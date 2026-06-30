@@ -113,6 +113,7 @@ export class BuildingModule {
         nextCost: lv < def.maxLevel ? def.cost(lv + 1) : null,
         nextTimeSec: lv < def.maxLevel ? this.buildTime(s, def.timeSec(lv + 1)) : null,
         unlocked: this.meetsRequires(s, def.requires),
+        requires: def.requires,
       };
     }
     return out;

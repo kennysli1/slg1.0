@@ -123,6 +123,7 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
 /* ---------- 标签徽记 ---------- */
 .tag { display: inline-block; font-size: var(--f-xs); padding: 1px var(--s-2); border-radius: 999px; background: var(--c-surface-2); color: var(--c-ink-soft); border: 1px solid var(--c-line); }
 .tag-lock { background: #efe6d4; }
+.req-hint { font-size: var(--f-xs); color: var(--c-ink-soft); margin: var(--s-1) 0; }
 
 /* ---------- 按钮 ---------- */
 .btn-primary, .btn-sm {

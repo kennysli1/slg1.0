@@ -70,9 +70,30 @@ const ERR_MSG: Record<string, string> = {
   password_too_short: '密码至少4位',
   empty_name: '请输入名字',
   name_too_long: '名字太长(≤16)',
-  queue_busy: '已有建造/训练在进行',
-  insufficient_resources: '资源不足',
+  queue_busy: '已有建造/训练在进行，请等当前完成',
+  requires_not_met: '前置建筑不满足，尚未解锁',
+  max_level: '已达最高等级',
+  spend_failed: '资源不足',
+  bad_count: '数量不合法',
+  bad_field: '资源田不存在',
+  wrong_tribe_unit: '该兵种不属于你的部族',
+  no_troops: '没有可派出的兵力',
+  target_not_found: '目标不存在或已消失',
+  cannot_attack_self: '不能攻击自己的村庄',
+  village_not_found: '村庄不存在',
 };
+/** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */
+function errText(code?: string): string {
+  if (!code) return '操作失败';
+  if (ERR_MSG[code]) return ERR_MSG[code];
+  if (code.startsWith('insufficient_troops')) return '兵力不足';
+  if (code.startsWith('insufficient:')) {
+    const r = code.split(':')[1];
+    return `${RES_INFO[r]?.name ?? r}不足`;
+  }
+  if (code.startsWith('unknown_')) return '目标不存在';
+  return code;
+}
 
 let loginMode: 'login' | 'register' = 'register';
 let pickedTribe = 'romans';
@@ -109,7 +130,7 @@ function renderLogin(msg = '') {
     if (!name || !pwd) return renderLogin('请输入用户名和密码');
     const res = loginMode === 'register' ? await register(name, pwd, pickedTribe) : await login(name, pwd);
     if (res.ok) startGame();
-    else renderLogin(ERR_MSG[res.error ?? ''] ?? `失败：${res.error}`);
+    else renderLogin(errText(res.error));
   };
   document.getElementById('goBtn')!.onclick = go;
   document.getElementById('pwd')!.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') go(); });
@@ -207,12 +228,16 @@ function renderVillage(): string {
     const max = d.level >= d.maxLevel;
     const afford = canAfford(d.nextCost);
     let btn: string;
+    let reqHint = '';
     if (max) btn = '<small class="tag">已满级</small>';
-    else if (!d.unlocked) btn = '<small class="tag tag-lock">未解锁</small>';
-    else btn = `<button class="btn-sm" data-bld="${kind}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
+    else if (!d.unlocked) {
+      btn = '<small class="tag tag-lock">未解锁</small>';
+      const reqs = (d.requires || []).map((r: any) => `${BUILDING_INFO[r.kind]?.name ?? r.kind} Lv${r.level}`).join('、');
+      if (reqs) reqHint = `<div class="req-hint">需先建：${reqs}</div>`;
+    } else btn = `<button class="btn-sm" data-bld="${kind}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
     return `<div class="card ${d.unlocked ? '' : 'locked'}">${art(BUILDING_INFO[kind]?.icon ?? '/art/bld_main.png', d.name, 'md')}
       <div class="cardbody"><div class="card-title">${d.name} <b class="lv">Lv${d.level}</b></div>
-        ${max || !d.unlocked ? '' : costPreview(d.nextCost, d.nextTimeSec)}${btn}</div></div>`;
+        ${max || !d.unlocked ? reqHint : costPreview(d.nextCost, d.nextTimeSec)}${btn}</div></div>`;
   }).join('');
 
   return `${banner}
@@ -397,7 +422,7 @@ function bindTargetEvents() {
 
 async function act(p: Promise<any>) {
   const res = await p;
-  if (!res.ok) addReport(`操作失败：${ERR_MSG[res.error?.code] ?? res.error?.msg ?? res.error?.code}`);
+  if (!res.ok) addReport(`操作失败：${errText(res.error?.code)}`);
   await refreshAll();
 }
 
