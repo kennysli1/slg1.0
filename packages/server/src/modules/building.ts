@@ -18,7 +18,7 @@ interface BuildingState {
   villageId: string;
   buildings: Record<string, number>;
   fields: { type: string; level: number }[];
-  queue: { target: string; fieldIndex?: number; toLevel: number; finishAt: number; taskId: string } | null;
+  queue: { target: string; fieldIndex?: number; toLevel: number; startAt: number; finishAt: number; taskId: string } | null;
 }
 
 const COLLECTION = 'building';
@@ -85,7 +85,16 @@ export class BuildingModule {
       ok: true,
       payload: {
         buildings: { ...s.buildings },
-        fields: s.fields.map((f) => ({ ...f })),
+        fields: s.fields.map((f) => {
+          const def = this.config.fields[f.type];
+          const next = f.level + 1;
+          return {
+            ...f,
+            maxLevel: def.maxLevel,
+            nextCost: next <= def.maxLevel ? def.cost(next) : null,
+            nextTimeSec: next <= def.maxLevel ? this.buildTime(s, def.timeSec(next)) : null,
+          };
+        }),
         queue: s.queue,
         defs: this.publicDefs(s),
       },
@@ -102,7 +111,7 @@ export class BuildingModule {
         level: lv,
         maxLevel: def.maxLevel,
         nextCost: lv < def.maxLevel ? def.cost(lv + 1) : null,
-        nextTimeSec: lv < def.maxLevel ? def.timeSec(lv + 1) : null,
+        nextTimeSec: lv < def.maxLevel ? this.buildTime(s, def.timeSec(lv + 1)) : null,
         unlocked: this.meetsRequires(s, def.requires),
       };
     }
@@ -132,9 +141,10 @@ export class BuildingModule {
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
     const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
-    const finishAt = this.now() + durMs;
+    const startAt = this.now();
+    const finishAt = startAt + durMs;
     const taskId = this.scheduler.schedule(durMs, () => this.completeBuilding(villageId, kind, toLevel));
-    s.queue = { target: kind, toLevel, finishAt, taskId };
+    s.queue = { target: kind, toLevel, startAt, finishAt, taskId };
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { kind, toLevel, finishAt } };
   }
@@ -158,9 +168,10 @@ export class BuildingModule {
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
     const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
-    const finishAt = this.now() + durMs;
+    const startAt = this.now();
+    const finishAt = startAt + durMs;
     const taskId = this.scheduler.schedule(durMs, () => this.completeField(villageId, fieldIndex, toLevel));
-    s.queue = { target: field.type, fieldIndex, toLevel, finishAt, taskId };
+    s.queue = { target: field.type, fieldIndex, toLevel, startAt, finishAt, taskId };
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { fieldIndex, type: field.type, toLevel, finishAt } };
   }

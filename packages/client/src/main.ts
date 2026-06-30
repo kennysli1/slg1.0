@@ -4,14 +4,16 @@ import { RES_INFO, FIELD_INFO, BUILDING_INFO, UNIT_INFO, PVE_INFO } from './info
 
 /**
  * 文字版 Travian 前端（多人版）：登录 → 村庄/军队/地图/报告。
- * 地图区分：自己村 / 他人村(可攻击) / 野怪(可掠夺)。
- * 所有图标用美术占位图（/art/*.png），统一走 art() 渲染，加载失败回退文字。
+ * 地图：以玩家为中心的坐标网格，点击目标选中后在面板派兵。
+ * 图标用美术占位图（/art/*.png），统一走 art() 渲染，加载失败回退文字。
  */
 
 let cache: any = {};
 const reports: string[] = [];
 let currentTab = 'village';
 let connected = false;
+const MAP_R = 6; // 地图视野半径（格），渲染 (2R+1)² 网格
+let selected: { refId: string; kind: string; x: number; y: number; name: string } | null = null;
 
 const fmt = (n: number) => Math.floor(n).toLocaleString();
 const secStr = (ms: number) => {
@@ -19,15 +21,40 @@ const secStr = (ms: number) => {
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}分${s % 60}秒` : `${s}秒`;
 };
+const RES_KEYS = ['wood', 'clay', 'iron', 'crop'] as const;
 
-/** 统一图标渲染：输出 <img>，加载失败回退为文字徽标。size: sm|md|lg */
-function art(src: string, label: string, size: 'sm' | 'md' | 'lg' = 'md'): string {
+/** 统一图标渲染：输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg */
+function art(src: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' = 'md'): string {
   const safe = label.replace(/'/g, '');
   return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy"
     onerror="this.outerHTML='<span class=\\'icon icon-${size} icon-fallback\\'>${safe}</span>'" />`;
 }
-/** 兵种图标：由 key 确定性映射到美术文件，不依赖服务器 emoji。 */
 const unitArt = (key: string) => `/art/unit_${key}.png`;
+
+/** 是否买得起。 */
+function canAfford(cost: Record<string, number> | null): boolean {
+  if (!cost) return false;
+  const have = cache.res?.resources;
+  if (!have) return false;
+  return RES_KEYS.every((r) => (have[r] ?? 0) >= (cost[r] ?? 0));
+}
+/** 消耗预览：带资源图标，买不起的项标红。 */
+function costPreview(cost: Record<string, number> | null, timeSec?: number | null): string {
+  if (!cost) return '';
+  const have = cache.res?.resources ?? {};
+  const items = RES_KEYS.filter((r) => (cost[r] ?? 0) > 0).map((r) => {
+    const lack = (have[r] ?? 0) < (cost[r] ?? 0);
+    return `<span class="cost-item${lack ? ' cost-lack' : ''}">${art(RES_INFO[r].icon, RES_INFO[r].name, 'xs')}${fmt(cost[r])}</span>`;
+  }).join('');
+  const time = timeSec ? `<span class="cost-time">⏱ ${secStr(Date.now() + timeSec * 1000)}</span>` : '';
+  return `<div class="cost">${items}${time}</div>`;
+}
+/** 进度条 HTML（用 data 属性记录起止，由计时器更新宽度与剩余文字）。 */
+function progressBar(startAt: number, finishAt: number, label: string): string {
+  return `<div class="progress" data-start="${startAt}" data-finish="${finishAt}">
+    <i class="progress-fill"></i>
+    <span class="progress-label">${label} · 剩 <b class="progress-time"></b></span></div>`;
+}
 
 const app = document.getElementById('app')!;
 
@@ -43,6 +70,8 @@ const ERR_MSG: Record<string, string> = {
   password_too_short: '密码至少4位',
   empty_name: '请输入名字',
   name_too_long: '名字太长(≤16)',
+  queue_busy: '已有建造/训练在进行',
+  insufficient_resources: '资源不足',
 };
 
 let loginMode: 'login' | 'register' = 'register';
@@ -128,7 +157,7 @@ async function refreshAll() {
 function renderResBar() {
   const r = cache.res;
   if (!r) return;
-  const cells = ['wood', 'clay', 'iron', 'crop'].map((t) => {
+  const cells = RES_KEYS.map((t) => {
     const rate = r.netRate[t] * 3600;
     const low = t === 'crop' && rate < 0 ? ' res-low' : '';
     const pct = Math.min(100, (r.resources[t] / r.capacity[t]) * 100);
@@ -152,28 +181,41 @@ function renderPage() {
   else if (currentTab === 'map') page.innerHTML = renderMap();
   else page.innerHTML = renderReports();
   bindPageEvents();
-}
-
-function queueBanner(): string {
-  const q = cache.vil?.queue;
-  if (!q) return '';
-  const label = FIELD_INFO[q.target]?.name ?? BUILDING_INFO[q.target]?.name ?? q.target;
-  return `<div class="banner banner-build">建造中：<b>${label}</b> → ${q.toLevel} 级（剩 <b id="qtimer">${secStr(q.finishAt)}</b>）</div>`;
+  syncTimers();
 }
 
 function renderVillage(): string {
   const vil = cache.vil;
   if (!vil) return '<div class="loading">加载中…</div>';
-  const fields = vil.fields.map((f: any, i: number) => `
-    <div class="card">${art(FIELD_INFO[f.type].icon, FIELD_INFO[f.type].name, 'md')}
+  const q = vil.queue;
+  const banner = q
+    ? `<div class="banner banner-build">🔨 建造中：<b>${FIELD_INFO[q.target]?.name ?? BUILDING_INFO[q.target]?.name ?? q.target}</b> → ${q.toLevel} 级
+        ${progressBar(q.startAt, q.finishAt, '建造')}</div>`
+    : '';
+
+  const fields = vil.fields.map((f: any, i: number) => {
+    const max = f.level >= f.maxLevel;
+    const afford = canAfford(f.nextCost);
+    const btn = max ? '<small class="tag">已满级</small>'
+      : `<button class="btn-sm" data-field="${i}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
+    return `<div class="card">${art(FIELD_INFO[f.type].icon, FIELD_INFO[f.type].name, 'md')}
       <div class="cardbody"><div class="card-title">${FIELD_INFO[f.type].name} <b class="lv">Lv${f.level}</b></div>
-        <button class="btn-sm" data-field="${i}" ${vil.queue ? 'disabled' : ''}>升级</button></div></div>`).join('');
-  const blds = Object.entries(vil.defs).map(([kind, d]: any) => `
-    <div class="card ${d.unlocked ? '' : 'locked'}">${art(BUILDING_INFO[kind]?.icon ?? '/art/bld_main.png', d.name, 'md')}
+        ${max ? '' : costPreview(f.nextCost, f.nextTimeSec)}${btn}</div></div>`;
+  }).join('');
+
+  const blds = Object.entries(vil.defs).map(([kind, d]: any) => {
+    const max = d.level >= d.maxLevel;
+    const afford = canAfford(d.nextCost);
+    let btn: string;
+    if (max) btn = '<small class="tag">已满级</small>';
+    else if (!d.unlocked) btn = '<small class="tag tag-lock">未解锁</small>';
+    else btn = `<button class="btn-sm" data-bld="${kind}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
+    return `<div class="card ${d.unlocked ? '' : 'locked'}">${art(BUILDING_INFO[kind]?.icon ?? '/art/bld_main.png', d.name, 'md')}
       <div class="cardbody"><div class="card-title">${d.name} <b class="lv">Lv${d.level}</b></div>
-        ${d.level >= d.maxLevel ? '<small class="tag">已满级</small>' : !d.unlocked ? '<small class="tag tag-lock">未解锁</small>'
-          : `<button class="btn-sm" data-bld="${kind}" ${vil.queue ? 'disabled' : ''}>升级</button>`}</div></div>`).join('');
-  return `${queueBanner()}
+        ${max || !d.unlocked ? '' : costPreview(d.nextCost, d.nextTimeSec)}${btn}</div></div>`;
+  }).join('');
+
+  return `${banner}
     <h3>资源田 <small>（18）</small></h3><div class="grid">${fields}</div>
     <h3>中心建筑</h3><div class="grid">${blds}</div>`;
 }
@@ -181,6 +223,9 @@ function renderVillage(): string {
 function unitName(key: string): string {
   const t = (cache.army?.trainable || []).find((u: any) => u.key === key);
   return t?.name ?? UNIT_INFO[key]?.name ?? key;
+}
+function unitTrainSec(key: string): number {
+  return (cache.army?.trainable || []).find((u: any) => u.key === key)?.trainSec ?? 30;
 }
 
 function renderArmy(): string {
@@ -190,13 +235,18 @@ function renderArmy(): string {
   const troopList = troops.length
     ? troops.map(([u, n]: any) => `<span class="troop">${art(unitArt(u), unitName(u), 'sm')}<span>${unitName(u)} <b>×${n}</b></span></span>`).join('')
     : '<small class="muted">暂无驻军</small>';
-  const training = army.training
-    ? `<div class="banner banner-train">训练中：<b>${unitName(army.training.unit)}</b> ×${army.training.remaining}（下一个 <b id="ttimer">${secStr(army.training.nextDoneAt)}</b>）</div>` : '';
-  const trainCards = (army.trainable || []).map((u: any) => `
-    <div class="card">${art(unitArt(u.key), u.name, 'md')}
+  const tr = army.training;
+  const training = tr
+    ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
+        ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
+  const trainCards = (army.trainable || []).map((u: any) => {
+    const afford = canAfford(u.cost);
+    return `<div class="card">${art(unitArt(u.key), u.name, 'md')}
       <div class="cardbody"><div class="card-title">${u.name} <small class="tag">${catName(u.cat)}</small></div>
+        ${costPreview(u.cost, u.trainSec)}
         <div class="train-row"><input type="number" min="1" value="1" id="cnt-${u.key}" />
-          <button class="btn-sm" data-train="${u.key}" ${army.training ? 'disabled' : ''}>训练</button></div></div></div>`).join('');
+          <button class="btn-sm" data-train="${u.key}" ${army.training || !afford ? 'disabled' : ''}>训练</button></div></div></div>`;
+  }).join('');
   return `<h3>驻军 <small>（${tribeName(army.tribe)}族）</small></h3><div class="troopbar">${troopList}</div>${training}
     <h3>训练</h3><div class="grid">${trainCards}</div>`;
 }
@@ -208,39 +258,86 @@ function tribeName(t: string): string {
   return { romans: '罗马', gauls: '高卢', teutons: '条顿' }[t] ?? t;
 }
 
-function renderMap(): string {
-  const area = cache.area, army = cache.army;
-  if (!area) return '<div class="loading">加载中…</div>';
-  const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
-  const troopInputs = myTroops.length
-    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm')}<input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /></label>`).join('')
-    : '<small class="muted">无可用兵力，先去军队页训练</small>';
+// ---------- 地图 ----------
+function tileAt(x: number, y: number): any {
+  return (cache.area?.tiles || []).find((t: any) => t.x === x && t.y === y);
+}
+function pveType(name?: string): string {
+  return name?.includes('鼠') ? 'rats' : name?.includes('狼') ? 'wolves' : 'bandits';
+}
 
-  const tiles = area.tiles.filter((t: any) => t.refId !== me?.villageId);
-  const list = tiles.map((t: any) => {
-    if (t.kind === 'pve') {
-      const ty = t.name?.includes('鼠') ? 'rats' : t.name?.includes('狼') ? 'wolves' : 'bandits';
-      return `<div class="card target">${art(PVE_INFO[ty]?.icon ?? '/art/pve_bandits.png', t.name, 'md')}
-        <div class="cardbody"><div class="card-title">${t.name} <small class="coord">(${t.x},${t.y})</small></div>
-          <button class="btn-sm btn-raid" data-raid="${t.refId}">掠夺</button></div></div>`;
+function renderMap(): string {
+  const area = cache.area;
+  if (!area || !me) return '<div class="loading">加载中…</div>';
+  // 若选中目标已不在视野（被打掉/刷新），清除
+  if (selected && !tileAt(selected.x, selected.y)) selected = null;
+
+  let cells = '';
+  for (let dy = -MAP_R; dy <= MAP_R; dy++) {
+    for (let dx = -MAP_R; dx <= MAP_R; dx++) {
+      const x = me.x + dx, y = me.y + dy;
+      const isSelf = dx === 0 && dy === 0;
+      const t = tileAt(x, y);
+      let cls = 'tile', inner = '', clickable = '';
+      if (isSelf) {
+        cls += ' tile-self';
+        inner = art('/art/bld_main.png', '本城', 'sm');
+      } else if (t?.kind === 'village') {
+        cls += ' tile-enemy';
+        inner = art('/art/bld_main.png', t.name, 'sm');
+        clickable = `data-tx="${x}" data-ty="${y}" data-kind="village" data-ref="${t.refId}" data-name="${t.name}"`;
+      } else if (t?.kind === 'pve') {
+        cls += ' tile-pve';
+        inner = art(PVE_INFO[pveType(t.name)]?.icon ?? '/art/pve_bandits.png', t.name, 'sm');
+        clickable = `data-tx="${x}" data-ty="${y}" data-kind="pve" data-ref="${t.refId}" data-name="${t.name}"`;
+      }
+      if (selected && selected.x === x && selected.y === y) cls += ' tile-selected';
+      cells += `<div class="${cls}" ${clickable} title="(${x},${y})${t?.name ? ' ' + t.name : ''}">${inner}</div>`;
     }
-    if (t.kind === 'village') {
-      return `<div class="card enemy">${art('/art/bld_main.png', t.name, 'md')}
-        <div class="cardbody"><div class="card-title">${t.name} <small class="coord">(${t.x},${t.y})</small></div>
-          <button class="btn-sm btn-attack" data-attack="${t.refId}" data-x="${t.x}" data-y="${t.y}">进攻</button></div></div>`;
-    }
-    return '';
-  }).join('');
+  }
 
   const moves = (cache.moves?.movements || []).map((m: any) => {
-    const kind = m.type === 'attack' ? '进攻' : m.type === 'raid' ? '掠夺' : '返程';
-    return `<div class="banner banner-move">${kind} → (${m.toXY.x},${m.toXY.y}) 抵达 <b>${secStr(m.arriveAt)}</b>${m.loot ? ` · 战利品 ${Object.values(m.loot).reduce((a: any, b: any) => a + b, 0)}` : ''}</div>`;
+    const kind = m.type === 'attack' ? '⚔️ 进攻' : m.type === 'raid' ? '🏇 掠夺' : '🏠 返程';
+    const loot = m.loot ? ` · 战利品 ${Object.values(m.loot).reduce((a: any, b: any) => a + b, 0)}` : '';
+    return `<div class="banner banner-move">${kind} → (${m.toXY.x},${m.toXY.y}) 抵达 <b>${secStr(m.arriveAt)}</b>${loot}</div>`;
   }).join('');
 
-  return `<h3>周边地图 <small>（你在 ${me?.x},${me?.y}）</small></h3>
-    <div class="raidbox"><div class="raidbox-title">出征兵力</div><div class="raid-inputs">${troopInputs}</div></div>
-    <div class="grid">${list || '<small class="muted">周边暂无目标</small>'}</div>
+  return `<h3>周边地图 <small>（你在 ${me.x},${me.y}，视野 ${MAP_R} 格）</small></h3>
+    <div class="map-wrap">
+      <div class="map-grid" style="grid-template-columns:repeat(${MAP_R * 2 + 1},1fr)">${cells}</div>
+      <div class="map-legend">
+        <span><i class="dot dot-self"></i>本城</span>
+        <span><i class="dot dot-enemy"></i>玩家村(可进攻)</span>
+        <span><i class="dot dot-pve"></i>野怪(可掠夺)</span>
+      </div>
+    </div>
+    <div id="targetPanel">${renderTargetPanel()}</div>
     <h3>行军中</h3>${moves || '<small class="muted">无</small>'}`;
+}
+
+function renderTargetPanel(): string {
+  if (!selected) return '<div class="empty">点击地图上的目标，选择出征兵力。</div>';
+  const army = cache.army;
+  const dist = Math.hypot(selected.x - me!.x, selected.y - me!.y).toFixed(1);
+  const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
+  const inputs = myTroops.length
+    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm')}<input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
+    : '<small class="muted">无可用兵力，先去军队页训练</small>';
+  const isPve = selected.kind === 'pve';
+  const action = isPve
+    ? `<button class="btn-sm btn-raid" id="doRaid">🏇 掠夺</button>`
+    : `<button class="btn-sm btn-attack" id="doAttack">⚔️ 进攻</button>`;
+  const icon = isPve ? (PVE_INFO[pveType(selected.name)]?.icon ?? '/art/pve_bandits.png') : '/art/bld_main.png';
+  return `<div class="target-panel ${isPve ? 'target' : 'enemy'}">
+    <div class="target-head">${art(icon, selected.name, 'md')}
+      <div><div class="card-title">${selected.name}</div>
+        <small class="coord">坐标 (${selected.x},${selected.y}) · 距离 ${dist} 格 · ${isPve ? '野怪据点' : '玩家村庄'}</small></div>
+      <button class="target-close" id="closeTarget">✕</button>
+    </div>
+    <div class="raidbox-title">出征兵力</div>
+    <div class="raid-inputs">${inputs}</div>
+    ${myTroops.length ? `<div class="target-actions">${action}</div>` : ''}
+  </div>`;
 }
 
 function renderReports(): string {
@@ -268,34 +365,57 @@ function bindPageEvents() {
       const cnt = Number((document.getElementById(`cnt-${u}`) as HTMLInputElement)?.value || 1);
       act(req('TrainTroops', { unit: u, count: cnt }));
     });
-  document.querySelectorAll<HTMLButtonElement>('[data-raid]').forEach((b) =>
-    b.onclick = () => {
-      const troops = collectTroops();
-      if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); renderPage(); return; }
-      act(req('SendRaid', { fromXY: { x: me!.x, y: me!.y }, targetId: b.dataset.raid, troops }));
+
+  // 地图：点击目标地块 → 选中
+  document.querySelectorAll<HTMLElement>('.tile[data-ref]').forEach((el) =>
+    el.onclick = () => {
+      selected = { refId: el.dataset.ref!, kind: el.dataset.kind!, x: Number(el.dataset.tx), y: Number(el.dataset.ty), name: el.dataset.name! };
+      const panel = document.getElementById('targetPanel');
+      if (panel) { panel.innerHTML = renderTargetPanel(); bindTargetEvents(); }
+      document.querySelectorAll('.tile-selected').forEach((t) => t.classList.remove('tile-selected'));
+      el.classList.add('tile-selected');
     });
-  document.querySelectorAll<HTMLButtonElement>('[data-attack]').forEach((b) =>
-    b.onclick = () => {
-      const troops = collectTroops();
-      if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); renderPage(); return; }
-      act(req('SendAttack', {
-        fromXY: { x: me!.x, y: me!.y },
-        targetVillage: b.dataset.attack,
-        toXY: { x: Number(b.dataset.x), y: Number(b.dataset.y) },
-        troops,
-      }));
-    });
+  bindTargetEvents();
+}
+
+function bindTargetEvents() {
+  const close = document.getElementById('closeTarget');
+  if (close) close.onclick = () => { selected = null; const p = document.getElementById('targetPanel'); if (p) p.innerHTML = renderTargetPanel(); document.querySelectorAll('.tile-selected').forEach((t) => t.classList.remove('tile-selected')); };
+  const raid = document.getElementById('doRaid');
+  if (raid) raid.onclick = () => {
+    const troops = collectTroops();
+    if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
+    act(req('SendRaid', { fromXY: { x: me!.x, y: me!.y }, targetId: selected!.refId, troops }));
+  };
+  const atk = document.getElementById('doAttack');
+  if (atk) atk.onclick = () => {
+    const troops = collectTroops();
+    if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
+    act(req('SendAttack', { fromXY: { x: me!.x, y: me!.y }, targetVillage: selected!.refId, toXY: { x: selected!.x, y: selected!.y }, troops }));
+  };
 }
 
 async function act(p: Promise<any>) {
   const res = await p;
-  if (!res.ok) addReport(`操作失败：${res.error?.msg ?? res.error?.code}`);
+  if (!res.ok) addReport(`操作失败：${ERR_MSG[res.error?.code] ?? res.error?.msg ?? res.error?.code}`);
   await refreshAll();
 }
 
 function addReport(line: string) {
   reports.unshift(`[${new Date().toLocaleTimeString()}] ${line}`);
   if (reports.length > 60) reports.pop();
+}
+
+/** 刷新所有进度条的宽度与剩余时间文字（每秒调用）。 */
+function syncTimers() {
+  document.querySelectorAll<HTMLElement>('.progress').forEach((el) => {
+    const start = Number(el.dataset.start), finish = Number(el.dataset.finish);
+    const pct = Math.min(100, Math.max(0, ((Date.now() - start) / (finish - start)) * 100));
+    const fill = el.querySelector<HTMLElement>('.progress-fill');
+    const time = el.querySelector<HTMLElement>('.progress-time');
+    if (fill) fill.style.width = `${pct}%`;
+    if (time) time.textContent = secStr(finish);
+  });
 }
 
 // ---------- 推送 ----------
@@ -336,7 +456,6 @@ renderLogin('连接服务器中…');
 setInterval(() => {
   if (!me) return;
   renderResBar();
-  const qt = document.getElementById('qtimer'); if (qt && cache.vil?.queue) qt.textContent = secStr(cache.vil.queue.finishAt);
-  const tt = document.getElementById('ttimer'); if (tt && cache.army?.training) tt.textContent = secStr(cache.army.training.nextDoneAt);
+  syncTimers();
 }, 1000);
 setInterval(() => { if (me) refreshAll(); }, 5000);
