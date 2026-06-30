@@ -1,0 +1,197 @@
+/* ============================================================
+   Travian 2.0 设计系统
+   - 一套 CSS 变量统一配色 / 间距 / 字号 / 圆角 / 阴影
+   - 主题：罗马古典战争策略，暖色木质 + 羊皮纸底
+   - 图标统一用 .icon（美术占位图 <img>，加载失败回退 .icon-fallback 文字徽标）
+   ============================================================ */
+
+:root {
+  /* 配色 */
+  --c-bg: #ece3d0;            /* 页面底（羊皮纸） */
+  --c-surface: #fffdf7;       /* 卡片/面板 */
+  --c-surface-2: #f6efdf;     /* 次级面板 */
+  --c-ink: #2e2620;           /* 主文字 */
+  --c-ink-soft: #6f6353;      /* 次文字 */
+  --c-line: #d9cdb2;          /* 描边 */
+  --c-wood: #5a4632;          /* 顶栏深木 */
+  --c-wood-2: #6b5440;        /* 标签栏木 */
+  --c-brand: #8a6d4d;         /* 主题色（按钮/强调） */
+  --c-brand-ink: #f5e9d0;     /* 木色上的浅字 */
+  --c-gold: #d9a441;          /* 金色高亮 */
+  --c-danger: #b23b3b;        /* 进攻/告警红 */
+  --c-raid: #c47a2c;          /* 掠夺橙 */
+  --c-ok: #4f7a3f;            /* 正向绿 */
+
+  /* 间距刻度（4 的倍数） */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
+
+  /* 字号刻度 */
+  --f-xs: 11px; --f-sm: 13px; --f-md: 15px; --f-lg: 18px; --f-xl: 24px; --f-2xl: 30px;
+
+  /* 圆角 / 阴影 */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 16px;
+  --sh-1: 0 1px 3px rgba(46,38,32,.10);
+  --sh-2: 0 4px 14px rgba(46,38,32,.14);
+  --sh-3: 0 10px 30px rgba(46,38,32,.20);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, "Microsoft YaHei", sans-serif;
+  font-size: var(--f-md);
+  line-height: 1.5;
+  background: var(--c-bg);
+  color: var(--c-ink);
+}
+
+/* ---------- 通用图标 ---------- */
+.icon { display: inline-block; object-fit: contain; vertical-align: middle; border-radius: var(--r-sm); }
+.icon-sm { width: 22px; height: 22px; }
+.icon-md { width: 48px; height: 48px; }
+.icon-lg { width: 72px; height: 72px; }
+.icon-fallback {
+  display: inline-flex; align-items: center; justify-content: center; text-align: center;
+  background: var(--c-surface-2); border: 1px solid var(--c-line);
+  color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.1; padding: 2px; overflow: hidden;
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  display: flex; align-items: center; gap: var(--s-5); flex-wrap: wrap;
+  background: linear-gradient(180deg, #66503a, var(--c-wood));
+  color: var(--c-brand-ink); padding: var(--s-3) var(--s-4);
+  box-shadow: var(--sh-2);
+}
+.brand { display: flex; align-items: center; gap: var(--s-3); }
+.brand .title { font-size: var(--f-lg); font-weight: 700; letter-spacing: .5px; }
+.brand .subtitle { font-size: var(--f-sm); opacity: .75; }
+
+.resbar { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-left: auto; }
+.res {
+  display: flex; align-items: center; gap: var(--s-2);
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.14);
+  border-radius: var(--r-md); padding: var(--s-1) var(--s-3); min-width: 132px;
+}
+.res-num { font-weight: 600; font-size: var(--f-sm); }
+.res-num small { font-weight: 400; opacity: .65; }
+.res-rate { font-size: var(--f-xs); opacity: .7; margin-left: 2px; }
+.res-low .res-rate { color: #ff9b9b; opacity: 1; }
+.res-bar { position: relative; width: 100%; flex-basis: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.15); margin-top: 2px; }
+.res-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--c-gold); }
+.res-upkeep { min-width: auto; opacity: .85; }
+
+/* ---------- 标签导航 ---------- */
+.tabs { display: flex; background: var(--c-wood-2); box-shadow: var(--sh-1); }
+.tabs button {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--s-2);
+  padding: var(--s-3); border: 0; background: transparent; color: var(--c-brand-ink);
+  font-size: var(--f-md); cursor: pointer; border-bottom: 3px solid transparent;
+  transition: background .15s, border-color .15s;
+}
+.tabs button:hover { background: rgba(255,255,255,.07); }
+.tabs button.active { background: rgba(255,255,255,.12); border-bottom-color: var(--c-gold); font-weight: 600; }
+.tabs button .icon { border-radius: 4px; }
+
+/* ---------- 页面容器 ---------- */
+.page { padding: var(--s-5) var(--s-4); max-width: 960px; margin: 0 auto; }
+h3 {
+  margin: var(--s-5) 0 var(--s-3); font-size: var(--f-lg); font-weight: 700;
+  padding-left: var(--s-3); border-left: 4px solid var(--c-brand); color: var(--c-wood);
+}
+h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
+.loading, .empty, .muted { color: var(--c-ink-soft); font-size: var(--f-sm); }
+.empty { padding: var(--s-5); text-align: center; background: var(--c-surface); border-radius: var(--r-md); border: 1px dashed var(--c-line); }
+
+/* ---------- 卡片网格 ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: var(--s-3); }
+.card {
+  display: flex; gap: var(--s-3); align-items: center;
+  background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md);
+  padding: var(--s-3); box-shadow: var(--sh-1); transition: box-shadow .15s, transform .15s;
+}
+.card:hover { box-shadow: var(--sh-2); transform: translateY(-1px); }
+.card.locked { opacity: .55; }
+.card.target { background: linear-gradient(180deg, #fff8ec, var(--c-surface)); border-color: #e8cf9f; }
+.card.enemy { background: linear-gradient(180deg, #fdeeee, var(--c-surface)); border-color: #e8b6b6; }
+.cardbody { flex: 1; min-width: 0; }
+.card-title { font-size: var(--f-sm); font-weight: 600; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.card-title .lv { color: var(--c-brand); font-size: var(--f-sm); }
+.coord { color: var(--c-ink-soft); font-weight: 400; font-size: var(--f-xs); }
+
+/* ---------- 标签徽记 ---------- */
+.tag { display: inline-block; font-size: var(--f-xs); padding: 1px var(--s-2); border-radius: 999px; background: var(--c-surface-2); color: var(--c-ink-soft); border: 1px solid var(--c-line); }
+.tag-lock { background: #efe6d4; }
+
+/* ---------- 按钮 ---------- */
+.btn-primary, .btn-sm {
+  border: 0; border-radius: var(--r-sm); cursor: pointer; font-family: inherit;
+  background: var(--c-brand); color: #fff; transition: filter .15s, background .15s;
+}
+.btn-primary:hover, .btn-sm:hover { filter: brightness(1.08); }
+.btn-primary { width: 100%; padding: var(--s-3); font-size: var(--f-md); font-weight: 600; }
+.btn-sm { margin-top: var(--s-2); padding: var(--s-1) var(--s-3); font-size: var(--f-sm); }
+.btn-sm:disabled { background: #c4bba8; cursor: not-allowed; filter: none; }
+.btn-raid { background: var(--c-raid); }
+.btn-attack { background: var(--c-danger); }
+
+/* 数字输入 */
+input[type="number"], .train-row input { width: 56px; }
+input { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: var(--s-1) var(--s-2); font-family: inherit; font-size: var(--f-sm); background: #fff; }
+input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
+.train-row { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); }
+
+/* ---------- 横幅 ---------- */
+.banner {
+  border-radius: var(--r-md); padding: var(--s-3) var(--s-4); margin: var(--s-2) 0; font-size: var(--f-sm);
+  border: 1px solid var(--c-line); background: var(--c-surface);
+}
+.banner-build { background: #fff3d6; border-color: #e8c97a; }
+.banner-train { background: #eaf2e4; border-color: #bcd6a8; }
+.banner-move { background: #eef2f7; border-color: #b9c8da; }
+
+/* ---------- 军队页 ---------- */
+.troopbar { display: flex; flex-wrap: wrap; gap: var(--s-3); background: var(--c-surface); padding: var(--s-3); border-radius: var(--r-md); border: 1px solid var(--c-line); box-shadow: var(--sh-1); }
+.troop { display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-sm); }
+.troop b { color: var(--c-brand); }
+
+/* ---------- 地图页 ---------- */
+.raidbox { background: var(--c-surface); padding: var(--s-3) var(--s-4); border-radius: var(--r-md); border: 1px solid var(--c-line); margin-bottom: var(--s-3); box-shadow: var(--sh-1); }
+.raidbox-title { font-size: var(--f-sm); font-weight: 600; color: var(--c-ink-soft); margin-bottom: var(--s-2); }
+.raid-inputs { display: flex; flex-wrap: wrap; gap: var(--s-3); }
+.raid-input { display: flex; align-items: center; gap: var(--s-1); font-size: var(--f-sm); }
+
+/* ---------- 报告页 ---------- */
+.report { background: var(--c-surface); border-left: 3px solid var(--c-brand); padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; border-radius: var(--r-sm); font-size: var(--f-sm); box-shadow: var(--sh-1); }
+
+/* ============================================================
+   登录界面
+   ============================================================ */
+.login {
+  max-width: 380px; margin: 7vh auto; text-align: center;
+  background: var(--c-surface); padding: var(--s-6) var(--s-5);
+  border-radius: var(--r-lg); box-shadow: var(--sh-3); border: 1px solid var(--c-line);
+}
+.login-logo { margin-bottom: var(--s-2); }
+.login h1 { color: var(--c-wood); margin: var(--s-1) 0; font-size: var(--f-2xl); letter-spacing: .5px; }
+.login-sub { color: var(--c-ink-soft); font-size: var(--f-sm); margin: 0 0 var(--s-5); }
+.login input { width: 100%; padding: var(--s-3); font-size: var(--f-md); margin: var(--s-2) 0; }
+.logintabs { display: flex; gap: var(--s-2); margin-bottom: var(--s-4); }
+.logintabs button { flex: 1; padding: var(--s-2); border: 1px solid var(--c-line); background: var(--c-surface-2); border-radius: var(--r-sm); cursor: pointer; font-family: inherit; font-size: var(--f-md); color: var(--c-ink-soft); }
+.logintabs button.on { background: var(--c-brand); color: #fff; border-color: var(--c-brand); font-weight: 600; }
+.field-label { text-align: left; font-size: var(--f-sm); color: var(--c-ink-soft); margin: var(--s-3) 0 var(--s-1); }
+.tribes { display: flex; gap: var(--s-2); margin-bottom: var(--s-3); }
+.tribe { flex: 1; padding: var(--s-3) var(--s-1); border: 2px solid var(--c-line); background: var(--c-surface); border-radius: var(--r-sm); cursor: pointer; display: flex; flex-direction: column; gap: 3px; transition: border-color .15s, background .15s; }
+.tribe b { font-size: var(--f-md); }
+.tribe small { color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.3; }
+.tribe.picked { border-color: var(--c-brand); background: #fff6e8; }
+.loginmsg { color: var(--c-danger); font-size: var(--f-sm); min-height: 18px; margin-top: var(--s-3); }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 600px) {
+  .topbar { gap: var(--s-3); }
+  .resbar { margin-left: 0; width: 100%; }
+  .res { flex: 1; min-width: 44%; }
+  .tabs button span { display: none; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
