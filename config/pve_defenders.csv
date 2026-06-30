@@ -1,0 +1,5 @@
+targetType,unitKey,name,count,atk,defInf,defCav,carry
+rats,rat,老鼠,10,5,10,10,0
+wolves,wolf,野狼,20,20,25,30,0
+bandits,bandit,强盗,40,40,30,30,0
+bandits,banditArcher,强盗弓手,20,30,20,40,0

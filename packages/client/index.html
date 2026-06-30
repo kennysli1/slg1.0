@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Travian 2.0</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #f0ece0; color: #2a2a2a; }
+      .topbar { background: #5a4632; color: #f5e9d0; padding: 10px 16px; }
+      .title { font-size: 18px; font-weight: bold; margin-bottom: 6px; }
+      .resbar { display: flex; flex-wrap: wrap; gap: 14px; font-size: 14px; }
+      .res { white-space: nowrap; } .res small { opacity: .7; }
+      .tabs { display: flex; background: #6b5440; }
+      .tabs button { flex: 1; padding: 12px; border: 0; background: #6b5440; color: #f5e9d0; font-size: 15px; cursor: pointer; border-bottom: 3px solid transparent; }
+      .tabs button.active { background: #836a52; border-bottom-color: #ffcf6b; }
+      .page { padding: 16px; max-width: 920px; margin: 0 auto; }
+      h3 { margin: 18px 0 8px; border-left: 4px solid #8a6d4d; padding-left: 8px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+      .card { display: flex; gap: 8px; background: #fff; border: 1px solid #d8cdb5; border-radius: 8px; padding: 8px; align-items: center; }
+      .card.locked { opacity: .5; }
+      .card.target { background: #fff6e8; }
+      .card.enemy { background: #ffeaea; }
+      .login { max-width: 360px; margin: 80px auto; text-align: center; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+      .login h1 { color: #5a4632; }
+      .login p { color: #777; font-size: 14px; }
+      .login input { width: 100%; padding: 10px; font-size: 16px; margin: 10px 0; }
+      .login button { width: 100%; padding: 10px; font-size: 16px; background: #8a6d4d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+      .loginmsg { color: #c00; font-size: 13px; min-height: 18px; margin-top: 8px; }
+      .logintabs { display: flex; gap: 8px; margin-bottom: 12px; }
+      .logintabs button { flex: 1; padding: 8px; border: 1px solid #d8cdb5; background: #f4efe3; border-radius: 6px; cursor: pointer; }
+      .logintabs button.on { background: #8a6d4d; color: #fff; }
+      .tribes { display: flex; gap: 6px; margin: 8px 0; }
+      .tribe { flex: 1; padding: 8px 4px; border: 2px solid #d8cdb5; background: #fff; border-radius: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+      .tribe.picked { border-color: #8a6d4d; background: #fff6e8; }
+      .tribe small { color: #888; font-size: 11px; }
+      .ic { font-size: 28px; }
+      .cardbody { flex: 1; font-size: 13px; }
+      .cardbody button { margin-top: 4px; padding: 4px 10px; border: 0; border-radius: 5px; background: #8a6d4d; color: #fff; cursor: pointer; }
+      .cardbody button:disabled { background: #bbb; cursor: not-allowed; }
+      .train-row { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+      .banner { background: #fff3d6; border: 1px solid #e8c97a; border-radius: 6px; padding: 8px 12px; margin: 6px 0; font-size: 14px; }
+      .troopbar { display: flex; flex-wrap: wrap; gap: 12px; background: #fff; padding: 10px; border-radius: 8px; }
+      .raidbox { background: #fff; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; }
+      .report { background: #fff; border-left: 3px solid #8a6d4d; padding: 6px 10px; margin: 4px 0; border-radius: 4px; font-size: 13px; }
+      input { border: 1px solid #ccc; border-radius: 4px; padding: 2px 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

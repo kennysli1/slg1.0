@@ -1,0 +1,11 @@
+kind,name,icon,costWood,costClay,costIron,costCrop,costGrowth,timeBase,timeGrowth,maxLevel,requires
+main,主基地,🏛️,40,35,30,20,1.28,15,1.6,20,
+warehouse,仓库,📦,40,35,30,20,1.28,15,1.6,10,
+granary,粮仓,🏚️,40,35,30,20,1.28,15,1.6,10,
+barracks,兵营,⚔️,40,35,30,20,1.28,15,1.6,10,main:1
+stable,马厩,🐎,40,35,30,20,1.28,15,1.6,10,barracks:3
+workshop,兵工厂,🛠️,40,35,30,20,1.28,15,1.6,10,barracks:5
+academy,学院,📚,40,35,30,20,1.28,15,1.6,10,barracks:3
+smithy,铁匠铺,🔨,40,35,30,20,1.28,15,1.6,10,academy:1
+wall,城墙,🧱,40,35,30,20,1.28,15,1.6,10,
+rallypoint,集结点,🚩,40,35,30,20,1.28,15,1.6,10,

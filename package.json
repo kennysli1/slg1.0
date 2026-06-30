@@ -1,0 +1,19 @@
+{
+  "name": "slg1.0",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Travian 2.0 - 全栈TypeScript网页SLG",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @slg/shared",
+    "build:client": "npm run build -w @slg/client",
+    "build": "npm run build:shared && npm run build:client",
+    "dev:server": "npm run dev -w @slg/server",
+    "start": "node --import tsx packages/server/src/main.ts",
+    "test:server": "npm run test -w @slg/server"
+  }
+}
