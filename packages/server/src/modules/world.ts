@@ -23,6 +23,8 @@ export interface Tile {
   refId?: string;
   /** 展示名 */
   name?: string;
+  /** 图标基名（pve 目标用，渲染时拼 /art/+基名+.png）；村庄不带，前端用默认主基地图 */
+  icon?: string;
 }
 
 interface WorldState {
@@ -91,10 +93,10 @@ export class WorldModule {
   }
 
   private placePve(cmd: Command): CommandResult {
-    const { x, y, refId, name } = cmd.payload as { x: number; y: number; refId: string; name: string };
+    const { x, y, refId, name, icon } = cmd.payload as { x: number; y: number; refId: string; name: string; icon?: string };
     const exist = this.store.get<Tile>(COLLECTION_TILE, key(x, y));
     if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
-    this.store.set<Tile>(COLLECTION_TILE, key(x, y), { x, y, kind: 'pve', refId, name });
+    this.store.set<Tile>(COLLECTION_TILE, key(x, y), { x, y, kind: 'pve', refId, name, icon });
     return { ok: true, payload: { x, y } };
   }
 }

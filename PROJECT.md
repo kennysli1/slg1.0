@@ -112,7 +112,7 @@ slg1.0/
 | 文件 | 职责 |
 |------|------|
 | `api.ts` | WebSocket 通信 + 登录（记住自己身份 `me`） |
-| `info.ts` | 显示用名称/图标占位表（emoji，后续换美术图） |
+| `info.ts` | 显示用名称/图标基名表（按 code 索引；渲染时 `artPath()` 拼 `/art/<基名>.png`，服务器下发的 icon 基名优先） |
 | `main.ts` | 登录页 + 4 标签页 UI：村庄 / 军队 / 地图(自己村/他人村/野怪) / 报告 |
 
 ### 测试
@@ -156,6 +156,8 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 ### 2. 配置（改数值，最常做）
 打开 `config/` 里对应的 CSV（Excel 可开），改数值，存为 CSV UTF-8，重启后端。
 **不改代码、不重新编译。** 例：改 `units.csv` 里军团兵的 `atk` → 军团兵立刻变强。每列含义见 `config/README.md`。
+
+> **两个全局约定**（详见 `config/README.md` 开头）：① 目录表(fields/buildings/units/pve_targets)主键是**数字 `id`**，CSV 里**跨表引用一律填数字**（如 `units.building=4` 指兵营）；每行另有英文 `code` 供程序内部用，勿改。② `icon` 列只填**基名**（如 `bld_barracks`），渲染时拼 `/art/<基名>.png`。资源/部族主键保持语义串。
 
 ### 3. 扩展（加新东西）
 先看 `docs/2_2.0设计/07_扩展与代码规范.md` 的"扩展决策树"，归类后照做：

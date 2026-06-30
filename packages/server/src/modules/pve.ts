@@ -70,7 +70,7 @@ export class PveModule {
     void this.commands.send({
       name: 'world.PlacePve',
       from: PveModule.NAME,
-      payload: { x, y, refId: id, name: tpl.name },
+      payload: { x, y, refId: id, name: tpl.name, icon: tpl.icon },
     });
   }
 

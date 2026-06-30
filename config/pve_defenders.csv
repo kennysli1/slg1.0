@@ -1,6 +1,6 @@
-﻿targetType,unitKey,name,count,atk,defInf,defCav,carry
-#所属野怪类型,守军兵种标识,显示名,数量,攻击力,对步防御,对骑防御,负重
-rats,rat,老鼠,10,5,10,10,0
-wolves,wolf,野狼,20,20,25,30,0
-bandits,bandit,强盗,40,40,30,30,0
-bandits,banditArcher,强盗弓手,20,30,20,40,0
+﻿targetId,unitCode,name,count,atk,defInf,defCav,carry
+#所属野怪类型(野怪数字ID),守军兵种代码(此目标内部标签,不跨表),显示名,数量,攻击力,对步防御,对骑防御,负重
+1,rat,老鼠,10,5,10,10,0
+2,wolf,野狼,20,20,25,30,0
+3,bandit,强盗,40,40,30,30,0
+3,banditArcher,强盗弓手,20,30,20,40,0

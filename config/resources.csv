@@ -1,6 +1,6 @@
-﻿key,name,icon,note
-#资源标识(代码用),显示名,图标占位,用途备注
-wood,木材,🪵,建造与造兵
-clay,泥土,🧱,建造与造兵
-iron,铁矿,⛏️,造兵为主
-crop,粮食,🌾,养建筑人口与军队
+﻿id,name,icon,note
+#资源标识(语义串,代码与存档用,勿改),显示名,图标基名(渲染时拼 /art/+基名+.png),用途备注
+wood,木材,res_wood,建造与造兵
+clay,泥土,res_clay,建造与造兵
+iron,铁矿,res_iron,造兵为主
+crop,粮食,res_crop,养建筑人口与军队

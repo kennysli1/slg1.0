@@ -5,7 +5,7 @@ import { RES_INFO, FIELD_INFO, BUILDING_INFO, UNIT_INFO, PVE_INFO } from './info
 /**
  * 文字版 Travian 前端（多人版）：登录 → 村庄/军队/地图/报告。
  * 地图：以玩家为中心的坐标网格，点击目标选中后在面板派兵。
- * 图标用美术占位图（/art/*.png），统一走 art() 渲染，加载失败回退文字。
+ * 图标用美术占位图，统一走 art() 渲染（吃**基名**，由 artPath 拼成 /art/<基名>.png），加载失败回退文字。
  */
 
 let cache: any = {};
@@ -13,7 +13,7 @@ const reports: string[] = [];
 let currentTab = 'village';
 let connected = false;
 const MAP_R = 6; // 地图视野半径（格），渲染 (2R+1)² 网格
-let selected: { refId: string; kind: string; x: number; y: number; name: string } | null = null;
+let selected: { refId: string; kind: string; x: number; y: number; name: string; icon?: string } | null = null;
 
 const fmt = (n: number) => Math.floor(n).toLocaleString();
 const secStr = (ms: number) => {
@@ -23,13 +23,19 @@ const secStr = (ms: number) => {
 };
 const RES_KEYS = ['wood', 'clay', 'iron', 'crop'] as const;
 
-/** 统一图标渲染：输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg */
-function art(src: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' = 'md'): string {
+/** 美术资源根路径；图标列只存基名，渲染时拼 ART_BASE + 基名 + .png。 */
+const ART_BASE = '/art/';
+const artPath = (base: string) => `${ART_BASE}${base}.png`;
+
+/** 统一图标渲染：传图标**基名**，输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg */
+function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' = 'md'): string {
   const safe = label.replace(/'/g, '');
+  const src = artPath(icon);
   return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy"
     onerror="this.outerHTML='<span class=\\'icon icon-${size} icon-fallback\\'>${safe}</span>'" />`;
 }
-const unitArt = (key: string) => `/art/unit_${key}.png`;
+/** 兵种图标基名：服务器若下发 icon 基名优先用，否则按 code 约定拼 unit_<code>。 */
+const unitArt = (code: string) => `unit_${code}`;
 
 /** 是否买得起。 */
 function canAfford(cost: Record<string, number> | null): boolean {
@@ -119,7 +125,7 @@ function renderLogin(msg = '') {
       <b>${t.name}</b><small>${t.desc}</small></button>`).join('');
   app.innerHTML = `
     <div class="login">
-      <div class="login-logo">${art('/art/ui_logo.png', 'Travian 2.0', 'lg')}</div>
+      <div class="login-logo">${art('ui_logo', 'Travian 2.0', 'lg')}</div>
       <h1>Travian 2.0</h1>
       <p class="login-sub">罗马·高卢·条顿 — 在同一张地图上称雄</p>
       <div class="logintabs">
@@ -152,10 +158,10 @@ function renderLogin(msg = '') {
 
 // ---------- 游戏主界面 ----------
 const TABS = [
-  { key: 'village', name: '村庄', icon: '/art/ui_tab_village.png' },
-  { key: 'army', name: '军队', icon: '/art/ui_tab_army.png' },
-  { key: 'map', name: '地图', icon: '/art/ui_tab_map.png' },
-  { key: 'reports', name: '报告', icon: '/art/ui_tab_reports.png' },
+  { key: 'village', name: '村庄', icon: 'ui_tab_village' },
+  { key: 'army', name: '军队', icon: 'ui_tab_army' },
+  { key: 'map', name: '地图', icon: 'ui_tab_map' },
+  { key: 'reports', name: '报告', icon: 'ui_tab_reports' },
 ];
 
 function renderShell() {
@@ -163,7 +169,7 @@ function renderShell() {
     `<button data-tab="${t.key}">${art(t.icon, t.name, 'sm')}<span>${t.name}</span></button>`).join('');
   app.innerHTML = `
     <header class="topbar">
-      <div class="brand">${art('/art/ui_logo.png', 'LOGO', 'md')}
+      <div class="brand">${art('ui_logo', 'LOGO', 'md')}
         <div class="brand-text">
           <div class="title">Travian 2.0</div>
           <div class="subtitle">${me?.name ?? ''} 的村庄 · 坐标 (${me?.x},${me?.y})</div>
@@ -231,10 +237,12 @@ function renderVillage(): string {
   const fields = vil.fields.map((f: any, i: number) => {
     const max = f.level >= f.maxLevel;
     const afford = canAfford(f.nextCost);
+    const fname = f.name ?? FIELD_INFO[f.type]?.name ?? f.type;
+    const ficon = f.icon ?? FIELD_INFO[f.type]?.icon ?? 'field_woodcutter';
     const btn = max ? '<small class="tag">已满级</small>'
       : `<button class="btn-sm" data-field="${i}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
-    return `<div class="card">${art(FIELD_INFO[f.type].icon, FIELD_INFO[f.type].name, 'md')}
-      <div class="cardbody"><div class="card-title">${FIELD_INFO[f.type].name} <b class="lv">Lv${f.level}</b></div>
+    return `<div class="card">${art(ficon, fname, 'md')}
+      <div class="cardbody"><div class="card-title">${fname} <b class="lv">Lv${f.level}</b></div>
         ${max ? '' : costPreview(f.nextCost, f.nextTimeSec)}${btn}</div></div>`;
   }).join('');
 
@@ -249,7 +257,7 @@ function renderVillage(): string {
       const reqs = (d.requires || []).map((r: any) => `${BUILDING_INFO[r.kind]?.name ?? r.kind} Lv${r.level}`).join('、');
       if (reqs) reqHint = `<div class="req-hint">需先建：${reqs}</div>`;
     } else btn = `<button class="btn-sm" data-bld="${kind}" ${q || !afford ? 'disabled' : ''}>升级</button>`;
-    return `<div class="card ${d.unlocked ? '' : 'locked'}">${art(BUILDING_INFO[kind]?.icon ?? '/art/bld_main.png', d.name, 'md')}
+    return `<div class="card ${d.unlocked ? '' : 'locked'}">${art(d.icon ?? BUILDING_INFO[kind]?.icon ?? 'bld_main', d.name, 'md')}
       <div class="cardbody"><div class="card-title">${d.name} <b class="lv">Lv${d.level}</b></div>
         ${max || !d.unlocked ? reqHint : costPreview(d.nextCost, d.nextTimeSec)}${btn}</div></div>`;
   }).join('');
@@ -319,15 +327,16 @@ function renderMap(): string {
       let cls = 'tile', inner = '', clickable = '';
       if (isSelf) {
         cls += ' tile-self';
-        inner = art('/art/bld_main.png', '本城', 'sm');
+        inner = art('bld_main', '本城', 'sm');
       } else if (t?.kind === 'village') {
         cls += ' tile-enemy';
-        inner = art('/art/bld_main.png', t.name, 'sm');
+        inner = art('bld_main', t.name, 'sm');
         clickable = `data-tx="${x}" data-ty="${y}" data-kind="village" data-ref="${t.refId}" data-name="${t.name}"`;
       } else if (t?.kind === 'pve') {
         cls += ' tile-pve';
-        inner = art(PVE_INFO[pveType(t.name)]?.icon ?? '/art/pve_bandits.png', t.name, 'sm');
-        clickable = `data-tx="${x}" data-ty="${y}" data-kind="pve" data-ref="${t.refId}" data-name="${t.name}"`;
+        const picon = t.icon ?? PVE_INFO[pveType(t.name)]?.icon ?? 'pve_bandits';
+        inner = art(picon, t.name, 'sm');
+        clickable = `data-tx="${x}" data-ty="${y}" data-kind="pve" data-ref="${t.refId}" data-name="${t.name}" data-icon="${picon}"`;
       }
       if (selected && selected.x === x && selected.y === y) cls += ' tile-selected';
       cells += `<div class="${cls}" ${clickable} title="(${x},${y})${t?.name ? ' ' + t.name : ''}">${inner}</div>`;
@@ -365,7 +374,7 @@ function renderTargetPanel(): string {
   const action = isPve
     ? `<button class="btn-sm btn-raid" id="doRaid">🏇 掠夺</button>`
     : `<button class="btn-sm btn-attack" id="doAttack">⚔️ 进攻</button>`;
-  const icon = isPve ? (PVE_INFO[pveType(selected.name)]?.icon ?? '/art/pve_bandits.png') : '/art/bld_main.png';
+  const icon = isPve ? (selected.icon ?? PVE_INFO[pveType(selected.name)]?.icon ?? 'pve_bandits') : 'bld_main';
   return `<div class="target-panel ${isPve ? 'target' : 'enemy'}">
     <div class="target-head">${art(icon, selected.name, 'md')}
       <div><div class="card-title">${selected.name}</div>
@@ -412,7 +421,7 @@ function bindPageEvents() {
   // 地图：点击目标地块 → 选中
   document.querySelectorAll<HTMLElement>('.tile[data-ref]').forEach((el) =>
     el.onclick = () => {
-      selected = { refId: el.dataset.ref!, kind: el.dataset.kind!, x: Number(el.dataset.tx), y: Number(el.dataset.ty), name: el.dataset.name! };
+      selected = { refId: el.dataset.ref!, kind: el.dataset.kind!, x: Number(el.dataset.tx), y: Number(el.dataset.ty), name: el.dataset.name!, icon: el.dataset.icon };
       const panel = document.getElementById('targetPanel');
       if (panel) { panel.innerHTML = renderTargetPanel(); bindTargetEvents(); }
       document.querySelectorAll('.tile-selected').forEach((t) => t.classList.remove('tile-selected'));

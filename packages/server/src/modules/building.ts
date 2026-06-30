@@ -90,6 +90,8 @@ export class BuildingModule {
           const next = f.level + 1;
           return {
             ...f,
+            name: def.name,
+            icon: def.icon, // 图标基名（前端拼 /art/+基名+.png）
             maxLevel: def.maxLevel,
             nextCost: next <= def.maxLevel ? def.cost(next) : null,
             nextTimeSec: next <= def.maxLevel ? this.buildTime(s, def.timeSec(next)) : null,
