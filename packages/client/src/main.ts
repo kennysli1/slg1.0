@@ -49,11 +49,25 @@ function costPreview(cost: Record<string, number> | null, timeSec?: number | nul
   const time = timeSec ? `<span class="cost-time">⏱ ${secStr(Date.now() + timeSec * 1000)}</span>` : '';
   return `<div class="cost">${items}${time}</div>`;
 }
+/** 训练数量变化时，按总价重算某兵种卡片的消耗预览与按钮可用性。 */
+function updateTrainCost(unitKey: string) {
+  const u = (cache.army?.trainable || []).find((x: any) => x.key === unitKey);
+  if (!u) return;
+  const inp = document.getElementById(`cnt-${unitKey}`) as HTMLInputElement;
+  const cnt = Math.max(1, Math.floor(Number(inp?.value) || 1));
+  const total: Record<string, number> = {};
+  for (const r of RES_KEYS) total[r] = (u.cost[r] ?? 0) * cnt;
+  const slot = document.getElementById(`cost-${unitKey}`);
+  if (slot) slot.innerHTML = costPreview(total, u.trainSec * cnt);
+  const btn = document.getElementById(`btn-${unitKey}`) as HTMLButtonElement;
+  if (btn && !cache.army?.training) btn.disabled = !canAfford(total);
+}
 /** 进度条 HTML（用 data 属性记录起止，由计时器更新宽度与剩余文字）。 */
 function progressBar(startAt: number, finishAt: number, label: string): string {
+  const pct = Math.min(100, Math.max(0, ((Date.now() - startAt) / (finishAt - startAt)) * 100));
   return `<div class="progress" data-start="${startAt}" data-finish="${finishAt}">
-    <i class="progress-fill"></i>
-    <span class="progress-label">${label} · 剩 <b class="progress-time"></b></span></div>`;
+    <i class="progress-fill" style="width:${pct}%"></i>
+    <span class="progress-label">${label} · 剩 <b class="progress-time">${secStr(finishAt)}</b></span></div>`;
 }
 
 const app = document.getElementById('app')!;
@@ -265,12 +279,11 @@ function renderArmy(): string {
     ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
         ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
   const trainCards = (army.trainable || []).map((u: any) => {
-    const afford = canAfford(u.cost);
     return `<div class="card">${art(unitArt(u.key), u.name, 'md')}
       <div class="cardbody"><div class="card-title">${u.name} <small class="tag">${catName(u.cat)}</small></div>
-        ${costPreview(u.cost, u.trainSec)}
-        <div class="train-row"><input type="number" min="1" value="1" id="cnt-${u.key}" />
-          <button class="btn-sm" data-train="${u.key}" ${army.training || !afford ? 'disabled' : ''}>训练</button></div></div></div>`;
+        <div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
+        <div class="train-row"><input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
+          <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}" ${army.training ? 'disabled' : ''}>训练</button></div></div></div>`;
   }).join('');
   return `<h3>驻军 <small>（${tribeName(army.tribe)}族）</small></h3><div class="troopbar">${troopList}</div>${training}
     <h3>训练</h3><div class="grid">${trainCards}</div>`;
@@ -390,6 +403,11 @@ function bindPageEvents() {
       const cnt = Number((document.getElementById(`cnt-${u}`) as HTMLInputElement)?.value || 1);
       act(req('TrainTroops', { unit: u, count: cnt }));
     });
+  // 训练数量框：实时重算消耗预览 + 按钮可用性（按选定数量算总价）
+  document.querySelectorAll<HTMLInputElement>('input[data-unit]').forEach((inp) => {
+    inp.oninput = () => updateTrainCost(inp.dataset.unit!);
+    updateTrainCost(inp.dataset.unit!); // 初次渲染按当前值校正
+  });
 
   // 地图：点击目标地块 → 选中
   document.querySelectorAll<HTMLElement>('.tile[data-ref]').forEach((el) =>
@@ -482,5 +500,9 @@ setInterval(() => {
   if (!me) return;
   renderResBar();
   syncTimers();
+  // 资源每秒增长，军队页训练按钮的"买得起"状态随之实时刷新
+  if (currentTab === 'army') {
+    document.querySelectorAll<HTMLInputElement>('input[data-unit]').forEach((inp) => updateTrainCost(inp.dataset.unit!));
+  }
 }, 1000);
 setInterval(() => { if (me) refreshAll(); }, 5000);
