@@ -1,4 +1,5 @@
-targetType,unitKey,name,count,atk,defInf,defCav,carry
+﻿targetType,unitKey,name,count,atk,defInf,defCav,carry
+#所属野怪类型,守军兵种标识,显示名,数量,攻击力,对步防御,对骑防御,负重
 rats,rat,老鼠,10,5,10,10,0
 wolves,wolf,野狼,20,20,25,30,0
 bandits,bandit,强盗,40,40,30,30,0

@@ -1,4 +1,5 @@
-type,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop
+﻿type,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop
+#野怪类型标识,显示名,图标占位,重生秒数,掠夺木材,掠夺泥土,掠夺铁矿,掠夺粮食
 rats,老鼠窝,🐀,120,200,200,100,100
 wolves,野狼群,🐺,300,500,500,400,300
 bandits,强盗营地,🏴‍☠️,600,1200,1200,1000,600

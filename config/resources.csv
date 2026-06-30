@@ -1,4 +1,5 @@
-key,name,icon,note
+﻿key,name,icon,note
+#资源标识(代码用),显示名,图标占位,用途备注
 wood,木材,🪵,建造与造兵
 clay,泥土,🧱,建造与造兵
 iron,铁矿,⛏️,造兵为主

@@ -1,4 +1,5 @@
-key,tribe,name,icon,cat,atk,defInf,defCav,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building
+﻿key,tribe,name,icon,cat,atk,defInf,defCav,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building
+#兵种标识(代码用),所属部族,显示名,图标占位,兵种类别,攻击力,对步防御,对骑防御,移动速度,负重(掠夺量),每小时耗粮,木材造价,泥土造价,铁矿造价,粮食造价,训练秒数/个,所需建筑
 legionnaire,romans,军团兵,🗡️,infantry,40,35,50,6,50,1,120,100,150,30,27,barracks
 praetorian,romans,禁卫兵,🛡️,infantry,30,65,35,5,20,1,100,130,160,70,33,barracks
 imperian,romans,帝国兵,⚔️,infantry,70,40,25,7,50,1,150,160,210,80,38,barracks
