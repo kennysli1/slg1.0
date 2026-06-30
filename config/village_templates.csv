@@ -1,0 +1,5 @@
+﻿tribe,field_layout,start_buildings,start_resources
+#部族(语义串romans/gauls/teutons),田地布局(类型*数量,用|分隔),初始建筑(code:等级,用|分隔),初始资源(可选,res:量,用|分隔;空=用全局start_resource_amount)
+romans,woodcutter*4|claypit*4|ironmine*4|cropland*6,main:1|rallypoint:1,
+gauls,woodcutter*4|claypit*4|ironmine*4|cropland*6,main:1|rallypoint:1,
+teutons,woodcutter*4|claypit*4|ironmine*4|cropland*6,main:1|rallypoint:1,

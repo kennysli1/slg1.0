@@ -26,6 +26,8 @@ export interface CombatInput {
   defender: Snapshot;
   /** 防守方城墙等级（提供防御加成） */
   wallLevel?: number;
+  /** 城墙每级防御加成（由调用方从 config.constants 注入；Combat 无状态不读配置） */
+  wallBonusPerLevel?: number;
 }
 
 export interface CombatResult {
@@ -51,7 +53,7 @@ function totalAttack(s: Snapshot): number {
  * 防守方按"进攻方步/骑构成比例"加权取对步防/对骑防。
  * 简化：算进攻方中步兵攻击占比 pInf，防御 = Σ count*(defInf*pInf + defCav*pCav)。
  */
-function totalDefense(attacker: Snapshot, defender: Snapshot, wallLevel = 0): number {
+function totalDefense(attacker: Snapshot, defender: Snapshot, wallLevel = 0, wallBonusPerLevel = 0.03): number {
   let atkInf = 0;
   let atkCav = 0;
   for (const u of Object.values(attacker)) {
@@ -66,8 +68,8 @@ function totalDefense(attacker: Snapshot, defender: Snapshot, wallLevel = 0): nu
   for (const u of Object.values(defender)) {
     d += u.count * (u.defInf * pInf + u.defCav * pCav);
   }
-  // 城墙加成：每级 +3%（占位）
-  return d * (1 + wallLevel * 0.03);
+  // 城墙加成：每级 +wallBonusPerLevel（由调用方从 config 注入，默认 3%）
+  return d * (1 + wallLevel * wallBonusPerLevel);
 }
 
 /** 应用损失率到一组兵力，返回死亡数。 */
@@ -85,7 +87,7 @@ function applyLosses(s: Snapshot, ratio: number): Record<string, number> {
  */
 export function resolveCombat(input: CombatInput): CombatResult {
   const A = totalAttack(input.attacker);
-  const D = totalDefense(input.attacker, input.defender, input.wallLevel ?? 0);
+  const D = totalDefense(input.attacker, input.defender, input.wallLevel ?? 0, input.wallBonusPerLevel ?? 0.03);
 
   const attackerWins = A > D;
   let attackerLossRatio: number;

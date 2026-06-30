@@ -2,6 +2,7 @@ import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Economy（经济）
@@ -14,7 +15,7 @@ import type { CommandBus } from '../infra/command-bus.js';
  * upkeep 由各模块算好后经 SetUpkeep 上报（Economy 不懂建筑/兵种细节，派生管线对内口径）。
  *
  * 惰性结算：资源不每秒写，读/写前按 (now-lastTick)*rate 补算。
- * 扩展点：资源种类在 RESOURCE_TYPES，加种类不改逻辑。
+ * 扩展点：资源种类来自 config.resources（resources.csv），初始量/容量/成长来自 config.constants。
  */
 
 export const RESOURCE_TYPES = ['wood', 'clay', 'iron', 'crop'] as const;
@@ -43,6 +44,16 @@ function zero(): ResMap {
 export class EconomyModule {
   static readonly NAME = 'economy';
 
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'economy',
+    publicActions: {
+      GetResources: { command: 'economy.GetResources', ownVillage: true, needAuth: true },
+    },
+    eventPushMap: {
+      'economy.CropDeficit': 'CropDeficit',
+    },
+  };
+
   constructor(
     private store: Store,
     private bus: EventBus,
@@ -66,15 +77,19 @@ export class EconomyModule {
   }
 
   createVillage(villageId: string): void {
+    const c = this.config.constants;
+    const start = c.startResourceAmount;
+    const cap = c.storageBase;
+    const baseRatePerSec = c.baseProductionPerHour / 3600;
     const s: EconomyState = {
       villageId,
-      resources: { wood: 750, clay: 750, iron: 750, crop: 750 },
+      resources: { wood: start, clay: start, iron: start, crop: start },
       lastTick: this.now(),
-      // 初始每小时各产约 +X（占位），换算到每秒
-      baseRate: { wood: 10 / 3600, clay: 10 / 3600, iron: 10 / 3600, crop: 10 / 3600 },
+      // 初始每小时各产约 baseProductionPerHour（来自 config），换算到每秒
+      baseRate: { wood: baseRatePerSec, clay: baseRatePerSec, iron: baseRatePerSec, crop: baseRatePerSec },
       rateModifiers: [],
       cropUpkeep: {},
-      capacity: { wood: 800, clay: 800, iron: 800, crop: 800 },
+      capacity: { wood: cap, clay: cap, iron: cap, crop: cap },
     };
     this.store.set(COLLECTION, villageId, s);
   }
@@ -226,12 +241,14 @@ export class EconomyModule {
       // 产量(每小时) = prodBase × prodGrowth^level，换算每秒
       s.baseRate[t] = (field.prodBase * Math.pow(field.prodGrowth, level)) / 3600;
     } else if (kind === 'warehouse') {
-      const cap = 800 * (1 + level * 0.5);
+      const c = this.config.constants;
+      const cap = c.storageBase * (1 + level * c.storageGrowthPerLevel);
       s.capacity.wood = cap;
       s.capacity.clay = cap;
       s.capacity.iron = cap;
     } else if (kind === 'granary') {
-      s.capacity.crop = 800 * (1 + level * 0.5);
+      const c = this.config.constants;
+      s.capacity.crop = c.storageBase * (1 + level * c.storageGrowthPerLevel);
     }
     this.store.set(COLLECTION, villageId, s);
   }

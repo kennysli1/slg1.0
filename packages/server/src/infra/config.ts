@@ -77,6 +77,38 @@ export interface PveSpawn {
   y: number;
 }
 
+/** 开局模板：按部族定义田地布局/初始建筑/初始资源。来自 village_templates.csv。 */
+export interface VillageTemplate {
+  tribe: string;
+  /** 展开后的田地类型序列（如 18 个 code） */
+  fieldLayout: string[];
+  /** 初始建筑 code -> 等级 */
+  startBuildings: Record<string, number>;
+  /** 初始资源覆盖（空则各资源用 constants.start_resource_amount） */
+  startResources: Record<string, number> | null;
+}
+
+/**
+ * 全局常量集合（来自 game_constants.csv）。
+ * 强类型暴露逻辑常用项，避免各模块各写各的 magic number；
+ * 同时保留 raw 便于校验与调试。
+ */
+export interface GameConstants {
+  wallBonusPerLevel: number;
+  smithyBonusPerLevel: number;
+  smithyCostBase: number;
+  mainBuildSpeedupPerLevel: number;
+  mainBuildSpeedupCap: number;
+  storageBase: number;
+  storageGrowthPerLevel: number;
+  startResourceAmount: number;
+  baseProductionPerHour: number;
+  mapSize: number;
+  mapViewRadius: number;
+  /** 原始 key->value（含未被强类型收录的扩展项） */
+  raw: Record<string, number | boolean | string>;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   fields: Record<string, FieldDef>;
@@ -84,6 +116,8 @@ export interface GameConfig {
   units: Record<string, UnitDef>;
   pveTemplates: Record<string, PveTemplate>;
   pveSpawns: PveSpawn[];
+  constants: GameConstants;
+  villageTemplates: Record<string, VillageTemplate>;
 }
 
 function costFn(base: { wood: number; clay: number; iron: number; crop: number }, growth: number) {
@@ -97,6 +131,47 @@ function costFn(base: { wood: number; clay: number; iron: number; crop: number }
 
 function timeFn(base: number, growth: number) {
   return (lv: number) => Math.round(base * Math.pow(growth, lv - 1));
+}
+
+/** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
+function parseConstantValue(raw: string, type: string): number | boolean | string {
+  if (type === 'bool') return raw === 'true' || raw === '1';
+  if (type === 'string') return raw;
+  return num(raw);
+}
+
+/** 解析 "woodcutter*4|claypit*4" → ['woodcutter','woodcutter','woodcutter','woodcutter','claypit'...]。 */
+function parseFieldLayout(s: string): string[] {
+  if (!s) return [];
+  const out: string[] = [];
+  for (const part of s.split('|')) {
+    const [code, cnt] = part.split('*');
+    const n = num(cnt, 1);
+    for (let i = 0; i < n; i++) out.push(code.trim());
+  }
+  return out;
+}
+
+/** 解析 "main:1|rallypoint:1" → { main:1, rallypoint:1 }。 */
+function parseLeveledList(s: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!s) return out;
+  for (const part of s.split('|')) {
+    const [code, lv] = part.split(':');
+    if (code) out[code.trim()] = num(lv, 1);
+  }
+  return out;
+}
+
+/** 解析 "wood:750|clay:750" → { wood:750, clay:750 }；空串返回 null（表示用全局默认）。 */
+function parseResourceList(s: string): Record<string, number> | null {
+  if (!s) return null;
+  const out: Record<string, number> = {};
+  for (const part of s.split('|')) {
+    const [code, amt] = part.split(':');
+    if (code) out[code.trim()] = num(amt);
+  }
+  return out;
 }
 
 /**
@@ -181,5 +256,151 @@ export function loadGameConfig(configDir: string): GameConfig {
     x: num(r.x), y: num(r.y),
   }));
 
-  return { resources, fields, buildings, units, pveTemplates, pveSpawns };
+  // 全局常量表
+  const raw: Record<string, number | boolean | string> = {};
+  for (const r of loadCsv(p('game_constants.csv'))) {
+    if (!r.key) continue;
+    raw[r.key] = parseConstantValue(r.value, r.type);
+  }
+  const cn = (k: string, def: number) => (typeof raw[k] === 'number' ? (raw[k] as number) : def);
+  const constants: GameConstants = {
+    wallBonusPerLevel: cn('wall_bonus_per_level', 0.03),
+    smithyBonusPerLevel: cn('smithy_bonus_per_level', 0.1),
+    smithyCostBase: cn('smithy_cost_base', 200),
+    mainBuildSpeedupPerLevel: cn('main_build_speedup_per_level', 0.05),
+    mainBuildSpeedupCap: cn('main_build_speedup_cap', 0.6),
+    storageBase: cn('storage_base', 800),
+    storageGrowthPerLevel: cn('storage_growth_per_level', 0.5),
+    startResourceAmount: cn('start_resource_amount', 750),
+    baseProductionPerHour: cn('base_production_per_hour', 10),
+    mapSize: cn('map_size', 20),
+    mapViewRadius: cn('map_view_radius', 6),
+    raw,
+  };
+
+  // 开局模板表（按部族）
+  const villageTemplates: Record<string, VillageTemplate> = {};
+  for (const r of loadCsv(p('village_templates.csv'))) {
+    if (!r.tribe) continue;
+    villageTemplates[r.tribe] = {
+      tribe: r.tribe,
+      fieldLayout: parseFieldLayout(r.field_layout),
+      startBuildings: parseLeveledList(r.start_buildings),
+      startResources: parseResourceList(r.start_resources),
+    };
+  }
+
+  const config: GameConfig = {
+    resources, fields, buildings, units, pveTemplates, pveSpawns, constants, villageTemplates,
+  };
+  validateGameConfig(config);
+  return config;
+}
+
+/**
+ * 启动期配置校验：把"运行时才暴露的错误"提前到启动失败，错误信息定位到表/字段。
+ * 覆盖：跨表引用合法性、关键值范围、建筑 requires 循环依赖。
+ * 任何错误抛出 Error（聚合所有问题一次性报出，便于一次改完）。
+ */
+export function validateGameConfig(config: GameConfig): void {
+  const errors: string[] = [];
+  const resourceKeys = new Set(config.resources.map((r) => r.key));
+
+  // resources：必须含 economy 依赖的 4 种结构字段
+  for (const need of ['wood', 'clay', 'iron', 'crop']) {
+    if (!resourceKeys.has(need)) errors.push(`resources.csv 缺少必需资源 id=${need}（economy 结构字段）`);
+  }
+
+  // fields：产出资源必须存在；范围
+  for (const f of Object.values(config.fields)) {
+    if (!resourceKeys.has(f.resource)) errors.push(`fields.csv[${f.type}] resource=${f.resource} 不在 resources.csv`);
+    if (f.maxLevel <= 0) errors.push(`fields.csv[${f.type}] maxLevel 必须>0（当前${f.maxLevel}）`);
+    if (f.prodBase < 0) errors.push(`fields.csv[${f.type}] prodBase 不能为负`);
+  }
+
+  // buildings：requires 引用必须存在；范围
+  const buildingCodes = new Set(Object.keys(config.buildings));
+  for (const b of Object.values(config.buildings)) {
+    if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    for (const r of b.requires) {
+      if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
+      if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
+    }
+  }
+
+  // 建筑 requires 循环依赖检测（DFS 找环）
+  const cycle = findRequiresCycle(config.buildings);
+  if (cycle) errors.push(`buildings.csv requires 存在循环依赖：${cycle.join(' → ')}`);
+
+  // units：所需建筑必须存在；范围
+  for (const u of Object.values(config.units)) {
+    if (u.building && !buildingCodes.has(u.building)) {
+      errors.push(`units.csv[${u.key}] building=${u.building} 不在 buildings.csv`);
+    }
+    if (u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
+    if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
+  }
+
+  // pve：守军挂在已知目标上（解析阶段已丢弃孤儿，这里校验 spawn 引用）；spawn 目标必须存在
+  const pveCodes = new Set(Object.keys(config.pveTemplates));
+  for (const s of config.pveSpawns) {
+    if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
+  }
+
+  // village_templates：田地/建筑 code 必须存在；资源覆盖 key 必须存在
+  for (const t of Object.values(config.villageTemplates)) {
+    for (const code of new Set(t.fieldLayout)) {
+      if (!config.fields[code]) errors.push(`village_templates.csv[${t.tribe}] field_layout 含未知田地 ${code}`);
+    }
+    for (const code of Object.keys(t.startBuildings)) {
+      if (!buildingCodes.has(code)) errors.push(`village_templates.csv[${t.tribe}] start_buildings 含未知建筑 ${code}`);
+    }
+    if (t.startResources) {
+      for (const code of Object.keys(t.startResources)) {
+        if (!resourceKeys.has(code)) errors.push(`village_templates.csv[${t.tribe}] start_resources 含未知资源 ${code}`);
+      }
+    }
+  }
+
+  // constants：关键范围
+  const c = config.constants;
+  if (c.mapSize <= 0) errors.push(`game_constants.csv map_size 必须>0`);
+  if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
+  if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
+
+  if (errors.length) {
+    throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);
+  }
+}
+
+/** DFS 检测建筑 requires 图中的环；返回环路径（含重复首节点）或 null。 */
+function findRequiresCycle(buildings: Record<string, BuildingDef>): string[] | null {
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color: Record<string, number> = {};
+  const stack: string[] = [];
+  let found: string[] | null = null;
+
+  const visit = (node: string): void => {
+    if (found) return;
+    color[node] = GRAY;
+    stack.push(node);
+    for (const r of buildings[node]?.requires ?? []) {
+      if (!buildings[r.kind]) continue; // 不存在的引用已在别处报错
+      if (color[r.kind] === GRAY) {
+        const i = stack.indexOf(r.kind);
+        found = stack.slice(i).concat(r.kind);
+        return;
+      }
+      if ((color[r.kind] ?? WHITE) === WHITE) visit(r.kind);
+      if (found) return;
+    }
+    stack.pop();
+    color[node] = BLACK;
+  };
+
+  for (const node of Object.keys(buildings)) {
+    if ((color[node] ?? WHITE) === WHITE) visit(node);
+    if (found) return found;
+  }
+  return null;
 }

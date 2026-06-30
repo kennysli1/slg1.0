@@ -2,6 +2,7 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -51,6 +52,15 @@ function verifyPassword(pwd: string, stored: string): boolean {
 
 export class PlayerModule {
   static readonly NAME = 'player';
+
+  /** 对外动作清单（被 Gateway 汇总）。注册/登录是公开动作，无需鉴权。 */
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'player',
+    publicActions: {
+      Register: { command: 'player.Register' },
+      Login: { command: 'player.Login' },
+    },
+  };
 
   constructor(
     private store: Store,

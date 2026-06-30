@@ -4,6 +4,7 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Building（资源田 + 中心建筑科技树）
@@ -25,6 +26,18 @@ const COLLECTION = 'building';
 
 export class BuildingModule {
   static readonly NAME = 'building';
+
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'building',
+    publicActions: {
+      GetVillage: { command: 'building.GetState', ownVillage: true, needAuth: true },
+      UpgradeBuilding: { command: 'building.UpgradeBuilding', ownVillage: true, needAuth: true },
+      UpgradeField: { command: 'building.UpgradeField', ownVillage: true, needAuth: true },
+    },
+    eventPushMap: {
+      'building.Upgraded': 'BuildingUpgraded',
+    },
+  };
 
   constructor(
     private store: Store,
@@ -56,17 +69,23 @@ export class BuildingModule {
     }
   }
 
-  createVillage(villageId: string): void {
-    // 标准罗马村：18 田 = 4木4泥4铁6粮
-    const layout = [
-      ...Array(4).fill('woodcutter'),
-      ...Array(4).fill('claypit'),
-      ...Array(4).fill('ironmine'),
-      ...Array(6).fill('cropland'),
-    ];
+  createVillage(villageId: string, tribe = 'romans'): void {
+    // 开局布局来自 village_templates.csv（按部族）；缺该部族模板时回退罗马，再缺则用默认 18 田
+    const tpl = this.config.villageTemplates[tribe] ?? this.config.villageTemplates['romans'];
+    const layout = tpl?.fieldLayout?.length
+      ? tpl.fieldLayout
+      : [
+          ...Array(4).fill('woodcutter'),
+          ...Array(4).fill('claypit'),
+          ...Array(4).fill('ironmine'),
+          ...Array(6).fill('cropland'),
+        ];
+    const buildings = tpl?.startBuildings && Object.keys(tpl.startBuildings).length
+      ? { ...tpl.startBuildings }
+      : { main: 1, rallypoint: 1 };
     const s: BuildingState = {
       villageId,
-      buildings: { main: 1, rallypoint: 1 },
+      buildings,
       fields: layout.map((type) => ({ type, level: 0 })),
       queue: null,
     };
@@ -182,7 +201,8 @@ export class BuildingModule {
   /** 主基地降低建造时间。 */
   private buildTime(s: BuildingState, baseSec: number): number {
     const mainLv = s.buildings.main ?? 1;
-    const speedup = 1 - Math.min(0.6, (mainLv - 1) * 0.05);
+    const c = this.config.constants;
+    const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
     return Math.max(1, Math.round(baseSec * speedup));
   }
 

@@ -5,6 +5,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import { resolveCombat, type Snapshot } from './combat.js';
 import type { GameConfig } from '../infra/config.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Movement（行军）
@@ -35,6 +36,22 @@ const COLLECTION = 'movement';
 
 export class MovementModule {
   static readonly NAME = 'movement';
+
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'movement',
+    publicActions: {
+      SendRaid: { command: 'movement.SendRaid', ownVillage: true, needAuth: true },
+      SendAttack: { command: 'movement.SendAttack', ownVillage: true, needAuth: true },
+      ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true },
+    },
+    eventPushMap: {
+      'movement.Sent': 'MarchSent',
+      'movement.RaidResolved': 'RaidResolved',
+      'movement.AttackResolved': 'AttackResolved',
+      'movement.IncomingAttack': 'IncomingAttack',
+      'movement.Returned': 'MarchReturned',
+    },
+  };
 
   constructor(
     private store: Store,
@@ -194,7 +211,7 @@ export class MovementModule {
     const tgtBuild = await this.commands.send({ name: 'building.GetState', from: MovementModule.NAME, payload: { villageId: target } });
     const wallLevel = (tgtBuild.payload as any)?.buildings?.wall ?? 0;
 
-    const result = resolveCombat({ attacker, defender, wallLevel });
+    const result = resolveCombat({ attacker, defender, wallLevel, wallBonusPerLevel: this.config.constants.wallBonusPerLevel });
 
     // 扣防守方损失（把死亡数从对方驻军里减掉）
     if (Object.keys(result.defenderLosses).length) {

@@ -2,6 +2,7 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · World（地图 / 坐标 / 地块）
@@ -40,6 +41,13 @@ function key(x: number, y: number) {
 
 export class WorldModule {
   static readonly NAME = 'world';
+
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'world',
+    publicActions: {
+      GetArea: { command: 'world.GetArea', needAuth: true },
+    },
+  };
 
   constructor(
     private store: Store,

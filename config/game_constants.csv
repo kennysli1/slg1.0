@@ -1,0 +1,13 @@
+﻿key,value,type,note
+#常量键(代码读取用,勿改),值,类型(number/bool/string),中文说明
+wall_bonus_per_level,0.03,number,城墙每级防御加成(0.03=每级+3%)
+smithy_bonus_per_level,0.1,number,铁匠每级攻防加成(0.1=每级+10%)
+smithy_cost_base,200,number,铁匠升级成本基数(木+泥各 base×目标等级)
+main_build_speedup_per_level,0.05,number,主基地每级建造提速(0.05=每级-5%耗时)
+main_build_speedup_cap,0.6,number,主基地建造提速上限(0.6=最多-60%)
+storage_base,800,number,仓库/粮仓基础容量
+storage_growth_per_level,0.5,number,容量每级增长系数(0.5=每级+50%基数)
+start_resource_amount,750,number,新村各资源初始存量
+base_production_per_hour,10,number,资源田0级基础每小时产量
+map_size,20,number,地图半径(地图为[-size,size]方形)
+map_view_radius,6,number,前端地图视野半径(格,前端白名单常量)

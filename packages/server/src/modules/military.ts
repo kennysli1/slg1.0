@@ -4,6 +4,7 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig, UnitDef } from '../infra/config.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Military（军队/兵种）
@@ -43,6 +44,18 @@ const COLLECTION = 'military';
 
 export class MilitaryModule {
   static readonly NAME = 'military';
+
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'military',
+    publicActions: {
+      GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true },
+      TrainTroops: { command: 'military.TrainTroops', ownVillage: true, needAuth: true },
+      UpgradeSmithy: { command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true },
+    },
+    eventPushMap: {
+      'military.TroopTrained': 'TroopTrained',
+    },
+  };
 
   constructor(
     private store: Store,
@@ -108,7 +121,7 @@ export class MilitaryModule {
   /** 派生管线：最终三维 = 基础 × (1 + 铁匠等级×每级加成)。对外只暴露这个结果。 */
   private finalStats(unit: string, smithyLv: number) {
     const def = this.config.units[unit];
-    const bonus = 1 + smithyLv * 0.1; // 占位：每级+10%
+    const bonus = 1 + smithyLv * this.config.constants.smithyBonusPerLevel; // 每级加成来自 config
     return {
       atk: def.atk * bonus,
       defInf: def.defInf * bonus,
@@ -215,7 +228,8 @@ export class MilitaryModule {
     if (!this.config.units[unit]) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
 
     const nextLv = (s.smithyLevel[unit] ?? 0) + 1;
-    const cost = { wood: 200 * nextLv, clay: 200 * nextLv }; // 占位
+    const base = this.config.constants.smithyCostBase;
+    const cost = { wood: base * nextLv, clay: base * nextLv }; // 成本基数来自 config
     const spend = await this.commands.send({
       name: 'economy.TrySpend',
       from: MilitaryModule.NAME,

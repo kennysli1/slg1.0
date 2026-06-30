@@ -1,6 +1,15 @@
 import type { WireRequest, WireResponse, WirePush, DomainEvent } from '@slg/shared';
 import { WIRE_VERSION } from '@slg/shared';
 import type { GameApp } from '../app.js';
+import { aggregateManifests, type ModuleManifest } from './manifest.js';
+import { PlayerModule } from '../modules/player.js';
+import { EconomyModule } from '../modules/economy.js';
+import { BuildingModule } from '../modules/building.js';
+import { MilitaryModule } from '../modules/military.js';
+import { WorldModule } from '../modules/world.js';
+import { PveModule } from '../modules/pve.js';
+import { MovementModule } from '../modules/movement.js';
+import { MetaModule } from '../modules/meta.js';
 
 /**
  * 接入层 · Gateway（唯一翻译官 + 多人会话管理）
@@ -11,6 +20,9 @@ import type { GameApp } from '../app.js';
  *  - 把外部 Request(action) 翻译成内部 Command；对"自己村"的操作强制注入会话的
  *    villageId（玩家不能伪造别人的村做操作 → 安全）。
  *  - 订阅内部 Event，按事件 payload 里的 villageId **定向推送**给对应玩家（不再广播）。
+ *
+ * 路由表来源（阶段C）：由各模块的 static MANIFEST 汇总生成，不再手工维护。
+ * 新增一个 action 只需在对应模块 manifest 加一行，避免"实现了但网关漏配"。
  *
  * 不含游戏逻辑，只做翻译、路由、会话与权限。
  */
@@ -26,38 +38,19 @@ interface Session {
   villageId?: string;
 }
 
-/**
- * action 路由表。ownVillage=true 表示该操作作用于"玩家自己的村"，
- * Gateway 会强制把会话的 villageId 注入 payload（忽略客户端传的 villageId）。
- */
-const ACTION_ROUTES: Record<string, { command: string; ownVillage?: boolean; needAuth?: boolean }> = {
-  Register: { command: 'player.Register' },
-  Login: { command: 'player.Login' },
-  GetResources: { command: 'economy.GetResources', ownVillage: true, needAuth: true },
-  GetVillage: { command: 'building.GetState', ownVillage: true, needAuth: true },
-  UpgradeBuilding: { command: 'building.UpgradeBuilding', ownVillage: true, needAuth: true },
-  UpgradeField: { command: 'building.UpgradeField', ownVillage: true, needAuth: true },
-  GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true },
-  TrainTroops: { command: 'military.TrainTroops', ownVillage: true, needAuth: true },
-  UpgradeSmithy: { command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true },
-  GetArea: { command: 'world.GetArea', needAuth: true },
-  GetTarget: { command: 'pve.GetTarget', needAuth: true },
-  SendRaid: { command: 'movement.SendRaid', ownVillage: true, needAuth: true },
-  SendAttack: { command: 'movement.SendAttack', ownVillage: true, needAuth: true },
-  ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true },
-};
+/** 所有领域模块的 manifest（新增模块在此登记即可被网关汇总）。 */
+const MODULE_MANIFESTS: ModuleManifest[] = [
+  PlayerModule.MANIFEST,
+  MetaModule.MANIFEST,
+  EconomyModule.MANIFEST,
+  BuildingModule.MANIFEST,
+  MilitaryModule.MANIFEST,
+  WorldModule.MANIFEST,
+  PveModule.MANIFEST,
+  MovementModule.MANIFEST,
+];
 
-/** 内部 event → 外部 push event 名。这些事件 payload 必须含 villageId 用于定向投递。 */
-const EVENT_TO_PUSH: Record<string, string> = {
-  'building.Upgraded': 'BuildingUpgraded',
-  'military.TroopTrained': 'TroopTrained',
-  'movement.Sent': 'MarchSent',
-  'movement.RaidResolved': 'RaidResolved',
-  'movement.AttackResolved': 'AttackResolved',
-  'movement.IncomingAttack': 'IncomingAttack',
-  'movement.Returned': 'MarchReturned',
-  'economy.CropDeficit': 'CropDeficit',
-};
+const { actionRoutes: ACTION_ROUTES, eventToPush: EVENT_TO_PUSH } = aggregateManifests(MODULE_MANIFESTS);
 
 export class Gateway {
   private sessions = new Set<Session>();

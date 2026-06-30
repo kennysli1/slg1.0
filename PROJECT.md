@@ -32,7 +32,9 @@ slg1.0/
 │   ├── units.csv             兵种
 │   ├── pve_targets.csv       PvE 目标模板
 │   ├── pve_defenders.csv     PvE 守军
-│   └── pve_spawns.csv        PvE 地图分布点
+│   ├── pve_spawns.csv        PvE 地图分布点
+│   ├── game_constants.csv    全局常量（城墙/铁匠/容量/地图尺寸等，原硬编码）
+│   └── village_templates.csv 各部族开局布局（田地/初始建筑/初始资源）
 │
 ├── packages/             ← 【代码】
 │   ├── shared/               前后端共享：通信信封类型（必须 ESM）
@@ -87,7 +89,7 @@ slg1.0/
 | `scheduler.ts` | 调度器：全游戏唯一时间源，定时触发（支持假时钟测试） |
 | `store.ts` | 存储接口 + 内存实现(测试) + **JSON文件实现(生产,落盘+重启恢复)** | 以后换 SQLite/PG 只改这里 |
 | `csv.ts` | CSV 解析器 |
-| `config.ts` | 把 `config/*.csv` 解析成 `GameConfig`，注入各模块 |
+| `config.ts` | 把 `config/*.csv` 解析成 `GameConfig`（含 `constants`/`villageTemplates`）；**启动期 `validateGameConfig` 校验**：跨表引用、数值范围、建筑 requires 循环依赖，错误定位到表/字段 |
 
 ### 领域层 `modules/`（每个模块管一块状态）
 | 模块 | 拥有的状态 | 主要能力 |
@@ -98,28 +100,40 @@ slg1.0/
 | `military.ts` | 兵力/训练队列/铁匠等级 | 训练（逐个产出）、铁匠养成、参战快照、增减兵力 |
 | `world.ts` | 地图地块（村庄/PvE/空地） | 坐标、距离、放置村庄/PvE |
 | `movement.ts` | 在途部队 | 出征→到达→战斗→带战利品返程（raid打PvE / attack打玩家 / return） |
-| `combat.ts` | 无（**纯函数**） | 进攻快照 vs 防守快照 → 伤亡/战利品（PvE/PvP 共用） |
+| `combat.ts` | 无（**纯函数**） | 进攻快照 vs 防守快照 → 伤亡/战利品（PvE/PvP 共用）；城墙加成由调用方从 config 注入 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
+| `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/田地/建筑/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
 ### 接入层
 | 文件 | 职责 |
 |------|------|
-| `gateway/gateway.ts` | 翻译官 + **多人会话**：每连接绑定玩家身份，自己村操作强制注入会话villageId（安全），事件按villageId定向推送 |
+| `gateway/manifest.ts` | **模块清单声明式注册**：定义 `ModuleManifest`（publicActions/eventPushMap）+ `aggregateManifests` 汇总；动作/事件名冲突启动即报错 |
+| `gateway/gateway.ts` | 翻译官 + **多人会话**：路由表由各模块 `static MANIFEST` 汇总生成（不再手工维护）；自己村操作强制注入会话villageId（安全），事件按villageId定向推送 |
 | `app.ts` | 组装层：加载 config → new 所有模块 → init |
 | `main.ts` | 入口：Fastify + WebSocket，挂 Gateway，托管前端 |
 
-### 前端 `packages/client/src`
-| 文件 | 职责 |
+### 前端 `packages/client/src`（按 feature 拆分）
+| 路径 | 职责 |
 |------|------|
+| `main.ts` | 仅入口：`import bootstrap()` |
 | `api.ts` | WebSocket 通信 + 登录（记住自己身份 `me`） |
-| `info.ts` | 显示用名称/图标基名表（按 code 索引；渲染时 `artPath()` 拼 `/art/<基名>.png`，服务器下发的 icon 基名优先） |
-| `main.ts` | 登录页 + 4 标签页 UI：村庄 / 军队 / 地图(自己村/他人村/野怪) / 报告 |
+| `info.ts` | 显示映射**回退表**（fallback）；正常走服务端 `GetGameConfig` |
+| `app/bootstrap.ts` | 启动编排：shell/资源条/页签路由/刷新循环/推送分发 |
+| `app/state.ts` | 应用级共享状态（缓存/战报/当前页签/地图选中） |
+| `app/config.ts` | 服务端配置缓存层（消费 `GetGameConfig`，提供 `resInfo`/`unitInfo`… 取值，缺失回退 `info.ts`） |
+| `features/{login,village,army,map,reports}/` | 各页面独立 render + bind 事件处理 |
+| `shared/ui/`、`shared/utils/` | 图标/消耗预览/进度条/格式化/错误文案等共享原子 |
 
 ### 测试
 | 文件 | 内容 |
 |------|------|
+| `server/src/test/all.test.ts` | **测试入口 barrel**（跨平台；`npm run test:server` 跑它，汇总导入下列各文件） |
 | `server/src/test/full-loop.test.ts` | 单人全循环：经济→训练→打PvE→掠夺→返程 |
 | `server/src/test/multiplayer-pvp.test.ts` | 多人+PvP：注册/归属/A打B/双方战报/掠夺/返程/禁止自攻 |
+| `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
+| `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
+| `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
+| `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
 
 ---
 
@@ -161,8 +175,9 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ### 3. 扩展（加新东西）
 先看 `docs/2_2.0设计/07_扩展与代码规范.md` 的"扩展决策树"，归类后照做：
-- 加**内容/数值**（新建筑/兵种/PvE）→ 改 `config/*.csv` 加一行。
-- 加**新系统**（工会/邮件）→ 照 `modules/` 模板加一个新模块，挂到 `app.ts`，gateway 加路由。
+- 加**内容/数值**（新建筑/兵种/PvE）→ 改 `config/*.csv` 加一行。**前端无需改代码**（名称/图标走服务端 `GetGameConfig` 下发）。
+- 加**全局常量/平衡参数** → 改 `config/game_constants.csv`，在 `config.ts` 的 `GameConstants` 加字段映射。
+- 加**新系统**（工会/邮件）→ 照 `modules/` 模板加一个新模块，挂到 `app.ts`，**给模块加 `static MANIFEST`** 并在 `gateway.ts` 的 `MODULE_MANIFESTS` 登记（不必手改路由表）。
 - 加**养成/加成**（天赋/突破）→ 在 owner 模块的派生管线加一层。
 
 ### 4. 修改（改逻辑）
@@ -175,7 +190,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 七、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 7 大模块 + 配置 CSV 化 + 可玩前端 + 多人 + PvP + **账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件**。测试 11/11。
+**已完成**：架构 + 通信规范 + 8 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件。测试 20/20。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`。
 

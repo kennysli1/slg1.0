@@ -41,6 +41,8 @@
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
+| 表8 | `game_constants.csv` | **全局常量**（城墙/铁匠加成、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
+| 表9 | `village_templates.csv` | **各部族开局布局**（18田分布、初始建筑、初始资源） | 改新手村开局；给不同部族不同起手 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 atk。
@@ -138,6 +140,52 @@
 | x / y | 地图坐标 |
 
 > 加目标点 = 加一行。
+
+## game_constants.csv — 全局常量（原硬编码迁出）
+| 列 | 含义 |
+|----|------|
+| key | 常量键（代码按它读取，**勿改**） |
+| value | 值 |
+| type | 类型：`number`/`bool`/`string`（决定怎么解析 value） |
+| note | 中文说明 |
+
+当前常量（改完重启即生效，默认值与重构前行为一致）：
+
+| key | 默认 | 作用 |
+|-----|------|------|
+| wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
+| smithy_bonus_per_level | 0.1 | 铁匠每级攻防加成（+10%/级） |
+| smithy_cost_base | 200 | 铁匠升级成本基数（木+泥各 base×目标等级） |
+| main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
+| main_build_speedup_cap | 0.6 | 主基地提速上限（最多-60%） |
+| storage_base | 800 | 仓库/粮仓基础容量 |
+| storage_growth_per_level | 0.5 | 容量每级增长系数（+50%基数/级） |
+| start_resource_amount | 750 | 新村各资源初始存量 |
+| base_production_per_hour | 10 | 资源田 0 级基础每小时产量 |
+| map_size | 20 | 地图半径（地图为 [-size,size] 方形） |
+| map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
+
+> 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
+
+## village_templates.csv — 各部族开局布局
+| 列 | 含义 |
+|----|------|
+| tribe | 部族（语义串 romans/gauls/teutons） |
+| field_layout | 18 块田的分布，格式 `类型*数量`，多段用 `\|` 分隔，如 `woodcutter*4\|claypit*4\|ironmine*4\|cropland*6` |
+| start_buildings | 初始建筑，格式 `code:等级`，多段用 `\|` 分隔，如 `main:1\|rallypoint:1` |
+| start_resources | 初始资源覆盖（**可选**），格式 `res:量`，留空则各资源用 `game_constants` 的 `start_resource_amount` |
+
+> 想让条顿开局多两块农田、或某部族自带兵营？改这张表，无需动代码。
+
+---
+
+## ⚙️ 启动校验（改完没生效先看这）
+后端启动时会校验所有 CSV，**发现问题直接报错并指出表/字段**，而不是带病运行。覆盖：
+- 跨表引用合法性（兵种 `building`、建筑 `requires`、PvE `targetId` 必须指向存在的行）
+- 关键数值范围（maxLevel/trainSec/speed 不能 ≤0，提速上限须在 [0,1) 等）
+- 建筑 `requires` 不允许**循环依赖**（A 需 B、B 需 A 会报错）
+
+> 若启动报「配置校验失败」，按提示的表名/字段名改对应 CSV 即可。
 
 ---
 

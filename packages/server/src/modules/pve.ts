@@ -2,6 +2,7 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
+import type { ModuleManifest } from '../gateway/manifest.js';
 import type { Snapshot } from './combat.js';
 
 /**
@@ -31,6 +32,13 @@ const COLLECTION = 'pve';
 
 export class PveModule {
   static readonly NAME = 'pve';
+
+  static readonly MANIFEST: ModuleManifest = {
+    moduleName: 'pve',
+    publicActions: {
+      GetTarget: { command: 'pve.GetTarget', needAuth: true },
+    },
+  };
 
   constructor(
     private store: Store,

@@ -12,6 +12,7 @@ import { WorldModule } from './modules/world.js';
 import { PveModule } from './modules/pve.js';
 import { MovementModule } from './modules/movement.js';
 import { PlayerModule } from './modules/player.js';
+import { MetaModule } from './modules/meta.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -30,6 +31,7 @@ export interface GameApp {
   pve: PveModule;
   movement: MovementModule;
   player: PlayerModule;
+  meta: MetaModule;
   now: () => number;
   createVillage(villageId: string, x?: number, y?: number, name?: string): void;
   setupWorld(): void;
@@ -68,11 +70,12 @@ export function createGameApp(opts?: {
   // 实际建村的函数（供 Player 注册时调用）
   const doCreateVillage = (villageId: string, x: number, y: number, name: string, tribe = 'romans') => {
     economy.createVillage(villageId);
-    building.createVillage(villageId);
+    building.createVillage(villageId, tribe);
     military.createVillage(villageId, tribe);
     void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { x, y, refId: villageId, name } });
   };
   const player = new PlayerModule(store, bus, commands, now, doCreateVillage);
+  const meta = new MetaModule(commands, config);
 
   economy.init();
   building.init();
@@ -81,15 +84,16 @@ export function createGameApp(opts?: {
   pve.init();
   movement.init();
   player.init();
+  meta.init();
 
   return {
     config, store, bus, commands, scheduler,
-    economy, building, military, world, pve, movement, player, now,
+    economy, building, military, world, pve, movement, player, meta, now,
     createVillage(villageId, x = 0, y = 0, name = '我的村庄') {
       doCreateVillage(villageId, x, y, name, 'romans');
     },
     setupWorld() {
-      world.setup(20);
+      world.setup(config.constants.mapSize);
       // PvE 目标点位由 config/pve_spawns.csv 决定
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.x, s.y);
     },
