@@ -170,4 +170,38 @@ export class PlayerModule {
     }
     return { x: 1, y: 1 };
   }
+
+  /**
+   * 运维：为所有现存账号重建村庄（刷档后调用）。账号本身（用户名/密码/种族）不动。
+   * 调用前提：economy/building/military/world 等游戏进度集合已被清空、世界已重新 setup。
+   *
+   * @param reassignSpots false=保留每个账号原有地图坐标；true=按注册顺序重新螺旋分配坐标
+   *                      （用于地图尺寸/布局也变了的情况），并同步更新账号记录与归属索引。
+   */
+  rebuildVillages(reassignSpots: boolean): void {
+    // 按注册顺序（id 里的序号）稳定排序，保证重分配坐标可复现。
+    const players = this.store
+      .all<PlayerState>(COLLECTION)
+      .slice()
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+
+    if (reassignSpots) {
+      // 归属索引会整体重建，先清空避免残留旧 villageId 映射。
+      this.store.clear(COLLECTION_BYVILLAGE);
+    }
+
+    for (const p of players) {
+      let { x, y, villageId } = p;
+      if (reassignSpots) {
+        const spot = this.allocateSpot(); // 依赖已写回的 x/y 去重，逐个分配
+        x = spot.x;
+        y = spot.y;
+        villageId = `v-${p.id}`;
+        const updated: PlayerState = { ...p, x, y, villageId };
+        this.store.set(COLLECTION, p.id, updated);
+        this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
+      }
+      this.createVillage(villageId, x, y, `${p.name}的村庄`, p.tribe);
+    }
+  }
 }

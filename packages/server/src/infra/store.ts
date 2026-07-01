@@ -23,6 +23,8 @@ export interface Store {
   delete(collection: string, key: string): boolean;
   /** 列出某集合所有文档（骨架阶段够用；DB 阶段会换成带条件查询）。 */
   all<T>(collection: string): T[];
+  /** 清空整个集合（运维/刷档用）。集合不存在则无操作。 */
+  clear(collection: string): void;
 }
 
 /** 内存实现：关机即失，仅用于测试与快速验证。 */
@@ -52,6 +54,10 @@ export class MemoryStore implements Store {
 
   all<T>(collection: string): T[] {
     return [...this.col(collection).values()] as T[];
+  }
+
+  clear(collection: string): void {
+    this.data.get(collection)?.clear();
   }
 }
 
@@ -96,6 +102,11 @@ export class JsonFileStore extends MemoryStore {
     const r = super.delete(collection, key);
     if (r) this.markDirty();
     return r;
+  }
+
+  clear(collection: string): void {
+    super.clear(collection);
+    this.markDirty();
   }
 
   private markDirty(): void {

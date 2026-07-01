@@ -18,6 +18,30 @@ import { MetaModule } from './modules/meta.js';
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
  * 所有游戏数据来自 config/*.csv，模块从 GameConfig 读，不硬编码。
  */
+
+/**
+ * 游戏进度类集合：刷档时清空这些，玩家账号（player*）视模式决定是否保留。
+ * 新增有状态模块时，若其数据属于「一局游戏进度」而非「账号」，务必在此登记。
+ */
+const PROGRESS_COLLECTIONS = [
+  'economy',
+  'building',
+  'military',
+  'movement',
+  'movement_seq',
+  'pve',
+  'world_meta',
+  'world_tile',
+] as const;
+
+/** 账号类集合：wipe:all 时才清空。 */
+const ACCOUNT_COLLECTIONS = [
+  'player',
+  'player_byname',
+  'player_byvillage',
+  'player_seq',
+] as const;
+
 export interface GameApp {
   config: GameConfig;
   store: Store;
@@ -37,6 +61,14 @@ export interface GameApp {
   setupWorld(): void;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
+  /**
+   * 刷档：清空游戏进度并重建世界。三种粒度：
+   *  - {keepAccounts:true,  reassignSpots:false} 新赛季：留账号+地图位置，进度归零
+   *  - {keepAccounts:true,  reassignSpots:true}  重排：留登录凭据，重新分配地图位置
+   *  - {keepAccounts:false}                      删档：连账号一起清空
+   * 返回受影响的账号数（keepAccounts=false 时为被清空的账号数）。
+   */
+  resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): { accounts: number };
 }
 
 /** 默认 config 目录：仓库根的 config/（相对编译后/源码位置回溯到 packages/server 再上两级）。 */
@@ -102,6 +134,23 @@ export function createGameApp(opts?: {
       military.resume();
       movement.resume();
       pve.resume();
+    },
+    resetWorld({ keepAccounts, reassignSpots = false }) {
+      // 1. 清空所有游戏进度集合。
+      for (const c of PROGRESS_COLLECTIONS) store.clear(c);
+
+      // 2. 不保留账号 → 连账号集合一起清，回到零玩家状态。
+      if (!keepAccounts) {
+        const n = store.all('player').length;
+        for (const c of ACCOUNT_COLLECTIONS) store.clear(c);
+        return { accounts: n };
+      }
+
+      // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
+      world.setup(config.constants.mapSize);
+      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.x, s.y);
+      player.rebuildVillages(reassignSpots);
+      return { accounts: store.all('player').length };
     },
   };
 }

@@ -45,6 +45,7 @@ slg1.0/
     ├── 00_README.md          文档索引 + 进度 + 怎么跑
     ├── 1_原版拆解/           参照系：对原版 Travian 的反向拆解（GDD/开发计划）
     ├── 2_2.0设计/            我们的 2.0 设计与规范（见下）
+    ├── 服务器/              数据存储结构 + 数据库操作手册（备份/刷档/删档）
     ├── 美术资源清单.md        需要的占位图替换清单
     └── 部署手册_腾讯云轻量服务器.md
 ```
@@ -87,7 +88,7 @@ slg1.0/
 | `event-bus.ts` | 事件总线：广播 Event，一对多解耦 |
 | `command-bus.ts` | 命令总线：发 Command，一对一要结果 |
 | `scheduler.ts` | 调度器：全游戏唯一时间源，定时触发（支持假时钟测试） |
-| `store.ts` | 存储接口 + 内存实现(测试) + **JSON文件实现(生产,落盘+重启恢复)** | 以后换 SQLite/PG 只改这里 |
+| `store.ts` | 存储接口 + 内存实现(测试) + **JSON文件实现(生产,落盘+重启恢复)**；接口 `get/set/delete/all/clear`。以后换 SQLite/PG 只改这里 |
 | `csv.ts` | CSV 解析器 |
 | `config.ts` | 把 `config/*.csv` 解析成 `GameConfig`（含 `constants`/`villageTemplates`）；**启动期 `validateGameConfig` 校验**：跨表引用、数值范围、建筑 requires 循环依赖，错误定位到表/字段 |
 
@@ -109,8 +110,9 @@ slg1.0/
 |------|------|
 | `gateway/manifest.ts` | **模块清单声明式注册**：定义 `ModuleManifest`（publicActions/eventPushMap）+ `aggregateManifests` 汇总；动作/事件名冲突启动即报错 |
 | `gateway/gateway.ts` | 翻译官 + **多人会话**：路由表由各模块 `static MANIFEST` 汇总生成（不再手工维护）；自己村操作强制注入会话villageId（安全），事件按villageId定向推送 |
-| `app.ts` | 组装层：加载 config → new 所有模块 → init |
+| `app.ts` | 组装层：加载 config → new 所有模块 → init；**刷档 `resetWorld()`**（进度/账号集合白名单 + 三种粒度） |
 | `main.ts` | 入口：Fastify + WebSocket，挂 Gateway，托管前端 |
+| `admin.ts` | **运维 CLI**（一次性进程）：`reset:season`/`reset:respawn`/`wipe:all` 刷档，执行前自动备份 |
 
 ### 前端 `packages/client/src`（按 feature 拆分）
 | 路径 | 职责 |
@@ -131,6 +133,7 @@ slg1.0/
 | `server/src/test/full-loop.test.ts` | 单人全循环：经济→训练→打PvE→掠夺→返程 |
 | `server/src/test/multiplayer-pvp.test.ts` | 多人+PvP：注册/归属/A打B/双方战报/掠夺/返程/禁止自攻 |
 | `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
+| `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
@@ -150,6 +153,8 @@ slg1.0/
 | `2_2.0设计/01_定位与改动方针.md` | S0 核心定位决策 | 回顾方向 |
 | `2_2.0设计/02_系统清单.md` | 系统范围（保留/改/新增/后置） | 看做了什么没做什么 |
 | `2_2.0设计/改进方向备选池.md` | 待选扩展点 | 想新功能时 |
+| **`服务器/01_数据存储结构.md`** | 存档格式、每个集合的 schema、主键规则 | 改数据 / 排查存档问题前 |
+| **`服务器/02_数据库操作手册.md`** | 查看/备份/手改/刷档/删档/换DB | 运维数据 / 刷档时 |
 | `1_原版拆解/` | 原版 Travian 反拆（参照系） | 还原某系统时对照 |
 | `美术资源清单.md` | 31个占位图替换清单 | 做美术时 |
 | `部署手册_腾讯云轻量服务器.md` | 部署步骤 + 需你提供的信息 | 上线时 |

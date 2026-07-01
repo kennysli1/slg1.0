@@ -54,6 +54,10 @@ npm run dev -w @slg/client       # 终端 B：启动前端，打开提示的 htt
 npm run build            # 构建 shared + client（生产前端产物到 packages/client/dist）
 npm start                # 生产模式启动后端（托管已构建的前端静态文件）
 npm run test:server      # 跑后端测试（单人全循环 + 多人 PvP）
+
+npm run reset:season     # 刷档：留账号+地图位置，进度归零（新赛季）
+npm run reset:respawn    # 刷档：留登录凭据，重新分配地图位置
+npm run wipe:all         # 删档：连账号一起清空（均自动备份到 data/backups/）
 ```
 
 环境变量（生产）：`PORT`（默认 8080）、`HOST`（默认 0.0.0.0）、`DATA_PATH`（存档路径，默认 `./data/game.json`）。
@@ -131,4 +135,5 @@ slg1.0/
 | `docs/2_2.0设计/04_通信格式规范.md` | 改通信 / 加接口前 |
 | `docs/2_2.0设计/06_代码导读.md` | 第一次读代码 |
 | `docs/2_2.0设计/07_扩展与代码规范.md` | 每次加代码前 |
+| `docs/服务器/` | 存档结构 / 备份 / 刷档 / 删档 |
 | `config/README.md` | 改数值前 |

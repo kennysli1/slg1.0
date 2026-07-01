@@ -24,6 +24,7 @@
 | 加全局常量 / 平衡参数 | 改 `config/game_constants.csv` + 在 `infra/config.ts` 的 `GameConstants` 加字段 |
 | 加新系统（工会 / 邮件等） | 照 `packages/server/src/modules/` 模板加模块，给它加 `static MANIFEST`，在 `gateway/gateway.ts` 的 `MODULE_MANIFESTS` 登记，挂到 `app.ts` |
 | 改逻辑 | 找到状态 owner 模块（见 PROJECT.md 模块清单）改其私有方法，**不要跨模块直接读写** |
+| 刷档 / 重置游戏 | `npm run reset:season`（留账号+位置，进度归零）/ `reset:respawn`（留凭据，重排位置）/ `wipe:all`（连账号清）。均自动备份。见 `docs/服务器/02_数据库操作手册.md` |
 
 ## 结构 & 通信
 
