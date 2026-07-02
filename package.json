@@ -15,6 +15,7 @@
     "dev:server": "npm run dev -w @slg/server",
     "start": "node --import tsx packages/server/src/main.ts",
     "test:server": "npm run test -w @slg/server",
+    "lint": "npm run lint -w @slg/server",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",
     "reset:respawn": "node --import tsx packages/server/src/admin.ts --mode=respawn",
     "wipe:all": "node --import tsx packages/server/src/admin.ts --mode=wipe"

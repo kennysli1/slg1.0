@@ -137,6 +137,7 @@ slg1.0/
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
+| `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
 
 ---
 
@@ -179,7 +180,8 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 > **两个全局约定**（详见 `config/README.md` 开头）：① 目录表(fields/buildings/units/pve_targets)主键是**数字 `id`**，CSV 里**跨表引用一律填数字**（如 `units.building=4` 指兵营）；每行另有英文 `code` 供程序内部用，勿改。② `icon` 列只填**基名**（如 `bld_barracks`），渲染时拼 `/art/<基名>.png`。资源/部族主键保持语义串。
 
 ### 3. 扩展（加新东西）
-先看 `docs/2_2.0设计/07_扩展与代码规范.md` 的"扩展决策树"，归类后照做：
+先看 `docs/2_2.0设计/07_扩展与代码规范.md` 的"扩展决策树"，归类后照做。
+**一句话总闸**：新东西有没有"自己独占的一块状态"？有 → 新建模块文件（它当 owner）；没有，只是给旧状态加数值/加成 → 改已有文件。
 - 加**内容/数值**（新建筑/兵种/PvE）→ 改 `config/*.csv` 加一行。**前端无需改代码**（名称/图标走服务端 `GetGameConfig` 下发）。
 - 加**全局常量/平衡参数** → 改 `config/game_constants.csv`，在 `config.ts` 的 `GameConstants` 加字段映射。
 - 加**新系统**（工会/邮件）→ 照 `modules/` 模板加一个新模块，挂到 `app.ts`，**给模块加 `static MANIFEST`** 并在 `gateway.ts` 的 `MODULE_MANIFESTS` 登记（不必手改路由表）。
@@ -188,7 +190,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 ### 4. 修改（改逻辑）
 - 找到状态 owner 模块（见上方模块清单），改它的私有方法。
 - **不要**跨模块直接读写；要别的模块的数据就发 Command。
-- 改完跑 `npm run test:server` 确认全循环没坏。
+- 改完跑 `npm run lint`（守铁律）+ `npm run test:server`（含架构守卫，确认全循环没坏）。
 - 提交前对照 `07` 文档末尾的"自查清单"。
 
 ---

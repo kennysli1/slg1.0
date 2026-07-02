@@ -6,6 +6,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
     "test": "tsx --test src/test/all.test.ts"
   },
   "dependencies": {
@@ -16,7 +17,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "eslint": "^9.39.4",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.62.1"
   }
 }

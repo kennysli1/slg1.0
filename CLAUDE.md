@@ -15,8 +15,14 @@
 4. **派生属性对外只给结果快照**：加成在模块内部叠加，对外只暴露算好的最终值。
 
 > 原理与扩展案例见 `docs/2_2.0设计/03_架构总览.md`；每次加代码前先读 `docs/2_2.0设计/07_扩展与代码规范.md` 的扩展决策树与自查清单。
+>
+> **这四条不只是约定，有自动闸门兜底**：写代码时 ESLint 实时红线（跨模块 import / 模块内 setTimeout），提交前 `npm run lint` + `npm run test:server`（含 `test/architecture.test.ts` 静态扫描）会挡住违规。写错不再靠"记得读文档"，而是当场报错。
 
 ## 怎么改（速查）
+
+> **动手前先问总闸这一句**：我要加的东西有没有"自己独占的一块状态"（工会成员表 / 邮件箱 / 任务进度）？
+> **有 → 新建模块文件**（`modules/xxx.ts`，它当这块状态的 owner）；**没有，只是给旧状态加数值/加成/触发 → 改已有文件**（配置表 / 派生管线 / 流水线插件）。
+> 说得出 owner 就加文件，说不出就改文件。展开见 `docs/2_2.0设计/07_扩展与代码规范.md` §二。
 
 | 我想… | 怎么做 |
 |-------|--------|
@@ -38,7 +44,8 @@ npm install                      # 首次
 npm run build:shared             # 改过 packages/shared 后必跑（前后端共享类型）
 npm run dev:server               # 终端A：后端 :8080（ws: /ws）
 npm run dev -w @slg/client       # 终端B：前端 :5173
-npm run test:server              # 改完逻辑必跑：单人全循环 + 多人PvP + 持久化 + 配置校验
+npm run lint                     # 提交前必跑：ESLint 守铁律#2/#3（跨模块import/模块内定时器）
+npm run test:server              # 改完逻辑必跑：单人全循环 + 多人PvP + 持久化 + 配置校验 + 架构守卫
 ```
 
-**提交前**：跑 `npm run test:server`，并对照 `docs/2_2.0设计/07_扩展与代码规范.md` 末尾的自查清单。
+**提交前**：跑 `npm run lint` + `npm run test:server`（均须绿），并对照 `docs/2_2.0设计/07_扩展与代码规范.md` 末尾的自查清单。
