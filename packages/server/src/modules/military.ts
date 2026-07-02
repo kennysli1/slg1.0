@@ -118,17 +118,23 @@ export class MilitaryModule {
     });
   }
 
-  /** 派生管线：最终三维 = 基础 × (1 + 铁匠等级×每级加成)。对外只暴露这个结果。 */
+  /** 派生管线：最终数值 = 基础 × (1 + 铁匠等级×每级加成)。对外只暴露这个结果（含形态/特性）。 */
   private finalStats(unit: string, smithyLv: number) {
     const def = this.config.units[unit];
     const bonus = 1 + smithyLv * this.config.constants.smithyBonusPerLevel; // 每级加成来自 config
     return {
-      atk: def.atk * bonus,
-      defInf: def.defInf * bonus,
-      defCav: def.defCav * bonus,
+      form: def.form,
+      meleeAtk: def.meleeAtk * bonus,
+      rangedAtk: def.rangedAtk * bonus,
+      meleeDef: def.meleeDef * bonus,
+      rangedDef: def.rangedDef * bonus,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
+      traits: def.traits.map((tc) => {
+        const t = this.config.unitTraits[tc];
+        return { effect: t.effect, value: t.value };
+      }),
     };
   }
 
@@ -140,7 +146,7 @@ export class MilitaryModule {
     // 本族可训练兵种列表（前端据此显示）
     const trainable = Object.values(this.config.units)
       .filter((u) => u.tribe === s.tribe)
-      .map((u) => ({ key: u.key, name: u.name, icon: u.icon, cat: u.cat, building: u.building, cost: u.cost, trainSec: u.trainSec }));
+      .map((u) => ({ key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building, cost: u.cost, trainSec: u.trainSec }));
     return {
       ok: true,
       payload: {

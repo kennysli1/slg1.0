@@ -1,6 +1,6 @@
 /** 军队页：驻军 + 训练。 */
 import { art, unitArt, canAfford, costPreview, progressBar } from '../../shared/ui/widgets.js';
-import { catName, tribeName } from '../../shared/ui/text.js';
+import { formName, tribeName } from '../../shared/ui/text.js';
 import { unitInfo, resourceKeys } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
@@ -26,7 +26,7 @@ export function renderArmy(): string {
         ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
   const trainCards = (army.trainable || []).map((u: any) => {
     return `<div class="card">${art(unitArt(u.key), u.name, 'md')}
-      <div class="cardbody"><div class="card-title">${u.name} <small class="tag">${catName(u.cat)}</small></div>
+      <div class="cardbody"><div class="card-title">${u.name} <small class="tag">${formName(u.form)}</small></div>
         <div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="train-row"><input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
           <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}" ${army.training ? 'disabled' : ''}>训练</button></div></div></div>`;

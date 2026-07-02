@@ -168,25 +168,30 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .troop { display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-sm); }
 .troop b { color: var(--c-brand); }
 
-/* ---------- 地图网格 ---------- */
+/* ---------- 地图（六边形 SVG） ---------- */
 .map-wrap { background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: var(--s-3); box-shadow: var(--sh-1); }
-.map-grid { display: grid; gap: 3px; max-width: 560px; margin: 0 auto; }
-.tile {
-  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-  background: #e9e0c9; border: 1px solid #ddd2b6; border-radius: var(--r-sm);
-  font-size: var(--f-xs); color: var(--c-ink-soft); transition: transform .1s, box-shadow .1s;
-}
-.tile[data-ref] { cursor: pointer; }
-.tile[data-ref]:hover { transform: scale(1.08); box-shadow: var(--sh-2); z-index: 2; }
-.tile-self { background: #d7e8cf; border-color: var(--c-ok); box-shadow: inset 0 0 0 2px rgba(79,122,63,.4); }
-.tile-enemy { background: #f4dada; border-color: #d99; }
-.tile-pve { background: #efe2f1; border-color: #c4a8cc; }
-.tile-selected { outline: 3px solid var(--c-gold); outline-offset: -1px; z-index: 3; }
+.map-svg { display: block; max-width: 640px; margin: 0 auto; width: 100%; height: auto; }
+.hex { fill: #e9e0c9; stroke: #ddd2b6; stroke-width: 1; transition: fill .1s; }
+.hex-cell[data-ref] { cursor: pointer; }
+.hex-cell[data-ref]:hover .hex { stroke: var(--c-gold); stroke-width: 2; }
+.hex-self { fill: #d7e8cf; stroke: var(--c-ok); stroke-width: 2; }
+.hex-enemy { fill: #f4dada; stroke: #d99; }
+.hex-pve { fill: #efe2f1; stroke: #c4a8cc; }
+.hex-cell.hex-selected .hex { stroke: var(--c-gold); stroke-width: 3; }
+.hex-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; pointer-events: none; }
+.hex-icon img { width: 26px; height: 26px; }
+/* 行军路径与部队标记 */
+.march-path { fill: none; stroke: #c0392b; stroke-width: 2; stroke-dasharray: 5 4; opacity: .75; }
+.march-path.march-return { stroke: #4f7a3f; }
+.march-dot { fill: #c0392b; stroke: #fff; stroke-width: 1.5; }
+.march-dot.paused { fill: var(--c-gold); }
+.march-emoji { font-size: 11px; }
 .map-legend { display: flex; gap: var(--s-4); justify-content: center; margin-top: var(--s-3); font-size: var(--f-xs); color: var(--c-ink-soft); flex-wrap: wrap; }
 .map-legend .dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
 .dot-self { background: #d7e8cf; border: 1px solid var(--c-ok); }
 .dot-enemy { background: #f4dada; border: 1px solid #d99; }
 .dot-pve { background: #efe2f1; border: 1px solid #c4a8cc; }
+.dot-march { background: #c0392b; border: 1px solid #fff; border-radius: 50%; }
 
 /* ---------- 出征目标面板 ---------- */
 .target-panel { margin: var(--s-3) 0; padding: var(--s-3) var(--s-4); border-radius: var(--r-md); border: 1px solid var(--c-line); background: var(--c-surface); box-shadow: var(--sh-1); }

@@ -6,6 +6,9 @@
  */
 import './full-loop.test.js';
 import './multiplayer-pvp.test.js';
+import './combat.test.js';
+import './hex.test.js';
+import './movement-path.test.js';
 import './persistence.test.js';
 import './reset.test.js';
 import './config.test.js';

@@ -9,6 +9,7 @@ import { MilitaryModule } from '../modules/military.js';
 import { WorldModule } from '../modules/world.js';
 import { PveModule } from '../modules/pve.js';
 import { MovementModule } from '../modules/movement.js';
+import { CombatModule } from '../modules/combat.js';
 import { MetaModule } from '../modules/meta.js';
 
 /**
@@ -48,6 +49,7 @@ const MODULE_MANIFESTS: ModuleManifest[] = [
   WorldModule.MANIFEST,
   PveModule.MANIFEST,
   MovementModule.MANIFEST,
+  CombatModule.MANIFEST,
 ];
 
 const { actionRoutes: ACTION_ROUTES, eventToPush: EVENT_TO_PUSH } = aggregateManifests(MODULE_MANIFESTS);

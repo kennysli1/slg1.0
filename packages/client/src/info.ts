@@ -34,17 +34,17 @@ export const BUILDING_INFO: Record<string, { name: string; icon: string }> = {
   rallypoint: { name: '集结点', icon: 'bld_rallypoint' },
 };
 
-export const UNIT_INFO: Record<string, { name: string; icon: string; cat: string }> = {
-  legionnaire: { name: '军团兵', icon: 'unit_legionnaire', cat: '步兵' },
-  praetorian: { name: '禁卫兵', icon: 'unit_praetorian', cat: '步兵' },
-  imperian: { name: '帝国兵', icon: 'unit_imperian', cat: '步兵' },
-  equlegati: { name: '侦察骑兵', icon: 'unit_equlegati', cat: '侦察' },
-  equimperatoris: { name: '近卫骑兵', icon: 'unit_equimperatoris', cat: '骑兵' },
-  equcaesaris: { name: '凯撒骑兵', icon: 'unit_equcaesaris', cat: '骑兵' },
-  ram: { name: '攻城锤', icon: 'unit_ram', cat: '攻城' },
-  catapult: { name: '投石机', icon: 'unit_catapult', cat: '攻城' },
-  senator: { name: '元老', icon: 'unit_senator', cat: '行政' },
-  settler: { name: '拓荒者', icon: 'unit_settler', cat: '拓荒' },
+export const UNIT_INFO: Record<string, { name: string; icon: string; form: string }> = {
+  legionnaire: { name: '军团兵', icon: 'unit_legionnaire', form: 'melee' },
+  praetorian: { name: '禁卫兵', icon: 'unit_praetorian', form: 'melee' },
+  imperian: { name: '帝国兵', icon: 'unit_imperian', form: 'melee' },
+  equlegati: { name: '侦察骑兵', icon: 'unit_equlegati', form: 'melee' },
+  equimperatoris: { name: '近卫骑兵', icon: 'unit_equimperatoris', form: 'melee' },
+  equcaesaris: { name: '凯撒骑兵', icon: 'unit_equcaesaris', form: 'melee' },
+  ram: { name: '攻城锤', icon: 'unit_ram', form: 'melee' },
+  catapult: { name: '投石机', icon: 'unit_catapult', form: 'ranged' },
+  senator: { name: '元老', icon: 'unit_senator', form: 'melee' },
+  settler: { name: '拓荒者', icon: 'unit_settler', form: 'melee' },
 };
 
 export const PVE_INFO: Record<string, { icon: string }> = {

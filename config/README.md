@@ -45,7 +45,7 @@
 | 表9 | `village_templates.csv` | **各部族开局布局**（18田分布、初始建筑、初始资源） | 改新手村开局；给不同部族不同起手 |
 
 > **常见操作举例**
-> - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 atk。
+> - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
 > - 想让老鼠窝掉更多资源 → 表5 `pve_targets.csv`，改 rats 行的 lootWood 等。
 > - 想给老鼠窝加更多守军 → 表6 `pve_defenders.csv`，给 `targetId=1`(老鼠窝) 加一行新怪。
 > - 想在地图多放几个强盗营地 → 表7 `pve_spawns.csv`，加几行 `targetId=3`(强盗营地) 的坐标。
@@ -98,18 +98,32 @@
 | code | 英文代码（程序/存档用，勿改） |
 | tribe | 所属部族（语义串 romans/gauls/teutons） |
 | name / icon | 显示名 / 图标基名 |
-| cat | 分类：infantry/cavalry/scout/siege/admin/settler |
-| atk | 攻击力 |
-| defInf | 对步兵防御 |
-| defCav | 对骑兵防御 |
+| form | 形态：`melee`(近战/前排) 或 `ranged`(远程/后排)。取代旧的 cat |
+| meleeAtk | 近战攻击力（近战兵永远用它；远程兵被迫肉搏时用它） |
+| rangedAtk | 远程攻击力（远程兵后排放输出时用它） |
+| meleeDef | 近战防御（被近战攻击时的承伤耐久） |
+| rangedDef | 远程防御（被远程攻击时的承伤耐久） |
 | speed | 速度（格/小时，决定行军快慢） |
 | carry | 单兵载货（搬战利品） |
 | upkeep | 每兵每小时耗粮 |
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
+| traits | 特性ID列表（逗号分隔，引用 **unit_traits.csv 的数字 id**，可空） |
 
-> 加新部族/兵种：直接加行即可（id 接着往后排）。
+> 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。
+
+## unit_traits.csv — 兵种特性（攻防之上的额外倍率修正）
+| 列 | 含义 |
+|----|------|
+| id | 数字主键（units.csv 的 traits 列引用它） |
+| code | 英文代码（程序内部用，勿改） |
+| name | 显示名（如"持盾"） |
+| effect | 效果类型代码（枚举，见下） |
+| value | 数值（含义随 effect 而定，如 -0.30） |
+
+> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成)。
+> 加新特性：本表加一行 + 在 `infra/combat.ts` 的 effect 分派里加一个 case。
 
 ## pve_targets.csv — PvE 目标模板
 | 列 | 含义 |
@@ -127,7 +141,9 @@
 | unitCode | 守军单位代码（仅此目标内部标签，不跨表引用，保留英文串） |
 | name | 显示名 |
 | count | 数量 |
-| atk/defInf/defCav | 三维 |
+| form | 形态：`melee` / `ranged` |
+| meleeAtk/rangedAtk | 近战/远程攻击力 |
+| meleeDef/rangedDef | 近战/远程防御 |
 | carry | 载货（守军一般0） |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
@@ -137,7 +153,7 @@
 |----|------|
 | id | 分布点实例 id（如 `pve-0`，勿改——存档用） |
 | targetId | 目标类型（填 **pve_targets 的数字 id**） |
-| x / y | 地图坐标 |
+| q / r | 六边形轴坐标（地图为六边形网格，q/r 为 axial 坐标） |
 
 > 加目标点 = 加一行。
 

@@ -17,6 +17,17 @@ const setClock = (t: number) => (clock = t);
 const send = (app: GameApp, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 const reg = (app: GameApp, name: string, pwd: string, tribe = 'romans') =>
   send(app, 'player.Register', { name, password: pwd, tribe });
+/** 玩家坐标读取（六边形轴坐标 q/r，兼容旧 x/y）。 */
+const px = (p: any) => p.q ?? p.x ?? 0;
+const py = (p: any) => p.r ?? p.y ?? 0;
+/** 大步快进驱动"到达→逐 tick 战斗→结束→返程"整条链，直到没有待处理任务。 */
+async function drain(app: GameApp, bigStepMs = 3_600_000, maxIters = 30000): Promise<void> {
+  let iters = 0;
+  while (app.scheduler.pending > 0 && iters < maxIters) {
+    await app.scheduler.advanceTo(clock + bigStepMs, setClock);
+    iters++;
+  }
+}
 
 test('注册：用户名+密码+种族，返回玩家但不含密码', async () => {
   const app = freshApp();
@@ -55,7 +66,7 @@ test('两玩家坐标不同 + 村庄归属反查', async () => {
   const app = freshApp();
   const a = (await reg(app, 'A', 'p1234')).payload as any;
   const b = (await reg(app, 'B', 'p1234')).payload as any;
-  assert.ok(a.player.x !== b.player.x || a.player.y !== b.player.y);
+  assert.ok(px(a.player) !== px(b.player) || py(a.player) !== py(b.player));
   const owner = await send(app, 'player.GetByVillage', { villageId: a.player.villageId });
   assert.equal((owner.payload as any).player.name, 'A');
 });
@@ -74,24 +85,24 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   const bBefore = (await send(app, 'economy.GetResources', { villageId: vb })).payload as any;
 
   let atkReport: any = null, defReport: any = null, incoming: any = null;
-  app.bus.on('movement.AttackResolved', (e: any) => { if (e.payload.side === 'attacker') atkReport = e.payload; else defReport = e.payload; });
+  app.bus.on('combat.BattleEnded', (e: any) => { if (e.payload.side === 'attacker') atkReport = e.payload; else defReport = e.payload; });
   app.bus.on('movement.IncomingAttack', (e: any) => (incoming = e.payload));
 
   const atk = await send(app, 'movement.SendAttack', {
-    villageId: va, fromXY: { x: a.player.x, y: a.player.y },
-    targetVillage: vb, toXY: { x: b.player.x, y: b.player.y }, troops: { legionnaire: 5 },
+    villageId: va, fromXY: { q: px(a.player), r: py(a.player) },
+    targetVillage: vb, toXY: { q: px(b.player), r: py(b.player) }, troops: { legionnaire: 5 },
   });
   assert.equal(atk.ok, true, `攻击应发出: ${atk.reason ?? ''}`);
   assert.ok(incoming, 'B 应收到来袭警报');
 
-  await app.scheduler.advanceTo((atk.payload as any).arriveAt + 1000, setClock);
+  // 大步快进驱动"到达→逐 tick 战斗→结束→返程"
+  await drain(app);
   assert.ok(atkReport && defReport, '双方都应收到战报');
   assert.equal(atkReport.attackerWins, true);
 
   const bAfter = (await send(app, 'economy.GetResources', { villageId: vb })).payload as any;
   assert.ok(bAfter.resources.wood < bBefore.resources.wood, 'B 资源应被抢');
 
-  await app.scheduler.advanceTo(clock + 3_600_000, setClock);
   const army = (await send(app, 'military.GetArmy', { villageId: va })).payload as any;
   assert.ok((army.troops.legionnaire ?? 0) > 0, 'A 幸存兵应返回');
 });
@@ -104,8 +115,8 @@ test('安全：不能攻击自己', async () => {
   await send(app, 'military.TrainTroops', { villageId: va, unit: 'legionnaire', count: 1 });
   await app.scheduler.advanceTo(clock + 27_000, setClock);
   const atk = await send(app, 'movement.SendAttack', {
-    villageId: va, fromXY: { x: a.player.x, y: a.player.y },
-    targetVillage: va, toXY: { x: a.player.x, y: a.player.y }, troops: { legionnaire: 1 },
+    villageId: va, fromXY: { q: px(a.player), r: py(a.player) },
+    targetVillage: va, toXY: { q: px(a.player), r: py(a.player) }, troops: { legionnaire: 1 },
   });
   assert.equal(atk.reason, 'cannot_attack_self');
 });

@@ -9,5 +9,7 @@ storage_base,800,number,仓库/粮仓基础容量
 storage_growth_per_level,0.5,number,容量每级增长系数(0.5=每级+50%基数)
 start_resource_amount,750,number,新村各资源初始存量
 base_production_per_hour,10,number,资源田0级基础每小时产量
-map_size,20,number,地图半径(地图为[-size,size]方形)
-map_view_radius,6,number,前端地图视野半径(格,前端白名单常量)
+map_size,20,number,地图半径(六边形网格,以原点为中心的环数,hexDistance<=size 为合法格)
+map_view_radius,6,number,前端地图视野半径(六边形环数,前端白名单常量)
+combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
+combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)

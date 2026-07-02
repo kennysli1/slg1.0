@@ -26,7 +26,7 @@ async function seed(app: GameApp) {
     await app.commands.send({ name: 'economy.Grant', from: 't', payload: { villageId: p.villageId, gain: { wood: 500, clay: 500, iron: 500, crop: 500 } } });
     const up = await app.commands.send({ name: 'building.UpgradeField', from: 't', payload: { villageId: p.villageId, fieldIndex: 0 } });
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
-    return p as { villageId: string; x: number; y: number; name: string };
+    return p as { villageId: string; q: number; r: number; name: string };
   };
   const a = await reg('阿甲', 'romans');
   const b = await reg('阿乙', 'gauls');
@@ -57,8 +57,8 @@ test('reset:season — 保留账号+地图位置，进度归零', async () => {
     assert.equal(login.ok, true, '刷档后应仍能登录');
     const p = (login.payload as any).player;
     assert.equal(p.villageId, a.villageId, 'villageId 应不变');
-    assert.equal(p.x, a.x, 'x 坐标应保留');
-    assert.equal(p.y, a.y, 'y 坐标应保留');
+    assert.equal(p.q, a.q, 'q 坐标应保留');
+    assert.equal(p.r, a.r, 'r 坐标应保留');
 
     // 进度归零：田回到 0 级（升过的那块也被重置）
     const vill = await app.commands.send({ name: 'building.GetState', from: 't', payload: { villageId: a.villageId } });
@@ -98,7 +98,7 @@ test('reset:respawn — 保留凭据，重新分配地图位置', async () => {
     assert.equal((owner.payload as any).player.name, '阿乙');
 
     // 该村在地图上真实存在（世界已重建 + 村庄已放置）
-    const area = await app.commands.send({ name: 'world.GetArea', from: 't', payload: { cx: p.x, cy: p.y, r: 0 } });
+    const area = await app.commands.send({ name: 'world.GetArea', from: 't', payload: { cq: p.q, cr: p.r, r: 0 } });
     assert.equal(area.ok, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });

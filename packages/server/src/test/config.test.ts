@@ -53,3 +53,34 @@ test('校验器：建筑 requires 循环依赖应抛错', () => {
   bad.buildings[b] = { ...bad.buildings[b], requires: [{ kind: a, level: 1 }] };
   assert.throws(() => validateGameConfig(bad), /循环依赖/);
 });
+
+test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () => {
+  const cfg = loadGameConfig(configDir);
+  const leg = cfg.units['legionnaire'];
+  assert.equal(leg.form, 'melee', '军团兵近战');
+  assert.equal(leg.meleeAtk, 40);
+  assert.equal(leg.meleeDef, 35);
+  assert.equal(leg.rangedDef, 50);
+  const cat = cfg.units['catapult'];
+  assert.equal(cat.form, 'ranged', '投石机远程');
+  assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
+  // 持盾特性解析：禁卫兵引用 trait id=1(shield)
+  assert.deepEqual(cfg.units['praetorian'].traits, ['shield']);
+  assert.equal(cfg.unitTraits['shield'].effect, 'dmg_taken_ranged');
+});
+
+test('校验器：兵种 form 非法应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = { ...cfg, units: { ...cfg.units } };
+  const u = Object.keys(bad.units)[0];
+  bad.units[u] = { ...bad.units[u], form: 'flying' as any };
+  assert.throws(() => validateGameConfig(bad), /form/);
+});
+
+test('校验器：兵种引用不存在的特性应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = { ...cfg, units: { ...cfg.units } };
+  const u = Object.keys(bad.units)[0];
+  bad.units[u] = { ...bad.units[u], traits: ['no_such_trait'] };
+  assert.throws(() => validateGameConfig(bad), /特性/);
+});

@@ -99,9 +99,9 @@ slg1.0/
 | `economy.ts` | 资源存量/产率/容量/crop消耗 | 4资源、惰性结算、扣费/给资源、crop净消耗与告急 |
 | `building.ts` | 18资源田 + 中心建筑等级/队列 | 升级、科技树前置、主基地降耗时、上报人口耗粮 |
 | `military.ts` | 兵力/训练队列/铁匠等级 | 训练（逐个产出）、铁匠养成、参战快照、增减兵力 |
-| `world.ts` | 地图地块（村庄/PvE/空地） | 坐标、距离、放置村庄/PvE |
-| `movement.ts` | 在途部队 | 出征→到达→战斗→带战利品返程（raid打PvE / attack打玩家 / return） |
-| `combat.ts` | 无（**纯函数**） | 进攻快照 vs 防守快照 → 伤亡/战利品（PvE/PvP 共用）；城墙加成由调用方从 config 注入 |
+| `world.ts` | 地图地块（村庄/PvE/空地） | **六边形网格**（轴坐标 `{q,r}`）坐标、`hexDistance` 距离、放置村庄/PvE |
+| `movement.ts` | 在途部队 | 出征→逐格行军→到达发 `combat.Engage`→战斗结束(`BattleEnded`)带战利品返程（raid打PvE / attack打玩家 / return）；坐标为六边形 `{q,r}` |
+| `combat.ts` | **进行中的战斗**（`battle` 集合） | 有状态逐 tick 战斗：前后排承伤 + 近战/远程 + 特性；一地一场战、后到按阵营并入；结束发 Command 让 owner 扣兵/掠夺、发 Event 出战报（PvE/PvP 共用）；每 tick 推实时快照 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/田地/建筑/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
@@ -197,7 +197,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 七、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 8 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件。测试 20/20。
+**已完成**：架构 + 通信规范 + 9 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）**。测试 39/39。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`。
 

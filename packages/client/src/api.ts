@@ -18,8 +18,8 @@ export interface Me {
   name: string;
   tribe: string;
   villageId: string;
-  x: number;
-  y: number;
+  q: number; // 六边形轴坐标
+  r: number;
 }
 export let me: Me | null = null;
 

@@ -3,33 +3,64 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
-import { resolveCombat, type Snapshot } from './combat.js';
+import type { Snapshot } from '../infra/combat-types.js';
 import type { GameConfig } from '../infra/config.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import { type Hex, hexDistance, linePath } from '../infra/hex.js';
 
 /**
  * 领域模块 · Movement（行军）
- * 对应设计文档 02_系统清单D组、08_系统逻辑详解§6、1_原版拆解/03
+ * 对应设计文档 02_系统清单D组、docs/2_2.0设计/08_战斗系统重做设计.md§二
  *
  * 职责：在途部队的 owner。把村庄连成博弈网络的唯一通道。
- * 流程：发兵(从源村扣兵) → 算到达时间(距离/最慢速度) → 到达结算 → 生成返程 → 返程到达入村。
- * 战斗交给 Combat 纯函数（PvE/PvP 同源）；PvE 目标守军向 PvE 模块查，玩家村守军向 Military 查。
  *
- * 支持类型：raid(掠夺PvE)、attack(攻击玩家村)、return(返程)。
+ * 移动模型（六边形 + 真实路径，本次重做）：
+ *  - 地图为六边形网格，坐标用轴坐标 (q,r)，几何走 infra/hex.ts。
+ *  - 出征时用 linePath 算出**逐格路径**，按最慢兵种速度算每格耗时，
+ *    逐格登记 Scheduler 任务推进（铁律#3：时间统一走 Scheduler）。
+ *  - 每推进一格即检查**同格相遇**：两支敌对"出征军"(raid/attack)走到同一格 → 就地开战。
+ *    返程军(return)视为脱战，免疫相遇。相遇后双方原地暂停直到结算完毕，胜方继续原定行军。
+ *  - 部队"当前所在格" pos 对外可见 → 前端画行军路径与实时位置。
+ *
+ * 战斗接入（另一条线，战斗重做 agent 负责）：
+ *  - 到达目标格时不自己结算，而发 `combat.Engage` 交给 Combat 开/并入战场；
+ *    战斗结束 Combat 发 `combat.BattleEnded`，本模块据此安排幸存者带战利品返程。
+ *  - 坐标对 Combat 为不透明透传（字段名 fromXY/toXY/targetXY 沿用，值为 {q,r}）。
+ *
+ * 支持类型：raid(打PvE)、attack(打玩家村)、return(返程)。
  */
 
 interface Movement {
   id: string;
   type: 'raid' | 'attack' | 'return';
   fromVillage: string;
-  fromXY: { x: number; y: number };
-  toXY: { x: number; y: number };
+  /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
+  fromXY: Hex;
+  toXY: Hex;
   targetId?: string; // PvE 目标 id
   targetVillage?: string; // PvP 被攻击村 id
   troops: Record<string, number>;
   loot?: Record<string, number>;
   departAt: number;
   arriveAt: number;
+  // ── 逐格推进状态 ──
+  /** 逐格路径（含首尾），相邻两格恒为六边形邻居。 */
+  path: Hex[];
+  /** 当前已走到 path 的下标（0=起点）。 */
+  stepIndex: number;
+  /** 当前所在格（= path[stepIndex]），对外可见。 */
+  pos: Hex;
+  /** 每格耗时(ms)。 */
+  perStepMs: number;
+  /** 下一格到达时刻(ms, epoch)；前端据此在两格间插值动画。 */
+  nextStepAt: number;
+  /** marching=正常行军；paused=相遇/战斗中暂停。 */
+  status: 'marching' | 'paused';
+  /**
+   * 步进令牌：每次登记"下一格"任务时自增并记录。step 回调携带登记时的令牌，
+   * 只有令牌匹配才执行——作废因相遇/暂停而遗留的过期定时任务，防止重复推进。
+   */
+  stepToken: number;
 }
 
 const COLLECTION = 'movement';
@@ -46,10 +77,9 @@ export class MovementModule {
     },
     eventPushMap: {
       'movement.Sent': 'MarchSent',
-      'movement.RaidResolved': 'RaidResolved',
-      'movement.AttackResolved': 'AttackResolved',
       'movement.IncomingAttack': 'IncomingAttack',
       'movement.Returned': 'MarchReturned',
+      'movement.Intercepted': 'MarchIntercepted',
     },
   };
 
@@ -66,15 +96,20 @@ export class MovementModule {
     this.commands.register('movement.SendRaid', (c) => this.sendRaid(c));
     this.commands.register('movement.SendAttack', (c) => this.sendAttack(c));
     this.commands.register('movement.List', (c) => this.list(c));
+    // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
+    this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
   }
 
-  /** 重启恢复：为所有在途行军重新登记到达任务（过期则立即结算）。 */
+  /** 重启恢复：为所有在途、仍在行军的部队重新登记下一格推进（过期则立即触发）。 */
   resume(): void {
     for (const mv of this.store.all<Movement>(COLLECTION)) {
-      const delay = Math.max(0, mv.arriveAt - this.now());
-      if (mv.type === 'raid') this.scheduler.schedule(delay, () => this.arriveRaid(mv.id));
-      else if (mv.type === 'attack') this.scheduler.schedule(delay, () => this.arriveAttack(mv.id));
-      else if (mv.type === 'return') this.scheduler.schedule(delay, () => this.arriveReturn(mv.id));
+      if (mv.status !== 'marching') continue;
+      // 续跑：作废旧令牌，登记新的下一格任务。
+      mv.stepToken += 1;
+      const token = mv.stepToken;
+      this.store.set(COLLECTION, mv.id, mv);
+      const delay = Math.max(0, mv.nextStepAt - this.now());
+      this.scheduler.schedule(delay, () => this.step(mv.id, token));
     }
   }
 
@@ -88,7 +123,7 @@ export class MovementModule {
     return `mv-${n}`;
   }
 
-  /** 列出某村相关的在途行军。 */
+  /** 列出某村相关的在途行军（含路径/当前位置/状态，供前端可视化）。 */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const all = this.store.all<Movement>(COLLECTION).filter((m) => m.fromVillage === villageId);
@@ -99,7 +134,14 @@ export class MovementModule {
           id: m.id,
           type: m.type,
           targetId: m.targetId,
-          toXY: m.toXY,
+          from: m.fromXY,
+          to: m.toXY,
+          path: m.path,
+          pos: m.pos,
+          stepIndex: m.stepIndex,
+          status: m.status,
+          perStepMs: m.perStepMs,
+          nextStepAt: m.nextStepAt,
           troops: m.troops,
           loot: m.loot,
           arriveAt: m.arriveAt,
@@ -108,14 +150,46 @@ export class MovementModule {
     };
   }
 
+  /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
+  private travelSec(from: Hex, to: Hex, troops: Record<string, number>): number {
+    const dist = hexDistance(from, to);
+    const slowest = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6));
+    return Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
+  }
+
+  /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
+  private launch(
+    base: Pick<Movement, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
+      Partial<Pick<Movement, 'targetId' | 'targetVillage' | 'loot'>>,
+  ): Movement {
+    const path = linePath(base.fromXY, base.toXY);
+    const steps = Math.max(1, path.length - 1);
+    const totalMs = this.travelSec(base.fromXY, base.toXY, base.troops) * 1000;
+    const perStepMs = Math.max(1, Math.round(totalMs / steps));
+    const full: Movement = {
+      ...base,
+      path,
+      stepIndex: 0,
+      pos: path[0],
+      perStepMs,
+      nextStepAt: this.now() + perStepMs,
+      arriveAt: this.now() + perStepMs * steps,
+      status: 'marching',
+      stepToken: 1,
+    };
+    this.store.set(COLLECTION, full.id, full);
+    this.scheduler.schedule(perStepMs, () => this.step(full.id, full.stepToken));
+    return full;
+  }
+
   /**
    * 发起掠夺：向 PvE 目标派兵。
-   * 1. 校验兵力(从 Military 扣出) 2. 算到达 3. 登记到达事件。
+   * 1. 校验兵力(从 Military 扣出) 2. 算路径 3. 逐格推进。
    */
   private async sendRaid(cmd: Command): Promise<CommandResult> {
     const { villageId, fromXY, targetId, troops } = cmd.payload as {
       villageId: string;
-      fromXY: { x: number; y: number };
+      fromXY: Hex;
       targetId: string;
       troops: Record<string, number>;
     };
@@ -123,7 +197,8 @@ export class MovementModule {
     // 目标存在？拿其坐标
     const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
     if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
-    const toXY = { x: (target.payload as any).x, y: (target.payload as any).y };
+    const tp = target.payload as any;
+    const toXY: Hex = { q: tp.q, r: tp.r };
 
     // 从源村扣出兵力（负 delta）
     const delta: Record<string, number> = {};
@@ -135,22 +210,13 @@ export class MovementModule {
     });
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
-    // 距离 / 最慢速度 → 到达时间
-    const dist = Math.hypot(toXY.x - fromXY.x, toXY.y - fromXY.y);
-    const slowest = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6));
-    const travelSec = Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
-    const id = this.nextId();
-    const arriveAt = this.now() + travelSec * 1000;
+    const mv = this.launch({
+      id: this.nextId(), type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops,
+      departAt: this.now(),
+    });
 
-    const mv: Movement = {
-      id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops,
-      departAt: this.now(), arriveAt,
-    };
-    this.store.set(COLLECTION, id, mv);
-    this.scheduler.schedule(travelSec * 1000, () => this.arriveRaid(id));
-
-    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id, type: 'raid', villageId, targetId, arriveAt } } as DomainEvent);
-    return { ok: true, payload: { id, arriveAt, travelSec } };
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
   /**
@@ -160,9 +226,9 @@ export class MovementModule {
   private async sendAttack(cmd: Command): Promise<CommandResult> {
     const { villageId, fromXY, targetVillage, toXY, troops } = cmd.payload as {
       villageId: string;
-      fromXY: { x: number; y: number };
+      fromXY: Hex;
       targetVillage: string;
-      toXY: { x: number; y: number };
+      toXY: Hex;
       troops: Record<string, number>;
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
@@ -177,160 +243,185 @@ export class MovementModule {
     const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
-    const dist = Math.hypot(toXY.x - fromXY.x, toXY.y - fromXY.y);
-    const slowest = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6));
-    const travelSec = Math.max(3, Math.round((dist / slowest) * 3600));
-    const id = this.nextId();
-    const arriveAt = this.now() + travelSec * 1000;
-    const mv: Movement = {
-      id, type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops,
-      departAt: this.now(), arriveAt,
-    };
-    this.store.set(COLLECTION, id, mv);
-    this.scheduler.schedule(travelSec * 1000, () => this.arriveAttack(id));
+    const mv = this.launch({
+      id: this.nextId(), type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops,
+      departAt: this.now(),
+    });
 
-    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id, type: 'attack', villageId, targetVillage, arriveAt } } as DomainEvent);
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     // 通知被攻击方：来袭警报
-    void this.bus.emit({ name: 'movement.IncomingAttack', source: MovementModule.NAME, ts: this.now(), payload: { villageId: targetVillage, fromVillage: villageId, arriveAt } } as DomainEvent);
-    return { ok: true, payload: { id, arriveAt, travelSec } };
+    void this.bus.emit({ name: 'movement.IncomingAttack', source: MovementModule.NAME, ts: this.now(), payload: { villageId: targetVillage, fromVillage: villageId, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
-  /** PvP 到达：取对方驻军+城墙→战斗→扣对方兵→掠夺对方资源→双方战报→带战利品返程。 */
-  private async arriveAttack(id: string): Promise<void> {
+  /**
+   * 逐格推进：前进一格 → 检查同格相遇 → 到终点则触发到达；否则登记下一格。
+   * token 校验：只有携带当前 stepToken 的回调才执行，作废因暂停/相遇遗留的过期任务。
+   */
+  private async step(id: string, token: number): Promise<void> {
     const mv = this.load(id);
-    if (!mv || !mv.targetVillage) return;
-    const target = mv.targetVillage;
+    if (!mv || mv.status !== 'marching' || mv.stepToken !== token) return;
 
-    const attacker = this.buildSnapshot(mv.troops);
+    // 前进一格
+    mv.stepIndex += 1;
+    mv.pos = mv.path[mv.stepIndex];
+    mv.nextStepAt = this.now() + mv.perStepMs;
+    this.store.set(COLLECTION, id, mv);
 
-    // 防守方驻军快照（含铁匠加成口径）
-    const defRes = await this.commands.send({ name: 'military.GetCombatSnapshot', from: MovementModule.NAME, payload: { villageId: target } });
-    const defender: Snapshot = (defRes.payload as any)?.snapshot ?? {};
-
-    // 城墙等级
-    const tgtBuild = await this.commands.send({ name: 'building.GetState', from: MovementModule.NAME, payload: { villageId: target } });
-    const wallLevel = (tgtBuild.payload as any)?.buildings?.wall ?? 0;
-
-    const result = resolveCombat({ attacker, defender, wallLevel, wallBonusPerLevel: this.config.constants.wallBonusPerLevel });
-
-    // 扣防守方损失（把死亡数从对方驻军里减掉）
-    if (Object.keys(result.defenderLosses).length) {
-      const delta: Record<string, number> = {};
-      for (const [u, dead] of Object.entries(result.defenderLosses)) if (dead > 0) delta[u] = -dead;
-      if (Object.keys(delta).length) {
-        await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId: target, delta } });
+    // 相遇检测（仅两支出征军相遇即战；返程军脱战免疫）
+    if (mv.type !== 'return') {
+      const opponent = await this.findEncounter(mv);
+      if (opponent) {
+        await this.resolveFieldEncounter(mv, opponent);
+        return; // 相遇已接管本 movement 的后续（暂停/结算），不再自动前进
       }
     }
 
-    // 掠夺：仅攻方胜才抢
-    let looted: Record<string, number> = {};
-    if (result.attackerWins && result.survivorCarry > 0) {
-      const lootRes = await this.commands.send({ name: 'economy.GetLootable', from: MovementModule.NAME, payload: { villageId: target } });
-      const lootable: Record<string, number> = (lootRes.payload as any)?.lootable ?? {};
-      const total = Object.values(lootable).reduce((a, b) => a + b, 0);
-      const want: Record<string, number> = {};
-      if (total > 0) {
-        const ratio = Math.min(1, result.survivorCarry / total);
-        for (const [t, v] of Object.entries(lootable)) want[t] = Math.floor(v * ratio);
-      }
-      const taken = await this.commands.send({ name: 'economy.TakeLoot', from: MovementModule.NAME, payload: { villageId: target, amount: want } });
-      looted = (taken.payload as any)?.taken ?? {};
+    // 到终点？
+    if (mv.stepIndex >= mv.path.length - 1) {
+      await this.arrive(mv);
+      return;
     }
 
-    // 幸存兵力
-    const survivors: Record<string, number> = {};
-    for (const [u, n] of Object.entries(mv.troops)) {
-      const s = n - (result.attackerLosses[u] ?? 0);
-      if (s > 0) survivors[u] = s;
-    }
-
-    // 给攻防双方各发战报
-    const reportPayload = {
-      attackerVillage: mv.fromVillage,
-      defenderVillage: target,
-      attackerWins: result.attackerWins,
-      attackPower: result.attackPower,
-      defensePower: result.defensePower,
-      attackerLosses: result.attackerLosses,
-      defenderLosses: result.defenderLosses,
-      looted,
-    };
-    void this.bus.emit({ name: 'movement.AttackResolved', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, side: 'attacker', ...reportPayload } } as DomainEvent);
-    void this.bus.emit({ name: 'movement.AttackResolved', source: MovementModule.NAME, ts: this.now(), payload: { villageId: target, side: 'defender', ...reportPayload } } as DomainEvent);
-
-    this.store.delete(COLLECTION, id);
-    if (Object.keys(survivors).length > 0) this.scheduleReturn(mv, survivors, looted);
+    // 登记下一格（沿用当前令牌）
+    this.scheduler.schedule(mv.perStepMs, () => this.step(id, mv.stepToken));
   }
 
-  /** 掠夺到达：取守军→战斗→应用结果→带战利品返程。 */
-  private async arriveRaid(id: string): Promise<void> {
-    const mv = this.load(id);
-    if (!mv || !mv.targetId) return;
+  /** 到达终点：按类型分派（出征→交给 Combat；返程→归队入库）。 */
+  private async arrive(mv: Movement): Promise<void> {
+    if (mv.type === 'return') { await this.arriveReturn(mv.id); return; }
+    if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
+    if (mv.type === 'attack' && mv.targetVillage) { await this.arriveEngage(mv, 'village', mv.targetVillage); return; }
+  }
 
-    // 进攻方快照：用 Military 的口径，但兵在途，所以现造快照
-    const attacker = this.buildSnapshot(mv.troops);
-
-    const defRes = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: mv.targetId } });
-    const defender: Snapshot = (defRes.payload as any)?.snapshot ?? {};
-
-    const result = resolveCombat({ attacker, defender });
-
-    // 应用到 PvE：扣守军、拿战利品
-    const apply = await this.commands.send({
-      name: 'pve.ApplyResult',
-      from: MovementModule.NAME,
+  /** 出征到达：把兵力快照交给 Combat 开/并入战场，删除去程（兵力进入战斗，由 Combat 追踪）。 */
+  private async arriveEngage(mv: Movement, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
+    await this.commands.send({
+      name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
-        id: mv.targetId,
-        defenderLosses: result.defenderLosses,
-        attackerWins: result.attackerWins,
-        looterCarry: result.survivorCarry,
+        targetKind, targetId, targetXY: mv.toXY,
+        movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
+        troops: mv.troops, attackerSnapshot: this.buildSnapshot(mv.troops),
       },
     });
-    const looted = (apply.payload as any)?.looted ?? {};
+    this.store.delete(COLLECTION, mv.id);
+  }
 
-    // 计算幸存兵力
+  /**
+   * 找出与 mv 同格相遇的**敌对出征军**：另一支 marching 的 raid/attack，pos 相同，且属于不同玩家。
+   * 返回对手 movement 或 undefined。
+   */
+  private async findEncounter(mv: Movement): Promise<Movement | undefined> {
+    const myOwner = await this.ownerOf(mv.fromVillage);
+    for (const other of this.store.all<Movement>(COLLECTION)) {
+      if (other.id === mv.id) continue;
+      if (other.type === 'return' || other.status !== 'marching') continue;
+      if (other.pos.q !== mv.pos.q || other.pos.r !== mv.pos.r) continue;
+      const otherOwner = await this.ownerOf(other.fromVillage);
+      if (otherOwner && myOwner && otherOwner === myOwner) continue; // 同一玩家不相互交战
+      return other;
+    }
+    return undefined;
+  }
+
+  /** 村庄归属玩家 id（找不到返回村庄 id 本身，保证不同村=不同归属的保守判定）。 */
+  private async ownerOf(villageId: string): Promise<string> {
+    const res = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
+    return res.ok ? ((res.payload as any).player?.id ?? villageId) : villageId;
+  }
+
+  /**
+   * 途中相遇结算：双方就地暂停 → 结算 → 胜方继续原定行军，败方全灭消失。
+   *
+   * TODO(combat-agent 阶段二)：改为发一条"野战 combat.Engage"交给有状态战斗逐 tick 结算，
+   * 战斗中双方 status=paused，BattleEnded 后由 onBattleEnded 恢复行军。
+   * 当前为让相遇功能在阶段一可玩/可测，用自包含的一次性强弱结算占位（不依赖尚未就绪的野战战斗）。
+   */
+  private async resolveFieldEncounter(a: Movement, b: Movement): Promise<void> {
+    // 双方就地暂停（作废各自遗留的下一格任务），对外可见"停在相遇格"。
+    a.status = 'paused'; a.stepToken += 1;
+    b.status = 'paused'; b.stepToken += 1;
+    this.store.set(COLLECTION, a.id, a);
+    this.store.set(COLLECTION, b.id, b);
+
+    const powA = this.fieldPower(a.troops);
+    const powB = this.fieldPower(b.troops);
+    const aWins = powA >= powB;
+    const winner = aWins ? a : b;
+    const loser = aWins ? b : a;
+    const wPow = aWins ? powA : powB;
+    const lPow = aWins ? powB : powA;
+
+    // 胜方按对方相对强度损失一部分兵（非线性：一边倒损失小），败方全灭。
+    const lossRatio = wPow > 0 ? Math.min(1, Math.pow(lPow / wPow, 1.5)) : 0;
     const survivors: Record<string, number> = {};
-    for (const [u, n] of Object.entries(mv.troops)) {
-      const s = n - (result.attackerLosses[u] ?? 0);
+    for (const [u, n] of Object.entries(winner.troops)) {
+      const s = n - Math.min(n, Math.round(n * lossRatio));
       if (s > 0) survivors[u] = s;
     }
 
-    // 生成战报
-    void this.bus.emit({
-      name: 'movement.RaidResolved',
-      source: MovementModule.NAME,
-      ts: this.now(),
-      payload: {
-        villageId: mv.fromVillage,
-        targetId: mv.targetId,
-        attackerWins: result.attackerWins,
-        attackPower: result.attackPower,
-        defensePower: result.defensePower,
-        attackerLosses: result.attackerLosses,
-        defenderLosses: result.defenderLosses,
-        looted,
-      },
-    } as DomainEvent);
+    // 战报：双方各收一份
+    const report = {
+      at: winner.pos,
+      winnerVillage: winner.fromVillage,
+      loserVillage: loser.fromVillage,
+      winnerSurvivors: survivors,
+    };
+    void this.bus.emit({ name: 'movement.Intercepted', source: MovementModule.NAME, ts: this.now(), payload: { villageId: winner.fromVillage, side: 'winner', ...report } } as DomainEvent);
+    void this.bus.emit({ name: 'movement.Intercepted', source: MovementModule.NAME, ts: this.now(), payload: { villageId: loser.fromVillage, side: 'loser', ...report } } as DomainEvent);
 
-    // 删除去程，若有幸存者则生成返程
-    this.store.delete(COLLECTION, id);
-    if (Object.keys(survivors).length > 0) {
-      this.scheduleReturn(mv, survivors, looted);
+    // 败方消失
+    this.store.delete(COLLECTION, loser.id);
+
+    // 胜方：无幸存者则一并消失；否则更新兵力、恢复行军（新令牌）。
+    if (Object.keys(survivors).length === 0) {
+      this.store.delete(COLLECTION, winner.id);
+      return;
     }
+    winner.troops = survivors;
+    winner.status = 'marching';
+    winner.stepToken += 1;
+    winner.nextStepAt = this.now() + winner.perStepMs;
+    this.store.set(COLLECTION, winner.id, winner);
+    // 若胜方已在终点格相遇，直接到达；否则继续走
+    if (winner.stepIndex >= winner.path.length - 1) await this.arrive(winner);
+    else this.scheduler.schedule(winner.perStepMs, () => this.step(winner.id, winner.stepToken));
   }
 
-  private scheduleReturn(orig: Movement, troops: Record<string, number>, loot: Record<string, number>): void {
-    const dist = Math.hypot(orig.toXY.x - orig.fromXY.x, orig.toXY.y - orig.fromXY.y);
-    const slowest = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6));
-    const travelSec = Math.max(3, Math.round((dist / slowest) * 3600));
-    const id = this.nextId();
-    const arriveAt = this.now() + travelSec * 1000;
-    const mv: Movement = {
-      id, type: 'return', fromVillage: orig.fromVillage, fromXY: orig.toXY, toXY: orig.fromXY,
-      troops, loot, departAt: this.now(), arriveAt,
+  /** 野战粗略战力：Σ count×(meleeAtk+rangedAtk)。仅相遇占位用，阶段二由有状态战斗取代。 */
+  private fieldPower(troops: Record<string, number>): number {
+    let p = 0;
+    for (const [u, n] of Object.entries(troops)) {
+      const def = this.config.units[u];
+      if (!def || n <= 0) continue;
+      p += n * (def.meleeAtk + def.rangedAtk);
+    }
+    return p;
+  }
+
+  /** 战斗结束事件（attacker 侧）：为幸存者安排带战利品返程。 */
+  private onBattleEnded(e: DomainEvent): void {
+    const p = e.payload as {
+      side: string; fromVillage: string; fromXY: Hex; toXY: Hex;
+      survivors?: Record<string, number>; loot?: Record<string, number>;
     };
-    this.store.set(COLLECTION, id, mv);
-    this.scheduler.schedule(travelSec * 1000, () => this.arriveReturn(id));
+    if (p.side !== 'attacker') return;
+    const survivors = p.survivors ?? {};
+    if (Object.keys(survivors).length === 0) return; // 全灭无返程
+    this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {});
+  }
+
+  private scheduleReturn(
+    fromVillage: string,
+    fromXY: Hex,
+    toXY: Hex,
+    troops: Record<string, number>,
+    loot: Record<string, number>,
+  ): void {
+    this.launch({
+      id: this.nextId(), type: 'return', fromVillage, fromXY, toXY,
+      troops, loot, departAt: this.now(),
+    });
   }
 
   /** 返程到达：兵力归队 + 战利品入库。 */
@@ -355,13 +446,22 @@ export class MovementModule {
     void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, troops: mv.troops, loot: mv.loot } } as DomainEvent);
   }
 
-  /** 用兵种定义为在途兵力构造战斗快照（无铁匠加成，骨架简化）。 */
+  /** 用兵种定义为在途兵力构造战斗快照（含特性解析；铁匠加成骨架暂不叠加，与旧口径一致）。 */
   private buildSnapshot(troops: Record<string, number>): Snapshot {
     const snap: Snapshot = {};
     for (const [u, n] of Object.entries(troops)) {
       const def = this.config.units[u];
       if (!def || n <= 0) continue;
-      snap[u] = { count: n, atk: def.atk, defInf: def.defInf, defCav: def.defCav, carry: def.carry, cat: def.cat };
+      snap[u] = {
+        count: n, form: def.form,
+        meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk,
+        meleeDef: def.meleeDef, rangedDef: def.rangedDef,
+        carry: def.carry,
+        traits: def.traits.map((tc) => {
+          const t = this.config.unitTraits[tc];
+          return { effect: t.effect, value: t.value };
+        }),
+      };
     }
     return snap;
   }

@@ -4,13 +4,15 @@
  */
 
 export interface SelectedTarget {
-  refId: string; kind: string; x: number; y: number; name: string; icon?: string;
+  refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
 let cache: any = {};
 const reports: string[] = [];
 let currentTab = 'village';
 let selected: SelectedTarget | null = null;
+/** 进行中战斗的实时快照：battleId -> 双方兵力聚合（来自 BattleTick 推送）。 */
+const battles: Record<string, any> = {};
 
 export function getCache(): any { return cache; }
 export function setCache(c: any): void { cache = c; }
@@ -19,6 +21,15 @@ export function getReports(): string[] { return reports; }
 export function addReport(line: string): void {
   reports.unshift(`[${new Date().toLocaleTimeString()}] ${line}`);
   if (reports.length > 60) reports.pop();
+}
+
+/** 进行中战斗快照读写（战斗实时进度用）。 */
+export function getBattles(): Record<string, any> { return battles; }
+export function setBattleSnapshot(payload: any): void {
+  if (payload?.battleId) battles[payload.battleId] = payload;
+}
+export function clearBattleSnapshot(battleId: string): void {
+  if (battleId) delete battles[battleId];
 }
 
 export function getTab(): string { return currentTab; }

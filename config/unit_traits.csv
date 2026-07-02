@@ -1,0 +1,4 @@
+id,code,name,effect,value
+#数字ID(units.csv的traits列引用它),代码标识(英文程序内部用勿改),显示名,效果类型代码(见下),数值(含义随effect而定)
+#effect枚举: dmg_taken_ranged=受远程伤害倍率 / dmg_taken_melee=受近战伤害倍率 / atk_ranged / atk_melee=自身攻击加成 / def_ranged / def_melee=自身防御加成
+1,shield,持盾,dmg_taken_ranged,-0.30

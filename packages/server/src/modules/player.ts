@@ -3,6 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import { hexKey } from '../infra/hex.js';
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -25,8 +26,8 @@ interface PlayerState {
   /** 种族：romans/gauls/teutons */
   tribe: string;
   villageId: string;
-  x: number;
-  y: number;
+  q: number; // 六边形轴坐标
+  r: number;
   createdAt: number;
 }
 
@@ -68,7 +69,7 @@ export class PlayerModule {
     private commands: CommandBus,
     private now: () => number,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military + 放地图）。 */
-    private createVillage: (villageId: string, x: number, y: number, name: string, tribe: string) => void,
+    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void,
   ) {}
 
   init(): void {
@@ -97,12 +98,12 @@ export class PlayerModule {
 
     const id = `p-${this.nextSeq()}`;
     const villageId = `v-${id}`;
-    const { x, y } = this.allocateSpot();
-    this.createVillage(villageId, x, y, `${clean}的村庄`, t);
+    const { q, r } = this.allocateSpot();
+    this.createVillage(villageId, q, r, `${clean}的村庄`, t);
 
     const p: PlayerState = {
       id, name: clean, pwd: hashPassword(password), tribe: t,
-      villageId, x, y, createdAt: this.now(),
+      villageId, q, r, createdAt: this.now(),
     };
     this.store.set(COLLECTION, id, p);
     this.store.set(COLLECTION_BYNAME, clean, id);
@@ -139,7 +140,7 @@ export class PlayerModule {
 
   /** 对外只暴露安全字段（绝不含 pwd）。 */
   private publicPlayer(p: PlayerState) {
-    return { id: p.id, name: p.name, tribe: p.tribe, villageId: p.villageId, x: p.x, y: p.y };
+    return { id: p.id, name: p.name, tribe: p.tribe, villageId: p.villageId, q: p.q, r: p.r };
   }
 
   private nextSeq(): number {
@@ -149,26 +150,30 @@ export class PlayerModule {
   }
 
   /**
-   * 为新玩家分配地图空位：确定性方形螺旋（从原点向外），避开已占坐标。
-   * 不用随机数，保证可复现。
+   * 为新玩家分配地图空位：确定性六边形环形螺旋（从原点向外一环一环走），避开已占坐标。
+   * 不用随机数，保证可复现。原点留给 PvE 中心区，从第 1 环开始。
    */
-  private allocateSpot(): { x: number; y: number } {
-    const taken = new Set(this.store.all<PlayerState>(COLLECTION).map((p) => `${p.x},${p.y}`));
-    // 螺旋遍历
-    let x = 0, y = 0, dx = 0, dy = -1;
-    const max = 200; // 足够多
-    for (let i = 0; i < max * max; i++) {
-      // 跳过原点(留给 PvE 中心区) 与已占点
-      if ((x !== 0 || y !== 0) && !taken.has(`${x},${y}`)) {
-        return { x, y };
+  private allocateSpot(): { q: number; r: number } {
+    const taken = new Set(this.store.all<PlayerState>(COLLECTION).map((p) => hexKey(p.q, p.r)));
+    // 六个方向（axial 偏移），按 redblobgames 环形遍历顺序。
+    const DIRS = [
+      { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
+      { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 },
+    ];
+    const maxRing = 200;
+    for (let k = 1; k <= maxRing; k++) {
+      // 从第 k 环的一个角起步（原点沿方向4走 k 步），再沿 6 条边各走 k 步。
+      let q = 0 + DIRS[4].q * k;
+      let r = 0 + DIRS[4].r * k;
+      for (let side = 0; side < 6; side++) {
+        for (let step = 0; step < k; step++) {
+          if (!taken.has(hexKey(q, r))) return { q, r };
+          q += DIRS[side].q;
+          r += DIRS[side].r;
+        }
       }
-      if (x === y || (x < 0 && x === -y) || (x > 0 && x === 1 - y)) {
-        [dx, dy] = [-dy, dx];
-      }
-      x += dx;
-      y += dy;
     }
-    return { x: 1, y: 1 };
+    return { q: 1, r: 0 };
   }
 
   /**
@@ -191,17 +196,17 @@ export class PlayerModule {
     }
 
     for (const p of players) {
-      let { x, y, villageId } = p;
+      let { q, r, villageId } = p;
       if (reassignSpots) {
-        const spot = this.allocateSpot(); // 依赖已写回的 x/y 去重，逐个分配
-        x = spot.x;
-        y = spot.y;
+        const spot = this.allocateSpot(); // 依赖已写回的 q/r 去重，逐个分配
+        q = spot.q;
+        r = spot.r;
         villageId = `v-${p.id}`;
-        const updated: PlayerState = { ...p, x, y, villageId };
+        const updated: PlayerState = { ...p, q, r, villageId };
         this.store.set(COLLECTION, p.id, updated);
         this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
       }
-      this.createVillage(villageId, x, y, `${p.name}的村庄`, p.tribe);
+      this.createVillage(villageId, q, r, `${p.name}的村庄`, p.tribe);
     }
   }
 }

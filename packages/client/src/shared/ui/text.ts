@@ -34,8 +34,8 @@ export function errText(code?: string): string {
   return code;
 }
 
-export function catName(c: string): string {
-  return { infantry: '步兵', cavalry: '骑兵', scout: '侦察', siege: '攻城', admin: '行政', settler: '拓荒' }[c] ?? c;
+export function formName(f: string): string {
+  return { melee: '近战', ranged: '远程' }[f] ?? f;
 }
 export function tribeName(t: string): string {
   return { romans: '罗马', gauls: '高卢', teutons: '条顿' }[t] ?? t;

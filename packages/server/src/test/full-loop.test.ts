@@ -19,6 +19,18 @@ const setClock = (t: number) => (clock = t);
 async function send(app: GameApp, action: string, payload: any) {
   return app.commands.send({ name: action, from: 'test', payload });
 }
+/**
+ * 战斗改为有状态逐 tick 推进。Scheduler.fireDue 在一次 advanceTo 内会把"已到期"任务
+ * 全部跑完（含 tick 自我重排的后续 tick，因为跳进的时钟已远超它们），所以用**大步**(默认1小时)
+ * 快进即可让"整场战斗 + 一段行军"在一次调用内跑完；反复几次直到没有待处理任务，驱动全链路。
+ */
+async function drain(app: GameApp, bigStepMs = 3_600_000, maxIters = 30000): Promise<void> {
+  let iters = 0;
+  while (app.scheduler.pending > 0 && iters < maxIters) {
+    await app.scheduler.advanceTo(clock + bigStepMs, setClock);
+    iters++;
+  }
+}
 
 test('经济：4资源初始化与惰性产出', async () => {
   const app = freshApp();
@@ -69,9 +81,9 @@ test('完整循环：训练→出征打PvE→掠夺→返程入库', async () =>
   // 记录出征前资源
   const beforeRes = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
 
-  // 派 5 军团兵 raid pve-0 (rats, 在 (3,1))
+  // 派 5 军团兵 raid pve-0 (rats)
   const raid = await send(app, 'movement.SendRaid', {
-    villageId: 'v1', fromXY: { x: 0, y: 0 }, targetId: 'pve-0', troops: { legionnaire: 5 },
+    villageId: 'v1', fromXY: { q: 0, r: 0 }, targetId: 'pve-0', troops: { legionnaire: 5 },
   });
   assert.equal(raid.ok, true, `出征应成功: ${raid.reason ?? ''}`);
 
@@ -79,21 +91,17 @@ test('完整循环：训练→出征打PvE→掠夺→返程入库', async () =>
   army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   assert.equal(army.troops.legionnaire ?? 0, 0, '出征后村内应无兵');
 
-  // 收集战报事件
-  let raidResolved: any = null;
-  app.bus.on('movement.RaidResolved', (e) => (raidResolved = e.payload));
+  // 收集战斗结束事件（战斗改为有状态逐 tick 推进，到达后开战，结束发 BattleEnded）
+  let battleEnded: any = null;
+  app.bus.on('combat.BattleEnded', (e) => { if ((e.payload as any).side === 'attacker') battleEnded = e.payload; });
 
-  // 快进到到达 + 战斗 + 返程到达
-  const arriveAt = (raid.payload as any).arriveAt;
-  await app.scheduler.advanceTo(arriveAt + 1000, setClock);
-  assert.ok(raidResolved, '应产生掠夺战报');
-  assert.equal(raidResolved.attackerWins, true, '5军团兵应击败老鼠窝');
-  assert.ok(Object.keys(raidResolved.looted).length > 0, '应掠夺到资源');
+  // 反复小步快进：驱动"到达→逐 tick 战斗→结束→返程"整条链
+  await drain(app);
+  assert.ok(battleEnded, '应产生战斗结束事件');
+  assert.equal(battleEnded.attackerWins, true, '5军团兵应击败老鼠窝');
+  assert.ok(Object.keys(battleEnded.looted).length > 0, '应掠夺到资源');
 
-  // 再快进让返程到达（返程旅行需约定的行军时间，给足）
-  await app.scheduler.advanceTo(clock + 3_600_000, setClock);
-
-  // 兵已归队
+  // 兵已归队（drain 已把返程也跑完）
   army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   assert.ok((army.troops.legionnaire ?? 0) > 0, '幸存兵应已返回');
 

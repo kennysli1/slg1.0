@@ -3,7 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
-import type { Snapshot } from './combat.js';
+import type { Snapshot } from '../infra/combat-types.js';
 
 /**
  * 领域模块 · PvE（NPC 目标 / 发育地板）
@@ -19,8 +19,8 @@ import type { Snapshot } from './combat.js';
 interface PveState {
   id: string;
   type: string;
-  x: number;
-  y: number;
+  q: number; // 六边形轴坐标
+  r: number;
   /** 当前守军（被打会减员；重生时恢复满） */
   defender: Snapshot;
   loot: Record<string, number>;
@@ -62,14 +62,14 @@ export class PveModule {
     }
   }
 
-  /** 创建一个 PvE 目标，并登记到地图。 */
-  create(id: string, type: string, x: number, y: number): void {
+  /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。 */
+  create(id: string, type: string, q: number, r: number): void {
     const tpl = this.config.pveTemplates[type];
     const s: PveState = {
       id,
       type,
-      x,
-      y,
+      q,
+      r,
       defender: structuredClone(tpl.defender),
       loot: { ...tpl.loot },
       cleared: false,
@@ -78,7 +78,7 @@ export class PveModule {
     void this.commands.send({
       name: 'world.PlacePve',
       from: PveModule.NAME,
-      payload: { x, y, refId: id, name: tpl.name, icon: tpl.icon },
+      payload: { q, r, refId: id, name: tpl.name, icon: tpl.icon },
     });
   }
 

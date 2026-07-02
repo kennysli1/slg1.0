@@ -19,11 +19,11 @@ import { dirname, join } from 'node:path';
 const MODULES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'modules');
 
 /**
- * 唯一合法的"被其它模块 import"的模块：combat 是无状态纯函数(resolveCombat/Snapshot)，
- * 不持有状态、不发命令，作为纯计算被 movement/pve 复用是设计许可的例外。
- * 除它以外，模块之间一律只能走 Command/Event。
+ * 战斗重做后：combat 升级为有状态模块（owns battle 集合），不再被任何模块 import——
+ * 三方共用的战斗类型(Snapshot/CombatUnit)已下沉到 infra/combat-types.ts（基础设施可被合法 import）。
+ * 因此模块间 import 白名单为空：一律只能走 Command/Event。
  */
-const IMPORT_WHITELIST = new Set(['combat.js']);
+const IMPORT_WHITELIST = new Set<string>([]);
 
 interface ModuleFile {
   name: string; // 文件名，如 'economy.ts'

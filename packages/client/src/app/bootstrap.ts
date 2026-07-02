@@ -32,7 +32,7 @@ function renderShell() {
       <div class="brand">${art('ui_logo', 'LOGO', 'md')}
         <div class="brand-text">
           <div class="title">Travian 2.0</div>
-          <div class="subtitle">${me?.name ?? ''} 的村庄 · 坐标 (${me?.x},${me?.y})</div>
+          <div class="subtitle">${me?.name ?? ''} 的村庄 · 坐标 (${me?.q},${me?.r})</div>
         </div>
       </div>
       <div id="resbar" class="resbar"></div>
@@ -48,7 +48,7 @@ async function refreshAll() {
   if (!me) return;
   const [res, vil, army, area, moves] = await Promise.all([
     req('GetResources'), req('GetVillage'), req('GetArmy'),
-    req('GetArea', { cx: me.x, cy: me.y, r: 25 }), req('ListMovements'),
+    req('GetArea', { cq: me.q, cr: me.r, r: 25 }), req('ListMovements'),
   ]);
   setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
   renderResBar();

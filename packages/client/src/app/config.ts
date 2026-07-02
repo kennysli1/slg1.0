@@ -12,14 +12,14 @@ import * as fallback from '../info.js';
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface BuildingInfo { name: string; icon: string }
-export interface UnitInfo { name: string; icon: string; cat: string }
+export interface UnitInfo { name: string; icon: string; form: string }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
   fields: { type: string; name: string; icon: string; resource: string }[];
   buildings: { kind: string; name: string; icon: string }[];
-  units: { key: string; tribe: string; name: string; icon: string; cat: string }[];
+  units: { key: string; tribe: string; name: string; icon: string; form: string }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   constants: { mapViewRadius: number; mapSize: number };
 }
@@ -40,7 +40,7 @@ export async function loadGameConfig(): Promise<void> {
     for (const x of cfg.resources) res[x.key] = { name: x.name, icon: x.icon };
     for (const x of cfg.fields) fields[x.type] = { name: x.name, icon: x.icon, resource: x.resource };
     for (const x of cfg.buildings) buildings[x.kind] = { name: x.name, icon: x.icon };
-    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, cat: x.cat };
+    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
   } catch {
     /* 网络/协议异常 → 继续用 info.ts 回退 */
@@ -62,7 +62,7 @@ export function buildingInfo(kind: string): BuildingInfo {
   return buildings[kind] ?? fallback.BUILDING_INFO[kind] ?? { name: kind, icon: 'bld_main' };
 }
 export function unitInfo(key: string): UnitInfo {
-  return units[key] ?? fallback.UNIT_INFO[key] ?? { name: key, icon: `unit_${key}`, cat: 'infantry' };
+  return units[key] ?? fallback.UNIT_INFO[key] ?? { name: key, icon: `unit_${key}`, form: 'melee' };
 }
 /** PvE：服务端按 code 给名称/图标。地图 tile 只有 name 时按关键字猜测回退。 */
 export function pveInfoByType(type: string): PveInfo | undefined {

@@ -11,6 +11,7 @@ import { MilitaryModule } from './modules/military.js';
 import { WorldModule } from './modules/world.js';
 import { PveModule } from './modules/pve.js';
 import { MovementModule } from './modules/movement.js';
+import { CombatModule } from './modules/combat.js';
 import { PlayerModule } from './modules/player.js';
 import { MetaModule } from './modules/meta.js';
 
@@ -29,6 +30,8 @@ const PROGRESS_COLLECTIONS = [
   'military',
   'movement',
   'movement_seq',
+  'battle',
+  'battle_seq',
   'pve',
   'world_meta',
   'world_tile',
@@ -54,10 +57,11 @@ export interface GameApp {
   world: WorldModule;
   pve: PveModule;
   movement: MovementModule;
+  combat: CombatModule;
   player: PlayerModule;
   meta: MetaModule;
   now: () => number;
-  createVillage(villageId: string, x?: number, y?: number, name?: string): void;
+  createVillage(villageId: string, q?: number, r?: number, name?: string): void;
   setupWorld(): void;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
@@ -98,13 +102,14 @@ export function createGameApp(opts?: {
   const world = new WorldModule(store, bus, commands, now);
   const pve = new PveModule(store, bus, commands, scheduler, now, config);
   const movement = new MovementModule(store, bus, commands, scheduler, now, config);
+  const combat = new CombatModule(store, bus, commands, scheduler, now, config);
 
-  // 实际建村的函数（供 Player 注册时调用）
-  const doCreateVillage = (villageId: string, x: number, y: number, name: string, tribe = 'romans') => {
+  // 实际建村的函数（供 Player 注册时调用）。坐标为六边形轴坐标 (q,r)。
+  const doCreateVillage = (villageId: string, q: number, r: number, name: string, tribe = 'romans') => {
     economy.createVillage(villageId);
     building.createVillage(villageId, tribe);
     military.createVillage(villageId, tribe);
-    void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { x, y, refId: villageId, name } });
+    void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { q, r, refId: villageId, name } });
   };
   const player = new PlayerModule(store, bus, commands, now, doCreateVillage);
   const meta = new MetaModule(commands, config);
@@ -115,24 +120,26 @@ export function createGameApp(opts?: {
   world.init();
   pve.init();
   movement.init();
+  combat.init();
   player.init();
   meta.init();
 
   return {
     config, store, bus, commands, scheduler,
-    economy, building, military, world, pve, movement, player, meta, now,
-    createVillage(villageId, x = 0, y = 0, name = '我的村庄') {
-      doCreateVillage(villageId, x, y, name, 'romans');
+    economy, building, military, world, pve, movement, combat, player, meta, now,
+    createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
+      doCreateVillage(villageId, q, r, name, 'romans');
     },
     setupWorld() {
       world.setup(config.constants.mapSize);
       // PvE 目标点位由 config/pve_spawns.csv 决定
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.x, s.y);
+      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
     },
     resume() {
       building.resume();
       military.resume();
       movement.resume();
+      combat.resume();
       pve.resume();
     },
     resetWorld({ keepAccounts, reassignSpots = false }) {
@@ -148,7 +155,7 @@ export function createGameApp(opts?: {
 
       // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
       world.setup(config.constants.mapSize);
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.x, s.y);
+      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
       player.rebuildVillages(reassignSpots);
       return { accounts: store.all('player').length };
     },

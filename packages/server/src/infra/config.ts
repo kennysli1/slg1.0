@@ -1,5 +1,8 @@
 import { join } from 'node:path';
 import { loadCsv, num } from './csv.js';
+import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
+
+export type { UnitTraitDef } from './combat-types.js';
 
 /**
  * 基础设施 · 配置注册表（GameConfig）
@@ -48,16 +51,20 @@ export interface UnitDef {
   tribe: string;
   name: string;
   icon: string; // 基名
-  cat: 'infantry' | 'cavalry' | 'scout' | 'siege' | 'admin' | 'settler';
-  atk: number;
-  defInf: number;
-  defCav: number;
+  /** 形态：melee(近战/前排) / ranged(远程/后排)。取代旧的 cat。 */
+  form: UnitForm;
+  meleeAtk: number;
+  rangedAtk: number;
+  meleeDef: number;
+  rangedDef: number;
   speed: number;
   carry: number;
   upkeep: number;
   cost: Record<string, number>;
   trainSec: number;
   building: string; // 所需建筑 code（由数字ID解析而来）
+  /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
+  traits: string[];
 }
 
 export interface PveTemplate {
@@ -65,7 +72,15 @@ export interface PveTemplate {
   type: string; // code
   name: string;
   icon: string; // 基名
-  defender: Record<string, { count: number; atk: number; defInf: number; defCav: number; carry: number }>;
+  defender: Record<string, {
+    count: number;
+    form: UnitForm;
+    meleeAtk: number;
+    rangedAtk: number;
+    meleeDef: number;
+    rangedDef: number;
+    carry: number;
+  }>;
   loot: Record<string, number>;
   respawnSec: number;
 }
@@ -73,8 +88,8 @@ export interface PveTemplate {
 export interface PveSpawn {
   id: string;
   type: string; // pve 目标 code（由数字ID解析而来）
-  x: number;
-  y: number;
+  q: number; // 六边形轴坐标
+  r: number;
 }
 
 /** 开局模板：按部族定义田地布局/初始建筑/初始资源。来自 village_templates.csv。 */
@@ -105,6 +120,10 @@ export interface GameConstants {
   baseProductionPerHour: number;
   mapSize: number;
   mapViewRadius: number;
+  /** 战斗每 tick 间隔(ms)：越小越平滑越费算力（08设计§4.4 的 dt）。 */
+  combatTickMs: number;
+  /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
+  combatStrength: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -114,6 +133,8 @@ export interface GameConfig {
   fields: Record<string, FieldDef>;
   buildings: Record<string, BuildingDef>;
   units: Record<string, UnitDef>;
+  /** 兵种特性表（unit_traits.csv），按 code 索引。 */
+  unitTraits: Record<string, UnitTraitDef>;
   pveTemplates: Record<string, PveTemplate>;
   pveSpawns: PveSpawn[];
   constants: GameConstants;
@@ -187,6 +208,19 @@ function parseRequires(s: string, idToCode: Map<number, string>): { kind: string
   });
 }
 
+/**
+ * 解析兵种 traits 列。逗号分隔的特性**数字ID**（如 "1,3"）；traitIdToCode 映射回 code。
+ * 空则返回 []。
+ */
+function parseTraitRefs(s: string, traitIdToCode: Map<number, string>): string[] {
+  if (!s) return [];
+  return s.split(',').map((part) => {
+    const idStr = part.trim();
+    if (!idStr) return '';
+    return traitIdToCode.get(num(idStr)) ?? idStr;
+  }).filter(Boolean);
+}
+
 /** 从指定目录加载所有 CSV。configDir 默认指向仓库根的 config/。 */
 export function loadGameConfig(configDir: string): GameConfig {
   const p = (f: string) => join(configDir, f);
@@ -220,15 +254,30 @@ export function loadGameConfig(configDir: string): GameConfig {
     };
   }
 
+  // 兵种特性表：先解析，units 的 traits 列用数字 id 引用它，解析回 code
+  const unitTraits: Record<string, UnitTraitDef> = {};
+  const traitIdToCode = new Map<number, string>();
+  for (const r of loadCsv(p('unit_traits.csv'))) {
+    if (!r.code) continue;
+    traitIdToCode.set(num(r.id), r.code);
+    unitTraits[r.code] = {
+      id: num(r.id), code: r.code, name: r.name,
+      effect: r.effect as TraitEffect, value: num(r.value),
+    };
+  }
+
   const units: Record<string, UnitDef> = {};
   for (const r of loadCsv(p('units.csv'))) {
     units[r.code] = {
-      id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon, cat: r.cat as UnitDef['cat'],
-      atk: num(r.atk), defInf: num(r.defInf), defCav: num(r.defCav),
+      id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon,
+      form: (r.form as UnitForm) || 'melee',
+      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
+      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef),
       speed: num(r.speed, 6), carry: num(r.carry), upkeep: num(r.upkeep, 1),
       cost: { wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) },
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
+      traits: parseTraitRefs(r.traits, traitIdToCode),
     };
   }
 
@@ -247,13 +296,19 @@ export function loadGameConfig(configDir: string): GameConfig {
     const code = pveIdToCode.get(num(r.targetId));
     const tpl = code ? pveTemplates[code] : undefined;
     if (!tpl) continue;
-    tpl.defender[r.unitCode] = { count: num(r.count), atk: num(r.atk), defInf: num(r.defInf), defCav: num(r.defCav), carry: num(r.carry) };
+    tpl.defender[r.unitCode] = {
+      count: num(r.count),
+      form: (r.form as UnitForm) || 'melee',
+      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
+      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef),
+      carry: num(r.carry),
+    };
   }
 
   const pveSpawns: PveSpawn[] = loadCsv(p('pve_spawns.csv')).map((r) => ({
     id: r.id,
     type: pveIdToCode.get(num(r.targetId)) ?? r.targetId, // 数字目标ID → code
-    x: num(r.x), y: num(r.y),
+    q: num(r.q), r: num(r.r),
   }));
 
   // 全局常量表
@@ -275,6 +330,8 @@ export function loadGameConfig(configDir: string): GameConfig {
     baseProductionPerHour: cn('base_production_per_hour', 10),
     mapSize: cn('map_size', 20),
     mapViewRadius: cn('map_view_radius', 6),
+    combatTickMs: cn('combat_tick_ms', 200),
+    combatStrength: cn('combat_strength', 1),
     raw,
   };
 
@@ -291,7 +348,7 @@ export function loadGameConfig(configDir: string): GameConfig {
   }
 
   const config: GameConfig = {
-    resources, fields, buildings, units, pveTemplates, pveSpawns, constants, villageTemplates,
+    resources, fields, buildings, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates,
   };
   validateGameConfig(config);
   return config;
@@ -332,10 +389,25 @@ export function validateGameConfig(config: GameConfig): void {
   const cycle = findRequiresCycle(config.buildings);
   if (cycle) errors.push(`buildings.csv requires 存在循环依赖：${cycle.join(' → ')}`);
 
-  // units：所需建筑必须存在；范围
+  // unit_traits：effect 必须是已知枚举
+  const traitEffects = new Set<TraitEffect>(TRAIT_EFFECTS);
+  const traitCodes = new Set(Object.keys(config.unitTraits));
+  for (const t of Object.values(config.unitTraits)) {
+    if (!traitEffects.has(t.effect)) {
+      errors.push(`unit_traits.csv[${t.code}] effect=${t.effect} 不是已知效果（${TRAIT_EFFECTS.join('/')}）`);
+    }
+  }
+
+  // units：所需建筑必须存在；form 枚举；traits 引用存在；范围
   for (const u of Object.values(config.units)) {
     if (u.building && !buildingCodes.has(u.building)) {
       errors.push(`units.csv[${u.key}] building=${u.building} 不在 buildings.csv`);
+    }
+    if (u.form !== 'melee' && u.form !== 'ranged') {
+      errors.push(`units.csv[${u.key}] form=${u.form} 必须是 melee 或 ranged`);
+    }
+    for (const tc of u.traits) {
+      if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
     }
     if (u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
     if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
