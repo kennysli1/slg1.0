@@ -49,3 +49,5 @@ npm run test:server              # 改完逻辑必跑：单人全循环 + 多人
 ```
 
 **提交前**：跑 `npm run lint` + `npm run test:server`（均须绿），并对照 `docs/2_2.0设计/07_扩展与代码规范.md` 末尾的自查清单。
+
+**部署到服务器**：一键脚本 + 服务器凭据/说明在本地 `.claude/deploy/`（该目录被 gitignore，不上传）。普通更新 `bash .claude/deploy/deploy.sh`；**数据结构变更（坐标/兵种字段/新集合）必须带刷档** `bash .claude/deploy/deploy.sh --reset respawn`。细节读 `.claude/deploy/README.md`。
