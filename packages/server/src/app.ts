@@ -14,6 +14,7 @@ import { MovementModule } from './modules/movement.js';
 import { CombatModule } from './modules/combat.js';
 import { PlayerModule } from './modules/player.js';
 import { MetaModule } from './modules/meta.js';
+import { NotificationsModule } from './modules/notifications.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -35,6 +36,7 @@ const PROGRESS_COLLECTIONS = [
   'pve',
   'world_meta',
   'world_tile',
+  'notifications',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -60,6 +62,7 @@ export interface GameApp {
   combat: CombatModule;
   player: PlayerModule;
   meta: MetaModule;
+  notifications: NotificationsModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void;
   setupWorld(): void;
@@ -113,6 +116,7 @@ export function createGameApp(opts?: {
   };
   const player = new PlayerModule(store, bus, commands, now, doCreateVillage);
   const meta = new MetaModule(commands, config);
+  const notifications = new NotificationsModule(store, bus, commands, now, config);
 
   economy.init();
   building.init();
@@ -123,10 +127,11 @@ export function createGameApp(opts?: {
   combat.init();
   player.init();
   meta.init();
+  notifications.init();
 
   return {
     config, store, bus, commands, scheduler,
-    economy, building, military, world, pve, movement, combat, player, meta, now,
+    economy, building, military, world, pve, movement, combat, player, meta, notifications, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       doCreateVillage(villageId, q, r, name, 'romans');
     },

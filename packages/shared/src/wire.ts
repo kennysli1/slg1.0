@@ -48,3 +48,13 @@ export type WireMessage = WireRequest | WireResponse | WirePush;
 
 /** 当前协议版本 */
 export const WIRE_VERSION = 1;
+
+/** 服务端持久化的单条通知/战报（结构化存储，展示文案由客户端负责）。 */
+export interface StoredNotification {
+  id: string;
+  /** 对外推送事件名（与 WirePush.event 一致，如 BattleEnded / BuildingUpgraded）。 */
+  event: string;
+  payload: Record<string, unknown>;
+  /** 事件发生时刻(ms)，来自源事件的 ts。 */
+  ts: number;
+}

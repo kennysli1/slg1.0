@@ -13,7 +13,7 @@ import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
 import { renderMap, bindMap } from '../features/map/map.js';
-import { renderReports, handlePush } from '../features/reports/reports.js';
+import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
 
 const app = document.getElementById('app')!;
 
@@ -102,6 +102,10 @@ async function act(p: Promise<any>) {
 
 function startGame() {
   renderShell();
+  // 登录后拉一次历史通知，播种战报列表（只拉一次，后续靠 live Push 追加）
+  req('GetNotifications').then((res) => {
+    if (res.ok) hydrateReports((res.payload as any).notifications ?? []);
+  });
   refreshAll();
 }
 

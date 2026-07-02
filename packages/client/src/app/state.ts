@@ -19,8 +19,14 @@ export function setCache(c: any): void { cache = c; }
 
 export function getReports(): string[] { return reports; }
 export function addReport(line: string): void {
-  reports.unshift(`[${new Date().toLocaleTimeString()}] ${line}`);
+  reports.unshift(line.startsWith('[') ? line : `[${new Date().toLocaleTimeString()}] ${line}`);
   if (reports.length > 60) reports.pop();
+}
+/** 用服务端历史通知初始化战报列表（登录后调用一次，替换当前内存内容）。 */
+export function seedReports(lines: string[]): void {
+  reports.length = 0;
+  // 历史条目是 old→new 顺序，unshift 逐条反序 → 最终 reports[0] 为最新
+  for (let i = lines.length - 1; i >= 0; i--) reports.unshift(lines[i]);
 }
 
 /** 进行中战斗快照读写（战斗实时进度用）。 */

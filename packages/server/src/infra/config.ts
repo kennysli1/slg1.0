@@ -124,6 +124,8 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 每个村庄最多保留的通知/战报条数。 */
+  notificationsPerVillage: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -332,6 +334,7 @@ export function loadGameConfig(configDir: string): GameConfig {
     mapViewRadius: cn('map_view_radius', 6),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    notificationsPerVillage: cn('notifications_per_village', 60),
     raw,
   };
 

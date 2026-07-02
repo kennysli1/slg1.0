@@ -15,3 +15,4 @@ import './config.test.js';
 import './meta.test.js';
 import './manifest.test.js';
 import './architecture.test.js';
+import './notifications.test.js';
