@@ -76,6 +76,11 @@ export interface GameApp {
    * 返回受影响的账号数（keepAccounts=false 时为被清空的账号数）。
    */
   resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): { accounts: number };
+  /**
+   * 删除单个玩家账号及其所有游戏进度（经济/建筑/兵力/地图等）。
+   * 返回被删除的 villageId，若玩家不存在返回 null。
+   */
+  deletePlayer(playerId: string): { villageId: string } | null;
 }
 
 /** 默认 config 目录：仓库根的 config/（相对编译后/源码位置回溯到 packages/server 再上两级）。 */
@@ -151,10 +156,12 @@ export function createGameApp(opts?: {
       // 1. 清空所有游戏进度集合。
       for (const c of PROGRESS_COLLECTIONS) store.clear(c);
 
-      // 2. 不保留账号 → 连账号集合一起清，回到零玩家状态。
+      // 2. 不保留账号 → 连账号集合一起清，回到零玩家状态，重建世界骨架。
       if (!keepAccounts) {
         const n = store.all('player').length;
         for (const c of ACCOUNT_COLLECTIONS) store.clear(c);
+        world.setup(config.constants.mapSize);
+        for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
         return { accounts: n };
       }
 
@@ -163,6 +170,37 @@ export function createGameApp(opts?: {
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
       player.rebuildVillages(reassignSpots);
       return { accounts: store.all('player').length };
+    },
+    deletePlayer(playerId) {
+      const p = store.get<{ villageId: string; name: string }>('player', playerId);
+      if (!p) return null;
+      const { villageId, name } = p;
+      // 清除账号记录
+      store.delete('player', playerId);
+      store.delete('player_byname', name);
+      store.delete('player_byvillage', villageId);
+      // 清除游戏进度（以 villageId 为 key 的所有进度集合）
+      const progressByVillage = ['economy', 'building', 'military', 'notifications'] as const;
+      for (const c of progressByVillage) store.delete(c, villageId);
+      // 清除行军/战斗记录（以 villageId 过滤，避免误删其他人）
+      for (const m of store.all<{ fromVillage?: string; targetId?: string }>('movement')) {
+        if ((m as any).fromVillage === villageId || (m as any).targetId === villageId) {
+          store.delete('movement', (m as any).id ?? '');
+        }
+      }
+      // 清除地图上该村庄的 tile
+      const tile = store.get<{ q: number; r: number }>('world_tile', `${p.villageId}`);
+      if (!tile) {
+        // 找 world_tile 中 refId===villageId 的格
+        for (const t of store.all<{ refId?: string; q: number; r: number }>('world_tile')) {
+          if ((t as any).refId === villageId) {
+            const key = `${t.q},${t.r}`;
+            store.set('world_tile', key, { q: t.q, r: t.r, kind: 'empty' });
+            break;
+          }
+        }
+      }
+      return { villageId };
     },
   };
 }

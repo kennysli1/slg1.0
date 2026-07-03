@@ -81,7 +81,7 @@ async function main() {
 
   // GM 调试 API（始终挂载；如需关闭设 GM_ENABLED=off）
   if (process.env.GM_ENABLED !== 'off') {
-    registerGmRoutes(fastify, app.store);
+    registerGmRoutes(fastify, app.store, app);
     console.log('[server] GM API 已启用 — /gm/collections');
   }
 

@@ -9,12 +9,15 @@
  *   PUT    /gm/:collection/:key           写/覆盖一条文档（body 为 JSON）
  *   DELETE /gm/:collection/:key           删一条文档
  *   DELETE /gm/:collection                清空整个集合（危险，需 ?confirm=yes）
+ *   POST   /gm/ops/reset                  刷档（body: {mode:"season"|"respawn"|"wipe"}，需 ?confirm=yes）
+ *   DELETE /gm/ops/player/:playerId       删除单个玩家账号及所有进度（需 ?confirm=yes）
  *
  * 安全：GM_TOKEN=<secret> 时所有请求需带 X-GM-Token header（面板自动处理）。
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
+import type { GameApp } from '../app.js';
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
 <html lang="zh">
@@ -31,6 +34,9 @@ body{font-family:monospace;font-size:13px;background:#1a1a2e;color:#e0e0e0;displ
 .col-item:hover,.col-item.active{background:#0f3460;color:#4cc9f0}
 .col-badge{background:#0f3460;color:#4cc9f0;border-radius:10px;padding:1px 6px;font-size:11px}
 .col-item.active .col-badge{background:#4cc9f0;color:#16213e}
+#ops-panel{padding:10px 12px;border-top:1px solid #0f3460;flex-shrink:0}
+#ops-panel h3{font-size:11px;color:#a0a8c0;text-transform:uppercase;margin-bottom:8px}
+#ops-panel .ops-row{display:flex;flex-direction:column;gap:5px}
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 #toolbar{padding:8px 12px;background:#16213e;border-bottom:1px solid #0f3460;display:flex;gap:8px;align-items:center;flex-shrink:0}
 #search{flex:1;background:#0f3460;border:1px solid #4cc9f0;color:#e0e0e0;padding:4px 8px;border-radius:4px;font-family:monospace}
@@ -44,18 +50,32 @@ button{background:#0f3460;border:1px solid #4cc9f0;color:#4cc9f0;padding:4px 10p
 button:hover{background:#4cc9f0;color:#16213e}
 button.danger{border-color:#f07070;color:#f07070}
 button.danger:hover{background:#f07070;color:#16213e}
+button.warn{border-color:#f0b070;color:#f0b070}
+button.warn:hover{background:#f0b070;color:#16213e}
 button.save{border-color:#70f070;color:#70f070}
 button.save:hover{background:#70f070;color:#16213e}
+button.sm{padding:3px 7px;font-size:11px}
 #editor{flex:1;background:#0d1117;color:#c9d1d9;padding:12px;font-family:monospace;font-size:12px;border:none;resize:none;outline:none;overflow:auto}
 #status{padding:4px 12px;font-size:11px;color:#a0a8c0;background:#16213e;border-top:1px solid #0f3460;flex-shrink:0}
 #cur-key{color:#4cc9f0;font-weight:bold}
 .empty{padding:20px;color:#555;text-align:center}
+.player-item{padding:5px 10px;font-size:12px;border-bottom:1px solid #0f3460;display:flex;justify-content:space-between;align-items:center;gap:4px}
+.player-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
 <div id="sidebar">
   <h2>集合</h2>
   <div id="col-list"><div class="empty">加载中…</div></div>
+  <div id="ops-panel">
+    <h3>运维操作</h3>
+    <div class="ops-row">
+      <button class="warn sm" onclick="showPlayers()">管理玩家</button>
+      <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
+      <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
+      <button class="danger sm" onclick="resetOp('wipe')">清档（删所有账号）</button>
+    </div>
+  </div>
 </div>
 <div id="main">
   <div id="toolbar">
@@ -198,12 +218,51 @@ function copyDoc() {
   status('已复制到剪贴板');
 }
 
+async function resetOp(mode) {
+  const labels = {season:'新赛季（保留账号+地图位置，进度归零）', respawn:'重排位置（保留登录凭据，重新分配坐标）', wipe:'清档（删除所有账号及全部进度）'};
+  if (!confirm(\`确定执行：\${labels[mode]}？\\n此操作不可撤销。\`)) return;
+  const r = await api('POST', '/ops/reset?confirm=yes', {mode});
+  if (r.ok) { status(\`\${labels[mode]} 完成，受影响账号：\${r.accounts}\`); refreshAll(); }
+  else status('操作失败: ' + (r.reason ?? JSON.stringify(r)), false);
+}
+
+async function showPlayers() {
+  const data = await api('GET', '/player?limit=500');
+  const docs = data.docs ?? {};
+  const list = document.getElementById('doc-list');
+  const keys = Object.keys(docs);
+  if (!keys.length) { list.innerHTML = '<div class="empty">暂无玩家</div>'; return; }
+  list.innerHTML = '';
+  for (const k of keys) {
+    const p = docs[k];
+    const row = document.createElement('div');
+    row.className = 'player-item';
+    row.innerHTML = \`<span class="player-name" title="\${k}">\${p.name ?? k}</span><span style="color:#a0a8c0;font-size:11px">\${p.tribe ?? ''}</span>\`;
+    const btn = document.createElement('button');
+    btn.className = 'danger sm';
+    btn.textContent = '删';
+    btn.onclick = () => deletePlayer(k, p.name ?? k);
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
+  curCol = 'player';
+  document.getElementById('cur-key').textContent = '玩家管理';
+  status(\`共 \${keys.length} 个玩家\`);
+}
+
+async function deletePlayer(playerId, name) {
+  if (!confirm(\`确定删除玩家「\${name}」及其所有进度？\`)) return;
+  const r = await api('DELETE', \`/ops/player/\${playerId}?confirm=yes\`);
+  if (r.ok) { status(\`已删除玩家 \${name}（村庄 \${r.villageId}）\`); refreshAll(); showPlayers(); }
+  else status('删除失败: ' + (r.reason ?? JSON.stringify(r)), false);
+}
+
 refreshAll();
 </script>
 </body>
 </html>`;
 
-export function registerGmRoutes(fastify: FastifyInstance, store: Store): void {
+export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp: GameApp): void {
   const token = process.env.GM_TOKEN?.trim() || null;
 
   const auth = (req: FastifyRequest, reply: FastifyReply): boolean => {
@@ -284,6 +343,44 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store): void {
     }
     store.clear(collection);
     void reply.send({ ok: true, collection, cleared: true });
+  });
+
+  // POST /gm/ops/reset — 刷档（需 ?confirm=yes，body: {mode:"season"|"respawn"|"wipe"}）
+  fastify.post('/gm/ops/reset', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const query = req.query as Record<string, string>;
+    if (query.confirm !== 'yes') {
+      void reply.code(400).send({ ok: false, reason: '危险操作：需加 ?confirm=yes 参数' });
+      return;
+    }
+    const { mode } = (req.body ?? {}) as { mode?: string };
+    if (mode !== 'season' && mode !== 'respawn' && mode !== 'wipe') {
+      void reply.code(400).send({ ok: false, reason: 'mode 必须为 season | respawn | wipe' });
+      return;
+    }
+    const opts =
+      mode === 'wipe'
+        ? { keepAccounts: false }
+        : { keepAccounts: true, reassignSpots: mode === 'respawn' };
+    const { accounts } = gameApp.resetWorld(opts);
+    void reply.send({ ok: true, mode, accounts });
+  });
+
+  // DELETE /gm/ops/player/:playerId — 删除单个玩家账号及所有进度（需 ?confirm=yes）
+  fastify.delete('/gm/ops/player/:playerId', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const query = req.query as Record<string, string>;
+    if (query.confirm !== 'yes') {
+      void reply.code(400).send({ ok: false, reason: '危险操作：需加 ?confirm=yes 参数' });
+      return;
+    }
+    const { playerId } = req.params as { playerId: string };
+    const result = gameApp.deletePlayer(playerId);
+    if (!result) {
+      void reply.code(404).send({ ok: false, reason: 'player_not_found', playerId });
+      return;
+    }
+    void reply.send({ ok: true, playerId, villageId: result.villageId });
   });
 }
 
