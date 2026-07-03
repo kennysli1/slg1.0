@@ -1,12 +1,12 @@
 ﻿id,code,name,icon,costWood,costClay,costIron,costCrop,costGrowth,timeBase,timeGrowth,maxLevel,requires
 #数字ID(跨表引用用),代码标识(英文,勿改),显示名,图标基名(渲染时拼 /art/+基名+.png),木材基价,泥土基价,铁矿基价,粮食基价,造价增长率/级,建造基础秒数,时间增长率/级,最高等级,前置(用建筑数字ID:等级,如 4:3,多个用|)
-1,main,主基地,bld_main,40,35,30,20,1.28,15,1.6,20,
-2,warehouse,仓库,bld_warehouse,40,35,30,20,1.28,15,1.6,10,
-3,granary,粮仓,bld_granary,40,35,30,20,1.28,15,1.6,10,
-4,barracks,兵营,bld_barracks,40,35,30,20,1.28,15,1.6,10,1:1
-5,stable,马厩,bld_stable,40,35,30,20,1.28,15,1.6,10,4:3
-6,workshop,兵工厂,bld_workshop,40,35,30,20,1.28,15,1.6,10,4:5
-7,academy,学院,bld_academy,40,35,30,20,1.28,15,1.6,10,4:3
-8,smithy,铁匠铺,bld_smithy,40,35,30,20,1.28,15,1.6,10,7:1
-9,wall,城墙,bld_wall,40,35,30,20,1.28,15,1.6,10,
-10,rallypoint,集结点,bld_rallypoint,40,35,30,20,1.28,15,1.6,10,
+1,main,主基地,bld_main,4,3.5,3,2,1.28,1.5,1.6,20,
+2,warehouse,仓库,bld_warehouse,4,3.5,3,2,1.28,1.5,1.6,10,
+3,granary,粮仓,bld_granary,4,3.5,3,2,1.28,1.5,1.6,10,
+4,barracks,兵营,bld_barracks,4,3.5,3,2,1.28,1.5,1.6,10,1:1
+5,stable,马厩,bld_stable,4,3.5,3,2,1.28,1.5,1.6,10,4:3
+6,workshop,兵工厂,bld_workshop,4,3.5,3,2,1.28,1.5,1.6,10,4:5
+7,academy,学院,bld_academy,4,3.5,3,2,1.28,1.5,1.6,10,4:3
+8,smithy,铁匠铺,bld_smithy,4,3.5,3,2,1.28,1.5,1.6,10,7:1
+9,wall,城墙,bld_wall,4,3.5,3,2,1.28,1.5,1.6,10,
+10,rallypoint,集结点,bld_rallypoint,4,3.5,3,2,1.28,1.5,1.6,10,

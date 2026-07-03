@@ -69,6 +69,7 @@ export class EconomyModule {
     this.commands.register('economy.GetLootable', (c) => this.getLootable(c));
     this.commands.register('economy.TakeLoot', (c) => this.takeLoot(c));
     this.commands.register('economy.SetUpkeep', (c) => this.setUpkeep(c));
+    this.commands.register('economy.SetBaseRate', (c) => this.setBaseRate(c));
 
     this.bus.on('building.Upgraded', (evt) => {
       const { villageId, kind, level } = evt.payload as { villageId: string; kind: string; level: number };
@@ -229,18 +230,30 @@ export class EconomyModule {
     return { ok: true, payload: {} };
   }
 
+  /** Building 上报某资源类型的全村总产率（每小时），Economy 换算后更新 baseRate。 */
+  private setBaseRate(cmd: Command): CommandResult {
+    const { villageId, resource, ratePerHour } = cmd.payload as {
+      villageId: string;
+      resource: string;
+      ratePerHour: number;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s);
+    if (RESOURCE_TYPES.includes(resource as ResourceType)) {
+      s.baseRate[resource as ResourceType] = ratePerHour / 3600;
+    }
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
   // ---- Event 反应 ----
   private onBuildingUpgraded(villageId: string, kind: string, level: number): void {
     const s = this.load(villageId);
     if (!s) return;
     this.settle(s);
-    // 资源田 → 用 config 里该田的产出公式更新基础产率
-    const field = this.config.fields[kind];
-    if (field) {
-      const t = field.resource as ResourceType;
-      // 产量(每小时) = prodBase × prodGrowth^level，换算每秒
-      s.baseRate[t] = (field.prodBase * Math.pow(field.prodGrowth, level)) / 3600;
-    } else if (kind === 'warehouse') {
+    // 资源田产率不在此处理，由 Building 通过 SetBaseRate Command 上报全村总产率
+    if (kind === 'warehouse') {
       const c = this.config.constants;
       const cap = c.storageBase * (1 + level * c.storageGrowthPerLevel);
       s.capacity.wood = cap;

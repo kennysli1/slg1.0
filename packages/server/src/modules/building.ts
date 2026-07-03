@@ -225,6 +225,8 @@ export class BuildingModule {
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpgraded(villageId, field.type, toLevel);
     this.reportPopulation(s);
+    const def = this.config.fields[field.type];
+    if (def) this.reportFieldRate(s, def.resource);
   }
 
   private async emitUpgraded(villageId: string, kind: string, level: number): Promise<void> {
@@ -246,6 +248,21 @@ export class BuildingModule {
       name: 'economy.SetUpkeep',
       from: BuildingModule.NAME,
       payload: { villageId: s.villageId, source: 'population', cropPerHour: pop },
+    });
+  }
+
+  /** 计算全村某类资源的总产率(每小时)并上报 Economy。 */
+  private reportFieldRate(s: BuildingState, resource: string): void {
+    let ratePerHour = 0;
+    for (const f of s.fields) {
+      const def = this.config.fields[f.type];
+      if (!def || def.resource !== resource) continue;
+      ratePerHour += def.prodBase * Math.pow(def.prodGrowth, f.level);
+    }
+    void this.commands.send({
+      name: 'economy.SetBaseRate',
+      from: BuildingModule.NAME,
+      payload: { villageId: s.villageId, resource, ratePerHour },
     });
   }
 }

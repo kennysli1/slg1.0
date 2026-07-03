@@ -111,8 +111,8 @@ export function renderMap(): string {
   });
 
   const svg = `<svg class="map-svg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="0 0 ${width.toFixed(0)} ${height.toFixed(0)}" width="100%" preserveAspectRatio="xMidYMid meet">
-      <g class="layer-paths">${paths}</g>
       <g class="layer-hexes">${cells}</g>
+      <g class="layer-paths">${paths}</g>
       <g class="layer-markers">${markers}</g>
     </svg>`;
 
