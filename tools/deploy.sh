@@ -6,7 +6,7 @@ set -euo pipefail
 
 KEY=~/.ssh/kennysgame.pem
 HOST=ubuntu@101.43.64.22
-REMOTE='~/travian2'
+REMOTE='~/kow'
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> 打包源码"
@@ -19,6 +19,6 @@ scp -i "$KEY" -o StrictHostKeyChecking=no /tmp/deploy.tgz "$HOST:/tmp/deploy.tgz
 
 echo "==> 解压 + 构建 + 重启"
 ssh -i "$KEY" -o StrictHostKeyChecking=no "$HOST" \
-  "cd $REMOTE && tar xzf /tmp/deploy.tgz && npm run build 2>&1 | tail -4 && pm2 restart travian2 2>&1 | tail -2 && echo DEPLOYED"
+  "cd $REMOTE && tar xzf /tmp/deploy.tgz && npm run build 2>&1 | tail -4 && pm2 restart kow 2>&1 | tail -2 && echo DEPLOYED"
 
 echo "==> 完成，访问 http://101.43.64.22:8080"

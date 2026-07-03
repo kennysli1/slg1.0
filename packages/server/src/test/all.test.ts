@@ -5,6 +5,7 @@
  * 新增测试文件时在此加一行 import 即可。
  */
 import './full-loop.test.js';
+import './building.test.js';
 import './multiplayer-pvp.test.js';
 import './combat.test.js';
 import './hex.test.js';

@@ -3,26 +3,50 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
-import type { GameConfig } from '../infra/config.js';
+import type { GameConfig, Zone, BuildingDef } from '../infra/config.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
- * 领域模块 · Building（资源田 + 中心建筑科技树）
- * 对应设计文档 02_系统清单B组、1_原版拆解/02资源建筑
+ * 领域模块 · Building（三区建筑系统：城镇中心 + 城内 + 城外）
+ * 对应设计文档 11_建筑系统重做.md / 12_建筑系统重构架构规划.md
  *
- * 职责：每村资源田(18槽)与中心建筑(等级/建造队列)的 owner。
- * 数据来自 GameConfig（config/fields.csv、buildings.csv）——改 CSV 即改游戏。
- * 不直接改资源——经 Economy.TrySpend 扣费；升级完成广播 building.Upgraded。
+ * 职责：每村"建筑布局"这一块状态的唯一 owner。
+ *   · placed[]：所有已建实例（含 center/inner/outer；资源田也是 zone=outer 的实例）。
+ *   · queue[] ：多条并行建造队列（容量派生自城镇中心等级）。
+ *   · 城内/城外槽位数、队列容量 = 从城镇中心等级派生的快照（不落库，铁律#4）。
+ *
+ * 数据来自 GameConfig（config/buildings.csv、town_center_slots.csv）——改 CSV 即改游戏。
+ * 不直接改资源——经 economy.TrySpend 扣费；派生结果经 economy.SetBaseRate/SetUpkeep/SetCapacity 上报。
+ * 城墙防御经 building.GetDefenseSnapshot 对外给快照（不暴露内部状态，铁律#1/#4）。
  */
+
+interface PlacedBuilding {
+  slotId: string; // 村内唯一：'center' / 'inner-0' / 'outer-3'
+  zone: Zone;
+  kind: string; // 建筑 code（含资源田）
+  level: number; // 0=建造中(占位)，>=1=已建成
+}
+
+interface QueueItem {
+  slotId: string;
+  kind: string;
+  toLevel: number; // 新建=1，升级=当前+1
+  isNew: boolean; // true=新建(完成发 Built)，false=升级(完成发 Upgraded)
+  startAt: number;
+  finishAt: number;
+  taskId: string;
+}
 
 interface BuildingState {
   villageId: string;
-  buildings: Record<string, number>;
-  fields: { type: string; level: number }[];
-  queue: { target: string; fieldIndex?: number; toLevel: number; startAt: number; finishAt: number; taskId: string } | null;
+  tribe: string;
+  placed: PlacedBuilding[];
+  queue: QueueItem[];
 }
 
 const COLLECTION = 'building';
+const CENTER_KIND = 'main';
+const CENTER_SLOT = 'center';
 
 export class BuildingModule {
   static readonly NAME = 'building';
@@ -30,11 +54,13 @@ export class BuildingModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'building',
     publicActions: {
-      GetVillage: { command: 'building.GetState', ownVillage: true, needAuth: true },
-      UpgradeBuilding: { command: 'building.UpgradeBuilding', ownVillage: true, needAuth: true },
-      UpgradeField: { command: 'building.UpgradeField', ownVillage: true, needAuth: true },
+      GetVillageLayout: { command: 'building.GetLayout', ownVillage: true, needAuth: true },
+      GetBuildOptions: { command: 'building.GetBuildOptions', ownVillage: true, needAuth: true },
+      Build: { command: 'building.Build', ownVillage: true, needAuth: true },
+      UpgradeBuilding: { command: 'building.Upgrade', ownVillage: true, needAuth: true },
     },
     eventPushMap: {
+      'building.Built': 'BuildingBuilt',
       'building.Upgraded': 'BuildingUpgraded',
     },
   };
@@ -49,201 +75,337 @@ export class BuildingModule {
   ) {}
 
   init(): void {
-    this.commands.register('building.GetState', (c) => this.getState(c));
-    this.commands.register('building.UpgradeBuilding', (c) => this.upgradeBuilding(c));
-    this.commands.register('building.UpgradeField', (c) => this.upgradeField(c));
+    this.commands.register('building.GetLayout', (c) => this.getLayout(c));
+    this.commands.register('building.GetBuildOptions', (c) => this.getBuildOptions(c));
+    this.commands.register('building.Build', (c) => this.build(c));
+    this.commands.register('building.Upgrade', (c) => this.upgrade(c));
+    this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
   }
 
-  /** 重启恢复：为所有未完成的建造队列重新登记定时任务（过期则立即触发）。 */
+  /** 重启恢复：为每条未完成队列重新登记定时任务（过期则立即触发）。 */
   resume(): void {
     for (const s of this.store.all<BuildingState>(COLLECTION)) {
-      if (!s.queue) continue;
-      const delay = Math.max(0, s.queue.finishAt - this.now());
-      const q = s.queue;
-      if (q.fieldIndex !== undefined) {
-        q.taskId = this.scheduler.schedule(delay, () => this.completeField(s.villageId, q.fieldIndex!, q.toLevel));
-      } else {
-        q.taskId = this.scheduler.schedule(delay, () => this.completeBuilding(s.villageId, q.target, q.toLevel));
+      if (!s.queue?.length) continue;
+      for (const q of s.queue) {
+        const delay = Math.max(0, q.finishAt - this.now());
+        q.taskId = this.scheduler.schedule(delay, () => this.complete(s.villageId, q.slotId));
       }
       this.store.set(COLLECTION, s.villageId, s);
     }
   }
 
   createVillage(villageId: string, tribe = 'romans'): void {
-    // 开局布局来自 village_templates.csv（按部族）；缺该部族模板时回退罗马，再缺则用默认 18 田
     const tpl = this.config.villageTemplates[tribe] ?? this.config.villageTemplates['romans'];
-    const layout = tpl?.fieldLayout?.length
-      ? tpl.fieldLayout
-      : [
-          ...Array(4).fill('woodcutter'),
-          ...Array(4).fill('claypit'),
-          ...Array(4).fill('ironmine'),
-          ...Array(6).fill('cropland'),
-        ];
-    const buildings = tpl?.startBuildings && Object.keys(tpl.startBuildings).length
-      ? { ...tpl.startBuildings }
-      : { main: 1, rallypoint: 1 };
-    const s: BuildingState = {
-      villageId,
-      buildings,
-      fields: layout.map((type) => ({ type, level: 0 })),
-      queue: null,
-    };
+    const startPlaced = tpl?.startPlaced && Object.keys(tpl.startPlaced).length
+      ? tpl.startPlaced
+      : { main: 1, rallypoint: 1, woodcutter: 1, claypit: 1, ironmine: 1, cropland: 1 };
+
+    // 按 zone 分配 slotId：center 固定 'center'，其余按区顺序编号
+    const placed: PlacedBuilding[] = [];
+    const idx: Record<Zone, number> = { center: 0, inner: 0, outer: 0 };
+    for (const [kind, level] of Object.entries(startPlaced)) {
+      const def = this.config.buildings[kind];
+      if (!def) continue;
+      const slotId = def.zone === 'center' ? CENTER_SLOT : `${def.zone}-${idx[def.zone]++}`;
+      placed.push({ slotId, zone: def.zone, kind, level });
+    }
+    const s: BuildingState = { villageId, tribe, placed, queue: [] };
     this.store.set(COLLECTION, villageId, s);
+
+    // 开局即上报派生（人口/容量/各资源田产率），让 economy 初值正确
     this.reportPopulation(s);
+    this.reportCapacity(s);
+    for (const r of ['wood', 'clay', 'iron', 'crop']) this.reportFieldRate(s, r);
   }
 
   private load(villageId: string): BuildingState | undefined {
     return this.store.get<BuildingState>(COLLECTION, villageId);
   }
 
-  private getState(cmd: Command): CommandResult {
-    const s = this.load((cmd.payload as any).villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    return {
-      ok: true,
-      payload: {
-        buildings: { ...s.buildings },
-        fields: s.fields.map((f) => {
-          const def = this.config.fields[f.type];
-          const next = f.level + 1;
-          return {
-            ...f,
-            name: def.name,
-            icon: def.icon, // 图标基名（前端拼 /art/+基名+.png）
-            maxLevel: def.maxLevel,
-            nextCost: next <= def.maxLevel ? def.cost(next) : null,
-            nextTimeSec: next <= def.maxLevel ? this.buildTime(s, def.timeSec(next)) : null,
-          };
-        }),
-        queue: s.queue,
-        defs: this.publicDefs(s),
-      },
-    };
+  // ---- 派生（全部在内部算，对外只给快照，铁律#4）----
+
+  private center(s: BuildingState): PlacedBuilding | undefined {
+    return s.placed.find((p) => p.slotId === CENTER_SLOT);
   }
 
-  private publicDefs(s: BuildingState) {
-    const out: Record<string, any> = {};
-    for (const [kind, def] of Object.entries(this.config.buildings)) {
-      const lv = s.buildings[kind] ?? 0;
-      out[kind] = {
-        name: def.name,
-        icon: def.icon,
-        level: lv,
-        maxLevel: def.maxLevel,
-        nextCost: lv < def.maxLevel ? def.cost(lv + 1) : null,
-        nextTimeSec: lv < def.maxLevel ? this.buildTime(s, def.timeSec(lv + 1)) : null,
-        unlocked: this.meetsRequires(s, def.requires),
-        requires: def.requires,
-      };
+  /** 城镇中心等级（缺失回退 1）。 */
+  private tcLevel(s: BuildingState): number {
+    return this.center(s)?.level ?? 1;
+  }
+
+  /** 城镇中心某等级的槽位配额（就近取：超表则用最高级）。 */
+  private slotTier(tcLevel: number): { inner: number; outer: number; queue: number } {
+    const tiers = this.config.townCenterSlots;
+    if (tiers[tcLevel]) return tiers[tcLevel];
+    // 缺级回退：找 <=tcLevel 的最大已定义级
+    let best = tiers[1] ?? { inner: 0, outer: 0, queue: 1 };
+    for (const [lvStr, t] of Object.entries(tiers)) {
+      const lv = Number(lvStr);
+      if (lv <= tcLevel) best = t;
     }
-    return out;
+    return best;
+  }
+
+  private zoneSlots(s: BuildingState, zone: Zone): number {
+    const tier = this.slotTier(this.tcLevel(s));
+    return zone === 'inner' ? tier.inner : zone === 'outer' ? tier.outer : 1;
+  }
+
+  private queueCapacity(s: BuildingState): number {
+    return this.slotTier(this.tcLevel(s)).queue;
+  }
+
+  private zoneUsed(s: BuildingState, zone: Zone): number {
+    return s.placed.filter((p) => p.zone === zone).length;
+  }
+
+  private freeSlots(s: BuildingState, zone: Zone): number {
+    return Math.max(0, this.zoneSlots(s, zone) - this.zoneUsed(s, zone));
+  }
+
+  /** 在某区分配一个未占用的 slotId（复用被拆除释放的编号）。 */
+  private allocSlot(s: BuildingState, zone: Zone): string {
+    const used = new Set(s.placed.filter((p) => p.zone === zone).map((p) => p.slotId));
+    for (let i = 0; ; i++) {
+      const id = `${zone}-${i}`;
+      if (!used.has(id)) return id;
+    }
   }
 
   private meetsRequires(s: BuildingState, requires: { kind: string; level: number }[]): boolean {
-    return requires.every((r) => (s.buildings[r.kind] ?? 0) >= r.level);
-  }
-
-  private async upgradeBuilding(cmd: Command): Promise<CommandResult> {
-    const { villageId, kind } = cmd.payload as { villageId: string; kind: string };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    const def = this.config.buildings[kind];
-    if (!def) return { ok: false, payload: {}, reason: `unknown_building:${kind}` };
-    if (s.queue) return { ok: false, payload: {}, reason: 'queue_busy' };
-    if (!this.meetsRequires(s, def.requires)) return { ok: false, payload: {}, reason: 'requires_not_met' };
-    const toLevel = (s.buildings[kind] ?? 0) + 1;
-    if (toLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'max_level' };
-
-    const spend = await this.commands.send({
-      name: 'economy.TrySpend',
-      from: BuildingModule.NAME,
-      payload: { villageId, cost: def.cost(toLevel) },
+    return requires.every((r) => {
+      const p = s.placed.find((x) => x.kind === r.kind && x.level >= r.level);
+      return !!p;
     });
-    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
-
-    const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
-    const startAt = this.now();
-    const finishAt = startAt + durMs;
-    const taskId = this.scheduler.schedule(durMs, () => this.completeBuilding(villageId, kind, toLevel));
-    s.queue = { target: kind, toLevel, startAt, finishAt, taskId };
-    this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { kind, toLevel, finishAt } };
   }
 
-  private async upgradeField(cmd: Command): Promise<CommandResult> {
-    const { villageId, fieldIndex } = cmd.payload as { villageId: string; fieldIndex: number };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    const field = s.fields[fieldIndex];
-    if (!field) return { ok: false, payload: {}, reason: 'bad_field' };
-    if (s.queue) return { ok: false, payload: {}, reason: 'queue_busy' };
-    const def = this.config.fields[field.type];
-    const toLevel = field.level + 1;
-    if (toLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'max_level' };
-
-    const spend = await this.commands.send({
-      name: 'economy.TrySpend',
-      from: BuildingModule.NAME,
-      payload: { villageId, cost: def.cost(toLevel) },
-    });
-    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
-
-    const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
-    const startAt = this.now();
-    const finishAt = startAt + durMs;
-    const taskId = this.scheduler.schedule(durMs, () => this.completeField(villageId, fieldIndex, toLevel));
-    s.queue = { target: field.type, fieldIndex, toLevel, startAt, finishAt, taskId };
-    this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { fieldIndex, type: field.type, toLevel, finishAt } };
+  /** 前置未满足时的文案（如"需城镇中心 5 级"）。 */
+  private lockReason(s: BuildingState, requires: { kind: string; level: number }[]): string | undefined {
+    const missing = requires.filter((r) => !s.placed.some((x) => x.kind === r.kind && x.level >= r.level));
+    if (!missing.length) return undefined;
+    return '需' + missing.map((r) => `${this.config.buildings[r.kind]?.name ?? r.kind} ${r.level} 级`).join('、');
   }
 
-  /** 主基地降低建造时间。 */
+  /** 城镇中心降低建造时间。 */
   private buildTime(s: BuildingState, baseSec: number): number {
-    const mainLv = s.buildings.main ?? 1;
+    const mainLv = this.tcLevel(s);
     const c = this.config.constants;
     const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
     return Math.max(1, Math.round(baseSec * speedup));
   }
 
-  private async completeBuilding(villageId: string, kind: string, toLevel: number): Promise<void> {
-    const s = this.load(villageId);
-    if (!s) return;
-    s.buildings[kind] = toLevel;
-    s.queue = null;
-    this.store.set(COLLECTION, villageId, s);
-    await this.emitUpgraded(villageId, kind, toLevel);
-    this.reportPopulation(s);
+  /** 资源田某等级产量（level 0=未建成=0；>=1 用 base×growth^(lv-1)）。 */
+  private fieldRate(def: BuildingDef, level: number): number {
+    if (level < 1 || def.prodBase === undefined) return 0;
+    return def.prodBase * Math.pow(def.prodGrowth ?? 1.3, level - 1);
   }
 
-  private async completeField(villageId: string, fieldIndex: number, toLevel: number): Promise<void> {
-    const s = this.load(villageId);
-    if (!s) return;
-    const field = s.fields[fieldIndex];
-    field.level = toLevel;
-    s.queue = null;
-    this.store.set(COLLECTION, villageId, s);
-    await this.emitUpgraded(villageId, field.type, toLevel);
-    this.reportPopulation(s);
-    const def = this.config.fields[field.type];
-    if (def) this.reportFieldRate(s, def.resource);
+  private hasPendingOp(s: BuildingState, slotId: string): boolean {
+    return s.queue.some((q) => q.slotId === slotId);
   }
 
-  private async emitUpgraded(villageId: string, kind: string, level: number): Promise<void> {
+  // ---- Commands ----
+
+  private getLayout(cmd: Command): CommandResult {
+    const s = this.load((cmd.payload as any).villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    const centerP = this.center(s);
+    const centerDef = this.config.buildings[CENTER_KIND];
+    const tcLv = centerP?.level ?? 1;
+    const centerNext = tcLv < (centerDef?.maxLevel ?? 20);
+    return {
+      ok: true,
+      payload: {
+        townCenter: {
+          slotId: CENTER_SLOT,
+          kind: CENTER_KIND,
+          name: centerDef?.name ?? '城镇中心',
+          icon: centerDef?.icon ?? 'bld_main',
+          level: tcLv,
+          maxLevel: centerDef?.maxLevel ?? 20,
+          nextCost: centerNext ? centerDef!.cost(tcLv + 1) : null,
+          nextTimeSec: centerNext ? this.buildTime(s, centerDef!.timeSec(tcLv + 1)) : null,
+          building: this.hasPendingOp(s, CENTER_SLOT),
+        },
+        zones: {
+          inner: this.zoneView(s, 'inner'),
+          outer: this.zoneView(s, 'outer'),
+        },
+        queue: {
+          capacity: this.queueCapacity(s),
+          items: s.queue
+            .slice()
+            .sort((a, b) => a.finishAt - b.finishAt)
+            .map((q) => ({
+              slotId: q.slotId,
+              kind: q.kind,
+              name: this.config.buildings[q.kind]?.name ?? q.kind,
+              toLevel: q.toLevel,
+              isNew: q.isNew,
+              startAt: q.startAt,
+              finishAt: q.finishAt,
+            })),
+        },
+      },
+    };
+  }
+
+  private zoneView(s: BuildingState, zone: Zone) {
+    const placed = s.placed
+      .filter((p) => p.zone === zone)
+      .map((p) => {
+        const def = this.config.buildings[p.kind];
+        const constructing = p.level < 1;
+        const canUp = !constructing && p.level < (def?.maxLevel ?? 1);
+        return {
+          slotId: p.slotId,
+          kind: p.kind,
+          name: def?.name ?? p.kind,
+          icon: def?.icon ?? 'bld_main',
+          level: p.level,
+          maxLevel: def?.maxLevel ?? 1,
+          building: constructing || this.hasPendingOp(s, p.slotId),
+          nextCost: canUp ? def!.cost(p.level + 1) : null,
+          nextTimeSec: canUp ? this.buildTime(s, def!.timeSec(p.level + 1)) : null,
+          producing: def?.resource
+            ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, p.level)) }
+            : undefined,
+        };
+      });
+    return { slots: this.zoneSlots(s, zone), freeSlots: this.freeSlots(s, zone), placed };
+  }
+
+  /** 侧边栏：某区当前可建建筑清单（含灰显理由）。 */
+  private getBuildOptions(cmd: Command): CommandResult {
+    const { villageId, zone } = cmd.payload as { villageId: string; zone: Zone };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
+
+    const options = Object.values(this.config.buildings)
+      .filter((def) => def.zone === zone)
+      .map((def) => ({
+        kind: def.kind,
+        name: def.name,
+        icon: def.icon,
+        cost: def.cost(1),
+        timeSec: this.buildTime(s, def.timeSec(1)),
+        unlocked: this.meetsRequires(s, def.requires),
+        requires: def.requires,
+        lockReason: this.lockReason(s, def.requires),
+        producing: def.resource ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, 1)) } : undefined,
+      }));
+    return { ok: true, payload: { zone, freeSlots: this.freeSlots(s, zone), options } };
+  }
+
+  /** 点空槽建造新建筑。 */
+  private async build(cmd: Command): Promise<CommandResult> {
+    const { villageId, zone, kind } = cmd.payload as { villageId: string; zone: Zone; kind: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const def = this.config.buildings[kind];
+    if (!def) return { ok: false, payload: {}, reason: `unknown_building:${kind}` };
+    if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
+    if (def.zone !== zone) return { ok: false, payload: {}, reason: 'zone_mismatch' };
+    if (this.freeSlots(s, zone) <= 0) return { ok: false, payload: {}, reason: 'no_free_slot' };
+    if (!this.meetsRequires(s, def.requires)) return { ok: false, payload: {}, reason: 'requires_not_met' };
+    if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
+
+    const spend = await this.commands.send({
+      name: 'economy.TrySpend',
+      from: BuildingModule.NAME,
+      payload: { villageId, cost: def.cost(1) },
+    });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+
+    const slotId = this.allocSlot(s, zone);
+    s.placed.push({ slotId, zone, kind, level: 0 }); // level 0 = 建造中占位
+    const durMs = this.buildTime(s, def.timeSec(1)) * 1000;
+    const startAt = this.now();
+    const finishAt = startAt + durMs;
+    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
+    s.queue.push({ slotId, kind, toLevel: 1, isNew: true, startAt, finishAt, taskId });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { slotId, kind, finishAt } };
+  }
+
+  /** 点已建建筑升级（含资源田、城镇中心，用 slotId 定位）。 */
+  private async upgrade(cmd: Command): Promise<CommandResult> {
+    const { villageId, slotId } = cmd.payload as { villageId: string; slotId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const p = s.placed.find((x) => x.slotId === slotId);
+    if (!p) return { ok: false, payload: {}, reason: 'slot_empty' };
+    if (p.level < 1) return { ok: false, payload: {}, reason: 'still_constructing' };
+    if (this.hasPendingOp(s, slotId)) return { ok: false, payload: {}, reason: 'slot_busy' };
+    const def = this.config.buildings[p.kind];
+    if (!def) return { ok: false, payload: {}, reason: `unknown_building:${p.kind}` };
+    const toLevel = p.level + 1;
+    if (toLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'max_level' };
+    if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
+
+    const spend = await this.commands.send({
+      name: 'economy.TrySpend',
+      from: BuildingModule.NAME,
+      payload: { villageId, cost: def.cost(toLevel) },
+    });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+
+    const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
+    const startAt = this.now();
+    const finishAt = startAt + durMs;
+    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
+    s.queue.push({ slotId, kind: p.kind, toLevel, isNew: false, startAt, finishAt, taskId });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { slotId, toLevel, finishAt } };
+  }
+
+  /** 队列项完成：落级、移出队列、广播、刷新派生。 */
+  private async complete(villageId: string, slotId: string): Promise<void> {
+    const s = this.load(villageId);
+    if (!s) return;
+    const qi = s.queue.find((q) => q.slotId === slotId);
+    if (!qi) return;
+    const p = s.placed.find((x) => x.slotId === slotId);
+    if (p) p.level = qi.toLevel;
+    s.queue = s.queue.filter((q) => q !== qi);
+    this.store.set(COLLECTION, villageId, s);
+
+    const kind = qi.kind;
+    await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
+
+    // 刷新派生：人口/容量始终；资源田刷该资源产率
+    this.reportPopulation(s);
+    this.reportCapacity(s);
+    const def = this.config.buildings[kind];
+    if (def?.resource) this.reportFieldRate(s, def.resource);
+  }
+
+  private getDefenseSnapshot(cmd: Command): CommandResult {
+    const s = this.load((cmd.payload as any).villageId);
+    if (!s) return { ok: true, payload: { wallLevel: 0 } };
+    let wallLevel = 0;
+    for (const p of s.placed) if (p.kind === 'wall' && p.level > wallLevel) wallLevel = p.level;
+    return { ok: true, payload: { wallLevel } };
+  }
+
+  private async emit(name: string, villageId: string, slotId: string, kind: string, level: number): Promise<void> {
     const evt: DomainEvent = {
-      name: 'building.Upgraded',
+      name,
       source: BuildingModule.NAME,
       ts: this.now(),
-      payload: { villageId, kind, level },
+      payload: { villageId, slotId, kind, level },
     };
     await this.bus.emit(evt);
   }
 
-  /** 计算全村人口(=crop消耗/小时)并上报 Economy。 */
+  // ---- 派生聚合上报（对内口径，铁律#4）----
+
+  /** 全村人口(=crop消耗/小时)上报 Economy。 */
   private reportPopulation(s: BuildingState): void {
     let pop = 0;
-    for (const lv of Object.values(s.buildings)) pop += sumPop(lv);
-    for (const f of s.fields) pop += sumPop(f.level);
+    for (const p of s.placed) pop += sumPop(p.level);
     void this.commands.send({
       name: 'economy.SetUpkeep',
       from: BuildingModule.NAME,
@@ -251,18 +413,39 @@ export class BuildingModule {
     });
   }
 
-  /** 计算全村某类资源的总产率(每小时)并上报 Economy。 */
+  /** 全村某类资源的资源田总产率(每小时)上报 Economy。 */
   private reportFieldRate(s: BuildingState, resource: string): void {
     let ratePerHour = 0;
-    for (const f of s.fields) {
-      const def = this.config.fields[f.type];
+    for (const p of s.placed) {
+      const def = this.config.buildings[p.kind];
       if (!def || def.resource !== resource) continue;
-      ratePerHour += def.prodBase * Math.pow(def.prodGrowth, f.level);
+      ratePerHour += this.fieldRate(def, p.level);
     }
     void this.commands.send({
       name: 'economy.SetBaseRate',
       from: BuildingModule.NAME,
       payload: { villageId: s.villageId, resource, ratePerHour },
+    });
+  }
+
+  /** 全村仓储容量上报 Economy（仓库→木/泥/铁，粮仓→粮；多座叠加等级）。 */
+  private reportCapacity(s: BuildingState): void {
+    const c = this.config.constants;
+    let warehouseLv = 0;
+    let granaryLv = 0;
+    for (const p of s.placed) {
+      if (p.kind === 'warehouse') warehouseLv += p.level;
+      else if (p.kind === 'granary') granaryLv += p.level;
+    }
+    const cap = (totalLv: number) => c.storageBase * (1 + totalLv * c.storageGrowthPerLevel);
+    const solid = cap(warehouseLv);
+    void this.commands.send({
+      name: 'economy.SetCapacity',
+      from: BuildingModule.NAME,
+      payload: {
+        villageId: s.villageId,
+        capacity: { wood: solid, clay: solid, iron: solid, crop: cap(granaryLv) },
+      },
     });
   }
 }

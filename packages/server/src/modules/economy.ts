@@ -73,11 +73,7 @@ export class EconomyModule {
     this.commands.register('economy.TakeLoot', (c) => this.takeLoot(c));
     this.commands.register('economy.SetUpkeep', (c) => this.setUpkeep(c));
     this.commands.register('economy.SetBaseRate', (c) => this.setBaseRate(c));
-
-    this.bus.on('building.Upgraded', (evt) => {
-      const { villageId, kind, level } = evt.payload as { villageId: string; kind: string; level: number };
-      this.onBuildingUpgraded(villageId, kind, level);
-    });
+    this.commands.register('economy.SetCapacity', (c) => this.setCapacity(c));
   }
 
   createVillage(villageId: string): void {
@@ -252,22 +248,18 @@ export class EconomyModule {
     return { ok: true, payload: {} };
   }
 
-  // ---- Event 反应 ----
-  private onBuildingUpgraded(villageId: string, kind: string, level: number): void {
+  /** Building 上报全村仓储总容量（已算好，Economy 只存不算，铁律#4）。 */
+  private setCapacity(cmd: Command): CommandResult {
+    const { villageId, capacity } = cmd.payload as { villageId: string; capacity: Partial<ResMap> };
     const s = this.load(villageId);
-    if (!s) return;
-    this.settle(s);
-    // 资源田产率不在此处理，由 Building 通过 SetBaseRate Command 上报全村总产率
-    if (kind === 'warehouse') {
-      const c = this.config.constants;
-      const cap = c.storageBase * (1 + level * c.storageGrowthPerLevel);
-      s.capacity.wood = cap;
-      s.capacity.clay = cap;
-      s.capacity.iron = cap;
-    } else if (kind === 'granary') {
-      const c = this.config.constants;
-      s.capacity.crop = c.storageBase * (1 + level * c.storageGrowthPerLevel);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s); // 改容量前先按旧容量结算（避免溢出判定错位）
+    for (const t of RESOURCE_TYPES) {
+      if (capacity[t] !== undefined) s.capacity[t] = capacity[t]!;
     }
+    // 容量下调后夹住存量
+    for (const t of RESOURCE_TYPES) s.resources[t] = Math.min(s.resources[t], s.capacity[t]);
     this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
   }
 }

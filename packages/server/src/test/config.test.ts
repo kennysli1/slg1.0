@@ -21,13 +21,25 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.mapViewRadius, 6, '视野半径');
 });
 
-test('开局模板：village_templates.csv 展开田地布局/初始建筑', () => {
+test('开局模板：village_templates.csv 展开预置建筑', () => {
   const t = loadGameConfig(configDir).villageTemplates['romans'];
   assert.ok(t, '应有罗马模板');
-  assert.equal(t.fieldLayout.length, 18, '18 块田');
-  assert.equal(t.fieldLayout.filter((f) => f === 'cropland').length, 6, '6 块农田');
-  assert.equal(t.startBuildings.main, 1, '主基地 1 级');
-  assert.equal(t.startBuildings.rallypoint, 1, '集结点 1 级');
+  assert.equal(t.startPlaced.main, 1, '城镇中心 1 级');
+  assert.equal(t.startPlaced.rallypoint, 1, '集结点 1 级');
+  assert.equal(t.startPlaced.woodcutter, 1, '伐木场 1 级');
+});
+
+test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.equal(cfg.buildings['main'].zone, 'center', '城镇中心归 center');
+  assert.equal(cfg.buildings['warehouse'].zone, 'inner', '仓库归 inner');
+  assert.equal(cfg.buildings['barracks'].zone, 'outer', '兵营归 outer');
+  assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
+  assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
+  assert.ok((cfg.buildings['woodcutter'].prodBase ?? 0) > 0, '资源田应有产量基数');
+  // 城镇中心 1 级槽位配额
+  const t1 = cfg.townCenterSlots[1];
+  assert.ok(t1 && t1.inner > 0 && t1.outer > 0 && t1.queue >= 2, '开局应有城内/城外槽位与≥2队列');
 });
 
 test('校验器：合法配置不抛错', () => {

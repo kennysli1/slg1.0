@@ -43,8 +43,11 @@ test('经济：4资源初始化与惰性产出', async () => {
 test('建筑：升级资源田提升产率', async () => {
   const app = freshApp();
   const before = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
-  // 升级第0块田(woodcutter)
-  const up = await send(app, 'building.UpgradeField', { villageId: 'v1', fieldIndex: 0 });
+  // 找到 woodcutter 所在槽位并升级
+  const layout = (await send(app, 'building.GetLayout', { villageId: 'v1' })).payload as any;
+  const wood = layout.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(wood, '开局城外应有伐木场');
+  const up = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: wood.slotId });
   assert.equal(up.ok, true, `升级田应成功: ${up.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 60_000, setClock);
   const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;

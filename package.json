@@ -2,7 +2,7 @@
   "name": "slg1.0",
   "private": true,
   "version": "0.0.1",
-  "description": "Travian 2.0 - 全栈TypeScript网页SLG",
+  "description": "King of World (KOW) - 全栈TypeScript网页SLG",
   "workspaces": [
     "packages/shared",
     "packages/server",

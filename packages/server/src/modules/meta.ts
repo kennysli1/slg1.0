@@ -37,11 +37,9 @@ export class MetaModule {
       ok: true,
       payload: {
         resources: c.resources.map((r) => ({ key: r.key, name: r.name, icon: r.icon })),
-        fields: Object.values(c.fields).map((f) => ({
-          type: f.type, name: f.name, icon: f.icon, resource: f.resource,
-        })),
         buildings: Object.values(c.buildings).map((b) => ({
-          kind: b.kind, name: b.name, icon: b.icon,
+          kind: b.kind, name: b.name, icon: b.icon, zone: b.zone,
+          resource: b.resource ?? null,
         })),
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,

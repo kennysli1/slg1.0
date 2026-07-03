@@ -14,9 +14,8 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  * 兵种数据来自 GameConfig（config/units.csv）——改 CSV 即改兵种/加部族。
  * 不直接改资源——训练时向 Economy 发 TrySpend 扣费（状态归属唯一）。
  *
- * 体现两个 Travian 要点：
- *  - 训练队列：逐个产出（每 trainSec 出 1 个），资源一次性预扣。
- *  - 铁匠养成：smithyLevel 提升某兵种攻防 → 派生管线（对外只给最终三维）。
+ * 训练队列：逐个产出（每 trainSec 出 1 个），资源一次性预扣。
+ * 铁匠养成：smithyLevel 提升某兵种攻防 → 派生管线（对外只给最终三维）。
  */
 
 export type { UnitDef };

@@ -3,7 +3,7 @@
 module.exports = {
   apps: [
     {
-      name: 'travian2',
+      name: 'kow',
       // 用 tsx 直接跑 TS 源码（无需单独编译后端）
       script: 'node',
       args: '--import tsx packages/server/src/main.ts',

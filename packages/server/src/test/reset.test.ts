@@ -24,7 +24,9 @@ async function seed(app: GameApp) {
     assert.equal(r.ok, true, `注册应成功: ${r.reason ?? ''}`);
     const p = (r.payload as any).player;
     await app.commands.send({ name: 'economy.Grant', from: 't', payload: { villageId: p.villageId, gain: { wood: 500, clay: 500, iron: 500, crop: 500 } } });
-    const up = await app.commands.send({ name: 'building.UpgradeField', from: 't', payload: { villageId: p.villageId, fieldIndex: 0 } });
+    const layout = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: p.villageId } });
+    const wood = (layout.payload as any).zones.outer.placed.find((f: any) => f.kind === 'woodcutter');
+    const up = await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: p.villageId, slotId: wood.slotId } });
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
     return p as { villageId: string; q: number; r: number; name: string };
   };
@@ -60,11 +62,11 @@ test('reset:season — 保留账号+地图位置，进度归零', async () => {
     assert.equal(p.q, a.q, 'q 坐标应保留');
     assert.equal(p.r, a.r, 'r 坐标应保留');
 
-    // 进度归零：田回到 0 级（升过的那块也被重置）
-    const vill = await app.commands.send({ name: 'building.GetState', from: 't', payload: { villageId: a.villageId } });
+    // 进度归零：村庄按开局模板重建，资源田回到开局 1 级（升过的那块也被重置）
+    const vill = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: a.villageId } });
     assert.equal(vill.ok, true);
-    const fields = (vill.payload as any).fields as { level: number }[];
-    assert.ok(fields.every((f) => f.level === 0), '所有田应回到 0 级');
+    const fields = (vill.payload as any).zones.outer.placed.filter((f: any) => f.producing) as { level: number }[];
+    assert.ok(fields.length > 0 && fields.every((f) => f.level === 1), '所有资源田应回到开局 1 级');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

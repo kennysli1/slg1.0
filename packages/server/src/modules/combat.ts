@@ -217,8 +217,8 @@ export class CombatModule {
     }
     const defRes = await this.commands.send({ name: 'military.GetCombatSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
     const defender = ((defRes.payload as any)?.snapshot ?? {}) as Snapshot;
-    const build = await this.commands.send({ name: 'building.GetState', from: CombatModule.NAME, payload: { villageId: targetId } });
-    const wallLevel = (build.payload as any)?.buildings?.wall ?? 0;
+    const build = await this.commands.send({ name: 'building.GetDefenseSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
+    const wallLevel = (build.payload as any)?.wallLevel ?? 0;
     return { defender, wallLevel };
   }
 

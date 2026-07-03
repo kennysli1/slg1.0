@@ -31,7 +31,9 @@ test('重启后：账号/资源/建筑保留，密码仍可登录，在途建造
     const vid = (reg.payload as any).player.villageId;
 
     await app.commands.send({ name: 'economy.Grant', from: 't', payload: { villageId: vid, gain: { wood: 500, clay: 500, iron: 500, crop: 500 } } });
-    const up = await app.commands.send({ name: 'building.UpgradeField', from: 't', payload: { villageId: vid, fieldIndex: 0 } });
+    const layout0 = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
+    const wood0 = (layout0.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+    const up = await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: vid, slotId: wood0.slotId } });
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
 
     // 刷盘
@@ -52,10 +54,11 @@ test('重启后：账号/资源/建筑保留，密码仍可登录，在途建造
     const res = await app.commands.send({ name: 'economy.GetResources', from: 't', payload: { villageId: vid } });
     assert.ok((res.payload as any).resources.wood > 0);
 
-    // 在途建造恢复：快进后应完成（等级变1）
+    // 在途建造恢复：快进后应完成（woodcutter 升到 2 级）
     await app.scheduler.advanceTo(clock + 120_000, setClock);
-    const vil = await app.commands.send({ name: 'building.GetState', from: 't', payload: { villageId: vid } });
-    assert.equal((vil.payload as any).fields[0].level, 1, '重启后在途建造应继续并完成');
+    const vil = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
+    const wood1 = (vil.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+    assert.equal(wood1.level, 2, '重启后在途建造应继续并完成');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

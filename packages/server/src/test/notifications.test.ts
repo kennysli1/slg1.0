@@ -22,7 +22,9 @@ test('notifications: 建筑升级事件被记录', async () => {
   const r = (await reg(app, '建村人')).payload as any;
   const vid = r.player.villageId;
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const up = await send(app, 'building.UpgradeField', { villageId: vid, fieldIndex: 0 });
+  const layout = (await send(app, 'building.GetLayout', { villageId: vid })).payload as any;
+  const wood = layout.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  const up = await send(app, 'building.Upgrade', { villageId: vid, slotId: wood.slotId });
   assert.equal(up.ok, true, `升级田应成功: ${up.reason ?? ''}`);
   await drain(app);
 

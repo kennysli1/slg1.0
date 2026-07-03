@@ -13,8 +13,8 @@ export function renderLogin(app: HTMLElement, onSuccess: () => void, msg = '') {
       <b>${t.name}</b><small>${t.desc}</small></button>`).join('');
   app.innerHTML = `
     <div class="login">
-      <div class="login-logo">${art('ui_logo', 'Travian 2.0', 'lg')}</div>
-      <h1>Travian 2.0</h1>
+      <div class="login-logo">${art('ui_logo', 'King of World', 'lg')}</div>
+      <h1>世界之王</h1>
       <p class="login-sub">罗马·高卢·条顿 — 在同一张地图上称雄</p>
       <div class="logintabs">
         <button class="${loginMode === 'register' ? 'on' : ''}" id="toReg">注册</button>

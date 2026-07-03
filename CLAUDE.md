@@ -5,7 +5,7 @@
 
 ## 这是什么（一句话）
 
-多人在线、服务器权威、实时推进的文字版 Travian 2.0 网页 SLG，全栈 TypeScript（npm workspaces monorepo）。
+多人在线、服务器权威、实时推进的文字版 SLG 网页游戏（世界之王 / KOW），全栈 TypeScript（npm workspaces monorepo）。
 
 ## 四条架构铁律（改任何代码都不能违背）
 

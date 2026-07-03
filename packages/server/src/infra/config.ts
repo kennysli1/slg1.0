@@ -12,7 +12,7 @@ export type { UnitTraitDef } from './combat-types.js';
  * 成本/时间用"基数×增长率^(等级-1)"参数化，CSV 里存基数和增长率。
  *
  * ── 主键与引用约定（2.0 配置规范）──────────────────────────────
- * 目录表(fields/buildings/units/pve_targets)每行有两个标识：
+ * 目录表(buildings/units/pve_targets)每行有两个标识：
  *   · id   数字主键——CSV 里**跨表引用一律用它**（requires=4:3、building=4、targetId=1）。
  *   · code 英文代码——**引擎内部与存档统一用它**（避免 kind===5 这种魔法数字、CSV 重排不破坏代码）。
  * 加载时把 CSV 里的数字引用解析回 code，所以本文件之外的代码只见 code。
@@ -21,28 +21,32 @@ export type { UnitTraitDef } from './combat-types.js';
  * icon 列只填**基名**（如 bld_barracks）；渲染方拼 `<美术根>/<基名>.png`（前端 artPath）。
  */
 
-export interface FieldDef {
-  id: number;
-  type: string; // code
-  name: string;
-  icon: string; // 基名
-  resource: string;
-  prodBase: number;
-  prodGrowth: number;
-  cost: (lv: number) => Record<string, number>;
-  timeSec: (lv: number) => number;
-  maxLevel: number;
-}
+/** 建筑归属区。center=城镇中心(阀门,唯一)；inner=城内(民生研发)；outer=城外(生产量产)。 */
+export type Zone = 'center' | 'inner' | 'outer';
 
 export interface BuildingDef {
   id: number;
   kind: string; // code
   name: string;
   icon: string; // 基名
+  zone: Zone;
+  /** 仅资源田：产出资源 key（wood/clay/iron/crop）；非产出建筑为 undefined。 */
+  resource?: string;
+  /** 仅资源田：每级产量基数。 */
+  prodBase?: number;
+  /** 仅资源田：产量增长率/级。 */
+  prodGrowth?: number;
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
+}
+
+/** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
+export interface TownCenterSlotTier {
+  inner: number;
+  outer: number;
+  queue: number;
 }
 
 export interface UnitDef {
@@ -92,13 +96,11 @@ export interface PveSpawn {
   r: number;
 }
 
-/** 开局模板：按部族定义田地布局/初始建筑/初始资源。来自 village_templates.csv。 */
+/** 开局模板：按部族定义预置建筑布局/初始资源。来自 village_templates.csv。 */
 export interface VillageTemplate {
   tribe: string;
-  /** 展开后的田地类型序列（如 18 个 code） */
-  fieldLayout: string[];
-  /** 初始建筑 code -> 等级 */
-  startBuildings: Record<string, number>;
+  /** 开局预置建筑：{ code -> 等级 }（zone 由 buildings.csv 自动归区；资源田用 0 级=未开发占位）。 */
+  startPlaced: Record<string, number>;
   /** 初始资源覆盖（空则各资源用 constants.start_resource_amount） */
   startResources: Record<string, number> | null;
 }
@@ -134,8 +136,9 @@ export interface GameConstants {
 
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
-  fields: Record<string, FieldDef>;
   buildings: Record<string, BuildingDef>;
+  /** 城镇中心等级 → 槽位配额（town_center_slots.csv），索引 = tcLevel（1..maxLevel）。 */
+  townCenterSlots: Record<number, TownCenterSlotTier>;
   units: Record<string, UnitDef>;
   /** 兵种特性表（unit_traits.csv），按 code 索引。 */
   unitTraits: Record<string, UnitTraitDef>;
@@ -163,18 +166,6 @@ function parseConstantValue(raw: string, type: string): number | boolean | strin
   if (type === 'bool') return raw === 'true' || raw === '1';
   if (type === 'string') return raw;
   return num(raw);
-}
-
-/** 解析 "woodcutter*4|claypit*4" → ['woodcutter','woodcutter','woodcutter','woodcutter','claypit'...]。 */
-function parseFieldLayout(s: string): string[] {
-  if (!s) return [];
-  const out: string[] = [];
-  for (const part of s.split('|')) {
-    const [code, cnt] = part.split('*');
-    const n = num(cnt, 1);
-    for (let i = 0; i < n; i++) out.push(code.trim());
-  }
-  return out;
 }
 
 /** 解析 "main:1|rallypoint:1" → { main:1, rallypoint:1 }。 */
@@ -231,17 +222,6 @@ export function loadGameConfig(configDir: string): GameConfig {
 
   const resources = loadCsv(p('resources.csv')).map((r) => ({ key: r.id, name: r.name, icon: r.icon }));
 
-  const fields: Record<string, FieldDef> = {};
-  for (const r of loadCsv(p('fields.csv'))) {
-    fields[r.code] = {
-      id: num(r.id), type: r.code, name: r.name, icon: r.icon, resource: r.resource,
-      prodBase: num(r.prodBase, 10), prodGrowth: num(r.prodGrowth, 1.3),
-      cost: costFn({ wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) }, num(r.costGrowth, 1.28)),
-      timeSec: timeFn(num(r.timeBase, 15), num(r.timeGrowth, 1.6)),
-      maxLevel: num(r.maxLevel, 10),
-    };
-  }
-
   // 先读建筑原始行，建立 数字ID→code 映射，再解析 requires（前置也是数字ID引用）
   const buildingRows = loadCsv(p('buildings.csv'));
   const buildingIdToCode = new Map<number, string>();
@@ -249,12 +229,27 @@ export function loadGameConfig(configDir: string): GameConfig {
 
   const buildings: Record<string, BuildingDef> = {};
   for (const r of buildingRows) {
+    const isField = !!r.resource;
     buildings[r.code] = {
       id: num(r.id), kind: r.code, name: r.name, icon: r.icon,
+      zone: (r.zone as Zone) || 'inner',
+      resource: isField ? r.resource : undefined,
+      prodBase: isField ? num(r.prodBase, 1000) : undefined,
+      prodGrowth: isField ? num(r.prodGrowth, 1.3) : undefined,
       cost: costFn({ wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) }, num(r.costGrowth, 1.28)),
       timeSec: timeFn(num(r.timeBase, 15), num(r.timeGrowth, 1.6)),
       maxLevel: num(r.maxLevel, 10),
       requires: parseRequires(r.requires, buildingIdToCode),
+    };
+  }
+
+  // 城镇中心槽位曲线：tcLevel → {inner,outer,queue}
+  const townCenterSlots: Record<number, TownCenterSlotTier> = {};
+  for (const r of loadCsv(p('town_center_slots.csv'))) {
+    const lv = num(r.tcLevel);
+    if (lv <= 0) continue;
+    townCenterSlots[lv] = {
+      inner: num(r.innerSlots), outer: num(r.outerSlots), queue: num(r.queueSlots, 2),
     };
   }
 
@@ -349,14 +344,13 @@ export function loadGameConfig(configDir: string): GameConfig {
     if (!r.tribe) continue;
     villageTemplates[r.tribe] = {
       tribe: r.tribe,
-      fieldLayout: parseFieldLayout(r.field_layout),
-      startBuildings: parseLeveledList(r.start_buildings),
+      startPlaced: parseLeveledList(r.start_placed),
       startResources: parseResourceList(r.start_resources),
     };
   }
 
   const config: GameConfig = {
-    resources, fields, buildings, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates,
   };
   validateGameConfig(config);
   return config;
@@ -376,20 +370,38 @@ export function validateGameConfig(config: GameConfig): void {
     if (!resourceKeys.has(need)) errors.push(`resources.csv 缺少必需资源 id=${need}（economy 结构字段）`);
   }
 
-  // fields：产出资源必须存在；范围
-  for (const f of Object.values(config.fields)) {
-    if (!resourceKeys.has(f.resource)) errors.push(`fields.csv[${f.type}] resource=${f.resource} 不在 resources.csv`);
-    if (f.maxLevel <= 0) errors.push(`fields.csv[${f.type}] maxLevel 必须>0（当前${f.maxLevel}）`);
-    if (f.prodBase < 0) errors.push(`fields.csv[${f.type}] prodBase 不能为负`);
-  }
-
-  // buildings：requires 引用必须存在；范围
+  // buildings：zone 合法；恰好一个 center；资源田产出字段；requires 引用存在；范围
   const buildingCodes = new Set(Object.keys(config.buildings));
+  let centerCount = 0;
+  let centerMaxLevel = 0;
   for (const b of Object.values(config.buildings)) {
+    if (b.zone !== 'center' && b.zone !== 'inner' && b.zone !== 'outer') {
+      errors.push(`buildings.csv[${b.kind}] zone=${b.zone} 必须是 center/inner/outer`);
+    }
+    if (b.zone === 'center') { centerCount++; centerMaxLevel = b.maxLevel; }
+    if (b.resource !== undefined) {
+      if (!resourceKeys.has(b.resource)) errors.push(`buildings.csv[${b.kind}] resource=${b.resource} 不在 resources.csv`);
+      if ((b.prodBase ?? 0) < 0) errors.push(`buildings.csv[${b.kind}] prodBase 不能为负`);
+      if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
+    }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
     for (const r of b.requires) {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
+    }
+  }
+  if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
+
+  // town_center_slots：覆盖 1..城镇中心maxLevel；槽位单调不减；queue≥1
+  if (centerMaxLevel > 0) {
+    let prevInner = 0, prevOuter = 0;
+    for (let lv = 1; lv <= centerMaxLevel; lv++) {
+      const tier = config.townCenterSlots[lv];
+      if (!tier) { errors.push(`town_center_slots.csv 缺少 tcLevel=${lv}（需覆盖 1..${centerMaxLevel}）`); continue; }
+      if (tier.inner < prevInner) errors.push(`town_center_slots.csv tcLevel=${lv} innerSlots 比上一级小（须单调不减）`);
+      if (tier.outer < prevOuter) errors.push(`town_center_slots.csv tcLevel=${lv} outerSlots 比上一级小（须单调不减）`);
+      if (tier.queue < 1) errors.push(`town_center_slots.csv tcLevel=${lv} queueSlots 必须≥1`);
+      prevInner = tier.inner; prevOuter = tier.outer;
     }
   }
 
@@ -432,13 +444,21 @@ export function validateGameConfig(config: GameConfig): void {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
   }
 
-  // village_templates：田地/建筑 code 必须存在；资源覆盖 key 必须存在
+  // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
+  const tier1 = config.townCenterSlots[1];
   for (const t of Object.values(config.villageTemplates)) {
-    for (const code of new Set(t.fieldLayout)) {
-      if (!config.fields[code]) errors.push(`village_templates.csv[${t.tribe}] field_layout 含未知田地 ${code}`);
+    let innerUsed = 0, outerUsed = 0, centerUsed = 0;
+    for (const code of Object.keys(t.startPlaced)) {
+      const def = config.buildings[code];
+      if (!def) { errors.push(`village_templates.csv[${t.tribe}] start_placed 含未知建筑 ${code}`); continue; }
+      if (def.zone === 'center') centerUsed++;
+      else if (def.zone === 'inner') innerUsed++;
+      else outerUsed++;
     }
-    for (const code of Object.keys(t.startBuildings)) {
-      if (!buildingCodes.has(code)) errors.push(`village_templates.csv[${t.tribe}] start_buildings 含未知建筑 ${code}`);
+    if (centerUsed !== 1) errors.push(`village_templates.csv[${t.tribe}] 开局必须恰好含 1 个城镇中心(center)，当前 ${centerUsed}`);
+    if (tier1) {
+      if (innerUsed > tier1.inner) errors.push(`village_templates.csv[${t.tribe}] 开局城内预置 ${innerUsed} 超过 tcLevel=1 上限 ${tier1.inner}`);
+      if (outerUsed > tier1.outer) errors.push(`village_templates.csv[${t.tribe}] 开局城外预置 ${outerUsed} 超过 tcLevel=1 上限 ${tier1.outer}`);
     }
     if (t.startResources) {
       for (const code of Object.keys(t.startResources)) {

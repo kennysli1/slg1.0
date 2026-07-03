@@ -12,7 +12,7 @@
 ## ⭐ 两个全局约定（2.0 起，务必先读）
 
 ### 1. 主键 id 与代码 code —— 跨表引用一律用数字 id
-目录表（`fields` / `buildings` / `units` / `pve_targets`）每行有两个标识列：
+目录表（`buildings` / `units` / `pve_targets`）每行有两个标识列：
 
 | 列 | 是什么 | 谁用 |
 |----|--------|------|
@@ -35,14 +35,14 @@
 | # | 文件 | 配什么（一句话） | 想改这些就动它 |
 |---|------|----------------|---------------|
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
-| 表2 | `fields.csv` | **资源田**（4类：伐木场/采泥场/铁矿/农田） | 改资源田产量、升级成本、建造时间、最高等级 |
-| 表3 | `buildings.csv` | **中心建筑**（主基地/兵营/马厩等10个） | 改建筑成本/耗时/最高等级、改科技树前置依赖 |
+| 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分城镇中心/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、改科技树前置、改归属区 |
+| 表3 | `town_center_slots.csv` | **城镇中心各级开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
 | 表4 | `units.csv` | **兵种**（罗马/高卢/条顿） | 改兵种攻防/速度/载货/耗粮/造价、加新兵种、加新部族 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙/铁匠加成、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
-| 表9 | `village_templates.csv` | **各部族开局布局**（18田分布、初始建筑、初始资源） | 改新手村开局；给不同部族不同起手 |
+| 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -63,33 +63,38 @@
 | icon | 图标基名（如 `res_wood`，渲染时拼 `/art/res_wood.png`） |
 | note | 备注 |
 
-## fields.csv — 资源田（4类）
-| 列 | 含义 |
-|----|------|
-| id | 数字主键（跨表引用用） |
-| code | 英文代码（程序/存档用，勿改） |
-| name / icon | 显示名 / 图标基名 |
-| resource | 产出哪种资源（对应 resources.csv 的 id，语义串） |
-| prodBase | 1级每小时产量基数 |
-| prodGrowth | 每级产量增长倍率（如1.3=每级+30%） |
-| costWood/Clay/Iron/Crop | 1级升级成本 |
-| costGrowth | 成本每级增长倍率 |
-| timeBase | 1级建造耗时（秒） |
-| timeGrowth | 耗时每级增长倍率 |
-| maxLevel | 最高等级 |
+## fields.csv — 已废弃（资源田并入 buildings.csv）
+> 资源田现在是 `buildings.csv` 里 `zone=outer` 且填了 `resource/prodBase/prodGrowth` 的行。此表已删除。
 
-> 升n级成本 = costX × costGrowth^(n-1)；耗时同理。
-
-## buildings.csv — 中心建筑
+## buildings.csv — 全部建筑（含资源田）
 | 列 | 含义 |
 |----|------|
 | id | 数字主键（跨表引用用：被 units.building、其它建筑的 requires 引用） |
 | code | 英文代码（程序/存档用，勿改） |
 | name / icon | 显示名 / 图标基名 |
-| costWood/.../costGrowth | 成本与增长（同上） |
+| zone | 归属区：`center`(城镇中心,唯一) / `inner`(城内·民生研发) / `outer`(城外·生产量产)。资源田填 `outer` |
+| resource | **仅资源田填**：产出哪种资源（对应 resources.csv 的 id）；非产出建筑留空 |
+| prodBase | **仅资源田填**：1级每小时产量基数 |
+| prodGrowth | **仅资源田填**：每级产量增长倍率（如1.3=每级+30%） |
+| costWood/.../costGrowth | 成本与增长（升n级成本 = costX × costGrowth^(n-1)） |
 | timeBase / timeGrowth | 耗时与增长 |
 | maxLevel | 最高等级 |
-| requires | 前置：`建筑数字ID:等级`，多个用 `\|` 分隔，如 `4:3`（兵营3级）。空=无前置 |
+| requires | 前置：`建筑数字ID:等级`，多个用 `\|` 分隔，如 `1:3`（城镇中心3级）。空=无前置 |
+
+> **加建筑只需加一行并填 `zone`**：城内外分池 + 侧边栏可建清单全部由 zone 自动归位，前端无需改代码。
+> 资源田是 `zone=outer` 且填了 `resource/prodBase/prodGrowth` 的建筑，与普通建筑走同一套"点空槽建造/升级"逻辑。
+
+## town_center_slots.csv — 城镇中心槽位曲线
+| 列 | 含义 |
+|----|------|
+| tcLevel | 城镇中心等级（需覆盖 1..城镇中心maxLevel，逐级写全） |
+| innerSlots | 该等级开放的城内槽位数（须单调不减） |
+| outerSlots | 该等级开放的城外槽位数（须单调不减） |
+| queueSlots | 该等级的建造队列条数（≥1；可随等级增长） |
+| unlockNote | 里程碑说明（仅注释，程序不读） |
+
+> **发育节奏与取舍强度的总阀门**：槽位总量始终 < 想盖的建筑总数 → 玩家必须放弃某些流派。
+> 想让玩家发育更快就调大 slots；想让城内外取舍更狠就压低满级 slots。
 
 ## units.csv — 兵种（含三部族）
 | 列 | 含义 |
@@ -187,11 +192,10 @@
 | 列 | 含义 |
 |----|------|
 | tribe | 部族（语义串 romans/gauls/teutons） |
-| field_layout | 18 块田的分布，格式 `类型*数量`，多段用 `\|` 分隔，如 `woodcutter*4\|claypit*4\|ironmine*4\|cropland*6` |
-| start_buildings | 初始建筑，格式 `code:等级`，多段用 `\|` 分隔，如 `main:1\|rallypoint:1` |
+| start_placed | 开局预置建筑（含资源田），格式 `code:等级`，多段用 `\|` 分隔，如 `main:1\|rallypoint:1\|woodcutter:1\|claypit:1\|ironmine:1\|cropland:1`。zone 由 buildings.csv 自动归区；开局预置数量不能超过 tcLevel=1 的城内/城外槽位上限 |
 | start_resources | 初始资源覆盖（**可选**），格式 `res:量`，留空则各资源用 `game_constants` 的 `start_resource_amount` |
 
-> 想让条顿开局多两块农田、或某部族自带兵营？改这张表，无需动代码。
+> 想让条顿开局多带一座兵营、或某部族自带铁匠铺？改这张表 `start_placed`，无需动代码。
 
 ---
 

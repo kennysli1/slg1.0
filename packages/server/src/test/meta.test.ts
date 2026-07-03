@@ -14,7 +14,7 @@ function freshApp(): GameApp {
   return app;
 }
 
-test('GetGameConfig：返回 resources/fields/buildings/units/pve/常量最小集', async () => {
+test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', async () => {
   const app = freshApp();
   const r = await app.commands.send({ name: 'meta.GetGameConfig', from: 'test', payload: {} });
   assert.equal(r.ok, true);
@@ -25,9 +25,10 @@ test('GetGameConfig：返回 resources/fields/buildings/units/pve/常量最小�
   // 兵种：下发数量 = config 兵种数量（新增 CSV 行会自动出现）
   assert.equal(p.units.length, Object.keys(app.config.units).length);
   assert.ok(p.units.every((u: any) => u.key && u.tribe && u.name && u.icon && u.form));
-  // 建筑/田地/PvE
+  // 建筑：下发数量 = config 建筑数量（含资源田，均带 zone）
   assert.equal(p.buildings.length, Object.keys(app.config.buildings).length);
-  assert.equal(p.fields.length, Object.keys(app.config.fields).length);
+  assert.ok(p.buildings.every((b: any) => b.kind && b.name && b.icon && b.zone));
+  assert.ok(p.buildings.some((b: any) => b.zone === 'outer' && b.resource), '资源田应带 resource');
   assert.equal(p.pveTemplates.length, Object.keys(app.config.pveTemplates).length);
   // 白名单常量
   assert.equal(p.constants.mapViewRadius, app.config.constants.mapViewRadius);
