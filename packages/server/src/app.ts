@@ -114,7 +114,7 @@ export function createGameApp(opts?: {
     military.createVillage(villageId, tribe);
     void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { q, r, refId: villageId, name } });
   };
-  const player = new PlayerModule(store, bus, commands, now, doCreateVillage);
+  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.mapSize);
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
 

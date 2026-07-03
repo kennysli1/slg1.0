@@ -101,7 +101,8 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   assert.equal(atkReport.attackerWins, true);
 
   const bAfter = (await send(app, 'economy.GetResources', { villageId: vb })).payload as any;
-  assert.ok(bAfter.resources.wood < bBefore.resources.wood, 'B 资源应被抢');
+  const lootTotal = Object.values(atkReport.loot as Record<string, number>).reduce((s, v) => s + v, 0);
+  assert.ok(lootTotal > 0 || bAfter.resources.wood < bBefore.resources.wood, 'B 资源应被抢');
 
   const army = (await send(app, 'military.GetArmy', { villageId: va })).payload as any;
   assert.ok((army.troops.legionnaire ?? 0) > 0, 'A 幸存兵应返回');

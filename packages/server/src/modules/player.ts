@@ -3,7 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
-import { hexKey } from '../infra/hex.js';
+import { hexKey, hexDistance } from '../infra/hex.js';
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -70,6 +70,8 @@ export class PlayerModule {
     private now: () => number,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military + 放地图）。 */
     private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void,
+    /** 地图半径，用于随机分配出生坐标范围（默认 20）。 */
+    private mapSize: number = 20,
   ) {}
 
   init(): void {
@@ -150,21 +152,48 @@ export class PlayerModule {
   }
 
   /**
-   * 为新玩家分配地图空位：确定性六边形环形螺旋（从原点向外一环一环走），避开已占坐标。
-   * 不用随机数，保证可复现。原点留给 PvE 中心区，从第 1 环开始。
+   * 为新玩家分配地图空位：在地图内随机散布，与现有玩家保持最小间距（MIN_SPACING）。
+   * 使用 LCG 伪随机（基于玩家总数做种子偏移），不用 Math.random()，保证可复现性。
+   * 地图边缘留 2 格缓冲；若随机尝试失败（地图很满）则降级为螺旋兜底。
    */
   private allocateSpot(): { q: number; r: number } {
-    const taken = new Set(this.store.all<PlayerState>(COLLECTION).map((p) => hexKey(p.q, p.r)));
-    // 六个方向（axial 偏移），按 redblobgames 环形遍历顺序。
+    const existing = this.store.all<PlayerState>(COLLECTION);
+    const taken = new Set(existing.map((p) => hexKey(p.q, p.r)));
+
+    // 最小玩家间距：地图半径的 1/4，最少 3 格，最多 8 格
+    const MIN_SPACING = Math.max(3, Math.min(8, Math.floor(this.mapSize / 4)));
+    const border = 2; // 距离地图边缘的最小距离
+    const usableRadius = this.mapSize - border;
+
+    // LCG 伪随机，种子基于当前玩家数（保证分布可复现但不集中）
+    let seed = existing.length * 2654435761 + 1;
+    const lcg = () => {
+      seed = (seed * 1664525 + 1013904223) & 0xffffffff;
+      return (seed >>> 0) / 0x100000000;
+    };
+
+    const MAX_ATTEMPTS = 200;
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      // 在 usableRadius 范围内随机生成 axial 坐标
+      const q = Math.round((lcg() * 2 - 1) * usableRadius);
+      const r = Math.round((lcg() * 2 - 1) * usableRadius);
+      // 确保在六边形地图内
+      if (Math.abs(q) + Math.abs(r) + Math.abs(-q - r) > this.mapSize * 2) continue;
+      if (taken.has(hexKey(q, r))) continue;
+      // 检查与现有玩家的最小间距
+      const tooClose = existing.some((p) => hexDistance({ q, r }, { q: p.q, r: p.r }) < MIN_SPACING);
+      if (tooClose) continue;
+      return { q, r };
+    }
+
+    // 兜底：螺旋向外找第一个空格（地图很满时）
     const DIRS = [
       { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
       { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 },
     ];
-    const maxRing = 200;
-    for (let k = 1; k <= maxRing; k++) {
-      // 从第 k 环的一个角起步（原点沿方向4走 k 步），再沿 6 条边各走 k 步。
-      let q = 0 + DIRS[4].q * k;
-      let r = 0 + DIRS[4].r * k;
+    for (let k = 1; k <= this.mapSize; k++) {
+      let q = DIRS[4].q * k;
+      let r = DIRS[4].r * k;
       for (let side = 0; side < 6; side++) {
         for (let step = 0; step < k; step++) {
           if (!taken.has(hexKey(q, r))) return { q, r };
