@@ -7,8 +7,8 @@ import { art } from '../shared/ui/widgets.js';
 import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers } from '../shared/ui/widgets.js';
-import { resInfo, resourceKeys, loadGameConfig } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport } from './state.js';
+import { resInfo, resourceKeys, loadGameConfig, mapViewRadius } from './config.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
@@ -31,7 +31,7 @@ function renderShell() {
     <header class="topbar">
       <div class="brand">${art('ui_logo', 'LOGO', 'md')}
         <div class="brand-text">
-          <div class="title">Travian 2.0</div>
+          <div class="title">世界之王</div>
           <div class="subtitle">${me?.name ?? ''} 的村庄 · 坐标 (${me?.q},${me?.r})</div>
         </div>
       </div>
@@ -46,9 +46,12 @@ function renderShell() {
 
 async function refreshAll() {
   if (!me) return;
+  const center = getMapCenter() ?? { q: me.q, r: me.r };
+  const R = mapViewRadius();
+  const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
   const [res, vil, army, area, moves] = await Promise.all([
-    req('GetResources'), req('GetVillage'), req('GetArmy'),
-    req('GetArea', { cq: me.q, cr: me.r, r: 25 }), req('ListMovements'),
+    req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
+    req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
   ]);
   setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
   renderResBar();
@@ -90,7 +93,14 @@ function renderPage() {
 function bindPageEvents() {
   bindVillage(act);
   bindArmy(act);
-  bindMap(act);
+  bindMap(act, async (center) => {
+    // 导航后立即用新中心刷新地图数据
+    const R = mapViewRadius();
+    const fetchR = R + 6;
+    const area = await req('GetArea', { cq: center.q, cr: center.r, r: fetchR });
+    setCache({ ...getCache(), area: area.payload });
+    renderPage();
+  });
 }
 
 /** 统一"发请求并刷新"：失败转中文战报。 */

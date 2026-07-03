@@ -11,14 +11,13 @@ import * as fallback from '../info.js';
 
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
-export interface BuildingInfo { name: string; icon: string }
+export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string }
 export interface UnitInfo { name: string; icon: string; form: string }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
-  fields: { type: string; name: string; icon: string; resource: string }[];
-  buildings: { kind: string; name: string; icon: string }[];
+  buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null }[];
   units: { key: string; tribe: string; name: string; icon: string; form: string }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   constants: { mapViewRadius: number; mapSize: number };
@@ -38,8 +37,11 @@ export async function loadGameConfig(): Promise<void> {
     if (!r.ok) return;
     cfg = r.payload as unknown as ServerConfig;
     for (const x of cfg.resources) res[x.key] = { name: x.name, icon: x.icon };
-    for (const x of cfg.fields) fields[x.type] = { name: x.name, icon: x.icon, resource: x.resource };
-    for (const x of cfg.buildings) buildings[x.kind] = { name: x.name, icon: x.icon };
+    for (const x of cfg.buildings) {
+      buildings[x.kind] = { name: x.name, icon: x.icon, zone: x.zone, resource: x.resource ?? undefined };
+      // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
+      if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
+    }
     for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
   } catch {
@@ -50,6 +52,11 @@ export async function loadGameConfig(): Promise<void> {
 /** 前端地图视野半径：服务端白名单常量优先，缺省 6。 */
 export function mapViewRadius(): number {
   return cfg?.constants?.mapViewRadius ?? 6;
+}
+
+/** 地图总半径（服务端 map_size），用于边界检测。 */
+export function mapSize(): number {
+  return cfg?.constants?.mapSize ?? 20;
 }
 
 export function resInfo(key: string): ResInfo {

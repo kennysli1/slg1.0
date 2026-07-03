@@ -2,13 +2,43 @@
 import { art, unitArt } from '../../shared/ui/widgets.js';
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
-import { mapViewRadius, pveInfoByType } from '../../app/config.js';
-import { getCache, getSelected, setSelected, addReport } from '../../app/state.js';
+import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
+import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import { req, me } from '../../api.js';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+}
+
+/** 当前地图视野中心（未设置时默认为自己）。 */
+function viewCenter(): { q: number; r: number } {
+  return getMapCenter() ?? { q: me!.q, r: me!.r };
+}
+
+/** pointy-top 六边形的六个轴向邻居方向向量。 */
+
+/**
+ * pointy-top axial 坐标中：
+ *   屏幕上   → r 减小（q 不变）
+ *   屏幕下   → r 增大（q 不变）
+ *   屏幕左   → q 减小（r 不变）
+ *   屏幕右   → q 增大（r 不变）
+ */
+const SCREEN_DIRS: Record<string, { dq: number; dr: number }> = {
+  up:    { dq: 0,  dr: -1 },
+  down:  { dq: 0,  dr:  1 },
+  left:  { dq: -1, dr:  0 },
+  right: { dq:  1, dr:  0 },
+};
+
+/** 检查坐标是否在地图边界内。 */
+function inBounds(q: number, r: number): boolean {
+  return hexDistance({ q: 0, r: 0 }, { q, r }) <= mapSize();
+}
+
+function dirLabel(dir: string): string {
+  return { up: '上', down: '下', left: '左', right: '右' }[dir] ?? dir;
 }
 
 function tileAt(q: number, r: number): any {
@@ -21,12 +51,12 @@ function pveIconByName(name?: string): string {
   return pveInfoByType(type)?.icon ?? 'pve_bandits';
 }
 
-/** 收集视野内所有格坐标（六边形半径 R）。 */
-function viewHexes(R: number): Hex[] {
+/** 收集视野内所有格坐标（六边形半径 R，以 center 为中心）。 */
+function viewHexes(center: { q: number; r: number }, R: number): Hex[] {
   const out: Hex[] = [];
   for (let dq = -R; dq <= R; dq++) {
     for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
-      out.push({ q: me!.q + dq, r: me!.r + dr });
+      out.push({ q: center.q + dq, r: center.r + dr });
     }
   }
   return out;
@@ -36,10 +66,11 @@ export function renderMap(): string {
   const area = getCache().area;
   if (!area || !me) return '<div class="loading">加载中…</div>';
   const R = mapViewRadius();
+  const center = viewCenter();
   const selected = getSelected();
   if (selected && !tileAt(selected.q, selected.r)) setSelected(null);
 
-  const hexes = viewHexes(R);
+  const hexes = viewHexes(center, R);
   // 画布尺寸：取视野内像素范围。
   const pad = HEX_SIZE * 1.4;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -62,11 +93,14 @@ export function renderMap(): string {
     const p = hexToPixel(h);
     const cx = p.x + ox, cy = p.y + oy;
     const isSelf = h.q === me.q && h.r === me.r;
+    const isCenter = !isSelf && h.q === center.q && h.r === center.r;
     const t = tileAt(h.q, h.r);
     let cls = 'hex', inner = '', clickable = '';
     if (isSelf) {
       cls += ' hex-self';
       inner = art('bld_main', '本城', 'sm');
+    } else if (isCenter) {
+      cls += ' hex-view-center';
     } else if (t?.kind === 'village') {
       cls += ' hex-enemy';
       inner = art('bld_main', t.name, 'sm');
@@ -123,7 +157,44 @@ export function renderMap(): string {
     return `<div class="banner banner-move">${kind} → (${m.to.q},${m.to.r}) 抵达 <b>${secStr(m.arriveAt)}</b>${st}${loot}</div>`;
   }).join('');
 
-  return `<h3>周边地图 <small>（你在 ${me.q},${me.r}，视野 ${R} 格）</small></h3>
+  // 导航控件：方向键 + 坐标跳转
+  const size = mapSize();
+  const STEP = 4;
+  const canUp    = inBounds(center.q, center.r - STEP);
+  const canDown  = inBounds(center.q, center.r + STEP);
+  const canLeft  = inBounds(center.q - STEP, center.r);
+  const canRight = inBounds(center.q + STEP, center.r);
+  const isHome = center.q === me.q && center.r === me.r;
+
+  // 玩家看到的是 X,Y（X=q, Y=r，显示层映射）
+  const nav = `<div class="map-nav">
+    <div class="map-nav-dpad">
+      <button class="map-dpad-btn map-dpad-up" id="mapDirUp" title="向上" ${canUp ? '' : 'disabled'}>▲</button>
+      <div class="map-dpad-mid">
+        <button class="map-dpad-btn map-dpad-left" id="mapDirLeft" title="向左" ${canLeft ? '' : 'disabled'}>◀</button>
+        <button class="map-dpad-btn map-dpad-home" id="mapDirHome" title="回到本城" ${isHome ? 'disabled' : ''}>⌂</button>
+        <button class="map-dpad-btn map-dpad-right" id="mapDirRight" title="向右" ${canRight ? '' : 'disabled'}>▶</button>
+      </div>
+      <button class="map-dpad-btn map-dpad-down" id="mapDirDown" title="向下" ${canDown ? '' : 'disabled'}>▼</button>
+    </div>
+    <div class="map-nav-jump">
+      <label class="map-jump-label">跳转坐标</label>
+      <div class="map-jump-row">
+        <span class="map-jump-axis">X</span><input type="number" id="mapJumpX" class="map-jump-input" value="${center.q}" min="${-size}" max="${size}" />
+        <span class="map-jump-axis">Y</span><input type="number" id="mapJumpY" class="map-jump-input" value="${center.r}" min="${-size}" max="${size}" />
+        <button class="map-jump-btn" id="mapJumpGo">跳转</button>
+      </div>
+      <div class="map-jump-hint">地图范围 ±${size}，当前视野中心 X=${center.q} Y=${center.r}</div>
+    </div>
+  </div>`;
+
+  const isViewing = center.q !== me.q || center.r !== me.r;
+  const viewLabel = isViewing
+    ? `正在查看 (X=${center.q}, Y=${center.r})，<a href="#" id="mapReturnHome">回到本城</a>`
+    : `你在 X=${me.q}, Y=${me.r}，视野 ${R} 格`;
+
+  return `<h3>周边地图 <small>（${viewLabel}）</small></h3>
+    ${nav}
     <div class="map-wrap">
       ${svg}
       <div class="map-legend">
@@ -201,11 +272,9 @@ function startMarchAnimation(ox: number, oy: number): void {
   animTimer = requestAnimationFrame(tick);
 }
 
-/** 绑定地图页交互（选格 + 出征 + 启动行军动画）。 */
-export function bindMap(act: (p: Promise<any>) => void): void {
+/** 绑定地图页交互（选格 + 出征 + 启动行军动画 + 导航控件）。 */
+export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q: number; r: number }) => void): void {
   const svg = document.querySelector<SVGSVGElement>('.map-svg');
-  // 画布偏移由渲染时决定；这里从 marker 初始 transform 反推不可靠，改为动画内直接用 hexToPixel + 统一偏移。
-  // 偏移已内嵌进 marker/path 的绝对坐标，动画需同一 ox/oy —— 用 data 属性传递。
   if (svg) {
     const ox = Number(svg.dataset.ox || 0);
     const oy = Number(svg.dataset.oy || 0);
@@ -225,6 +294,54 @@ export function bindMap(act: (p: Promise<any>) => void): void {
       el.classList.add('hex-selected');
     });
   bindTargetEvents(act);
+
+  // 方向键
+  const STEP = 4;
+  const bindDir = (id: string, dir: string) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.onclick = () => {
+      const d = SCREEN_DIRS[dir];
+      const cur = viewCenter();
+      const nq = cur.q + d.dq * STEP;
+      const nr = cur.r + d.dr * STEP;
+      if (!inBounds(nq, nr)) {
+        addReport(`已到达地图边界，无法继续向${dirLabel(dir)}移动`);
+        return;
+      }
+      setMapCenter({ q: nq, r: nr });
+      navigate?.({ q: nq, r: nr });
+    };
+  };
+  bindDir('mapDirUp', 'up');
+  bindDir('mapDirDown', 'down');
+  bindDir('mapDirLeft', 'left');
+  bindDir('mapDirRight', 'right');
+
+  // 回到本城（方向键盘中心的 ⌂）
+  const homeBtn = document.getElementById('mapDirHome');
+  if (homeBtn) homeBtn.onclick = () => { setMapCenter(null); navigate?.({ q: me!.q, r: me!.r }); };
+
+  // 标题行内联"回到本城"链接
+  const retHome = document.getElementById('mapReturnHome');
+  if (retHome) retHome.onclick = (e) => { e.preventDefault(); setMapCenter(null); navigate?.({ q: me!.q, r: me!.r }); };
+
+  // 坐标跳转（X=q, Y=r）
+  const jumpGo = document.getElementById('mapJumpGo');
+  if (jumpGo) jumpGo.onclick = () => {
+    const xEl = document.getElementById('mapJumpX') as HTMLInputElement;
+    const yEl = document.getElementById('mapJumpY') as HTMLInputElement;
+    const q = parseInt(xEl.value, 10);
+    const r = parseInt(yEl.value, 10);
+    if (isNaN(q) || isNaN(r)) { addReport('请输入有效坐标'); return; }
+    if (!inBounds(q, r)) { addReport(`坐标 (X=${q}, Y=${r}) 超出地图范围 ±${mapSize()}`); return; }
+    setMapCenter({ q, r });
+    navigate?.({ q, r });
+  };
+  // 按 Enter 也触发跳转
+  [document.getElementById('mapJumpX'), document.getElementById('mapJumpY')].forEach((el) => {
+    if (el) el.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') jumpGo?.click(); });
+  });
 }
 
 function bindTargetEvents(act: (p: Promise<any>) => void) {
