@@ -8,6 +8,8 @@ import type { WireRequest } from '@slg/shared';
 
 import { createGameApp } from './app.js';
 import { Gateway, type ClientConnection } from './gateway/gateway.js';
+import { registerGmRoutes } from './gateway/gm.js';
+import { initLogger } from './infra/logger.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -17,6 +19,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 async function main() {
   // 1. 组装游戏内核（数据落盘到 data/game.json）
   const dataPath = process.env.DATA_PATH ?? join(__dirname, '../../../data/game.json');
+  const logDir = join(__dirname, '../../../data/logs');
+  initLogger(logDir);
   const app = createGameApp({ storePath: dataPath });
   const gateway = new Gateway(app);
 
@@ -74,6 +78,12 @@ async function main() {
 
   // 健康检查
   fastify.get('/health', async () => ({ ok: true, ts: app.now() }));
+
+  // GM 调试 API（始终挂载；如需关闭设 GM_ENABLED=off）
+  if (process.env.GM_ENABLED !== 'off') {
+    registerGmRoutes(fastify, app.store);
+    console.log('[server] GM API 已启用 — /gm/collections');
+  }
 
   await fastify.listen({ port: PORT, host: HOST });
   console.log(`[server] listening on http://${HOST}:${PORT}  (ws: /ws)`);

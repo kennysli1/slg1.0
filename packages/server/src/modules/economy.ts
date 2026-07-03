@@ -3,6 +3,9 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import { makeLogger } from '../infra/logger.js';
+
+const log = makeLogger('economy');
 
 /**
  * 领域模块 · Economy（经济）
@@ -204,6 +207,7 @@ export class EconomyModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s);
+    const before = { ...s.resources };
     const taken = zero();
     for (const t of RESOURCE_TYPES) {
       const want = amount[t] ?? 0;
@@ -212,6 +216,7 @@ export class EconomyModule {
       taken[t] = t2;
     }
     this.store.set(COLLECTION, villageId, s);
+    log('掠夺', { village: villageId, before, want: amount, taken, after: { ...s.resources } });
     return { ok: true, payload: { taken } };
   }
 

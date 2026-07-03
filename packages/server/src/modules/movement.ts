@@ -7,6 +7,9 @@ import type { Snapshot } from '../infra/combat-types.js';
 import type { GameConfig } from '../infra/config.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
 import { type Hex, hexDistance, linePath } from '../infra/hex.js';
+import { makeLogger } from '../infra/logger.js';
+
+const log = makeLogger('movement');
 
 /**
  * 领域模块 · Movement（行军）
@@ -216,6 +219,7 @@ export class MovementModule {
       departAt: this.now(),
     });
 
+    log('出征(raid)', { id: mv.id, from: villageId, targetId, troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
@@ -249,6 +253,7 @@ export class MovementModule {
       departAt: this.now(),
     });
 
+    log('出征(attack)', { id: mv.id, from: villageId, targetVillage, troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     // 通知被攻击方：来袭警报
     void this.bus.emit({ name: 'movement.IncomingAttack', source: MovementModule.NAME, ts: this.now(), payload: { villageId: targetVillage, fromVillage: villageId, arriveAt: mv.arriveAt } } as DomainEvent);
@@ -429,6 +434,7 @@ export class MovementModule {
   private async arriveReturn(id: string): Promise<void> {
     const mv = this.load(id);
     if (!mv) return;
+    log('返程到达', { id: mv.id, from: mv.fromVillage, troops: mv.troops, loot: mv.loot });
     // 兵归队
     await this.commands.send({
       name: 'military.AdjustTroops',

@@ -6,6 +6,9 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
 import type { CombatUnit, Snapshot, TraitEffect } from '../infra/combat-types.js';
+import { makeLogger } from '../infra/logger.js';
+
+const log = makeLogger('combat');
 
 /**
  * 领域模块 · Combat（战斗）— 有状态模块
@@ -154,6 +157,7 @@ export class CombatModule {
       }
       existing.attackPower0 += totalPower(p.attackerSnapshot);
       this.store.set(COLLECTION, existing.id, existing);
+      log('援军并入', { battleId: existing.id, from: p.fromVillage, troops: p.troops, newAtkPower: Math.round(existing.attackPower0) });
       return { ok: true, payload: { battleId: existing.id, merged: true } };
     }
 
@@ -186,6 +190,14 @@ export class CombatModule {
       status: 'active',
     };
     this.store.set(COLLECTION, id, battle);
+
+    log('战斗开始', {
+      battleId: id, targetKind: p.targetKind, targetId: p.targetId,
+      wallLevel,
+      atkPower: Math.round(battle.attackPower0), defPower: Math.round(battle.defensePower0),
+      attacker: snapshotSummary(attacker),
+      defender: snapshotSummary(defender),
+    });
 
     // 开战事件（推给双方）
     this.emitToParties(battle, 'combat.BattleStarted', (villageId, side) => ({
@@ -230,6 +242,11 @@ export class CombatModule {
 
     const atkAlive = totalCount(b.attacker);
     const defAlive = totalCount(b.defender);
+
+    // 每10 tick 记录一次兵力变化（避免刷屏）
+    if (b.ticks % 10 === 0) {
+      log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(killsToDef * 100) / 100, killsToAtk: Math.round(killsToAtk * 100) / 100 });
+    }
 
     if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= MAX_TICKS) {
       await this.finish(b);
@@ -279,6 +296,8 @@ export class CombatModule {
     let totalCarry = 0;
     for (const u of Object.values(b.attacker)) totalCarry += u.count * u.carry;
 
+    log('战斗结束', { battleId: b.id, ticks: b.ticks, attackerWins, atkAlive: totalCount(b.attacker), defAlive, attackerLosses, defenderLosses, totalCarry });
+
     // 应用防守方损失 + 取战利品
     let looted: Record<string, number> = {};
     if (b.targetKind === 'pve') {
@@ -304,8 +323,10 @@ export class CombatModule {
           const ratio = Math.min(1, totalCarry / total);
           for (const [t, v] of Object.entries(lootable)) want[t] = Math.floor(v * ratio);
         }
+        log('PvP 掠夺前', { target: b.targetId, lootable, totalCarry, ratio: total > 0 ? Math.min(1, totalCarry / total).toFixed(3) : 0, want });
         const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: want } });
         looted = (taken.payload as any)?.taken ?? {};
+        log('PvP 掠夺后', { target: b.targetId, looted });
       }
     }
 
@@ -505,4 +526,16 @@ function applyKills(snap: Snapshot, killsFloat: number): number {
 /** 移除数量归零的条目。 */
 function pruneZero(snap: Snapshot): void {
   for (const [key, u] of Object.entries(snap)) if (u.count <= 0) delete snap[key];
+}
+
+/** 日志用：快照摘要，列出每兵种数量+关键战斗属性+特性名。 */
+function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
+  return Object.entries(snap).map(([key, u]) => ({
+    code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,
+    count: u.count, form: u.form,
+    meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
+    meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+    carry: u.carry,
+    traits: u.traits?.map((t) => `${t.effect}:${t.value}`) ?? [],
+  }));
 }
