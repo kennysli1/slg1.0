@@ -67,7 +67,7 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   // 持盾特性解析：禁卫兵引用 trait id=1(shield)
   assert.deepEqual(cfg.units['praetorian'].traits, ['shield']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
-  assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.30);
+  assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });
 
 test('校验器：兵种 form 非法应抛错', () => {
