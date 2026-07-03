@@ -153,7 +153,8 @@ export class MovementModule {
   /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
   private travelSec(from: Hex, to: Hex, troops: Record<string, number>): number {
     const dist = hexDistance(from, to);
-    const slowest = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6));
+    const mult = this.config.constants.marchSpeedMultiplier ?? 1;
+    const slowest = Math.min(...Object.keys(troops).map((u) => (this.config.units[u]?.speed ?? 6) * mult));
     return Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
   }
 
@@ -457,9 +458,9 @@ export class MovementModule {
         meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk,
         meleeDef: def.meleeDef, rangedDef: def.rangedDef,
         carry: def.carry,
-        traits: def.traits.map((tc) => {
+        traits: def.traits.flatMap((tc) => {
           const t = this.config.unitTraits[tc];
-          return { effect: t.effect, value: t.value };
+          return t.effects;
         }),
       };
     }

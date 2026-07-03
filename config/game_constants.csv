@@ -2,7 +2,7 @@
 #常量键(代码读取用,勿改),值,类型(number/bool/string),中文说明
 wall_bonus_per_level,0.03,number,城墙每级防御加成(0.03=每级+3%)
 smithy_bonus_per_level,0.1,number,铁匠每级攻防加成(0.1=每级+10%)
-smithy_cost_base,200,number,铁匠升级成本基数(木+泥各 base×目标等级)
+smithy_cost_base,20,number,铁匠升级成本基数(木+泥各 base×目标等级)
 main_build_speedup_per_level,0.05,number,主基地每级建造提速(0.05=每级-5%耗时)
 main_build_speedup_cap,0.6,number,主基地建造提速上限(0.6=最多-60%)
 storage_base,800,number,仓库/粮仓基础容量

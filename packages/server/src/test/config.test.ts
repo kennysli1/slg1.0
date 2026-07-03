@@ -66,7 +66,8 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
   // 持盾特性解析：禁卫兵引用 trait id=1(shield)
   assert.deepEqual(cfg.units['praetorian'].traits, ['shield']);
-  assert.equal(cfg.unitTraits['shield'].effect, 'dmg_taken_ranged');
+  assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
+  assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.30);
 });
 
 test('校验器：兵种 form 非法应抛错', () => {
@@ -83,4 +84,25 @@ test('校验器：兵种引用不存在的特性应抛错', () => {
   const u = Object.keys(bad.units)[0];
   bad.units[u] = { ...bad.units[u], traits: ['no_such_trait'] };
   assert.throws(() => validateGameConfig(bad), /特性/);
+});
+
+test('特性：多效果特性正确展开', () => {
+  const cfg = loadGameConfig(configDir);
+  const multiTrait = {
+    id: 99, code: 'heavy', name: '重甲',
+    effects: [
+      { effect: 'def_melee' as const, value: 0.10 },
+      { effect: 'dmg_taken_ranged' as const, value: -0.15 },
+    ],
+  };
+  const patchedConfig = {
+    ...cfg,
+    unitTraits: { ...cfg.unitTraits, heavy: multiTrait },
+    units: {
+      ...cfg.units,
+      legionnaire: { ...cfg.units['legionnaire'], traits: ['heavy'] },
+    },
+  };
+  assert.doesNotThrow(() => validateGameConfig(patchedConfig));
+  assert.equal(patchedConfig.unitTraits['heavy'].effects.length, 2);
 });

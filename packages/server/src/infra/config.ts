@@ -124,6 +124,8 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
+  marchSpeedMultiplier: number;
   /** 每个村庄最多保留的通知/战报条数。 */
   notificationsPerVillage: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
@@ -262,10 +264,12 @@ export function loadGameConfig(configDir: string): GameConfig {
   for (const r of loadCsv(p('unit_traits.csv'))) {
     if (!r.code) continue;
     traitIdToCode.set(num(r.id), r.code);
-    unitTraits[r.code] = {
-      id: num(r.id), code: r.code, name: r.name,
-      effect: r.effect as TraitEffect, value: num(r.value),
-    };
+    const effects: { effect: TraitEffect; value: number }[] = [];
+    for (let i = 1; i <= 5; i++) {
+      const ek = `effect${i}`, vk = `value${i}`;
+      if (r[ek]) effects.push({ effect: r[ek] as TraitEffect, value: num(r[vk]) });
+    }
+    unitTraits[r.code] = { id: num(r.id), code: r.code, name: r.name, effects };
   }
 
   const units: Record<string, UnitDef> = {};
@@ -335,6 +339,7 @@ export function loadGameConfig(configDir: string): GameConfig {
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
     notificationsPerVillage: cn('notifications_per_village', 60),
+    marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     raw,
   };
 
@@ -392,12 +397,17 @@ export function validateGameConfig(config: GameConfig): void {
   const cycle = findRequiresCycle(config.buildings);
   if (cycle) errors.push(`buildings.csv requires 存在循环依赖：${cycle.join(' → ')}`);
 
-  // unit_traits：effect 必须是已知枚举
+  // unit_traits：每个 effect 必须是已知枚举，且至少有一个效果
   const traitEffects = new Set<TraitEffect>(TRAIT_EFFECTS);
   const traitCodes = new Set(Object.keys(config.unitTraits));
   for (const t of Object.values(config.unitTraits)) {
-    if (!traitEffects.has(t.effect)) {
-      errors.push(`unit_traits.csv[${t.code}] effect=${t.effect} 不是已知效果（${TRAIT_EFFECTS.join('/')}）`);
+    if (t.effects.length === 0) {
+      errors.push(`unit_traits.csv[${t.code}] 没有任何效果（effect1 不能为空）`);
+    }
+    for (const e of t.effects) {
+      if (!traitEffects.has(e.effect)) {
+        errors.push(`unit_traits.csv[${t.code}] effect=${e.effect} 不是已知效果（${TRAIT_EFFECTS.join('/')}）`);
+      }
     }
   }
 

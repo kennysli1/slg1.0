@@ -131,9 +131,9 @@ export class MilitaryModule {
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
-      traits: def.traits.map((tc) => {
+      traits: def.traits.flatMap((tc) => {
         const t = this.config.unitTraits[tc];
-        return { effect: t.effect, value: t.value };
+        return t.effects;
       }),
     };
   }

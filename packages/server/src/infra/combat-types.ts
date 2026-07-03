@@ -31,13 +31,13 @@ export const TRAIT_EFFECTS: readonly TraitEffect[] = [
   'def_melee',
 ];
 
-/** 特性定义（来自 unit_traits.csv，解析在 config.ts）。 */
+/** 特性定义（来自 unit_traits.csv，解析在 config.ts）。一条特性可携带多个 effect。 */
 export interface UnitTraitDef {
   id: number;
   code: string; // 程序内部用
   name: string; // 显示名
-  effect: TraitEffect;
-  value: number; // 含义随 effect 而定
+  /** 该特性的所有效果，至少一个。CSV 的 effect1/value1…effect3/value3 列解析而来。 */
+  effects: { effect: TraitEffect; value: number }[];
 }
 
 /**
