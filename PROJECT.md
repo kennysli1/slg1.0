@@ -30,6 +30,7 @@ slg1.0/
 │   ├── buildings.csv         全部建筑（含资源田，zone 分城镇中心/城内/城外 + 前置依赖）
 │   ├── town_center_slots.csv 城镇中心各级开放的城内/城外槽位数 + 建造队列条数
 │   ├── units.csv             兵种
+│   ├── unit_traits.csv       兵种特性
 │   ├── pve_targets.csv       PvE 目标模板
 │   ├── pve_defenders.csv     PvE 守军
 │   ├── pve_spawns.csv        PvE 地图分布点
@@ -130,13 +131,18 @@ slg1.0/
 |------|------|
 | `server/src/test/all.test.ts` | **测试入口 barrel**（跨平台；`npm run test:server` 跑它，汇总导入下列各文件） |
 | `server/src/test/full-loop.test.ts` | 单人全循环：经济→训练→打PvE→掠夺→返程 |
+| `server/src/test/building.test.ts` | 建筑三区布局、建造/升级、槽位/队列、前置门控 |
 | `server/src/test/multiplayer-pvp.test.ts` | 多人+PvP：注册/归属/A打B/双方战报/掠夺/返程/禁止自攻 |
+| `server/src/test/combat.test.ts` | 有状态战斗 tick、胜负、损失与战报 |
+| `server/src/test/hex.test.ts` | 六边形距离与路径 |
+| `server/src/test/movement-path.test.ts` | 逐格行军、到达接战、途中相遇 |
 | `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
 | `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
 | `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
+| `server/src/test/notifications.test.ts` | 服务端通知/战报持久化与上限裁剪 |
 
 ---
 
@@ -195,7 +201,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 七、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 9 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）**。测试 39/39。
+**已完成**：架构 + 通信规范 + 9 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）**。服务端测试 61 项。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`。
 

@@ -1,5 +1,5 @@
 /** 地图页：六边形网格 + 行军路径与实时部队位置 + 目标选中面板 + 出征。 */
-import { art, unitArt } from '../../shared/ui/widgets.js';
+import { art, escapeAttr, escapeHtml, unitArt } from '../../shared/ui/widgets.js';
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
@@ -104,12 +104,12 @@ export function renderMap(): string {
     } else if (t?.kind === 'village') {
       cls += ' hex-enemy';
       inner = art('bld_main', t.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="village" data-ref="${t.refId}" data-name="${t.name}"`;
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="village" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}"`;
     } else if (t?.kind === 'pve') {
       cls += ' hex-pve';
       const picon = t.icon ?? pveIconByName(t.name);
       inner = art(picon, t.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="pve" data-ref="${t.refId}" data-name="${t.name}" data-icon="${picon}"`;
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="pve" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(picon)}"`;
     }
     const sel = getSelected();
     const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';
@@ -224,7 +224,7 @@ function renderTargetPanel(): string {
   const icon = isPve ? (selected.icon ?? pveIconByName(selected.name)) : 'bld_main';
   return `<div class="target-panel ${isPve ? 'target' : 'enemy'}">
     <div class="target-head">${art(icon, selected.name, 'md')}
-      <div><div class="card-title">${selected.name}</div>
+      <div><div class="card-title">${escapeHtml(selected.name)}</div>
         <small class="coord">坐标 (${selected.q},${selected.r}) · 距离 ${dist} 格 · ${isPve ? '野怪据点' : '玩家村庄'}</small></div>
       <button class="target-close" id="closeTarget">✕</button>
     </div>
@@ -356,13 +356,13 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
   if (raid) raid.onclick = () => {
     const troops = collectTroops();
     if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
-    act(req('SendRaid', { fromXY: { q: me!.q, r: me!.r }, targetId: getSelected()!.refId, troops }));
+    act(req('SendRaid', { targetId: getSelected()!.refId, troops }));
   };
   const atk = document.getElementById('doAttack');
   if (atk) atk.onclick = () => {
     const troops = collectTroops();
     if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
     const sel = getSelected()!;
-    act(req('SendAttack', { fromXY: { q: me!.q, r: me!.r }, targetVillage: sel.refId, toXY: { q: sel.q, r: sel.r }, troops }));
+    act(req('SendAttack', { targetVillage: sel.refId, troops }));
   };
 }

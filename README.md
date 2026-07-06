@@ -14,7 +14,7 @@
 - **已实现**：账号密码登录（scrypt 加密）、三种族（罗马/高卢/条顿）、地图与坐标、科技树前置依赖、JSON 文件持久化、**重启后恢复在途任务**、多人 + PvP。
 - **数值全部 CSV 化**：改游戏平衡只动 `config/*.csv`，用 Excel 打开改完重启即生效，**不碰代码**。
 
-测试覆盖：单人全循环 + 多人 PvP，11/11 通过。
+测试覆盖：13 个服务端测试文件，61 项用例，覆盖单人全循环、多人 PvP、持久化、配置校验、manifest 与架构守卫。
 
 ---
 
@@ -51,7 +51,7 @@ npm run dev -w @slg/client       # 终端 B：启动前端，打开提示的 htt
 ## 常用命令
 
 ```bash
-npm run build            # 构建 shared + client（生产前端产物到 packages/client/dist）
+npm run build            # 构建 shared + server + client（前端产物到 packages/client/dist）
 npm start                # 生产模式启动后端（托管已构建的前端静态文件）
 npm run test:server      # 跑后端测试（单人全循环 + 多人 PvP）
 
@@ -75,8 +75,9 @@ slg1.0/
 │
 ├── config/               ← 【游戏数值】全部 CSV，Excel 可改，改完重启生效
 │   ├── README.md             每张表每列的说明 + 速查
-│   ├── resources.csv  fields.csv  buildings.csv  units.csv
-│   └── pve_targets.csv  pve_defenders.csv  pve_spawns.csv
+│   ├── resources.csv  buildings.csv  town_center_slots.csv  units.csv
+│   ├── unit_traits.csv  pve_targets.csv  pve_defenders.csv  pve_spawns.csv
+│   └── game_constants.csv  village_templates.csv
 │
 ├── packages/             ← 【代码】
 │   ├── shared/               前后端共享：通信信封类型（ESM）

@@ -12,6 +12,11 @@ function freshApp(): GameApp {
 const setClock = (t: number) => (clock = t);
 const send = (app: GameApp, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 const reg = (app: GameApp, name: string) => send(app, 'player.Register', { name, password: 'pass123', tribe: 'romans' });
+async function buildBarracks(app: GameApp, villageId: string): Promise<void> {
+  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 10_000, setClock);
+}
 async function drain(app: GameApp): Promise<void> {
   let i = 0;
   while (app.scheduler.pending > 0 && i < 30000) { await app.scheduler.advanceTo(clock + 3_600_000, setClock); i++; }
@@ -38,15 +43,14 @@ test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
   const a = (await reg(app, '攻')).payload as any;
   const b = (await reg(app, '守')).payload as any;
   const va = a.player.villageId, vb = b.player.villageId;
-  const px = (p: any) => p.q ?? 0, py = (p: any) => p.r ?? 0;
 
   await send(app, 'economy.Grant', { villageId: va, gain: { wood: 999, clay: 999, iron: 999, crop: 999 } });
+  await buildBarracks(app, va);
   await send(app, 'military.TrainTroops', { villageId: va, unit: 'legionnaire', count: 5 });
   for (let i = 0; i < 5; i++) await app.scheduler.advanceTo(clock + 27_000, setClock);
 
   await send(app, 'movement.SendAttack', {
-    villageId: va, fromXY: { q: px(a.player), r: py(a.player) },
-    targetVillage: vb, toXY: { q: px(b.player), r: py(b.player) }, troops: { legionnaire: 5 },
+    villageId: va, targetVillage: vb, troops: { legionnaire: 5 },
   });
   await drain(app);
 

@@ -126,6 +126,28 @@ export class MovementModule {
     return `mv-${n}`;
   }
 
+  private validateTroops(troops: Record<string, number> | undefined): { ok: true; troops: Record<string, number> } | { ok: false; reason: string } {
+    if (!troops || typeof troops !== 'object') return { ok: false, reason: 'bad_troops' };
+    const cleaned: Record<string, number> = {};
+    for (const [unit, raw] of Object.entries(troops)) {
+      if (!this.config.units[unit]) return { ok: false, reason: `unknown_unit:${unit}` };
+      if (!Number.isInteger(raw) || raw <= 0) return { ok: false, reason: `bad_troops:${unit}` };
+      cleaned[unit] = raw;
+    }
+    if (Object.keys(cleaned).length === 0) return { ok: false, reason: 'empty_troops' };
+    return { ok: true, troops: cleaned };
+  }
+
+  private async villageXY(villageId: string): Promise<Hex | null> {
+    const res = await this.commands.send({
+      name: 'world.GetTileByRef',
+      from: MovementModule.NAME,
+      payload: { refId: villageId, kind: 'village' },
+    });
+    const tile = (res.payload as any)?.tile;
+    return res.ok && tile ? { q: tile.q, r: tile.r } : null;
+  }
+
   /** 列出某村相关的在途行军（含路径/当前位置/状态，供前端可视化）。 */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
@@ -191,12 +213,15 @@ export class MovementModule {
    * 1. 校验兵力(从 Military 扣出) 2. 算路径 3. 逐格推进。
    */
   private async sendRaid(cmd: Command): Promise<CommandResult> {
-    const { villageId, fromXY, targetId, troops } = cmd.payload as {
+    const { villageId, targetId, troops } = cmd.payload as {
       villageId: string;
-      fromXY: Hex;
       targetId: string;
       troops: Record<string, number>;
     };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const fromXY = await this.villageXY(villageId);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
 
     // 目标存在？拿其坐标
     const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
@@ -206,7 +231,7 @@ export class MovementModule {
 
     // 从源村扣出兵力（负 delta）
     const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(troops)) delta[u] = -n;
+    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
     const adj = await this.commands.send({
       name: 'military.AdjustTroops',
       from: MovementModule.NAME,
@@ -215,11 +240,11 @@ export class MovementModule {
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     const mv = this.launch({
-      id: this.nextId(), type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops,
+      id: this.nextId(), type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
       departAt: this.now(),
     });
 
-    log('出征(raid)', { id: mv.id, from: villageId, targetId, troops, arriveAt: new Date(mv.arriveAt).toISOString() });
+    log('出征(raid)', { id: mv.id, from: villageId, targetId, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
@@ -229,14 +254,18 @@ export class MovementModule {
    * 与 sendRaid 同结构，目标是玩家村（targetVillage）而非 PvE 目标。
    */
   private async sendAttack(cmd: Command): Promise<CommandResult> {
-    const { villageId, fromXY, targetVillage, toXY, troops } = cmd.payload as {
+    const { villageId, targetVillage, troops } = cmd.payload as {
       villageId: string;
-      fromXY: Hex;
       targetVillage: string;
-      toXY: Hex;
       troops: Record<string, number>;
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const fromXY = await this.villageXY(villageId);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
 
     // 目标村必须存在（有军队状态即视为存在）
     const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
@@ -244,16 +273,16 @@ export class MovementModule {
 
     // 从源村扣出兵力
     const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(troops)) delta[u] = -n;
+    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
     const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     const mv = this.launch({
-      id: this.nextId(), type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops,
+      id: this.nextId(), type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
       departAt: this.now(),
     });
 
-    log('出征(attack)', { id: mv.id, from: villageId, targetVillage, troops, arriveAt: new Date(mv.arriveAt).toISOString() });
+    log('出征(attack)', { id: mv.id, from: villageId, targetVillage, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     // 通知被攻击方：来袭警报
     void this.bus.emit({ name: 'movement.IncomingAttack', source: MovementModule.NAME, ts: this.now(), payload: { villageId: targetVillage, fromVillage: villageId, arriveAt: mv.arriveAt } } as DomainEvent);

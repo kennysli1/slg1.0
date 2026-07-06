@@ -48,9 +48,9 @@ docs/
 - [x] 阶段二 架构总览定稿（`03_架构总览.md`）
 - [x] 阶段二 通信格式规范定稿（`04_通信格式规范.md`）
 - [x] 阶段三 技术栈定稿（`05_技术栈与工程结构.md`）
-- [x] **阶段三 骨架链路跑通**：基础设施(EventBus/Scheduler/Store/CommandBus) + Gateway/WS + Economy/Building + 前端演示页。升级建筑全链路经单元测试(4/4)、WebSocket、浏览器三重实测通过。
+- [x] **阶段三 骨架链路跑通**：基础设施(EventBus/Scheduler/Store/CommandBus) + Gateway/WS + Economy/Building + 前端演示页。升级建筑全链路经单元测试、WebSocket、浏览器三重实测通过。
 - [x] 代码导读 + 扩展与代码规范定稿（`06`、`07`）
-- [x] **多人在线可玩**：6 大模块(Economy/Building/Military/World/Movement/Combat/PvE) + 完整网页前端。核心循环跑通：4资源经济→训练全兵种→出征打PvE→掠夺→返程入库。全循环测试 4/4 通过。
+- [x] **多人在线可玩**：9 大模块(Player/Economy/Building/Military/World/PvE/Movement/Combat/Notifications) + 完整网页前端。核心循环跑通：4资源经济→训练全兵种→出征打PvE/PvP→掠夺→返程入库。服务端测试 61 项通过。
 - [ ] 美术资源生成替换（清单见 `美术资源清单.md`）
 - [ ] 部署到腾讯云（见 `部署手册_腾讯云轻量服务器.md`）
 
@@ -62,7 +62,7 @@ npm run build:shared             # 改过 shared 后必跑
 npm run dev:server               # 终端A：后端 :8080
 npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://localhost:5173
 ```
-四个标签页：🏠村庄(升级18资源田+10建筑) / ⚔️军队(训练罗马10兵种) / 🗺️地图(出征掠夺6个PvE目标) / 📜报告(战报)。
+四个标签页：🏠村庄(三区建筑与资源田) / ⚔️军队(三部族兵种) / 🗺️地图(出征掠夺PvE或进攻玩家村) / 📜报告(战报)。
 
 ## 配置表速查（改数值在哪改）
 
@@ -71,11 +71,14 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 | # | 文件 | 配什么 |
 |---|------|--------|
 | 表1 | `config/resources.csv` | **资源种类**（木/泥/铁/粮） |
-| 表2 | `config/fields.csv` | **资源田**（伐木场/采泥场/铁矿/农田 的产量·成本·时间） |
-| 表3 | `config/buildings.csv` | **中心建筑**（10个建筑的成本·时间·科技树前置） |
-| 表4 | `config/units.csv` | **兵种**（罗马10兵种的攻防·速度·载货·耗粮·造价） |
-| 表5 | `config/pve_targets.csv` | **野怪/PvE目标**（战利品·重生时间） |
-| 表6 | `config/pve_defenders.csv` | **野怪守军**（每个目标里有哪些怪·几只·多强） |
-| 表7 | `config/pve_spawns.csv` | **野怪在地图的位置**（坐标分布） |
+| 表2 | `config/buildings.csv` | **全部建筑**（含资源田；成本/耗时/产量/前置/归属区） |
+| 表3 | `config/town_center_slots.csv` | **城镇中心等级槽位曲线**（城内/城外/队列） |
+| 表4 | `config/units.csv` | **兵种**（三部族攻防·速度·载货·耗粮·造价·所需建筑） |
+| 表5 | `config/unit_traits.csv` | **兵种特性**（攻防之外的倍率修正） |
+| 表6 | `config/pve_targets.csv` | **野怪/PvE目标**（战利品·重生时间） |
+| 表7 | `config/pve_defenders.csv` | **野怪守军**（每个目标里有哪些怪·几只·多强） |
+| 表8 | `config/pve_spawns.csv` | **野怪在地图的位置**（坐标分布） |
+| 表9 | `config/game_constants.csv` | **全局常量**（地图、容量、战斗、行军等） |
+| 表10 | `config/village_templates.csv` | **开局模板**（三部族初始建筑/资源） |
 
 > 每张表**每一列**的详细含义、以及常见改法举例，见 `config/README.md`。

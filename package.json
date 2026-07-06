@@ -10,10 +10,11 @@
   ],
   "scripts": {
     "build:shared": "npm run build -w @slg/shared",
+    "build:server": "npm run build -w @slg/server",
     "build:client": "npm run build -w @slg/client",
-    "build": "npm run build:shared && npm run build:client",
+    "build": "npm run build:shared && npm run build:server && npm run build:client",
     "dev:server": "npm run dev -w @slg/server",
-    "start": "node --import tsx packages/server/src/main.ts",
+    "start": "node packages/server/dist/main.js",
     "test:server": "npm run test -w @slg/server",
     "lint": "npm run lint -w @slg/server",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",

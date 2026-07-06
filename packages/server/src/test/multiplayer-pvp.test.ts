@@ -17,6 +17,11 @@ const setClock = (t: number) => (clock = t);
 const send = (app: GameApp, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 const reg = (app: GameApp, name: string, pwd: string, tribe = 'romans') =>
   send(app, 'player.Register', { name, password: pwd, tribe });
+async function buildBarracks(app: GameApp, villageId: string): Promise<void> {
+  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 10_000, setClock);
+}
 /** 玩家坐标读取（六边形轴坐标 q/r，兼容旧 x/y）。 */
 const px = (p: any) => p.q ?? p.x ?? 0;
 const py = (p: any) => p.r ?? p.y ?? 0;
@@ -54,6 +59,7 @@ test('种族：高卢玩家不能训练罗马兵', async () => {
   const g = (await reg(app, '高卢人', 'pass123', 'gauls')).payload as any;
   const vid = g.player.villageId;
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
+  await buildBarracks(app, vid);
   // 罗马军团兵 → 拒绝
   const bad = await send(app, 'military.TrainTroops', { villageId: vid, unit: 'legionnaire', count: 1 });
   assert.equal(bad.reason, 'wrong_tribe_unit');
@@ -78,6 +84,7 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   const va = a.player.villageId, vb = b.player.villageId;
 
   await send(app, 'economy.Grant', { villageId: va, gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
+  await buildBarracks(app, va);
   await send(app, 'military.TrainTroops', { villageId: va, unit: 'legionnaire', count: 5 });
   for (let i = 0; i < 5; i++) await app.scheduler.advanceTo(clock + 27_000, setClock);
 
@@ -113,6 +120,7 @@ test('安全：不能攻击自己', async () => {
   const a = (await reg(app, '自攻', 'p1234')).payload as any;
   const va = a.player.villageId;
   await send(app, 'economy.Grant', { villageId: va, gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
+  await buildBarracks(app, va);
   await send(app, 'military.TrainTroops', { villageId: va, unit: 'legionnaire', count: 1 });
   await app.scheduler.advanceTo(clock + 27_000, setClock);
   const atk = await send(app, 'movement.SendAttack', {
@@ -120,4 +128,42 @@ test('安全：不能攻击自己', async () => {
     targetVillage: va, toXY: { q: px(a.player), r: py(a.player) }, troops: { legionnaire: 1 },
   });
   assert.equal(atk.reason, 'cannot_attack_self');
+});
+
+test('安全：出征兵力必须为正整数，负数不能刷兵', async () => {
+  const app = freshApp();
+  const a = (await reg(app, '刷兵防护', 'p1234')).payload as any;
+  const va = a.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 5 } });
+
+  const bad = await send(app, 'movement.SendRaid', {
+    villageId: va,
+    fromXY: { q: 999, r: 999 },
+    targetId: 'pve-0',
+    troops: { legionnaire: -10 },
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.reason, 'bad_troops:legionnaire');
+
+  const army = (await send(app, 'military.GetArmy', { villageId: va })).payload as any;
+  assert.equal(army.troops.legionnaire, 5, '负数出征不应增加驻军');
+});
+
+test('安全：客户端伪造出征坐标不会缩短真实行军时间', async () => {
+  const app = freshApp();
+  const a = (await reg(app, '坐标A', 'p1234')).payload as any;
+  const b = (await reg(app, '坐标B', 'p1234')).payload as any;
+  const va = a.player.villageId, vb = b.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 5 } });
+
+  const atk = await send(app, 'movement.SendAttack', {
+    villageId: va,
+    fromXY: { q: 0, r: 0 },
+    targetVillage: vb,
+    toXY: { q: 0, r: 0 },
+    troops: { legionnaire: 5 },
+  });
+
+  assert.equal(atk.ok, true, `攻击应发出: ${atk.reason ?? ''}`);
+  assert.ok(((atk.payload as any).travelSec ?? 0) > 3, '应按服务器真实坐标计算，而不是客户端伪造的同格坐标');
 });

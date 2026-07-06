@@ -172,6 +172,14 @@ export class MilitaryModule {
     if (!Number.isInteger(count) || count <= 0) return { ok: false, payload: {}, reason: 'bad_count' };
     if (s.training) return { ok: false, payload: {}, reason: 'queue_busy' };
 
+    const building = await this.commands.send({
+      name: 'building.GetBuildingLevel',
+      from: MilitaryModule.NAME,
+      payload: { villageId, kind: def.building },
+    });
+    const level = (building.payload as any)?.level ?? 0;
+    if (!building.ok || level < 1) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
+
     // 一次性预扣 count 份资源
     const totalCost: Record<string, number> = {};
     for (const [r, v] of Object.entries(def.cost)) totalCost[r] = v * count;

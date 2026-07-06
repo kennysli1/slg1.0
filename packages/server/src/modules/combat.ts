@@ -71,7 +71,7 @@ export class CombatModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'combat',
     publicActions: {
-      GetBattle: { command: 'combat.GetBattle', needAuth: true },
+      GetBattle: { command: 'combat.GetBattle', ownVillage: true, needAuth: true },
     },
     eventPushMap: {
       'combat.BattleStarted': 'BattleStarted',
@@ -123,10 +123,18 @@ export class CombatModule {
   // ---- Commands ----
 
   private getBattle(cmd: Command): CommandResult {
-    const { targetId } = cmd.payload as { targetId: string };
+    const { targetId, villageId } = cmd.payload as { targetId: string; villageId?: string };
     const b = this.findActive(targetId);
     if (!b) return { ok: true, payload: { battle: null } };
+    if (villageId && !this.canViewBattle(b, villageId)) {
+      return { ok: false, payload: {}, reason: 'battle_forbidden' };
+    }
     return { ok: true, payload: { battle: this.snapshotForClient(b) } };
+  }
+
+  private canViewBattle(b: Battle, villageId: string): boolean {
+    if (b.targetKind === 'village' && b.targetId === villageId) return true;
+    return Object.values(b.contributions).some((c) => c.fromVillage === villageId);
   }
 
   /**

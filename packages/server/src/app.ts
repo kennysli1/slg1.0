@@ -107,7 +107,7 @@ export function createGameApp(opts?: {
   const economy = new EconomyModule(store, bus, commands, now, config);
   const building = new BuildingModule(store, bus, commands, scheduler, now, config);
   const military = new MilitaryModule(store, bus, commands, scheduler, now, config);
-  const world = new WorldModule(store, bus, commands, now);
+  const world = new WorldModule(store, bus, commands, now, config);
   const pve = new PveModule(store, bus, commands, scheduler, now, config);
   const movement = new MovementModule(store, bus, commands, scheduler, now, config);
   const combat = new CombatModule(store, bus, commands, scheduler, now, config);
@@ -182,22 +182,23 @@ export function createGameApp(opts?: {
       // 清除游戏进度（以 villageId 为 key 的所有进度集合）
       const progressByVillage = ['economy', 'building', 'military', 'notifications'] as const;
       for (const c of progressByVillage) store.delete(c, villageId);
-      // 清除行军/战斗记录（以 villageId 过滤，避免误删其他人）
-      for (const m of store.all<{ fromVillage?: string; targetId?: string }>('movement')) {
-        if ((m as any).fromVillage === villageId || (m as any).targetId === villageId) {
+      // 清除行军记录（以 villageId 过滤，避免误删其他人）
+      for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
+        if (m.fromVillage === villageId || m.targetId === villageId || m.targetVillage === villageId) {
           store.delete('movement', (m as any).id ?? '');
         }
       }
+      // 清除进行中战斗（目标或来攻贡献涉及该村庄时整场取消，避免幽灵返程/战报）
+      for (const b of store.all<{ id?: string; targetId?: string; contributions?: Record<string, { fromVillage?: string }> }>('battle')) {
+        const involves = b.targetId === villageId || Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
+        if (involves) store.delete('battle', b.id ?? '');
+      }
       // 清除地图上该村庄的 tile
-      const tile = store.get<{ q: number; r: number }>('world_tile', `${p.villageId}`);
-      if (!tile) {
-        // 找 world_tile 中 refId===villageId 的格
-        for (const t of store.all<{ refId?: string; q: number; r: number }>('world_tile')) {
-          if ((t as any).refId === villageId) {
-            const key = `${t.q},${t.r}`;
-            store.set('world_tile', key, { q: t.q, r: t.r, kind: 'empty' });
-            break;
-          }
+      for (const t of store.all<{ refId?: string; q: number; r: number }>('world_tile')) {
+        if (t.refId === villageId) {
+          const key = `${t.q},${t.r}`;
+          store.set('world_tile', key, { q: t.q, r: t.r, kind: 'empty' });
+          break;
         }
       }
       return { villageId };

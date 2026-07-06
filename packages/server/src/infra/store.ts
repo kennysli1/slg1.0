@@ -96,12 +96,18 @@ export class JsonFileStore extends MemoryStore {
     try {
       const raw = readFileSync(this.filePath, 'utf8');
       const obj = JSON.parse(raw) as Record<string, Record<string, unknown>>;
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        throw new Error('存档根节点必须是对象');
+      }
       for (const [coll, docs] of Object.entries(obj)) {
+        if (!docs || typeof docs !== 'object' || Array.isArray(docs)) {
+          throw new Error(`集合 ${coll} 必须是对象`);
+        }
         const c = this.col(coll);
         for (const [k, v] of Object.entries(docs)) c.set(k, v);
       }
     } catch (err) {
-      console.error('[JsonFileStore] 载入失败，从空开始:', err);
+      throw new Error(`[JsonFileStore] 载入失败，拒绝从空存档启动以避免覆盖原数据: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

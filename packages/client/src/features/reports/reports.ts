@@ -4,11 +4,12 @@ import { fieldInfo, buildingInfo, resInfo } from '../../app/config.js';
 import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
+import { escapeHtml } from '../../shared/ui/widgets.js';
 
 export function renderReports(): string {
   const reports = getReports();
   if (!reports.length) return '<div class="empty">暂无战报。去地图掠夺野怪或进攻其他玩家！</div>';
-  return reports.map((r) => `<div class="report">${r}</div>`).join('');
+  return reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
 }
 
 /**

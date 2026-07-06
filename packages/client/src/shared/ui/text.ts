@@ -13,18 +13,25 @@ const ERR_MSG: Record<string, string> = {
   max_level: '已达最高等级',
   spend_failed: '资源不足',
   bad_count: '数量不合法',
+  bad_troops: '出征兵力不合法',
+  empty_troops: '请至少选择一种出征兵力',
   bad_field: '资源田不存在',
   wrong_tribe_unit: '该兵种不属于你的部族',
   no_troops: '没有可派出的兵力',
   target_not_found: '目标不存在或已消失',
+  origin_not_found: '出发村庄不存在',
   cannot_attack_self: '不能攻击自己的村庄',
   village_not_found: '村庄不存在',
+  not_logged_in: '请重新登录',
+  network_error: '网络连接异常',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */
 export function errText(code?: string): string {
   if (!code) return '操作失败';
   if (ERR_MSG[code]) return ERR_MSG[code];
+  if (code.startsWith('bad_troops')) return '出征兵力不合法';
+  if (code.startsWith('requires_building')) return '缺少训练所需建筑';
   if (code.startsWith('insufficient_troops')) return '兵力不足';
   if (code.startsWith('insufficient:')) {
     const r = code.split(':')[1];

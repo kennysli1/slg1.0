@@ -80,6 +80,7 @@ export class BuildingModule {
     this.commands.register('building.Build', (c) => this.build(c));
     this.commands.register('building.Upgrade', (c) => this.upgrade(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
+    this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
   }
 
   /** 重启恢复：为每条未完成队列重新登记定时任务（过期则立即触发）。 */
@@ -120,6 +121,14 @@ export class BuildingModule {
 
   private load(villageId: string): BuildingState | undefined {
     return this.store.get<BuildingState>(COLLECTION, villageId);
+  }
+
+  private getBuildingLevel(cmd: Command): CommandResult {
+    const { villageId, kind } = cmd.payload as { villageId: string; kind: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const level = Math.max(0, ...s.placed.filter((p) => p.kind === kind).map((p) => p.level));
+    return { ok: true, payload: { kind, level } };
   }
 
   // ---- 派生（全部在内部算，对外只给快照，铁律#4）----

@@ -49,7 +49,7 @@
 > - 想让老鼠窝掉更多资源 → 表5 `pve_targets.csv`，改 rats 行的 lootWood 等。
 > - 想给老鼠窝加更多守军 → 表6 `pve_defenders.csv`，给 `targetId=1`(老鼠窝) 加一行新怪。
 > - 想在地图多放几个强盗营地 → 表7 `pve_spawns.csv`，加几行 `targetId=3`(强盗营地) 的坐标。
-> - 想让兵营不需要前置就能造 → 表3 `buildings.csv`，把 barracks 行的 requires 清空。
+> - 想让兵营不需要前置就能造 → 表2 `buildings.csv`，把 barracks 行的 requires 清空。
 
 ---
 
@@ -124,11 +124,11 @@
 | id | 数字主键（units.csv 的 traits 列引用它） |
 | code | 英文代码（程序内部用，勿改） |
 | name | 显示名（如"持盾"） |
-| effect | 效果类型代码（枚举，见下） |
-| value | 数值（含义随 effect 而定，如 -0.30） |
+| effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
+| value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
 
 > effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成)。
-> 加新特性：本表加一行 + 在 `infra/combat.ts` 的 effect 分派里加一个 case。
+> 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
 
 ## pve_targets.csv — PvE 目标模板
 | 列 | 含义 |
@@ -176,13 +176,13 @@
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
 | smithy_bonus_per_level | 0.1 | 铁匠每级攻防加成（+10%/级） |
-| smithy_cost_base | 200 | 铁匠升级成本基数（木+泥各 base×目标等级） |
+| smithy_cost_base | 20 | 铁匠升级成本基数（木+泥各 base×目标等级） |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
 | main_build_speedup_cap | 0.6 | 主基地提速上限（最多-60%） |
 | storage_base | 800 | 仓库/粮仓基础容量 |
 | storage_growth_per_level | 0.5 | 容量每级增长系数（+50%基数/级） |
 | start_resource_amount | 750 | 新村各资源初始存量 |
-| base_production_per_hour | 10 | 资源田 0 级基础每小时产量 |
+| base_production_per_hour | 1000 | 基础产量兼容常量；当前资源田实际产量以 `buildings.csv` 的 `prodBase/prodGrowth` 为准 |
 | map_size | 20 | 地图半径（地图为 [-size,size] 方形） |
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 

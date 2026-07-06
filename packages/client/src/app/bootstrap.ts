@@ -3,7 +3,7 @@
  * 不含具体页面渲染逻辑——各页面在 features/* 内自描述，这里只负责装配。
  */
 import { connect, req, onPush, me } from '../api.js';
-import { art } from '../shared/ui/widgets.js';
+import { art, escapeHtml } from '../shared/ui/widgets.js';
 import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers } from '../shared/ui/widgets.js';
@@ -32,7 +32,7 @@ function renderShell() {
       <div class="brand">${art('ui_logo', 'LOGO', 'md')}
         <div class="brand-text">
           <div class="title">世界之王</div>
-          <div class="subtitle">${me?.name ?? ''} 的村庄 · 坐标 (${me?.q},${me?.r})</div>
+          <div class="subtitle">${escapeHtml(me?.name ?? '')} 的村庄 · 坐标 (${me?.q},${me?.r})</div>
         </div>
       </div>
       <div id="resbar" class="resbar"></div>
@@ -46,16 +46,27 @@ function renderShell() {
 
 async function refreshAll() {
   if (!me) return;
-  const center = getMapCenter() ?? { q: me.q, r: me.r };
-  const R = mapViewRadius();
-  const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
-  const [res, vil, army, area, moves] = await Promise.all([
-    req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
-    req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
-  ]);
-  setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
-  renderResBar();
-  renderPage();
+  try {
+    const center = getMapCenter() ?? { q: me.q, r: me.r };
+    const R = mapViewRadius();
+    const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
+    const [res, vil, army, area, moves] = await Promise.all([
+      req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
+      req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
+    ]);
+    const failed = [res, vil, army, area, moves].find((x) => !x.ok);
+    if (failed) {
+      const code = failed.error?.code ?? 'failed';
+      if (code === 'not_logged_in') renderLogin(app, startGame, '连接已断开，请重新登录');
+      else addReport(`刷新失败：${errText(code)}`);
+      return;
+    }
+    setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
+    renderResBar();
+    renderPage();
+  } catch {
+    addReport('刷新失败：网络连接异常');
+  }
 }
 
 function renderResBar() {
@@ -97,25 +108,39 @@ function bindPageEvents() {
     // 导航后立即用新中心刷新地图数据
     const R = mapViewRadius();
     const fetchR = R + 6;
-    const area = await req('GetArea', { cq: center.q, cr: center.r, r: fetchR });
-    setCache({ ...getCache(), area: area.payload });
-    renderPage();
+    try {
+      const area = await req('GetArea', { cq: center.q, cr: center.r, r: fetchR });
+      if (area.ok) {
+        setCache({ ...getCache(), area: area.payload });
+        renderPage();
+      } else {
+        addReport(`地图刷新失败：${errText(area.error?.code)}`);
+      }
+    } catch {
+      addReport('地图刷新失败：网络连接异常');
+    }
   });
 }
 
 /** 统一"发请求并刷新"：失败转中文战报。 */
 async function act(p: Promise<any>) {
-  const res = await p;
-  if (!res.ok) addReport(`操作失败：${errText(res.error?.code)}`);
-  await refreshAll();
+  try {
+    const res = await p;
+    if (!res.ok) addReport(`操作失败：${errText(res.error?.code)}`);
+    await refreshAll();
+  } catch {
+    addReport('操作失败：网络连接异常');
+  }
 }
 
 function startGame() {
   renderShell();
   // 登录后拉一次历史通知，播种战报列表（只拉一次，后续靠 live Push 追加）
-  req('GetNotifications').then((res) => {
-    if (res.ok) hydrateReports((res.payload as any).notifications ?? []);
-  });
+  req('GetNotifications')
+    .then((res) => {
+      if (res.ok) hydrateReports((res.payload as any).notifications ?? []);
+    })
+    .catch(() => addReport('历史战报加载失败：网络连接异常'));
   refreshAll();
 }
 
@@ -127,10 +152,15 @@ onPush((event, payload) => {
 
 /** 应用入口：先拉配置 → 连接 WS → 据登录态进入登录页或游戏。 */
 export async function bootstrap() {
-  await loadGameConfig(); // 拉服务端配置（名称/图标/分类/白名单常量）
   connect(
-    () => { if (!me) renderLogin(app, startGame); else startGame(); },
-    () => { /* 断线：connect 内部会自动重连 */ },
+    () => {
+      void (async () => {
+        await loadGameConfig(); // WS 建立后拉服务端配置（名称/图标/分类/白名单常量）
+        if (!me) renderLogin(app, startGame);
+        else startGame();
+      })();
+    },
+    () => { renderLogin(app, startGame, '连接已断开，正在重连…'); },
   );
   renderLogin(app, startGame, '连接服务器中…');
 

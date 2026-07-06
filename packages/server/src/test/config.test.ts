@@ -98,6 +98,32 @@ test('校验器：兵种引用不存在的特性应抛错', () => {
   assert.throws(() => validateGameConfig(bad), /特性/);
 });
 
+test('校验器：PvE 模板没有守军应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = { ...cfg, pveTemplates: { ...cfg.pveTemplates } };
+  const p = Object.keys(bad.pveTemplates)[0];
+  bad.pveTemplates[p] = { ...bad.pveTemplates[p], defender: {} };
+  assert.throws(() => validateGameConfig(bad), /没有任何守军/);
+});
+
+test('校验器：PvE spawn 坐标超出地图应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = {
+    ...cfg,
+    pveSpawns: [{ ...cfg.pveSpawns[0], q: cfg.constants.mapSize + 1, r: 0 }],
+  };
+  assert.throws(() => validateGameConfig(bad), /超出 map_size/);
+});
+
+test('校验器：关键常量范围非法应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, combatTickMs: 0, marchSpeedMultiplier: 0 },
+  };
+  assert.throws(() => validateGameConfig(bad), /combat_tick_ms|march_speed_multiplier/);
+});
+
 test('特性：多效果特性正确展开', () => {
   const cfg = loadGameConfig(configDir);
   const multiTrait = {

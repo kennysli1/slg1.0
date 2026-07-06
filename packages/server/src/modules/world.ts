@@ -3,6 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import type { GameConfig } from '../infra/config.js';
 import { hexKey, hexDistance } from '../infra/hex.js';
 
 /**
@@ -52,10 +53,12 @@ export class WorldModule {
     private _bus: EventBus,
     private commands: CommandBus,
     private _now: () => number,
+    private config: GameConfig,
   ) {}
 
   init(): void {
     this.commands.register('world.GetTile', (c) => this.getTile(c));
+    this.commands.register('world.GetTileByRef', (c) => this.getTileByRef(c));
     this.commands.register('world.GetArea', (c) => this.getArea(c));
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
@@ -73,13 +76,23 @@ export class WorldModule {
     return { ok: true, payload: { tile: t ?? { q, r, kind: 'empty' } } };
   }
 
+  /** 按 owner id 反查地块，供行军等模块派生服务器权威坐标。 */
+  private getTileByRef(cmd: Command): CommandResult {
+    const { refId, kind } = cmd.payload as { refId: string; kind?: TileKind };
+    const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) =>
+      t.refId === refId && (kind ? t.kind === kind : true));
+    if (!tile) return { ok: false, payload: {}, reason: 'tile_not_found' };
+    return { ok: true, payload: { tile } };
+  }
+
   /** 返回以 (cq,cr) 为中心、六边形半径 r 内的所有非空地块。 */
   private getArea(cmd: Command): CommandResult {
     const { cq, cr, r } = cmd.payload as { cq: number; cr: number; r: number };
     const center = { q: cq, r: cr };
+    const radius = Math.min(Math.max(0, r), this.config.constants.mapViewRadius + 6);
     const tiles: Tile[] = [];
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
-      if (hexDistance(center, t) <= r) tiles.push(t);
+      if (hexDistance(center, t) <= radius) tiles.push(t);
     }
     return { ok: true, payload: { tiles } };
   }

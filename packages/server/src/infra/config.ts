@@ -216,14 +216,34 @@ function parseTraitRefs(s: string, traitIdToCode: Map<number, string>): string[]
   }).filter(Boolean);
 }
 
+function assertUniqueRows(rows: Record<string, string>[], table: string, idField = 'id', codeField = 'code'): void {
+  const ids = new Set<string>();
+  const codes = new Set<string>();
+  for (const r of rows) {
+    const id = r[idField]?.trim();
+    const code = r[codeField]?.trim();
+    if (id) {
+      if (ids.has(id)) throw new Error(`${table} 存在重复 ${idField}: ${id}`);
+      ids.add(id);
+    }
+    if (code) {
+      if (codes.has(code)) throw new Error(`${table} 存在重复 ${codeField}: ${code}`);
+      codes.add(code);
+    }
+  }
+}
+
 /** 从指定目录加载所有 CSV。configDir 默认指向仓库根的 config/。 */
 export function loadGameConfig(configDir: string): GameConfig {
   const p = (f: string) => join(configDir, f);
 
-  const resources = loadCsv(p('resources.csv')).map((r) => ({ key: r.id, name: r.name, icon: r.icon }));
+  const resourceRows = loadCsv(p('resources.csv'));
+  assertUniqueRows(resourceRows, 'resources.csv', 'id', 'id');
+  const resources = resourceRows.map((r) => ({ key: r.id, name: r.name, icon: r.icon }));
 
   // 先读建筑原始行，建立 数字ID→code 映射，再解析 requires（前置也是数字ID引用）
   const buildingRows = loadCsv(p('buildings.csv'));
+  assertUniqueRows(buildingRows, 'buildings.csv');
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
 
@@ -254,9 +274,11 @@ export function loadGameConfig(configDir: string): GameConfig {
   }
 
   // 兵种特性表：先解析，units 的 traits 列用数字 id 引用它，解析回 code
+  const traitRows = loadCsv(p('unit_traits.csv'));
+  assertUniqueRows(traitRows, 'unit_traits.csv');
   const unitTraits: Record<string, UnitTraitDef> = {};
   const traitIdToCode = new Map<number, string>();
-  for (const r of loadCsv(p('unit_traits.csv'))) {
+  for (const r of traitRows) {
     if (!r.code) continue;
     traitIdToCode.set(num(r.id), r.code);
     const effects: { effect: TraitEffect; value: number }[] = [];
@@ -267,8 +289,10 @@ export function loadGameConfig(configDir: string): GameConfig {
     unitTraits[r.code] = { id: num(r.id), code: r.code, name: r.name, effects };
   }
 
+  const unitRows = loadCsv(p('units.csv'));
+  assertUniqueRows(unitRows, 'units.csv');
   const units: Record<string, UnitDef> = {};
-  for (const r of loadCsv(p('units.csv'))) {
+  for (const r of unitRows) {
     units[r.code] = {
       id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
@@ -283,9 +307,11 @@ export function loadGameConfig(configDir: string): GameConfig {
   }
 
   // PvE：主表 + 守军表 + 分布点，三表用数字目标ID互相引用，解析回 code
+  const pveRows = loadCsv(p('pve_targets.csv'));
+  assertUniqueRows(pveRows, 'pve_targets.csv');
   const pveTemplates: Record<string, PveTemplate> = {};
   const pveIdToCode = new Map<number, string>();
-  for (const r of loadCsv(p('pve_targets.csv'))) {
+  for (const r of pveRows) {
     pveIdToCode.set(num(r.id), r.code);
     pveTemplates[r.code] = {
       id: num(r.id), type: r.code, name: r.name, icon: r.icon, respawnSec: num(r.respawnSec, 120),
@@ -296,7 +322,7 @@ export function loadGameConfig(configDir: string): GameConfig {
   for (const r of loadCsv(p('pve_defenders.csv'))) {
     const code = pveIdToCode.get(num(r.targetId));
     const tpl = code ? pveTemplates[code] : undefined;
-    if (!tpl) continue;
+    if (!tpl) throw new Error(`pve_defenders.csv targetId=${r.targetId} 不在 pve_targets.csv`);
     tpl.defender[r.unitCode] = {
       count: num(r.count),
       form: (r.form as UnitForm) || 'melee',
@@ -306,7 +332,9 @@ export function loadGameConfig(configDir: string): GameConfig {
     };
   }
 
-  const pveSpawns: PveSpawn[] = loadCsv(p('pve_spawns.csv')).map((r) => ({
+  const spawnRows = loadCsv(p('pve_spawns.csv'));
+  assertUniqueRows(spawnRows, 'pve_spawns.csv', 'id', 'id');
+  const pveSpawns: PveSpawn[] = spawnRows.map((r) => ({
     id: r.id,
     type: pveIdToCode.get(num(r.targetId)) ?? r.targetId, // 数字目标ID → code
     q: num(r.q), r: num(r.r),
@@ -339,8 +367,10 @@ export function loadGameConfig(configDir: string): GameConfig {
   };
 
   // 开局模板表（按部族）
+  const templateRows = loadCsv(p('village_templates.csv'));
+  assertUniqueRows(templateRows, 'village_templates.csv', 'tribe', 'tribe');
   const villageTemplates: Record<string, VillageTemplate> = {};
-  for (const r of loadCsv(p('village_templates.csv'))) {
+  for (const r of templateRows) {
     if (!r.tribe) continue;
     villageTemplates[r.tribe] = {
       tribe: r.tribe,
@@ -364,6 +394,7 @@ export function loadGameConfig(configDir: string): GameConfig {
 export function validateGameConfig(config: GameConfig): void {
   const errors: string[] = [];
   const resourceKeys = new Set(config.resources.map((r) => r.key));
+  const knownTribes = new Set(['romans', 'gauls', 'teutons']);
 
   // resources：必须含 economy 依赖的 4 种结构字段
   for (const need of ['wood', 'clay', 'iron', 'crop']) {
@@ -425,6 +456,9 @@ export function validateGameConfig(config: GameConfig): void {
 
   // units：所需建筑必须存在；form 枚举；traits 引用存在；范围
   for (const u of Object.values(config.units)) {
+    if (!knownTribes.has(u.tribe)) {
+      errors.push(`units.csv[${u.key}] tribe=${u.tribe} 必须是 romans/gauls/teutons`);
+    }
     if (u.building && !buildingCodes.has(u.building)) {
       errors.push(`units.csv[${u.key}] building=${u.building} 不在 buildings.csv`);
     }
@@ -438,15 +472,25 @@ export function validateGameConfig(config: GameConfig): void {
     if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
   }
 
-  // pve：守军挂在已知目标上（解析阶段已丢弃孤儿，这里校验 spawn 引用）；spawn 目标必须存在
+  // pve：每个模板必须有守军；spawn 目标必须存在且坐标在地图内
   const pveCodes = new Set(Object.keys(config.pveTemplates));
+  for (const p of Object.values(config.pveTemplates)) {
+    if (Object.keys(p.defender).length === 0) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
+  }
   for (const s of config.pveSpawns) {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
+    if (hexDistance0(s.q, s.r) > config.constants.mapSize) {
+      errors.push(`pve_spawns.csv[${s.id}] 坐标(${s.q},${s.r}) 超出 map_size=${config.constants.mapSize}`);
+    }
   }
 
   // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
   const tier1 = config.townCenterSlots[1];
+  for (const need of knownTribes) {
+    if (!config.villageTemplates[need]) errors.push(`village_templates.csv 缺少部族模板 ${need}`);
+  }
   for (const t of Object.values(config.villageTemplates)) {
+    if (!knownTribes.has(t.tribe)) errors.push(`village_templates.csv[${t.tribe}] tribe 必须是 romans/gauls/teutons`);
     let innerUsed = 0, outerUsed = 0, centerUsed = 0;
     for (const code of Object.keys(t.startPlaced)) {
       const def = config.buildings[code];
@@ -470,12 +514,21 @@ export function validateGameConfig(config: GameConfig): void {
   // constants：关键范围
   const c = config.constants;
   if (c.mapSize <= 0) errors.push(`game_constants.csv map_size 必须>0`);
+  if (c.mapViewRadius <= 0) errors.push(`game_constants.csv map_view_radius 必须>0`);
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
+  if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
+  if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
+  if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
 
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);
   }
+}
+
+function hexDistance0(q: number, r: number): number {
+  return (Math.abs(q) + Math.abs(q + r) + Math.abs(r)) / 2;
 }
 
 /** DFS 检测建筑 requires 图中的环；返回环路径（含重复首节点）或 null。 */

@@ -19,6 +19,12 @@ const setClock = (t: number) => (clock = t);
 async function send(app: GameApp, action: string, payload: any) {
   return app.commands.send({ name: action, from: 'test', payload });
 }
+
+async function buildBarracks(app: GameApp, villageId = 'v1'): Promise<void> {
+  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 10_000, setClock);
+}
 /**
  * 战斗改为有状态逐 tick 推进。Scheduler.fireDue 在一次 advanceTo 内会把"已到期"任务
  * 全部跑完（含 tick 自我重排的后续 tick，因为跳进的时钟已远超它们），所以用**大步**(默认1小时)
@@ -59,6 +65,7 @@ test('军队：训练消耗资源并产兵，军队耗粮上报', async () => {
   // 训练3个军团兵（需 barracks，但骨架 rallypoint 也有兵种；legionnaire 需 barracks）
   // 先给资源
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await buildBarracks(app);
   const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 2 });
   assert.equal(r.ok, true, `训练应成功: ${r.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 27_000, setClock);
@@ -70,10 +77,19 @@ test('军队：训练消耗资源并产兵，军队耗粮上报', async () => {
   assert.ok(eco.cropUpkeep > 0, 'crop消耗应>0（含军队耗粮）');
 });
 
+test('军队：未建所需建筑时拒绝训练', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'requires_building:barracks');
+});
+
 test('完整循环：训练→出征打PvE→掠夺→返程入库', async () => {
   const app = freshApp();
   // 先升仓库提高容量，再多次补给（单次Grant受容量截断）
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
+  await buildBarracks(app);
 
   // 训练 5 个军团兵（成本 wood 600 < 容量800），足以击败老鼠窝
   await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 5 });
