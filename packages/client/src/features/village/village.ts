@@ -6,6 +6,8 @@ import { req } from '../../api.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
+/** 仅"刚打开"这一帧带入场动画；后续 5s 全量刷新重建 DOM 时不再重放（否则每次都会滑进来"闪一下"）。 */
+let drawerJustOpened = false;
 /** 建造/升级动作回调（由 bindVillage 注入的 act）。 */
 let actFn: ((p: Promise<any>) => void) | null = null;
 
@@ -90,6 +92,8 @@ function renderPlaced(p: any): string {
 /** 侧边栏抽屉：某区可建建筑清单。 */
 function renderDrawer(): string {
   if (!drawer) return '';
+  const opening = drawerJustOpened; // 消费一次性动画标记：只有本次是"刚打开"才带 --opening
+  drawerJustOpened = false;
   const title = drawer.zone === 'inner' ? '城内可建' : '城外可建';
   const opts = drawer.options.map((o: any) => {
     const afford = canAfford(o.cost);
@@ -105,7 +109,7 @@ function renderDrawer(): string {
         ${costPreview(o.cost, o.timeSec)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
-    <aside class="drawer">
+    <aside class="drawer${opening ? ' drawer--opening' : ''}">
       <div class="drawer-head">${title} <small>（空槽 ${drawer.freeSlots}）</small>
         <button class="drawer-close" data-close-drawer="1">✕</button></div>
       <div class="drawer-body">${opts || '<div class="hint-sm">暂无可建建筑</div>'}</div>
@@ -128,6 +132,7 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       if (!res.ok) return;
       const p = res.payload as any;
       drawer = { zone, options: p.options ?? [], freeSlots: p.freeSlots ?? 0 };
+      drawerJustOpened = true;
       rerenderPage();
     });
 

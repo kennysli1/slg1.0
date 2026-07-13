@@ -134,7 +134,8 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
 .drawer-mask { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 40; }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 88vw); z-index: 41;
   background: var(--c-surface); border-left: 1px solid var(--c-line); box-shadow: var(--sh-2);
-  display: flex; flex-direction: column; animation: drawer-in .18s ease; }
+  display: flex; flex-direction: column; }
+.drawer--opening { animation: drawer-in .18s ease; }
 @keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 .drawer-head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4);
   border-bottom: 1px solid var(--c-line); font-weight: 600; }
