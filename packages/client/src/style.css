@@ -51,6 +51,13 @@ body {
 .icon-sm { width: 22px; height: 22px; }
 .icon-md { width: 48px; height: 48px; }
 .icon-lg { width: 72px; height: 72px; }
+/* 大图标（建筑/兵种/资源田）坐在统一圆角底板上：透明美术不再悬浮显得参差 */
+.icon-md, .icon-lg {
+  box-sizing: border-box; padding: 5px;
+  background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: var(--r-md);
+}
+/* 顶栏 logo 与标签图标不加底板（深色背景上会突兀） */
+.brand .icon, .tabs .icon { background: transparent; border: 0; padding: 0; }
 .icon-fallback {
   display: inline-flex; align-items: center; justify-content: center; text-align: center;
   background: var(--c-surface-2); border: 1px solid var(--c-line);
