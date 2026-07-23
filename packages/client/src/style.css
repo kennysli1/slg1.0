@@ -49,7 +49,7 @@ body {
 .icon { display: inline-block; object-fit: contain; vertical-align: middle; border-radius: var(--r-sm); }
 .icon-xs { width: 15px; height: 15px; }
 .icon-sm { width: 22px; height: 22px; }
-.icon-md { width: 48px; height: 48px; }
+.icon-md { width: 56px; height: 56px; }
 .icon-lg { width: 72px; height: 72px; }
 /* 大图标（建筑/兵种/资源田）坐在统一圆角底板上：透明美术不再悬浮显得参差 */
 .icon-md, .icon-lg {
@@ -118,15 +118,17 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
   background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md);
   padding: var(--s-3); box-shadow: var(--sh-1); transition: box-shadow .15s, transform .15s;
 }
-/* 同一区网格内所有卡（已建/空槽）统一最小高度，避免高低参差 */
-.grid > .card { min-height: 96px; align-items: flex-start; }
+/* 同一区网格内所有卡（已建/空槽）统一最小高度并垂直居中图标，避免下方大片留白 */
+.grid > .card { min-height: 88px; align-items: center; }
 .card:hover { box-shadow: var(--sh-2); transform: translateY(-1px); }
 .card.locked { opacity: .55; }
 .card.target { background: linear-gradient(180deg, #fff8ec, var(--c-surface)); border-color: #e8cf9f; }
 .card.enemy { background: linear-gradient(180deg, #fdeeee, var(--c-surface)); border-color: #e8b6b6; }
 .cardbody { flex: 1; min-width: 0; }
+/* 建筑卡的升级按钮整宽，撑满底部一行、消除右侧空白 */
+.cardbody > .btn-sm { display: block; width: 100%; }
 .card-title { font-size: var(--f-sm); font-weight: 600; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.card-title .lv { color: var(--c-brand); font-size: var(--f-sm); }
+.card-title .lv { color: var(--c-brand); font-size: var(--f-sm); margin-left: auto; }
 .coord { color: var(--c-ink-soft); font-weight: 400; font-size: var(--f-xs); }
 
 /* ---------- 建筑三区系统 ---------- */
@@ -137,10 +139,10 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
 .card-empty:hover { border-color: var(--c-brand); color: var(--c-brand); background: var(--c-surface-2); }
 .card-empty:hover .slot-icon { border-color: var(--c-brand); color: var(--c-brand); }
 .slot-icon {
-  flex: none; width: 48px; height: 48px; border-radius: var(--r-md);
+  flex: none; width: 56px; height: 56px; border-radius: var(--r-md);
   border: 1px dashed var(--c-line); background: var(--c-surface-2);
   display: flex; align-items: center; justify-content: center;
-  font-size: 28px; line-height: 1; font-weight: 300; color: var(--c-ink-soft);
+  font-size: 30px; line-height: 1; font-weight: 300; color: var(--c-ink-soft);
 }
 .hint-sm { font-size: var(--f-xs); color: var(--c-ink-soft); margin: var(--s-1) 0; }
 .hint-sm.prod { color: var(--c-brand); font-weight: 600; }
@@ -187,6 +189,7 @@ input[type="number"], .train-row input { width: 56px; }
 input { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: var(--s-1) var(--s-2); font-family: inherit; font-size: var(--f-sm); background: #fff; }
 input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .train-row { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); }
+.train-row .btn-sm { flex: 1; margin-top: 0; }
 
 /* ---------- 横幅 ---------- */
 .banner {
@@ -198,10 +201,10 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .banner-move { background: #eef2f7; border-color: #b9c8da; }
 
 /* ---------- 消耗预览 ---------- */
-.cost { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); font-size: var(--f-xs); color: var(--c-ink-soft); }
+.cost { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); font-size: var(--f-xs); color: var(--c-ink-soft); align-items: center; }
 .cost-item { display: inline-flex; align-items: center; gap: 2px; }
 .cost-lack { color: var(--c-danger); font-weight: 600; }
-.cost-time { opacity: .8; }
+.cost-time { opacity: .8; margin-left: auto; white-space: nowrap; }
 
 /* ---------- 进度条 ---------- */
 .progress { position: relative; height: 18px; margin-top: var(--s-2); background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; }
@@ -228,8 +231,8 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .hex-enemy { fill: #f4dada; stroke: #d99; }
 .hex-pve { fill: #efe2f1; stroke: #c4a8cc; }
 .hex-cell.hex-selected .hex { stroke: var(--c-gold); stroke-width: 3; }
-.hex-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; pointer-events: none; }
-.hex-icon img { width: 36px; height: 36px; filter: drop-shadow(0 1px 1px rgba(46,38,32,.35)); }
+.hex-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; pointer-events: none; }
+.hex-icon img { width: 44px; height: 44px; filter: drop-shadow(0 1px 1px rgba(46,38,32,.35)); }
 /* 行军路径与部队标记 */
 .march-path { fill: none; stroke: #c0392b; stroke-width: 2; stroke-dasharray: 5 4; opacity: .75; }
 .march-path.march-return { stroke: #4f7a3f; }

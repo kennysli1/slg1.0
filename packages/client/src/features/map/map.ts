@@ -116,7 +116,7 @@ export function renderMap(): string {
     // 用 <g> 承载多边形 + 图标，transform 定位
     cells += `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable} title="(${h.q},${h.r})">
         <polygon class="${cls}" points="${cornerStr}"></polygon>
-        ${inner ? `<foreignObject x="-20" y="-20" width="40" height="40"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
+        ${inner ? `<foreignObject x="-24" y="-24" width="48" height="48"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
       </g>`;
   }
 
