@@ -50,20 +50,22 @@ function renderCenter(tc: any): string {
     : busy ? '<small class="tag">建造中</small>'
     : `<button class="btn-sm" data-up-slot="${tc.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   return `<h3>城镇中心</h3>
-    <div class="grid"><div class="card card-center">${art(tc.icon, tc.name, 'lg')}
+    <div class="card card-center">${art(tc.icon, tc.name, 'lg')}
       <div class="cardbody"><div class="card-title">${tc.name} <b class="lv">Lv${tc.level}</b></div>
         <div class="hint-sm">升级开放更多城内/城外槽位与队列</div>
-        ${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div></div>`;
+        ${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div>`;
 }
 
 /** 渲染一个区：已建建筑卡 + 空槽（可点建造）。 */
 function renderZone(zone: 'inner' | 'outer', title: string, z: any): string {
   if (!z) return '';
   const placed = (z.placed || []).map((p: any) => renderPlaced(p)).join('');
-  // 空槽：freeSlots 个"＋"占位
+  // 空槽：freeSlots 个占位卡（与已建建筑同为横向布局，保持形状/高度一致）
   const empties = Array.from({ length: z.freeSlots || 0 }, () =>
     `<div class="card card-empty" data-build-zone="${zone}">
-      <div class="slot-plus">＋</div><div class="hint-sm">空槽 · 点击建造</div></div>`).join('');
+      <div class="slot-icon">＋</div>
+      <div class="cardbody"><div class="card-title">空槽</div><div class="hint-sm">点击建造</div></div>
+    </div>`).join('');
   return `<h3>${title} <small>（${z.placed?.length ?? 0}/${z.slots ?? 0}）</small></h3>
     <div class="grid">${placed}${empties}</div>`;
 }

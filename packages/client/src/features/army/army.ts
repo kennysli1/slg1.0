@@ -18,7 +18,7 @@ export function renderArmy(): string {
   if (!army) return '<div class="loading">加载中…</div>';
   const troops = Object.entries(army.troops || {});
   const troopList = troops.length
-    ? troops.map(([u, n]: any) => `<span class="troop">${art(unitArt(u), unitName(u), 'sm')}<span>${unitName(u)} <b>×${n}</b></span></span>`).join('')
+    ? troops.map(([u, n]: any) => `<span class="troop">${art(unitArt(u), unitName(u), 'sm')}<span class="troop-name">${unitName(u)}</span><b class="troop-count">×${n}</b></span>`).join('')
     : '<small class="muted">暂无驻军</small>';
   const tr = army.training;
   const training = tr

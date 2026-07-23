@@ -112,12 +112,14 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
 .empty { padding: var(--s-5); text-align: center; background: var(--c-surface); border-radius: var(--r-md); border: 1px dashed var(--c-line); }
 
 /* ---------- 卡片网格 ---------- */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: var(--s-3); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--s-3); align-items: stretch; }
 .card {
   display: flex; gap: var(--s-3); align-items: center;
   background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md);
   padding: var(--s-3); box-shadow: var(--sh-1); transition: box-shadow .15s, transform .15s;
 }
+/* 同一区网格内所有卡（已建/空槽）统一最小高度，避免高低参差 */
+.grid > .card { min-height: 96px; align-items: flex-start; }
 .card:hover { box-shadow: var(--sh-2); transform: translateY(-1px); }
 .card.locked { opacity: .55; }
 .card.target { background: linear-gradient(180deg, #fff8ec, var(--c-surface)); border-color: #e8cf9f; }
@@ -128,10 +130,18 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; }
 .coord { color: var(--c-ink-soft); font-weight: 400; font-size: var(--f-xs); }
 
 /* ---------- 建筑三区系统 ---------- */
-.card-center { background: linear-gradient(180deg, #fff5df, var(--c-surface)); border-color: var(--c-gold); box-shadow: var(--sh-2); }
-.card-empty { flex-direction: column; justify-content: center; text-align: center; cursor: pointer; border-style: dashed; color: var(--c-ink-soft); min-height: 84px; }
+/* 城镇中心：整行 hero 卡，突出显示 */
+.card-center { align-items: center; background: linear-gradient(180deg, #fff5df, var(--c-surface)); border-color: var(--c-gold); box-shadow: var(--sh-2); }
+/* 空槽：与已建建筑同为横向布局，用占位图标框对齐图标列 */
+.card-empty { cursor: pointer; border-style: dashed; color: var(--c-ink-soft); }
 .card-empty:hover { border-color: var(--c-brand); color: var(--c-brand); background: var(--c-surface-2); }
-.slot-plus { font-size: 28px; line-height: 1; font-weight: 300; }
+.card-empty:hover .slot-icon { border-color: var(--c-brand); color: var(--c-brand); }
+.slot-icon {
+  flex: none; width: 48px; height: 48px; border-radius: var(--r-md);
+  border: 1px dashed var(--c-line); background: var(--c-surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; line-height: 1; font-weight: 300; color: var(--c-ink-soft);
+}
 .hint-sm { font-size: var(--f-xs); color: var(--c-ink-soft); margin: var(--s-1) 0; }
 .hint-sm.prod { color: var(--c-brand); font-weight: 600; }
 .queue-wrap { margin-bottom: var(--s-3); }
@@ -199,9 +209,14 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .progress-label { position: relative; z-index: 1; display: block; text-align: center; font-size: var(--f-xs); line-height: 18px; color: var(--c-ink); }
 
 /* ---------- 军队页 ---------- */
-.troopbar { display: flex; flex-wrap: wrap; gap: var(--s-3); background: var(--c-surface); padding: var(--s-3); border-radius: var(--r-md); border: 1px solid var(--c-line); box-shadow: var(--sh-1); }
-.troop { display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-sm); }
-.troop b { color: var(--c-brand); }
+.troopbar { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-2); }
+.troop {
+  display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-sm);
+  background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md);
+  padding: var(--s-2) var(--s-3); box-shadow: var(--sh-1);
+}
+.troop-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.troop-count { flex: none; color: var(--c-brand); font-weight: 700; }
 
 /* ---------- 地图（六边形 SVG） ---------- */
 .map-wrap { background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: var(--s-3); box-shadow: var(--sh-1); }
@@ -213,8 +228,8 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .hex-enemy { fill: #f4dada; stroke: #d99; }
 .hex-pve { fill: #efe2f1; stroke: #c4a8cc; }
 .hex-cell.hex-selected .hex { stroke: var(--c-gold); stroke-width: 3; }
-.hex-icon { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; pointer-events: none; }
-.hex-icon img { width: 26px; height: 26px; }
+.hex-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; pointer-events: none; }
+.hex-icon img { width: 36px; height: 36px; filter: drop-shadow(0 1px 1px rgba(46,38,32,.35)); }
 /* 行军路径与部队标记 */
 .march-path { fill: none; stroke: #c0392b; stroke-width: 2; stroke-dasharray: 5 4; opacity: .75; }
 .march-path.march-return { stroke: #4f7a3f; }
@@ -279,9 +294,14 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .target-close:hover { background: rgba(0,0,0,.12); }
 .target-actions { margin-top: var(--s-3); }
 .raidbox-title { font-size: var(--f-sm); font-weight: 600; color: var(--c-ink-soft); margin-bottom: var(--s-2); }
-.raid-inputs { display: flex; flex-wrap: wrap; gap: var(--s-3); }
-.raid-input { display: flex; align-items: center; gap: var(--s-1); font-size: var(--f-sm); }
-.raid-input small { color: var(--c-ink-soft); }
+.raid-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--s-2); }
+.raid-input {
+  display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-sm);
+  background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md); padding: var(--s-1) var(--s-2);
+}
+.raid-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.raid-input input { width: 52px; }
+.raid-input small { flex: none; color: var(--c-ink-soft); }
 
 /* ---------- 报告页 ---------- */
 .report { background: var(--c-surface); border-left: 3px solid var(--c-brand); padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; border-radius: var(--r-sm); font-size: var(--f-sm); box-shadow: var(--sh-1); }

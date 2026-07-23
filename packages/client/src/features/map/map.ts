@@ -116,7 +116,7 @@ export function renderMap(): string {
     // 用 <g> 承载多边形 + 图标，transform 定位
     cells += `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable} title="(${h.q},${h.r})">
         <polygon class="${cls}" points="${cornerStr}"></polygon>
-        ${inner ? `<foreignObject x="-16" y="-16" width="32" height="32"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
+        ${inner ? `<foreignObject x="-20" y="-20" width="40" height="40"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
       </g>`;
   }
 
@@ -215,7 +215,7 @@ function renderTargetPanel(): string {
   const dist = hexDistance({ q: selected.q, r: selected.r }, { q: me!.q, r: me!.r });
   const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
   const inputs = myTroops.length
-    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm')}<input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
+    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm')}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
     : '<small class="muted">无可用兵力，先去军队页训练</small>';
   const isPve = selected.kind === 'pve';
   const action = isPve
