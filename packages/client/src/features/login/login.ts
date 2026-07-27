@@ -3,7 +3,7 @@ import { art } from '../../shared/ui/widgets.js';
 import { errText, TRIBES } from '../../shared/ui/text.js';
 import { login, register } from '../../api.js';
 
-let loginMode: 'login' | 'register' = 'register';
+let loginMode: 'login' | 'register' = 'login';
 let pickedTribe = 'romans';
 
 /** 渲染登录页。onSuccess 在登录/注册成功后调用（进入游戏）。 */
@@ -17,8 +17,8 @@ export function renderLogin(app: HTMLElement, onSuccess: () => void, msg = '') {
       <h1>世界之王</h1>
       <p class="login-sub">罗马·高卢·条顿 — 在同一张地图上称雄</p>
       <div class="logintabs">
-        <button class="${loginMode === 'register' ? 'on' : ''}" id="toReg">注册</button>
         <button class="${loginMode === 'login' ? 'on' : ''}" id="toLogin">登录</button>
+        <button class="${loginMode === 'register' ? 'on' : ''}" id="toReg">注册</button>
       </div>
       <input id="name" placeholder="用户名（≤16字）" maxlength="16" />
       <input id="pwd" type="password" placeholder="密码（≥4位）" />
