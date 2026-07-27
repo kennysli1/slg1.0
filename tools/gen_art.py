@@ -54,6 +54,8 @@ ASSETS = {
     },
     "pve": {
         "rats": "老鼠窝", "wolves": "野狼群", "bandits": "强盗营",
+        "mercenaries": "雇佣兵营", "barbarians": "蛮族村寨", "fortress": "边境要塞",
+        "dark_legion": "黑暗军团", "bone_king": "骷髅王营地",
     },
     "ui": {
         "logo": "LOGO", "tab_village": "村庄", "tab_army": "军队",
