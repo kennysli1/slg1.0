@@ -41,6 +41,12 @@ function dirLabel(dir: string): string {
   return { up: '上', down: '下', left: '左', right: '右' }[dir] ?? dir;
 }
 
+/** 空地块地形着色：按坐标做确定性哈希，分 4 档极淡色相，让地图不再死平且稳定不闪。 */
+function terrainVariant(q: number, r: number): number {
+  const h = Math.imul(q * 73856093 ^ r * 19349663, 0x45d9f3b) >>> 0;
+  return h % 4;
+}
+
 function tileAt(q: number, r: number): any {
   return (getCache().area?.tiles || []).find((t: any) => t.q === q && t.r === r);
 }
@@ -110,6 +116,9 @@ export function renderMap(): string {
       const picon = t.icon ?? pveIconByName(t.name);
       inner = art(picon, t.name, 'sm');
       clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="pve" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(picon)}"`;
+    } else {
+      // 空地块：确定性地形着色（4 档极淡色相），稳定不随刷新变化
+      cls += ` hex-grass-${terrainVariant(h.q, h.r)}`;
     }
     const sel = getSelected();
     const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';

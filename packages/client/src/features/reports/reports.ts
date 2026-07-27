@@ -8,7 +8,11 @@ import { escapeHtml } from '../../shared/ui/widgets.js';
 
 export function renderReports(): string {
   const reports = getReports();
-  if (!reports.length) return '<div class="empty">暂无战报。去地图掠夺野怪或进攻其他玩家！</div>';
+  if (!reports.length) return `<div class="empty empty-hero">
+    <div class="empty-icon">📜</div>
+    <div class="empty-title">战报空空如也</div>
+    <div class="empty-sub">去地图掠夺野怪或进攻其他玩家<br/>胜负、损失与战利品都会记录在这里</div>
+  </div>`;
   return reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
 }
 

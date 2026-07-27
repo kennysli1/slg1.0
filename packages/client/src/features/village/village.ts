@@ -50,7 +50,7 @@ function renderCenter(tc: any): string {
     : busy ? '<small class="tag">建造中</small>'
     : `<button class="btn-sm" data-up-slot="${tc.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   return `<h3>城镇中心</h3>
-    <div class="card card-center">${art(tc.icon, tc.name, 'lg')}
+    <div class="card card-center">${art(tc.icon, tc.name, 'xl')}
       <div class="cardbody"><div class="card-title">${tc.name} <b class="lv">Lv${tc.level}</b></div>
         <div class="hint-sm">升级开放更多城内/城外槽位与队列</div>
         ${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div>`;

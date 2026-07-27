@@ -87,16 +87,26 @@ function renderResBar() {
     `<span class="res res-upkeep"><span class="res-num">耗粮 ${fmt(r.cropUpkeep)}/h</span></span>`;
 }
 
+let lastRenderedTab: string | null = null;
+
 function renderPage() {
   const page = document.getElementById('page');
   if (!page) return;
   const tab = getTab();
+  const entering = tab !== lastRenderedTab; // 仅在切换页签时播放入场动效，5s 刷新/局部重渲不重放
+  lastRenderedTab = tab;
   document.querySelectorAll('.tabs button').forEach((b) =>
     b.classList.toggle('active', (b as HTMLButtonElement).dataset.tab === tab));
+  page.classList.remove('page--enter');
   if (tab === 'village') page.innerHTML = renderVillage();
   else if (tab === 'army') page.innerHTML = renderArmy();
   else if (tab === 'map') page.innerHTML = renderMap();
   else page.innerHTML = renderReports();
+  if (entering) {
+    void page.offsetWidth; // 强制回流，确保重加 class 能重新触发动画
+    page.classList.add('page--enter');
+    window.setTimeout(() => page.classList.remove('page--enter'), 650);
+  }
   bindPageEvents();
   syncTimers();
 }

@@ -22,8 +22,8 @@ export function escapeAttr(value: unknown): string {
   return escapeHtml(value);
 }
 
-/** 统一图标渲染：传图标基名，输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg */
-export function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' = 'md'): string {
+/** 统一图标渲染：传图标基名，输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg|xl */
+export function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' | 'xl' = 'md'): string {
   const safe = escapeAttr(label);
   const src = escapeAttr(artPath(icon));
   return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy" />`;
