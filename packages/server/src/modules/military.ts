@@ -142,10 +142,19 @@ export class MilitaryModule {
   private getArmy(cmd: Command): CommandResult {
     const s = this.load((cmd.payload as any).villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    // 本族可训练兵种列表（前端据此显示）
+    // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）
     const trainable = Object.values(this.config.units)
       .filter((u) => u.tribe === s.tribe)
-      .map((u) => ({ key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building, cost: u.cost, trainSec: u.trainSec }));
+      .map((u) => {
+        const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
+        return {
+          key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
+          cost: u.cost, trainSec: u.trainSec,
+          meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
+          meleeDef: st.meleeDef, rangedDef: st.rangedDef,
+          speed: st.speed, carry: st.carry, upkeep: st.upkeep,
+        };
+      });
     return {
       ok: true,
       payload: {

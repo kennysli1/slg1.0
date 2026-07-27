@@ -13,6 +13,23 @@ export function unitTrainSec(key: string): number {
   return (getCache().army?.trainable || []).find((u: any) => u.key === key)?.trainSec ?? 30;
 }
 
+/** 紧凑属性行：攻 / 防(近·远) / 速 / 载 / 粮。数值为服务端算好的最终值快照。 */
+function renderUnitStats(u: any): string {
+  const r = (v: any) => Math.round(Number(v) || 0);
+  const isRanged = u.form === 'ranged';
+  const atk = r(isRanged ? u.rangedAtk : u.meleeAtk);
+  const atkTitle = isRanged ? '远程攻击力' : '近战攻击力';
+  const stat = (label: string, value: string | number, title: string, cls = '') =>
+    `<span class="ustat ${cls}" title="${title}"><i>${label}</i><b>${value}</b></span>`;
+  return `<div class="unit-stats">
+    ${stat('攻', atk, atkTitle, 'us-atk')}
+    ${stat('防', `${r(u.meleeDef)}·${r(u.rangedDef)}`, '防御（近战·远程）', 'us-def')}
+    ${stat('速', r(u.speed), '移动速度')}
+    ${stat('载', r(u.carry), '掠夺负重')}
+    ${stat('粮', r(u.upkeep), '每小时耗粮')}
+  </div>`;
+}
+
 export function renderArmy(): string {
   const army = getCache().army;
   if (!army) return '<div class="loading">加载中…</div>';
@@ -27,6 +44,7 @@ export function renderArmy(): string {
   const trainCards = (army.trainable || []).map((u: any) => {
     return `<div class="card">${art(unitArt(u.key), u.name, 'md')}
       <div class="cardbody"><div class="card-title">${u.name} <small class="tag">${formName(u.form)}</small></div>
+        ${renderUnitStats(u)}
         <div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="train-row"><input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
           <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}" ${army.training ? 'disabled' : ''}>训练</button></div></div></div>`;
