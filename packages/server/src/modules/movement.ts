@@ -336,10 +336,25 @@ export class MovementModule {
       payload: {
         targetKind, targetId, targetXY: mv.toXY,
         movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
-        troops: mv.troops, attackerSnapshot: this.buildSnapshot(mv.troops),
+        troops: mv.troops, attackerSnapshot: await this.attackerSnapshot(mv),
       },
     });
     this.store.delete(COLLECTION, mv.id);
+  }
+
+  /**
+   * 进攻方参战快照：优先向源村 Military 取"含铁匠养成加成的最终数值"（派生管线对外口径，
+   * 与防守方 GetCombatSnapshot 同源 → 攻守对称）。源村不可用时回退到 CSV 原始数值。
+   * 修复：此前直接用 buildSnapshot 导致铁匠加成只作用于防守、进攻无效。
+   */
+  private async attackerSnapshot(mv: Movement): Promise<Snapshot> {
+    const res = await this.commands.send({
+      name: 'military.GetCombatSnapshot', from: MovementModule.NAME,
+      payload: { villageId: mv.fromVillage, units: mv.troops },
+    });
+    const snap = (res.ok ? (res.payload as { snapshot?: Snapshot }).snapshot : undefined);
+    if (snap && Object.keys(snap).length > 0) return snap;
+    return this.buildSnapshot(mv.troops); // 回退：源村已消失等异常，用原始数值保证出征仍能结算
   }
 
   /**
@@ -482,7 +497,10 @@ export class MovementModule {
     void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, troops: mv.troops, loot: mv.loot } } as DomainEvent);
   }
 
-  /** 用兵种定义为在途兵力构造战斗快照（含特性解析；铁匠加成骨架暂不叠加，与旧口径一致）。 */
+  /**
+   * 回退用兵力快照：用兵种定义构造（含特性解析，但**不含铁匠加成**）。
+   * 正常路径走 attackerSnapshot → military.GetCombatSnapshot（含加成）；此函数仅在源村不可用时兜底。
+   */
   private buildSnapshot(troops: Record<string, number>): Snapshot {
     const snap: Snapshot = {};
     for (const [u, n] of Object.entries(troops)) {

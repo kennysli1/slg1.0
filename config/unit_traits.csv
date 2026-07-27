@@ -1,6 +1,6 @@
 id,code,name,effect1,value1,effect2,value2,effect3,value3
 #数字ID(units.csv的traits列引用它),代码标识(英文程序内部用勿改),显示名,效果1类型,效果1数值,效果2类型(可空),效果2数值(可空),效果3类型(可空),效果3数值(可空)
-#可用effect key及公式见 docs/trait_effects.md
+#可用effect key及公式见 docs/2_2.0设计/10_兵种特性效果表.md
 1,shield,持盾,dmg_taken_ranged,-0.25,,,,
 2,heavy_armor,重甲,dmg_taken_melee,-0.20,,,,
 3,ferocious,狂猛,atk_melee,0.30,,,,

@@ -8,7 +8,7 @@ import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Military（军队/兵种）
- * 对应设计文档 02_系统清单C组、1_原版拆解/03军事战斗、07_扩展与代码规范
+ * 对应设计文档 02_系统清单C组、10_兵种特性效果表、07_扩展与代码规范
  *
  * 职责：每村兵力数量、训练队列、兵种养成(铁匠)等级的 owner。
  * 兵种数据来自 GameConfig（config/units.csv）——改 CSV 即改兵种/加部族。

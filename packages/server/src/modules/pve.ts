@@ -26,6 +26,10 @@ interface PveState {
   loot: Record<string, number>;
   /** 是否已被清空（待重生） */
   cleared: boolean;
+  /** 是否已被清空过至少一次（首通奖励用；一生仅一次，重生不重置） */
+  firstCleared: boolean;
+  /** 累计被清空次数（战利品浮动的确定性 LCG 种子，保证可复现） */
+  clearCount: number;
 }
 
 const COLLECTION = 'pve';
@@ -73,6 +77,8 @@ export class PveModule {
       defender: structuredClone(tpl.defender),
       loot: { ...tpl.loot },
       cleared: false,
+      firstCleared: false,
+      clearCount: 0,
     };
     this.store.set(COLLECTION, id, s);
     void this.commands.send({
@@ -121,15 +127,22 @@ export class PveModule {
 
     let looted: Record<string, number> = {};
     if (attackerWins && remain <= 0) {
-      // 清空：按载货上限搬运战利品
+      // 清空：累计次数（战利品浮动种子）→ 按载货上限搬运（含 ±variance 浮动）
+      s.clearCount = (s.clearCount ?? 0) + 1;
       looted = this.takeLoot(s, looterCarry);
+      // 首通奖励：该目标实例一生第一次被清空，额外倍率（不受载货上限约束，作为特殊奖励）
+      if (!s.firstCleared) {
+        const bonus = this.config.constants.pveFirstClearBonus;
+        for (const t of Object.keys(looted)) looted[t] = Math.round(looted[t] * (1 + bonus));
+        s.firstCleared = true;
+      }
       s.cleared = true;
       // 登记重生
       const tpl = this.config.pveTemplates[s.type];
       this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id));
     }
     this.store.set(COLLECTION, id, s);
-    return { ok: true, payload: { looted, cleared: s.cleared } };
+    return { ok: true, payload: { looted, cleared: s.cleared, firstClear: s.firstCleared && s.clearCount === 1 } };
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {
@@ -138,12 +151,28 @@ export class PveModule {
     const looted: Record<string, number> = {};
     if (total <= 0) return looted;
     const ratio = Math.min(1, carry / total);
+    // 每种资源乘一个确定性浮动系数（±variance，均值1），消除重复攻打的无聊确定性又不破坏可复现
+    let i = 0;
     for (const t of types) {
-      const take = Math.floor(s.loot[t] * ratio);
+      const factor = this.lootFactor(s, i++);
+      const take = Math.floor(s.loot[t] * ratio * factor);
       looted[t] = take;
-      s.loot[t] -= take;
+      s.loot[t] = Math.max(0, s.loot[t] - take);
     }
     return looted;
+  }
+
+  /**
+   * 确定性伪随机浮动系数 ∈ [1-variance, 1+variance)。
+   * 用 LCG（种子=clearCount×资源槽位偏移）而非 Math.random，保证存档/测试可复现（同 world/player 口径）。
+   */
+  private lootFactor(s: PveState, slot: number): number {
+    const v = this.config.constants.pveLootVariance;
+    if (v <= 0) return 1;
+    const seed = (s.clearCount * 4 + slot + 1) >>> 0;
+    const x = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const u = (x % 1000) / 1000; // [0,1)
+    return 1 - v + u * 2 * v;
   }
 
   private respawn(id: string): void {

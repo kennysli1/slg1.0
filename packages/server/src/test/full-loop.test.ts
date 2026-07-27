@@ -80,9 +80,10 @@ test('军队：训练消耗资源并产兵，军队耗粮上报', async () => {
 test('军队：未建所需建筑时拒绝训练', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+  // 罗马开局预置兵营(可直接训练军团兵)，故用需要"马厩"的近卫骑兵探测门控——开局无马厩应被拒。
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'equimperatoris', count: 1 });
   assert.equal(r.ok, false);
-  assert.equal(r.reason, 'requires_building:barracks');
+  assert.equal(r.reason, 'requires_building:stable');
 });
 
 test('完整循环：训练→出征打PvE→掠夺→返程入库', async () => {
