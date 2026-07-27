@@ -26,8 +26,6 @@ interface PveState {
   loot: Record<string, number>;
   /** 是否已被清空（待重生） */
   cleared: boolean;
-  /** 是否已被清空过至少一次（首通奖励用；一生仅一次，重生不重置） */
-  firstCleared: boolean;
   /** 累计被清空次数（战利品浮动的确定性 LCG 种子，保证可复现） */
   clearCount: number;
 }
@@ -77,7 +75,6 @@ export class PveModule {
       defender: structuredClone(tpl.defender),
       loot: { ...tpl.loot },
       cleared: false,
-      firstCleared: false,
       clearCount: 0,
     };
     this.store.set(COLLECTION, id, s);
@@ -130,19 +127,13 @@ export class PveModule {
       // 清空：累计次数（战利品浮动种子）→ 按载货上限搬运（含 ±variance 浮动）
       s.clearCount = (s.clearCount ?? 0) + 1;
       looted = this.takeLoot(s, looterCarry);
-      // 首通奖励：该目标实例一生第一次被清空，额外倍率（不受载货上限约束，作为特殊奖励）
-      if (!s.firstCleared) {
-        const bonus = this.config.constants.pveFirstClearBonus;
-        for (const t of Object.keys(looted)) looted[t] = Math.round(looted[t] * (1 + bonus));
-        s.firstCleared = true;
-      }
       s.cleared = true;
       // 登记重生
       const tpl = this.config.pveTemplates[s.type];
       this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id));
     }
     this.store.set(COLLECTION, id, s);
-    return { ok: true, payload: { looted, cleared: s.cleared, firstClear: s.firstCleared && s.clearCount === 1 } };
+    return { ok: true, payload: { looted, cleared: s.cleared } };
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {

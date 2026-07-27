@@ -130,8 +130,6 @@ export interface GameConstants {
   marchSpeedMultiplier: number;
   /** 每个村庄最多保留的通知/战报条数。 */
   notificationsPerVillage: number;
-  /** PvE 目标首次被清空的额外战利品倍率（1.5=额外+150%，合计2.5倍；每实例一生一次，重生不重置）。 */
-  pveFirstClearBonus: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
@@ -367,7 +365,6 @@ export function loadGameConfig(configDir: string): GameConfig {
     combatStrength: cn('combat_strength', 1),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
-    pveFirstClearBonus: cn('pve_first_clear_bonus', 1.5),
     pveLootVariance: cn('pve_loot_variance', 0.2),
     raw,
   };

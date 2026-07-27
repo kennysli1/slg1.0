@@ -15,5 +15,4 @@ combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
-pve_first_clear_bonus,1.5,number,PvE目标首次被清空的额外战利品倍率(1.5=额外+150%,合计2.5倍;每个目标实例一生仅一次,重生不重置)
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%,均值不变;确定性LCG按清空次数取种,可复现)
