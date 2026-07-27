@@ -22,11 +22,30 @@ export function escapeAttr(value: unknown): string {
   return escapeHtml(value);
 }
 
-/** 统一图标渲染：传图标基名，输出 <img>，加载失败回退为文字徽标。size: xs|sm|md|lg|xl */
+/** 统一图标渲染：传图标基名，输出 <img>，加载失败由 installIconFallback 就地换成文字徽标。size: xs|sm|md|lg|xl */
 export function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' | 'xl' = 'md'): string {
   const safe = escapeAttr(label);
   const src = escapeAttr(artPath(icon));
   return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy" />`;
+}
+
+/**
+ * 全局图标兜底：任何 <img class="icon"> 加载失败（美术未就位/404）时，就地替换为
+ * .icon-fallback 文字徽标（显示 alt 文本，沿用原尺寸类）。
+ * 实现 style.css 与美术清单声明的"加载失败回退文字徽标"规范——此前只有 CSS/规范、无 JS 接线。
+ * img 的 error 事件不冒泡，故用捕获阶段在 document 上统一监听；启动时装一次即覆盖全部（含后续动态渲染）。
+ */
+export function installIconFallback(): void {
+  document.addEventListener('error', (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLImageElement) || !el.classList.contains('icon')) return;
+    const label = el.getAttribute('alt') ?? '';
+    const span = document.createElement('span');
+    span.className = `${el.className} icon-fallback`;
+    span.textContent = label;
+    span.title = label;
+    el.replaceWith(span);
+  }, true);
 }
 
 /** 兵种图标基名：服务器若下发 icon 基名优先用，否则按 code 约定拼 unit_<code>。 */

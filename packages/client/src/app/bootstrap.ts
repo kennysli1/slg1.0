@@ -6,7 +6,7 @@ import { connect, req, onPush, me } from '../api.js';
 import { art, escapeHtml } from '../shared/ui/widgets.js';
 import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
-import { syncTimers } from '../shared/ui/widgets.js';
+import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { resInfo, resourceKeys, loadGameConfig, mapViewRadius } from './config.js';
 import { getCache, setCache, getTab, setTab, addReport, getMapCenter } from './state.js';
 import { renderLogin } from '../features/login/login.js';
@@ -162,6 +162,7 @@ onPush((event, payload) => {
 
 /** 应用入口：先拉配置 → 连接 WS → 据登录态进入登录页或游戏。 */
 export async function bootstrap() {
+  installIconFallback(); // 图标加载失败 → 文字徽标（覆盖未就位的美术占位）
   connect(
     () => {
       void (async () => {

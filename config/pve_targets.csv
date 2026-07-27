@@ -3,8 +3,8 @@
 1,rats,老鼠窝,pve_rats,120,200,200,100,100
 2,wolves,野狼群,pve_wolves,300,500,500,400,300
 3,bandits,强盗营地,pve_bandits,600,1200,1200,1000,600
-4,mercenaries,雇佣兵营,pve_bandits,1200,2500,2500,2000,1500
-5,barbarians,蛮族村寨,pve_wolves,2400,5000,5000,4000,3000
-6,fortress,边境要塞,pve_bandits,4800,9000,9000,7000,5000
-7,dark_legion,黑暗军团,pve_bandits,7200,16000,16000,12000,8000
-8,bone_king,骷髅王营地,pve_wolves,14400,28000,28000,20000,14000
+4,mercenaries,雇佣兵营,pve_mercenaries,1200,2500,2500,2000,1500
+5,barbarians,蛮族村寨,pve_barbarians,2400,5000,5000,4000,3000
+6,fortress,边境要塞,pve_fortress,4800,9000,9000,7000,5000
+7,dark_legion,黑暗军团,pve_dark_legion,7200,16000,16000,12000,8000
+8,bone_king,骷髅王营地,pve_bone_king,14400,28000,28000,20000,14000
