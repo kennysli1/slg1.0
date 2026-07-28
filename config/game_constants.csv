@@ -16,3 +16,10 @@ combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%,均值不变;确定性LCG按清空次数取种,可复现)
+pop_growth_per_prosperity,15,number,每点繁荣度每小时增长的人口数
+pop_per_capita_crop,2.0,number,每人每小时消耗粮食量(决定软上限大小)
+pop_labor_floor,0.75,number,人口为0时速率类建筑的最低倍率(适用:资源田/学院/兵营/马厩/兵工厂/铁匠铺;防死亡螺旋)
+pop_death_recovery_ratio,0.30,number,战斗阵亡中转化为伤兵的比例(30%变伤兵,70%永久阵亡)
+pop_heal_time,3600,number,伤兵治愈基础时长(秒;满员时2400s)
+pop_heal_bonus,0.50,number,满员时伤兵治愈速度加成(0.50→耗时变2400s)
+pop_death_rate_factor,0.1,number,净粮赤字→减员速率比例(待平衡调参;值越大粮仓耗尽后减员越快)

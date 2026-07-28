@@ -81,6 +81,7 @@ export class BuildingModule {
     this.commands.register('building.Upgrade', (c) => this.upgrade(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
+    this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
   }
 
   /** 重启恢复：为每条未完成队列重新登记定时任务（过期则立即触发）。 */
@@ -195,12 +196,28 @@ export class BuildingModule {
     return '需' + missing.map((r) => `${this.config.buildings[r.kind]?.name ?? r.kind} ${r.level} 级`).join('、');
   }
 
-  /** 城镇中心降低建造时间。 */
-  private buildTime(s: BuildingState, baseSec: number): number {
+  /** 城镇中心降低建造时间；再乘人口劳动力建造加速（time_mult_pop）。 */
+  private async buildTime(s: BuildingState, baseSec: number): Promise<number> {
     const mainLv = this.tcLevel(s);
     const c = this.config.constants;
     const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
-    return Math.max(1, Math.round(baseSec * speedup));
+    let timeSec = Math.max(1, Math.round(baseSec * speedup));
+    // 人口建造加速（population.GetLaborMult('main')）；未就绪时 mult=1.0（兜底，铁律#4）
+    try {
+      const res = await this.commands.send({
+        name: 'population.GetLaborMult',
+        from: BuildingModule.NAME,
+        payload: { villageId: s.villageId, buildingKind: 'main' },
+      });
+      if (res.ok) {
+        const mult = (res.payload as any).mult as number;
+        // mult 此处是 time_mult（0.8 ~ 1.0），直接乘
+        timeSec = Math.max(1, Math.round(timeSec * mult));
+      }
+    } catch {
+      // population 模块尚未就绪时静默忽略，用不带加速的时间
+    }
+    return timeSec;
   }
 
   /** 资源田某等级产量（level 0=未建成=0；>=1 用 base×growth^(lv-1)）。 */
@@ -223,6 +240,14 @@ export class BuildingModule {
     const centerDef = this.config.buildings[CENTER_KIND];
     const tcLv = centerP?.level ?? 1;
     const centerNext = tcLv < (centerDef?.maxLevel ?? 20);
+    // buildTime is now async but getLayout is sync — use sync estimation (no pop mult) for layout display
+    // The population mult is applied when the build command is actually submitted
+    const buildTimeSyncEstimate = (baseSec: number) => {
+      const mainLv = this.tcLevel(s);
+      const c = this.config.constants;
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      return Math.max(1, Math.round(baseSec * speedup));
+    };
     return {
       ok: true,
       payload: {
@@ -234,7 +259,7 @@ export class BuildingModule {
           level: tcLv,
           maxLevel: centerDef?.maxLevel ?? 20,
           nextCost: centerNext ? centerDef!.cost(tcLv + 1) : null,
-          nextTimeSec: centerNext ? this.buildTime(s, centerDef!.timeSec(tcLv + 1)) : null,
+          nextTimeSec: centerNext ? buildTimeSyncEstimate(centerDef!.timeSec(tcLv + 1)) : null,
           building: this.hasPendingOp(s, CENTER_SLOT),
         },
         zones: {
@@ -261,6 +286,12 @@ export class BuildingModule {
   }
 
   private zoneView(s: BuildingState, zone: Zone) {
+    const buildTimeSyncEstimate = (baseSec: number) => {
+      const mainLv = this.tcLevel(s);
+      const c = this.config.constants;
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      return Math.max(1, Math.round(baseSec * speedup));
+    };
     const placed = s.placed
       .filter((p) => p.zone === zone)
       .map((p) => {
@@ -276,7 +307,7 @@ export class BuildingModule {
           maxLevel: def?.maxLevel ?? 1,
           building: constructing || this.hasPendingOp(s, p.slotId),
           nextCost: canUp ? def!.cost(p.level + 1) : null,
-          nextTimeSec: canUp ? this.buildTime(s, def!.timeSec(p.level + 1)) : null,
+          nextTimeSec: canUp ? buildTimeSyncEstimate(def!.timeSec(p.level + 1)) : null,
           producing: def?.resource
             ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, p.level)) }
             : undefined,
@@ -292,6 +323,12 @@ export class BuildingModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
 
+    const buildTimeSyncEstimate = (baseSec: number) => {
+      const mainLv = this.tcLevel(s);
+      const c = this.config.constants;
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      return Math.max(1, Math.round(baseSec * speedup));
+    };
     const options = Object.values(this.config.buildings)
       .filter((def) => def.zone === zone)
       .map((def) => ({
@@ -299,7 +336,7 @@ export class BuildingModule {
         name: def.name,
         icon: def.icon,
         cost: def.cost(1),
-        timeSec: this.buildTime(s, def.timeSec(1)),
+        timeSec: buildTimeSyncEstimate(def.timeSec(1)),
         unlocked: this.meetsRequires(s, def.requires),
         requires: def.requires,
         lockReason: this.lockReason(s, def.requires),
@@ -330,7 +367,8 @@ export class BuildingModule {
 
     const slotId = this.allocSlot(s, zone);
     s.placed.push({ slotId, zone, kind, level: 0 }); // level 0 = 建造中占位
-    const durMs = this.buildTime(s, def.timeSec(1)) * 1000;
+    const durSec = await this.buildTime(s, def.timeSec(1));
+    const durMs = durSec * 1000;
     const startAt = this.now();
     const finishAt = startAt + durMs;
     const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
@@ -361,7 +399,8 @@ export class BuildingModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
-    const durMs = this.buildTime(s, def.timeSec(toLevel)) * 1000;
+    const durSec = await this.buildTime(s, def.timeSec(toLevel));
+    const durMs = durSec * 1000;
     const startAt = this.now();
     const finishAt = startAt + durMs;
     const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
@@ -411,14 +450,14 @@ export class BuildingModule {
 
   // ---- 派生聚合上报（对内口径，铁律#4）----
 
-  /** 全村人口(=crop消耗/小时)上报 Economy。 */
+  /** 全村建筑维护（crop消耗/小时）上报 Economy。source 从 'population' 改名为 'building' 避免语义混淆。 */
   private reportPopulation(s: BuildingState): void {
     let pop = 0;
     for (const p of s.placed) pop += sumPop(p.level);
     void this.commands.send({
       name: 'economy.SetUpkeep',
       from: BuildingModule.NAME,
-      payload: { villageId: s.villageId, source: 'population', cropPerHour: pop },
+      payload: { villageId: s.villageId, source: 'building', cropPerHour: pop },
     });
   }
 
@@ -456,6 +495,43 @@ export class BuildingModule {
         capacity: { wood: solid, clay: solid, iron: solid, crop: cap(granaryLv) },
       },
     });
+  }
+
+  /**
+   * 只读查询「劳动力上下文」（供 population 模块计算繁荣度与劳动力，无回调，无环）。
+   * 返回：
+   *  - prosperity：全村繁荣度（Σ level×prosperityPerLevel）
+   *  - buildings：所有 laborAmplified=true 的已建实例快照（含 kind/level/resource）
+   * population 拿到后缓存快照，不再查询 building 内部状态（铁律#1/#4）。
+   */
+  private getLaborContext(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    // 计算繁荣度（全部建筑，包括 level=0 占位的不计，>=1 才算）
+    let prosperity = 0;
+    for (const p of s.placed) {
+      if (p.level < 1) continue;
+      const def = this.config.buildings[p.kind];
+      if (!def) continue;
+      prosperity += p.level * def.prosperityPerLevel;
+    }
+
+    // 收集 laborAmplified=true 的已建实例
+    const buildings: Array<{ kind: string; level: number; resource?: string }> = [];
+    for (const p of s.placed) {
+      if (p.level < 1) continue;
+      const def = this.config.buildings[p.kind];
+      if (!def?.laborAmplified) continue;
+      buildings.push({
+        kind: p.kind,
+        level: p.level,
+        resource: def.resource,
+      });
+    }
+
+    return { ok: true, payload: { prosperity, buildings } };
   }
 }
 

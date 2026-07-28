@@ -74,6 +74,8 @@ export class EconomyModule {
     this.commands.register('economy.SetUpkeep', (c) => this.setUpkeep(c));
     this.commands.register('economy.SetBaseRate', (c) => this.setBaseRate(c));
     this.commands.register('economy.SetCapacity', (c) => this.setCapacity(c));
+    this.commands.register('economy.SetRateModifier', (c) => this.setRateModifier(c));
+    this.commands.register('economy.GetCropContext', (c) => this.getCropContext(c));
   }
 
   createVillage(villageId: string): void {
@@ -261,5 +263,53 @@ export class EconomyModule {
     for (const t of RESOURCE_TYPES) s.resources[t] = Math.min(s.resources[t], s.capacity[t]);
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /**
+   * 注入产率修正器（覆盖式：同 source 层的修正器只存一条）。
+   * population 把劳动力增幅 effMult-1 推进来，economy 产率管线叠加后真实生效（铁律#4）。
+   * economy 只存不回调 population，无环（见架构文档§二·2.4）。
+   */
+  private setRateModifier(cmd: Command): CommandResult {
+    const { villageId, source, mult } = cmd.payload as {
+      villageId: string;
+      source: string;
+      mult: Partial<ResMap>;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s); // 改修正器前先结算，避免旧倍率被新值覆盖后多算
+    // 覆盖式：移除同 source 旧层，追加新层
+    s.rateModifiers = s.rateModifiers.filter((m) => m.source !== source);
+    s.rateModifiers.push({ source, mult });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /**
+   * 只读查询「粮食上下文」（供 population 模块计算软上限，无回调，无环）。
+   * 返回：
+   *  - baseCropPerHour：农田原始产率×3600（不含劳动力修正的裸值，pop 自己算 effMult）
+   *  - buildingUpkeepPerHour：建筑维护耗粮（source='building' 的那条，population 不计进分子）
+   *  - troopUpkeepPerHour：军队维护耗粮（source='troops'，同上）
+   *  - currentCrop：当前粮食存量
+   *  - cropCapacity：粮仓容量
+   * 注意：civilian_pop 这条不纳入（那是软上限要衡量的容量），见架构§二·2.4 口径锁定。
+   */
+  private getCropContext(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    // 不 settle（纯读，不产生副作用；population 只需要 baseRate/cropUpkeep 的快照）
+    return {
+      ok: true,
+      payload: {
+        baseCropPerHour: s.baseRate.crop * 3600,
+        buildingUpkeepPerHour: s.cropUpkeep['building'] ?? 0,
+        troopUpkeepPerHour: s.cropUpkeep['troops'] ?? 0,
+        currentCrop: s.resources.crop,
+        cropCapacity: s.capacity.crop,
+      },
+    };
   }
 }

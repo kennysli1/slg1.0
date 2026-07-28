@@ -7,12 +7,32 @@ export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
+/** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。 */
+export interface PopSnapshot {
+  currentPop: number;
+  softLimit: number;
+  growthPerHour: number;
+  lambdaRatio: number;
+  wounded: { total: number; entries: { count: number; healAt: number }[] };
+  laborMults: {
+    production: { wood: number; clay: number; iron: number; crop: number };
+    build: number;
+    train: { barracks: number; stable: number; workshop: number };
+    smithy: number;
+  };
+  lastTick: number;
+  /** 客户端本地记录的快照获取时刻（ms），用于本地外插。 */
+  fetchedAt: number;
+}
+
 let cache: any = {};
 const reports: string[] = [];
 let currentTab = 'village';
 let selected: SelectedTarget | null = null;
 /** 进行中战斗的实时快照：battleId -> 双方兵力聚合（来自 BattleTick 推送）。 */
 const battles: Record<string, any> = {};
+/** 人口系统快照（GetPopulation + PopulationChanged 校正）。 */
+let popState: PopSnapshot | null = null;
 
 export function getCache(): any { return cache; }
 export function setCache(c: any): void { cache = c; }
@@ -47,3 +67,22 @@ export function setSelected(s: SelectedTarget | null): void { selected = s; }
 let mapCenter: { q: number; r: number } | null = null;
 export function getMapCenter(): { q: number; r: number } | null { return mapCenter; }
 export function setMapCenter(c: { q: number; r: number } | null): void { mapCenter = c; }
+
+/** 人口快照读写。 */
+export function getPopState(): PopSnapshot | null { return popState; }
+export function setPopState(s: PopSnapshot): void { popState = s; }
+
+/**
+ * 本地外插当前人口（不发请求）。
+ * 公式：若 currentPop < softLimit 且增长率 > 0，则按 growthPerHour 线性外插，上限 softLimit。
+ * 下降（超限减员）由服务端处理，客户端保守显示不模拟减员。
+ */
+export function interpolatePop(): number {
+  if (!popState) return 0;
+  const { currentPop, softLimit, growthPerHour, fetchedAt } = popState;
+  if (currentPop < softLimit && growthPerHour > 0) {
+    const elapsedHours = (Date.now() - fetchedAt) / 3_600_000;
+    return Math.min(softLimit, Math.round(currentPop + growthPerHour * elapsedHours));
+  }
+  return Math.round(currentPop);
+}

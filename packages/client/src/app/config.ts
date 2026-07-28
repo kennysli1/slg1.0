@@ -12,13 +12,13 @@ import * as fallback from '../info.js';
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string }
-export interface UnitInfo { name: string; icon: string; form: string }
+export interface UnitInfo { name: string; icon: string; form: string; popCost: number }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null }[];
-  units: { key: string; tribe: string; name: string; icon: string; form: string }[];
+  units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   constants: { mapViewRadius: number; mapSize: number };
 }
@@ -42,7 +42,7 @@ export async function loadGameConfig(): Promise<void> {
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
-    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form };
+    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1 };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
   } catch {
     /* 网络/协议异常 → 继续用 info.ts 回退 */
@@ -69,7 +69,10 @@ export function buildingInfo(kind: string): BuildingInfo {
   return buildings[kind] ?? fallback.BUILDING_INFO[kind] ?? { name: kind, icon: 'bld_main' };
 }
 export function unitInfo(key: string): UnitInfo {
-  return units[key] ?? fallback.UNIT_INFO[key] ?? { name: key, icon: `unit_${key}`, form: 'melee' };
+  if (units[key]) return units[key];
+  const fb = fallback.UNIT_INFO[key];
+  if (fb) return { ...fb, popCost: 1 };
+  return { name: key, icon: `unit_${key}`, form: 'melee', popCost: 1 };
 }
 /** PvE：服务端按 code 给名称/图标。地图 tile 只有 name 时按关键字猜测回退。 */
 export function pveInfoByType(type: string): PveInfo | undefined {

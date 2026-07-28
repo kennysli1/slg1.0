@@ -1,10 +1,11 @@
 /** 报告页：战报列表 + 服务端推送事件 → 战报文案。 */
 import { secStr } from '../../shared/utils/format.js';
 import { fieldInfo, buildingInfo, resInfo } from '../../app/config.js';
-import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot } from '../../app/state.js';
+import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
 import { escapeHtml } from '../../shared/ui/widgets.js';
+import { fmt } from '../../shared/utils/format.js';
 
 export function renderReports(): string {
   const reports = getReports();
@@ -57,6 +58,25 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     return `${time}🏠 部队返回，带回：${loot || '无'}`;
   } else if (event === 'CropDeficit') {
     return `${time}⚠️ 粮食告急！军队可能逃亡`;
+  } else if (event === 'PopulationChanged') {
+    // 只有带 event 字段的离散事件才上报（静默增长不扰战报流）
+    const evTag: string | undefined = (payload as any).event;
+    if (!evTag) return null;
+    const popVal = fmt(Math.round(Number((payload as any).currentPop) || 0));
+    if (evTag === 'wounded') {
+      const wTotal = fmt(Number((payload as any).woundedTotal) || 0);
+      return `${time}🩹 战斗伤兵登记，伤兵池 ${wTotal} 人，当前人口 ${popVal}`;
+    }
+    if (evTag === 'healed') {
+      return `${time}💚 伤兵治愈归队，当前人口 ${popVal}`;
+    }
+    if (evTag === 'consumed') {
+      return `${time}⚔️ 训练消耗人口，当前 ${popVal}`;
+    }
+    if (evTag === 'death') {
+      return `${time}💀 粮食短缺，人口减少至 ${popVal}`;
+    }
+    return `${time}👥 人口变化：${popVal}`;
   }
   return null;
 }
@@ -68,6 +88,26 @@ export function handlePush(event: string, payload: any): void {
     return;
   }
   if (event === 'BattleEnded') clearBattleSnapshot(payload.battleId);
+
+  // T7.5：PopulationChanged — 立即校正本地人口快照，不等下次全量刷新
+  if (event === 'PopulationChanged') {
+    const current = getPopState();
+    if (current) {
+      setPopState({
+        ...current,
+        currentPop: Number(payload.currentPop) !== 0 ? Number(payload.currentPop) : current.currentPop,
+        softLimit: Number(payload.softLimit) !== 0 ? Number(payload.softLimit) : current.softLimit,
+        growthPerHour: payload.growthPerHour != null ? Number(payload.growthPerHour) : current.growthPerHour,
+        lambdaRatio: payload.lambdaRatio != null ? Number(payload.lambdaRatio) : current.lambdaRatio,
+        wounded: {
+          ...current.wounded,
+          total: payload.woundedTotal != null ? Number(payload.woundedTotal) : current.wounded.total,
+        },
+        fetchedAt: Date.now(),
+      });
+    }
+  }
+
   const text = notificationText(event, payload);
   if (text) addReport(text);
 }

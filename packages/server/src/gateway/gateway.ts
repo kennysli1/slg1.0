@@ -6,6 +6,7 @@ import { PlayerModule } from '../modules/player.js';
 import { EconomyModule } from '../modules/economy.js';
 import { BuildingModule } from '../modules/building.js';
 import { MilitaryModule } from '../modules/military.js';
+import { PopulationModule } from '../modules/population.js';
 import { WorldModule } from '../modules/world.js';
 import { PveModule } from '../modules/pve.js';
 import { MovementModule } from '../modules/movement.js';
@@ -47,6 +48,7 @@ const MODULE_MANIFESTS: ModuleManifest[] = [
   EconomyModule.MANIFEST,
   BuildingModule.MANIFEST,
   MilitaryModule.MANIFEST,
+  PopulationModule.MANIFEST,
   WorldModule.MANIFEST,
   PveModule.MANIFEST,
   MovementModule.MANIFEST,

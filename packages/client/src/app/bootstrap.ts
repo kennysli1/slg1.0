@@ -8,9 +8,10 @@ import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { resInfo, resourceKeys, loadGameConfig, mapViewRadius } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport, getMapCenter } from './state.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
+import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
 import { renderMap, bindMap } from '../features/map/map.js';
 import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
@@ -50,9 +51,10 @@ async function refreshAll() {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     const R = mapViewRadius();
     const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
-    const [res, vil, army, area, moves] = await Promise.all([
+    const [res, vil, army, area, moves, pop] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
       req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
+      req('GetPopulation').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
     if (failed) {
@@ -62,6 +64,28 @@ async function refreshAll() {
       return;
     }
     setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
+    // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
+    if (pop.ok) {
+      const p = pop.payload as any;
+      setPopState({
+        currentPop: p.currentPop ?? 0,
+        softLimit: p.softLimit ?? 0,
+        growthPerHour: p.growthPerHour ?? 0,
+        lambdaRatio: p.lambdaRatio ?? 0,
+        wounded: {
+          total: p.wounded?.total ?? 0,
+          entries: p.wounded?.entries ?? [],
+        },
+        laborMults: p.laborMults ?? {
+          production: { wood: 1, clay: 1, iron: 1, crop: 1 },
+          build: 1,
+          train: { barracks: 1, stable: 1, workshop: 1 },
+          smithy: 1,
+        },
+        lastTick: p.lastTick ?? Date.now(),
+        fetchedAt: Date.now(),
+      });
+    }
     renderResBar();
     renderPage();
   } catch {
@@ -179,6 +203,7 @@ export async function bootstrap() {
     if (!me) return;
     renderResBar();
     syncTimers();
+    syncPopDisplay(); // 人口本地外插：每秒平滑更新显示值
     // 资源每秒增长，军队页训练按钮的"买得起"状态随之实时刷新
     if (getTab() === 'army') {
       document.querySelectorAll<HTMLInputElement>('input[data-unit]').forEach((inp) => updateTrainCost(inp.dataset.unit!));

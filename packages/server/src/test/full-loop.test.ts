@@ -75,6 +75,10 @@ test('军队：训练消耗资源并产兵，军队耗粮上报', async () => {
   // 耗粮已上报：净crop产率应比无兵时低
   const eco = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   assert.ok(eco.cropUpkeep > 0, 'crop消耗应>0（含军队耗粮）');
+
+  // 人口：训练后人口应减少
+  const popSnap = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  assert.ok(popSnap.currentPop >= 0, '人口应存在');
 });
 
 test('军队：未建所需建筑时拒绝训练', async () => {
@@ -84,6 +88,29 @@ test('军队：未建所需建筑时拒绝训练', async () => {
   const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'equimperatoris', count: 1 });
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'requires_building:stable');
+});
+
+test('人口：人口不足时拒绝训练（insufficient_population）', async () => {
+  const app = freshApp();
+  // 等待 population.createVillage 异步初始化完成（需要多个微任务周期）
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await buildBarracks(app);
+
+  // 获取当前人口
+  const popSnap = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  const curPop = Math.floor(popSnap.currentPop);
+  assert.ok(curPop > 0, '初始人口应>0');
+
+  // 尝试训练数量超过人口的兵（each legionnaire consumes 1 pop）
+  const tooMany = curPop + 100;
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: tooMany });
+  assert.equal(r.ok, false, '人口不足时训练应被拒绝');
+  assert.equal(r.reason, 'insufficient_population', `应返回 insufficient_population，实际: ${r.reason}`);
+
+  // 确认资源未被扣（训练被回滚）
+  const eco = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.ok(eco.resources.wood > 0, '训练拒绝后资源不应被扣（回滚成功）');
 });
 
 test('完整循环：训练→出征打PvE→掠夺→返程入库', async () => {

@@ -40,6 +40,14 @@ export interface BuildingDef {
   timeSec: (lv: number) => number;
   maxLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
+  /** 每级贡献的繁荣度（全部建筑统一为 5）。 */
+  prosperityPerLevel: number;
+  /** 是否参与人口劳动力增幅（资源田/军事/学院/铁匠/城镇中心=true；仓库/粮仓/城墙/集结点=false）。 */
+  laborAmplified: boolean;
+  /** laborAmplified=true 时的饱和阈值基数（Lv1 时需要多少人口才能让该建筑满员）。 */
+  laborSaturation: number;
+  /** laborAmplified=true 时满员的最大增幅（速率类=产率加成；建造类=时间缩减比）。 */
+  laborBonusMax: number;
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -69,6 +77,10 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
+  /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
+  popCost: number;
+  /** 是否永久消耗人口（拓荒者=true：解散/死亡时人口不返还）。 */
+  popPermanent: boolean;
 }
 
 export interface PveTemplate {
@@ -132,6 +144,20 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
+  /** 人口：每点繁荣度每小时增长人口数。 */
+  popGrowthPerProsperity: number;
+  /** 人口：每人每小时消耗粮食量（决定软上限大小）。 */
+  popPerCapitaCrop: number;
+  /** 人口：零人口时所有速率类建筑的最低倍率（防死亡螺旋）。 */
+  popLaborFloor: number;
+  /** 人口：战斗阵亡中转化为伤兵的比例（30% 变伤兵，70% 永久阵亡）。 */
+  popDeathRecoveryRatio: number;
+  /** 人口：伤兵治愈基础时长（秒，满员时缩短）。 */
+  popHealTime: number;
+  /** 人口：满员时伤兵治愈速度加成（0.50 → 满员时耗时变 2400s）。 */
+  popHealBonus: number;
+  /** 人口：净粮赤字→减员速率比例（待平衡调参，值越大减员越快）。 */
+  popDeathRateFactor: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -206,12 +232,13 @@ function parseRequires(s: string, idToCode: Map<number, string>): { kind: string
 }
 
 /**
- * 解析兵种 traits 列。逗号分隔的特性**数字ID**（如 "1,3"）；traitIdToCode 映射回 code。
+ * 解析兵种 traits 列。竖线(|)分隔的特性**数字ID**（如 "1|3"）；traitIdToCode 映射回 code。
+ * 注意：用 | 而非逗号，因为 CSV 解析器按逗号切分，值内不能含逗号（与 requires 列同理）。
  * 空则返回 []。
  */
 function parseTraitRefs(s: string, traitIdToCode: Map<number, string>): string[] {
   if (!s) return [];
-  return s.split(',').map((part) => {
+  return s.split('|').map((part) => {
     const idStr = part.trim();
     if (!idStr) return '';
     return traitIdToCode.get(num(idStr)) ?? idStr;
@@ -262,6 +289,10 @@ export function loadGameConfig(configDir: string): GameConfig {
       timeSec: timeFn(num(r.timeBase, 15), num(r.timeGrowth, 1.6)),
       maxLevel: num(r.maxLevel, 10),
       requires: parseRequires(r.requires, buildingIdToCode),
+      prosperityPerLevel: num(r.prosperityPerLevel, 5),
+      laborAmplified: num(r.laborAmplified, 0) === 1,
+      laborSaturation: num(r.laborSaturation, 0),
+      laborBonusMax: num(r.laborBonusMax, 0),
     };
   }
 
@@ -305,6 +336,8 @@ export function loadGameConfig(configDir: string): GameConfig {
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
+      popCost: num(r.popCost, 1),
+      popPermanent: num(r.popPermanent, 0) === 1,
     };
   }
 
@@ -366,6 +399,13 @@ export function loadGameConfig(configDir: string): GameConfig {
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
+    popGrowthPerProsperity: cn('pop_growth_per_prosperity', 15),
+    popPerCapitaCrop: cn('pop_per_capita_crop', 2.0),
+    popLaborFloor: cn('pop_labor_floor', 0.75),
+    popDeathRecoveryRatio: cn('pop_death_recovery_ratio', 0.30),
+    popHealTime: cn('pop_heal_time', 3600),
+    popHealBonus: cn('pop_heal_bonus', 0.50),
+    popDeathRateFactor: cn('pop_death_rate_factor', 0.1),
     raw,
   };
 
@@ -423,6 +463,11 @@ export function validateGameConfig(config: GameConfig): void {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
+    if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
+    if (b.laborAmplified) {
+      if (b.laborSaturation <= 0) errors.push(`buildings.csv[${b.kind}] laborAmplified=1 时 laborSaturation 必须>0`);
+      if (b.laborBonusMax < 0 || b.laborBonusMax > 1) errors.push(`buildings.csv[${b.kind}] laborBonusMax 必须在[0,1]（当前${b.laborBonusMax}）`);
+    }
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
 
@@ -473,6 +518,7 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
     if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
+    if (u.popCost < 0) errors.push(`units.csv[${u.key}] popCost 必须≥0（当前${u.popCost}）`);
   }
 
   // pve：每个模板必须有守军；spawn 目标必须存在且坐标在地图内
@@ -524,6 +570,12 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
+  // 人口常量范围校验
+  if (c.popPerCapitaCrop <= 0) errors.push(`game_constants.csv pop_per_capita_crop 必须>0（防零除软上限）`);
+  if (c.popLaborFloor <= 0 || c.popLaborFloor > 1) errors.push(`game_constants.csv pop_labor_floor 必须在(0,1]`);
+  if (c.popDeathRecoveryRatio < 0 || c.popDeathRecoveryRatio > 1) errors.push(`game_constants.csv pop_death_recovery_ratio 必须在[0,1]`);
+  if (c.popHealTime <= 0) errors.push(`game_constants.csv pop_heal_time 必须>0`);
+  if (c.popDeathRateFactor <= 0) errors.push(`game_constants.csv pop_death_rate_factor 必须>0`);
 
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);

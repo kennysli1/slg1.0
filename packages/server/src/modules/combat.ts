@@ -352,19 +352,33 @@ export class CombatModule {
     // 每支来攻部队：算各自幸存兵力 + 按载货比例分战利品 → 发结束事件（Movement 据此返程）
     for (const [cid, contrib] of Object.entries(b.contributions)) {
       const survivors: Record<string, number> = {};
+      const attackerLossesForVillage: Record<string, number> = {};
       let carry = 0;
       for (const code of Object.keys(contrib.troops)) {
         const u = b.attacker[`${cid}#${code}`];
-        if (u && u.count > 0) {
-          survivors[code] = u.count;
-          carry += u.count * u.carry;
+        const survived = u?.count ?? 0;
+        const lost = contrib.troops[code] - survived;
+        if (survived > 0) {
+          survivors[code] = survived;
+          carry += survived * (u?.carry ?? 0);
         }
+        if (lost > 0) attackerLossesForVillage[code] = lost;
       }
       const share: Record<string, number> = {};
       if (Object.keys(looted).length && carry > 0) {
         const ratio = carry / totalLootCarry;
         for (const [t, v] of Object.entries(looted)) share[t] = Math.floor(v * ratio);
       }
+
+      // 向攻击方村庄登记伤兵（combat 只传原始损失，population 用 config 换算）
+      if (Object.keys(attackerLossesForVillage).length > 0) {
+        void this.commands.send({
+          name: 'population.AddWounded',
+          from: CombatModule.NAME,
+          payload: { villageId: contrib.fromVillage, losses: attackerLossesForVillage },
+        });
+      }
+
       void this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
@@ -376,8 +390,15 @@ export class CombatModule {
       } as DomainEvent);
     }
 
-    // 防守方玩家（村庄战）收一份战报
+    // 防守方玩家（村庄战）收一份战报 + 登记伤兵
     if (b.targetKind === 'village') {
+      if (Object.keys(defenderLosses).length > 0) {
+        void this.commands.send({
+          name: 'population.AddWounded',
+          from: CombatModule.NAME,
+          payload: { villageId: b.targetId, losses: defenderLosses },
+        });
+      }
       void this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: { villageId: b.targetId, side: 'defender', battleId: b.id, looted, ...reportBase },

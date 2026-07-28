@@ -24,6 +24,8 @@ const ERR_MSG: Record<string, string> = {
   village_not_found: '村庄不存在',
   not_logged_in: '请重新登录',
   network_error: '网络连接异常',
+  insufficient_population: '人口不足，无法训练',
+  bad_units: '解散兵种不合法',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */

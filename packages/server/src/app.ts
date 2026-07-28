@@ -8,6 +8,7 @@ import { loadGameConfig, type GameConfig } from './infra/config.js';
 import { EconomyModule } from './modules/economy.js';
 import { BuildingModule } from './modules/building.js';
 import { MilitaryModule } from './modules/military.js';
+import { PopulationModule } from './modules/population.js';
 import { WorldModule } from './modules/world.js';
 import { PveModule } from './modules/pve.js';
 import { MovementModule } from './modules/movement.js';
@@ -29,6 +30,7 @@ const PROGRESS_COLLECTIONS = [
   'economy',
   'building',
   'military',
+  'population',
   'movement',
   'movement_seq',
   'battle',
@@ -56,6 +58,7 @@ export interface GameApp {
   economy: EconomyModule;
   building: BuildingModule;
   military: MilitaryModule;
+  population: PopulationModule;
   world: WorldModule;
   pve: PveModule;
   movement: MovementModule;
@@ -107,16 +110,19 @@ export function createGameApp(opts?: {
   const economy = new EconomyModule(store, bus, commands, now, config);
   const building = new BuildingModule(store, bus, commands, scheduler, now, config);
   const military = new MilitaryModule(store, bus, commands, scheduler, now, config);
+  const population = new PopulationModule(store, bus, commands, scheduler, now, config);
   const world = new WorldModule(store, bus, commands, now, config);
   const pve = new PveModule(store, bus, commands, scheduler, now, config);
   const movement = new MovementModule(store, bus, commands, scheduler, now, config);
   const combat = new CombatModule(store, bus, commands, scheduler, now, config);
 
   // 实际建村的函数（供 Player 注册时调用）。坐标为六边形轴坐标 (q,r)。
-  const doCreateVillage = (villageId: string, q: number, r: number, name: string, tribe = 'romans') => {
+  const doCreateVillage = async (villageId: string, q: number, r: number, name: string, tribe = 'romans') => {
     economy.createVillage(villageId);
     building.createVillage(villageId, tribe);
     military.createVillage(villageId, tribe);
+    // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
+    await population.createVillage(villageId);
     void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { q, r, refId: villageId, name } });
   };
   const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.mapSize);
@@ -126,6 +132,7 @@ export function createGameApp(opts?: {
   economy.init();
   building.init();
   military.init();
+  population.init();
   world.init();
   pve.init();
   movement.init();
@@ -136,9 +143,9 @@ export function createGameApp(opts?: {
 
   return {
     config, store, bus, commands, scheduler,
-    economy, building, military, world, pve, movement, combat, player, meta, notifications, now,
+    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
-      doCreateVillage(villageId, q, r, name, 'romans');
+      void doCreateVillage(villageId, q, r, name, 'romans');
     },
     setupWorld() {
       world.setup(config.constants.mapSize);
@@ -148,6 +155,7 @@ export function createGameApp(opts?: {
     resume() {
       building.resume();
       military.resume();
+      population.resume();
       movement.resume();
       combat.resume();
       pve.resume();
@@ -179,8 +187,8 @@ export function createGameApp(opts?: {
       store.delete('player', playerId);
       store.delete('player_byname', name);
       store.delete('player_byvillage', villageId);
-      // 清除游戏进度（以 villageId 为 key 的所有进度集合）
-      const progressByVillage = ['economy', 'building', 'military', 'notifications'] as const;
+      // 清除游戏进度（以 villageId 为 key 的所有进度集合，含 population）
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications'] as const;
       for (const c of progressByVillage) store.delete(c, villageId);
       // 清除行军记录（以 villageId 过滤，避免误删其他人）
       for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {

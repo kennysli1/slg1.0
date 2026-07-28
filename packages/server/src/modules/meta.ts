@@ -43,6 +43,7 @@ export class MetaModule {
         })),
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,
+          popCost: u.popCost,
         })),
         pveTemplates: Object.values(c.pveTemplates).map((p) => ({
           type: p.type, name: p.name, icon: p.icon,

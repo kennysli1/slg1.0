@@ -3,6 +3,7 @@ import { art, canAfford, costPreview, progressBar } from '../../shared/ui/widget
 import { buildingInfo } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
+import { renderPopPanel } from './population.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
@@ -16,11 +17,13 @@ export function renderVillage(): string {
   if (!vil || !vil.zones) return '<div class="loading">加载中…</div>';
 
   const queueBanner = renderQueue(vil.queue);
+  const popPanel = renderPopPanel();
   const center = renderCenter(vil.townCenter);
   const inner = renderZone('inner', '城内 · 民生研发', vil.zones.inner);
   const outer = renderZone('outer', '城外 · 生产量产', vil.zones.outer);
 
   return `${queueBanner}
+    ${popPanel ? `<h3>人口 · 文明活力</h3>${popPanel}` : ''}
     ${center}
     ${outer}
     ${inner}

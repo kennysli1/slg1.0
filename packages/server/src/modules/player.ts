@@ -68,8 +68,8 @@ export class PlayerModule {
     private _bus: EventBus,
     private commands: CommandBus,
     private now: () => number,
-    /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military + 放地图）。 */
-    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void,
+    /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military/population + 放地图）。 */
+    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
     /** 地图半径，用于随机分配出生坐标范围（默认 20）。 */
     private mapSize: number = 20,
   ) {}
@@ -101,7 +101,7 @@ export class PlayerModule {
     const id = `p-${this.nextSeq()}`;
     const villageId = `v-${id}`;
     const { q, r } = this.allocateSpot();
-    this.createVillage(villageId, q, r, `${clean}的村庄`, t);
+    void this.createVillage(villageId, q, r, `${clean}的村庄`, t);
 
     const p: PlayerState = {
       id, name: clean, pwd: hashPassword(password), tribe: t,
@@ -235,7 +235,7 @@ export class PlayerModule {
         this.store.set(COLLECTION, p.id, updated);
         this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
       }
-      this.createVillage(villageId, q, r, `${p.name}的村庄`, p.tribe);
+      void this.createVillage(villageId, q, r, `${p.name}的村庄`, p.tribe);
     }
   }
 }

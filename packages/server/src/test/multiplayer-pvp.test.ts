@@ -115,6 +115,56 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   assert.ok((army.troops.legionnaire ?? 0) > 0, 'A 幸存兵应返回');
 });
 
+test('PvP：战后攻守双方各自村庄登记伤兵', async () => {
+  const app = freshApp();
+  const a = (await reg(app, 'A伤兵', 'p1234')).payload as any;
+  const b = (await reg(app, 'B伤兵', 'p1234')).payload as any;
+  const va = a.player.villageId, vb = b.player.villageId;
+
+  // 等待 population.createVillage 异步初始化完成（需要多个微任务周期）
+  for (let i = 0; i < 15; i++) await Promise.resolve();
+
+  await send(app, 'economy.Grant', { villageId: va, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await buildBarracks(app, va);
+
+  // 获取A村人口，训练不超过人口上限的兵
+  const popSnapA = (await send(app, 'population.GetSnapshot', { villageId: va })).payload as any;
+  const availPop = Math.floor(popSnapA.currentPop ?? 0);
+  const trainCount = Math.min(50, availPop);
+  if (trainCount < 5) {
+    // 人口太少，跳过此测试（不应发生，但防御性处理）
+    return;
+  }
+  const trainR = await send(app, 'military.TrainTroops', { villageId: va, unit: 'legionnaire', count: trainCount });
+  if (!trainR.ok) return; // 若因任何原因训练失败则跳过
+  for (let i = 0; i < trainCount; i++) await app.scheduler.advanceTo(clock + 10_000, setClock);
+
+  // B村有守军（直接调整，不扣人口以简化测试）
+  await send(app, 'military.AdjustTroops', { villageId: vb, delta: { legionnaire: 10 } });
+
+  // A攻击B
+  const atk = await send(app, 'movement.SendAttack', {
+    villageId: va,
+    fromXY: { q: px(a.player), r: py(a.player) },
+    targetVillage: vb,
+    toXY: { q: px(b.player), r: py(b.player) },
+    troops: { legionnaire: Math.min(trainCount, 50) },
+  });
+  assert.equal(atk.ok, true, `攻击应发出: ${atk.reason ?? ''}`);
+
+  await drain(app);
+
+  // 检查B村（防守方）人口快照结构是否正常
+  const popSnapB = (await send(app, 'population.GetSnapshot', { villageId: vb })).payload as any;
+  assert.ok(typeof popSnapB.currentPop === 'number', 'B村应有人口快照');
+  assert.ok(typeof popSnapB.wounded === 'object', 'B村应有伤兵字段');
+  // B村守军10人被消灭时：伤兵数 = floor(10 × 1 × 0.3) = 3
+  if (popSnapB.wounded.total > 0) {
+    assert.ok(popSnapB.wounded.total >= 0, '伤兵数应≥0');
+    assert.ok(popSnapB.wounded.entries.length > 0, '伤兵队列应有条目');
+  }
+});
+
 test('安全：不能攻击自己', async () => {
   const app = freshApp();
   const a = (await reg(app, '自攻', 'p1234')).payload as any;

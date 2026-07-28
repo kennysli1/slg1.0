@@ -25,6 +25,8 @@ interface TrainOrder {
   remaining: number; // 还要出几个
   nextDoneAt: number; // 下一个出兵的时刻
   taskId: string;
+  /** 每个兵的实际训练时长(ms)，含人口加速（训练开始时快照，整批一致）。 */
+  trainMsEach: number;
 }
 
 interface MilitaryState {
@@ -50,6 +52,7 @@ export class MilitaryModule {
       GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true },
       TrainTroops: { command: 'military.TrainTroops', ownVillage: true, needAuth: true },
       UpgradeSmithy: { command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true },
+      DisbandTroops: { command: 'military.DisbandTroops', ownVillage: true, needAuth: true },
     },
     eventPushMap: {
       'military.TroopTrained': 'TroopTrained',
@@ -73,6 +76,7 @@ export class MilitaryModule {
     this.commands.register('military.GetArmy', (c) => this.getArmy(c));
     this.commands.register('military.TrainTroops', (c) => this.trainTroops(c));
     this.commands.register('military.UpgradeSmithy', (c) => this.upgradeSmithy(c));
+    this.commands.register('military.DisbandTroops', (c) => this.disbandTroops(c));
     // 供 Combat/Movement 取"参战快照"：对外只给算好的最终三维（派生管线对外口径）
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
@@ -84,6 +88,10 @@ export class MilitaryModule {
     for (const s of this.store.all<MilitaryState>(COLLECTION)) {
       if (!s.training) continue;
       const delay = Math.max(0, s.training.nextDoneAt - this.now());
+      // trainMsEach 兼容旧存档（旧存档无此字段，回退到 def.trainSec）
+      if (!s.training.trainMsEach) {
+        s.training.trainMsEach = (this.config.units[s.training.unit]?.trainSec ?? 30) * 1000;
+      }
       s.training.taskId = this.scheduler.schedule(delay, () => this.produceOne(s.villageId));
       this.store.set(COLLECTION, s.villageId, s);
     }
@@ -169,7 +177,7 @@ export class MilitaryModule {
     };
   }
 
-  /** 训练：校验兵种(含种族) → 一次性预扣资源(数量×单价) → 入队，逐个产出。 */
+  /** 训练：校验兵种(含种族) → 扣人口 → 一次性预扣资源(数量×单价) → 入队，逐个产出。 */
   private async trainTroops(cmd: Command): Promise<CommandResult> {
     const { villageId, unit, count } = cmd.payload as { villageId: string; unit: string; count: number };
     const s = this.load(villageId);
@@ -189,7 +197,15 @@ export class MilitaryModule {
     const level = (building.payload as any)?.level ?? 0;
     if (!building.ok || level < 1) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
 
-    // 一次性预扣 count 份资源
+    // 扣人口（训练开始时扣，不足则拒绝训练）
+    const popResult = await this.commands.send({
+      name: 'population.ConsumePop',
+      from: MilitaryModule.NAME,
+      payload: { villageId, unit, count },
+    });
+    if (!popResult.ok) return { ok: false, payload: {}, reason: popResult.reason ?? 'insufficient_population' };
+
+    // 一次性预扣 count 份资源（人口已扣，资源失败需回滚人口）
     const totalCost: Record<string, number> = {};
     for (const [r, v] of Object.entries(def.cost)) totalCost[r] = v * count;
 
@@ -198,16 +214,35 @@ export class MilitaryModule {
       from: MilitaryModule.NAME,
       payload: { villageId, cost: totalCost },
     });
-    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+    if (!spend.ok) {
+      // 资源不足：回滚已扣的人口
+      void this.commands.send({
+        name: 'population.ReturnPop',
+        from: MilitaryModule.NAME,
+        payload: { villageId, units: { [unit]: count } },
+      });
+      return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+    }
+
+    // 读取人口劳动力练兵加速（GetLaborMult，只读快照，无副作用）
+    const laborRes = await this.commands.send({
+      name: 'population.GetLaborMult',
+      from: MilitaryModule.NAME,
+      payload: { villageId, buildingKind: def.building },
+    });
+    const laborMult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
+    // trainSec_eff = trainSec / rate_mult（人多练得快）
+    const effectiveTrainSec = def.trainSec / Math.max(0.01, laborMult);
 
     // 入队，登记第一个出兵
-    const firstDoneMs = def.trainSec * 1000;
+    const firstDoneMs = effectiveTrainSec * 1000;
     const taskId = this.scheduler.schedule(firstDoneMs, () => this.produceOne(villageId));
     s.training = {
       unit,
       remaining: count,
       nextDoneAt: this.now() + firstDoneMs,
       taskId,
+      trainMsEach: firstDoneMs,
     };
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { unit, count } };
@@ -223,8 +258,8 @@ export class MilitaryModule {
     order.remaining -= 1;
 
     if (order.remaining > 0) {
-      const def = this.config.units[order.unit];
-      const nextMs = def.trainSec * 1000;
+      // 用开始训练时快照的每兵耗时（整批一致）
+      const nextMs = order.trainMsEach ?? (this.config.units[order.unit]?.trainSec ?? 30) * 1000;
       order.nextDoneAt = this.now() + nextMs;
       order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId));
     } else {
@@ -242,7 +277,9 @@ export class MilitaryModule {
     void this.bus.emit(evt);
   }
 
-  /** 铁匠升级：扣资源 → 提升某兵种养成等级（派生管线加层）。 */
+  /** 铁匠升级：扣资源 → 提升某兵种养成等级（派生管线加层）。
+   * 锻造速率钩子：当前锻造为瞬时扣费（无时长），仅读取 GetLaborMult('smithy') 记录（预留二期）。
+   */
   private async upgradeSmithy(cmd: Command): Promise<CommandResult> {
     const { villageId, unit } = cmd.payload as { villageId: string; unit: string };
     const s = this.load(villageId);
@@ -259,9 +296,50 @@ export class MilitaryModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
+    // 锻造速率钩子（当前锻造无时长，预留二期；此处只读快照）
+    // const smithyMult = await this.commands.send({ name: 'population.GetLaborMult', ... });
+    // 若二期加锻造时长：lockDurMs = baseDurMs / smithyMult.mult
+
     s.smithyLevel[unit] = nextLv;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { unit, smithyLevel: nextLv } };
+  }
+
+  /**
+   * 解散驻村军队（DisbandTroops）：减兵力 + 归还人口 + 更新维护。
+   * 只能解散驻村部队（出征中的军队不在 troops 里，归 movement 管辖）。
+   * 100% 归还人口（但拓荒者 popPermanent=true，由 population.ReturnPop 跳过）。
+   * 资源不返还。
+   */
+  private async disbandTroops(cmd: Command): Promise<CommandResult> {
+    const { villageId, units } = cmd.payload as { villageId: string; units: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    // 校验：兵种存在、数量合法、驻村兵力充足
+    for (const [unit, cnt] of Object.entries(units)) {
+      if (!Number.isInteger(cnt) || cnt <= 0) return { ok: false, payload: {}, reason: `bad_count:${unit}` };
+      const have = s.troops[unit] ?? 0;
+      if (have < cnt) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
+    }
+
+    // 扣减兵力
+    for (const [unit, cnt] of Object.entries(units)) {
+      s.troops[unit] = (s.troops[unit] ?? 0) - cnt;
+      if (s.troops[unit] <= 0) delete s.troops[unit];
+    }
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+
+    // 归还人口（population.ReturnPop 自行跳过 popPermanent 单位）
+    const returnResult = await this.commands.send({
+      name: 'population.ReturnPop',
+      from: MilitaryModule.NAME,
+      payload: { villageId, units },
+    });
+    const returnedPop = (returnResult.payload as any)?.returned ?? 0;
+
+    return { ok: true, payload: { troops: { ...s.troops }, returnedPop } };
   }
 
   /**

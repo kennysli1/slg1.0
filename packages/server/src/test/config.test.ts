@@ -76,8 +76,8 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 持盾特性解析：禁卫兵引用 trait id=1(shield)
-  assert.deepEqual(cfg.units['praetorian'].traits, ['shield']);
+  // 多特性解析（| 分隔）：禁卫兵引用 trait 1(shield)+2(heavy_armor)，两个都应生效
+  assert.deepEqual(cfg.units['praetorian'].traits, ['shield', 'heavy_armor']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
   assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });

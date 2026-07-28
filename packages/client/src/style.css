@@ -386,6 +386,91 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* ---------- 报告页 ---------- */
 .report { background: var(--c-surface); border-left: 3px solid var(--c-brand); padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; border-radius: var(--r-sm); font-size: var(--f-sm); box-shadow: var(--sh-1); }
 
+/* ---------- 人口面板 ---------- */
+.pop-panel {
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: var(--r-md); padding: var(--s-3) var(--s-4);
+  box-shadow: var(--sh-1); margin-bottom: var(--s-2);
+}
+.pop-head {
+  display: flex; align-items: baseline; gap: var(--s-2); margin-bottom: var(--s-2);
+}
+.pop-current {
+  font-size: var(--f-xl); font-weight: 700; font-family: var(--ff-num); color: var(--c-ink);
+  transition: color .3s;
+}
+.pop-slash { color: var(--c-ink-soft); font-size: var(--f-lg); }
+.pop-limit { font-size: var(--f-lg); font-family: var(--ff-num); color: var(--c-ink-soft); }
+.pop-pct { margin-left: auto; font-family: var(--ff-num); }
+.pop-bar-wrap {
+  height: 7px; background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; margin-bottom: var(--s-2);
+}
+.pop-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--c-brand), var(--c-gold));
+  border-radius: 999px; transition: width .9s linear;
+}
+.pop-meta { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-2); }
+.pop-stat {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--f-xs); background: var(--c-surface-2);
+  border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: 2px var(--s-2);
+}
+.pop-stat i { font-style: normal; color: var(--c-ink-soft); }
+.pop-stat b { font-family: var(--ff-num); font-weight: 700; color: var(--c-ink); }
+.pop-stat-wound b { color: var(--c-danger); }
+.pop-wounded {
+  display: flex; align-items: center; gap: var(--s-1);
+  font-size: var(--f-xs); color: var(--c-danger); margin-bottom: var(--s-2);
+}
+.pop-wounded-icon { font-size: var(--f-md); }
+.pop-wounded-count { font-weight: 700; font-family: var(--ff-num); }
+.pop-labor { border-top: 1px solid var(--c-line); padding-top: var(--s-2); margin-top: var(--s-1); }
+.pop-labor-title {
+  font-size: var(--f-xs); font-weight: 600; color: var(--c-ink-soft);
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: var(--s-1);
+}
+.pop-labor-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s-1) var(--s-3);
+}
+.pop-labor-item { display: inline-flex; align-items: center; gap: 4px; font-size: var(--f-xs); }
+.pop-labor-item i { font-style: normal; color: var(--c-ink-soft); }
+.pop-labor-item b { font-family: var(--ff-num); font-weight: 700; color: var(--c-ok); }
+.pop-labor-build b { color: var(--c-brand); }
+
+/* 人口不足警告（训练面板） */
+.pop-warn {
+  color: var(--c-danger); font-size: var(--f-xs); font-weight: 600;
+  margin: var(--s-1) 0; padding: 2px var(--s-2);
+  background: rgba(178,59,59,.07); border-radius: var(--r-sm);
+}
+/* 人口消耗标注（训练行内） */
+.ustat.us-pop { background: #f0eaf8; border-color: #d4c8e8; }
+.ustat.us-pop b { color: #7a5a99; }
+
+/* ---------- 解散部队区 ---------- */
+.disband-section { margin-top: var(--s-3); }
+.disband-header {
+  display: flex; align-items: baseline; gap: var(--s-2); margin-bottom: var(--s-2);
+  font-weight: 600; font-size: var(--f-sm);
+}
+.disband-row {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-2) var(--s-3); background: var(--c-surface);
+  border: 1px solid var(--c-line); border-radius: var(--r-md);
+  margin-bottom: var(--s-1); font-size: var(--f-sm); flex-wrap: wrap;
+}
+.disband-name { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disband-count { color: var(--c-ink-soft); font-family: var(--ff-num); }
+.disband-pop-return { color: var(--c-ok); font-size: var(--f-xs); font-family: var(--ff-num); }
+.disband-input { width: 64px; }
+.btn-disband {
+  border: 1px solid var(--c-danger); background: transparent; color: var(--c-danger);
+  border-radius: var(--r-sm); padding: 2px var(--s-3); font-size: var(--f-sm);
+  cursor: pointer; transition: background .15s, color .15s; font-family: inherit; white-space: nowrap;
+}
+.btn-disband:hover { background: var(--c-danger); color: #fff; }
+
 /* ============================================================
    登录界面
    ============================================================ */
