@@ -277,3 +277,54 @@ test('人口：settle 后人口接近软上限（5步迭代收敛≥90%）', asy
   // 繁荣度应>0（有建筑就有繁荣度）
   assert.ok(snap.growthPerHour > 0, '新村有建筑，增长率应>0');
 });
+
+/**
+ * 回归守卫（对应 2026-07-28 线上 BUG）：
+ * 读操作 GetPopulation/GetSnapshot 必须对客户端推送「零副作用」——绝不能 emit population.Changed。
+ *
+ * 曾经的 BUG：settle() 在末尾无条件 emit population.Changed，而 settle 被 getSnapshot(读) 触发。
+ * 于是客户端 refreshAll→GetPopulation→settle→emit→网关推 PopulationChanged→
+ * 客户端 onPush→refreshAll→…… 形成正反馈死循环，页面每秒重渲成百次，
+ * 用户点击时 DOM 节点被反复销毁重建 → 建筑空槽/升级、地图方向键「点了没反应」。
+ *
+ * 单元测试为何没兜住：所有测试都是「服务端单进程 直接调 command 断言结果」，
+ * 从不模拟「客户端收到 push 后再次发起读请求」这条闭环——而死循环恰恰只在该闭环下浮现。
+ * 本守卫用最小代价复现闭环的第一跳：读一次，断言它不产生任何推送。
+ */
+test('回归·读无副作用：GetPopulation 不得产生 population.Changed 推送', async () => {
+  const app = freshApp();
+  await flushMicrotasks();
+
+  // 推进时钟，确保 settle 的 dtHours>0（否则会提前 return，无法复现 buggy 分支）
+  setClock(clock + 60_000);
+
+  let pushes = 0;
+  app.bus.on('population.Changed', () => { pushes += 1; });
+
+  // 纯读：连续读多次模拟客户端轮询/推送回环的首跳
+  await send(app, 'population.GetSnapshot', { villageId: 'v1' });
+  await send(app, 'population.GetSnapshot', { villageId: 'v1' });
+  await send(app, 'population.GetSnapshot', { villageId: 'v1' });
+
+  assert.equal(pushes, 0,
+    `读操作(GetPopulation)不得 emit population.Changed（实际 ${pushes} 次）——` +
+    '否则客户端 onPush→refreshAll→再读 会形成推送死循环，页面持续重渲导致点击失效');
+});
+
+/**
+ * 与上条互补：离散写操作仍必须推送（否则客户端看不到即时变化）。
+ * 训练扣人口后应至少 emit 一次 population.Changed（consumePop 内显式 emit）。
+ */
+test('回归·写有推送：训练扣人口应 emit population.Changed', async () => {
+  const app = freshApp();
+  await flushMicrotasks();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  await app.scheduler.advanceTo(clock + 10_000, setClock);
+
+  let pushes = 0;
+  app.bus.on('population.Changed', () => { pushes += 1; });
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 2 });
+  assert.equal(r.ok, true, `训练应成功: ${r.reason ?? ''}`);
+  assert.ok(pushes >= 1, `训练扣人口应至少推送一次 population.Changed（实际 ${pushes} 次）`);
+});

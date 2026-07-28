@@ -14,13 +14,14 @@ export function unitTrainSec(key: string): number {
   return (getCache().army?.trainable || []).find((u: any) => u.key === key)?.trainSec ?? 30;
 }
 
-/** 紧凑属性行：攻 / 防(近·远) / 速 / 载 / 粮 / 人口。数值为服务端算好的最终值快照。 */
+/** 紧凑属性行：攻 / 防(近·远) / 速 / 载 / 粮 / 人口。数值为服务端算好的最终值快照。
+ *  仅在「点击兵种弹出的详情弹窗」内展示，训练卡默认只显示造价（见需求：部队仅显示建造资源）。 */
 function renderUnitStats(u: any): string {
   const r = (v: any) => Math.round(Number(v) || 0);
   const isRanged = u.form === 'ranged';
   const atk = r(isRanged ? u.rangedAtk : u.meleeAtk);
   const atkTitle = isRanged ? '远程攻击力' : '近战攻击力';
-  const popCost = unitInfo(u.key).popCost;
+  const popCost = unitInfo(u.key ?? u.code ?? '').popCost;
   const stat = (label: string, value: string | number, title: string, cls = '') =>
     `<span class="ustat ${cls}" title="${title}"><i>${label}</i><b>${value}</b></span>`;
   return `<div class="unit-stats">
@@ -42,10 +43,10 @@ export function renderArmy(): string {
   const army = getCache().army;
   if (!army) return '<div class="loading">加载中…</div>';
 
-  // 驻军展示
+  // 驻军展示（点击兵种 → 弹出属性详情）
   const troops = Object.entries(army.troops || {});
   const troopList = troops.length
-    ? troops.map(([u, n]: any) => `<span class="troop">${art(unitArt(u), unitName(u), 'sm')}<span class="troop-name">${unitName(u)}</span><b class="troop-count">×${n}</b></span>`).join('')
+    ? troops.map(([u, n]: any) => `<span class="troop" data-unit-detail="${u}" title="点击查看 ${unitName(u)} 属性">${art(unitArt(u), unitName(u), 'sm')}<span class="troop-name">${unitName(u)}</span><b class="troop-count">×${n}</b></span>`).join('')
     : '<small class="muted">暂无驻军</small>';
 
   // 训练进度横幅
@@ -54,13 +55,15 @@ export function renderArmy(): string {
     ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
         ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
 
-  // 训练卡片（含 popCost 展示和人口检查占位 div）
+  // 训练卡片：默认只显示「建造所需资源」+ 训练操作；攻防等详细数据点击「属性」按钮弹出
   const trainCards = (army.trainable || []).map((u: any) => {
     const popCost = unitInfo(u.key).popCost;
-    return `<div class="card">${art(unitArt(u.key), u.name, 'md')}
+    return `<div class="card unit-card">
+      <button class="unit-icon-btn" data-unit-detail="${u.key}" title="查看 ${u.name} 属性">${art(unitArt(u.key), u.name, 'md')}</button>
       <div class="cardbody">
-        <div class="card-title">${u.name} <small class="tag">${formName(u.form)}</small></div>
-        ${renderUnitStats(u)}
+        <div class="card-title">${u.name} <small class="tag">${formName(u.form)}</small>
+          <button class="unit-detail-link" data-unit-detail="${u.key}" title="查看攻防等详细属性">属性 ⓘ</button>
+        </div>
         <div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="pop-warn" id="pop-warn-${u.key}" style="display:none"></div>
         <div class="train-row">
@@ -75,7 +78,7 @@ export function renderArmy(): string {
   // 解散部队区（仅有驻军时显示）
   const disbandSection = renderDisbandSection(army);
 
-  return `<h3>驻军 <small>（${tribeName(army.tribe)}族）</small></h3>
+  return `<h3>驻军 <small>（${tribeName(army.tribe)}族 · 点击兵种看属性）</small></h3>
     <div class="troopbar">${troopList}</div>
     ${training}
     ${disbandSection}
@@ -159,8 +162,55 @@ function updateDisbandPopReturn(unitKey: string) {
   if (el) el.textContent = `+${fmt(popReturn)} 人口`;
 }
 
-/** 绑定军队页交互（训练 + 解散 + 数量框实时重算）。 */
+/** 兵种详情弹窗：展示攻防/速/载/粮/人口 + 造价。直接注入 body（不进 #page，
+ *  避免 5s 全量刷新把弹窗一起重建/关掉）。点遮罩、✕ 或 Esc 关闭。 */
+function openUnitDetail(unitKey: string): void {
+  closeUnitDetail(); // 单例：先关旧的
+  const u = (getCache().army?.trainable || []).find((x: any) => x.key === unitKey);
+  const info = unitInfo(unitKey);
+  const name = u?.name ?? info.name;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'unit-detail-modal';
+  const stats = u ? renderUnitStats(u) : '<div class="hint-sm">该兵种暂无详细数据</div>';
+  const costHtml = u ? costPreview(u.cost, u.trainSec) : '';
+  wrap.innerHTML = `
+    <div class="drawer-mask" data-close-detail="1"></div>
+    <div class="unit-modal" role="dialog" aria-modal="true">
+      <div class="unit-modal-head">
+        ${art(unitArt(unitKey), name, 'lg')}
+        <div class="unit-modal-title"><b>${name}</b>${u ? `<small class="tag">${formName(u.form)}</small>` : ''}</div>
+        <button class="drawer-close" data-close-detail="1" aria-label="关闭">✕</button>
+      </div>
+      <div class="unit-modal-body">
+        <div class="unit-modal-sec-title">战斗属性</div>
+        ${stats}
+        ${costHtml ? `<div class="unit-modal-sec-title">训练造价</div>${costHtml}` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  wrap.querySelectorAll<HTMLElement>('[data-close-detail]').forEach((el) =>
+    el.onclick = () => closeUnitDetail());
+}
+
+function closeUnitDetail(): void {
+  document.getElementById('unit-detail-modal')?.remove();
+}
+
+// Esc 关闭（装一次即可，全程有效）
+if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Escape') closeUnitDetail();
+  });
+}
+
+/** 绑定军队页交互（训练 + 解散 + 数量框实时重算 + 兵种详情弹窗）。 */
 export function bindArmy(act: (p: Promise<any>) => void): void {
+  // 兵种详情弹窗（驻军 chip / 训练卡图标 / 属性按钮）
+  document.querySelectorAll<HTMLElement>('[data-unit-detail]').forEach((el) =>
+    el.onclick = (e) => { e.stopPropagation(); openUnitDetail(el.dataset.unitDetail!); });
+
   // 训练
   document.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) =>
     b.onclick = () => {

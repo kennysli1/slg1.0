@@ -209,10 +209,14 @@ export class PopulationModule {
     s.currentPop = Math.max(0, s.currentPop);
     s.lastTick = now;
 
-    // 上报到 economy（民用人口维护 + 劳动力修正器）
+    // 上报到 economy（民用人口维护 + 劳动力修正器）。这是纯命令(idempotent)，不产生客户端推送。
     await this.reportToEconomy(s, softLimit, effMultCrop);
-    // 发出变化事件（gateway 定向推送给村主人）
-    await this.emitChanged(s, softLimit, growthPerHour, effMultCrop);
+    // 注意：settle 是"读写前惰性补算"，会被 getSnapshot(读) 触发。
+    // 绝不能在此 emit population.Changed —— 否则 客户端 GetPopulation → settle → emit
+    // → 网关推 PopulationChanged → 客户端 onPush→refreshAll→再 GetPopulation 形成正反馈死循环，
+    // 页面被每秒重渲成百次，用户点击的 DOM 节点被反复销毁重建 → "点了没反应"。
+    // 增长是平滑的、客户端本地外插(syncPopDisplay)+5s轮询已足够；离散变更(建造/征兵/解散/伤兵)
+    // 各自在其命令处理器里显式 emit。读路径必须对推送零副作用。
   }
 
   // ── 派生计算（全在模块内部，对外只给快照，铁律#4）──────────────────────
@@ -332,31 +336,6 @@ export class PopulationModule {
         mult,
       },
     });
-  }
-
-  /** emit population.Changed，携带当前人口/软上限/增长率等快照。 */
-  private async emitChanged(
-    s: PopulationState,
-    softLimit: number,
-    growthPerHour: number,
-    effMultCrop: number,
-  ): Promise<void> {
-    const lambda = softLimit > 0 ? Math.min(1, s.currentPop / softLimit) : 0;
-    const woundedTotal = s.woundedPool.reduce((sum, e) => sum + e.count, 0);
-    void this.bus.emit({
-      name: 'population.Changed',
-      source: PopulationModule.NAME,
-      ts: this.now(),
-      payload: {
-        villageId: s.villageId,
-        currentPop: Math.floor(s.currentPop),
-        softLimit: Math.floor(softLimit),
-        growthPerHour: Math.round(growthPerHour),
-        lambdaRatio: Math.round(lambda * 100) / 100,
-        woundedTotal,
-        effMultCrop: Math.round(effMultCrop * 1000) / 1000,
-      },
-    } as DomainEvent);
   }
 
   // ── 订阅处理 ─────────────────────────────────────────────────────────────

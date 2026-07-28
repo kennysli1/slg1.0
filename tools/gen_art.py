@@ -78,7 +78,14 @@ def fit_font(text, max_w, start=30, lo=12):
     return ImageFont.truetype(FONT_PATH, lo)
 
 
-def gen(prefix, key, label):
+def gen(prefix, key, label, force=False):
+    fn = f"{prefix}_{key}.png"
+    path = os.path.join(OUT, fn)
+    # 关键：默认「只补缺失」。真实美术与占位图同名，若直接覆盖会把已到位的正式美术
+    # 刷回占位图（曾导致全部美术丢失）。仅当文件不存在、或显式 --force 时才写入。
+    if os.path.exists(path) and not force:
+        return None
+
     bar_hex, _ = CAT[prefix]
     img = Image.new("RGB", (SIZE, SIZE), "#ffffff")
     d = ImageDraw.Draw(img)
@@ -105,18 +112,24 @@ def gen(prefix, key, label):
         w = font.getlength(ln)
         d.text(((SIZE - w) / 2, y0 + i * line_h), ln, fill="#2a2a2a", font=font)
 
-    fn = f"{prefix}_{key}.png"
-    img.save(os.path.join(OUT, fn))
+    img.save(path)
     return fn
 
 
 def main():
-    count = 0
+    import sys
+    force = "--force" in sys.argv[1:]
+    made, skipped = 0, 0
     for prefix, items in ASSETS.items():
         for key, label in items.items():
-            gen(prefix, key, label)
-            count += 1
-    print(f"已生成 {count} 张占位图 -> {OUT}")
+            if gen(prefix, key, label, force=force):
+                made += 1
+            else:
+                skipped += 1
+    mode = "强制重生成" if force else "只补缺失(默认)"
+    print(f"[{mode}] 新生成 {made} 张，跳过已存在 {skipped} 张 -> {OUT}")
+    if not force and skipped:
+        print("提示：如需刻意用占位图覆盖现有美术，请加 --force（会清掉正式美术，慎用）。")
 
 
 if __name__ == "__main__":
