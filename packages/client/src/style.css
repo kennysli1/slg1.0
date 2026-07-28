@@ -509,32 +509,31 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }
 
-/* ---------- 兵种卡「属性」触发器 + 详情弹窗 ---------- */
-.unit-icon-btn { border: 0; background: none; padding: 0; cursor: pointer; line-height: 0; }
-.unit-icon-btn:hover .icon { outline: 2px solid var(--c-brand); outline-offset: 1px; border-radius: 8px; }
-.unit-detail-link {
-  margin-left: auto; border: 1px solid var(--c-line); background: var(--c-surface-2);
-  color: var(--c-ink-soft); border-radius: 999px; padding: 1px 8px; font-size: var(--f-xs);
-  cursor: pointer; white-space: nowrap;
-}
-.unit-detail-link:hover { border-color: var(--c-brand); color: var(--c-brand); }
+/* ---------- 兵种卡（整张可点）+ 右侧详情抽屉 ---------- */
+.unit-card { cursor: pointer; }
+.unit-card:hover { border-color: var(--c-brand); box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.unit-detail-hint { margin-left: auto; color: var(--c-ink-soft); font-size: var(--f-xs); white-space: nowrap; }
+.unit-card:hover .unit-detail-hint { color: var(--c-brand); }
+/* 训练区不继承卡片「手型」，且点击不展开详情（逻辑在 bindArmy 里排除） */
+.unit-card .train-row { cursor: default; }
 .troop[data-unit-detail] { cursor: pointer; }
 .troop[data-unit-detail]:hover { outline: 1px solid var(--c-brand); }
 .card-title { display: flex; align-items: center; gap: var(--s-2); }
 
+/* 复用建造抽屉的 .drawer / .drawer-mask / .drawer-head / .drawer-body 形态 */
 #unit-detail-modal .drawer-mask { z-index: 60; }
-.unit-modal {
-  position: fixed; z-index: 61; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: min(360px, 92vw); background: var(--c-surface); border: 1px solid var(--c-line);
-  border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,.28); overflow: hidden;
-  animation: drawer-in .16s ease;
+.unit-drawer { z-index: 61; }
+.unit-drawer-name { font-family: var(--ff-display, inherit); font-size: var(--f-lg); font-weight: 700; }
+.drawer-sec-title { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 700; margin: var(--s-2) 0 var(--s-1); }
+
+/* 属性清单：一行一项，标签在左、数值在右 */
+.ustat-list { display: flex; flex-direction: column; border: 1px solid var(--c-line); border-radius: 10px; overflow: hidden; }
+.ustat-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3);
+  padding: 7px var(--s-3); border-bottom: 1px solid var(--c-line);
 }
-.unit-modal-head {
-  display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4);
-  border-bottom: 1px solid var(--c-line); background: var(--c-surface-2);
-}
-.unit-modal-title { display: flex; flex-direction: column; gap: 2px; }
-.unit-modal-title b { font-family: var(--ff-display, inherit); font-size: var(--f-lg); }
-.unit-modal-head .drawer-close { margin-left: auto; }
-.unit-modal-body { padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
-.unit-modal-sec-title { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 700; margin-top: var(--s-1); }
+.ustat-row:last-child { border-bottom: 0; }
+.ustat-row:nth-child(odd) { background: var(--c-surface-2); }
+.ustat-label { color: var(--c-ink); }
+.ustat-label small { color: var(--c-ink-soft); margin-left: 6px; font-size: var(--f-xs); }
+.ustat-val { font-family: var(--ff-num); font-weight: 700; color: var(--c-ink); font-size: var(--f-md); }

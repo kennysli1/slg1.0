@@ -14,23 +14,23 @@ export function unitTrainSec(key: string): number {
   return (getCache().army?.trainable || []).find((u: any) => u.key === key)?.trainSec ?? 30;
 }
 
-/** 紧凑属性行：攻 / 防(近·远) / 速 / 载 / 粮 / 人口。数值为服务端算好的最终值快照。
- *  仅在「点击兵种弹出的详情弹窗」内展示，训练卡默认只显示造价（见需求：部队仅显示建造资源）。 */
-function renderUnitStats(u: any): string {
+/** 详情抽屉里的属性清单：一行一项、带清晰中文标签（不再用「攻XX 防XX-XX」压缩写法）。
+ *  数值为服务端算好的最终值快照（铁律#4）。 */
+function renderUnitDetailRows(u: any): string {
   const r = (v: any) => Math.round(Number(v) || 0);
-  const isRanged = u.form === 'ranged';
-  const atk = r(isRanged ? u.rangedAtk : u.meleeAtk);
-  const atkTitle = isRanged ? '远程攻击力' : '近战攻击力';
   const popCost = unitInfo(u.key ?? u.code ?? '').popCost;
-  const stat = (label: string, value: string | number, title: string, cls = '') =>
-    `<span class="ustat ${cls}" title="${title}"><i>${label}</i><b>${value}</b></span>`;
-  return `<div class="unit-stats">
-    ${stat('攻', atk, atkTitle, 'us-atk')}
-    ${stat('防', `${r(u.meleeDef)}·${r(u.rangedDef)}`, '防御（近战·远程）', 'us-def')}
-    ${stat('速', r(u.speed), '移动速度')}
-    ${stat('载', r(u.carry), '掠夺负重')}
-    ${stat('粮', r(u.upkeep), '每小时耗粮')}
-    ${stat('人口', popCost, `训练消耗人口（每兵 ${popCost}）`, 'us-pop')}
+  const row = (label: string, value: string | number, hint = '') =>
+    `<div class="ustat-row"><span class="ustat-label">${label}${hint ? `<small>${hint}</small>` : ''}</span><span class="ustat-val">${value}</span></div>`;
+  return `<div class="ustat-list">
+    ${row('形态', formName(u.form), u.form === 'ranged' ? '后排远程' : '前排近战')}
+    ${row('近战攻击', r(u.meleeAtk))}
+    ${row('远程攻击', r(u.rangedAtk))}
+    ${row('近战防御', r(u.meleeDef), '挨近战时耐久')}
+    ${row('远程防御', r(u.rangedDef), '挨远程时耐久')}
+    ${row('移动速度', r(u.speed), '格/小时')}
+    ${row('掠夺负重', r(u.carry))}
+    ${row('每小时耗粮', r(u.upkeep))}
+    ${row('训练消耗人口', popCost, '每兵')}
   </div>`;
 }
 
@@ -55,14 +55,15 @@ export function renderArmy(): string {
     ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
         ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
 
-  // 训练卡片：默认只显示「建造所需资源」+ 训练操作；攻防等详细数据点击「属性」按钮弹出
+  // 训练卡片：整张卡可点 → 右侧抽屉展开详细属性；卡面默认只显示「建造所需资源」+ 训练操作。
+  // 训练输入框/按钮区(.train-row)点击不冒泡到卡片（见 bindArmy），避免误触发详情。
   const trainCards = (army.trainable || []).map((u: any) => {
     const popCost = unitInfo(u.key).popCost;
-    return `<div class="card unit-card">
-      <button class="unit-icon-btn" data-unit-detail="${u.key}" title="查看 ${u.name} 属性">${art(unitArt(u.key), u.name, 'md')}</button>
+    return `<div class="card unit-card" data-unit-detail="${u.key}" title="点击查看 ${u.name} 详细属性">
+      ${art(unitArt(u.key), u.name, 'md')}
       <div class="cardbody">
         <div class="card-title">${u.name} <small class="tag">${formName(u.form)}</small>
-          <button class="unit-detail-link" data-unit-detail="${u.key}" title="查看攻防等详细属性">属性 ⓘ</button>
+          <small class="unit-detail-hint">详情 ›</small>
         </div>
         <div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="pop-warn" id="pop-warn-${u.key}" style="display:none"></div>
@@ -162,8 +163,8 @@ function updateDisbandPopReturn(unitKey: string) {
   if (el) el.textContent = `+${fmt(popReturn)} 人口`;
 }
 
-/** 兵种详情弹窗：展示攻防/速/载/粮/人口 + 造价。直接注入 body（不进 #page，
- *  避免 5s 全量刷新把弹窗一起重建/关掉）。点遮罩、✕ 或 Esc 关闭。 */
+/** 兵种详情：右侧抽屉展开（与建造抽屉一致的形态），属性一行一项清晰列出 + 训练造价。
+ *  直接注入 body（不进 #page，避免 5s 全量刷新把它一起重建/关掉）。点遮罩、✕ 或 Esc 关闭。 */
 function openUnitDetail(unitKey: string): void {
   closeUnitDetail(); // 单例：先关旧的
   const u = (getCache().army?.trainable || []).find((x: any) => x.key === unitKey);
@@ -172,22 +173,23 @@ function openUnitDetail(unitKey: string): void {
 
   const wrap = document.createElement('div');
   wrap.id = 'unit-detail-modal';
-  const stats = u ? renderUnitStats(u) : '<div class="hint-sm">该兵种暂无详细数据</div>';
+  const stats = u ? renderUnitDetailRows(u) : '<div class="hint-sm">该兵种暂无详细数据</div>';
   const costHtml = u ? costPreview(u.cost, u.trainSec) : '';
   wrap.innerHTML = `
     <div class="drawer-mask" data-close-detail="1"></div>
-    <div class="unit-modal" role="dialog" aria-modal="true">
-      <div class="unit-modal-head">
-        ${art(unitArt(unitKey), name, 'lg')}
-        <div class="unit-modal-title"><b>${name}</b>${u ? `<small class="tag">${formName(u.form)}</small>` : ''}</div>
+    <aside class="drawer drawer--opening unit-drawer" role="dialog" aria-modal="true">
+      <div class="drawer-head">
+        ${art(unitArt(unitKey), name, 'sm')}
+        <span class="unit-drawer-name">${name}</span>
+        ${u ? `<small class="tag">${formName(u.form)}</small>` : ''}
         <button class="drawer-close" data-close-detail="1" aria-label="关闭">✕</button>
       </div>
-      <div class="unit-modal-body">
-        <div class="unit-modal-sec-title">战斗属性</div>
+      <div class="drawer-body">
+        <div class="drawer-sec-title">战斗属性</div>
         ${stats}
-        ${costHtml ? `<div class="unit-modal-sec-title">训练造价</div>${costHtml}` : ''}
+        ${costHtml ? `<div class="drawer-sec-title">训练造价</div>${costHtml}` : ''}
       </div>
-    </div>`;
+    </aside>`;
   document.body.appendChild(wrap);
 
   wrap.querySelectorAll<HTMLElement>('[data-close-detail]').forEach((el) =>
@@ -205,11 +207,14 @@ if (typeof document !== 'undefined') {
   });
 }
 
-/** 绑定军队页交互（训练 + 解散 + 数量框实时重算 + 兵种详情弹窗）。 */
+/** 绑定军队页交互（训练 + 解散 + 数量框实时重算 + 兵种详情抽屉）。 */
 export function bindArmy(act: (p: Promise<any>) => void): void {
-  // 兵种详情弹窗（驻军 chip / 训练卡图标 / 属性按钮）
+  // 兵种详情抽屉：整张训练卡 / 驻军 chip 可点；卡内训练区(.train-row)点击不触发详情
   document.querySelectorAll<HTMLElement>('[data-unit-detail]').forEach((el) =>
-    el.onclick = (e) => { e.stopPropagation(); openUnitDetail(el.dataset.unitDetail!); });
+    el.onclick = (e) => {
+      if ((e.target as HTMLElement)?.closest('.train-row')) return; // 训练输入/按钮：不展开详情
+      openUnitDetail(el.dataset.unitDetail!);
+    });
 
   // 训练
   document.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) =>
