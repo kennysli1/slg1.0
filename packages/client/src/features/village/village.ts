@@ -1,5 +1,6 @@
-/** 村庄页：三区结构（城镇中心 + 城内 + 城外）+ 空槽点击建造 + 多队列。 */
+/** 村庄页：三区结构（城镇中心 + 城内 + 城外）+ 空槽点击建造 + 多队列 + 建筑详情抽屉。 */
 import { art, canAfford, costPreview, progressBar } from '../../shared/ui/widgets.js';
+import { showToast } from '../../shared/ui/toast.js';
 import { buildingInfo } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
@@ -43,7 +44,7 @@ function renderQueue(queue: any): string {
   return `<div class="queue-wrap"><div class="queue-head">建造队列 <small>（${queue.items.length}/${cap}）</small></div>${items}</div>`;
 }
 
-/** 城镇中心卡（唯一，占整行，突出显示）。 */
+/** 城镇中心卡（唯一，占整行，突出显示）。整卡可点开详情；升级按钮点击不冒泡。 */
 function renderCenter(tc: any): string {
   if (!tc) return '';
   const max = tc.level >= tc.maxLevel;
@@ -53,8 +54,9 @@ function renderCenter(tc: any): string {
     : busy ? '<small class="tag">建造中</small>'
     : `<button class="btn-sm" data-up-slot="${tc.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   return `<h3>城镇中心</h3>
-    <div class="card card-center">${art(tc.icon, tc.name, 'xl')}
-      <div class="cardbody"><div class="card-title">${tc.name} <b class="lv">Lv${tc.level}</b></div>
+    <div class="card card-center" data-bld-slot="${tc.slotId}" title="点击查看 ${tc.name} 详情">${art(tc.icon, tc.name, 'xl')}
+      <div class="cardbody"><div class="card-title">${tc.name} <b class="lv">Lv${tc.level}</b>
+        <small class="bld-detail-hint">详情 ›</small></div>
         <div class="hint-sm">升级开放更多城内/城外槽位与队列</div>
         ${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div>`;
 }
@@ -73,7 +75,7 @@ function renderZone(zone: 'inner' | 'outer', title: string, z: any): string {
     <div class="grid">${placed}${empties}</div>`;
 }
 
-/** 单个已建建筑卡（含资源田；建造中显示进度占位）。 */
+/** 单个已建建筑卡（含资源田；建造中显示进度占位）。整卡可点开详情；升级按钮点击不冒泡。 */
 function renderPlaced(p: any): string {
   const constructing = p.level < 1;
   const busy = p.building;
@@ -88,13 +90,14 @@ function renderPlaced(p: any): string {
   else if (busy) btn = '<small class="tag">建造中</small>';
   else btn = `<button class="btn-sm" data-up-slot="${p.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   const lv = constructing ? '建造中' : `Lv${p.level}`;
-  return `<div class="card">${art(p.icon, p.name, 'md')}
-    <div class="cardbody"><div class="card-title">${p.name} <b class="lv">${lv}</b></div>
+  return `<div class="card" data-bld-slot="${p.slotId}" title="点击查看 ${p.name} 详情">${art(p.icon, p.name, 'md')}
+    <div class="cardbody"><div class="card-title">${p.name} <b class="lv">${lv}</b>
+      <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
       ${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
 }
 
-/** 侧边栏抽屉：某区可建建筑清单。 */
+/** 侧边栏抽屉：某区可建建筑清单。整条选项可点开详情；建造按钮点击不冒泡。 */
 function renderDrawer(): string {
   if (!drawer) return '';
   const opening = drawerJustOpened; // 消费一次性动画标记：只有本次是"刚打开"才带 --opening
@@ -109,8 +112,8 @@ function renderDrawer(): string {
     } else {
       action = `<button class="btn-sm" data-do-build="${o.kind}" ${!afford ? 'disabled' : ''}>建造</button>`;
     }
-    return `<div class="opt ${o.unlocked ? '' : 'locked'}">${art(o.icon, o.name, 'md')}
-      <div class="opt-body"><div class="opt-title">${o.name} ${prod}</div>
+    return `<div class="opt ${o.unlocked ? '' : 'locked'}" data-bld-opt="${o.kind}" title="点击查看 ${o.name} 详情">${art(o.icon, o.name, 'md')}
+      <div class="opt-body"><div class="opt-title">${o.name} ${prod}<small class="bld-detail-hint">详情 ›</small></div>
         ${costPreview(o.cost, o.timeSec)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
@@ -121,6 +124,99 @@ function renderDrawer(): string {
     </aside>`;
 }
 
+// ---------- 建筑详情抽屉（右侧，独立单例；与军队页兵种详情一致的形态） ----------
+
+/** 详情抽屉上下文：已建/城镇中心从布局取；空槽可建项从 options 取（level=0）。 */
+interface BldDetailCtx {
+  level: number;
+  maxLevel?: number;
+  cost?: Record<string, number> | null; // 下一级(或建造)消耗
+  timeSec?: number | null;
+  producing?: { ratePerHour: number } | null;
+  isBuild?: boolean; // true=尚未建造(建造消耗)；false=升级消耗
+}
+
+/** 从当前布局缓存按 slotId 找到已建建筑/城镇中心，组装详情上下文。 */
+function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx } | null {
+  const vil = getCache().vil;
+  if (!vil) return null;
+  const tc = vil.townCenter;
+  if (tc && tc.slotId === slotId) {
+    return { kind: tc.kind, ctx: { level: tc.level, maxLevel: tc.maxLevel, cost: tc.nextCost, timeSec: tc.nextTimeSec, isBuild: false } };
+  }
+  for (const zone of ['inner', 'outer'] as const) {
+    const p = (vil.zones?.[zone]?.placed || []).find((x: any) => x.slotId === slotId);
+    if (p) {
+      return {
+        kind: p.kind,
+        ctx: { level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec, producing: p.producing, isBuild: p.level < 1 },
+      };
+    }
+  }
+  return null;
+}
+
+/** 打开建筑详情抽屉：简介 + 升级效果 + 当前等级 + 下一级(建造)消耗。注入 body，避免被 5s 刷新重建。 */
+function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
+  closeBuildingDetail(); // 单例
+  const info = buildingInfo(kind);
+  const max = ctx.maxLevel != null && ctx.level >= ctx.maxLevel;
+
+  // 等级行
+  const lvStr = ctx.isBuild
+    ? '尚未建造'
+    : `Lv${ctx.level}${ctx.maxLevel ? ` / ${ctx.maxLevel}` : ''}`;
+
+  // 消耗区标题 + 内容
+  let costSec = '';
+  if (max) {
+    costSec = `<div class="drawer-sec-title">已满级</div><div class="hint-sm">该建筑已达最高等级，无需继续升级。</div>`;
+  } else if (ctx.cost) {
+    const label = ctx.isBuild ? '建造消耗' : `升级到 Lv${ctx.level + 1} 消耗`;
+    costSec = `<div class="drawer-sec-title">${label}</div>${costPreview(ctx.cost, ctx.timeSec)}`;
+  }
+
+  const prodSec = ctx.producing
+    ? `<div class="bld-detail-row"><span class="bld-detail-k">当前产量</span><span class="bld-detail-v">+${ctx.producing.ratePerHour}/h</span></div>`
+    : '';
+
+  const wrap = document.createElement('div');
+  wrap.id = 'building-detail-modal';
+  wrap.innerHTML = `
+    <div class="drawer-mask" data-close-bld="1"></div>
+    <aside class="drawer drawer--opening bld-drawer" role="dialog" aria-modal="true">
+      <div class="drawer-head">
+        ${art(info.icon, info.name, 'sm')}
+        <span class="bld-drawer-name">${info.name}</span>
+        <small class="tag">${lvStr}</small>
+        <button class="drawer-close" data-close-bld="1" aria-label="关闭">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div class="drawer-sec-title">简介</div>
+        <div class="bld-detail-desc">${info.desc || '这栋建筑暂无简介。'}</div>
+        <div class="drawer-sec-title">升级效果</div>
+        <div class="bld-detail-desc">${info.effect || '每级提升该建筑的相关能力。'}</div>
+        ${prodSec}
+        ${costSec}
+      </div>
+    </aside>`;
+  document.body.appendChild(wrap);
+
+  wrap.querySelectorAll<HTMLElement>('[data-close-bld]').forEach((el) =>
+    el.onclick = () => closeBuildingDetail());
+}
+
+function closeBuildingDetail(): void {
+  document.getElementById('building-detail-modal')?.remove();
+}
+
+// Esc 关闭建筑详情（装一次即可，全程有效）
+if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Escape') closeBuildingDetail();
+  });
+}
+
 /** 绑定村庄页交互。act 为统一的"发请求并刷新"回调。 */
 export function bindVillage(act: (p: Promise<any>) => void): void {
   actFn = act;
@@ -129,9 +225,22 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   document.querySelectorAll<HTMLButtonElement>('[data-up-slot]').forEach((b) =>
     b.onclick = () => act(req('UpgradeBuilding', { slotId: b.dataset.upSlot })));
 
-  // 点空槽 → 拉该区可建清单 → 打开抽屉
+  // 整卡可点开建筑详情（点到卡内按钮不触发）
+  document.querySelectorAll<HTMLElement>('[data-bld-slot]').forEach((el) =>
+    el.onclick = (e) => {
+      if ((e.target as HTMLElement)?.closest('button')) return; // 升级按钮：不展开详情
+      const found = ctxFromSlot(el.dataset.bldSlot!);
+      if (found) openBuildingDetail(found.kind, found.ctx);
+    });
+
+  // 点空槽 → 队列满则提示；否则拉该区可建清单 → 打开抽屉
   document.querySelectorAll<HTMLElement>('[data-build-zone]').forEach((el) =>
     el.onclick = async () => {
+      const q = getCache().vil?.queue;
+      if (q && q.items?.length >= (q.capacity ?? 0)) {
+        showToast('当前队列已满，请稍后添加');
+        return;
+      }
       const zone = el.dataset.buildZone as 'inner' | 'outer';
       const res = await req('GetBuildOptions', { zone });
       if (!res.ok) return;
@@ -139,6 +248,14 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       drawer = { zone, options: p.options ?? [], freeSlots: p.freeSlots ?? 0 };
       drawerJustOpened = true;
       rerenderPage();
+    });
+
+  // 建造抽屉内：整条可建选项点开详情（点到建造按钮不触发）
+  document.querySelectorAll<HTMLElement>('[data-bld-opt]').forEach((el) =>
+    el.onclick = (e) => {
+      if ((e.target as HTMLElement)?.closest('button')) return; // 建造按钮：不展开详情
+      const o = (drawer?.options || []).find((x: any) => x.kind === el.dataset.bldOpt);
+      if (o) openBuildingDetail(o.kind, { level: 0, cost: o.cost, timeSec: o.timeSec, producing: o.producing, isBuild: true });
     });
 
   // 抽屉内点"建造"

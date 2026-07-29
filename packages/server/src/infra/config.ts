@@ -48,6 +48,10 @@ export interface BuildingDef {
   laborSaturation: number;
   /** laborAmplified=true 时满员的最大增幅（速率类=产率加成；建造类=时间缩减比）。 */
   laborBonusMax: number;
+  /** 展示用简介：这栋建筑干嘛的/有什么用（点开建筑详情展示；纯文本，缺列回退空串）。 */
+  desc: string;
+  /** 展示用升级效果说明：每级提升什么（纯文本，缺列回退空串）。 */
+  effect: string;
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -293,6 +297,8 @@ export function loadGameConfig(configDir: string): GameConfig {
       laborAmplified: num(r.laborAmplified, 0) === 1,
       laborSaturation: num(r.laborSaturation, 0),
       laborBonusMax: num(r.laborBonusMax, 0),
+      desc: r.desc ?? '',
+      effect: r.effect ?? '',
     };
   }
 

@@ -1,5 +1,6 @@
 /** 军队页：驻军 + 训练 + 解散。 */
 import { art, unitArt, canAfford, costPreview, progressBar } from '../../shared/ui/widgets.js';
+import { showToast } from '../../shared/ui/toast.js';
 import { formName, tribeName } from '../../shared/ui/text.js';
 import { unitInfo, resourceKeys } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
@@ -70,7 +71,7 @@ export function renderArmy(): string {
         <div class="train-row">
           <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
           <small class="hint-sm" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></small>
-          <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}" ${army.training ? 'disabled' : ''}>训练</button>
+          <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}">训练</button>
         </div>
       </div>
     </div>`;
@@ -84,7 +85,7 @@ export function renderArmy(): string {
     ${training}
     ${disbandSection}
     <h3>训练</h3>
-    <div class="grid">${trainCards}</div>`;
+    <div class="grid grid-units">${trainCards}</div>`;
 }
 
 /** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。 */
@@ -219,6 +220,8 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
   // 训练
   document.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) =>
     b.onclick = () => {
+      // 训练是单批次进行：已有训练在进行时点击 → 即时提示（点 4 的队列已满同源体验）
+      if (getCache().army?.training) { showToast('已有训练在进行，请等当前完成'); return; }
       const u = b.dataset.train!;
       const cnt = Number((document.getElementById(`cnt-${u}`) as HTMLInputElement)?.value || 1);
       act(req('TrainTroops', { unit: u, count: cnt }));

@@ -99,14 +99,11 @@ export function renderMap(): string {
     const p = hexToPixel(h);
     const cx = p.x + ox, cy = p.y + oy;
     const isSelf = h.q === me.q && h.r === me.r;
-    const isCenter = !isSelf && h.q === center.q && h.r === center.r;
     const t = tileAt(h.q, h.r);
     let cls = 'hex', inner = '', clickable = '';
     if (isSelf) {
       cls += ' hex-self';
       inner = art('bld_main', '本城', 'sm');
-    } else if (isCenter) {
-      cls += ' hex-view-center';
     } else if (t?.kind === 'village') {
       cls += ' hex-enemy';
       inner = art('bld_main', t.name, 'sm');
@@ -255,8 +252,7 @@ function collectTroops(): Record<string, number> {
 }
 
 /** 部队沿路径的实时插值动画（每帧调，无需重渲染整张地图）。 */
-let animTimer: number | null = null;
-function startMarchAnimation(ox: number, oy: number): void {
+let animTimer: number | null = null;function startMarchAnimation(ox: number, oy: number): void {
   if (animTimer !== null) { cancelAnimationFrame(animTimer); animTimer = null; }
   const tick = () => {
     const moves = getCache().moves?.movements || [];
@@ -281,6 +277,71 @@ function startMarchAnimation(ox: number, oy: number): void {
   animTimer = requestAnimationFrame(tick);
 }
 
+/* ============================================================
+   地图缩放/平移（移动端手势增强）
+   - 单指：保留原生行为（点击选格 / 竖向滚动页面）
+   - 双指：捏合缩放 + 拖拽平移，familiar 的地图手势，零冲突
+   - 状态存模块级：每 5s 重渲后 bindMap 重新 applyMapTransform，缩放不丢失
+   - D-pad / 跳转 / 回城会切换视野中心并重拉数据 → resetMapView() 归位
+   ============================================================ */
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 3;
+let mapZoom = 1;
+let mapPanX = 0;
+let mapPanY = 0;
+
+function resetMapView(): void {
+  mapZoom = 1;
+  mapPanX = 0;
+  mapPanY = 0;
+}
+
+function applyMapTransform(svg: SVGSVGElement): void {
+  svg.style.transformOrigin = 'center center';
+  svg.style.transform = `translate(${mapPanX.toFixed(1)}px, ${mapPanY.toFixed(1)}px) scale(${mapZoom.toFixed(3)})`;
+}
+
+/** 双指手势：捏合缩放 + 双指拖拽平移。绑定标记避免同一元素重复绑定。 */
+function bindMapGestures(svg: SVGSVGElement): void {
+  if ((svg as any)._gesturesBound) return;
+  (svg as any)._gesturesBound = true;
+
+  let startDist = 0;      // 双指起始间距
+  let startZoom = 1;      // 手势开始时的缩放
+  let startMidX = 0;      // 双指中点（起始）
+  let startMidY = 0;
+  let startPanX = 0;
+  let startPanY = 0;
+
+  const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = (t: TouchList) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+
+  svg.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    startDist = dist(e.touches);
+    startZoom = mapZoom;
+    const m = mid(e.touches);
+    startMidX = m.x; startMidY = m.y;
+    startPanX = mapPanX; startPanY = mapPanY;
+  }, { passive: true });
+
+  svg.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 2 || startDist === 0) return;
+    e.preventDefault(); // 阻止浏览器整页缩放，改由我们控制地图缩放
+    const scale = dist(e.touches) / startDist;
+    mapZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, startZoom * scale));
+    const m = mid(e.touches);
+    mapPanX = startPanX + (m.x - startMidX);
+    mapPanY = startPanY + (m.y - startMidY);
+    if (mapZoom <= ZOOM_MIN + 0.01) { mapPanX = 0; mapPanY = 0; } // 回到 1x 时归中，避免漂移
+    applyMapTransform(svg);
+  }, { passive: false });
+
+  svg.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) startDist = 0;
+  }, { passive: true });
+}
+
 /** 绑定地图页交互（选格 + 出征 + 启动行军动画 + 导航控件）。 */
 export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q: number; r: number }) => void): void {
   const svg = document.querySelector<SVGSVGElement>('.map-svg');
@@ -288,6 +349,8 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     const ox = Number(svg.dataset.ox || 0);
     const oy = Number(svg.dataset.oy || 0);
     startMarchAnimation(ox, oy);
+    bindMapGestures(svg); // 手机双指缩放/平移（增强，不替代 D-pad）
+    applyMapTransform(svg); // 跨 5s 重渲保留缩放态
   }
 
   document.querySelectorAll<SVGGElement>('.hex-cell[data-ref]').forEach((el) =>
@@ -319,6 +382,7 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
         return;
       }
       setMapCenter({ q: nq, r: nr });
+      resetMapView();
       navigate?.({ q: nq, r: nr });
     };
   };
@@ -329,11 +393,11 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
 
   // 回到本城（方向键盘中心的 ⌂）
   const homeBtn = document.getElementById('mapDirHome');
-  if (homeBtn) homeBtn.onclick = () => { setMapCenter(null); navigate?.({ q: me!.q, r: me!.r }); };
+  if (homeBtn) homeBtn.onclick = () => { setMapCenter(null); resetMapView(); navigate?.({ q: me!.q, r: me!.r }); };
 
   // 标题行内联"回到本城"链接
   const retHome = document.getElementById('mapReturnHome');
-  if (retHome) retHome.onclick = (e) => { e.preventDefault(); setMapCenter(null); navigate?.({ q: me!.q, r: me!.r }); };
+  if (retHome) retHome.onclick = (e) => { e.preventDefault(); setMapCenter(null); resetMapView(); navigate?.({ q: me!.q, r: me!.r }); };
 
   // 坐标跳转（X=q, Y=r）
   const jumpGo = document.getElementById('mapJumpGo');
@@ -345,6 +409,7 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     if (isNaN(q) || isNaN(r)) { addReport('请输入有效坐标'); return; }
     if (!inBounds(q, r)) { addReport(`坐标 (X=${q}, Y=${r}) 超出地图范围 ±${mapSize()}`); return; }
     setMapCenter({ q, r });
+    resetMapView();
     navigate?.({ q, r });
   };
   // 按 Enter 也触发跳转

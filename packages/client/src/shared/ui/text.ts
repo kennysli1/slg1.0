@@ -9,6 +9,7 @@ const ERR_MSG: Record<string, string> = {
   empty_name: '请输入名字',
   name_too_long: '名字太长(≤16)',
   queue_busy: '已有建造/训练在进行，请等当前完成',
+  queue_full: '当前队列已满，请稍后添加',
   requires_not_met: '前置建筑不满足，尚未解锁',
   max_level: '已达最高等级',
   spend_failed: '资源不足',

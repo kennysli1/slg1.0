@@ -322,7 +322,6 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .dot-enemy { background: #f4dada; border: 1px solid #d99; }
 .dot-pve { background: #efe2f1; border: 1px solid #c4a8cc; }
 .dot-march { background: #c0392b; border: 1px solid #fff; border-radius: 50%; }
-.hex-view-center { fill: #d9edff; stroke: #7ab0d9; stroke-width: 1.5; }
 
 /* ---------- 地图导航控件 ---------- */
 .map-nav {
@@ -500,14 +499,114 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .tribe.picked { border-color: var(--c-brand); background: #fff6e8; }
 .loginmsg { color: var(--c-danger); font-size: var(--f-sm); min-height: 18px; margin-top: var(--s-3); }
 
-/* ---------- 响应式 ---------- */
+/* ============================================================
+   响应式 / 移动端适配（≤600px 视为手机）
+   原则：移动优先渐进增强——只在窄屏媒体查询里覆写，桌面端零回归。
+   ============================================================ */
 @media (max-width: 600px) {
-  .topbar { gap: var(--s-3); }
-  .resbar { margin-left: 0; width: 100%; }
-  .res { flex: 1; min-width: 44%; }
-  .tabs button span { display: none; }
-  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  /* --- 顶栏：吃刘海安全区 + 标题收紧，避免溢出换行 --- */
+  .topbar {
+    gap: var(--s-2) var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    padding-top: max(var(--s-2), env(safe-area-inset-top));
+    padding-left: max(var(--s-3), env(safe-area-inset-left));
+    padding-right: max(var(--s-3), env(safe-area-inset-right));
+  }
+  .brand { gap: var(--s-2); }
+  .brand .icon-md { width: 40px; height: 40px; }
+  .brand .title { font-size: var(--f-lg); letter-spacing: 1.5px; }
+  .brand .subtitle { font-size: var(--f-xs); }
+
+  /* --- 资源条：满宽紧凑网格，去掉过宽 min-width，一行 3 格 --- */
+  .resbar { margin-left: 0; width: 100%; gap: var(--s-1) var(--s-2); }
+  .res {
+    flex: 1 1 28%; min-width: 0; padding: var(--s-1) var(--s-2);
+    gap: var(--s-1); font-size: var(--f-xs);
+  }
+  .res-num { font-size: var(--f-sm); }
+  .res-num small { display: none; } /* 手机隐藏"/上限"，只留当前值+速率 */
+  .res-bar { display: none; }        /* 隐藏每格迷你进度条，省高度 */
+  .res-upkeep { flex-basis: 100%; }
+
+  /* --- 输入框：≥16px 阻止 iOS 聚焦时自动放大页面 --- */
+  input, input[type="number"], .train-row input,
+  .map-jump-input, .raid-input input, .disband-input {
+    font-size: 16px;
+  }
+
+  /* --- 点击热区 ≥40px：拇指友好 --- */
+  .btn-sm { padding: var(--s-2) var(--s-3); min-height: 40px; }
+  .btn-primary { min-height: 46px; }
+  .map-dpad-btn { width: 44px; height: 44px; font-size: var(--f-md); }
+  .target-close, .drawer-close { width: 40px; height: 40px; font-size: var(--f-lg); }
+  .btn-disband { padding: var(--s-2) var(--s-3); min-height: 36px; }
+  .map-jump-btn { padding: var(--s-2) var(--s-3); min-height: 40px; }
+
+  /* --- 页面容器：吃左右安全区 --- */
+  .page {
+    padding: var(--s-4) var(--s-3);
+    padding-left: max(var(--s-3), env(safe-area-inset-left));
+    padding-right: max(var(--s-3), env(safe-area-inset-right));
+  }
+
+  /* --- 卡片网格：360px 稳定 2 列 --- */
+  .grid { grid-template-columns: repeat(2, 1fr); gap: var(--s-2); }
+  /* 训练卡内含"数量输入+训练按钮"一行，2 列放不下 → 单列列表式展开 */
+  .grid-units { grid-template-columns: 1fr; }
+  .troopbar,
+  .raid-inputs,
+  .pop-labor-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* --- 地图：单指滚页 / 双指缩放平移（手势逻辑在 map.ts），缩放溢出裁剪 --- */
+  .map-svg { touch-action: pan-y; }
+  .map-wrap { overflow: hidden; }
+
+  /* ==========================================================
+     底部固定导航（手机原生 App 习惯）
+     .tabs 脱离文档流固定到底部，图标在上、文字在下；
+     页面底部留出等高 padding，避免内容被导航遮挡。
+     ========================================================== */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    box-shadow: 0 -2px 10px rgba(46, 38, 32, .18);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid rgba(0, 0, 0, .25);
+  }
+  .tabs button {
+    flex-direction: column; gap: 2px; padding: var(--s-2) 0 var(--s-1);
+    font-size: var(--f-xs); min-height: 54px;
+    border-bottom: 0; border-top: 3px solid transparent;
+  }
+  .tabs button span { display: block; }        /* 底部导航显示文字标签 */
+  .tabs button .icon-sm { width: 24px; height: 24px; }
+  .tabs button.active {
+    border-bottom-color: transparent; border-top-color: var(--c-gold);
+  }
+  /* 页面底部留白 = 导航高度 + 安全区，最后一屏内容不被遮挡 */
+  .page { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+
+  /* ==========================================================
+     抽屉 → 底部上滑面板（bottom-sheet）
+     手机上右侧 380px 抽屉改为从底部升起，拇指可达；
+     复用同一套 .drawer 结构（建造抽屉 + 兵种详情抽屉都覆盖到）。
+     ========================================================== */
+  .drawer {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto;
+    max-height: 85dvh;
+    border-left: 0; border-top: 1px solid var(--c-line);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* 顶部拖拽手柄提示（视觉，非功能） */
+  .drawer .drawer-head::before {
+    content: ""; position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 999px; background: var(--c-line);
+  }
+  .drawer .drawer-head { position: relative; padding-top: var(--s-4); }
+  /* 覆盖右滑动画为上滑 */
+  .drawer--opening { animation: sheet-up .2s ease; }
 }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
 /* ---------- 兵种卡（整张可点）+ 右侧详情抽屉 ---------- */
 .unit-card { cursor: pointer; }
@@ -537,3 +636,35 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .ustat-label { color: var(--c-ink); }
 .ustat-label small { color: var(--c-ink-soft); margin-left: 6px; font-size: var(--f-xs); }
 .ustat-val { font-family: var(--ff-num); font-weight: 700; color: var(--c-ink); font-size: var(--f-md); }
+
+/* ---------- 建筑详情抽屉（复用 .drawer / .drawer-mask / .drawer-head / .drawer-body / .drawer-sec-title） ---------- */
+#building-detail-modal .drawer-mask { z-index: 60; }
+.bld-drawer { z-index: 61; }
+.bld-drawer-name { font-family: var(--ff-display, inherit); font-size: var(--f-lg); font-weight: 700; }
+.bld-detail-desc { color: var(--c-ink); line-height: 1.6; font-size: var(--f-sm); }
+.bld-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3);
+  padding: 7px var(--s-3); border: 1px solid var(--c-line); border-radius: 10px; }
+.bld-detail-k { color: var(--c-ink-soft); }
+.bld-detail-v { font-family: var(--ff-num); font-weight: 700; color: var(--c-ok, var(--c-ink)); }
+
+/* 建筑卡/可建选项："详情 ›" 提示 + 可点悬停反馈（复用兵种卡观感） */
+.bld-detail-hint { margin-left: auto; color: var(--c-ink-soft); font-size: var(--f-xs); white-space: nowrap; }
+.card[data-bld-slot], .opt[data-bld-opt] { cursor: pointer; }
+.card[data-bld-slot]:hover { border-color: var(--c-brand); box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.card[data-bld-slot]:hover .bld-detail-hint, .opt[data-bld-opt]:hover .bld-detail-hint { color: var(--c-brand); }
+/* 卡内可交互控件保持默认光标，避免"整卡可点"误导 */
+.card[data-bld-slot] .btn-sm, .opt[data-bld-opt] .btn-sm { cursor: pointer; }
+
+/* ---------- 右上角人口速览单元格（复用 .res 结构） ---------- */
+.res-pop-icon { font-size: var(--f-md); line-height: 1; }
+
+/* ---------- 全局 Toast（即时提示，如队列已满） ---------- */
+#toast-host { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
+  z-index: 80; display: flex; flex-direction: column; align-items: center; gap: var(--s-2); pointer-events: none; }
+.toast { pointer-events: auto; background: rgba(28,24,18,.92); color: #fff;
+  padding: 10px 18px; border-radius: 999px; font-size: var(--f-sm); font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0,0,0,.28); max-width: 86vw; text-align: center;
+  animation: toast-in .2s ease; transition: opacity .26s ease, transform .26s ease; }
+.toast--out { opacity: 0; transform: translateY(6px); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+

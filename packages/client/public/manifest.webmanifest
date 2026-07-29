@@ -1,0 +1,26 @@
+{
+  "name": "世界之王",
+  "short_name": "世界之王",
+  "description": "多人在线实时策略（SLG）——建设村庄、训练军队、征战地图。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ece3d0",
+  "theme_color": "#5a4632",
+  "icons": [
+    {
+      "src": "/art/ui_logo.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/art/ui_logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

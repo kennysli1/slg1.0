@@ -7,8 +7,9 @@ import { art, escapeHtml } from '../shared/ui/widgets.js';
 import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
+import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, mapViewRadius } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState } from './state.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
@@ -108,7 +109,22 @@ function renderResBar() {
   }).join('');
   const rb = document.getElementById('resbar');
   if (rb) rb.innerHTML = cells +
-    `<span class="res res-upkeep"><span class="res-num">耗粮 ${fmt(r.cropUpkeep)}/h</span></span>`;
+    `<span class="res res-upkeep"><span class="res-num">耗粮 ${fmt(r.cropUpkeep)}/h</span></span>` +
+    renderPopCell();
+}
+
+/** 右上角人口速览单元格（与资源同排常驻）；详情仍在村庄页人口面板。 */
+function renderPopCell(): string {
+  const ps = getPopState();
+  if (!ps) return '';
+  const pop = interpolatePop();
+  const growth = Math.round(ps.growthPerHour);
+  const sign = growth >= 0 ? '+' : '';
+  const near = ps.softLimit > 0 && pop / ps.softLimit >= 0.95 ? ' res-low' : '';
+  return `<span class="res res-pop${near}" title="人口 ${fmt(pop)}/${fmt(ps.softLimit)}（软上限）· 增长 ${sign}${growth}/h">
+    <span class="res-pop-icon">👥</span>
+    <span class="res-num">${fmt(pop)}<small>/${fmt(ps.softLimit)}</small></span>
+    <span class="res-rate">${sign}${growth}/h</span></span>`;
 }
 
 let lastRenderedTab: string | null = null;
@@ -160,7 +176,12 @@ function bindPageEvents() {
 async function act(p: Promise<any>) {
   try {
     const res = await p;
-    if (!res.ok) addReport(`操作失败：${errText(res.error?.code)}`);
+    if (!res.ok) {
+      const code = res.error?.code;
+      // 队列相关的"当下拦截"用 toast 即时反馈；其余仍进报告流水
+      if (code === 'queue_full' || code === 'queue_busy') showToast(errText(code));
+      else addReport(`操作失败：${errText(code)}`);
+    }
     await refreshAll();
   } catch {
     addReport('操作失败：网络连接异常');
