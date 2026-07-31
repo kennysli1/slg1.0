@@ -4,9 +4,9 @@ module.exports = {
   apps: [
     {
       name: 'kow',
-      // 用 tsx 直接跑 TS 源码（无需单独编译后端）
-      script: 'node',
-      args: '--import tsx packages/server/src/main.ts',
+      // 生产统一运行构建产物，与根 package.json 的 npm start 保持一致。
+      script: 'packages/server/dist/main.js',
+      node_args: '--enable-source-maps',
       cwd: __dirname,
       env: {
         NODE_ENV: 'production',

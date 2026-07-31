@@ -29,6 +29,7 @@ interface VillageNotifications {
 const EVENT_MAP: Record<string, string> = {
   'combat.BattleEnded':       'BattleEnded',
   'combat.BattleStarted':     'BattleStarted',
+  'building.Built':           'BuildingBuilt',
   'building.Upgraded':        'BuildingUpgraded',
   'military.TroopTrained':    'TroopTrained',
   'movement.Sent':            'MarchSent',
@@ -43,7 +44,7 @@ export class NotificationsModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'notifications',
     publicActions: {
-      GetNotifications: { command: 'notifications.List', ownVillage: true, needAuth: true },
+      GetNotifications: { command: 'notifications.List', ownVillage: true, needAuth: true, schema: {} },
     },
     eventPushMap: {},
   };

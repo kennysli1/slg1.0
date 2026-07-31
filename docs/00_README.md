@@ -38,9 +38,10 @@ docs/
 
 ## 下一步
 
-阶段一、阶段二（架构+通信格式）已定稿。下一步可进入：
-- **阶段二补完**（可选）：逐模块状态归属细化（按需，不必逐命令抠 payload）。
-- **阶段三 代码**：搭框架骨架——基础设施层(Scheduler/EventBus/Persistence) + Gateway + 一个最小领域模块走通一条端到端链路。
+三阶段（GDD → 架构 → 代码）均已走通，游戏多人在线可玩且已部署。后续为内容/系统迭代：
+- 种族特性差异化、英雄/工会等养成系统（照 `07_扩展与代码规范.md` 决策树加）。
+- 域名 + HTTPS 正式公开。
+- 补齐 PvE tier4-8 正式美术。
 
 ## 进度
 
@@ -50,9 +51,10 @@ docs/
 - [x] 阶段三 技术栈定稿（`05_技术栈与工程结构.md`）
 - [x] **阶段三 骨架链路跑通**：基础设施(EventBus/Scheduler/Store/CommandBus) + Gateway/WS + Economy/Building + 前端演示页。升级建筑全链路经单元测试、WebSocket、浏览器三重实测通过。
 - [x] 代码导读 + 扩展与代码规范定稿（`06`、`07`）
-- [x] **多人在线可玩**：9 大模块(Player/Economy/Building/Military/World/PvE/Movement/Combat/Notifications) + 完整网页前端。核心循环跑通：4资源经济→训练全兵种→出征打PvE/PvP→掠夺→返程入库。服务端测试 61 项通过。
-- [ ] 美术资源生成替换（清单见 `美术资源清单.md`）
-- [ ] 部署到腾讯云（见 `部署手册_腾讯云轻量服务器.md`）
+- [x] **多人在线可玩**：11 大模块(Player/Economy/Building/Military/World/PvE/Movement/Combat/Notifications/Population/Meta) + 完整网页前端。核心循环跑通：4资源经济→训练全兵种→出征打PvE/PvP→掠夺→返程入库。服务端测试 76 项通过。
+- [x] **人口系统**：繁荣度驱动增长 + 粮食软上限 + 粮仓触底减员 + 伤兵治愈（设计见 `13`/`14`）。
+- [x] 正式美术资源接入（40 张中世纪奇幻风格图；PvE tier4-8 暂用占位图）。
+- [x] 部署到腾讯云（见 `部署手册_腾讯云轻量服务器.md`，一键脚本在 `.claude/deploy/`）。
 
 ## 怎么玩（本地）
 

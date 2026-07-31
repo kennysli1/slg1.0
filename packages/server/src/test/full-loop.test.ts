@@ -90,6 +90,19 @@ test('军队：未建所需建筑时拒绝训练', async () => {
   assert.equal(r.reason, 'requires_building:stable');
 });
 
+test('军队：GetArmy 对未解锁兵种下发 lockReason', async () => {
+  const app = freshApp();
+  const army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  const legion = (army.trainable || []).find((u: any) => u.key === 'legionnaire');
+  const cavalry = (army.trainable || []).find((u: any) => u.key === 'equimperatoris');
+  assert.ok(legion, '应返回军团兵');
+  assert.equal(legion.unlocked, true, '开局有兵营，军团兵应解锁');
+  assert.equal(legion.lockReason, undefined);
+  assert.ok(cavalry, '应返回近卫骑兵');
+  assert.equal(cavalry.unlocked, false, '开局无马厩，近卫骑兵应锁定');
+  assert.match(String(cavalry.lockReason ?? ''), /马厩/, `lockReason 应写明马厩要求，实际: ${cavalry.lockReason}`);
+});
+
 test('人口：人口不足时拒绝训练（insufficient_population）', async () => {
   const app = freshApp();
   // 等待 population.createVillage 异步初始化完成（需要多个微任务周期）
@@ -115,7 +128,7 @@ test('人口：人口不足时拒绝训练（insufficient_population）', async 
 
 test('完整循环：训练→出征打PvE→掠夺→返程入库', async () => {
   const app = freshApp();
-  // 先升仓库提高容量，再多次补给（单次Grant受容量截断）
+  // 补给资源（Grant 全额入库，可超额）
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
   await buildBarracks(app);
 

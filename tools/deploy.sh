@@ -17,8 +17,8 @@ tar czf /tmp/deploy.tgz -C "$ROOT" \
 echo "==> 上传"
 scp -i "$KEY" -o StrictHostKeyChecking=no /tmp/deploy.tgz "$HOST:/tmp/deploy.tgz"
 
-echo "==> 解压 + 构建 + 重启"
+echo "==> 解压 + 安装 + 构建 + 重启"
 ssh -i "$KEY" -o StrictHostKeyChecking=no "$HOST" \
-  "cd $REMOTE && tar xzf /tmp/deploy.tgz && npm run build 2>&1 | tail -4 && pm2 restart kow 2>&1 | tail -2 && echo DEPLOYED"
+  "cd $REMOTE && tar xzf /tmp/deploy.tgz && npm ci && npm run build && pm2 reload kow --update-env && echo DEPLOYED"
 
 echo "==> 完成，访问 http://101.43.64.22:8080"

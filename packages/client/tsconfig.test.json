@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "moduleResolution": "NodeNext",
+    "module": "NodeNext"
+  },
+  "include": [
+    "src/test/**/*",
+    "src/shared/utils/escape.ts",
+    "src/shared/ui/text.ts",
+    "src/app/config.ts",
+    "src/api.ts",
+    "src/info.ts"
+  ]
+}

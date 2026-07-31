@@ -2,7 +2,7 @@
  * 应用启动与编排壳：shell/资源条/页签路由/刷新循环/推送分发。
  * 不含具体页面渲染逻辑——各页面在 features/* 内自描述，这里只负责装配。
  */
-import { connect, req, onPush, me } from '../api.js';
+import { connect, req, onPush, me, getProtocolError, selectVillage } from '../api.js';
 import { art, escapeHtml } from '../shared/ui/widgets.js';
 import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
@@ -29,12 +29,19 @@ const TABS = [
 function renderShell() {
   const tabBtns = TABS.map((t) =>
     `<button data-tab="${t.key}">${art(t.icon, t.name, 'sm')}<span>${t.name}</span></button>`).join('');
+  const villages = me?.villages ?? [];
+  const villageSwitch = villages.length > 1
+    ? `<select id="villageSwitch" class="village-switch" title="切换当前操作村">
+        ${villages.map((v) =>
+          `<option value="${v.id}" ${v.id === me?.villageId ? 'selected' : ''}>${escapeHtml(v.name)}${v.isCapital ? '（主）' : ''} (${v.q},${v.r})</option>`).join('')}
+      </select>`
+    : '';
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">${art('ui_logo', 'LOGO', 'md')}
         <div class="brand-text">
           <div class="title">世界之王</div>
-          <div class="subtitle">${escapeHtml(me?.name ?? '')} 的村庄 · 坐标 (${me?.q},${me?.r})</div>
+          <div class="subtitle">${escapeHtml(me?.name ?? '')} · (${me?.q},${me?.r}) ${villageSwitch}</div>
         </div>
       </div>
       <div id="resbar" class="resbar"></div>
@@ -44,6 +51,21 @@ function renderShell() {
   document.querySelectorAll<HTMLButtonElement>('.tabs button').forEach((b) => {
     b.onclick = () => { setTab(b.dataset.tab!); renderPage(); };
   });
+  const sw = document.getElementById('villageSwitch') as HTMLSelectElement | null;
+  if (sw) {
+    sw.onchange = async () => {
+      const id = sw.value;
+      if (!id || id === me?.villageId) return;
+      const r = await selectVillage(id);
+      if (!r.ok) {
+        addReport(`切村失败：${errText(r.error)}`);
+        sw.value = me?.villageId ?? '';
+        return;
+      }
+      renderShell();
+      await refreshAll();
+    };
+  }
 }
 
 async function refreshAll() {
@@ -68,13 +90,30 @@ async function refreshAll() {
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       const p = pop.payload as any;
+      // GetPopulation payload 实际字段：currentPop, softLimit, growthPerHour, lambdaRatio,
+      // wounded{total,entries}, pools{garrisonPopCost,enRoutePopCost,woundedTotal}, laborMults, lastTick
+      // garrisonPop/totalPop/laborRatio 为客户端派生；inFamine/cropDeficitRate 由 push 事件持续校正。
+      const currentPop: number = p.currentPop ?? 0;
+      const woundedTotal: number = p.wounded?.total ?? 0;
+      // garrisonPop = 驻军人口（含在途）；server 用 pools.garrisonPopCost 存放
+      const garrisonPop: number = (p.pools?.garrisonPopCost ?? 0) + (p.pools?.enRoutePopCost ?? 0);
+      const totalPop: number = currentPop + garrisonPop + woundedTotal;
+      const laborRatio: number = totalPop > 0 ? currentPop / totalPop : 1;
+      const softLimit: number = p.softLimit ?? 0;
+      // inFamine：currentPop > softLimit 为必要条件（充分条件还需粮仓触底，但快照无此数据）
+      const inFamine: boolean = softLimit > 0 && currentPop > softLimit;
       setPopState({
-        currentPop: p.currentPop ?? 0,
-        softLimit: p.softLimit ?? 0,
+        currentPop,
+        garrisonPop,
+        totalPop,
+        softLimit,
         growthPerHour: p.growthPerHour ?? 0,
         lambdaRatio: p.lambdaRatio ?? 0,
+        laborRatio,
+        cropDeficitRate: 0, // 快照无粮食赤字速率；由 famine_reduction push 事件校正
+        inFamine,
         wounded: {
-          total: p.wounded?.total ?? 0,
+          total: woundedTotal,
           entries: p.wounded?.entries ?? [],
         },
         laborMults: p.laborMults ?? {
@@ -99,12 +138,15 @@ function renderResBar() {
   if (!r) return;
   const cells = resourceKeys().map((t) => {
     const rate = r.netRate[t] * 3600;
+    const over = !!(r.productionPaused?.[t] || (r.overCapacity?.[t] > 0));
     const low = t === 'crop' && rate < 0 ? ' res-low' : '';
-    const pct = Math.min(100, (r.resources[t] / r.capacity[t]) * 100);
+    const overCls = over ? ' res-over' : '';
+    const pct = Math.min(100, (r.resources[t] / Math.max(1, r.capacity[t])) * 100);
     const info = resInfo(t);
-    return `<span class="res${low}">${art(info.icon, info.name, 'sm')}
-      <span class="res-num">${fmt(r.resources[t])}<small>/${fmt(r.capacity[t])}</small></span>
-      <span class="res-rate">${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/h</span>
+    const overTip = over ? ' · 超额·停产' : '';
+    return `<span class="res${low}${overCls}" title="${info.name}${overTip}">${art(info.icon, info.name, 'sm')}
+      <span class="res-num">${fmt(r.resources[t])}<small>/${fmt(r.capacity[t])}</small>${over ? '<small class="res-over-tag">超额</small>' : ''}</span>
+      <span class="res-rate">${over ? '停产' : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/h`}</span>
       <span class="res-bar"><i style="width:${pct}%"></i></span></span>`;
   }).join('');
   const rb = document.getElementById('resbar');
@@ -120,9 +162,16 @@ function renderPopCell(): string {
   const pop = interpolatePop();
   const growth = Math.round(ps.growthPerHour);
   const sign = growth >= 0 ? '+' : '';
-  const near = ps.softLimit > 0 && pop / ps.softLimit >= 0.95 ? ' res-low' : '';
-  return `<span class="res res-pop${near}" title="人口 ${fmt(pop)}/${fmt(ps.softLimit)}（软上限）· 增长 ${sign}${growth}/h">
-    <span class="res-pop-icon">👥</span>
+  // 饥荒优先显示红色，接近饱和显示橙色
+  const famineClass = ps.inFamine ? ' res-famine' : (ps.softLimit > 0 && pop / ps.softLimit >= 0.95 ? ' res-low' : '');
+  const famineIcon = ps.inFamine ? '🚨' : '👥';
+  const titleSuffix = ps.inFamine
+    ? `（饥荒！赤字 ${Math.round(ps.cropDeficitRate)}/h）`
+    : ps.garrisonPop > 0
+      ? `· 驻军 ${fmt(ps.garrisonPop)} 人`
+      : '';
+  return `<span class="res res-pop${famineClass}" title="平民 ${fmt(pop)}/${fmt(ps.softLimit)}（软上限）· 增长 ${sign}${growth}/h${titleSuffix}">
+    <span class="res-pop-icon">${famineIcon}</span>
     <span class="res-num">${fmt(pop)}<small>/${fmt(ps.softLimit)}</small></span>
     <span class="res-rate">${sign}${growth}/h</span></span>`;
 }
@@ -202,7 +251,17 @@ function startGame() {
 // ---------- 推送分发 ----------
 onPush((event, payload) => {
   handlePush(event, payload);
-  refreshAll();
+  // 拓荒成功：刷新村列表（SelectVillage 回当前村即可拿完整 villages）
+  if (event === 'VillageFounded' && me?.villageId) {
+    void selectVillage(me.villageId).then((r) => {
+      if (r.ok) renderShell();
+    });
+  }
+  // PopulationChanged 由 handlePush 完成快照校正 + 局部 DOM 更新（rerenderPopPanel），
+  // 严禁在此触发 refreshAll/GetPopulation，防止 push→refresh→settle→emit 正反馈死循环。
+  if (event !== 'PopulationChanged') {
+    void refreshAll();
+  }
 });
 
 /** 应用入口：先拉配置 → 连接 WS → 据登录态进入登录页或游戏。 */
@@ -216,7 +275,10 @@ export async function bootstrap() {
         else startGame();
       })();
     },
-    () => { renderLogin(app, startGame, '连接已断开，正在重连…'); },
+    () => {
+      const pe = getProtocolError();
+      renderLogin(app, startGame, pe ?? '连接已断开，正在重连…');
+    },
   );
   renderLogin(app, startGame, '连接服务器中…');
 

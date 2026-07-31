@@ -54,10 +54,22 @@ export class BuildingModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'building',
     publicActions: {
-      GetVillageLayout: { command: 'building.GetLayout', ownVillage: true, needAuth: true },
-      GetBuildOptions: { command: 'building.GetBuildOptions', ownVillage: true, needAuth: true },
-      Build: { command: 'building.Build', ownVillage: true, needAuth: true },
-      UpgradeBuilding: { command: 'building.Upgrade', ownVillage: true, needAuth: true },
+      GetVillageLayout: { command: 'building.GetLayout', ownVillage: true, needAuth: true, schema: {} },
+      GetBuildOptions: {
+        command: 'building.GetBuildOptions', ownVillage: true, needAuth: true,
+        schema: { zone: { type: 'enum', values: ['inner', 'outer'] } },
+      },
+      Build: {
+        command: 'building.Build', ownVillage: true, needAuth: true,
+        schema: {
+          zone: { type: 'enum', values: ['inner', 'outer'] },
+          kind: { type: 'string', minLen: 1, maxLen: 32 },
+        },
+      },
+      UpgradeBuilding: {
+        command: 'building.Upgrade', ownVillage: true, needAuth: true,
+        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
+      },
     },
     eventPushMap: {
       'building.Built': 'BuildingBuilt',
@@ -90,7 +102,12 @@ export class BuildingModule {
       if (!s.queue?.length) continue;
       for (const q of s.queue) {
         const delay = Math.max(0, q.finishAt - this.now());
-        q.taskId = this.scheduler.schedule(delay, () => this.complete(s.villageId, q.slotId));
+        q.taskId = this.scheduler.schedule(
+          delay,
+          () => this.complete(s.villageId, q.slotId),
+          `building:${s.villageId}`,
+          `village:${s.villageId}`,
+        );
       }
       this.store.set(COLLECTION, s.villageId, s);
     }
@@ -230,6 +247,10 @@ export class BuildingModule {
     return s.queue.some((q) => q.slotId === slotId);
   }
 
+  private pendingOp(s: BuildingState, slotId: string): QueueItem | undefined {
+    return s.queue.find((q) => q.slotId === slotId);
+  }
+
   // ---- Commands ----
 
   private getLayout(cmd: Command): CommandResult {
@@ -240,6 +261,7 @@ export class BuildingModule {
     const centerDef = this.config.buildings[CENTER_KIND];
     const tcLv = centerP?.level ?? 1;
     const centerNext = tcLv < (centerDef?.maxLevel ?? 20);
+    const centerQueue = this.pendingOp(s, CENTER_SLOT);
     // buildTime is now async but getLayout is sync — use sync estimation (no pop mult) for layout display
     // The population mult is applied when the build command is actually submitted
     const buildTimeSyncEstimate = (baseSec: number) => {
@@ -260,7 +282,9 @@ export class BuildingModule {
           maxLevel: centerDef?.maxLevel ?? 20,
           nextCost: centerNext ? centerDef!.cost(tcLv + 1) : null,
           nextTimeSec: centerNext ? buildTimeSyncEstimate(centerDef!.timeSec(tcLv + 1)) : null,
-          building: this.hasPendingOp(s, CENTER_SLOT),
+          building: !!centerQueue,
+          buildingStartAt: centerQueue?.startAt,
+          buildingFinishAt: centerQueue?.finishAt,
         },
         zones: {
           inner: this.zoneView(s, 'inner'),
@@ -297,6 +321,7 @@ export class BuildingModule {
       .map((p) => {
         const def = this.config.buildings[p.kind];
         const constructing = p.level < 1;
+        const pending = this.pendingOp(s, p.slotId);
         const canUp = !constructing && p.level < (def?.maxLevel ?? 1);
         return {
           slotId: p.slotId,
@@ -305,7 +330,9 @@ export class BuildingModule {
           icon: def?.icon ?? 'bld_main',
           level: p.level,
           maxLevel: def?.maxLevel ?? 1,
-          building: constructing || this.hasPendingOp(s, p.slotId),
+          building: constructing || !!pending,
+          buildingStartAt: pending?.startAt,
+          buildingFinishAt: pending?.finishAt,
           nextCost: canUp ? def!.cost(p.level + 1) : null,
           nextTimeSec: canUp ? buildTimeSyncEstimate(def!.timeSec(p.level + 1)) : null,
           producing: def?.resource
@@ -371,7 +398,7 @@ export class BuildingModule {
     const durMs = durSec * 1000;
     const startAt = this.now();
     const finishAt = startAt + durMs;
-    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
+    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId), `building:${villageId}`, `village:${villageId}`);
     s.queue.push({ slotId, kind, toLevel: 1, isNew: true, startAt, finishAt, taskId });
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { slotId, kind, finishAt } };
@@ -403,7 +430,7 @@ export class BuildingModule {
     const durMs = durSec * 1000;
     const startAt = this.now();
     const finishAt = startAt + durMs;
-    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId));
+    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId), `building:${villageId}`, `village:${villageId}`);
     s.queue.push({ slotId, kind: p.kind, toLevel, isNew: false, startAt, finishAt, taskId });
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { slotId, toLevel, finishAt } };

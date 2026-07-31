@@ -18,6 +18,8 @@ const log = makeLogger('economy');
  * upkeep 由各模块算好后经 SetUpkeep 上报（Economy 不懂建筑/兵种细节，派生管线对内口径）。
  *
  * 惰性结算：资源不每秒写，读/写前按 (now-lastTick)*rate 补算。
+ * 仓储超额：强制入库（Grant）可超过 capacity；超额资源生产暂停，口粮消耗仍生效；
+ *           自然产出顶到 capacity，不会自行超额。
  * 扩展点：资源种类来自 config.resources（resources.csv），初始量/容量/成长来自 config.constants。
  */
 
@@ -36,6 +38,12 @@ interface EconomyState {
   /** crop 每小时消耗，按来源记（building 人口 / military 耗粮） */
   cropUpkeep: Record<string, number>;
   capacity: ResMap;
+  /**
+   * 上次 settle 时是否处于粮食赤字（crop<=0 且净产率<0）。
+   * 用于边沿触发：只在从 false→true 时才 emit CropDeficit，避免每次 settle 都触发。
+   * 旧存档无此字段，默认 false（视为非赤字状态，下次 settle 若赤字则正常触发）。
+   */
+  wasCropDeficit?: boolean;
 }
 
 const COLLECTION = 'economy';
@@ -50,7 +58,7 @@ export class EconomyModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'economy',
     publicActions: {
-      GetResources: { command: 'economy.GetResources', ownVillage: true, needAuth: true },
+      GetResources: { command: 'economy.GetResources', ownVillage: true, needAuth: true, schema: {} },
     },
     eventPushMap: {
       'economy.CropDeficit': 'CropDeficit',
@@ -97,24 +105,39 @@ export class EconomyModule {
   }
 
   // ---- 惰性结算 ----
+  /**
+   * 仓储超额规则（分城/运输/掠夺通用）：
+   * - 允许 resources > capacity（由 Grant 等强制入库产生）
+   * - 超额时该资源**生产**暂停；crop 口粮消耗仍生效
+   * - 自然产出不得把存量推过 capacity（只有强制入库可超额）
+   */
   private settle(s: EconomyState): void {
     const now = this.now();
     const elapsed = (now - s.lastTick) / 1000;
     if (elapsed <= 0) return;
     for (const t of RESOURCE_TYPES) {
+      const wasOver = s.resources[t] > s.capacity[t];
       const rate = this.netRate(s, t);
-      const next = s.resources[t] + rate * elapsed;
-      // crop 可因净消耗下降，下限0；其余上限截断
-      s.resources[t] = Math.max(0, Math.min(s.capacity[t], next));
+      let next = s.resources[t] + rate * elapsed;
+      next = Math.max(0, next);
+      // 未超额时，自然产出顶到容量为止
+      if (!wasOver && next > s.capacity[t]) next = s.capacity[t];
+      s.resources[t] = next;
     }
     s.lastTick = now;
-    if (this.netRate(s, 'crop') < 0 && s.resources.crop <= 0) {
+    // 边沿触发 CropDeficit：仅在从非赤字→赤字时 emit 一次，避免每次 settle 都触发。
+    // 旧存档 wasCropDeficit 未定义时视为 false（不改变触发语义）。
+    const nowInDeficit = this.netRate(s, 'crop') < 0 && s.resources.crop <= 0;
+    if (nowInDeficit && !s.wasCropDeficit) {
+      s.wasCropDeficit = true;
       void this.bus.emit({
         name: 'economy.CropDeficit',
         source: EconomyModule.NAME,
         ts: now,
         payload: { villageId: s.villageId },
       } as DomainEvent);
+    } else if (!nowInDeficit) {
+      s.wasCropDeficit = false;
     }
   }
 
@@ -125,9 +148,10 @@ export class EconomyModule {
     return s.baseRate[t] * mult;
   }
 
-  /** 净产率：crop 要减去每秒消耗，其余=毛产率。 */
+  /** 净产率：超额时毛产=0；crop 仍减每秒消耗。 */
   private netRate(s: EconomyState, t: ResourceType): number {
-    const gross = this.grossRate(s, t);
+    const over = s.resources[t] > s.capacity[t];
+    const gross = over ? 0 : this.grossRate(s, t);
     if (t !== 'crop') return gross;
     const upkeepPerHour = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);
     return gross - upkeepPerHour / 3600;
@@ -145,7 +169,15 @@ export class EconomyModule {
     this.settle(s);
     this.store.set(COLLECTION, s.villageId, s);
     const netRate = zero();
-    for (const t of RESOURCE_TYPES) netRate[t] = this.netRate(s, t);
+    const overCapacity: ResMap = zero();
+    const productionPaused: Record<ResourceType, boolean> = {
+      wood: false, clay: false, iron: false, crop: false,
+    };
+    for (const t of RESOURCE_TYPES) {
+      netRate[t] = this.netRate(s, t);
+      overCapacity[t] = Math.max(0, s.resources[t] - s.capacity[t]);
+      productionPaused[t] = s.resources[t] > s.capacity[t];
+    }
     const upkeep = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);
     return {
       ok: true,
@@ -154,6 +186,8 @@ export class EconomyModule {
         capacity: { ...s.capacity },
         netRate, // 每秒
         cropUpkeep: upkeep, // 每小时
+        overCapacity,       // 各资源超出容量的量（0=未超额）
+        productionPaused,   // 超额则该资源生产暂停
       },
     };
   }
@@ -171,6 +205,10 @@ export class EconomyModule {
     return { ok: true, payload: { resources: { ...s.resources } } };
   }
 
+  /**
+   * 强制入库：全额加上，允许超过 capacity。
+   * overflow[t] = 本次入库后该资源超出容量的量（兼容字段；不再表示「未入账」）。
+   */
   private grant(cmd: Command): CommandResult {
     const { villageId, gain } = cmd.payload as { villageId: string; gain: Partial<ResMap> };
     const s = this.load(villageId);
@@ -179,12 +217,10 @@ export class EconomyModule {
     const applied = zero();
     const overflow = zero();
     for (const t of RESOURCE_TYPES) {
-      const add = gain[t] ?? 0;
-      const room = s.capacity[t] - s.resources[t];
-      const take = Math.min(add, room);
-      s.resources[t] += take;
-      applied[t] = take;
-      overflow[t] = add - take;
+      const add = Math.max(0, gain[t] ?? 0);
+      s.resources[t] += add;
+      applied[t] = add;
+      overflow[t] = Math.max(0, s.resources[t] - s.capacity[t]);
     }
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { applied, overflow } };
@@ -259,8 +295,7 @@ export class EconomyModule {
     for (const t of RESOURCE_TYPES) {
       if (capacity[t] !== undefined) s.capacity[t] = capacity[t]!;
     }
-    // 容量下调后夹住存量
-    for (const t of RESOURCE_TYPES) s.resources[t] = Math.min(s.resources[t], s.capacity[t]);
+    // 容量变化不砍库存：仍超额则继续停产，容量抬高后自动恢复产出
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
@@ -290,8 +325,10 @@ export class EconomyModule {
    * 只读查询「粮食上下文」（供 population 模块计算软上限，无回调，无环）。
    * 返回：
    *  - baseCropPerHour：农田原始产率×3600（不含劳动力修正的裸值，pop 自己算 effMult）
-   *  - buildingUpkeepPerHour：建筑维护耗粮（source='building' 的那条，population 不计进分子）
-   *  - troopUpkeepPerHour：军队维护耗粮（source='troops'，同上）
+   *  - buildingUpkeepPerHour：建筑维护耗粮（source='building'）
+   *  - troopUpkeepPerHour：军队维护耗粮（source='troops'）
+   *  - nonCivilianUpkeep：所有非 civilian_pop 来源的 crop 每小时总消耗（含 building/troops/
+   *    soldier_pool/wounded_pool/enroute_pop 等全部来源；供 v2 软上限一步算出，省去逐条手算）
    *  - currentCrop：当前粮食存量
    *  - cropCapacity：粮仓容量
    * 注意：civilian_pop 这条不纳入（那是软上限要衡量的容量），见架构§二·2.4 口径锁定。
@@ -301,12 +338,16 @@ export class EconomyModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     // 不 settle（纯读，不产生副作用；population 只需要 baseRate/cropUpkeep 的快照）
+    const nonCivilianUpkeep = Object.entries(s.cropUpkeep)
+      .filter(([src]) => src !== 'civilian_pop')
+      .reduce((sum, [, v]) => sum + v, 0);
     return {
       ok: true,
       payload: {
         baseCropPerHour: s.baseRate.crop * 3600,
         buildingUpkeepPerHour: s.cropUpkeep['building'] ?? 0,
         troopUpkeepPerHour: s.cropUpkeep['troops'] ?? 0,
+        nonCivilianUpkeep,
         currentCrop: s.resources.crop,
         cropCapacity: s.capacity.crop,
       },

@@ -1,0 +1,145 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createGameApp, type GameApp } from '../app.js';
+
+let clock = 1_000_000;
+function freshApp(): GameApp {
+  clock = 1_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true });
+  app.setupWorld();
+  return app;
+}
+const setClock = (t: number) => (clock = t);
+async function send(app: GameApp, action: string, payload: any) {
+  return app.commands.send({ name: action, from: 'test', payload });
+}
+async function drain(app: GameApp, bigStepMs = 3_600_000, maxIters = 30000): Promise<void> {
+  let iters = 0;
+  while (app.scheduler.pending > 0 && iters < maxIters) {
+    await app.scheduler.advanceTo(clock + bigStepMs, setClock);
+    iters++;
+  }
+}
+
+async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
+  // 主基地拉到门控等级
+  const b = app.store.get<any>('building', villageId);
+  const main = b.placed.find((p: any) => p.kind === 'main');
+  assert.ok(main, '应有主基地');
+  main.level = app.config.constants.foundMinMainLevel;
+  app.store.set('building', villageId, b);
+
+  const pop = (await send(app, 'population.GetSnapshot', { villageId })).payload as any;
+  assert.ok(
+    pop.softLimit >= app.config.constants.foundMinSoftLimit,
+    `softLimit=${pop.softLimit} 应≥${app.config.constants.foundMinSoftLimit}`,
+  );
+
+  const per = app.config.constants.foundResourceCostBase;
+  await send(app, 'economy.Grant', {
+    villageId,
+    gain: { wood: per, clay: per, iron: per, crop: per },
+  });
+  await send(app, 'military.AdjustTroops', {
+    villageId,
+    delta: { settler: app.config.constants.foundSettlerCount },
+  });
+}
+
+test('拓荒：门控不足时拒绝', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'found1', password: 'pass1', tribe: 'romans',
+  });
+  const vid = (reg.payload as any).player.villageId as string;
+  // 不升 main，直接尝试
+  const r = await send(app, 'movement.FoundVillage', { villageId: vid, q: 9, r: -9 });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'main_level_too_low');
+});
+
+test('拓荒：成功建第二村', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'found2', password: 'pass2', tribe: 'romans',
+  });
+  const player = (reg.payload as any).player;
+  const vid = player.villageId as string;
+  const pq = player.q as number;
+  const pr = player.r as number;
+  await prepFoundReady(app, vid);
+
+  // 选一个距主城足够远的空地
+  const minD = app.config.constants.foundMinTileDistance;
+  let tq = pq + minD + 1;
+  let tr = pr;
+  // 若越界则换方向
+  if (Math.abs(tq) + Math.abs(tr) + Math.abs(-tq - tr) > app.config.constants.mapSize * 2) {
+    tq = pq;
+    tr = pr + minD + 1;
+  }
+
+  const found = await send(app, 'movement.FoundVillage', { villageId: vid, q: tq, r: tr });
+  assert.equal(found.ok, true, `FoundVillage: ${found.reason}`);
+
+  await drain(app);
+
+  const g = await send(app, 'player.Get', { playerId: player.id });
+  const villages = (g.payload as any).player.villages as any[];
+  assert.equal(villages.length, 2, '应有两座村');
+  const branch = villages.find((v) => !v.isCapital);
+  assert.ok(branch, '应有分城');
+  assert.equal(branch.q, tq);
+  assert.equal(branch.r, tr);
+
+  // 拓荒者不应回村
+  const army = (await send(app, 'military.GetArmy', { villageId: vid })).payload as any;
+  assert.equal(army.troops?.settler ?? 0, 0);
+
+  // 新村有经济
+  const eco = await send(app, 'economy.GetResources', { villageId: branch.id });
+  assert.equal(eco.ok, true);
+});
+
+test('拓荒：距离过近拒绝', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'found3', password: 'pass3', tribe: 'romans',
+  });
+  const player = (reg.payload as any).player;
+  const vid = player.villageId as string;
+  await prepFoundReady(app, vid);
+
+  const r = await send(app, 'movement.FoundVillage', {
+    villageId: vid, q: player.q, r: player.r, // 叠在自己村上
+  });
+  assert.equal(r.ok, false);
+  assert.ok(
+    r.reason === 'tile_occupied' || r.reason === 'too_close_to_village',
+    `reason=${r.reason}`,
+  );
+});
+
+test('拓荒：同时只能 1 支在途', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'found4', password: 'pass4', tribe: 'romans',
+  });
+  const player = (reg.payload as any).player;
+  const vid = player.villageId as string;
+  await prepFoundReady(app, vid);
+
+  const minD = app.config.constants.foundMinTileDistance;
+  const a = await send(app, 'movement.FoundVillage', {
+    villageId: vid, q: player.q + minD + 2, r: player.r,
+  });
+  assert.equal(a.ok, true, a.reason);
+
+  // 再补拓荒者与资源发第二支
+  await prepFoundReady(app, vid);
+  const b = await send(app, 'movement.FoundVillage', {
+    villageId: vid, q: player.q + minD + 4, r: player.r,
+  });
+  assert.equal(b.ok, false);
+  assert.equal(b.reason, 'found_inflight_limit');
+});

@@ -12,6 +12,9 @@
  * 不必再回头改 gateway.ts。
  */
 
+export type { FieldSchema, PayloadSchema } from './validate.js';
+import type { PayloadSchema } from './validate.js';
+
 /** 单条对外动作的路由声明。 */
 export interface ActionRoute {
   /** 内部命令名（CommandBus 注册名，如 'building.UpgradeBuilding'） */
@@ -20,6 +23,16 @@ export interface ActionRoute {
   ownVillage?: boolean;
   /** true=需登录态 */
   needAuth?: boolean;
+  /** true=Gateway 强制注入会话 playerId（防伪造他人身份） */
+  injectPlayerId?: boolean;
+  /**
+   * payload 校验 schema。Gateway 在派发前：
+   *  1. 按 schema 校验类型/范围/长度/枚举；
+   *  2. 剥离未声明字段；
+   *  3. 再执行 ownVillage 注入。
+   * schema={} 表示 payload 必须是空对象（不接受任何客户端字段）。
+   */
+  schema?: PayloadSchema;
 }
 
 export interface ModuleManifest {

@@ -17,7 +17,7 @@ export class MetaModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'meta',
     publicActions: {
-      GetGameConfig: { command: 'meta.GetGameConfig' },
+      GetGameConfig: { command: 'meta.GetGameConfig', schema: {} },
     },
   };
 
@@ -53,6 +53,12 @@ export class MetaModule {
         constants: {
           mapViewRadius: c.constants.mapViewRadius,
           mapSize: c.constants.mapSize,
+          // 人口 v2 展示用常量（前端本地外插需要）
+          popGrowthPerProsperity: c.constants.popGrowthPerProsperity,
+          popPerCapitaCrop: c.constants.popPerCapitaCrop,
+          popGrowthScaleExp: c.constants.popGrowthScaleExp,
+          popGrowthScaleRef: c.constants.popGrowthScaleRef,
+          popFamineTickSec: c.constants.popFamineTickSec,
         },
       },
     };

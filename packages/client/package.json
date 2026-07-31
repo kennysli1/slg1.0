@@ -6,13 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/test/unit.test.ts"
   },
   "dependencies": {
     "@slg/shared": "*"
   },
   "devDependencies": {
+    "@types/node": "^20.11.0",
+    "eslint": "^9.39.4",
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0",
+    "typescript-eslint": "^8.62.1",
     "vite": "^5.2.0"
   }
 }

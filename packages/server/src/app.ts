@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { EventBus } from './infra/event-bus.js';
 import { CommandBus } from './infra/command-bus.js';
 import { Scheduler } from './infra/scheduler.js';
+import { KeyedSerialQueue } from './infra/keyed-serial-queue.js';
 import { MemoryStore, JsonFileStore, type Store } from './infra/store.js';
 import { loadGameConfig, type GameConfig } from './infra/config.js';
 import { EconomyModule } from './modules/economy.js';
@@ -55,6 +56,12 @@ export interface GameApp {
   bus: EventBus;
   commands: CommandBus;
   scheduler: Scheduler;
+  /**
+   * 全局共享串行队列。Gateway 用 "village:<id>" 串行化 WS 写请求，
+   * Scheduler 带 serializationKey 的任务通过同一实例执行，确保同村任务与
+   * WS 请求严格 FIFO，消除定时器与请求之间的写竞争。
+   */
+  serialQueue: KeyedSerialQueue;
   economy: EconomyModule;
   building: BuildingModule;
   military: MilitaryModule;
@@ -67,7 +74,7 @@ export interface GameApp {
   meta: MetaModule;
   notifications: NotificationsModule;
   now: () => number;
-  createVillage(villageId: string, q?: number, r?: number, name?: string): void;
+  createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
@@ -81,9 +88,9 @@ export interface GameApp {
   resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): { accounts: number };
   /**
    * 删除单个玩家账号及其所有游戏进度（经济/建筑/兵力/地图等）。
-   * 返回被删除的 villageId，若玩家不存在返回 null。
+   * 返回被删除的主城 villageId + 全部 villageIds；若玩家不存在返回 null。
    */
-  deletePlayer(playerId: string): { villageId: string } | null;
+  deletePlayer(playerId: string): { villageId: string; villageIds: string[] } | null;
 }
 
 /** 默认 config 目录：仓库根的 config/（相对编译后/源码位置回溯到 packages/server 再上两级）。 */
@@ -105,7 +112,8 @@ export function createGameApp(opts?: {
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
   const bus = new EventBus();
   const commands = new CommandBus();
-  const scheduler = new Scheduler(now, opts?.manualScheduler ?? false);
+  const serialQueue = new KeyedSerialQueue();
+  const scheduler = new Scheduler(now, opts?.manualScheduler ?? false, serialQueue);
 
   const economy = new EconomyModule(store, bus, commands, now, config);
   const building = new BuildingModule(store, bus, commands, scheduler, now, config);
@@ -118,16 +126,70 @@ export function createGameApp(opts?: {
 
   // 实际建村的函数（供 Player 注册时调用）。坐标为六边形轴坐标 (q,r)。
   const doCreateVillage = async (villageId: string, q: number, r: number, name: string, tribe = 'romans') => {
-    economy.createVillage(villageId);
-    building.createVillage(villageId, tribe);
-    military.createVillage(villageId, tribe);
-    // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
-    await population.createVillage(villageId);
-    void commands.send({ name: 'world.PlaceVillage', from: 'app', payload: { q, r, refId: villageId, name } });
+    try {
+      economy.createVillage(villageId);
+      building.createVillage(villageId, tribe);
+      military.createVillage(villageId, tribe);
+      // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
+      await population.createVillage(villageId);
+      const placeRes = await commands.send({
+        name: 'world.PlaceVillage', from: 'app',
+        payload: { q, r, refId: villageId, name },
+      });
+      if (!placeRes.ok) throw new Error(`world.PlaceVillage failed: ${placeRes.reason ?? 'unknown'}`);
+    } catch (err) {
+      // 回滚：清除已写入的进度集合，避免孤儿记录
+      store.delete('economy', villageId);
+      store.delete('building', villageId);
+      store.delete('military', villageId);
+      store.delete('population', villageId);
+      throw err;
+    }
   };
-  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.mapSize);
+  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.mapSize, serialQueue);
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
+
+  /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
+  const wipeSingleVillage = (villageId: string): void => {
+    for (const prefix of [
+      `building:${villageId}`,
+      `military:${villageId}`,
+      `population:heal:${villageId}`,
+      `population:deficit:${villageId}`,
+    ]) {
+      scheduler.cancelByOwner(prefix);
+    }
+    for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
+      if (mv.fromVillage === villageId && mv.id) scheduler.cancelByOwner(`movement:${mv.id}`);
+    }
+    for (const b of store.all<{ id?: string; targetId?: string; contributions?: Record<string, { fromVillage?: string }> }>('battle')) {
+      const involves =
+        b.targetId === villageId ||
+        Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
+      if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
+    }
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications'] as const) {
+      store.delete(c, villageId);
+    }
+    for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
+      if (m.fromVillage === villageId || m.targetId === villageId || m.targetVillage === villageId) {
+        store.delete('movement', (m as any).id ?? '');
+      }
+    }
+    for (const b of store.all<{ id?: string; targetId?: string; contributions?: Record<string, { fromVillage?: string }> }>('battle')) {
+      const involves =
+        b.targetId === villageId ||
+        Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
+      if (involves) store.delete('battle', b.id ?? '');
+    }
+    for (const t of store.all<{ refId?: string; q: number; r: number; kind?: string }>('world_tile')) {
+      if (t.kind === 'village' && t.refId === villageId) {
+        store.set('world_tile', `${t.q},${t.r}`, { q: t.q, r: t.r, kind: 'empty' });
+      }
+    }
+  };
+  player.setVillageWiper(wipeSingleVillage, config.constants.foundAbandonLockSec);
 
   economy.init();
   building.init();
@@ -142,10 +204,10 @@ export function createGameApp(opts?: {
   notifications.init();
 
   return {
-    config, store, bus, commands, scheduler,
+    config, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, movement, combat, player, meta, notifications, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
-      void doCreateVillage(villageId, q, r, name, 'romans');
+      return doCreateVillage(villageId, q, r, name, 'romans');
     },
     setupWorld() {
       world.setup(config.constants.mapSize);
@@ -161,6 +223,10 @@ export function createGameApp(opts?: {
       pve.resume();
     },
     resetWorld({ keepAccounts, reassignSpots = false }) {
+      // 0. 先清空调度器：取消所有待处理定时任务，避免刷档后遗留任务触发旧逻辑。
+      scheduler.reset();
+      serialQueue.reset();
+
       // 1. 清空所有游戏进度集合。
       for (const c of PROGRESS_COLLECTIONS) store.clear(c);
 
@@ -180,36 +246,71 @@ export function createGameApp(opts?: {
       return { accounts: store.all('player').length };
     },
     deletePlayer(playerId) {
-      const p = store.get<{ villageId: string; name: string }>('player', playerId);
+      const p = store.get<{
+        villageId?: string;
+        capitalVillageId?: string;
+        name: string;
+        ownedVillages?: { id: string }[];
+      }>('player', playerId);
       if (!p) return null;
-      const { villageId, name } = p;
-      // 清除账号记录
+      const { name } = p;
+      const villageIds = p.ownedVillages?.length
+        ? p.ownedVillages.map((v) => v.id)
+        : (p.villageId ? [p.villageId] : []);
+      const capitalId = p.capitalVillageId ?? p.villageId ?? villageIds[0] ?? '';
+      const villageSet = new Set(villageIds);
+
+      for (const villageId of villageIds) {
+        for (const prefix of [
+          `building:${villageId}`,
+          `military:${villageId}`,
+          `population:heal:${villageId}`,
+          `population:deficit:${villageId}`,
+        ]) {
+          scheduler.cancelByOwner(prefix);
+        }
+      }
+      for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
+        if (mv.fromVillage && villageSet.has(mv.fromVillage) && mv.id) {
+          scheduler.cancelByOwner(`movement:${mv.id}`);
+        }
+      }
+      for (const b of store.all<{ id?: string; targetId?: string; contributions?: Record<string, { fromVillage?: string }> }>('battle')) {
+        const involves =
+          (b.targetId && villageSet.has(b.targetId)) ||
+          Object.values(b.contributions ?? {}).some((c) => c.fromVillage && villageSet.has(c.fromVillage));
+        if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
+      }
+
       store.delete('player', playerId);
       store.delete('player_byname', name);
-      store.delete('player_byvillage', villageId);
-      // 清除游戏进度（以 villageId 为 key 的所有进度集合，含 population）
+      for (const villageId of villageIds) store.delete('player_byvillage', villageId);
+
       const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications'] as const;
-      for (const c of progressByVillage) store.delete(c, villageId);
-      // 清除行军记录（以 villageId 过滤，避免误删其他人）
+      for (const villageId of villageIds) {
+        for (const c of progressByVillage) store.delete(c, villageId);
+      }
       for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
-        if (m.fromVillage === villageId || m.targetId === villageId || m.targetVillage === villageId) {
+        if (
+          (m.fromVillage && villageSet.has(m.fromVillage)) ||
+          (m.targetId && villageSet.has(m.targetId)) ||
+          (m.targetVillage && villageSet.has(m.targetVillage))
+        ) {
           store.delete('movement', (m as any).id ?? '');
         }
       }
-      // 清除进行中战斗（目标或来攻贡献涉及该村庄时整场取消，避免幽灵返程/战报）
       for (const b of store.all<{ id?: string; targetId?: string; contributions?: Record<string, { fromVillage?: string }> }>('battle')) {
-        const involves = b.targetId === villageId || Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
+        const involves =
+          (b.targetId && villageSet.has(b.targetId)) ||
+          Object.values(b.contributions ?? {}).some((c) => c.fromVillage && villageSet.has(c.fromVillage));
         if (involves) store.delete('battle', b.id ?? '');
       }
-      // 清除地图上该村庄的 tile
       for (const t of store.all<{ refId?: string; q: number; r: number }>('world_tile')) {
-        if (t.refId === villageId) {
-          const key = `${t.q},${t.r}`;
-          store.set('world_tile', key, { q: t.q, r: t.r, kind: 'empty' });
-          break;
+        if (t.refId && villageSet.has(t.refId)) {
+          store.set('world_tile', `${t.q},${t.r}`, { q: t.q, r: t.r, kind: 'empty' });
         }
       }
-      return { villageId };
+      return { villageId: capitalId, villageIds };
     },
   };
 }

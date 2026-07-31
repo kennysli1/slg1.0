@@ -71,7 +71,10 @@ export class CombatModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'combat',
     publicActions: {
-      GetBattle: { command: 'combat.GetBattle', ownVillage: true, needAuth: true },
+      GetBattle: {
+        command: 'combat.GetBattle', ownVillage: true, needAuth: true,
+        schema: { targetId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
     },
     eventPushMap: {
       'combat.BattleStarted': 'BattleStarted',
@@ -79,6 +82,13 @@ export class CombatModule {
       'combat.BattleEnded': 'BattleEnded',
     },
   };
+
+  /**
+   * 同步预占集合：记录当前正在执行 fetchDefender async 阶段的 targetId。
+   * 防止两条并发 Engage 命令在同一目标上都走"新建"路径，导致重复战场（TOCTOU）。
+   * Key: targetId；Value: 最终 battle id（先占位，fetchDefender 完成后再写 store）。
+   */
+  private readonly claiming = new Set<string>();
 
   constructor(
     private store: Store,
@@ -97,7 +107,7 @@ export class CombatModule {
   /** 重启恢复：为所有进行中的战场重新登记下一 tick。 */
   resume(): void {
     for (const b of this.store.all<Battle>(COLLECTION)) {
-      if (b.status === 'active') this.scheduler.schedule(this.tickMs(), () => this.tick(b.id));
+      if (b.status === 'active') this.scheduler.schedule(this.tickMs(), () => this.tick(b.id), `combat:${b.id}`, `battle:${b.id}`);
     }
   }
 
@@ -140,6 +150,13 @@ export class CombatModule {
   /**
    * 开战 / 并入。Movement 到达目标时发来：来攻方兵力快照(已含 smithy 加成) + 归属信息。
    * 已有战场 → 并入 attacker 阵营；否则新开一场并拉取防守方快照。
+   *
+   * TOCTOU 修复（同步预占 + 二次安全并入）：
+   *  findActive 是同步操作，结果立即可信；但 fetchDefender 是 async，
+   *  在 await 期间另一条并发 Engage 也可能走到"新建"分支。
+   *  解决方案：进入新建分支后立即同步写入 claiming 集合预占 targetId，
+   *  fetchDefender 完成后再次检查——若此时已有战场（由并发 Engage 创建），
+   *  则安全并入而非重复建立，保证"一地一场战"不变式。
    */
   private async engage(cmd: Command): Promise<CommandResult> {
     const p = cmd.payload as {
@@ -169,8 +186,51 @@ export class CombatModule {
       return { ok: true, payload: { battleId: existing.id, merged: true } };
     }
 
-    // 新开一场：拉防守方快照
-    const { defender, wallLevel } = await this.fetchDefender(p.targetKind, p.targetId);
+    // 同步预占：标记该 targetId 正在被新建流程占用
+    // 若已有其他并发 Engage 在预占中，直接返回等它完成后再并入
+    if (this.claiming.has(p.targetId)) {
+      // 短路等待：再做一次 findActive（此时另一个 engage 可能已写入 store）
+      // 若仍未就绪（极罕见的 ABA 场景），保守地返回 merged=false 让调用方重试
+      const raceCheck = this.findActive(p.targetId);
+      if (raceCheck) {
+        raceCheck.contributions[contribId] = {
+          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops },
+        };
+        for (const [code, u] of Object.entries(p.attackerSnapshot)) {
+          raceCheck.attacker[`${contribId}#${code}`] = { ...u };
+        }
+        raceCheck.attackPower0 += totalPower(p.attackerSnapshot);
+        this.store.set(COLLECTION, raceCheck.id, raceCheck);
+        log('竞态并入（claiming）', { battleId: raceCheck.id, from: p.fromVillage });
+        return { ok: true, payload: { battleId: raceCheck.id, merged: true } };
+      }
+    }
+    this.claiming.add(p.targetId);
+
+    let fetchedDefender: { defender: Snapshot; wallLevel: number } | null = null;
+    try {
+      fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId);
+    } finally {
+      this.claiming.delete(p.targetId);
+    }
+
+    // 二次安全检查：fetchDefender 是 async，并发 Engage 可能在此期间已创建战场
+    const raceExisting = this.findActive(p.targetId);
+    if (raceExisting) {
+      // 安全并入
+      raceExisting.contributions[contribId] = {
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops },
+      };
+      for (const [code, u] of Object.entries(p.attackerSnapshot)) {
+        raceExisting.attacker[`${contribId}#${code}`] = { ...u };
+      }
+      raceExisting.attackPower0 += totalPower(p.attackerSnapshot);
+      this.store.set(COLLECTION, raceExisting.id, raceExisting);
+      log('二次检查并入', { battleId: raceExisting.id, from: p.fromVillage });
+      return { ok: true, payload: { battleId: raceExisting.id, merged: true } };
+    }
+
+    const { defender, wallLevel } = fetchedDefender!;
 
     const attacker: Snapshot = {};
     for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
@@ -213,7 +273,7 @@ export class CombatModule {
       attackPower: Math.round(battle.attackPower0), defensePower: Math.round(battle.defensePower0),
     }));
 
-    this.scheduler.schedule(this.tickMs(), () => this.tick(id));
+    this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
     return { ok: true, payload: { battleId: id, merged: false } };
   }
 
@@ -272,7 +332,7 @@ export class CombatModule {
       }));
     }
 
-    this.scheduler.schedule(this.tickMs(), () => this.tick(id));
+    this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
   }
 
   /** 结算：算损失/幸存/战利品 → 发 Command 让 owner 改状态 → 发 Event 出战报与返程信息。 */

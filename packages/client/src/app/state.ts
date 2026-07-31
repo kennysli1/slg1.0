@@ -9,10 +9,24 @@ export interface SelectedTarget {
 
 /** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。 */
 export interface PopSnapshot {
+  /**
+   * 平民人口（不含驻军、不含伤兵）。
+   * availablePop = currentPop（平民即可训练上限）。
+   */
   currentPop: number;
+  /** 驻军占用人口（已征召的兵种）。 */
+  garrisonPop: number;
+  /** 总人口 = currentPop + garrisonPop + wounded.total。 */
+  totalPop: number;
   softLimit: number;
   growthPerHour: number;
   lambdaRatio: number;
+  /** 劳动力比（平民 / 总人口），体现劳动力是否充裕。 */
+  laborRatio: number;
+  /** 粮食赤字速率（/h），伤兵与驻军的耗粮共同影响；仅饥荒时非零。 */
+  cropDeficitRate: number;
+  /** 是否处于饥荒状态（服务端权威）。 */
+  inFamine: boolean;
   wounded: { total: number; entries: { count: number; healAt: number }[] };
   laborMults: {
     production: { wood: number; clay: number; iron: number; crop: number };

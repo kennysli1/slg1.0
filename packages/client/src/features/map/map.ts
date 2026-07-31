@@ -1,11 +1,11 @@
 /** 地图页：六边形网格 + 行军路径与实时部队位置 + 目标选中面板 + 出征。 */
-import { art, escapeAttr, escapeHtml, unitArt } from '../../shared/ui/widgets.js';
+import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
-import { req, me } from '../../api.js';
+import { req, me, ownVillageAt, isOwnVillageId, selectVillage } from '../../api.js';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -98,12 +98,17 @@ export function renderMap(): string {
   for (const h of hexes) {
     const p = hexToPixel(h);
     const cx = p.x + ox, cy = p.y + oy;
-    const isSelf = h.q === me.q && h.r === me.r;
+    const ownHere = ownVillageAt(h.q, h.r);
+    const isCurrent = h.q === me.q && h.r === me.r;
     const t = tileAt(h.q, h.r);
     let cls = 'hex', inner = '', clickable = '';
-    if (isSelf) {
+    if (isCurrent) {
       cls += ' hex-self';
       inner = art('bld_main', '本城', 'sm');
+    } else if (ownHere) {
+      cls += ' hex-own';
+      inner = art('bld_main', ownHere.name, 'sm');
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(ownHere.id)}" data-name="${escapeAttr(ownHere.name)}"`;
     } else if (t?.kind === 'village') {
       cls += ' hex-enemy';
       inner = art('bld_main', t.name, 'sm');
@@ -114,8 +119,9 @@ export function renderMap(): string {
       inner = art(picon, t.name, 'sm');
       clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="pve" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(picon)}"`;
     } else {
-      // 空地块：确定性地形着色（4 档极淡色相），稳定不随刷新变化
+      // 空地块：可点选拓荒
       cls += ` hex-grass-${terrainVariant(h.q, h.r)}`;
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="empty" data-ref="empty-${h.q},${h.r}" data-name="空地"`;
     }
     const sel = getSelected();
     const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';
@@ -134,7 +140,10 @@ export function renderMap(): string {
     const pts = m.path
       .map((h: Hex) => { const p = hexToPixel(h); return `${(p.x + ox).toFixed(1)},${(p.y + oy).toFixed(1)}`; })
       .join(' ');
-    const cls = m.type === 'return' ? 'march-path march-return' : 'march-path';
+    const cls = m.type === 'return' ? 'march-path march-return'
+      : m.type === 'transport' ? 'march-path march-transport'
+      : m.type === 'found' ? 'march-path march-found'
+      : 'march-path';
     paths += `<polyline class="${cls}" points="${pts}"></polyline>`;
   }
 
@@ -143,7 +152,11 @@ export function renderMap(): string {
   moves.forEach((m: any, i: number) => {
     if (!m.pos) return;
     const p = hexToPixel(m.pos);
-    const label = m.type === 'attack' ? '⚔️' : m.type === 'raid' ? '🏇' : '🏠';
+    const label = m.type === 'attack' ? '⚔️'
+      : m.type === 'raid' ? '🏇'
+      : m.type === 'found' ? '🚩'
+      : m.type === 'transport' ? '📦'
+      : '🏠';
     markers += `<g class="march-marker" id="march-mk-${i}" data-mvidx="${i}" transform="translate(${(p.x + ox).toFixed(1)},${(p.y + oy).toFixed(1)})">
         <circle r="10" class="march-dot ${m.status === 'paused' ? 'paused' : ''}"></circle>
         <text class="march-emoji" text-anchor="middle" dy="4">${label}</text>
@@ -157,8 +170,14 @@ export function renderMap(): string {
     </svg>`;
 
   const movesList = moves.map((m: any) => {
-    const kind = m.type === 'attack' ? '⚔️ 进攻' : m.type === 'raid' ? '🏇 掠夺' : '🏠 返程';
-    const loot = m.loot ? ` · 战利品 ${Object.values(m.loot).reduce((a: any, b: any) => a + b, 0)}` : '';
+    const kind = m.type === 'attack' ? '⚔️ 进攻'
+      : m.type === 'raid' ? '🏇 掠夺'
+      : m.type === 'found' ? '🚩 拓荒'
+      : m.type === 'transport' ? '📦 运输'
+      : '🏠 返程';
+    const loot = m.loot || m.cargo
+      ? ` · 货物 ${Object.values(m.loot || m.cargo).reduce((a: any, b: any) => a + (b as number), 0)}`
+      : '';
     const st = m.status === 'paused' ? ' · <b>交战中</b>' : '';
     return `<div class="banner banner-move">${kind} → (${m.to.q},${m.to.r}) 抵达 <b>${secStr(m.arriveAt)}</b>${st}${loot}</div>`;
   }).join('');
@@ -216,12 +235,48 @@ export function renderMap(): string {
 
 function renderTargetPanel(): string {
   const selected = getSelected();
-  if (!selected) return '<div class="empty">点击地图上的目标，选择出征兵力。</div>';
+  if (!selected || !me) return '<div class="empty">点击地图上的目标：野怪掠夺、玩家进攻、空地拓荒、己方运输。</div>';
   const army = getCache().army;
-  const dist = hexDistance({ q: selected.q, r: selected.r }, { q: me!.q, r: me!.r });
+  const dist = hexDistance({ q: selected.q, r: selected.r }, { q: me.q, r: me.r });
+
+  if (selected.kind === 'empty') {
+    return `<div class="target-panel target">
+      <div class="target-head">${art('bld_main', '空地', 'md')}
+        <div><div class="card-title">空地</div>
+          <small class="coord">坐标 (${selected.q},${selected.r}) · 距离 ${dist} 格 · 可拓荒建村</small></div>
+        <button class="target-close" id="closeTarget">✕</button>
+      </div>
+      <p class="muted">需主基地与人口规模达标，并备齐 3 名拓荒者与开城资源。失败不退开城包。</p>
+      <div class="target-actions"><button class="btn-sm btn-raid" id="doFound">🚩 拓荒建村</button></div>
+    </div>`;
+  }
+
+  if (selected.kind === 'own_village' || isOwnVillageId(selected.refId)) {
+    const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
+    const inputs = myTroops.length
+      ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="0" id="raid-${u}" /><small>/${n}</small></label>`).join('')
+      : '<small class="muted">无可用兵力</small>';
+    const res = getCache().res?.resources ?? {};
+    const cargoInputs = ['wood', 'clay', 'iron', 'crop'].map((t) =>
+      `<label class="raid-input"><span class="raid-name">${t}</span><input type="number" min="0" max="${Math.floor(res[t] ?? 0)}" value="0" id="cargo-${t}" /><small>/${Math.floor(res[t] ?? 0)}</small></label>`).join('');
+    return `<div class="target-panel target">
+      <div class="target-head">${art('bld_main', selected.name, 'md')}
+        <div><div class="card-title">${escapeHtml(selected.name)}</div>
+          <small class="coord">己方村庄 · (${selected.q},${selected.r}) · 距离 ${dist} 格</small></div>
+        <button class="target-close" id="closeTarget">✕</button>
+      </div>
+      <div class="target-actions"><button class="btn-sm" id="doSwitchVillage">切换到此村</button></div>
+      <div class="raidbox-title">运输部队（运力=负重）</div>
+      <div class="raid-inputs">${inputs}</div>
+      <div class="raidbox-title">运输货物</div>
+      <div class="raid-inputs">${cargoInputs}</div>
+      ${myTroops.length ? `<div class="target-actions"><button class="btn-sm btn-raid" id="doTransport">📦 运输</button></div>` : ''}
+    </div>`;
+  }
+
   const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
   const inputs = myTroops.length
-    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm')}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
+    ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
     : '<small class="muted">无可用兵力，先去军队页训练</small>';
   const isPve = selected.kind === 'pve';
   const action = isPve
@@ -353,12 +408,13 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     applyMapTransform(svg); // 跨 5s 重渲保留缩放态
   }
 
-  document.querySelectorAll<SVGGElement>('.hex-cell[data-ref]').forEach((el) =>
+  document.querySelectorAll<SVGGElement>('.hex-cell[data-tq]').forEach((el) =>
     el.onclick = () => {
       setSelected({
-        refId: el.dataset.ref!, kind: el.dataset.kind!,
+        refId: el.dataset.ref || `empty-${el.dataset.tq},${el.dataset.tr}`,
+        kind: el.dataset.kind!,
         q: Number(el.dataset.tq), r: Number(el.dataset.tr),
-        name: el.dataset.name!, icon: el.dataset.icon,
+        name: el.dataset.name || '空地', icon: el.dataset.icon,
       });
       const panel = document.getElementById('targetPanel');
       if (panel) { panel.innerHTML = renderTargetPanel(); bindTargetEvents(act); }
@@ -438,5 +494,31 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
     if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
     const sel = getSelected()!;
     act(req('SendAttack', { targetVillage: sel.refId, troops }));
+  };
+  const found = document.getElementById('doFound');
+  if (found) found.onclick = () => {
+    const sel = getSelected()!;
+    act(req('FoundVillage', { q: sel.q, r: sel.r }));
+  };
+  const sw = document.getElementById('doSwitchVillage');
+  if (sw) sw.onclick = async () => {
+    const sel = getSelected()!;
+    const r = await selectVillage(sel.refId);
+    if (!r.ok) { addReport(`切村失败：${r.error}`); return; }
+    addReport(`已切换到 ${sel.name}`);
+    act(Promise.resolve({ ok: true }));
+  };
+  const tr = document.getElementById('doTransport');
+  if (tr) tr.onclick = () => {
+    const troops = collectTroops();
+    if (!Object.keys(troops).length) { addReport('请先设置运输部队'); return; }
+    const cargo: Record<string, number> = {};
+    for (const t of ['wood', 'clay', 'iron', 'crop']) {
+      const el = document.getElementById(`cargo-${t}`) as HTMLInputElement;
+      const n = el ? Number(el.value) : 0;
+      if (n > 0) cargo[t] = n;
+    }
+    if (!Object.keys(cargo).length) { addReport('请填写运输货物'); return; }
+    act(req('SendTransport', { targetVillage: getSelected()!.refId, troops, cargo }));
   };
 }

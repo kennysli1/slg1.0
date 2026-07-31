@@ -38,7 +38,10 @@ export class PveModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'pve',
     publicActions: {
-      GetTarget: { command: 'pve.GetTarget', needAuth: true },
+      GetTarget: {
+        command: 'pve.GetTarget', needAuth: true,
+        schema: { id: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
     },
   };
 
@@ -130,7 +133,7 @@ export class PveModule {
       s.cleared = true;
       // 登记重生
       const tpl = this.config.pveTemplates[s.type];
-      this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id));
+      this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id), `pve:${id}`, `pve:${id}`);
     }
     this.store.set(COLLECTION, id, s);
     return { ok: true, payload: { looted, cleared: s.cleared } };

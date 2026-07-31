@@ -3,30 +3,44 @@
  * 图标列只存**基名**；这里统一拼成 /art/<基名>.png，加载失败回退文字徽标。
  */
 import { fmt, secStr } from '../utils/format.js';
-import { resInfo, resourceKeys } from '../../app/config.js';
+import { resInfo, resourceKeys, unitInfo } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
+import { escapeHtml, escapeAttr } from '../utils/escape.js';
+export { escapeHtml, escapeAttr };
 
 const ART_BASE = '/art/';
 export const artPath = (base: string) => `${ART_BASE}${base}.png`;
 
-export function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+const UNIT_ART_FALLBACKS: Record<string, string> = {
+  phalanx: 'unit_praetorian',
+  swordsman: 'unit_imperian',
+  pathfinder: 'unit_equlegati',
+  theutates: 'unit_equimperatoris',
+  druidrider: 'unit_equimperatoris',
+  haeduan: 'unit_equcaesaris',
+  gaulram: 'unit_ram',
+  gcaultrebuchet: 'unit_catapult',
+  gaulchief: 'unit_senator',
+  gaulsettler: 'unit_settler',
+  clubswinger: 'unit_legionnaire',
+  spearman: 'unit_praetorian',
+  axeman: 'unit_imperian',
+  teuscout: 'unit_equlegati',
+  paladin: 'unit_equimperatoris',
+  teutonknight: 'unit_equcaesaris',
+  teuram: 'unit_ram',
+  teucatapult: 'unit_catapult',
+  teuchief: 'unit_senator',
+  teusettler: 'unit_settler',
+};
 
-export function escapeAttr(value: unknown): string {
-  return escapeHtml(value);
-}
 
 /** 统一图标渲染：传图标基名，输出 <img>，加载失败由 installIconFallback 就地换成文字徽标。size: xs|sm|md|lg|xl */
-export function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' | 'xl' = 'md'): string {
+export function art(icon: string, label: string, size: 'xs' | 'sm' | 'md' | 'lg' | 'xl' = 'md', fallbackIcon?: string): string {
   const safe = escapeAttr(label);
   const src = escapeAttr(artPath(icon));
-  return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy" />`;
+  const fallback = fallbackIcon ? ` data-fallback-src="${escapeAttr(artPath(fallbackIcon))}"` : '';
+  return `<img class="icon icon-${size}" src="${src}" alt="${safe}" title="${safe}" loading="lazy"${fallback} />`;
 }
 
 /**
@@ -39,6 +53,12 @@ export function installIconFallback(): void {
   document.addEventListener('error', (e) => {
     const el = e.target;
     if (!(el instanceof HTMLImageElement) || !el.classList.contains('icon')) return;
+    const fallbackSrc = el.dataset.fallbackSrc;
+    if (fallbackSrc && el.src !== fallbackSrc) {
+      delete el.dataset.fallbackSrc;
+      el.src = fallbackSrc;
+      return;
+    }
     const label = el.getAttribute('alt') ?? '';
     const span = document.createElement('span');
     span.className = `${el.className} icon-fallback`;
@@ -49,7 +69,8 @@ export function installIconFallback(): void {
 }
 
 /** 兵种图标基名：服务器若下发 icon 基名优先用，否则按 code 约定拼 unit_<code>。 */
-export const unitArt = (code: string) => `unit_${code}`;
+export const unitArt = (code: string) => unitInfo(code).icon ?? `unit_${code}`;
+export const unitArtFallback = (code: string) => UNIT_ART_FALLBACKS[code];
 
 /** 是否买得起。 */
 export function canAfford(cost: Record<string, number> | null): boolean {

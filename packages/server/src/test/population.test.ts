@@ -42,10 +42,9 @@ test('人口：新村创建即满员（currentPop ≈ softLimit）', async () =>
   const p = r.payload as any;
   assert.ok(p.currentPop > 0, '初始人口应>0');
   assert.ok(p.softLimit > 0, '软上限应>0');
-  // 新村满员：currentPop 应≈ softLimit（允许较大误差：初始P=0时算出的L是第一次迭代值，
-  // getSnapshot 用实际P重算的softLimit更高，故 currentPop/softLimit ≈ 0.80）
+  // v2 固定点迭代：currentPop/softLimit ≥ 0.99
   const ratio = p.currentPop / p.softLimit;
-  assert.ok(ratio >= 0.70 && ratio <= 1.1, `新村应接近满员（当前比值 ${ratio.toFixed(3)}）`);
+  assert.ok(ratio >= 0.99 && ratio <= 1.1, `新村应满员开局（当前比值 ${ratio.toFixed(3)}）`);
 });
 
 test('人口：training 扣人口，扣减量精确', async () => {
@@ -269,9 +268,9 @@ test('人口：settle 后人口接近软上限（5步迭代收敛≥90%）', asy
 
   const snap = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
   assert.ok(snap.softLimit > 0, '软上限应>0');
-  // 验证人口已接近软上限（设计§4.2：新村满员开局，P/L ≈ 0.80 因为初始P=0下算出第一次迭代值）
+  // v2 固定点：新村满员开局 P/L ≥ 0.99
   const ratio = snap.currentPop / snap.softLimit;
-  assert.ok(ratio >= 0.70, `新村开局人口应≥70%软上限，当前比值=${ratio.toFixed(3)}`);
+  assert.ok(ratio >= 0.99, `新村开局人口应≥99%软上限，当前比值=${ratio.toFixed(3)}`);
   // 增长率 = 繁荣度 × pop_growth_per_prosperity
   assert.ok(snap.growthPerHour >= 0, '增长率应≥0');
   // 繁荣度应>0（有建筑就有繁荣度）

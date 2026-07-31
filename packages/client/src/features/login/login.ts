@@ -1,10 +1,12 @@
 /** 登录/注册界面。 */
-import { art } from '../../shared/ui/widgets.js';
+import { art, escapeAttr, escapeHtml } from '../../shared/ui/widgets.js';
 import { errText, TRIBES } from '../../shared/ui/text.js';
 import { login, register } from '../../api.js';
 
 let loginMode: 'login' | 'register' = 'login';
 let pickedTribe = 'romans';
+let draftName = '';
+let draftPwd = '';
 
 /** 渲染登录页。onSuccess 在登录/注册成功后调用（进入游戏）。 */
 export function renderLogin(app: HTMLElement, onSuccess: () => void, msg = '') {
@@ -20,22 +22,28 @@ export function renderLogin(app: HTMLElement, onSuccess: () => void, msg = '') {
         <button class="${loginMode === 'login' ? 'on' : ''}" id="toLogin">登录</button>
         <button class="${loginMode === 'register' ? 'on' : ''}" id="toReg">注册</button>
       </div>
-      <input id="name" placeholder="用户名（≤16字）" maxlength="16" />
-      <input id="pwd" type="password" placeholder="密码（≥4位）" />
+      <input id="name" placeholder="用户名（≤16字）" maxlength="16" value="${escapeAttr(draftName)}" />
+      <input id="pwd" type="password" placeholder="密码（≥4位）" value="${escapeAttr(draftPwd)}" />
       ${loginMode === 'register' ? `<div class="field-label">选择部族</div><div class="tribes">${tribeBtns}</div>` : ''}
       <button id="goBtn" class="btn-primary">${loginMode === 'register' ? '注册并进入' : '登录'}</button>
-      <div class="loginmsg">${msg}</div>
+      <div class="loginmsg">${escapeHtml(msg)}</div>
     </div>`;
 
+  const saveDraft = () => {
+    draftName = (document.getElementById('name') as HTMLInputElement)?.value ?? draftName;
+    draftPwd = (document.getElementById('pwd') as HTMLInputElement)?.value ?? draftPwd;
+  };
   const rerender = (m = '') => renderLogin(app, onSuccess, m);
-  document.getElementById('toReg')!.onclick = () => { loginMode = 'register'; rerender(); };
-  document.getElementById('toLogin')!.onclick = () => { loginMode = 'login'; rerender(); };
+  document.getElementById('toReg')!.onclick = () => { saveDraft(); loginMode = 'register'; rerender(); };
+  document.getElementById('toLogin')!.onclick = () => { saveDraft(); loginMode = 'login'; rerender(); };
   document.querySelectorAll<HTMLButtonElement>('[data-tribe]').forEach((b) =>
-    b.onclick = () => { pickedTribe = b.dataset.tribe!; rerender(); });
+    b.onclick = () => { saveDraft(); pickedTribe = b.dataset.tribe!; rerender(); });
 
   const go = async () => {
     const name = (document.getElementById('name') as HTMLInputElement).value.trim();
     const pwd = (document.getElementById('pwd') as HTMLInputElement).value;
+    draftName = name;
+    draftPwd = pwd;
     if (!name || !pwd) return rerender('请输入用户名和密码');
     const res = loginMode === 'register' ? await register(name, pwd, pickedTribe) : await login(name, pwd);
     if (res.ok) onSuccess();

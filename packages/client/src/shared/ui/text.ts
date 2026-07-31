@@ -13,6 +13,12 @@ const ERR_MSG: Record<string, string> = {
   requires_not_met: '前置建筑不满足，尚未解锁',
   max_level: '已达最高等级',
   spend_failed: '资源不足',
+  slot_empty: '该建筑槽位为空',
+  slot_busy: '该建筑正在建造或升级',
+  still_constructing: '建筑尚未完成',
+  no_free_slot: '该区域没有空槽',
+  bad_zone: '建筑区域不合法',
+  zone_mismatch: '不能建在这个区域',
   bad_count: '数量不合法',
   bad_troops: '出征兵力不合法',
   empty_troops: '请至少选择一种出征兵力',
@@ -27,6 +33,31 @@ const ERR_MSG: Record<string, string> = {
   network_error: '网络连接异常',
   insufficient_population: '人口不足，无法训练',
   bad_units: '解散兵种不合法',
+  battle_forbidden: '不能查看这场战斗',
+  // 协议/信封错误
+  protocol_error: '协议版本不兼容，请刷新页面',
+  version_mismatch: '协议版本不兼容，请刷新页面',
+  bad_envelope: '消息格式错误，请刷新重试',
+  // 流量与 payload 错误
+  rate_limited: '请求过于频繁，请稍后再试',
+  invalid_payload: '请求格式不合法',
+  message_too_large: '消息体过大，请减少数据量',
+  // 分城 / 运输
+  main_level_too_low: '主基地等级不足，无法拓荒',
+  soft_limit_too_low: '人口规模不足，无法拓荒',
+  found_inflight_limit: '已有拓荒队伍在途',
+  tile_occupied: '目标地块已被占用',
+  too_close_to_village: '距离其他村庄过近',
+  out_of_map: '超出地图范围',
+  no_settlers: '拓荒者不足',
+  no_settler_unit: '当前部族没有拓荒者',
+  cargo_exceeds_carry: '货物超过部队负重',
+  empty_cargo: '请填写运输货物',
+  same_village: '不能运往出发村本身',
+  not_own_village: '只能运往自己的村庄',
+  cannot_abandon_capital: '不能放弃主城',
+  abandon_locked: '新建分城冷却中，暂不可放弃',
+  village_not_owned: '不是你的村庄',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */
@@ -36,12 +67,15 @@ export function errText(code?: string): string {
   if (code.startsWith('bad_troops')) return '出征兵力不合法';
   if (code.startsWith('requires_building')) return '缺少训练所需建筑';
   if (code.startsWith('insufficient_troops')) return '兵力不足';
+  if (code.startsWith('unknown_unit')) return '未知兵种';
+  if (code.startsWith('unknown_building')) return '未知建筑';
   if (code.startsWith('insufficient:')) {
     const r = code.split(':')[1];
     return `${resInfo(r).name ?? r}不足`;
   }
   if (code.startsWith('unknown_')) return '目标不存在';
-  return code;
+  // 未知错误码不原样回显（防注入 / 防泄漏内部细节）
+  return '操作失败';
 }
 
 export function formName(f: string): string {

@@ -37,7 +37,7 @@ test('重启后：账号/资源/建筑保留，密码仍可登录，在途建造
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
 
     // 刷盘
-    (app.store as any).flush();
+    app.store.flush();
 
     // ---- 第二次启动：从文件载入 ----
     app = appAt(file);
@@ -87,7 +87,7 @@ test('重启后：进行中的战斗恢复并跑完（combat.resume）', async (
     await app.scheduler.advanceTo(clock + 200, setClock);
     const mid = await app.commands.send({ name: 'combat.GetBattle', from: 't', payload: { targetId: 'pve-4' } });
     assert.ok((mid.payload as any).battle, '刷盘前战斗应仍在进行');
-    (app.store as any).flush();
+    app.store.flush();
 
     // ---- 第二次启动：从文件载入，combat.resume 应继续把战斗跑完 ----
     app = appAt(file);

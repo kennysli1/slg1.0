@@ -44,7 +44,14 @@ export class WorldModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'world',
     publicActions: {
-      GetArea: { command: 'world.GetArea', needAuth: true },
+      GetArea: {
+        command: 'world.GetArea', needAuth: true,
+        schema: {
+          cq: { type: 'integer', min: -200, max: 200 },
+          cr: { type: 'integer', min: -200, max: 200 },
+          r:  { type: 'integer', min: 0, max: 50 },
+        },
+      },
     },
   };
 
@@ -59,6 +66,8 @@ export class WorldModule {
   init(): void {
     this.commands.register('world.GetTile', (c) => this.getTile(c));
     this.commands.register('world.GetTileByRef', (c) => this.getTileByRef(c));
+    this.commands.register('world.MinVillageDistance', (c) => this.minVillageDistance(c));
+    this.commands.register('world.ClearVillage', (c) => this.clearVillage(c));
     this.commands.register('world.GetArea', (c) => this.getArea(c));
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
@@ -110,6 +119,33 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
     this.store.set<Tile>(COLLECTION_TILE, hexKey(q, r), { q, r, kind: 'village', refId, name });
     return { ok: true, payload: { q, r } };
+  }
+
+  /** 查询 (q,r) 到最近村庄的六边形距离；无村庄时 distance=Infinity 用 -1 表示。 */
+  private minVillageDistance(cmd: Command): CommandResult {
+    const { q, r } = cmd.payload as { q: number; r: number };
+    let min = Number.POSITIVE_INFINITY;
+    for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
+      if (t.kind !== 'village') continue;
+      const d = hexDistance({ q, r }, { q: t.q, r: t.r });
+      if (d < min) min = d;
+    }
+    return {
+      ok: true,
+      payload: { distance: Number.isFinite(min) ? min : -1 },
+    };
+  }
+
+  /** 放弃/删村：把村庄地块变回 empty。 */
+  private clearVillage(cmd: Command): CommandResult {
+    const { refId } = cmd.payload as { refId: string };
+    for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
+      if (t.kind === 'village' && t.refId === refId) {
+        this.store.set<Tile>(COLLECTION_TILE, hexKey(t.q, t.r), { q: t.q, r: t.r, kind: 'empty' });
+        return { ok: true, payload: { q: t.q, r: t.r } };
+      }
+    }
+    return { ok: false, payload: {}, reason: 'village_tile_not_found' };
   }
 
   private placePve(cmd: Command): CommandResult {

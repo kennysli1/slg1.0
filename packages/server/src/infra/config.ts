@@ -40,7 +40,7 @@ export interface BuildingDef {
   timeSec: (lv: number) => number;
   maxLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
-  /** 每级贡献的繁荣度（全部建筑统一为 5）。 */
+  /** 每级贡献的繁荣度（按建筑主题分档，见 buildings.csv）。 */
   prosperityPerLevel: number;
   /** 是否参与人口劳动力增幅（资源田/军事/学院/铁匠/城镇中心=true；仓库/粮仓/城墙/集结点=false）。 */
   laborAmplified: boolean;
@@ -160,8 +160,34 @@ export interface GameConstants {
   popHealTime: number;
   /** 人口：满员时伤兵治愈速度加成（0.50 → 满员时耗时变 2400s）。 */
   popHealBonus: number;
-  /** 人口：净粮赤字→减员速率比例（待平衡调参，值越大减员越快）。 */
+  /** 人口：净粮赤字→减员速率比例（值越大粮仓耗尽后减员越快；v2已拍板=0.5）。 */
   popDeathRateFactor: number;
+  /** 人口 v2：增长阶段递减指数（0=不递减；currentPop > scaleRef 时增速按 (scaleRef/P)^exp 衰减）。 */
+  popGrowthScaleExp: number;
+  /** 人口 v2：增长递减参考基准（人口超过此值时增速开始按指数下降）。 */
+  popGrowthScaleRef: number;
+  /** 人口 v2：驻军每点人口（popCost加权）每小时额外粮食消耗（三池口粮·士兵池）。 */
+  popSoldierCropRatio: number;
+  /** 人口 v2：伤兵每人每小时额外粮食消耗（三池口粮·伤兵池）。 */
+  popWoundedCropRatio: number;
+  /** 人口 v2：饥荒减员定时任务间隔（秒；默认 300=5 分钟）。 */
+  popFamineTickSec: number;
+  /** 拓荒：出发村主基地最低等级。 */
+  foundMinMainLevel: number;
+  /** 拓荒：出发村人口软上限最低门槛。 */
+  foundMinSoftLimit: number;
+  /** 拓荒：所需拓荒者数量。 */
+  foundSettlerCount: number;
+  /** 拓荒：第2村开城包（单资源）。 */
+  foundResourceCostBase: number;
+  /** 拓荒：开城包递增底数（第N村 = base × growth^(N-2)）。 */
+  foundResourceCostGrowth: number;
+  /** 拓荒：与任意已有村庄的最小六边形距离。 */
+  foundMinTileDistance: number;
+  /** 拓荒：每玩家同时在途拓荒行军上限。 */
+  foundMaxInflight: number;
+  /** 分城新建后禁止放弃的秒数。 */
+  foundAbandonLockSec: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -405,13 +431,26 @@ export function loadGameConfig(configDir: string): GameConfig {
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
-    popGrowthPerProsperity: cn('pop_growth_per_prosperity', 15),
+    popGrowthPerProsperity: cn('pop_growth_per_prosperity', 5),
     popPerCapitaCrop: cn('pop_per_capita_crop', 2.0),
     popLaborFloor: cn('pop_labor_floor', 0.75),
     popDeathRecoveryRatio: cn('pop_death_recovery_ratio', 0.30),
     popHealTime: cn('pop_heal_time', 3600),
     popHealBonus: cn('pop_heal_bonus', 0.50),
-    popDeathRateFactor: cn('pop_death_rate_factor', 0.1),
+    popDeathRateFactor: cn('pop_death_rate_factor', 0.5),
+    popGrowthScaleExp: cn('pop_growth_scale_exp', 0.9),
+    popGrowthScaleRef: cn('pop_growth_scale_ref', 2000),
+    popSoldierCropRatio: cn('pop_soldier_crop_ratio', 1.0),
+    popWoundedCropRatio: cn('pop_wounded_crop_ratio', 1.0),
+    popFamineTickSec: cn('pop_famine_tick_sec', 300),
+    foundMinMainLevel: cn('found_min_main_level', 10),
+    foundMinSoftLimit: cn('found_min_soft_limit', 350),
+    foundSettlerCount: cn('found_settler_count', 3),
+    foundResourceCostBase: cn('found_resource_cost_base', 3000),
+    foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
+    foundMinTileDistance: cn('found_min_tile_distance', 3),
+    foundMaxInflight: cn('found_max_inflight', 1),
+    foundAbandonLockSec: cn('found_abandon_lock_sec', 86400),
     raw,
   };
 
@@ -582,6 +621,33 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.popDeathRecoveryRatio < 0 || c.popDeathRecoveryRatio > 1) errors.push(`game_constants.csv pop_death_recovery_ratio 必须在[0,1]`);
   if (c.popHealTime <= 0) errors.push(`game_constants.csv pop_heal_time 必须>0`);
   if (c.popDeathRateFactor <= 0) errors.push(`game_constants.csv pop_death_rate_factor 必须>0`);
+  if (c.popGrowthScaleExp < 0) errors.push(`game_constants.csv pop_growth_scale_exp 必须≥0`);
+  if (c.popGrowthScaleRef <= 0) errors.push(`game_constants.csv pop_growth_scale_ref 必须>0`);
+  if (c.popSoldierCropRatio < 0) errors.push(`game_constants.csv pop_soldier_crop_ratio 必须≥0`);
+  if (c.popWoundedCropRatio < 0) errors.push(`game_constants.csv pop_wounded_crop_ratio 必须≥0`);
+  if (c.popFamineTickSec <= 0) errors.push(`game_constants.csv pop_famine_tick_sec 必须>0`);
+
+  // 人口 v2 启动配置守卫：遍历全部兵种，断言训练后食物净余量严格减少（gap < 0）。
+  // 推导：将 1 名平民转化为 1 个兵时，食物净余量的变化：
+  //   freed    = popCost × perCapita（释放出的平民粮耗）
+  //   consumed = popCost × perCapita × ratio（士兵池口粮）+ upkeep（军事维护）
+  //   gapChange = freed - consumed = popCost × perCapita × (1 - ratio) - upkeep
+  // 要求 gapChange < 0（训练使食物余量严格缩减）：
+  //   upkeep > popCost × perCapita × (1 - ratio)
+  // ratio=1.0 时：upkeep > 0（有军事维护费即可）；ratio<1 时：需更高 upkeep。
+  // 此守卫防止「免费兵种」（训练后食物余量不减，可无限增兵而无惩罚）进入游戏。
+  if (c.popPerCapitaCrop > 0) {
+    for (const [key, u] of Object.entries(config.units)) {
+      if (u.popCost <= 0 && u.upkeep <= 0) continue; // 零资源零人口的特殊单位跳过
+      const gapChange = u.popCost * c.popPerCapitaCrop * (1 - c.popSoldierCropRatio) - u.upkeep;
+      if (gapChange >= 0) {
+        errors.push(
+          `units.csv[${key}] 训练后食物余量变化=${gapChange.toFixed(3)}≥0（不减反增/持平），` +
+          `须满足 upkeep(${u.upkeep}) > popCost(${u.popCost})×perCapita(${c.popPerCapitaCrop})×(1-ratio(${c.popSoldierCropRatio}))`
+        );
+      }
+    }
+  }
 
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);

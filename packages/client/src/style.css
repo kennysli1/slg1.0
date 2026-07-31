@@ -115,6 +115,9 @@ body {
 .res-num small { font-weight: 400; opacity: .6; font-size: var(--f-xs); }
 .res-rate { font-size: var(--f-xs); opacity: .7; margin-left: 2px; font-family: var(--ff-num); }
 .res-low .res-rate { color: #ff9b9b; opacity: 1; }
+.res-over .res-rate { color: #c47b2b; opacity: 1; }
+.res-over-tag { margin-left: 4px; color: #c47b2b; font-size: 0.75em; }
+.village-switch { margin-left: 8px; max-width: 220px; font-size: 12px; }
 .res-bar { position: relative; width: 100%; flex-basis: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.15); margin-top: 2px; }
 .res-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--c-gold); }
 .res-upkeep { min-width: auto; opacity: .85; }
@@ -305,6 +308,9 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .hex-cell[data-ref] { cursor: pointer; }
 .hex-cell[data-ref]:hover .hex { stroke: var(--c-gold); stroke-width: 2; }
 .hex-self { fill: #d7e8cf; stroke: var(--c-ok); stroke-width: 2; }
+.hex-own { fill: #cfe4d7; stroke: #3a8f6a; stroke-width: 1.5; }
+.march-transport { stroke: #3a7bd5; }
+.march-found { stroke: #c47b2b; }
 .hex-enemy { fill: #f4dada; stroke: #d99; }
 .hex-pve { fill: #efe2f1; stroke: #c4a8cc; }
 .hex-cell.hex-selected .hex { stroke: var(--c-gold); stroke-width: 3; }
@@ -657,6 +663,72 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 
 /* ---------- 右上角人口速览单元格（复用 .res 结构） ---------- */
 .res-pop-icon { font-size: var(--f-md); line-height: 1; }
+
+/* 饥荒时顶栏人口速览：速率字变红，与资源赤字视觉一致 */
+.res-famine .res-rate { color: #ff9b9b; opacity: 1; }
+
+/* ---------- 人口面板 v2：状态标签区 ---------- */
+.pop-statuses {
+  display: flex; flex-direction: column; gap: var(--s-1); margin-bottom: var(--s-2);
+}
+/* 公共状态标签：左色条 + 小字 + 背景淡色 */
+.pop-status {
+  font-size: var(--f-xs); font-weight: 600; line-height: 1.45;
+  padding: var(--s-1) var(--s-2); border-radius: var(--r-sm);
+  border-left: 3px solid currentColor;
+}
+/* 🚨 饥荒（红） */
+.pop-status--famine {
+  color: var(--c-danger);
+  background: rgba(178, 59, 59, .08);
+  border-left-color: var(--c-danger);
+}
+/* ⚠️ 接近饱和（橙） */
+.pop-status--near {
+  color: #a0621a;
+  background: rgba(196, 122, 44, .08);
+  border-left-color: var(--c-raid);
+}
+/* ✅ 满员（绿） */
+.pop-status--full {
+  color: var(--c-ok);
+  background: rgba(79, 122, 63, .08);
+  border-left-color: var(--c-ok);
+}
+/* 🩹 重伤（蓝） */
+.pop-status--wound {
+  color: #3a6a99;
+  background: rgba(58, 106, 153, .08);
+  border-left-color: #3a6a99;
+}
+
+/* 进度条变色：饥荒红 / 接近饱和橙（覆盖默认木金渐变） */
+.pop-bar-fill--famine {
+  background: linear-gradient(90deg, var(--c-danger), #e05252);
+}
+.pop-bar-fill--near {
+  background: linear-gradient(90deg, var(--c-raid), #e8a458);
+}
+
+/* 超限/赤字数值（meta 行 stat 内） */
+.pop-stat-deficit {
+  background: rgba(178, 59, 59, .06);
+  border-color: rgba(178, 59, 59, .25);
+}
+.pop-stat-deficit i { color: var(--c-danger); }
+.pop-deficit {
+  color: var(--c-danger); font-weight: 700; font-family: var(--ff-num);
+}
+
+/* 人口分类小字行（平民 / 驻军 / 伤兵） */
+.pop-breakdown {
+  font-size: var(--f-xs); color: var(--c-ink-soft); margin-bottom: var(--s-1);
+}
+
+/* 训练面板：批次粮压标注 */
+.train-upkeep {
+  color: var(--c-raid); font-size: var(--f-xs); white-space: nowrap;
+}
 
 /* ---------- 全局 Toast（即时提示，如队列已满） ---------- */
 #toast-host { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);

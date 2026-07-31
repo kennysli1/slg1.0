@@ -18,3 +18,22 @@ import './manifest.test.js';
 import './architecture.test.js';
 import './notifications.test.js';
 import './population.test.js';
+// ---- 新增回归测试（阶段 1-3）----
+import './scheduler.test.js';
+import './lock-concurrency.test.js';
+import './concurrency.test.js';
+import './reset-concurrency.test.js';
+import './population-regression.test.js';
+import './population-v2.test.js';
+import './gateway-scheduler-serial.test.js';
+// ---- 网络安全阶段（wire-boundary / rate-limit / validate）----
+import './rate-limit.test.js';
+import './validate.test.js';
+import './wire-boundary.test.js';
+import './store.test.js';
+import './smoke-wire.test.js';
+import './economy-overflow.test.js';
+import './multi-village.test.js';
+import './found-village.test.js';
+import './transport-abandon.test.js';
+

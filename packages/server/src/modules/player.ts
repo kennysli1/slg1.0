@@ -3,20 +3,31 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
 import { hexKey, hexDistance } from '../infra/hex.js';
-import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
+
+const scryptAsync = promisify(scrypt);
 
 /**
  * 领域模块 · Player（玩家身份）
- * 多人化与上线的核心：玩家账号（用户名+密码）、种族、拥有一个村庄。
+ * 多人化与上线的核心：玩家账号（用户名+密码）、种族、拥有的村庄列表。
  *
- * 职责：玩家账号的 owner。注册（用户名+密码+种族）、登录（校验密码）、
+ * 职责：玩家账号的 owner。注册/登录、多村归属、主城标记、切村校验、
  *       玩家↔村庄双向映射、为新玩家分配地图空位。
  *
- * 密码安全：scrypt 加盐哈希（Node 内置 crypto，无第三方依赖），不存明文。
- *
- * 扩展点：一个玩家多村庄、更多玩家属性后续在此扩展。
+ * 扩展点：分城（AttachVillage / DetachVillage）、放弃分城等。
  */
+
+export interface OwnedVillage {
+  id: string;
+  q: number;
+  r: number;
+  name: string;
+  /** 建成时刻(ms)，放弃锁用；旧档缺省视为 0（可弃） */
+  foundedAt?: number;
+}
 
 interface PlayerState {
   id: string;
@@ -25,11 +36,32 @@ interface PlayerState {
   pwd: string;
   /** 种族：romans/gauls/teutons */
   tribe: string;
+  /** 主城 id（不可放弃） */
+  capitalVillageId: string;
+  /** 拥有的全部村庄（含主城） */
+  ownedVillages: OwnedVillage[];
+  /**
+   * 兼容旧字段：始终等于 capitalVillageId。
+   * 会话「当前操作村」由 Gateway session.villageId 持有，不存这里。
+   */
   villageId: string;
-  q: number; // 六边形轴坐标
+  /** 主城坐标快照（兼容 Me.q/r） */
+  q: number;
   r: number;
   createdAt: number;
 }
+
+/** 读档时可能只有旧单村字段。 */
+type RawPlayer = Partial<PlayerState> & {
+  id: string;
+  name: string;
+  pwd: string;
+  tribe: string;
+  createdAt: number;
+  villageId?: string;
+  q?: number;
+  r?: number;
+};
 
 const COLLECTION = 'player';
 const COLLECTION_BYNAME = 'player_byname';
@@ -37,16 +69,16 @@ const COLLECTION_BYVILLAGE = 'player_byvillage';
 
 const VALID_TRIBES = ['romans', 'gauls', 'teutons'];
 
-function hashPassword(pwd: string): string {
+async function hashPassword(pwd: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = scryptSync(pwd, salt, 32);
+  const hash = await scryptAsync(pwd, salt, 32) as Buffer;
   return `${salt.toString('hex')}:${hash.toString('hex')}`;
 }
 
-function verifyPassword(pwd: string, stored: string): boolean {
+async function verifyPassword(pwd: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(':');
   if (!saltHex || !hashHex) return false;
-  const hash = scryptSync(pwd, Buffer.from(saltHex, 'hex'), 32);
+  const hash = await scryptAsync(pwd, Buffer.from(saltHex, 'hex'), 32) as Buffer;
   const expected = Buffer.from(hashHex, 'hex');
   return hash.length === expected.length && timingSafeEqual(hash, expected);
 }
@@ -54,14 +86,47 @@ function verifyPassword(pwd: string, stored: string): boolean {
 export class PlayerModule {
   static readonly NAME = 'player';
 
-  /** 对外动作清单（被 Gateway 汇总）。注册/登录是公开动作，无需鉴权。 */
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'player',
     publicActions: {
-      Register: { command: 'player.Register' },
-      Login: { command: 'player.Login' },
+      Register: {
+        command: 'player.Register',
+        schema: {
+          name:     { type: 'string', minLen: 1, maxLen: 16 },
+          password: { type: 'string', minLen: 4, maxLen: 64 },
+          tribe:    { type: 'enum', optional: true, values: ['romans', 'gauls', 'teutons'] },
+        },
+      },
+      Login: {
+        command: 'player.Login',
+        schema: {
+          name:     { type: 'string', minLen: 1, maxLen: 64 },
+          password: { type: 'string', minLen: 1, maxLen: 64 },
+        },
+      },
+      SelectVillage: {
+        command: 'player.SelectVillage',
+        needAuth: true,
+        injectPlayerId: true,
+        schema: {
+          villageId: { type: 'string', minLen: 1, maxLen: 64 },
+        },
+      },
+      AbandonVillage: {
+        command: 'player.AbandonVillage',
+        needAuth: true,
+        injectPlayerId: true,
+        schema: {
+          villageId: { type: 'string', minLen: 1, maxLen: 64 },
+        },
+      },
     },
   };
+
+  /** 放弃分城时由 app 注入的清理回调（清进度/地图/行军）。 */
+  private wipeVillage?: (villageId: string) => void;
+  /** 放弃锁秒数（来自常量，app 注入；默认 86400）。 */
+  private abandonLockSec = 86400;
 
   constructor(
     private store: Store,
@@ -72,56 +137,143 @@ export class PlayerModule {
     private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
     /** 地图半径，用于随机分配出生坐标范围（默认 20）。 */
     private mapSize: number = 20,
+    /**
+     * 全局共享串行队列（可选）。
+     * Register 命令用 "account:<normalizedName>" 车道串行化，防止同名并发注册 TOCTOU。
+     */
+    private serialQueue?: KeyedSerialQueue,
   ) {}
+
+  /** app 在组装后注入：清理单村进度与地图。 */
+  setVillageWiper(fn: (villageId: string) => void, abandonLockSec?: number): void {
+    this.wipeVillage = fn;
+    if (abandonLockSec !== undefined) this.abandonLockSec = abandonLockSec;
+  }
 
   init(): void {
     this.commands.register('player.Register', (c) => this.register(c));
     this.commands.register('player.Login', (c) => this.login(c));
     this.commands.register('player.Get', (c) => this.get(c));
     this.commands.register('player.GetByVillage', (c) => this.getByVillage(c));
+    this.commands.register('player.SelectVillage', (c) => this.selectVillage(c));
+    this.commands.register('player.AbandonVillage', (c) => this.abandonVillage(c));
+    this.commands.register('player.AttachVillage', (c) => this.attachVillage(c));
+    this.commands.register('player.DetachVillage', (c) => this.detachVillage(c));
+    this.commands.register('player.AllocVillageId', (c) => this.allocVillageId(c));
+    this.commands.register('player.CreateOwnedVillage', (c) => this.createOwnedVillage(c));
+  }
+
+  /** 规范化旧档 → 完整 PlayerState；若发生迁移则写回。 */
+  private normalize(raw: RawPlayer): PlayerState {
+    let changed = false;
+    let capitalVillageId = raw.capitalVillageId;
+    let ownedVillages = raw.ownedVillages ? [...raw.ownedVillages] : undefined;
+    let villageId = raw.villageId;
+    let q = raw.q ?? 0;
+    let r = raw.r ?? 0;
+
+    if (!ownedVillages || ownedVillages.length === 0) {
+      const id = villageId ?? `v-${raw.id}`;
+      ownedVillages = [{ id, q, r, name: `${raw.name}的村庄` }];
+      capitalVillageId = id;
+      villageId = id;
+      changed = true;
+    }
+    if (!capitalVillageId) {
+      capitalVillageId = ownedVillages[0]!.id;
+      changed = true;
+    }
+    // 保证 capital 在列表中
+    if (!ownedVillages.some((v) => v.id === capitalVillageId)) {
+      ownedVillages.unshift({ id: capitalVillageId, q, r, name: `${raw.name}的村庄` });
+      changed = true;
+    }
+    // 兼容字段对齐主城
+    const capital = ownedVillages.find((v) => v.id === capitalVillageId)!;
+    if (villageId !== capitalVillageId || q !== capital.q || r !== capital.r) {
+      villageId = capitalVillageId;
+      q = capital.q;
+      r = capital.r;
+      changed = true;
+    }
+
+    const p: PlayerState = {
+      id: raw.id,
+      name: raw.name,
+      pwd: raw.pwd,
+      tribe: raw.tribe,
+      capitalVillageId,
+      ownedVillages,
+      villageId: capitalVillageId,
+      q,
+      r,
+      createdAt: raw.createdAt,
+    };
+    if (changed) this.store.set(COLLECTION, p.id, p);
+    return p;
   }
 
   private load(id: string): PlayerState | undefined {
-    return this.store.get<PlayerState>(COLLECTION, id);
+    const raw = this.store.get<RawPlayer>(COLLECTION, id);
+    if (!raw) return undefined;
+    return this.normalize(raw);
   }
 
-  /** 注册：用户名唯一 + 密码 + 种族 → 创建玩家与村庄。 */
-  private register(cmd: Command): CommandResult {
+  /** 注册：用户名唯一 + 密码 + 种族 → 创建玩家与主城。 */
+  private async register(cmd: Command): Promise<CommandResult> {
     const { name, password, tribe } = cmd.payload as { name: string; password: string; tribe: string };
     const clean = (name ?? '').trim();
     if (!clean) return { ok: false, payload: {}, reason: 'empty_name' };
     if (clean.length > 16) return { ok: false, payload: {}, reason: 'name_too_long' };
     if (!password || password.length < 4) return { ok: false, payload: {}, reason: 'password_too_short' };
+
+    const norm = clean.toLowerCase();
     const t = VALID_TRIBES.includes(tribe) ? tribe : 'romans';
 
-    if (this.store.get<string>(COLLECTION_BYNAME, clean)) {
-      return { ok: false, payload: {}, reason: 'name_taken' };
-    }
+    const doRegister = async (): Promise<CommandResult> => {
+      if (this.store.get<string>(COLLECTION_BYNAME, clean)) {
+        return { ok: false, payload: {}, reason: 'name_taken' };
+      }
 
-    const id = `p-${this.nextSeq()}`;
-    const villageId = `v-${id}`;
-    const { q, r } = this.allocateSpot();
-    void this.createVillage(villageId, q, r, `${clean}的村庄`, t);
+      const id = `p-${this.nextSeq()}`;
+      const villageId = `v-${id}-1`;
+      const { q, r } = this.allocateSpot();
+      const vName = `${clean}的村庄`;
 
-    const p: PlayerState = {
-      id, name: clean, pwd: hashPassword(password), tribe: t,
-      villageId, q, r, createdAt: this.now(),
+      try {
+        await this.createVillage(villageId, q, r, vName, t);
+      } catch (err) {
+        console.error(`[Player] register: createVillage failed for "${clean}"`, err);
+        return { ok: false, payload: {}, reason: 'village_creation_failed' };
+      }
+
+      const owned: OwnedVillage = { id: villageId, q, r, name: vName, foundedAt: this.now() };
+      const p: PlayerState = {
+        id, name: clean, pwd: await hashPassword(password), tribe: t,
+        capitalVillageId: villageId,
+        ownedVillages: [owned],
+        villageId, q, r, createdAt: this.now(),
+      };
+      this.store.set(COLLECTION, id, p);
+      this.store.set(COLLECTION_BYNAME, clean, id);
+      this.store.set(COLLECTION_BYVILLAGE, villageId, id);
+      return { ok: true, payload: { player: this.publicPlayer(p) } };
     };
-    this.store.set(COLLECTION, id, p);
-    this.store.set(COLLECTION_BYNAME, clean, id);
-    this.store.set(COLLECTION_BYVILLAGE, villageId, id);
-    return { ok: true, payload: { player: this.publicPlayer(p) } };
+
+    if (this.serialQueue) {
+      return this.serialQueue.run(`account:${norm}`, doRegister);
+    }
+    return doRegister();
   }
 
-  /** 登录：校验用户名+密码。 */
-  private login(cmd: Command): CommandResult {
+  private async login(cmd: Command): Promise<CommandResult> {
     const { name, password } = cmd.payload as { name: string; password: string };
     const clean = (name ?? '').trim();
     const id = this.store.get<string>(COLLECTION_BYNAME, clean);
     if (!id) return { ok: false, payload: {}, reason: 'no_such_user' };
     const p = this.load(id);
     if (!p) return { ok: false, payload: {}, reason: 'no_such_user' };
-    if (!verifyPassword(password ?? '', p.pwd)) return { ok: false, payload: {}, reason: 'wrong_password' };
+    if (!await verifyPassword(password ?? '', p.pwd)) return { ok: false, payload: {}, reason: 'wrong_password' };
     return { ok: true, payload: { player: this.publicPlayer(p) } };
   }
 
@@ -131,7 +283,6 @@ export class PlayerModule {
     return { ok: true, payload: { player: this.publicPlayer(p) } };
   }
 
-  /** 村庄→玩家反查（PvP 攻击时找被攻击村的主人）。 */
   private getByVillage(cmd: Command): CommandResult {
     const pid = this.store.get<string>(COLLECTION_BYVILLAGE, (cmd.payload as any).villageId);
     if (!pid) return { ok: false, payload: {}, reason: 'owner_not_found' };
@@ -140,9 +291,167 @@ export class PlayerModule {
     return { ok: true, payload: { player: this.publicPlayer(p) } };
   }
 
-  /** 对外只暴露安全字段（绝不含 pwd）。 */
-  private publicPlayer(p: PlayerState) {
-    return { id: p.id, name: p.name, tribe: p.tribe, villageId: p.villageId, q: p.q, r: p.r };
+  /** 校验村属于该玩家；Gateway 据此切换 session.villageId。 */
+  private selectVillage(cmd: Command): CommandResult {
+    const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const v = p.ownedVillages.find((x) => x.id === villageId);
+    if (!v) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    return {
+      ok: true,
+      payload: {
+        player: this.publicPlayer(p, villageId),
+        currentVillageId: villageId,
+      },
+    };
+  }
+
+  /**
+   * 内部：把已建好的村挂到玩家名下（found 到达后调用）。
+   * payload: { playerId, villageId, q, r, name }
+   */
+  private attachVillage(cmd: Command): CommandResult {
+    const { playerId, villageId, q, r, name } = cmd.payload as {
+      playerId: string; villageId: string; q: number; r: number; name: string;
+    };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    if (p.ownedVillages.some((v) => v.id === villageId)) {
+      return { ok: false, payload: {}, reason: 'village_already_owned' };
+    }
+    if (this.store.get<string>(COLLECTION_BYVILLAGE, villageId)) {
+      return { ok: false, payload: {}, reason: 'village_id_taken' };
+    }
+    p.ownedVillages.push({ id: villageId, q, r, name, foundedAt: this.now() });
+    this.store.set(COLLECTION, p.id, p);
+    this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
+    return { ok: true, payload: { player: this.publicPlayer(p) } };
+  }
+
+  /**
+   * 放弃分城：非主城、过锁定期 → 卸归属 + 清理进度/地图。
+   */
+  private abandonVillage(cmd: Command): CommandResult {
+    const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    if (villageId === p.capitalVillageId) {
+      return { ok: false, payload: {}, reason: 'cannot_abandon_capital' };
+    }
+    const v = p.ownedVillages.find((x) => x.id === villageId);
+    if (!v) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    const foundedAt = v.foundedAt ?? 0;
+    if (foundedAt > 0 && this.now() - foundedAt < this.abandonLockSec * 1000) {
+      return { ok: false, payload: {}, reason: 'abandon_locked' };
+    }
+    if (!this.wipeVillage) {
+      return { ok: false, payload: {}, reason: 'wipe_not_configured' };
+    }
+    // 先卸归属再清进度，避免 GetByVillage 残留
+    const det = this.detachVillage({
+      name: 'player.DetachVillage', from: PlayerModule.NAME,
+      payload: { playerId, villageId },
+    } as Command);
+    if (!det.ok) return det;
+    this.wipeVillage(villageId);
+    return { ok: true, payload: { player: (det.payload as any).player, abandoned: villageId } };
+  }
+
+  /**
+   * 内部：从玩家名下移除村（放弃分城后调用；不删主城）。
+   * payload: { playerId, villageId }
+   */
+  private detachVillage(cmd: Command): CommandResult {
+    const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    if (villageId === p.capitalVillageId) {
+      return { ok: false, payload: {}, reason: 'cannot_detach_capital' };
+    }
+    const idx = p.ownedVillages.findIndex((v) => v.id === villageId);
+    if (idx < 0) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    p.ownedVillages.splice(idx, 1);
+    this.store.set(COLLECTION, p.id, p);
+    this.store.delete(COLLECTION_BYVILLAGE, villageId);
+    return { ok: true, payload: { player: this.publicPlayer(p) } };
+  }
+
+  /**
+   * 内部：分配 id + 建村装配 + 挂归属（拓荒到达成功时由 movement 调用）。
+   * payload: { playerId, q, r, name? }
+   */
+  private async createOwnedVillage(cmd: Command): Promise<CommandResult> {
+    const { playerId, q, r, name } = cmd.payload as {
+      playerId: string; q: number; r: number; name?: string;
+    };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+
+    const alloc = this.allocVillageId({
+      name: 'player.AllocVillageId', from: PlayerModule.NAME, payload: { playerId },
+    } as Command);
+    if (!alloc.ok) return alloc;
+    const villageId = (alloc.payload as { villageId: string }).villageId;
+    const vName = (name && name.trim()) || `${p.name}的分城`;
+
+    try {
+      await this.createVillage(villageId, q, r, vName, p.tribe);
+    } catch (err) {
+      console.error(`[Player] createOwnedVillage failed`, err);
+      return { ok: false, payload: {}, reason: 'village_creation_failed' };
+    }
+
+    const att = this.attachVillage({
+      name: 'player.AttachVillage', from: PlayerModule.NAME,
+      payload: { playerId, villageId, q, r, name: vName },
+    } as Command);
+    if (!att.ok) return att;
+    return {
+      ok: true,
+      payload: { villageId, player: (att.payload as any).player },
+    };
+  }
+
+  /** 分配下一个村 id：v-<playerId>-<n>。 */
+  private allocVillageId(cmd: Command): CommandResult {
+    const { playerId } = cmd.payload as { playerId: string };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    let n = p.ownedVillages.length + 1;
+    let id = `v-${playerId}-${n}`;
+    while (this.store.get<string>(COLLECTION_BYVILLAGE, id) || p.ownedVillages.some((v) => v.id === id)) {
+      n += 1;
+      id = `v-${playerId}-${n}`;
+    }
+    return { ok: true, payload: { villageId: id } };
+  }
+
+  /**
+   * 对外安全字段。
+   * villageId / q / r：默认主城；若传入 currentVillageId 则指向当前操作村（供 Select 响应）。
+   */
+  private publicPlayer(p: PlayerState, currentVillageId?: string) {
+    const current = currentVillageId
+      ?? p.capitalVillageId;
+    const cur = p.ownedVillages.find((v) => v.id === current) ?? p.ownedVillages[0]!;
+    return {
+      id: p.id,
+      name: p.name,
+      tribe: p.tribe,
+      villageId: cur.id,
+      currentVillageId: cur.id,
+      capitalVillageId: p.capitalVillageId,
+      q: cur.q,
+      r: cur.r,
+      villages: p.ownedVillages.map((v) => ({
+        id: v.id,
+        q: v.q,
+        r: v.r,
+        name: v.name,
+        isCapital: v.id === p.capitalVillageId,
+      })),
+    };
   }
 
   private nextSeq(): number {
@@ -152,20 +461,19 @@ export class PlayerModule {
   }
 
   /**
-   * 为新玩家分配地图空位：在地图内随机散布，与现有玩家保持最小间距（MIN_SPACING）。
-   * 使用 LCG 伪随机（基于玩家总数做种子偏移），不用 Math.random()，保证可复现性。
-   * 地图边缘留 2 格缓冲；若随机尝试失败（地图很满）则降级为螺旋兜底。
+   * 为新玩家分配地图空位：在地图内随机散布，与现有**主城**保持最小间距。
    */
   private allocateSpot(): { q: number; r: number } {
-    const existing = this.store.all<PlayerState>(COLLECTION);
-    const taken = new Set(existing.map((p) => hexKey(p.q, p.r)));
+    const existing = this.store.all<RawPlayer>(COLLECTION).map((raw) => this.normalize(raw));
+    const taken = new Set<string>();
+    for (const p of existing) {
+      for (const v of p.ownedVillages) taken.add(hexKey(v.q, v.r));
+    }
 
-    // 最小玩家间距：地图半径的 1/4，最少 3 格，最多 8 格
     const MIN_SPACING = Math.max(3, Math.min(8, Math.floor(this.mapSize / 4)));
-    const border = 2; // 距离地图边缘的最小距离
+    const border = 2;
     const usableRadius = this.mapSize - border;
 
-    // LCG 伪随机，种子基于当前玩家数（保证分布可复现但不集中）
     let seed = existing.length * 2654435761 + 1;
     const lcg = () => {
       seed = (seed * 1664525 + 1013904223) & 0xffffffff;
@@ -174,19 +482,17 @@ export class PlayerModule {
 
     const MAX_ATTEMPTS = 200;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      // 在 usableRadius 范围内随机生成 axial 坐标
       const q = Math.round((lcg() * 2 - 1) * usableRadius);
       const r = Math.round((lcg() * 2 - 1) * usableRadius);
-      // 确保在六边形地图内
       if (Math.abs(q) + Math.abs(r) + Math.abs(-q - r) > this.mapSize * 2) continue;
       if (taken.has(hexKey(q, r))) continue;
-      // 检查与现有玩家的最小间距
-      const tooClose = existing.some((p) => hexDistance({ q, r }, { q: p.q, r: p.r }) < MIN_SPACING);
+      const tooClose = existing.some((p) =>
+        p.ownedVillages.some((v) => hexDistance({ q, r }, { q: v.q, r: v.r }) < MIN_SPACING),
+      );
       if (tooClose) continue;
       return { q, r };
     }
 
-    // 兜底：螺旋向外找第一个空格（地图很满时）
     const DIRS = [
       { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
       { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 },
@@ -206,36 +512,44 @@ export class PlayerModule {
   }
 
   /**
-   * 运维：为所有现存账号重建村庄（刷档后调用）。账号本身（用户名/密码/种族）不动。
-   * 调用前提：economy/building/military/world 等游戏进度集合已被清空、世界已重新 setup。
-   *
-   * @param reassignSpots false=保留每个账号原有地图坐标；true=按注册顺序重新螺旋分配坐标
-   *                      （用于地图尺寸/布局也变了的情况），并同步更新账号记录与归属索引。
+   * 运维：为所有现存账号重建**主城**（刷档后调用）。多村进度已随 PROGRESS 清空，
+   * 此处把玩家收束回单主城。
    */
   rebuildVillages(reassignSpots: boolean): void {
-    // 按注册顺序（id 里的序号）稳定排序，保证重分配坐标可复现。
     const players = this.store
-      .all<PlayerState>(COLLECTION)
+      .all<RawPlayer>(COLLECTION)
       .slice()
-      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+      .map((raw) => this.normalize(raw));
 
-    if (reassignSpots) {
-      // 归属索引会整体重建，先清空避免残留旧 villageId 映射。
-      this.store.clear(COLLECTION_BYVILLAGE);
-    }
+    this.store.clear(COLLECTION_BYVILLAGE);
 
     for (const p of players) {
-      let { q, r, villageId } = p;
+      let q = p.q;
+      let r = p.r;
+      let villageId = `v-${p.id}-1`;
       if (reassignSpots) {
-        const spot = this.allocateSpot(); // 依赖已写回的 q/r 去重，逐个分配
+        const spot = this.allocateSpot();
         q = spot.q;
         r = spot.r;
-        villageId = `v-${p.id}`;
-        const updated: PlayerState = { ...p, q, r, villageId };
-        this.store.set(COLLECTION, p.id, updated);
-        this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
+      } else {
+        // 保留原主城坐标；若旧 id 是 v-p-N 则升为 v-p-N-1
+        const capital = p.ownedVillages.find((v) => v.id === p.capitalVillageId);
+        if (capital) { q = capital.q; r = capital.r; }
       }
-      void this.createVillage(villageId, q, r, `${p.name}的村庄`, p.tribe);
+      const vName = `${p.name}的村庄`;
+      const owned: OwnedVillage = { id: villageId, q, r, name: vName };
+      const updated: PlayerState = {
+        ...p,
+        capitalVillageId: villageId,
+        ownedVillages: [owned],
+        villageId,
+        q,
+        r,
+      };
+      this.store.set(COLLECTION, p.id, updated);
+      this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
+      void this.createVillage(villageId, q, r, vName, p.tribe);
     }
   }
 }

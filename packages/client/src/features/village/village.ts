@@ -1,5 +1,5 @@
 /** 村庄页：三区结构（城镇中心 + 城内 + 城外）+ 空槽点击建造 + 多队列 + 建筑详情抽屉。 */
-import { art, canAfford, costPreview, progressBar } from '../../shared/ui/widgets.js';
+import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
 import { buildingInfo } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
@@ -50,15 +50,18 @@ function renderCenter(tc: any): string {
   const max = tc.level >= tc.maxLevel;
   const afford = canAfford(tc.nextCost);
   const busy = tc.building;
+  const progress = busy && tc.buildingStartAt && tc.buildingFinishAt
+    ? progressBar(tc.buildingStartAt, tc.buildingFinishAt, '升级中')
+    : '';
   const btn = max ? '<small class="tag">已满级</small>'
     : busy ? '<small class="tag">建造中</small>'
     : `<button class="btn-sm" data-up-slot="${tc.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   return `<h3>城镇中心</h3>
-    <div class="card card-center" data-bld-slot="${tc.slotId}" title="点击查看 ${tc.name} 详情">${art(tc.icon, tc.name, 'xl')}
-      <div class="cardbody"><div class="card-title">${tc.name} <b class="lv">Lv${tc.level}</b>
+    <div class="card card-center" data-bld-slot="${tc.slotId}" title="点击查看 ${escapeAttr(tc.name)} 详情">${art(tc.icon, tc.name, 'xl')}
+      <div class="cardbody"><div class="card-title">${escapeHtml(tc.name)} <b class="lv">Lv${tc.level}</b>
         <small class="bld-detail-hint">详情 ›</small></div>
         <div class="hint-sm">升级开放更多城内/城外槽位与队列</div>
-        ${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div>`;
+        ${progress}${max || busy ? '' : costPreview(tc.nextCost, tc.nextTimeSec)}${btn}</div></div>`;
 }
 
 /** 渲染一个区：已建建筑卡 + 空槽（可点建造）。 */
@@ -90,11 +93,14 @@ function renderPlaced(p: any): string {
   else if (busy) btn = '<small class="tag">建造中</small>';
   else btn = `<button class="btn-sm" data-up-slot="${p.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
   const lv = constructing ? '建造中' : `Lv${p.level}`;
-  return `<div class="card" data-bld-slot="${p.slotId}" title="点击查看 ${p.name} 详情">${art(p.icon, p.name, 'md')}
-    <div class="cardbody"><div class="card-title">${p.name} <b class="lv">${lv}</b>
+  const progress = busy && p.buildingStartAt && p.buildingFinishAt
+    ? progressBar(p.buildingStartAt, p.buildingFinishAt, constructing ? '建造中' : '升级中')
+    : '';
+  return `<div class="card" data-bld-slot="${p.slotId}" title="点击查看 ${escapeAttr(p.name)} 详情">${art(p.icon, p.name, 'md')}
+    <div class="cardbody"><div class="card-title">${escapeHtml(p.name)} <b class="lv">${lv}</b>
       <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
-      ${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
+      ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
 }
 
 /** 侧边栏抽屉：某区可建建筑清单。整条选项可点开详情；建造按钮点击不冒泡。 */
@@ -108,12 +114,12 @@ function renderDrawer(): string {
     const prod = o.producing ? `<span class="hint-sm prod">+${o.producing.ratePerHour}/h</span>` : '';
     let action: string;
     if (!o.unlocked) {
-      action = `<small class="tag tag-lock">${o.lockReason ?? '未解锁'}</small>`;
+      action = `<small class="tag tag-lock">${escapeHtml(o.lockReason ?? '未解锁')}</small>`;
     } else {
       action = `<button class="btn-sm" data-do-build="${o.kind}" ${!afford ? 'disabled' : ''}>建造</button>`;
     }
-    return `<div class="opt ${o.unlocked ? '' : 'locked'}" data-bld-opt="${o.kind}" title="点击查看 ${o.name} 详情">${art(o.icon, o.name, 'md')}
-      <div class="opt-body"><div class="opt-title">${o.name} ${prod}<small class="bld-detail-hint">详情 ›</small></div>
+    return `<div class="opt ${o.unlocked ? '' : 'locked'}" data-bld-opt="${o.kind}" title="点击查看 ${escapeAttr(o.name)} 详情">${art(o.icon, o.name, 'md')}
+      <div class="opt-body"><div class="opt-title">${escapeHtml(o.name)} ${prod}<small class="bld-detail-hint">详情 ›</small></div>
         ${costPreview(o.cost, o.timeSec)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
@@ -187,15 +193,15 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
     <aside class="drawer drawer--opening bld-drawer" role="dialog" aria-modal="true">
       <div class="drawer-head">
         ${art(info.icon, info.name, 'sm')}
-        <span class="bld-drawer-name">${info.name}</span>
+        <span class="bld-drawer-name">${escapeHtml(info.name)}</span>
         <small class="tag">${lvStr}</small>
         <button class="drawer-close" data-close-bld="1" aria-label="关闭">✕</button>
       </div>
       <div class="drawer-body">
         <div class="drawer-sec-title">简介</div>
-        <div class="bld-detail-desc">${info.desc || '这栋建筑暂无简介。'}</div>
+        <div class="bld-detail-desc">${escapeHtml(info.desc || '这栋建筑暂无简介。')}</div>
         <div class="drawer-sec-title">升级效果</div>
-        <div class="bld-detail-desc">${info.effect || '每级提升该建筑的相关能力。'}</div>
+        <div class="bld-detail-desc">${escapeHtml(info.effect || '每级提升该建筑的相关能力。')}</div>
         ${prodSec}
         ${costSec}
       </div>

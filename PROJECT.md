@@ -103,6 +103,8 @@ slg1.0/
 | `movement.ts` | 在途部队 | 出征→逐格行军→到达发 `combat.Engage`→战斗结束(`BattleEnded`)带战利品返程（raid打PvE / attack打玩家 / return）；坐标为六边形 `{q,r}` |
 | `combat.ts` | **进行中的战斗**（`battle` 集合） | 有状态逐 tick 战斗：前后排承伤 + 近战/远程 + 特性；一地一场战、后到按阵营并入；结束发 Command 让 owner 扣兵/掠夺、发 Event 出战报（PvE/PvP 共用）；每 tick 推实时快照 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
+| `population.ts` | 每村当前人口(currentPop)/伤兵队列(woundedPool) | v2：三池口粮（平民/士兵/伤兵）、阶段递减增长、闭式新村固定点、饥荒状态机（CropDeficit→famine tick emit）、SetGarrisonPop、SetEnRoutePop；单向写 economy 的 civilian_pop/soldier_pool/wounded_pool 口粮及劳动加成，只读 economy.nonCivilianUpkeep 算软上限（无环） |
+| `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
 ### 接入层
@@ -137,12 +139,16 @@ slg1.0/
 | `server/src/test/hex.test.ts` | 六边形距离与路径 |
 | `server/src/test/movement-path.test.ts` | 逐格行军、到达接战、途中相遇 |
 | `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
+| `server/src/test/population.test.ts` | 人口系统：繁荣度增长、粮食软上限、赤字减员、伤兵治愈、扣人口发 `population.Changed` |
+| `server/src/test/population-v2.test.ts` | 人口系统 v2 T1-T8：三池口粮口径/SetGarrisonPop/SetEnRoutePop/阶段递减增长/软上限联动/饥荒状态机/settle 永不 emit/伤兵池口粮 |
 | `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
 | `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
 | `server/src/test/notifications.test.ts` | 服务端通知/战报持久化与上限裁剪 |
+| `server/src/test/concurrency.test.ts` 等 | 并发串行化 / Scheduler / CropDeficit 边沿 / 伤兵 id / Gateway 边界 / WAL 恢复 |
+| `client/src/test/unit.test.ts` | 前端转义、错误文案、协议版本兼容性 |
 
 ---
 
@@ -158,10 +164,18 @@ slg1.0/
 | **`2_2.0设计/07_扩展与代码规范.md`** | 立规矩：怎么加内容/模块/养成 + 自查清单 | **每次加代码前** |
 | `2_2.0设计/01_定位与改动方针.md` | S0 核心定位决策 | 回顾方向 |
 | `2_2.0设计/02_系统清单.md` | 系统范围（保留/改/新增/后置） | 看做了什么没做什么 |
+| `2_2.0设计/08_战斗系统重做设计.md` | 有状态 tick 战斗（近战/远程/特性）设计 | 改战斗前（已实现） |
+| `2_2.0设计/09_地图与行军系统重做.md` | 六边形地图 + 真实路径 + 途中相遇 | 改地图/行军前（已实现） |
+| `2_2.0设计/10_兵种特性效果表.md` | TraitEffect 枚举参考 + 加新特性怎么改 | 加兵种特性时 |
+| `2_2.0设计/11_建筑系统重做.md` | 三区结构 + 城镇中心解锁槽位设计 | 改建筑前（已实现） |
+| `2_2.0设计/12_建筑系统重构架构规划.md` | 建筑重构的架构/实现规划 | 读建筑实现依据 |
+| `2_2.0设计/13_人口系统设计.md` | 人口机制 A–H + 数值表 + 收敛演算 | 改人口前（已实现） |
+| `2_2.0设计/14_人口系统架构规划.md` | 人口系统架构/接口签名规划 | 读人口实现依据 |
 | `2_2.0设计/改进方向备选池.md` | 待选扩展点 | 想新功能时 |
 | **`服务器/01_数据存储结构.md`** | 存档格式、每个集合的 schema、主键规则 | 改数据 / 排查存档问题前 |
 | **`服务器/02_数据库操作手册.md`** | 查看/备份/手改/刷档/删档/换DB | 运维数据 / 刷档时 |
-| `美术资源清单.md` | 31个占位图替换清单 | 做美术时 |
+| `服务器/03_GM调试手册.md` | GM 调试命令 / 手动改档技巧 | 联调 / 排障时 |
+| `美术资源清单.md` | 美术替换清单（40 张已接入，PvE tier4-8 待补） | 做美术时 |
 | `部署手册_腾讯云轻量服务器.md` | 部署步骤 + 需你提供的信息 | 上线时 |
 
 ---
@@ -201,12 +215,11 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 七、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 9 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化 + 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）**。服务端测试 61 项。
+**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v2（三池口粮/阶段递减增长/饥荒状态机/SetGarrisonPop/SetEnRoutePop/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
 
-**部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`。
+**部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`（与 pm2 `ecosystem.config.cjs` 同入口：`packages/server/dist/main.js`）。
 
 **可选下一步**：
-- 部署上线（按手册操作，需你在服务器执行几条命令）
-- 域名 + HTTPS（正式公开需要，我可帮配 Nginx + 免费证书）
+- 域名 + HTTPS（正式公开需要，可帮配 Nginx + 免费证书）
 - 种族特性差异化（专属建筑/加成）、英雄/工会等养成系统
-- 生成美术替换占位图（见美术资源清单）
+- 补齐 PvE tier4-8 正式美术（当前为占位图，见美术资源清单）

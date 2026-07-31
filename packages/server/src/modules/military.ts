@@ -49,10 +49,22 @@ export class MilitaryModule {
   static readonly MANIFEST: ModuleManifest = {
     moduleName: 'military',
     publicActions: {
-      GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true },
-      TrainTroops: { command: 'military.TrainTroops', ownVillage: true, needAuth: true },
-      UpgradeSmithy: { command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true },
-      DisbandTroops: { command: 'military.DisbandTroops', ownVillage: true, needAuth: true },
+      GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true, schema: {} },
+      TrainTroops: {
+        command: 'military.TrainTroops', ownVillage: true, needAuth: true,
+        schema: {
+          unit:  { type: 'string', minLen: 1, maxLen: 32 },
+          count: { type: 'integer', min: 1, max: 10000 },
+        },
+      },
+      UpgradeSmithy: {
+        command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true,
+        schema: { unit: { type: 'string', minLen: 1, maxLen: 32 } },
+      },
+      DisbandTroops: {
+        command: 'military.DisbandTroops', ownVillage: true, needAuth: true,
+        schema: { units: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
+      },
     },
     eventPushMap: {
       'military.TroopTrained': 'TroopTrained',
@@ -81,18 +93,39 @@ export class MilitaryModule {
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
+
+    // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
+    this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      this.onCropDeficit(villageId);
+    });
   }
 
-  /** 重启恢复：为所有进行中的训练重新登记下一个出兵任务（过期则立即触发）。 */
+  /**
+   * 重启恢复：每个村庄状态都上报驻军维护和人口（不论是否在训练）；
+   * 然后为进行中的训练重新登记出兵任务。
+   * 修复：旧版 if (!s.training) continue 会跳过所有无训练的驻军，导致
+   * reportUpkeep/reportGarrisonPop 从未被调用，economy 中 troops/soldier_pool 归零。
+   */
   resume(): void {
     for (const s of this.store.all<MilitaryState>(COLLECTION)) {
+      // 每个 state 都必须上报（包含无训练的驻村）
+      this.reportUpkeep(s);
+      this.reportGarrisonPop(s);
+
       if (!s.training) continue;
-      const delay = Math.max(0, s.training.nextDoneAt - this.now());
-      // trainMsEach 兼容旧存档（旧存档无此字段，回退到 def.trainSec）
+
+      // 旧存档兼容：trainMsEach 缺失时回退到 def.trainSec
       if (!s.training.trainMsEach) {
         s.training.trainMsEach = (this.config.units[s.training.unit]?.trainSec ?? 30) * 1000;
       }
-      s.training.taskId = this.scheduler.schedule(delay, () => this.produceOne(s.villageId));
+      const delay = Math.max(0, s.training.nextDoneAt - this.now());
+      s.training.taskId = this.scheduler.schedule(
+        delay,
+        () => this.produceOne(s.villageId),
+        `military:${s.villageId}`,
+        `village:${s.villageId}`,
+      );
       this.store.set(COLLECTION, s.villageId, s);
     }
   }
@@ -112,7 +145,7 @@ export class MilitaryModule {
     return this.store.get<MilitaryState>(COLLECTION, villageId);
   }
 
-  /** 计算驻军总耗粮(每小时)并上报 Economy。兵力变化后调用。 */
+  /** 计算驻军总耗粮(每小时)并上报 Economy（source='troops'，unit.upkeep 基础维护）。 */
   private reportUpkeep(s: MilitaryState): void {
     let crop = 0;
     for (const [unit, n] of Object.entries(s.troops)) {
@@ -123,6 +156,47 @@ export class MilitaryModule {
       from: MilitaryModule.NAME,
       payload: { villageId: s.villageId, source: 'troops', cropPerHour: crop },
     });
+  }
+
+  /**
+   * 上报驻军人口权重总量给 Population（三池口粮·士兵池，v2 设计 G）。
+   * 兵力变化后调用（与 reportUpkeep 配对）。Population 据此计算 soldier_pool 耗粮。
+   */
+  private reportGarrisonPop(s: MilitaryState): void {
+    let popCostSum = 0;
+    for (const [unit, n] of Object.entries(s.troops)) {
+      popCostSum += (this.config.units[unit]?.popCost ?? 0) * n;
+    }
+    void this.commands.send({
+      name: 'population.SetGarrisonPop',
+      from: MilitaryModule.NAME,
+      payload: { villageId: s.villageId, popCostSum },
+    });
+  }
+
+  /**
+   * 极端饥荒逃兵（v2 设计 E·闭环）：CropDeficit 边沿触发，按比例扣除驻军。
+   * 不向 population.ReturnPop（逃兵不回补 currentPop，避免同步环）。
+   * 扣兵后同步更新 upkeep 与 garrisonPop，让 economy 减少消耗，有助于退出赤字。
+   */
+  private onCropDeficit(villageId: string): void {
+    const s = this.load(villageId);
+    if (!s) return;
+    // 逃兵率：10%驻军；若驻军为空则直接返回
+    const desertRatio = 0.10;
+    let anyDeserted = false;
+    for (const unit of Object.keys(s.troops)) {
+      const have = s.troops[unit] ?? 0;
+      if (have <= 0) continue;
+      const desert = Math.max(1, Math.floor(have * desertRatio));
+      s.troops[unit] = have - desert;
+      if (s.troops[unit] <= 0) delete s.troops[unit];
+      anyDeserted = true;
+    }
+    if (!anyDeserted) return;
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+    this.reportGarrisonPop(s); // 同步更新士兵池口粮（不返还人口）
   }
 
   /** 派生管线：最终数值 = 基础 × (1 + 铁匠等级×每级加成)。对外只暴露这个结果（含形态/特性）。 */
@@ -147,22 +221,45 @@ export class MilitaryModule {
 
   // ---- Commands ----
 
-  private getArmy(cmd: Command): CommandResult {
+  private async getArmy(cmd: Command): Promise<CommandResult> {
     const s = this.load((cmd.payload as any).villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）
-    const trainable = Object.values(this.config.units)
-      .filter((u) => u.tribe === s.tribe)
-      .map((u) => {
-        const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
-        return {
-          key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-          cost: u.cost, trainSec: u.trainSec,
-          meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
-          meleeDef: st.meleeDef, rangedDef: st.rangedDef,
-          speed: st.speed, carry: st.carry, upkeep: st.upkeep,
-        };
+
+    // 批量查询本族兵种所需建筑等级（跨模块只走 Command）
+    const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe);
+    const buildingCodes = [...new Set(tribeUnits.map((u) => u.building).filter(Boolean))];
+    const buildingLevels = new Map<string, number>();
+    for (const kind of buildingCodes) {
+      const res = await this.commands.send({
+        name: 'building.GetBuildingLevel',
+        from: MilitaryModule.NAME,
+        payload: { villageId: s.villageId, kind },
       });
+      buildingLevels.set(kind, (res.payload as any)?.level ?? 0);
+    }
+
+    // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
+    // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
+    const c = this.config.constants;
+    const trainable = tribeUnits.map((u) => {
+      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
+      const needLv = 1;
+      const haveLv = u.building ? (buildingLevels.get(u.building) ?? 0) : needLv;
+      const unlocked = haveLv >= needLv;
+      const bldName = this.config.buildings[u.building]?.name ?? u.building;
+      // 每兵每小时总粮食成本（军事维护 + 士兵池口粮）
+      const cropPerHourEach = st.upkeep + u.popCost * c.popPerCapitaCrop * c.popSoldierCropRatio;
+      return {
+        key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
+        cost: u.cost, trainSec: u.trainSec,
+        meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
+        meleeDef: st.meleeDef, rangedDef: st.rangedDef,
+        speed: st.speed, carry: st.carry, upkeep: st.upkeep,
+        cropPerHourEach,
+        unlocked,
+        lockReason: unlocked ? undefined : `需${bldName} ${needLv} 级`,
+      };
+    });
     return {
       ok: true,
       payload: {
@@ -236,7 +333,7 @@ export class MilitaryModule {
 
     // 入队，登记第一个出兵
     const firstDoneMs = effectiveTrainSec * 1000;
-    const taskId = this.scheduler.schedule(firstDoneMs, () => this.produceOne(villageId));
+    const taskId = this.scheduler.schedule(firstDoneMs, () => this.produceOne(villageId), `military:${villageId}`, `village:${villageId}`);
     s.training = {
       unit,
       remaining: count,
@@ -261,12 +358,13 @@ export class MilitaryModule {
       // 用开始训练时快照的每兵耗时（整批一致）
       const nextMs = order.trainMsEach ?? (this.config.units[order.unit]?.trainSec ?? 30) * 1000;
       order.nextDoneAt = this.now() + nextMs;
-      order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId));
+      order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId), `military:${villageId}`, `village:${villageId}`);
     } else {
       s.training = null;
     }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
 
     const evt: DomainEvent = {
       name: 'military.TroopTrained',
@@ -330,6 +428,7 @@ export class MilitaryModule {
     }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
 
     // 归还人口（population.ReturnPop 自行跳过 popPermanent 单位）
     const returnResult = await this.commands.send({
@@ -377,6 +476,7 @@ export class MilitaryModule {
     }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
     return { ok: true, payload: { troops: { ...s.troops } } };
   }
 }

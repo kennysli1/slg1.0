@@ -76,7 +76,7 @@ function main(): void {
   const { accounts } = app.resetWorld(opts);
 
   // 4. 落盘
-  (app.store as { flush?: () => void }).flush?.();
+  app.store.flush();
 
   if (mode === 'wipe') {
     console.log(`[admin] 完成：已清空 ${before} 个账号及全部进度，存档回到全新状态。`);

@@ -17,6 +17,10 @@
     "start": "node packages/server/dist/main.js",
     "test:server": "npm run test -w @slg/server",
     "lint": "npm run lint -w @slg/server",
+    "lint:all": "npm run lint -w @slg/server && npm run lint -w @slg/client",
+    "typecheck": "npm run typecheck -w @slg/client",
+    "test:all": "npm run test:server && npm run test -w @slg/client",
+    "verify": "npm run build:shared && npm run lint:all && npm run typecheck && npm run test:all && npm audit --omit=dev --audit-level=high",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",
     "reset:respawn": "node --import tsx packages/server/src/admin.ts --mode=respawn",
     "wipe:all": "node --import tsx packages/server/src/admin.ts --mode=wipe"

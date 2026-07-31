@@ -1,0 +1,165 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createGameApp, type GameApp } from '../app.js';
+import { Gateway } from '../gateway/gateway.js';
+import type { WireRequest, WireResponse, WirePush } from '@slg/shared';
+import { WIRE_VERSION } from '@slg/shared';
+
+let clock = 1_000_000;
+function freshApp(): GameApp {
+  clock = 1_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true });
+  app.setupWorld();
+  return app;
+}
+async function send(app: GameApp, action: string, payload: any) {
+  return app.commands.send({ name: action, from: 'test', payload });
+}
+
+test('注册：单主城 + villages 列表 + 新 id 格式', async () => {
+  const app = freshApp();
+  const r = await send(app, 'player.Register', {
+    name: 'mvuser1', password: 'pass1', tribe: 'romans',
+  });
+  assert.equal(r.ok, true, r.reason);
+  const p = (r.payload as any).player;
+  assert.ok(p.villages?.length === 1);
+  assert.equal(p.villages[0].isCapital, true);
+  assert.equal(p.capitalVillageId, p.villageId);
+  assert.equal(p.currentVillageId, p.villageId);
+  assert.ok(String(p.villageId).startsWith('v-p-'), `villageId=${p.villageId}`);
+  assert.ok(String(p.villageId).includes('-'), '新村 id 应为 v-<playerId>-<n>');
+});
+
+test('旧档单 villageId 字段自动迁移为 ownedVillages', async () => {
+  const app = freshApp();
+  // 手工写入旧格式
+  app.store.set('player', 'p-old', {
+    id: 'p-old',
+    name: 'oldguy',
+    pwd: '00:00', // 不会走登录校验
+    tribe: 'romans',
+    villageId: 'v-p-old',
+    q: 2,
+    r: 3,
+    createdAt: 1,
+  });
+  app.store.set('player_byvillage', 'v-p-old', 'p-old');
+
+  const g = await send(app, 'player.Get', { playerId: 'p-old' });
+  assert.equal(g.ok, true);
+  const p = (g.payload as any).player;
+  assert.equal(p.capitalVillageId, 'v-p-old');
+  assert.equal(p.villages.length, 1);
+  assert.equal(p.villages[0].q, 2);
+  assert.equal(p.villages[0].r, 3);
+
+  // 写回后应已持久化新字段
+  const raw = app.store.get<any>('player', 'p-old');
+  assert.ok(Array.isArray(raw.ownedVillages) && raw.ownedVillages.length === 1);
+  assert.equal(raw.capitalVillageId, 'v-p-old');
+});
+
+test('Attach 第二村后 SelectVillage 切换当前村', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'mvuser2', password: 'pass2', tribe: 'gauls',
+  });
+  const p0 = (reg.payload as any).player;
+  const pid = p0.id as string;
+  const capital = p0.villageId as string;
+
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: pid });
+  assert.equal(alloc.ok, true);
+  const vid2 = (alloc.payload as any).villageId as string;
+  assert.notEqual(vid2, capital);
+
+  // 避开出生点与常见 PvE 点
+  const q2 = 12, r2 = -8;
+  await app.createVillage(vid2, q2, r2, '分城甲');
+  const att = await send(app, 'player.AttachVillage', {
+    playerId: pid, villageId: vid2, q: q2, r: r2, name: '分城甲',
+  });
+  assert.equal(att.ok, true, att.reason);
+  assert.equal((att.payload as any).player.villages.length, 2);
+
+  const selBad = await send(app, 'player.SelectVillage', {
+    playerId: pid, villageId: 'v-nope',
+  });
+  assert.equal(selBad.ok, false);
+  assert.equal(selBad.reason, 'village_not_owned');
+
+  const sel = await send(app, 'player.SelectVillage', {
+    playerId: pid, villageId: vid2,
+  });
+  assert.equal(sel.ok, true, sel.reason);
+  assert.equal((sel.payload as any).currentVillageId, vid2);
+  assert.equal((sel.payload as any).player.villageId, vid2);
+  assert.equal((sel.payload as any).player.q, q2);
+  assert.equal((sel.payload as any).player.capitalVillageId, capital);
+});
+
+test('Gateway：SelectVillage 后 ownVillage 打到新当前村', async () => {
+  const app = freshApp();
+  const gw = new Gateway(app);
+  const replies: (WireResponse | WirePush)[] = [];
+  const session = gw.addClient({ send: (m) => { replies.push(m); } });
+
+  const req = (action: string, payload: Record<string, unknown>, id: string): WireRequest => ({
+    v: WIRE_VERSION, type: 'req', id, action, payload, ts: clock,
+  });
+
+  const regRes = await gw.handleRequest(
+    req('Register', { name: 'gwmv1', password: 'pass99', tribe: 'romans' }, 'r1'),
+    session,
+  );
+  assert.equal(regRes.ok, true, regRes.error?.msg);
+  const capital = (regRes.payload as any).player.villageId as string;
+  assert.equal(session.villageId, capital);
+
+  const pid = (regRes.payload as any).player.id as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: pid });
+  const vid2 = (alloc.payload as any).villageId as string;
+  const q2 = 11, r2 = -7;
+  await app.createVillage(vid2, q2, r2, '分城乙');
+  await send(app, 'player.AttachVillage', {
+    playerId: pid, villageId: vid2, q: q2, r: r2, name: '分城乙',
+  });
+  // 推送索引应能覆盖第二村（登录后需刷新 villageIds——通过再 Select 或重新 bind）
+  // 先 Select 到分城
+  const selRes = await gw.handleRequest(
+    req('SelectVillage', { villageId: vid2 }, 's1'),
+    session,
+  );
+  assert.equal(selRes.ok, true, selRes.error?.msg);
+  assert.equal(session.villageId, vid2);
+  assert.ok(session.villageIds?.includes(capital));
+  assert.ok(session.villageIds?.includes(vid2));
+
+  // ownVillage 的 GetResources 应读到分城经济
+  const eco = await gw.handleRequest(req('GetResources', {}, 'e1'), session);
+  assert.equal(eco.ok, true, eco.error?.msg);
+  assert.ok((eco.payload as any).resources);
+});
+
+test('deletePlayer 清除全部村庄进度', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'mvdel', password: 'pass3', tribe: 'teutons',
+  });
+  const pid = (reg.payload as any).player.id as string;
+  const capital = (reg.payload as any).player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: pid });
+  const vid2 = (alloc.payload as any).villageId as string;
+  await app.createVillage(vid2, 10, -9, '分城丙');
+  await send(app, 'player.AttachVillage', {
+    playerId: pid, villageId: vid2, q: 10, r: -9, name: '分城丙',
+  });
+
+  const result = app.deletePlayer(pid);
+  assert.ok(result);
+  assert.deepEqual(new Set(result!.villageIds), new Set([capital, vid2]));
+  assert.equal(app.store.get('economy', capital), undefined);
+  assert.equal(app.store.get('economy', vid2), undefined);
+  assert.equal(app.store.get('player', pid), undefined);
+});

@@ -6,6 +6,7 @@ import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
 import { escapeHtml } from '../../shared/ui/widgets.js';
 import { fmt } from '../../shared/utils/format.js';
+import { rerenderPopPanel } from '../village/population.js';
 
 export function renderReports(): string {
   const reports = getReports();
@@ -23,8 +24,10 @@ export function renderReports(): string {
  */
 export function notificationText(event: string, payload: any, ts?: number): string | null {
   const time = ts ? `[${new Date(ts).toLocaleTimeString()}] ` : '';
-  if (event === 'BuildingUpgraded') {
-    return `${time}✅ 建造完成：${fieldInfo(payload.kind).name ?? buildingInfo(payload.kind).name ?? payload.kind} → ${payload.level}级`;
+  if (event === 'BuildingBuilt' || event === 'BuildingUpgraded') {
+    const name = fieldInfo(payload.kind).name ?? buildingInfo(payload.kind).name ?? payload.kind;
+    const verb = event === 'BuildingBuilt' ? '建造完成' : '升级完成';
+    return `${time}✅ ${verb}：${name} → ${payload.level}级`;
   } else if (event === 'TroopTrained') {
     return `${time}🎯 训练出 ${unitName(payload.unit)}（共${payload.total}）`;
   } else if (event === 'MarchSent') {
@@ -62,21 +65,34 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     // 只有带 event 字段的离散事件才上报（静默增长不扰战报流）
     const evTag: string | undefined = (payload as any).event;
     if (!evTag) return null;
-    const popVal = fmt(Math.round(Number((payload as any).currentPop) || 0));
+    const popVal = fmt(Math.round(Number((payload as any).currentPop) ?? 0));
     if (evTag === 'wounded') {
       const wTotal = fmt(Number((payload as any).woundedTotal) || 0);
-      return `${time}🩹 战斗伤兵登记，伤兵池 ${wTotal} 人，当前人口 ${popVal}`;
+      return `${time}🩹 战斗伤兵登记，伤兵池 ${wTotal} 人，当前平民 ${popVal}`;
     }
     if (evTag === 'healed') {
-      return `${time}💚 伤兵治愈归队，当前人口 ${popVal}`;
+      const healed = Number((payload as any).healed);
+      const healedStr = healed > 0 ? `+${fmt(healed)} 人归队，` : '';
+      return `${time}💚 伤兵治愈归队，${healedStr}当前平民 ${popVal}`;
     }
     if (evTag === 'consumed') {
-      return `${time}⚔️ 训练消耗人口，当前 ${popVal}`;
+      const consumed = fmt(Number((payload as any).consumed) || 0);
+      return `${time}🎯 征兵消耗 -${consumed} 人口 → 当前平民 ${popVal}`;
     }
-    if (evTag === 'death') {
-      return `${time}💀 粮食短缺，人口减少至 ${popVal}`;
+    if (evTag === 'returned') {
+      const returned = Number((payload as any).returned);
+      const retStr = returned > 0 ? `+${fmt(returned)} 人返还，` : '';
+      return `${time}🏠 解散归队，${retStr}当前平民 ${popVal}`;
     }
-    return `${time}👥 人口变化：${popVal}`;
+    // server 推送事件名为 famine_reduction（含减员量 reduced、快照 softLimit）
+    if (evTag === 'famine_reduction') {
+      const reduced = fmt(Number((payload as any).reduced) || 0);
+      return `${time}💀 粮食告急，减员 -${reduced} 人 → 当前平民 ${popVal}`;
+    }
+    if (evTag === 'recovery') {
+      return `${time}✅ 粮食恢复，人口停止下降`;
+    }
+    return `${time}👥 人口变化：当前平民 ${popVal}`;
   }
   return null;
 }
@@ -89,22 +105,59 @@ export function handlePush(event: string, payload: any): void {
   }
   if (event === 'BattleEnded') clearBattleSnapshot(payload.battleId);
 
-  // T7.5：PopulationChanged — 立即校正本地人口快照，不等下次全量刷新
+  // T7.5：PopulationChanged — 立即校正本地人口快照，不等下次全量刷新。
+  // 严禁在此处调 refreshAll() / GetPopulation，防止 push→refresh→settle→emit 正反馈死循环。
+  //
+  // 字段说明（与服务端实际 payload 对齐）：
+  //   famine_reduction 事件：currentPop, woundedTotal, reduced, softLimit
+  //   consumed 事件：currentPop, woundedTotal, consumed
+  //   returned 事件：currentPop, woundedTotal, returned
+  //   wounded  事件：currentPop, woundedTotal, wounded, permanentDead
+  //   healed   事件：currentPop, woundedTotal, healed
+  //   garrisonPop/totalPop/laborRatio 不在 push payload 中，保留快照旧值
   if (event === 'PopulationChanged') {
     const current = getPopState();
     if (current) {
+      // 用 != null 判断（非 !== 0），确保 currentPop=0 能正确写入
+      const newCurrentPop = payload.currentPop != null ? Number(payload.currentPop) : current.currentPop;
+      const newSoftLimit = payload.softLimit != null ? Number(payload.softLimit) : current.softLimit;
+      const evTag: string | undefined = payload.event;
+
+      // inFamine 推断：
+      //   famine_reduction 事件 → 明确处于饥荒（服务端已触发减员）
+      //   recovery 事件 → 明确脱离饥荒
+      //   其他 → 由 currentPop vs softLimit 推断
+      let newInFamine: boolean;
+      if (evTag === 'famine_reduction') {
+        newInFamine = true;
+      } else if (evTag === 'recovery') {
+        newInFamine = false;
+      } else {
+        newInFamine = newSoftLimit > 0 && newCurrentPop > newSoftLimit;
+      }
+
+      // totalPop 重新推算（garrisonPop 保留快照，无 push 更新）
+      const newWoundedTotal = payload.woundedTotal != null ? Number(payload.woundedTotal) : current.wounded.total;
+      const newTotalPop = newCurrentPop + current.garrisonPop + newWoundedTotal;
+      const newLaborRatio = newTotalPop > 0 ? newCurrentPop / newTotalPop : 1;
+
       setPopState({
         ...current,
-        currentPop: Number(payload.currentPop) !== 0 ? Number(payload.currentPop) : current.currentPop,
-        softLimit: Number(payload.softLimit) !== 0 ? Number(payload.softLimit) : current.softLimit,
+        currentPop: newCurrentPop,
+        totalPop: newTotalPop,
+        softLimit: newSoftLimit,
+        laborRatio: newLaborRatio,
+        inFamine: newInFamine,
         growthPerHour: payload.growthPerHour != null ? Number(payload.growthPerHour) : current.growthPerHour,
         lambdaRatio: payload.lambdaRatio != null ? Number(payload.lambdaRatio) : current.lambdaRatio,
         wounded: {
           ...current.wounded,
-          total: payload.woundedTotal != null ? Number(payload.woundedTotal) : current.wounded.total,
+          total: newWoundedTotal,
         },
         fetchedAt: Date.now(),
       });
+      // 局部刷新人口面板（不重建整页）
+      rerenderPopPanel();
     }
   }
 

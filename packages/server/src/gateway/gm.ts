@@ -321,6 +321,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     store.set(collection, key, body);
+    store.flush();
     void reply.send({ ok: true, collection, key, doc: body });
   });
 
@@ -329,6 +330,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     if (!auth(req, reply)) return;
     const { collection, key } = req.params as { collection: string; key: string };
     const deleted = store.delete(collection, key);
+    store.flush();
     void reply.send({ ok: true, collection, key, deleted });
   });
 
@@ -342,6 +344,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     store.clear(collection);
+    store.flush();
     void reply.send({ ok: true, collection, cleared: true });
   });
 
@@ -363,6 +366,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
         ? { keepAccounts: false }
         : { keepAccounts: true, reassignSpots: mode === 'respawn' };
     const { accounts } = gameApp.resetWorld(opts);
+    store.flush();
     void reply.send({ ok: true, mode, accounts });
   });
 
@@ -380,6 +384,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       void reply.code(404).send({ ok: false, reason: 'player_not_found', playerId });
       return;
     }
+    store.flush();
     void reply.send({ ok: true, playerId, villageId: result.villageId });
   });
 }
