@@ -5,7 +5,8 @@ import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../sha
 import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
-import { req, me, ownVillageAt, isOwnVillageId, selectVillage } from '../../api.js';
+import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
+import { errText } from '../../shared/ui/text.js';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -252,6 +253,8 @@ function renderTargetPanel(): string {
   }
 
   if (selected.kind === 'own_village' || isOwnVillageId(selected.refId)) {
+    const isCapital = !!me.villages?.find((v) => v.id === selected.refId)?.isCapital
+      || selected.refId === me.capitalVillageId;
     const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
     const inputs = myTroops.length
       ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="0" id="raid-${u}" /><small>/${n}</small></label>`).join('')
@@ -259,13 +262,19 @@ function renderTargetPanel(): string {
     const res = getCache().res?.resources ?? {};
     const cargoInputs = ['wood', 'clay', 'iron', 'crop'].map((t) =>
       `<label class="raid-input"><span class="raid-name">${t}</span><input type="number" min="0" max="${Math.floor(res[t] ?? 0)}" value="0" id="cargo-${t}" /><small>/${Math.floor(res[t] ?? 0)}</small></label>`).join('');
+    const abandonBtn = isCapital
+      ? ''
+      : `<button class="btn-sm btn-danger" id="doAbandonVillage" title="放弃分城（驻军与资源清空）">放弃此村</button>`;
     return `<div class="target-panel target">
       <div class="target-head">${art('bld_main', selected.name, 'md')}
-        <div><div class="card-title">${escapeHtml(selected.name)}</div>
+        <div><div class="card-title">${escapeHtml(selected.name)}${isCapital ? '（主城）' : ''}</div>
           <small class="coord">己方村庄 · (${selected.q},${selected.r}) · 距离 ${dist} 格</small></div>
         <button class="target-close" id="closeTarget">✕</button>
       </div>
-      <div class="target-actions"><button class="btn-sm" id="doSwitchVillage">切换到此村</button></div>
+      <div class="target-actions">
+        <button class="btn-sm" id="doSwitchVillage">切换到此村</button>
+        ${abandonBtn}
+      </div>
       <div class="raidbox-title">运输部队（运力=负重）</div>
       <div class="raid-inputs">${inputs}</div>
       <div class="raidbox-title">运输货物</div>
@@ -504,8 +513,21 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
   if (sw) sw.onclick = async () => {
     const sel = getSelected()!;
     const r = await selectVillage(sel.refId);
-    if (!r.ok) { addReport(`切村失败：${r.error}`); return; }
+    if (!r.ok) { addReport(`切村失败：${errText(r.error)}`); return; }
     addReport(`已切换到 ${sel.name}`);
+    act(Promise.resolve({ ok: true }));
+  };
+  const abd = document.getElementById('doAbandonVillage');
+  if (abd) abd.onclick = async () => {
+    const sel = getSelected()!;
+    const ok = window.confirm(
+      `确认放弃「${sel.name}」？\n驻军将就地解散，资源清空，地块变回空地。此操作不可撤销。`,
+    );
+    if (!ok) return;
+    const r = await abandonVillage(sel.refId);
+    if (!r.ok) { addReport(`放弃失败：${errText(r.error)}`); return; }
+    setSelected(null);
+    addReport(`已放弃 ${sel.name}`);
     act(Promise.resolve({ ok: true }));
   };
   const tr = document.getElementById('doTransport');

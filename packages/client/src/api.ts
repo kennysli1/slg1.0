@@ -91,6 +91,20 @@ export function ownVillageAt(q: number, r: number): MeVillage | undefined {
   return me?.villages?.find((v) => v.q === q && v.r === r);
 }
 
+/** 放弃分城（不可弃主城；服务端有新建冷却锁）。 */
+export async function abandonVillage(villageId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await req('AbandonVillage', { villageId });
+    if (res.ok) {
+      applyMe((res.payload as any).player as Me);
+      return { ok: true };
+    }
+    return { ok: false, error: res.error?.code };
+  } catch {
+    return { ok: false, error: 'network_error' };
+  }
+}
+
 export function onPush(h: PushHandler) {
   pushHandler = h;
 }

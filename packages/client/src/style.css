@@ -244,6 +244,7 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 .btn-sm:disabled { background: #c4bba8; cursor: not-allowed; filter: none; }
 .btn-raid { background: var(--c-raid); }
 .btn-attack { background: var(--c-danger); }
+.btn-danger { background: var(--c-danger); }
 
 /* 数字输入 */
 input[type="number"], .train-row input { width: 56px; }
