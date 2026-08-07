@@ -168,12 +168,15 @@ export function renderMap(): string {
   for (const h of hexes) baseInner += cellInner(h);
 
   // 渲染 3×3 个副本（中心 + 8 邻居），平铺成可无限环游的连续地图。
+  // 中心副本标记 map-copy-center，供 centerViewOn 精确选中——否则 querySelector 会命中首个
+  // (-1,-1) 副本，导致视觉居中错位、容器内同时出现中心副本与邻居副本=“两张地图”。
   let cells = '';
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
       const offx = i * Vx.x + j * Vy.x;
       const offy = i * Vx.y + j * Vy.y;
-      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
+      const cls = i === 0 && j === 0 ? 'map-copy map-copy-center' : 'map-copy';
+      cells += `<g class="${cls}" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
     }
   }
 
@@ -461,8 +464,10 @@ let mapCenteredKey = '';
  */
 function centerViewOn(target: { q: number; r: number }): void {
   if (!mapSvg) return;
+  // 精确选中“中心副本”里的目标格：9 份副本数据完全相同，必须用 center 副本，
+  // 否则 querySelector 会命中首个（-1,-1）副本，导致视觉居中错位、出现“两张地图”。
   const g = mapSvg.querySelector<SVGGElement>(
-    `.hex-cell[data-tq="${target.q}"][data-tr="${target.r}"]`,
+    `.map-copy-center .hex-cell[data-tq="${target.q}"][data-tr="${target.r}"]`,
   );
   const wrap = mapSvg.parentElement;
   if (!g || !wrap) return;
@@ -474,6 +479,7 @@ function centerViewOn(target: { q: number; r: number }): void {
   const cy = wr.top + wr.height / 2;
   mapPanX += cx - tx;
   mapPanY += cy - ty;
+  reducePanToLattice(); // 把平移约化到环面晶格内，避免越界漂移/重复副本
   applyMapTransform(mapSvg);
   mapCenteredKey = `${target.q},${target.r}`;
 }
