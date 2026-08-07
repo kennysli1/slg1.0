@@ -108,14 +108,30 @@ button.sm{padding:3px 7px;font-size:11px}
   </div>
 </div>
 <script>
-const TOKEN = '';  // 若设了 GM_TOKEN，把值填这里
-const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
+let token = sessionStorage.getItem('gmToken') ?? '';
 
 let curCol = '', curKey = '', allDocs = {};
 
-async function api(method, path, body) {
-  const r = await fetch('/gm' + path, {method, headers: H, body: body ? JSON.stringify(body) : undefined});
-  return r.json();
+async function api(method, path, body, retryAuth=true) {
+  const headers = {'Content-Type':'application/json'};
+  if (token) headers['X-GM-Token'] = token;
+  const r = await fetch('/gm' + path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+  const text = await r.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; }
+  catch { data = {ok:false, reason:\`HTTP \${r.status}: \${text || r.statusText}\`}; }
+
+  if (r.status === 401 && retryAuth) {
+    const next = prompt('请输入 GM Token：', token);
+    if (next !== null) {
+      token = next.trim();
+      if (token) sessionStorage.setItem('gmToken', token);
+      else sessionStorage.removeItem('gmToken');
+      return api(method, path, body, false);
+    }
+  }
+  if (!r.ok && data.ok === undefined) data.ok = false;
+  return data;
 }
 
 function status(msg, ok=true) {
@@ -191,6 +207,11 @@ async function saveDoc() {
 
 async function deleteDoc() {
   if (!curCol || !curKey) { status('请先选择文档', false); return; }
+  if (curCol === 'player') {
+    const player = allDocs[curKey] ?? {};
+    await deletePlayer(curKey, player.name ?? curKey);
+    return;
+  }
   if (!confirm(\`确定删除 \${curCol}/\${curKey}？\`)) return;
   const r = await api('DELETE', \`/\${curCol}/\${curKey}\`);
   if (r.ok) {
@@ -236,7 +257,12 @@ async function resetOp(mode) {
 
 async function showPlayers() {
   const data = await api('GET', '/player?limit=500');
+  if (!data.ok) { status('加载玩家失败: ' + (data.reason ?? JSON.stringify(data)), false); return; }
   const docs = data.docs ?? {};
+  allDocs = docs;
+  curCol = 'player';
+  curKey = '';
+  document.getElementById('editor').value = '';
   const list = document.getElementById('doc-list');
   const keys = Object.keys(docs);
   if (!keys.length) { list.innerHTML = '<div class="empty">暂无玩家</div>'; return; }
@@ -246,22 +272,31 @@ async function showPlayers() {
     const row = document.createElement('div');
     row.className = 'player-item';
     row.innerHTML = \`<span class="player-name" title="\${k}">\${p.name ?? k}</span><span style="color:#a0a8c0;font-size:11px">\${p.tribe ?? ''}</span>\`;
+    row.onclick = () => loadDoc(k, p);
     const btn = document.createElement('button');
     btn.className = 'danger sm';
     btn.textContent = '删';
-    btn.onclick = () => deletePlayer(k, p.name ?? k);
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      deletePlayer(k, p.name ?? k);
+    };
     row.appendChild(btn);
     list.appendChild(row);
   }
-  curCol = 'player';
   document.getElementById('cur-key').textContent = '玩家管理';
   status(\`共 \${keys.length} 个玩家\`);
 }
 
 async function deletePlayer(playerId, name) {
   if (!confirm(\`确定删除玩家「\${name}」及其所有进度？\`)) return;
-  const r = await api('DELETE', \`/ops/player/\${playerId}?confirm=yes\`);
-  if (r.ok) { status(\`已删除玩家 \${name}（村庄 \${r.villageId}）\`); refreshAll(); showPlayers(); }
+  const r = await api('DELETE', \`/ops/player/\${encodeURIComponent(playerId)}?confirm=yes\`);
+  if (r.ok) {
+    curKey = '';
+    document.getElementById('editor').value = '';
+    await refreshAll();
+    await showPlayers();
+    status(\`已删除玩家 \${name}（村庄 \${r.villageId}）\`);
+  }
   else status('删除失败: ' + (r.reason ?? JSON.stringify(r)), false);
 }
 
