@@ -98,27 +98,21 @@ export function renderMap(): string {
   const Vx = hexToPixel({ q: W, r: 0 });
   const Vy = hexToPixel({ q: 0, r: H });
 
-  // 画布尺寸：取基础副本像素范围。
+  // 视图坐标系：SVG viewBox 在 bindMap 时按容器实际像素设为 "0 0 cw ch"。
+  // 地图内容（中心副本 + 8 邻居，共 9 份）绘制在世界像素坐标系，
+  // 由内层 <g class="camera"> 的 transform 负责平移/缩放（相机），
+  // 配合 reducePanToLattice 把视野中心约束在中心副本邻域，实现环面无缝环绕、无边缘、无重复副本。
   const pad = HEX_SIZE * 1.4;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity, minY = Infinity;
   for (const h of hexes) {
     const p = hexToPixel(h);
-    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
   }
-  // 9 副本并集作为 viewBox：让 SVG 始终覆盖"中心副本 + 整圈邻居"，
-  // 配合 CSS 把 .map-svg 放大到 3× 容器 + preserveAspectRatio="slice"，
-  // 无论玩家平移到任何位置，容器内都只显示平铺副本的内容，永不见地图边缘/留白。
-  const Wvb = maxX - minX; // 单副本像素宽（不含 pad）
-  const Hvb = maxY - minY; // 单副本像素高（不含 pad）
-  const vbX = pad - Vx.x - Vy.x;
-  const vbY = pad - Vy.y;
-  const vbW = Wvb + 2 * Vx.x + 2 * Vy.x;
-  const vbH = Hvb + 2 * Vy.y;
-  mapViewW = vbW;   // 供边缘环绕取模使用（= 9 副本并集宽）
-  mapViewH = vbH;
-  const ox = -minX + pad; // 画布偏移：把像素坐标平移到正区间
+  const ox = -minX + pad; // 中心副本原点（世界像素），相机平移以此为基准
   const oy = -minY + pad;
+  mapOx = ox;
+  mapOy = oy;
 
   const corners = hexCorners();
   const cornerStr = corners.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
@@ -134,6 +128,8 @@ export function renderMap(): string {
     if (isCurrent) {
       cls += ' hex-self';
       inner = art('bld_main', '本城', 'sm');
+      // 本城也要带坐标属性：否则悬停/点击读到 null→坐标显示为 0,0。
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(me!.id)}" data-name="${escapeAttr(me!.name)}"`;
     } else if (ownHere) {
       cls += ' hex-own';
       inner = art('bld_main', ownHere.name, 'sm');
@@ -168,15 +164,14 @@ export function renderMap(): string {
   for (const h of hexes) baseInner += cellInner(h);
 
   // 渲染 3×3 个副本（中心 + 8 邻居），平铺成可无限环游的连续地图。
-  // 中心副本标记 map-copy-center，供 centerViewOn 精确选中——否则 querySelector 会命中首个
-  // (-1,-1) 副本，导致视觉居中错位、容器内同时出现中心副本与邻居副本=“两张地图”。
+  // 相机（<g class="camera">）平移/缩放时只显示其中落在容器内的部分；
+  // reducePanToLattice 把视野中心约束在中心副本邻域，故 9 份副本始终覆盖视野——无边缘、无重复。
   let cells = '';
   for (let i = -1; i <= 1; i++) {
     for (let j = -1; j <= 1; j++) {
       const offx = i * Vx.x + j * Vy.x;
       const offy = i * Vx.y + j * Vy.y;
-      const cls = i === 0 && j === 0 ? 'map-copy map-copy-center' : 'map-copy';
-      cells += `<g class="${cls}" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
+      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
     }
   }
 
@@ -211,11 +206,13 @@ export function renderMap(): string {
       </g>`;
   });
 
-  const svg = `<svg class="map-svg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}" preserveAspectRatio="xMidYMid slice">
-      <rect class="map-bg" x="${vbX.toFixed(1)}" y="${vbY.toFixed(1)}" width="${vbW.toFixed(1)}" height="${vbH.toFixed(1)}"></rect>
-      <g class="layer-hexes">${cells}</g>
-      <g class="layer-paths">${paths}</g>
-      <g class="layer-markers">${markers}</g>
+  const svg = `<svg class="map-svg" id="mapSvg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet">
+      <rect class="map-bg" x="0" y="0" width="100%" height="100%"></rect>
+      <g class="camera" id="mapCamera" transform="translate(0,0) scale(1)">
+        <g class="layer-hexes">${cells}</g>
+        <g class="layer-paths">${paths}</g>
+        <g class="layer-markers">${markers}</g>
+      </g>
     </svg>`;
 
   const movesList = moves.map((m: any) => {
@@ -399,16 +396,18 @@ let animTimer: number | null = null;function startMarchAnimation(ox: number, oy:
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 2;
 let mapZoom = 1;
-let mapPanX = 0;
-let mapPanY = 0;
-/** 整图 viewBox 尺寸（SVG 内部单位），用于边缘 wrap 时按"一个世界宽/高"取模。 */
-let mapViewW = 0;
-let mapViewH = 0;
+let mapPanX = 0;   // 相机 <g> 平移 x（viewBox px = 容器 px）
+let mapPanY = 0;   // 相机 <g> 平移 y
+let mapOx = 0;     // 中心副本原点 x（世界像素），renderMap 写入
+let mapOy = 0;     // 中心副本原点 y
+let mapCw = 1000;  // 容器宽（px），bindMap 按实际写入
+let mapCh = 700;   // 容器高（px）
+let mapCamera: SVGGElement | null = null;
 
 function resetMapView(): void {
+  // 双击空白：以当前视野中心、zoom=1 重新居中（而非归零，避免跳变）。
   mapZoom = 1;
-  mapPanX = 0;
-  mapPanY = 0;
+  centerViewOn(viewCenter());
 }
 
 /** 进地图页时重置居中状态：下次 bindMap 会以本城为心、INITIAL_ZOOM 重新居中。 */
@@ -420,36 +419,39 @@ export function resetMapCenter(): void {
 }
 
 /**
- * 环面无缝环绕：把平移量按"环面晶格"约化到基础副本内，跨边界时不硬跳变。
- * 屏幕空间周期向量 = (Vx, Vy) × (baseScale × zoom)，Vx 纯水平、Vy 带剪切。
- * 把 (panX,panY) 写成 a·Vxs + b·Vys，再把 (a,b) 约化到 [-0.5,0.5) 即得无缝等价平移。
+ * 环面无缝环绕：把"视野中心"约束在中心副本邻域内。
+ * 相机把世界点 P 映射到屏幕：screen = pan + zoom·P。
+ * 视野中心世界点 C = (cw/2 - panX)/zoom, (ch/2 - panY)/zoom。
+ * 将 C 写成 base + u·Vx + v·Vy（base=中心副本原点），把 (u,v) 约化到 [-0.5,0.5)，
+ * 再反推 pan，使相机中心始终落在中心副本 ±½ 晶格内 —— 9 份副本必覆盖视野，
+ * 既无边缘留白，也不会出现"两份地图"；整圈平移跨边界时无缝环绕到对侧。
  */
 function reducePanToLattice(): void {
-  if (!mapSvg || mapViewW <= 0 || mapViewH <= 0) return;
-  const dispW = mapSvg.clientWidth || 1;
-  const dispH = mapSvg.clientHeight || 1;
-  // slice 模式用 max 覆盖（与上面 renderMap 的 preserveAspectRatio="slice" 一致），
-  // 让约化周期 = 真实视觉周期，跨边界 wrap 时无缝、无子周期漂移。
-  const baseScale = Math.max(dispW / mapViewW, dispH / mapViewH);
-  const s = baseScale * mapZoom; // 当前屏幕缩放（含用户 zoom）
+  if (mapCw <= 0 || mapCh <= 0 || mapZoom <= 0) return;
   const W = worldW(), H = worldH();
-  const Vx = hexToPixel({ q: W, r: 0 }); // SVG 单位，Vx.y === 0
-  const Vy = hexToPixel({ q: 0, r: H });
-  const vxX = Vx.x * s; // Vx.y === 0，无需 vxY
-  const vyX = Vy.x * s, vyY = Vy.y * s;
-  if (Math.abs(vyY) < 1e-6 || Math.abs(vxX) < 1e-6) return;
-  // panX = a·vxX + b·vyX ; panY = b·vyY（Vx 纯水平，vxY=0）
-  let b = mapPanY / vyY;
-  let a = (mapPanX - b * vyX) / vxX;
-  a -= Math.round(a); // 约化到 [-0.5,0.5)
-  b -= Math.round(b);
-  mapPanX = a * vxX + b * vyX;
-  mapPanY = b * vyY;
+  const Vx = hexToPixel({ q: W, r: 0 }); // (Vx.x, 0)
+  const Vy = hexToPixel({ q: 0, r: H }); // (Vy.x, Vy.y)
+  if (Math.abs(Vx.x) < 1e-6 || Math.abs(Vy.y) < 1e-6) return;
+  const bx = mapOx, by = mapOy;
+  const cx = (mapCw / 2 - mapPanX) / mapZoom;
+  const cy = (mapCh / 2 - mapPanY) / mapZoom;
+  // 解 (u, v): C = base + u·Vx + v·Vy
+  const v = (cy - by) / Vy.y;                 // Vx.y === 0
+  const u = (cx - bx - v * Vy.x) / Vx.x;
+  const uR = u - Math.round(u);
+  const vR = v - Math.round(v);
+  const cxR = bx + uR * Vx.x + vR * Vy.x;
+  const cyR = by + vR * Vy.y;
+  mapPanX = mapCw / 2 - mapZoom * cxR;
+  mapPanY = mapCh / 2 - mapZoom * cyR;
 }
 
-function applyMapTransform(svg: SVGSVGElement): void {
-  svg.style.transformOrigin = 'center center';
-  svg.style.transform = `translate(${mapPanX.toFixed(1)}px, ${mapPanY.toFixed(1)}px) scale(${mapZoom.toFixed(3)})`;
+function applyMapTransform(_svg?: SVGSVGElement): void {
+  if (!mapCamera) return;
+  mapCamera.setAttribute(
+    'transform',
+    `translate(${mapPanX.toFixed(2)},${mapPanY.toFixed(2)}) scale(${mapZoom.toFixed(4)})`,
+  );
 }
 
 /** 进入全图模式时的初始缩放（让本城周围有可读细节，而非整图缩成微缩）。 */
@@ -458,29 +460,18 @@ const INITIAL_ZOOM = 1.6;
 let mapCenteredKey = '';
 
 /**
- * 视觉居中：把指定 (q,r) 格子平移到地图容器正中（仅改 CSS transform，不重拉数据）。
- * 原理：CSS transform 的 translate 分量以屏幕像素为单位，对整体做等量位移，
- * 因此「目标格屏幕中心 → 容器中心」的像素差可直接累加到 mapPanX/Y 上，与缩放无关。
+ * 视觉居中：把指定 (q,r) 格平移到容器正中。
+ * 直接由坐标算世界像素位置，不依赖 DOM 查询（避免命中 9 份副本中的错误一份），
+ * 再用 reducePanToLattice 约化到环面晶格内，保证跨边界无缝、无重复副本。
  */
 function centerViewOn(target: { q: number; r: number }): void {
-  if (!mapSvg) return;
-  // 精确选中“中心副本”里的目标格：9 份副本数据完全相同，必须用 center 副本，
-  // 否则 querySelector 会命中首个（-1,-1）副本，导致视觉居中错位、出现“两张地图”。
-  const g = mapSvg.querySelector<SVGGElement>(
-    `.map-copy-center .hex-cell[data-tq="${target.q}"][data-tr="${target.r}"]`,
-  );
-  const wrap = mapSvg.parentElement;
-  if (!g || !wrap) return;
-  const gr = g.getBoundingClientRect();
-  const wr = wrap.getBoundingClientRect();
-  const tx = gr.left + gr.width / 2;
-  const ty = gr.top + gr.height / 2;
-  const cx = wr.left + wr.width / 2;
-  const cy = wr.top + wr.height / 2;
-  mapPanX += cx - tx;
-  mapPanY += cy - ty;
-  reducePanToLattice(); // 把平移约化到环面晶格内，避免越界漂移/重复副本
-  applyMapTransform(mapSvg);
+  const p = hexToPixel({ q: target.q, r: target.r });
+  const wx = p.x + mapOx; // 中心副本内该格的世界像素坐标
+  const wy = p.y + mapOy;
+  mapPanX = mapCw / 2 - mapZoom * wx;
+  mapPanY = mapCh / 2 - mapZoom * wy;
+  reducePanToLattice();
+  applyMapTransform(mapSvg ?? undefined);
   mapCenteredKey = `${target.q},${target.r}`;
 }
 
@@ -516,7 +507,13 @@ function bindMapGestures(svg: SVGSVGElement): void {
     const m = mid(e.touches);
     mapPanX = startPanX + (m.x - startMidX);
     mapPanY = startPanY + (m.y - startMidY);
-    if (mapZoom <= ZOOM_MIN + 0.01) { mapPanX = 0; mapPanY = 0; } // 回到 1x 时归中，避免漂移
+    // 双指缩放围绕中点锚定：保持中点处世界点不动
+    const rect = svg.getBoundingClientRect();
+    const sx = m.x - rect.left, sy = m.y - rect.top;
+    const fw = (sx - mapPanX) / mapZoom;
+    const fh = (sy - mapPanY) / mapZoom;
+    mapPanX = sx - mapZoom * fw;
+    mapPanY = sy - mapZoom * fh;
     reducePanToLattice(); // 双指拖拽到边缘无缝环绕到对侧
     applyMapTransform(svg);
   }, { passive: false });
@@ -653,9 +650,16 @@ function bindMapMouse(): void {
     if (!mapSvg) return;
     if (!(e.target as Element)?.closest?.('.map-svg')) return;
     e.preventDefault(); // 阻止页面滚动
+    const rect = mapSvg.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const fw = (sx - mapPanX) / mapZoom; // 光标处世界点（缩放前）
+    const fh = (sy - mapPanY) / mapZoom;
     const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     mapZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, mapZoom * factor));
-    if (mapZoom <= ZOOM_MIN + 0.001) { mapPanX = 0; mapPanY = 0; } // 归一时归中，避免漂移
+    mapPanX = sx - mapZoom * fw; // 保持光标处世界点不动
+    mapPanY = sy - mapZoom * fh;
+    reducePanToLattice();
     applyMapTransform(mapSvg);
   }, { passive: false });
 }
@@ -697,8 +701,13 @@ export function bindMap(act: (p: Promise<any>) => void): void {
   const svg = document.querySelector<SVGSVGElement>('.map-svg');
   mapSvg = svg;
   if (svg) {
+    mapCamera = svg.querySelector<SVGGElement>('#mapCamera');
+    mapCw = svg.clientWidth || mapCw;
+    mapCh = svg.clientHeight || mapCh;
+    svg.setAttribute('viewBox', `0 0 ${mapCw} ${mapCh}`);
     const ox = Number(svg.dataset.ox || 0);
     const oy = Number(svg.dataset.oy || 0);
+    mapOx = ox; mapOy = oy;
     startMarchAnimation(ox, oy);
     bindMapGestures(svg); // 手机双指缩放/平移（增强，不替代 D-pad）
     bindMapMouse();       // 桌面鼠标：拖拽平移 + 滚轮缩放 + 悬停信息浮层
@@ -706,15 +715,14 @@ export function bindMap(act: (p: Promise<any>) => void): void {
     svg.addEventListener('dblclick', (e: MouseEvent) => {
       if ((e.target as Element)?.closest?.('.hex-cell')) return; // 点到地块不复位
       resetMapView();
-      applyMapTransform(svg);
     });
     // 首次绑定：以本城为初始中心、适度放大，进入全图可拖拽/缩放模式。
     if (mapCenteredKey === '') {
       mapZoom = INITIAL_ZOOM;
-      applyMapTransform(svg);
       centerViewOn(viewCenter());
+      syncNavUI(viewCenter());
     } else {
-      applyMapTransform(svg); // 跨 5s 重渲保留缩放/平移态
+      applyMapTransform(); // 跨 5s 重渲保留缩放/平移态
     }
   }
 
