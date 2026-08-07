@@ -2,7 +2,7 @@
 import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
-import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
+import { mapSize, pveInfoByType } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
@@ -58,7 +58,7 @@ function pveIconByName(name?: string): string {
   return pveInfoByType(type)?.icon ?? 'pve_bandits';
 }
 
-/** 收集视野内所有格坐标（六边形半径 R，以 center 为中心）。 */
+/** 收集以 center 为中心、六边形半径 R 内的所有格坐标。 */
 function viewHexes(center: { q: number; r: number }, R: number): Hex[] {
   const out: Hex[] = [];
   for (let dq = -R; dq <= R; dq++) {
@@ -69,16 +69,21 @@ function viewHexes(center: { q: number; r: number }, R: number): Hex[] {
   return out;
 }
 
+/** 整张地图的全部格坐标（以原点为中心、半径 mapSize 的六边形，约 1261 格）。 */
+function fullMapHexes(): Hex[] {
+  return viewHexes({ q: 0, r: 0 }, mapSize());
+}
+
 export function renderMap(): string {
   const area = getCache().area;
   if (!area || !me) return '<div class="loading">加载中…</div>';
-  const R = mapViewRadius();
   const center = viewCenter();
   const selected = getSelected();
   if (selected && !tileAt(selected.q, selected.r)) setSelected(null);
 
-  const hexes = viewHexes(center, R);
-  // 画布尺寸：取视野内像素范围。
+  // 全图渲染：画出整张地图（半径 mapSize 的全部六边形），拖拽/缩放可遍历全图。
+  const hexes = fullMapHexes();
+  // 画布尺寸：取全图像素范围。
   const pad = HEX_SIZE * 1.4;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const h of hexes) {
@@ -210,16 +215,16 @@ export function renderMap(): string {
         <span class="map-jump-axis">Y</span><input type="number" id="mapJumpY" class="map-jump-input" value="${center.r}" min="${-size}" max="${size}" />
         <button class="map-jump-btn" id="mapJumpGo">跳转</button>
       </div>
-      <div class="map-jump-hint">地图范围 ±${size}，当前视野中心 X=${center.q} Y=${center.r}</div>
+      <div class="map-jump-hint">全图范围 ±${size} · 拖拽平移 / 滚轮缩放 · 双击空白处复位视图 · 当前中心 X=${center.q} Y=${center.r}</div>
     </div>
   </div>`;
 
   const isViewing = center.q !== me.q || center.r !== me.r;
   const viewLabel = isViewing
-    ? `正在查看 (X=${center.q}, Y=${center.r})，<a href="#" id="mapReturnHome">回到本城</a>`
-    : `你在 X=${me.q}, Y=${me.r}，视野 ${R} 格`;
+    ? `全图模式 · 正在查看 (X=${center.q}, Y=${center.r})，<a href="#" id="mapReturnHome">回到本城</a>`
+    : `全图模式 · 你在 X=${me.q}, Y=${me.r}（已居中）`;
 
-  return `<h3>周边地图 <small>（${viewLabel}）</small></h3>
+  return `<h3>世界地图 <small id="mapViewLabel">（${viewLabel}）</small></h3>
     ${nav}
     <div class="map-wrap">
       ${svg}
@@ -342,11 +347,11 @@ let animTimer: number | null = null;function startMarchAnimation(ox: number, oy:
 }
 
 /* ============================================================
-   地图缩放/平移（移动端手势增强）
-   - 单指：保留原生行为（点击选格 / 竖向滚动页面）
-   - 双指：捏合缩放 + 拖拽平移，familiar 的地图手势，零冲突
-   - 状态存模块级：每 5s 重渲后 bindMap 重新 applyMapTransform，缩放不丢失
-   - D-pad / 跳转 / 回城会切换视野中心并重拉数据 → resetMapView() 归位
+   地图缩放/平移（整图视觉变换，不重拉数据）
+   - 整张地图（半径 mapSize 的全部六边形）一次性渲染进 SVG，viewBox 覆盖全图
+   - 桌面：左键拖拽平移 + 滚轮缩放；移动端：双指捏合缩放 + 双指拖拽平移
+   - 状态存模块级：每 5s 重渲后 bindMap 重新 applyMapTransform，缩放/平移不丢失
+   - D-pad / 跳转 / 回城 = centerViewOn() 视觉居中（仅改 transform），双击空白处 resetMapView() 复位
    ============================================================ */
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 3;
@@ -363,6 +368,35 @@ function resetMapView(): void {
 function applyMapTransform(svg: SVGSVGElement): void {
   svg.style.transformOrigin = 'center center';
   svg.style.transform = `translate(${mapPanX.toFixed(1)}px, ${mapPanY.toFixed(1)}px) scale(${mapZoom.toFixed(3)})`;
+}
+
+/** 进入全图模式时的初始缩放（让本城周围有可读细节，而非整图缩成微缩）。 */
+const INITIAL_ZOOM = 1.6;
+/** 记录已居中过的坐标，避免每次 5s 重渲把视角硬拉回中心。 */
+let mapCenteredKey = '';
+
+/**
+ * 视觉居中：把指定 (q,r) 格子平移到地图容器正中（仅改 CSS transform，不重拉数据）。
+ * 原理：CSS transform 的 translate 分量以屏幕像素为单位，对整体做等量位移，
+ * 因此「目标格屏幕中心 → 容器中心」的像素差可直接累加到 mapPanX/Y 上，与缩放无关。
+ */
+function centerViewOn(target: { q: number; r: number }): void {
+  if (!mapSvg) return;
+  const g = mapSvg.querySelector<SVGGElement>(
+    `.hex-cell[data-tq="${target.q}"][data-tr="${target.r}"]`,
+  );
+  const wrap = mapSvg.parentElement;
+  if (!g || !wrap) return;
+  const gr = g.getBoundingClientRect();
+  const wr = wrap.getBoundingClientRect();
+  const tx = gr.left + gr.width / 2;
+  const ty = gr.top + gr.height / 2;
+  const cx = wr.left + wr.width / 2;
+  const cy = wr.top + wr.height / 2;
+  mapPanX += cx - tx;
+  mapPanY += cy - ty;
+  applyMapTransform(mapSvg);
+  mapCenteredKey = `${target.q},${target.r}`;
 }
 
 /** 双指手势：捏合缩放 + 双指拖拽平移。绑定标记避免同一元素重复绑定。 */
@@ -539,8 +573,40 @@ function bindMapMouse(): void {
   }, { passive: false });
 }
 
+/** 同步导航控件 UI（方向键可用态 / 跳转输入值 / 标题行视图标签），不触发整页重渲。 */
+function syncNavUI(center: { q: number; r: number }): void {
+  const STEP = 4;
+  const setDis = (id: string, dis: boolean) => {
+    const b = document.getElementById(id);
+    if (b) (b as HTMLButtonElement).disabled = dis;
+  };
+  setDis('mapDirUp', !inBounds(center.q, center.r - STEP));
+  setDis('mapDirDown', !inBounds(center.q, center.r + STEP));
+  setDis('mapDirLeft', !inBounds(center.q - STEP, center.r));
+  setDis('mapDirRight', !inBounds(center.q + STEP, center.r));
+  setDis('mapDirHome', center.q === me!.q && center.r === me!.r);
+  const xEl = document.getElementById('mapJumpX') as HTMLInputElement | null;
+  const yEl = document.getElementById('mapJumpY') as HTMLInputElement | null;
+  if (xEl) xEl.value = String(center.q);
+  if (yEl) yEl.value = String(center.r);
+  const label = document.getElementById('mapViewLabel');
+  if (label) {
+    const isViewing = center.q !== me!.q || center.r !== me!.r;
+    label.innerHTML = isViewing
+      ? `全图模式 · 正在查看 (X=${center.q}, Y=${center.r})，<a href="#" id="mapReturnHome">回到本城</a>`
+      : `全图模式 · 你在 X=${center.q}, Y=${center.r}（已居中）`;
+    const ret = document.getElementById('mapReturnHome');
+    if (ret) ret.onclick = (e: Event) => {
+      e.preventDefault();
+      setMapCenter(null);
+      centerViewOn({ q: me!.q, r: me!.r });
+      syncNavUI({ q: me!.q, r: me!.r });
+    };
+  }
+}
+
 /** 绑定地图页交互（选格 + 出征 + 启动行军动画 + 导航控件）。 */
-export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q: number; r: number }) => void): void {
+export function bindMap(act: (p: Promise<any>) => void): void {
   const svg = document.querySelector<SVGSVGElement>('.map-svg');
   mapSvg = svg;
   if (svg) {
@@ -550,7 +616,19 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     bindMapGestures(svg); // 手机双指缩放/平移（增强，不替代 D-pad）
     bindMapMouse();       // 桌面鼠标：拖拽平移 + 滚轮缩放 + 悬停信息浮层
     svg.addEventListener('mouseleave', hideTileTooltip);
-    applyMapTransform(svg); // 跨 5s 重渲保留缩放态
+    svg.addEventListener('dblclick', (e: MouseEvent) => {
+      if ((e.target as Element)?.closest?.('.hex-cell')) return; // 点到地块不复位
+      resetMapView();
+      applyMapTransform(svg);
+    });
+    // 首次绑定：以本城为初始中心、适度放大，进入全图可拖拽/缩放模式。
+    if (mapCenteredKey === '') {
+      mapZoom = INITIAL_ZOOM;
+      applyMapTransform(svg);
+      centerViewOn(viewCenter());
+    } else {
+      applyMapTransform(svg); // 跨 5s 重渲保留缩放/平移态
+    }
   }
 
   document.querySelectorAll<SVGGElement>('.hex-cell[data-tq]').forEach((el) =>
@@ -569,7 +647,7 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     });
   bindTargetEvents(act);
 
-  // 方向键
+  // 方向键（全图模式下 = 视觉平移到相邻区域中心，不重拉数据）
   const STEP = 4;
   const bindDir = (id: string, dir: string) => {
     const btn = document.getElementById(id);
@@ -584,8 +662,8 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
         return;
       }
       setMapCenter({ q: nq, r: nr });
-      resetMapView();
-      navigate?.({ q: nq, r: nr });
+      centerViewOn({ q: nq, r: nr });
+      syncNavUI({ q: nq, r: nr });
     };
   };
   bindDir('mapDirUp', 'up');
@@ -595,11 +673,20 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
 
   // 回到本城（方向键盘中心的 ⌂）
   const homeBtn = document.getElementById('mapDirHome');
-  if (homeBtn) homeBtn.onclick = () => { setMapCenter(null); resetMapView(); navigate?.({ q: me!.q, r: me!.r }); };
+  if (homeBtn) homeBtn.onclick = () => {
+    setMapCenter(null);
+    centerViewOn({ q: me!.q, r: me!.r });
+    syncNavUI({ q: me!.q, r: me!.r });
+  };
 
   // 标题行内联"回到本城"链接
   const retHome = document.getElementById('mapReturnHome');
-  if (retHome) retHome.onclick = (e) => { e.preventDefault(); setMapCenter(null); resetMapView(); navigate?.({ q: me!.q, r: me!.r }); };
+  if (retHome) retHome.onclick = (e) => {
+    e.preventDefault();
+    setMapCenter(null);
+    centerViewOn({ q: me!.q, r: me!.r });
+    syncNavUI({ q: me!.q, r: me!.r });
+  };
 
   // 坐标跳转（X=q, Y=r）
   const jumpGo = document.getElementById('mapJumpGo');
@@ -611,8 +698,8 @@ export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q:
     if (isNaN(q) || isNaN(r)) { addReport('请输入有效坐标'); return; }
     if (!inBounds(q, r)) { addReport(`坐标 (X=${q}, Y=${r}) 超出地图范围 ±${mapSize()}`); return; }
     setMapCenter({ q, r });
-    resetMapView();
-    navigate?.({ q, r });
+    centerViewOn({ q, r });
+    syncNavUI({ q, r });
   };
   // 按 Enter 也触发跳转
   [document.getElementById('mapJumpX'), document.getElementById('mapJumpY')].forEach((el) => {

@@ -94,11 +94,14 @@ export class WorldModule {
     return { ok: true, payload: { tile } };
   }
 
-  /** 返回以 (cq,cr) 为中心、六边形半径 r 内的所有非空地块。 */
+  /** 返回以 (cq,cr) 为中心、六边形半径 r 内的所有非空地块。
+   *  full=true 时忽略半径上限，返回整张地图的全部非空地块（用于全图渲染）。 */
   private getArea(cmd: Command): CommandResult {
-    const { cq, cr, r } = cmd.payload as { cq: number; cr: number; r: number };
+    const { cq, cr, r, full } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean };
     const center = { q: cq, r: cr };
-    const radius = Math.min(Math.max(0, r), this.config.constants.mapViewRadius + 6);
+    const radius = full
+      ? Number.POSITIVE_INFINITY
+      : Math.min(Math.max(0, r), this.config.constants.mapViewRadius + 6);
     const tiles: Tile[] = [];
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
       if (hexDistance(center, t) <= radius) tiles.push(t);

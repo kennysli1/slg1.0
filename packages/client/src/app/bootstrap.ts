@@ -8,7 +8,7 @@ import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { showToast } from '../shared/ui/toast.js';
-import { resInfo, resourceKeys, loadGameConfig, mapViewRadius } from './config.js';
+import { resInfo, resourceKeys, loadGameConfig, mapSize } from './config.js';
 import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
@@ -72,11 +72,11 @@ async function refreshAll() {
   if (!me) return;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
-    const R = mapViewRadius();
-    const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
+    // 全图模式：一次性拉取整张地图的全部非空地块（full=true 忽略半径上限），
+    // 后续拖拽/缩放/跳转均为纯视觉变换，不再按视野重拉数据。
     const [res, vil, army, area, moves, pop] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
-      req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
+      req('GetArea', { cq: center.q, cr: center.r, r: mapSize(), full: true }), req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
@@ -203,22 +203,7 @@ function renderPage() {
 function bindPageEvents() {
   bindVillage(act);
   bindArmy(act);
-  bindMap(act, async (center) => {
-    // 导航后立即用新中心刷新地图数据
-    const R = mapViewRadius();
-    const fetchR = R + 6;
-    try {
-      const area = await req('GetArea', { cq: center.q, cr: center.r, r: fetchR });
-      if (area.ok) {
-        setCache({ ...getCache(), area: area.payload });
-        renderPage();
-      } else {
-        addReport(`地图刷新失败：${errText(area.error?.code)}`);
-      }
-    } catch {
-      addReport('地图刷新失败：网络连接异常');
-    }
-  });
+  bindMap(act);
 }
 
 /** 统一"发请求并刷新"：失败转中文战报。 */
