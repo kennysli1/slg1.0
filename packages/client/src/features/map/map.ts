@@ -64,8 +64,18 @@ function terrainVariant(q: number, r: number): number {
   return h % 4;
 }
 
+// 格子索引：用 Map 缓存，避免每次渲染对 tiles 做线性查找（视口剔除每帧会查上千次）。
+let _tileIndex: Map<string, any> | null = null;
+let _tileIndexRef: any = null;
 function tileAt(q: number, r: number): any {
-  return (getCache().area?.tiles || []).find((t: any) => t.q === q && t.r === r);
+  const tiles = getCache().area?.tiles;
+  if (!tiles) return undefined;
+  if (_tileIndexRef !== tiles) {
+    _tileIndex = new Map<string, any>();
+    for (const t of tiles) _tileIndex.set(`${t.q},${t.r}`, t);
+    _tileIndexRef = tiles;
+  }
+  return _tileIndex!.get(`${q},${r}`);
 }
 
 /** 地图 tile 仅有展示名时，按关键字猜测 PvE 图标（回退用）。 */
@@ -74,14 +84,104 @@ function pveIconByName(name?: string): string {
   return pveInfoByType(type)?.icon ?? 'pve_bandits';
 }
 
-/** 整张地图的全部格坐标：环绕平行四边形 0<=q<W, 0<=r<H（约 W×H 格）。 */
-function fullMapHexes(): Hex[] {
-  const W = worldW(), H = worldH();
-  const out: Hex[] = [];
-  for (let r = 0; r < H; r++) {
-    for (let q = 0; q < W; q++) out.push({ q, r });
+/** 六边形顶点字符串（模块级常量，避免每帧重建）。 */
+const HEX_CORNER_STR = hexCorners().map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+
+/** 生成单个格子标记：坐标为相机内坐标 (camX,camY)，由外层 <g class="camera"> 统一平移/缩放。
+ *  内容取自已缓存的 area.tiles，无需任何服务端请求——平移/缩放时调用即可让新进入视野的格子立刻带内容显示。 */
+function hexCellMarkup(q: number, r: number, camX: number, camY: number): string {
+  const ownHere = ownVillageAt(q, r);
+  const isCurrent = q === me!.q && r === me!.r;
+  const t = tileAt(q, r);
+  let cls = 'hex', inner = '', clickable = '';
+  if (isCurrent) {
+    cls += ' hex-self';
+    inner = art('bld_main', '本城', 'sm');
+    // 本城也要带坐标属性：否则悬停/点击读到 null→坐标显示为 0,0。
+    clickable = `data-tq="${q}" data-tr="${r}" data-kind="own_village" data-ref="${escapeAttr(me!.id)}" data-name="${escapeAttr(me!.name)}"`;
+  } else if (ownHere) {
+    cls += ' hex-own';
+    inner = art('bld_main', ownHere.name, 'sm');
+    clickable = `data-tq="${q}" data-tr="${r}" data-kind="own_village" data-ref="${escapeAttr(ownHere.id)}" data-name="${escapeAttr(ownHere.name)}"`;
+  } else if (t?.kind === 'village') {
+    cls += ' hex-enemy';
+    inner = art('bld_main', t.name, 'sm');
+    clickable = `data-tq="${q}" data-tr="${r}" data-kind="village" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}"`;
+  } else if (t?.kind === 'pve') {
+    cls += ' hex-pve';
+    const picon = t.icon ?? pveIconByName(t.name);
+    inner = art(picon, t.name, 'sm');
+    clickable = `data-tq="${q}" data-tr="${r}" data-kind="pve" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(picon)}"`;
+  } else {
+    // 空地块：可点选拓荒
+    cls += ` hex-grass-${terrainVariant(q, r)}`;
+    clickable = `data-tq="${q}" data-tr="${r}" data-kind="empty" data-ref="empty-${q},${r}" data-name="空地"`;
   }
-  return out;
+  const sel = getSelected();
+  const selCls = sel && sel.q === q && sel.r === r ? ' hex-selected' : '';
+  return `<g class="hex-cell${selCls}" transform="translate(${camX.toFixed(1)},${camY.toFixed(1)})" ${clickable}>
+      <polygon class="${cls}" points="${HEX_CORNER_STR}"></polygon>
+      ${inner ? `<foreignObject x="-24" y="-24" width="48" height="48"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
+    </g>`;
+}
+
+/** 视口剔除：依据当前相机（mapPanX/Y、mapZoom、mapCw/Ch）只渲染真正落在视野内（含少量余量）的格子。
+ *  关键：环面世界很小（41×41），若用"离屏幕中心最近的副本"会令每块格子都找到一份落在中心附近，
+ *  导致整张地图被全量渲染（即用户看到的"外围格子没移过去就先画出来"）。因此这里直接由【视口边界】
+ *  反解每块格子"可能落入视口的副本 (i,j) 区间"，只渲染确实进入视口的副本——平移时新格子才会被画出来。 */
+function buildHexLayer(): string {
+  const W = worldW(), H = worldH();
+  const Vx = hexToPixel({ q: W, r: 0 }); // (Vx.x, 0)
+  const Vy = hexToPixel({ q: 0, r: H }); // (Vy.x, Vy.y)
+  const Vsx = { x: mapZoom * Vx.x, y: 0 };
+  const Vsy = { x: mapZoom * Vy.x, y: mapZoom * Vy.y };
+  const margin = HEX_SIZE * mapZoom * 0.8;
+  const x0 = -margin, x1 = mapCw + margin;
+  const y0 = -margin, y1 = mapCh + margin;
+  const parts: string[] = [];
+  for (let r = 0; r < H; r++) {
+    for (let q = 0; q < W; q++) {
+      const p = hexToPixel({ q, r });
+      const baseX = mapOx + p.x;
+      const baseY = mapOy + p.y;
+      // 该格在中心副本 (i=0,j=0) 的屏幕位置
+      const bx = mapPanX + mapZoom * baseX;
+      const by = mapPanY + mapZoom * baseY;
+      if (Vsy.y === 0 || Vsx.x === 0) continue;
+      // 由视口边界反解 (i,j) 区间：只遍历"可能落入视口"的副本，而非整圈副本
+      const jMin = Math.floor((y0 - by) / Vsy.y) - 1;
+      const jMax = Math.ceil((y1 - by) / Vsy.y) + 1;
+      for (let j = jMin; j <= jMax; j++) {
+        const xBase = bx + j * Vsy.x;
+        const iMin = Math.floor((x0 - xBase) / Vsx.x) - 1;
+        const iMax = Math.ceil((x1 - xBase) / Vsx.x) + 1;
+        for (let i = iMin; i <= iMax; i++) {
+          const sx = bx + i * Vsx.x + j * Vsy.x;
+          const sy = by + j * Vsy.y;
+          if (sx < x0 || sx > x1 || sy < y0 || sy > y1) continue; // 最终边界校验，杜绝越界渲染
+          const camX = baseX + i * Vx.x + j * Vy.x;
+          const camY = baseY + j * Vy.y;
+          parts.push(hexCellMarkup(q, r, camX, camY));
+        }
+      }
+    }
+  }
+  return parts.join('');
+}
+
+/** 用当前相机状态重算并刷新"六边形图层"：平移或缩放后，新进入视野的格子会立即带内容绘制出来。 */
+function renderVisibleTiles(): void {
+  if (!mapCamera) return;
+  const layer = mapCamera.querySelector<SVGGElement>('.layer-hexes');
+  if (!layer) return;
+  layer.innerHTML = buildHexLayer();
+}
+
+/** 平移/缩放后立即重算并刷新"六边形图层"：屏幕出现哪个格子就渲染哪个格子，
+ *  不等下次自动刷新。改为同步即时渲染（不再经 rAF 节流），确保每次拖拽/缩放事件都立刻生效。
+ * 视口剔除后单次重绘约数百个格子节点，开销很小，直接同步足够流畅。 */
+function scheduleCull(): void {
+  renderVisibleTiles();
 }
 
 export function renderMap(): string {
@@ -91,89 +191,19 @@ export function renderMap(): string {
   const selected = getSelected();
   if (selected && !tileAt(selected.q, selected.r)) setSelected(null);
 
-  // 全图渲染：环绕平行四边形世界（0<=q<W,0<=r<H），画成可被无限平铺的"基础副本"。
-  const W = worldW(), H = worldH();
-  const hexes = fullMapHexes();
-  // 平行四边形周期向量（像素空间）：Vx 纯水平，Vy 带剪切（pointy-top 几何决定）。
-  const Vx = hexToPixel({ q: W, r: 0 });
-  const Vy = hexToPixel({ q: 0, r: H });
+  // 全图渲染：环面世界（0<=q<W,0<=r<H）。六边形采用"视口剔除"动态渲染——
+  // 只绘制当前视野内的格子，平移/缩放时由 renderVisibleTiles() 实时重算，
+  // 保证新进入画面的格子立刻带内容显示（无需等 5s 重拉）；
+  // 副本平铺份数按当前视口动态计算，故放大/缩小都不会出现边缘空白或重复副本。
 
-  // 视图坐标系：SVG viewBox 在 bindMap 时按容器实际像素设为 "0 0 cw ch"。
-  // 地图内容（中心副本 + 8 邻居，共 9 份）绘制在世界像素坐标系，
-  // 由内层 <g class="camera"> 的 transform 负责平移/缩放（相机），
-  // 配合 reducePanToLattice 把视野中心约束在中心副本邻域，实现环面无缝环绕、无边缘、无重复副本。
   const pad = HEX_SIZE * 1.4;
-  let minX = Infinity, minY = Infinity;
-  for (const h of hexes) {
-    const p = hexToPixel(h);
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-  }
-  const ox = -minX + pad; // 中心副本原点（世界像素），相机平移以此为基准
-  const oy = -minY + pad;
+  const ox = pad; // 中心副本原点（相机坐标系）：六边形像素坐标恒 >=0，故原点 = pad
+  const oy = pad;
   mapOx = ox;
   mapOy = oy;
 
-  const corners = hexCorners();
-  const cornerStr = corners.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-
-  // 单个格子的内部标记（坐标相对基础副本原点，不含 ox/oy；由外层 <g> 平移）。
-  const cellInner = (h: Hex): string => {
-    const p = hexToPixel(h);
-    const cx = p.x, cy = p.y;
-    const ownHere = ownVillageAt(h.q, h.r);
-    const isCurrent = h.q === me!.q && h.r === me!.r;
-    const t = tileAt(h.q, h.r);
-    let cls = 'hex', inner = '', clickable = '';
-    if (isCurrent) {
-      cls += ' hex-self';
-      inner = art('bld_main', '本城', 'sm');
-      // 本城也要带坐标属性：否则悬停/点击读到 null→坐标显示为 0,0。
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(me!.id)}" data-name="${escapeAttr(me!.name)}"`;
-    } else if (ownHere) {
-      cls += ' hex-own';
-      inner = art('bld_main', ownHere.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(ownHere.id)}" data-name="${escapeAttr(ownHere.name)}"`;
-    } else if (t?.kind === 'village') {
-      cls += ' hex-enemy';
-      inner = art('bld_main', t.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="village" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}"`;
-    } else if (t?.kind === 'pve') {
-      cls += ' hex-pve';
-      const picon = t.icon ?? pveIconByName(t.name);
-      inner = art(picon, t.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="pve" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(picon)}"`;
-    } else {
-      // 空地块：可点选拓荒
-      cls += ` hex-grass-${terrainVariant(h.q, h.r)}`;
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="empty" data-ref="empty-${h.q},${h.r}" data-name="空地"`;
-    }
-    const sel = getSelected();
-    const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';
-    // 用 <g> 承载多边形 + 图标，transform 定位
-    return `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable}>
-        <polygon class="${cls}" points="${cornerStr}"></polygon>
-        ${inner ? `<foreignObject x="-24" y="-24" width="48" height="48"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
-      </g>`;
-  };
-
-  // 基础副本：全部地块（含草地）。环面世界里所有副本内容一致，只差偏移——
-  // 因此 3×3 平铺全部复用同一个 baseInner，保证跨越边界时六边形网格/地形完全连续，
-  // 不会出现"网格消失"的视觉断层（baseInner 只构建一次，平摊到 9 份靠 transform）。
-  let baseInner = '';
-  for (const h of hexes) baseInner += cellInner(h);
-
-  // 渲染 3×3 个副本（中心 + 8 邻居），平铺成可无限环游的连续地图。
-  // 相机（<g class="camera">）平移/缩放时只显示其中落在容器内的部分；
-  // reducePanToLattice 把视野中心约束在中心副本邻域，故 9 份副本始终覆盖视野——无边缘、无重复。
-  let cells = '';
-  for (let i = -1; i <= 1; i++) {
-    for (let j = -1; j <= 1; j++) {
-      const offx = i * Vx.x + j * Vy.x;
-      const offy = i * Vx.y + j * Vy.y;
-      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
-    }
-  }
+  // 仅渲染当前视野内的格子（视口剔除），详见模块级 buildHexLayer()。
+  const cells = buildHexLayer();
 
   // 行军路径（自己部队）：折线 + 起终点
   const moves = getCache().moves?.movements || [];
@@ -393,7 +423,7 @@ let animTimer: number | null = null;function startMarchAnimation(ox: number, oy:
    - 状态存模块级：每 5s 重渲后 bindMap 重新 applyMapTransform，缩放/平移不丢失
    - D-pad / 跳转 / 回城 = centerViewOn() 视觉居中（仅改 transform），双击空白处 resetMapView() 复位
    ============================================================ */
-const ZOOM_MIN = 1;
+const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 2;
 let mapZoom = 1;
 let mapPanX = 0;   // 相机 <g> 平移 x（viewBox px = 容器 px）
@@ -472,6 +502,7 @@ function centerViewOn(target: { q: number; r: number }): void {
   mapPanY = mapCh / 2 - mapZoom * wy;
   reducePanToLattice();
   applyMapTransform(mapSvg ?? undefined);
+  renderVisibleTiles(); // 居中后立即重算视野内格子，确保新进入画面的格子带内容显示
   mapCenteredKey = `${target.q},${target.r}`;
 }
 
@@ -516,6 +547,7 @@ function bindMapGestures(svg: SVGSVGElement): void {
     mapPanY = sy - mapZoom * fh;
     reducePanToLattice(); // 双指拖拽到边缘无缝环绕到对侧
     applyMapTransform(svg);
+    scheduleCull(); // 双指缩放/拖拽后重算视野内格子
   }, { passive: false });
 
   svg.addEventListener('touchend', (e) => {
@@ -632,6 +664,7 @@ function bindMapMouse(): void {
       mapPanY = mapDragPanY + dy;
       reducePanToLattice(); // 拖到边缘无缝环绕到对侧
       applyMapTransform(mapSvg);
+      scheduleCull(); // 拖动让新格子进入画面时重算，确保立刻看到格子上的内容
       return;
     }
     const cell = (e.target as Element)?.closest?.('.hex-cell');
@@ -644,6 +677,7 @@ function bindMapMouse(): void {
     mapDragging = false;
     mapSvg?.classList.remove('grabbing');
     if (mapDragMoved) mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
+    renderVisibleTiles(); // 拖拽结束再确保一次：把松手瞬间视野内的格子都渲染出来
   });
 
   window.addEventListener('wheel', (e: WheelEvent) => {
@@ -661,6 +695,7 @@ function bindMapMouse(): void {
     mapPanY = sy - mapZoom * fh;
     reducePanToLattice();
     applyMapTransform(mapSvg);
+    scheduleCull(); // 缩放后重算视野内格子（含副本份数随缩放变化）
   }, { passive: false });
 }
 
@@ -723,23 +758,31 @@ export function bindMap(act: (p: Promise<any>) => void): void {
       syncNavUI(viewCenter());
     } else {
       applyMapTransform(); // 跨 5s 重渲保留缩放/平移态
+      renderVisibleTiles(); // 重渲后按当前相机重算视野内格子
     }
   }
 
-  document.querySelectorAll<SVGGElement>('.hex-cell[data-tq]').forEach((el) =>
-    el.onclick = () => {
+  // 点击格子：事件委托到 svg（格子会在平移/缩放时频繁重建，委托避免丢失 handler）。
+  if (svg) {
+    svg.addEventListener('click', (e: MouseEvent) => {
       if (swallowClick()) return; // 刚发生过拖拽平移，吞掉误触的选中
+      const cell = (e.target as Element)?.closest?.('.hex-cell');
+      if (!cell) return;
+      const dq = cell.getAttribute('data-tq'), dr = cell.getAttribute('data-tr');
+      if (dq == null || dr == null) return;
       setSelected({
-        refId: el.dataset.ref || `empty-${el.dataset.tq},${el.dataset.tr}`,
-        kind: el.dataset.kind!,
-        q: Number(el.dataset.tq), r: Number(el.dataset.tr),
-        name: el.dataset.name || '空地', icon: el.dataset.icon,
+        refId: cell.getAttribute('data-ref') || `empty-${dq},${dr}`,
+        kind: cell.getAttribute('data-kind')!,
+        q: Number(dq), r: Number(dr),
+        name: cell.getAttribute('data-name') || '空地',
+        icon: cell.getAttribute('data-icon') ?? undefined,
       });
       const panel = document.getElementById('targetPanel');
       if (panel) { panel.innerHTML = renderTargetPanel(); bindTargetEvents(act); }
       document.querySelectorAll('.hex-selected').forEach((t) => t.classList.remove('hex-selected'));
-      el.classList.add('hex-selected');
+      cell.classList.add('hex-selected');
     });
+  }
   bindTargetEvents(act);
 
   // 方向键（全图模式下 = 视觉平移到相邻区域中心，不重拉数据）

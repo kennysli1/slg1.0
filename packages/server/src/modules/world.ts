@@ -54,6 +54,7 @@ export class WorldModule {
           cq: { type: 'integer', min: -200, max: 200 },
           cr: { type: 'integer', min: -200, max: 200 },
           r:  { type: 'integer', min: 0, max: 50 },
+          full: { type: 'boolean', optional: true },
         },
       },
     },
