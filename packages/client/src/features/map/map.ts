@@ -106,10 +106,17 @@ export function renderMap(): string {
     minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   }
-  const width = maxX - minX + pad * 2;
-  const height = maxY - minY + pad * 2;
-  mapViewW = width;   // 供边缘环绕取模使用
-  mapViewH = height;
+  // 9 副本并集作为 viewBox：让 SVG 始终覆盖"中心副本 + 整圈邻居"，
+  // 配合 CSS 把 .map-svg 放大到 3× 容器 + preserveAspectRatio="slice"，
+  // 无论玩家平移到任何位置，容器内都只显示平铺副本的内容，永不见地图边缘/留白。
+  const Wvb = maxX - minX; // 单副本像素宽（不含 pad）
+  const Hvb = maxY - minY; // 单副本像素高（不含 pad）
+  const vbX = pad - Vx.x - Vy.x;
+  const vbY = pad - Vy.y;
+  const vbW = Wvb + 2 * Vx.x + 2 * Vy.x;
+  const vbH = Hvb + 2 * Vy.y;
+  mapViewW = vbW;   // 供边缘环绕取模使用（= 9 副本并集宽）
+  mapViewH = vbH;
   const ox = -minX + pad; // 画布偏移：把像素坐标平移到正区间
   const oy = -minY + pad;
 
@@ -201,8 +208,8 @@ export function renderMap(): string {
       </g>`;
   });
 
-  const svg = `<svg class="map-svg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="0 0 ${width.toFixed(0)} ${height.toFixed(0)}" width="100%" preserveAspectRatio="xMidYMid meet">
-      <rect class="map-bg" x="0" y="0" width="${width.toFixed(0)}" height="${height.toFixed(0)}"></rect>
+  const svg = `<svg class="map-svg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}" preserveAspectRatio="xMidYMid slice">
+      <rect class="map-bg" x="${vbX.toFixed(1)}" y="${vbY.toFixed(1)}" width="${vbW.toFixed(1)}" height="${vbH.toFixed(1)}"></rect>
       <g class="layer-hexes">${cells}</g>
       <g class="layer-paths">${paths}</g>
       <g class="layer-markers">${markers}</g>
@@ -418,7 +425,9 @@ function reducePanToLattice(): void {
   if (!mapSvg || mapViewW <= 0 || mapViewH <= 0) return;
   const dispW = mapSvg.clientWidth || 1;
   const dispH = mapSvg.clientHeight || 1;
-  const baseScale = Math.min(dispW / mapViewW, dispH / mapViewH);
+  // slice 模式用 max 覆盖（与上面 renderMap 的 preserveAspectRatio="slice" 一致），
+  // 让约化周期 = 真实视觉周期，跨边界 wrap 时无缝、无子周期漂移。
+  const baseScale = Math.max(dispW / mapViewW, dispH / mapViewH);
   const s = baseScale * mapZoom; // 当前屏幕缩放（含用户 zoom）
   const W = worldW(), H = worldH();
   const Vx = hexToPixel({ q: W, r: 0 }); // SVG 单位，Vx.y === 0

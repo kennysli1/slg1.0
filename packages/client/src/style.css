@@ -300,7 +300,9 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* ---------- 地图（六边形 SVG，全图可拖拽/缩放） ---------- */
 /* 地面底色：填满六边形四角与缩放留白，避免"空白"观感（wrap 时越界也显示为地面而非白板） */
 .map-wrap { position: relative; width: 100%; height: 70vh; min-height: 420px; overflow: hidden; background: #d8cfb2; border: 1px solid var(--c-line); border-radius: var(--r-md); box-shadow: var(--sh-1); }
-.map-svg { display: block; width: 100%; height: 100%; touch-action: none; background: #d8cfb2; overflow: visible; }
+/* SVG 元素放大到 3× 容器并绝对居中：配合 viewBox=9 副本并集 + slice，
+   使容器（.map-wrap）永远落在平铺副本内部，玩家平移到任何位置都看不到地图边缘/留白。 */
+.map-svg { position: absolute; left: -100%; top: -100%; width: 300%; height: 300%; display: block; touch-action: none; background: #d8cfb2; overflow: visible; }
 .map-bg { fill: #d8cfb2; }
 .hex { fill: #e9e0c9; stroke: #ddd2b6; stroke-width: 1; transition: fill .1s; }
 /* 空地块地形着色：以底色为基，做极淡色相偏移（林地/平原/沙地/草甸） */
