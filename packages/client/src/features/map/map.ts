@@ -659,7 +659,12 @@ function bindMapMouse(): void {
     if (mapDragging && mapSvg) {
       const dx = e.clientX - mapDragStartX;
       const dy = e.clientY - mapDragStartY;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) mapDragMoved = true;
+      // 仅在超过拖拽阈值（>3px）后才真正平移/重绘：避免"点击时轻微抖动"也触发
+      // 视口剔除重建 DOM，导致随后的 click 事件被重定向到 <g.layer-hexes> 而丢失 target，
+      // 进而使 cell = e.target.closest('.hex-cell') 为 null、点击选中/派兵失效。
+      const moved = Math.abs(dx) > 3 || Math.abs(dy) > 3;
+      if (!moved) return;
+      mapDragMoved = true;
       mapPanX = mapDragPanX + dx;
       mapPanY = mapDragPanY + dy;
       reducePanToLattice(); // 拖到边缘无缝环绕到对侧
@@ -676,8 +681,10 @@ function bindMapMouse(): void {
     if (!mapDragging) return;
     mapDragging = false;
     mapSvg?.classList.remove('grabbing');
-    if (mapDragMoved) mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
-    renderVisibleTiles(); // 拖拽结束再确保一次：把松手瞬间视野内的格子都渲染出来
+    if (mapDragMoved) {
+      mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
+      renderVisibleTiles(); // 拖拽结束再确保一次：把松手瞬间视野内的格子都渲染出来
+    }
   });
 
   window.addEventListener('wheel', (e: WheelEvent) => {
