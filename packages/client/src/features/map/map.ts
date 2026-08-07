@@ -154,19 +154,11 @@ export function renderMap(): string {
       </g>`;
   };
 
-  // 基础副本：全部地块（含草地）。
+  // 基础副本：全部地块（含草地）。环面世界里所有副本内容一致，只差偏移——
+  // 因此 3×3 平铺全部复用同一个 baseInner，保证跨越边界时六边形网格/地形完全连续，
+  // 不会出现"网格消失"的视觉断层（baseInner 只构建一次，平摊到 9 份靠 transform）。
   let baseInner = '';
   for (const h of hexes) baseInner += cellInner(h);
-
-  // 邻居副本：仅占位地块（村庄/PvE/己方）+ 一块草地底，省节点；靠周期平铺出无缝世界。
-  let neighborInner = `<polygon class="map-copy-bg" points="0,0 ${Vx.x.toFixed(1)},0 ${(Vx.x + Vy.x).toFixed(1)},${Vy.y.toFixed(1)} ${Vy.x.toFixed(1)},${Vy.y.toFixed(1)}"></polygon>`;
-  for (const h of hexes) {
-    const ownHere = ownVillageAt(h.q, h.r);
-    const isCurrent = h.q === me!.q && h.r === me!.r;
-    const t = tileAt(h.q, h.r);
-    if (!isCurrent && !ownHere && !t) continue; // 跳过空草地，邻居副本只画占位格
-    neighborInner += cellInner(h);
-  }
 
   // 渲染 3×3 个副本（中心 + 8 邻居），平铺成可无限环游的连续地图。
   let cells = '';
@@ -174,8 +166,7 @@ export function renderMap(): string {
     for (let j = -1; j <= 1; j++) {
       const offx = i * Vx.x + j * Vy.x;
       const offy = i * Vx.y + j * Vy.y;
-      const inner = (i === 0 && j === 0) ? baseInner : neighborInner;
-      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${inner}</g>`;
+      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${baseInner}</g>`;
     }
   }
 
@@ -396,7 +387,7 @@ let animTimer: number | null = null;function startMarchAnimation(ox: number, oy:
    - D-pad / 跳转 / 回城 = centerViewOn() 视觉居中（仅改 transform），双击空白处 resetMapView() 复位
    ============================================================ */
 const ZOOM_MIN = 1;
-const ZOOM_MAX = 3;
+const ZOOM_MAX = 2;
 let mapZoom = 1;
 let mapPanX = 0;
 let mapPanY = 0;

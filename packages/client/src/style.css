@@ -301,7 +301,6 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* 地面底色：填满六边形四角与缩放留白，避免"空白"观感（wrap 时越界也显示为地面而非白板） */
 .map-wrap { position: relative; width: 100%; height: 70vh; min-height: 420px; overflow: hidden; background: #d8cfb2; border: 1px solid var(--c-line); border-radius: var(--r-md); box-shadow: var(--sh-1); }
 .map-svg { display: block; width: 100%; height: 100%; touch-action: none; background: #d8cfb2; overflow: visible; }
-.map-copy-bg { fill: #e6e1c6; }
 .map-bg { fill: #d8cfb2; }
 .hex { fill: #e9e0c9; stroke: #ddd2b6; stroke-width: 1; transition: fill .1s; }
 /* 空地块地形着色：以底色为基，做极淡色相偏移（林地/平原/沙地/草甸） */
