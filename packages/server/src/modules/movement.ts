@@ -6,7 +6,7 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { Snapshot } from '../infra/combat-types.js';
 import type { GameConfig } from '../infra/config.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
-import { type Hex, hexDistance, linePath } from '../infra/hex.js';
+import { type Hex, hexDistance, linePath, hexDistanceWrapped, linePathWrapped, wrapHex } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
 
 const log = makeLogger('movement');
@@ -128,6 +128,7 @@ export class MovementModule {
   ) {}
 
   init(): void {
+    this.normalizeCoords();
     this.commands.register('movement.SendRaid', (c) => this.sendRaid(c));
     this.commands.register('movement.SendAttack', (c) => this.sendAttack(c));
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
@@ -135,6 +136,20 @@ export class MovementModule {
     this.commands.register('movement.List', (c) => this.list(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
+  }
+
+  /** 归一行军坐标进环面（幂等，兼容旧档）。 */
+  private normalizeCoords(): void {
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const wrap = (hh: any) => (hh ? wrapHex({ q: hh.q, r: hh.r }, W, H) : hh);
+    for (const mv of this.store.all<Movement>(COLLECTION)) {
+      const upd: any = { ...mv };
+      if (mv.fromXY) upd.fromXY = wrap(mv.fromXY);
+      if (mv.toXY) upd.toXY = wrap(mv.toXY);
+      if (Array.isArray(mv.path)) upd.path = mv.path.map(wrap);
+      if (mv.pos) upd.pos = wrap(mv.pos);
+      this.store.set(COLLECTION, mv.id, upd);
+    }
   }
 
   /** 重启恢复：为所有在途、仍在行军的部队重新登记下一格推进（过期则立即触发）。 */
@@ -251,7 +266,7 @@ export class MovementModule {
 
   /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
   private travelSec(from: Hex, to: Hex, troops: Record<string, number>): number {
-    const dist = hexDistance(from, to);
+    const dist = hexDistanceWrapped(from, to, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const mult = this.config.constants.marchSpeedMultiplier ?? 1;
     const slowest = Math.min(...Object.keys(troops).map((u) => (this.config.units[u]?.speed ?? 6) * mult));
     return Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
@@ -262,7 +277,7 @@ export class MovementModule {
     base: Pick<Movement, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
       Partial<Pick<Movement, 'targetId' | 'targetVillage' | 'loot' | 'cargo' | 'founderPlayerId'>>,
   ): Movement {
-    const path = linePath(base.fromXY, base.toXY);
+    const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
     const totalMs = this.travelSec(base.fromXY, base.toXY, base.troops) * 1000;
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
@@ -493,12 +508,11 @@ export class MovementModule {
   private async foundVillage(cmd: Command): Promise<CommandResult> {
     const { villageId, q, r } = cmd.payload as { villageId: string; q: number; r: number };
     const c = this.config.constants;
-    const toXY: Hex = { q, r };
-
-    // 地图范围
-    if (hexDistance({ q: 0, r: 0 }, toXY) > c.mapSize) {
+    // 环面世界：任意坐标合法（归一进 [0,W)×[0,H)）；仅拦截明显越界防误传巨值。
+    if (Math.abs(q) > 1000 || Math.abs(r) > 1000) {
       return { ok: false, payload: {}, reason: 'out_of_map' };
     }
+    const toXY: Hex = wrapHex({ q, r }, c.worldW ?? 41, c.worldH ?? 41);
 
     // 归属玩家
     const ownerRes = await this.commands.send({

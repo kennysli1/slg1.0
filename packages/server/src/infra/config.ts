@@ -138,6 +138,9 @@ export interface GameConstants {
   baseProductionPerHour: number;
   mapSize: number;
   mapViewRadius: number;
+  /** 环绕平行四边形世界尺寸（axial q 周期 worldW、r 周期 worldH）。 */
+  worldW: number;
+  worldH: number;
   /** 战斗每 tick 间隔(ms)：越小越平滑越费算力（08设计§4.4 的 dt）。 */
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
@@ -426,6 +429,8 @@ export function loadGameConfig(configDir: string): GameConfig {
     baseProductionPerHour: cn('base_production_per_hour', 10),
     mapSize: cn('map_size', 20),
     mapViewRadius: cn('map_view_radius', 6),
+    worldW: cn('world_width', 41),
+    worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
     notificationsPerVillage: cn('notifications_per_village', 60),
@@ -573,9 +578,10 @@ export function validateGameConfig(config: GameConfig): void {
   }
   for (const s of config.pveSpawns) {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
-    if (hexDistance0(s.q, s.r) > config.constants.mapSize) {
-      errors.push(`pve_spawns.csv[${s.id}] 坐标(${s.q},${s.r}) 超出 map_size=${config.constants.mapSize}`);
+    if (!Number.isFinite(s.q) || !Number.isFinite(s.r)) {
+      errors.push(`pve_spawns.csv[${s.id}] 坐标非数值`);
     }
+    // 注：坐标可为负或超出 [0,W)×[0,H)，放置时 world.PlacePve 会按环面取模归一。
   }
 
   // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
@@ -609,6 +615,8 @@ export function validateGameConfig(config: GameConfig): void {
   const c = config.constants;
   if (c.mapSize <= 0) errors.push(`game_constants.csv map_size 必须>0`);
   if (c.mapViewRadius <= 0) errors.push(`game_constants.csv map_view_radius 必须>0`);
+  if (c.worldW <= 0) errors.push(`game_constants.csv world_width 必须>0`);
+  if (c.worldH <= 0) errors.push(`game_constants.csv world_height 必须>0`);
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
@@ -652,10 +660,6 @@ export function validateGameConfig(config: GameConfig): void {
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);
   }
-}
-
-function hexDistance0(q: number, r: number): number {
-  return (Math.abs(q) + Math.abs(q + r) + Math.abs(r)) / 2;
 }
 
 /** DFS 检测建筑 requires 图中的环；返回环路径（含重复首节点）或 null。 */

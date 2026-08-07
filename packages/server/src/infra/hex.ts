@@ -99,3 +99,52 @@ export function linePath(from: Hex, to: Hex): Hex[] {
   }
   return path;
 }
+
+/**
+ * 环面（torus）坐标归一：把任意 axial 坐标折回 [0,W)×[0,H)。
+ * 世界布局为环绕平行四边形（axial torus），此函数统一作主键/邻居/距离的入口。
+ */
+export function wrapHex(h: Hex, W: number, H: number): Hex {
+  const wq = ((h.q % W) + W) % W;
+  const wr = ((h.r % H) + H) % H;
+  return { q: wq, r: wr };
+}
+
+/**
+ * 环面最短距离：枚举 to 的 3×3 环绕副本（dq∈{-W,0,W}, dr∈{-H,0,H}），取最小六边形距离。
+ * 再远一个周期不会更短，故 9 个组合已足够。
+ */
+export function hexDistanceWrapped(a: Hex, b: Hex, W: number, H: number): number {
+  let best = hexDistance(a, b);
+  for (let dq = -W; dq <= W; dq += W) {
+    for (let dr = -H; dr <= H; dr += H) {
+      if (dq === 0 && dr === 0) continue;
+      const d = hexDistance(a, { q: b.q + dq, r: b.r + dr });
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+
+/** 环面六个邻居（已归一进 [0,W)×[0,H)）。 */
+export function neighborsWrapped(h: Hex, W: number, H: number): Hex[] {
+  return DIRECTIONS.map((d) => wrapHex({ q: h.q + d.q, r: h.r + d.r }, W, H));
+}
+
+/**
+ * 环面逐格路径：取离 from 最近的 to 副本跑直线插值，结果每个格归一进 [0,W)×[0,H)，
+ * 因此路径可平滑跨过世界接缝（相邻两格恒为六边形邻居）。
+ */
+export function linePathWrapped(from: Hex, to: Hex, W: number, H: number): Hex[] {
+  let bestTo = to;
+  let bestD = hexDistance(from, to);
+  for (let dq = -W; dq <= W; dq += W) {
+    for (let dr = -H; dr <= H; dr += H) {
+      if (dq === 0 && dr === 0) continue;
+      const cand = { q: to.q + dq, r: to.r + dr };
+      const d = hexDistance(from, cand);
+      if (d < bestD) { bestD = d; bestTo = cand; }
+    }
+  }
+  return linePath(from, bestTo).map((p) => wrapHex(p, W, H));
+}

@@ -2,7 +2,7 @@
 import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
-import { mapSize, pveInfoByType } from '../../app/config.js';
+import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
@@ -10,6 +10,26 @@ import { errText } from '../../shared/ui/text.js';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
+}
+
+/** 环面最短距离：考虑 (q±W, r±H) 各 8 个镜像副本，取最小。 */
+function hexDistanceWrapped(a: { q: number; r: number }, b: { q: number; r: number }, W: number, H: number): number {
+  let best = hexDistance(a, b);
+  for (let dq = -W; dq <= W; dq += W) {
+    for (let dr = -H; dr <= H; dr += H) {
+      if (dq === 0 && dr === 0) continue;
+      const d = hexDistance(a, { q: b.q + dq, r: b.r + dr });
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+
+/** 坐标取模回 [0,W)×[0,H)（环面归一）。 */
+function wrapCoord(q: number, r: number, W: number, H: number): { q: number; r: number } {
+  const wq = ((q % W) + W) % W;
+  const wr = ((r % H) + H) % H;
+  return { q: wq, r: wr };
 }
 
 /** 当前地图视野中心（未设置时默认为自己）。 */
@@ -33,13 +53,9 @@ const SCREEN_DIRS: Record<string, { dq: number; dr: number }> = {
   right: { dq:  1, dr:  0 },
 };
 
-/** 检查坐标是否在地图边界内。 */
-function inBounds(q: number, r: number): boolean {
-  return hexDistance({ q: 0, r: 0 }, { q, r }) <= mapSize();
-}
-
-function dirLabel(dir: string): string {
-  return { up: '上', down: '下', left: '左', right: '右' }[dir] ?? dir;
+/** 环面世界无边界：任意坐标都合法（跨边界即环绕到对侧）。 */
+function inBounds(_q: number, _r: number): boolean {
+  return true;
 }
 
 /** 空地块地形着色：按坐标做确定性哈希，分 4 档极淡色相，让地图不再死平且稳定不闪。 */
@@ -58,20 +74,14 @@ function pveIconByName(name?: string): string {
   return pveInfoByType(type)?.icon ?? 'pve_bandits';
 }
 
-/** 收集以 center 为中心、六边形半径 R 内的所有格坐标。 */
-function viewHexes(center: { q: number; r: number }, R: number): Hex[] {
+/** 整张地图的全部格坐标：环绕平行四边形 0<=q<W, 0<=r<H（约 W×H 格）。 */
+function fullMapHexes(): Hex[] {
+  const W = worldW(), H = worldH();
   const out: Hex[] = [];
-  for (let dq = -R; dq <= R; dq++) {
-    for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
-      out.push({ q: center.q + dq, r: center.r + dr });
-    }
+  for (let r = 0; r < H; r++) {
+    for (let q = 0; q < W; q++) out.push({ q, r });
   }
   return out;
-}
-
-/** 整张地图的全部格坐标（以原点为中心、半径 mapSize 的六边形，约 1261 格）。 */
-function fullMapHexes(): Hex[] {
-  return viewHexes({ q: 0, r: 0 }, mapSize());
 }
 
 export function renderMap(): string {
@@ -81,9 +91,14 @@ export function renderMap(): string {
   const selected = getSelected();
   if (selected && !tileAt(selected.q, selected.r)) setSelected(null);
 
-  // 全图渲染：画出整张地图（半径 mapSize 的全部六边形），拖拽/缩放可遍历全图。
+  // 全图渲染：环绕平行四边形世界（0<=q<W,0<=r<H），画成可被无限平铺的"基础副本"。
+  const W = worldW(), H = worldH();
   const hexes = fullMapHexes();
-  // 画布尺寸：取全图像素范围。
+  // 平行四边形周期向量（像素空间）：Vx 纯水平，Vy 带剪切（pointy-top 几何决定）。
+  const Vx = hexToPixel({ q: W, r: 0 });
+  const Vy = hexToPixel({ q: 0, r: H });
+
+  // 画布尺寸：取基础副本像素范围。
   const pad = HEX_SIZE * 1.4;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const h of hexes) {
@@ -93,7 +108,7 @@ export function renderMap(): string {
   }
   const width = maxX - minX + pad * 2;
   const height = maxY - minY + pad * 2;
-  mapViewW = width;   // 供边缘 wrap 取模使用
+  mapViewW = width;   // 供边缘环绕取模使用
   mapViewH = height;
   const ox = -minX + pad; // 画布偏移：把像素坐标平移到正区间
   const oy = -minY + pad;
@@ -101,13 +116,12 @@ export function renderMap(): string {
   const corners = hexCorners();
   const cornerStr = corners.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
 
-  // 地块多边形
-  let cells = '';
-  for (const h of hexes) {
+  // 单个格子的内部标记（坐标相对基础副本原点，不含 ox/oy；由外层 <g> 平移）。
+  const cellInner = (h: Hex): string => {
     const p = hexToPixel(h);
-    const cx = p.x + ox, cy = p.y + oy;
+    const cx = p.x, cy = p.y;
     const ownHere = ownVillageAt(h.q, h.r);
-    const isCurrent = h.q === me.q && h.r === me.r;
+    const isCurrent = h.q === me!.q && h.r === me!.r;
     const t = tileAt(h.q, h.r);
     let cls = 'hex', inner = '', clickable = '';
     if (isCurrent) {
@@ -134,10 +148,35 @@ export function renderMap(): string {
     const sel = getSelected();
     const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';
     // 用 <g> 承载多边形 + 图标，transform 定位
-    cells += `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable}>
+    return `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable}>
         <polygon class="${cls}" points="${cornerStr}"></polygon>
         ${inner ? `<foreignObject x="-24" y="-24" width="48" height="48"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
       </g>`;
+  };
+
+  // 基础副本：全部地块（含草地）。
+  let baseInner = '';
+  for (const h of hexes) baseInner += cellInner(h);
+
+  // 邻居副本：仅占位地块（村庄/PvE/己方）+ 一块草地底，省节点；靠周期平铺出无缝世界。
+  let neighborInner = `<polygon class="map-copy-bg" points="0,0 ${Vx.x.toFixed(1)},0 ${(Vx.x + Vy.x).toFixed(1)},${Vy.y.toFixed(1)} ${Vy.x.toFixed(1)},${Vy.y.toFixed(1)}"></polygon>`;
+  for (const h of hexes) {
+    const ownHere = ownVillageAt(h.q, h.r);
+    const isCurrent = h.q === me!.q && h.r === me!.r;
+    const t = tileAt(h.q, h.r);
+    if (!isCurrent && !ownHere && !t) continue; // 跳过空草地，邻居副本只画占位格
+    neighborInner += cellInner(h);
+  }
+
+  // 渲染 3×3 个副本（中心 + 8 邻居），平铺成可无限环游的连续地图。
+  let cells = '';
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      const offx = i * Vx.x + j * Vy.x;
+      const offy = i * Vx.y + j * Vy.y;
+      const inner = (i === 0 && j === 0) ? baseInner : neighborInner;
+      cells += `<g class="map-copy" transform="translate(${(ox + offx).toFixed(1)},${(oy + offy).toFixed(1)})">${inner}</g>`;
+    }
   }
 
   // 行军路径（自己部队）：折线 + 起终点
@@ -191,8 +230,8 @@ export function renderMap(): string {
     return `<div class="banner banner-move">${kind} → (${m.to.q},${m.to.r}) 抵达 <b>${secStr(m.arriveAt)}</b>${st}${loot}</div>`;
   }).join('');
 
-  // 导航控件：方向键 + 坐标跳转
-  const size = mapSize();
+  // 导航控件：方向键 + 坐标跳转（环面世界无边界，方向键始终可用）
+  const size = Math.max(worldW(), worldH());
   const STEP = 4;
   const canUp    = inBounds(center.q, center.r - STEP);
   const canDown  = inBounds(center.q, center.r + STEP);
@@ -218,7 +257,7 @@ export function renderMap(): string {
         <span class="map-jump-axis">Y</span><input type="number" id="mapJumpY" class="map-jump-input" value="${center.r}" min="${-size}" max="${size}" />
         <button class="map-jump-btn" id="mapJumpGo">跳转</button>
       </div>
-      <div class="map-jump-hint">全图范围 ±${size} · 拖拽平移 / 滚轮缩放 · 双击空白处复位视图 · 当前中心 X=${center.q} Y=${center.r}</div>
+      <div class="map-jump-hint">环面世界 · 坐标范围 X∈[0,${worldW()}) Y∈[0,${worldH()})，跨边界自动环绕 · 拖拽平移 / 滚轮缩放 / 双击空白复位 · 当前中心 X=${center.q} Y=${center.r}</div>
     </div>
   </div>`;
 
@@ -246,7 +285,7 @@ function renderTargetPanel(): string {
   const selected = getSelected();
   if (!selected || !me) return '<div class="empty">点击地图上的目标：野怪掠夺、玩家进攻、空地拓荒、己方运输。</div>';
   const army = getCache().army;
-  const dist = hexDistance({ q: selected.q, r: selected.r }, { q: me.q, r: me.r });
+  const dist = hexDistanceWrapped({ q: selected.q, r: selected.r }, { q: me.q, r: me.r }, worldW(), worldH());
 
   if (selected.kind === 'empty') {
     return `<div class="target-panel target">
@@ -379,22 +418,30 @@ export function resetMapCenter(): void {
   mapPanY = 0;
 }
 
-/** 拖拽到边缘后环绕：把平移量按"一个世界宽/高"回卷，超出半幅即从对侧回来。 */
-function wrapPanToWorld(): void {
+/**
+ * 环面无缝环绕：把平移量按"环面晶格"约化到基础副本内，跨边界时不硬跳变。
+ * 屏幕空间周期向量 = (Vx, Vy) × (baseScale × zoom)，Vx 纯水平、Vy 带剪切。
+ * 把 (panX,panY) 写成 a·Vxs + b·Vys，再把 (a,b) 约化到 [-0.5,0.5) 即得无缝等价平移。
+ */
+function reducePanToLattice(): void {
   if (!mapSvg || mapViewW <= 0 || mapViewH <= 0) return;
   const dispW = mapSvg.clientWidth || 1;
   const dispH = mapSvg.clientHeight || 1;
-  const s = Math.min(dispW / mapViewW, dispH / mapViewH);
-  const cw = mapViewW * s;
-  const ch = mapViewH * s;
-  if (cw > 0) {
-    if (mapPanX > cw / 2) mapPanX -= cw;
-    else if (mapPanX < -cw / 2) mapPanX += cw;
-  }
-  if (ch > 0) {
-    if (mapPanY > ch / 2) mapPanY -= ch;
-    else if (mapPanY < -ch / 2) mapPanY += ch;
-  }
+  const baseScale = Math.min(dispW / mapViewW, dispH / mapViewH);
+  const s = baseScale * mapZoom; // 当前屏幕缩放（含用户 zoom）
+  const W = worldW(), H = worldH();
+  const Vx = hexToPixel({ q: W, r: 0 }); // SVG 单位，Vx.y === 0
+  const Vy = hexToPixel({ q: 0, r: H });
+  const vxX = Vx.x * s; // Vx.y === 0，无需 vxY
+  const vyX = Vy.x * s, vyY = Vy.y * s;
+  if (Math.abs(vyY) < 1e-6 || Math.abs(vxX) < 1e-6) return;
+  // panX = a·vxX + b·vyX ; panY = b·vyY（Vx 纯水平，vxY=0）
+  let b = mapPanY / vyY;
+  let a = (mapPanX - b * vyX) / vxX;
+  a -= Math.round(a); // 约化到 [-0.5,0.5)
+  b -= Math.round(b);
+  mapPanX = a * vxX + b * vyX;
+  mapPanY = b * vyY;
 }
 
 function applyMapTransform(svg: SVGSVGElement): void {
@@ -464,7 +511,7 @@ function bindMapGestures(svg: SVGSVGElement): void {
     mapPanX = startPanX + (m.x - startMidX);
     mapPanY = startPanY + (m.y - startMidY);
     if (mapZoom <= ZOOM_MIN + 0.01) { mapPanX = 0; mapPanY = 0; } // 回到 1x 时归中，避免漂移
-    wrapPanToWorld(); // 双指拖拽到边缘环绕到对侧
+    reducePanToLattice(); // 双指拖拽到边缘无缝环绕到对侧
     applyMapTransform(svg);
   }, { passive: false });
 
@@ -527,7 +574,7 @@ function showTileTooltip(cell: Element, clientX: number, clientY: number): void 
   const kind = cell.getAttribute('data-kind') || 'empty';
   const name = cell.getAttribute('data-name') || '空地';
   const isSelf = kind === 'own_village' && !!me && me.q === q && me.r === r;
-  const dist = me ? hexDistance({ q: me.q, r: me.r }, { q, r }) : 0;
+  const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, worldW(), worldH()) : 0;
   const key = `${kind}:${q},${r}:${name}`;
   const tip = ensureTooltip();
   if (key !== mapHoverKey || tip.style.display !== 'block') {
@@ -580,7 +627,7 @@ function bindMapMouse(): void {
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) mapDragMoved = true;
       mapPanX = mapDragPanX + dx;
       mapPanY = mapDragPanY + dy;
-      wrapPanToWorld(); // 拖到边缘环绕到对侧
+      reducePanToLattice(); // 拖到边缘无缝环绕到对侧
       applyMapTransform(mapSvg);
       return;
     }
@@ -691,13 +738,11 @@ export function bindMap(act: (p: Promise<any>) => void): void {
       const cur = viewCenter();
       const nq = cur.q + d.dq * STEP;
       const nr = cur.r + d.dr * STEP;
-      if (!inBounds(nq, nr)) {
-        addReport(`已到达地图边界，无法继续向${dirLabel(dir)}移动`);
-        return;
-      }
-      setMapCenter({ q: nq, r: nr });
-      centerViewOn({ q: nq, r: nr });
-      syncNavUI({ q: nq, r: nr });
+      // 环面世界：方向键始终可用，跨边界即环绕到对侧。
+      const w = wrapCoord(nq, nr, worldW(), worldH());
+      setMapCenter({ q: w.q, r: w.r });
+      centerViewOn({ q: w.q, r: w.r });
+      syncNavUI({ q: w.q, r: w.r });
     };
   };
   bindDir('mapDirUp', 'up');
@@ -730,10 +775,11 @@ export function bindMap(act: (p: Promise<any>) => void): void {
     const q = parseInt(xEl.value, 10);
     const r = parseInt(yEl.value, 10);
     if (isNaN(q) || isNaN(r)) { addReport('请输入有效坐标'); return; }
-    if (!inBounds(q, r)) { addReport(`坐标 (X=${q}, Y=${r}) 超出地图范围 ±${mapSize()}`); return; }
-    setMapCenter({ q, r });
-    centerViewOn({ q, r });
-    syncNavUI({ q, r });
+    // 环面世界：接受任意整数坐标，自动取模归一到 [0,W)×[0,H)。
+    const w = wrapCoord(q, r, worldW(), worldH());
+    setMapCenter({ q: w.q, r: w.r });
+    centerViewOn({ q: w.q, r: w.r });
+    syncNavUI({ q: w.q, r: w.r });
   };
   // 按 Enter 也触发跳转
   [document.getElementById('mapJumpX'), document.getElementById('mapJumpY')].forEach((el) => {

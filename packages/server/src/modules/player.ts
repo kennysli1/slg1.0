@@ -4,7 +4,7 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
 import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
-import { hexKey, hexDistance } from '../infra/hex.js';
+import { hexKey, hexDistanceWrapped, wrapHex } from '../infra/hex.js';
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -135,8 +135,9 @@ export class PlayerModule {
     private now: () => number,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military/population + 放地图）。 */
     private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
-    /** 地图半径，用于随机分配出生坐标范围（默认 20）。 */
-    private mapSize: number = 20,
+    /** 环绕平行四边形世界尺寸（axial q 周期 W、r 周期 H），用于随机分配出生坐标。 */
+    private worldW: number = 41,
+    private worldH: number = 41,
     /**
      * 全局共享串行队列（可选）。
      * Register 命令用 "account:<normalizedName>" 车道串行化，防止同名并发注册 TOCTOU。
@@ -151,6 +152,7 @@ export class PlayerModule {
   }
 
   init(): void {
+    this.normalizeCoords();
     this.commands.register('player.Register', (c) => this.register(c));
     this.commands.register('player.Login', (c) => this.login(c));
     this.commands.register('player.Get', (c) => this.get(c));
@@ -460,6 +462,25 @@ export class PlayerModule {
     return n;
   }
 
+  /** 归一玩家坐标进环面 [0,W)×[0,H)（幂等，兼容旧六边形存档）。各模块在 init 自归一自己的集合。 */
+  private normalizeCoords(): void {
+    const W = this.worldW, H = this.worldH;
+    for (const raw of this.store.all<RawPlayer>(COLLECTION)) {
+      const upd: any = { ...raw };
+      if (typeof raw.q === 'number' && typeof raw.r === 'number') {
+        const w = wrapHex({ q: raw.q, r: raw.r }, W, H);
+        upd.q = w.q; upd.r = w.r;
+      }
+      if (Array.isArray(raw.ownedVillages)) {
+        upd.ownedVillages = raw.ownedVillages.map((v: any) => {
+          const w = wrapHex({ q: v.q, r: v.r }, W, H);
+          return { ...v, q: w.q, r: w.r };
+        });
+      }
+      this.store.set(COLLECTION, raw.id, upd);
+    }
+  }
+
   /**
    * 为新玩家分配地图空位：在地图内随机散布，与现有**主城**保持最小间距。
    */
@@ -470,9 +491,8 @@ export class PlayerModule {
       for (const v of p.ownedVillages) taken.add(hexKey(v.q, v.r));
     }
 
-    const MIN_SPACING = Math.max(3, Math.min(8, Math.floor(this.mapSize / 4)));
-    const border = 2;
-    const usableRadius = this.mapSize - border;
+    const W = this.worldW, H = this.worldH;
+    const MIN_SPACING = Math.max(3, Math.min(8, Math.floor(Math.min(W, H) / 4)));
 
     let seed = existing.length * 2654435761 + 1;
     const lcg = () => {
@@ -480,34 +500,25 @@ export class PlayerModule {
       return (seed >>> 0) / 0x100000000;
     };
 
-    const MAX_ATTEMPTS = 200;
+    const MAX_ATTEMPTS = 400;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      const q = Math.round((lcg() * 2 - 1) * usableRadius);
-      const r = Math.round((lcg() * 2 - 1) * usableRadius);
-      if (Math.abs(q) + Math.abs(r) + Math.abs(-q - r) > this.mapSize * 2) continue;
+      const q = Math.floor(lcg() * W);
+      const r = Math.floor(lcg() * H);
       if (taken.has(hexKey(q, r))) continue;
       const tooClose = existing.some((p) =>
-        p.ownedVillages.some((v) => hexDistance({ q, r }, { q: v.q, r: v.r }) < MIN_SPACING),
+        p.ownedVillages.some((v) => hexDistanceWrapped({ q, r }, { q: v.q, r: v.r }, W, H) < MIN_SPACING),
       );
       if (tooClose) continue;
       return { q, r };
     }
 
-    const DIRS = [
-      { q: 1, r: 0 }, { q: 0, r: 1 }, { q: -1, r: 1 },
-      { q: -1, r: 0 }, { q: 0, r: -1 }, { q: 1, r: -1 },
-    ];
-    for (let k = 1; k <= this.mapSize; k++) {
-      let q = DIRS[4].q * k;
-      let r = DIRS[4].r * k;
-      for (let side = 0; side < 6; side++) {
-        for (let step = 0; step < k; step++) {
-          if (!taken.has(hexKey(q, r))) return { q, r };
-          q += DIRS[side].q;
-          r += DIRS[side].r;
-        }
+    // 兜底：线性扫描第一个空位
+    for (let r = 0; r < H; r++) {
+      for (let q = 0; q < W; q++) {
+        if (!taken.has(hexKey(q, r))) return { q, r };
       }
     }
+    return { q: 0, r: 0 };
     return { q: 1, r: 0 };
   }
 

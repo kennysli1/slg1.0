@@ -53,6 +53,8 @@ export class MetaModule {
         constants: {
           mapViewRadius: c.constants.mapViewRadius,
           mapSize: c.constants.mapSize,
+          worldW: c.constants.worldW,
+          worldH: c.constants.worldH,
           // 人口 v2 展示用常量（前端本地外插需要）
           popGrowthPerProsperity: c.constants.popGrowthPerProsperity,
           popPerCapitaCrop: c.constants.popPerCapitaCrop,

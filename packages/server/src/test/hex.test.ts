@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hexDistance, linePath, neighbors, hexKey } from '../infra/hex.js';
+import { hexDistance, linePath, neighbors, hexKey, wrapHex, hexDistanceWrapped, neighborsWrapped, linePathWrapped } from '../infra/hex.js';
 
 /**
  * 六边形轴坐标几何单元测试：距离、逐格路径、邻居。
@@ -39,4 +39,46 @@ test('linePath — 起终同点返回单格', () => {
   const p = linePath({ q: 2, r: 2 }, { q: 2, r: 2 });
   assert.equal(p.length, 1);
   assert.deepEqual(p[0], { q: 2, r: 2 });
+});
+
+// ── 环面（torus）几何：纬度 0<=q<W、0<=r<H 取模，坐标跨边界环游 ──
+
+test('wrapHex — 把任意坐标取模回 [0,W)×[0,H)', () => {
+  assert.deepEqual(wrapHex({ q: 0, r: 0 }, 41, 41), { q: 0, r: 0 });
+  assert.deepEqual(wrapHex({ q: 41, r: 0 }, 41, 41), { q: 0, r: 0 });
+  assert.deepEqual(wrapHex({ q: -1, r: 5 }, 41, 41), { q: 40, r: 5 });
+  assert.deepEqual(wrapHex({ q: 40, r: 41 }, 41, 41), { q: 40, r: 0 });
+  assert.deepEqual(wrapHex({ q: -41, r: -41 }, 41, 41), { q: 0, r: 0 });
+});
+
+test('hexDistanceWrapped — 取环面最短距离（可跨边界）', () => {
+  const W = 10, H = 10;
+  // (0,0) 与 (9,0) 在环面上只差 1（经 q=10 边界）
+  assert.equal(hexDistanceWrapped({ q: 0, r: 0 }, { q: 9, r: 0 }, W, H), 1);
+  // 不跨边界时与普通距离一致
+  assert.equal(hexDistanceWrapped({ q: 0, r: 0 }, { q: 3, r: 0 }, W, H), 3);
+  assert.equal(hexDistanceWrapped({ q: 0, r: 0 }, { q: 0, r: 0 }, W, H), 0);
+});
+
+test('neighborsWrapped — 邻居均落在 [0,W)×[0,H) 内', () => {
+  const W = 5, H = 5;
+  const ns = neighborsWrapped({ q: 0, r: 0 }, W, H);
+  assert.equal(ns.length, 6);
+  for (const n of ns) {
+    assert.ok(n.q >= 0 && n.q < W && n.r >= 0 && n.r < H, `邻居 ${hexKey(n.q, n.r)} 应在界内`);
+  }
+  // 跨边界邻居正确归一：(-1,0) → (4,0)
+  assert.ok(ns.some((v) => v.q === 4 && v.r === 0), '应含环面邻居 (4,0)');
+});
+
+test('linePathWrapped — 跨边界路径每步环面相邻且终点归一', () => {
+  const W = 41, H = 41;
+  const path = linePathWrapped({ q: 1, r: 0 }, { q: -1, r: 0 }, W, H);
+  assert.equal(path.length, 3, '距离1应含3格');
+  assert.deepEqual(path[0], { q: 1, r: 0 });
+  for (const p of path) assert.ok(p.q >= 0 && p.q < W && p.r >= 0 && p.r < H);
+  // 环面相邻：用 hexDistanceWrapped 校验（平铺坐标经取模后"断点"不能直接用 hexDistance）
+  for (let i = 1; i < path.length; i++) {
+    assert.equal(hexDistanceWrapped(path[i - 1], path[i], W, H), 1, `第${i}步应环面相邻`);
+  }
 });

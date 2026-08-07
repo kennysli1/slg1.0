@@ -20,7 +20,7 @@ interface ServerConfig {
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string }[];
   units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
-  constants: { mapViewRadius: number; mapSize: number };
+  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number };
 }
 
 let cfg: ServerConfig | null = null;
@@ -57,6 +57,16 @@ export function mapViewRadius(): number {
 /** 地图总半径（服务端 map_size），用于边界检测。 */
 export function mapSize(): number {
   return cfg?.constants?.mapSize ?? 20;
+}
+
+/** 环绕平行四边形世界宽（axial q 周期 worldW），默认 41。 */
+export function worldW(): number {
+  return cfg?.constants?.worldW ?? 41;
+}
+
+/** 环绕平行四边形世界高（axial r 周期 worldH），默认 41。 */
+export function worldH(): number {
+  return cfg?.constants?.worldH ?? 41;
 }
 
 export function resInfo(key: string): ResInfo {

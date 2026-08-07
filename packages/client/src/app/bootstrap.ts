@@ -8,7 +8,7 @@ import { errText } from '../shared/ui/text.js';
 import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { showToast } from '../shared/ui/toast.js';
-import { resInfo, resourceKeys, loadGameConfig, mapSize } from './config.js';
+import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
 import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
@@ -76,7 +76,7 @@ async function refreshAll() {
     // 后续拖拽/缩放/跳转均为纯视觉变换，不再按视野重拉数据。
     const [res, vil, army, area, moves, pop] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
-      req('GetArea', { cq: center.q, cr: center.r, r: mapSize(), full: true }), req('ListMovements'),
+      req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }), req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);

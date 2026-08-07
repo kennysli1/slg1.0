@@ -106,13 +106,23 @@ test('校验器：PvE 模板没有守军应抛错', () => {
   assert.throws(() => validateGameConfig(bad), /没有任何守军/);
 });
 
-test('校验器：PvE spawn 坐标超出地图应抛错', () => {
+test('校验器：PvE spawn 坐标可为负/超出 [0,W)×[0,H)（环面放置时归一，不再抛错）', () => {
+  const cfg = loadGameConfig(configDir);
+  const ok: GameConfig = {
+    ...cfg,
+    pveSpawns: [{ ...cfg.pveSpawns[0], q: cfg.constants.worldW + 5, r: -3 }],
+  };
+  // 环面世界里任何有限坐标都合法：放置时由 world.PlacePve 按 worldW/worldH 取模归一
+  assert.doesNotThrow(() => validateGameConfig(ok));
+});
+
+test('校验器：PvE spawn 坐标非数值仍抛错', () => {
   const cfg = loadGameConfig(configDir);
   const bad: GameConfig = {
     ...cfg,
-    pveSpawns: [{ ...cfg.pveSpawns[0], q: cfg.constants.mapSize + 1, r: 0 }],
+    pveSpawns: [{ ...cfg.pveSpawns[0], q: NaN as unknown as number, r: 0 }],
   };
-  assert.throws(() => validateGameConfig(bad), /超出 map_size/);
+  assert.throws(() => validateGameConfig(bad), /坐标非数值/);
 });
 
 test('校验器：关键常量范围非法应抛错', () => {

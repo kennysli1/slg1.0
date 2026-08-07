@@ -146,7 +146,7 @@ export function createGameApp(opts?: {
       throw err;
     }
   };
-  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.mapSize, serialQueue);
+  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue);
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
 
@@ -210,7 +210,7 @@ export function createGameApp(opts?: {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },
     setupWorld() {
-      world.setup(config.constants.mapSize);
+      world.setup(config.constants.worldW, config.constants.worldH);
       // PvE 目标点位由 config/pve_spawns.csv 决定
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
     },
@@ -234,13 +234,13 @@ export function createGameApp(opts?: {
       if (!keepAccounts) {
         const n = store.all('player').length;
         for (const c of ACCOUNT_COLLECTIONS) store.clear(c);
-        world.setup(config.constants.mapSize);
+        world.setup(config.constants.worldW, config.constants.worldH);
         for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
         return { accounts: n };
       }
 
       // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
-      world.setup(config.constants.mapSize);
+      world.setup(config.constants.worldW, config.constants.worldH);
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
       player.rebuildVillages(reassignSpots);
       return { accounts: store.all('player').length };

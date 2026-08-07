@@ -4,6 +4,7 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
 import type { Snapshot } from '../infra/combat-types.js';
+import { wrapHex } from '../infra/hex.js';
 
 /**
  * 领域模块 · PvE（NPC 目标 / 发育地板）
@@ -55,9 +56,21 @@ export class PveModule {
   ) {}
 
   init(): void {
+    this.normalizeCoords();
     this.commands.register('pve.GetTarget', (c) => this.getTarget(c));
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
+  }
+
+  /** 归一 PvE 坐标进环面（幂等，兼容旧档）。 */
+  private normalizeCoords(): void {
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    for (const s of this.store.all<PveState>(COLLECTION)) {
+      const w = wrapHex({ q: s.q, r: s.r }, W, H);
+      if (w.q !== s.q || w.r !== s.r) {
+        this.store.set(COLLECTION, s.id, { ...s, q: w.q, r: w.r });
+      }
+    }
   }
 
   /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。 */
