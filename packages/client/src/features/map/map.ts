@@ -127,7 +127,7 @@ export function renderMap(): string {
     const sel = getSelected();
     const selCls = sel && sel.q === h.q && sel.r === h.r ? ' hex-selected' : '';
     // 用 <g> 承载多边形 + 图标，transform 定位
-    cells += `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable} title="(${h.q},${h.r})">
+    cells += `<g class="hex-cell${selCls}" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})" ${clickable}>
         <polygon class="${cls}" points="${cornerStr}"></polygon>
         ${inner ? `<foreignObject x="-24" y="-24" width="48" height="48"><div class="hex-icon">${inner}</div></foreignObject>` : ''}
       </g>`;
@@ -406,19 +406,156 @@ function bindMapGestures(svg: SVGSVGElement): void {
   }, { passive: true });
 }
 
+/* ============================================================
+   地图鼠标交互（桌面端）：拖拽平移 + 滚轮缩放 + 悬停信息浮层
+   - 复用既有 mapZoom / mapPanX / mapPanY 与 applyMapTransform，属于纯视觉变换：
+     只改 SVG 的 CSS transform，不改视野中心，因此不会触发重新拉取地图数据。
+   - 与手机双指手势（bindMapGestures）并存：桌面用左键拖拽、滚轮缩放。
+   - 监听统一挂在 window 上，且只绑定一次（_kowMapMouseBound 标记），跨 5s 重渲不重复绑定；
+     当前 SVG 引用存模块级 mapSvg，每帧 renderMap/bindMap 刷新，旧元素自然丢弃。
+   - 拖拽与点击互斥：拖动超过 3px 阈值即视为平移，抬手后吞掉随后触发的 click，避免误选中地块。
+   - 悬停 <g class="hex-cell">（自带 data-tq/tr/kind/name/ref/icon）显示信息浮层：
+     坐标(X/Y) / 类型 / 名称 / 与你的距离，全部客户端可得，无需改动服务端契约。
+   ============================================================ */
+let mapSvg: SVGSVGElement | null = null;
+let mapSuppressClick = false;
+let mapDragging = false;
+let mapDragMoved = false;
+let mapDragStartX = 0;
+let mapDragStartY = 0;
+let mapDragPanX = 0;
+let mapDragPanY = 0;
+let mapHoverKey = '';
+
+/** 拖动后吞掉一次 click，防止误选中。 */
+function swallowClick(): boolean {
+  if (mapSuppressClick) { mapSuppressClick = false; return true; }
+  return false;
+}
+
+/** 悬停信息浮层：首次创建后常驻 body，按光标定位（fixed，不被 .map-wrap overflow 裁剪）。 */
+function ensureTooltip(): HTMLElement {
+  let el = document.getElementById('mapTooltip');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'mapTooltip';
+    el.className = 'map-tooltip';
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function tileKindLabel(kind: string, isSelf: boolean): string {
+  if (kind === 'empty') return '空地';
+  if (kind === 'own_village') return isSelf ? '本城（己方）' : '己方村庄';
+  if (kind === 'village') return '玩家村庄（可进攻）';
+  if (kind === 'pve') return '野怪据点（可掠夺）';
+  return kind;
+}
+
+function showTileTooltip(cell: Element, clientX: number, clientY: number): void {
+  const q = Number(cell.getAttribute('data-tq'));
+  const r = Number(cell.getAttribute('data-tr'));
+  const kind = cell.getAttribute('data-kind') || 'empty';
+  const name = cell.getAttribute('data-name') || '空地';
+  const isSelf = kind === 'own_village' && !!me && me.q === q && me.r === r;
+  const dist = me ? hexDistance({ q: me.q, r: me.r }, { q, r }) : 0;
+  const key = `${kind}:${q},${r}:${name}`;
+  const tip = ensureTooltip();
+  if (key !== mapHoverKey || tip.style.display !== 'block') {
+    mapHoverKey = key;
+    const label = tileKindLabel(kind, isSelf);
+    tip.innerHTML = `<div class="mt-title">${escapeHtml(label)}</div>`
+      + `<div class="mt-row"><span>坐标</span><b>X=${q} · Y=${r}</b></div>`
+      + `<div class="mt-row"><span>名称</span><b>${escapeHtml(name)}</b></div>`
+      + `<div class="mt-row"><span>距离</span><b>${dist} 格</b></div>`
+      + (kind === 'empty' ? '<div class="mt-hint">悬停预览 · 点击可拓荒建村</div>' : '');
+  }
+  tip.style.display = 'block';
+  const pad = 14;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = clientX + pad;
+  let y = clientY + pad;
+  if (x + w > window.innerWidth - 8) x = clientX - pad - w;
+  if (y + h > window.innerHeight - 8) y = clientY - pad - h;
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${Math.max(8, y)}px`;
+}
+
+function hideTileTooltip(): void {
+  const el = document.getElementById('mapTooltip');
+  if (el) el.style.display = 'none';
+}
+
+/** 桌面鼠标交互：拖拽平移 + 滚轮缩放 + 悬停浮层。window 级监听只绑一次。 */
+function bindMapMouse(): void {
+  if ((window as any)._kowMapMouseBound) return;
+  (window as any)._kowMapMouseBound = true;
+
+  window.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button !== 0 || !mapSvg) return;
+    if (!(e.target as Element)?.closest?.('.map-svg')) return;
+    mapDragging = true;
+    mapDragMoved = false;
+    mapDragStartX = e.clientX;
+    mapDragStartY = e.clientY;
+    mapDragPanX = mapPanX;
+    mapDragPanY = mapPanY;
+    mapSvg.classList.add('grabbing');
+    hideTileTooltip();
+  });
+
+  window.addEventListener('mousemove', (e: MouseEvent) => {
+    if (mapDragging && mapSvg) {
+      const dx = e.clientX - mapDragStartX;
+      const dy = e.clientY - mapDragStartY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) mapDragMoved = true;
+      mapPanX = mapDragPanX + dx;
+      mapPanY = mapDragPanY + dy;
+      applyMapTransform(mapSvg);
+      return;
+    }
+    const cell = (e.target as Element)?.closest?.('.hex-cell');
+    if (cell) showTileTooltip(cell, e.clientX, e.clientY);
+    else hideTileTooltip();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!mapDragging) return;
+    mapDragging = false;
+    mapSvg?.classList.remove('grabbing');
+    if (mapDragMoved) mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
+  });
+
+  window.addEventListener('wheel', (e: WheelEvent) => {
+    if (!mapSvg) return;
+    if (!(e.target as Element)?.closest?.('.map-svg')) return;
+    e.preventDefault(); // 阻止页面滚动
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    mapZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, mapZoom * factor));
+    if (mapZoom <= ZOOM_MIN + 0.001) { mapPanX = 0; mapPanY = 0; } // 归一时归中，避免漂移
+    applyMapTransform(mapSvg);
+  }, { passive: false });
+}
+
 /** 绑定地图页交互（选格 + 出征 + 启动行军动画 + 导航控件）。 */
 export function bindMap(act: (p: Promise<any>) => void, navigate?: (center: { q: number; r: number }) => void): void {
   const svg = document.querySelector<SVGSVGElement>('.map-svg');
+  mapSvg = svg;
   if (svg) {
     const ox = Number(svg.dataset.ox || 0);
     const oy = Number(svg.dataset.oy || 0);
     startMarchAnimation(ox, oy);
     bindMapGestures(svg); // 手机双指缩放/平移（增强，不替代 D-pad）
+    bindMapMouse();       // 桌面鼠标：拖拽平移 + 滚轮缩放 + 悬停信息浮层
+    svg.addEventListener('mouseleave', hideTileTooltip);
     applyMapTransform(svg); // 跨 5s 重渲保留缩放态
   }
 
   document.querySelectorAll<SVGGElement>('.hex-cell[data-tq]').forEach((el) =>
     el.onclick = () => {
+      if (swallowClick()) return; // 刚发生过拖拽平移，吞掉误触的选中
       setSelected({
         refId: el.dataset.ref || `empty-${el.dataset.tq},${el.dataset.tr}`,
         kind: el.dataset.kind!,

@@ -315,6 +315,17 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .hex-enemy { fill: #f4dada; stroke: #d99; }
 .hex-pve { fill: #efe2f1; stroke: #c4a8cc; }
 .hex-cell.hex-selected .hex { stroke: var(--c-gold); stroke-width: 3; }
+.map-svg { cursor: grab; }
+.map-svg.grabbing { cursor: grabbing; user-select: none; }
+.map-tooltip {
+  position: fixed; z-index: 1200; pointer-events: none; max-width: 240px;
+  background: #2a2118; color: #f5ede0; border: 1px solid #c9a24a; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5; box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.map-tooltip .mt-title { font-weight: 700; color: #e7c66a; margin-bottom: 4px; }
+.map-tooltip .mt-row { display: flex; justify-content: space-between; gap: 12px; }
+.map-tooltip .mt-row span { opacity: .7; }
+.map-tooltip .mt-hint { margin-top: 4px; font-size: 11px; opacity: .85; }
 .hex-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; pointer-events: none; }
 .hex-icon img { width: 44px; height: 44px; filter: drop-shadow(0 1px 1px rgba(46,38,32,.35)); }
 /* 行军路径与部队标记 */
