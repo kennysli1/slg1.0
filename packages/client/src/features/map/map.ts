@@ -93,6 +93,8 @@ export function renderMap(): string {
   }
   const width = maxX - minX + pad * 2;
   const height = maxY - minY + pad * 2;
+  mapViewW = width;   // 供边缘 wrap 取模使用
+  mapViewH = height;
   const ox = -minX + pad; // 画布偏移：把像素坐标平移到正区间
   const oy = -minY + pad;
 
@@ -170,6 +172,7 @@ export function renderMap(): string {
   });
 
   const svg = `<svg class="map-svg" data-ox="${ox.toFixed(1)}" data-oy="${oy.toFixed(1)}" viewBox="0 0 ${width.toFixed(0)} ${height.toFixed(0)}" width="100%" preserveAspectRatio="xMidYMid meet">
+      <rect class="map-bg" x="0" y="0" width="${width.toFixed(0)}" height="${height.toFixed(0)}"></rect>
       <g class="layer-hexes">${cells}</g>
       <g class="layer-paths">${paths}</g>
       <g class="layer-markers">${markers}</g>
@@ -358,11 +361,40 @@ const ZOOM_MAX = 3;
 let mapZoom = 1;
 let mapPanX = 0;
 let mapPanY = 0;
+/** 整图 viewBox 尺寸（SVG 内部单位），用于边缘 wrap 时按"一个世界宽/高"取模。 */
+let mapViewW = 0;
+let mapViewH = 0;
 
 function resetMapView(): void {
   mapZoom = 1;
   mapPanX = 0;
   mapPanY = 0;
+}
+
+/** 进地图页时重置居中状态：下次 bindMap 会以本城为心、INITIAL_ZOOM 重新居中。 */
+export function resetMapCenter(): void {
+  mapCenteredKey = '';
+  mapZoom = 1;
+  mapPanX = 0;
+  mapPanY = 0;
+}
+
+/** 拖拽到边缘后环绕：把平移量按"一个世界宽/高"回卷，超出半幅即从对侧回来。 */
+function wrapPanToWorld(): void {
+  if (!mapSvg || mapViewW <= 0 || mapViewH <= 0) return;
+  const dispW = mapSvg.clientWidth || 1;
+  const dispH = mapSvg.clientHeight || 1;
+  const s = Math.min(dispW / mapViewW, dispH / mapViewH);
+  const cw = mapViewW * s;
+  const ch = mapViewH * s;
+  if (cw > 0) {
+    if (mapPanX > cw / 2) mapPanX -= cw;
+    else if (mapPanX < -cw / 2) mapPanX += cw;
+  }
+  if (ch > 0) {
+    if (mapPanY > ch / 2) mapPanY -= ch;
+    else if (mapPanY < -ch / 2) mapPanY += ch;
+  }
 }
 
 function applyMapTransform(svg: SVGSVGElement): void {
@@ -432,6 +464,7 @@ function bindMapGestures(svg: SVGSVGElement): void {
     mapPanX = startPanX + (m.x - startMidX);
     mapPanY = startPanY + (m.y - startMidY);
     if (mapZoom <= ZOOM_MIN + 0.01) { mapPanX = 0; mapPanY = 0; } // 回到 1x 时归中，避免漂移
+    wrapPanToWorld(); // 双指拖拽到边缘环绕到对侧
     applyMapTransform(svg);
   }, { passive: false });
 
@@ -547,6 +580,7 @@ function bindMapMouse(): void {
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) mapDragMoved = true;
       mapPanX = mapDragPanX + dx;
       mapPanY = mapDragPanY + dy;
+      wrapPanToWorld(); // 拖到边缘环绕到对侧
       applyMapTransform(mapSvg);
       return;
     }

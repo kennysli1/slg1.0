@@ -14,7 +14,7 @@ import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
-import { renderMap, bindMap } from '../features/map/map.js';
+import { renderMap, bindMap, resetMapCenter } from '../features/map/map.js';
 import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
 
 const app = document.getElementById('app')!;
@@ -196,6 +196,8 @@ function renderPage() {
     page.classList.add('page--enter');
     window.setTimeout(() => page.classList.remove('page--enter'), 650);
   }
+  // 进入地图页时（非 5s 刷新）重置居中状态：以本城为心、INITIAL_ZOOM 重新居中。
+  if (entering && tab === 'map') resetMapCenter();
   bindPageEvents();
   syncTimers();
 }
