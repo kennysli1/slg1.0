@@ -158,7 +158,9 @@ export class BuildingModule {
   /**
    * 人口硬上限快照：供 population 模块（硬上限模型）取数，无回调，无环。
    * 返回：
-   *  - hardCap：Σ placed(level≥1) def.popCapPerLevel × level（每栋建筑每级贡献人口上限基数）。
+   *  - hardCap：Σ 每栋已建建筑(level≥1) 的 levels[1..level].popCap 之和。
+   *    逐等级 popCap 是「该级相对上一级的增量贡献」，求和即 1:1 等价于旧模型 popCapPerLevel × level
+   *    （例：main L10 = 20×10 = 200）。故必须累加 1..当前等级，而非只取当前等级。
    *  - mainLevel：城镇中心等级（人口增长率基数）。
    */
   private getPopCap(cmd: Command): CommandResult {
@@ -170,7 +172,10 @@ export class BuildingModule {
       if (p.level < 1) continue;
       const def = this.config.buildings[p.kind];
       if (!def) continue;
-      hardCap += def.popCapPerLevel * p.level;
+      // 累加该建筑 1..当前等级 的逐等级人口上限（增量模型）
+      for (let lv = 1; lv <= p.level; lv++) {
+        hardCap += def.levels[lv]?.popCap ?? 0;
+      }
     }
     return { ok: true, payload: { hardCap, mainLevel: this.tcLevel(s) } };
   }
@@ -263,10 +268,10 @@ export class BuildingModule {
     return timeSec;
   }
 
-  /** 资源田某等级产量（level 0=未建成=0；>=1 用 base×growth^(lv-1)）。 */
+  /** 资源田某等级产量（level 0=未建成=0；>=1 取 building_levels.csv 该级 prod）。 */
   private fieldRate(def: BuildingDef, level: number): number {
-    if (level < 1 || def.prodBase === undefined) return 0;
-    return def.prodBase * Math.pow(def.prodGrowth ?? 1.3, level - 1);
+    if (level < 1) return 0;
+    return def.levels[level]?.prod ?? 0;
   }
 
   private hasPendingOp(s: BuildingState, slotId: string): boolean {

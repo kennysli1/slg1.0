@@ -21,7 +21,7 @@ import type { GameApp } from '../app.js';
 import { readFileSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadCsv, parseCsvStructured, serializeCsv } from '../infra/csv.js';
+import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
 import { loadGameConfig } from '../infra/config.js';
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
@@ -274,17 +274,26 @@ refreshAll();
  */
 interface BalanceTable {
   file: string;
-  key: string;
+  /** 单主键列名；与 keyComposite 二选一。 */
+  key?: string;
+  /** 复合主键（多列组合，key 用 '|' 连接）；存在时按多列匹配行。 */
+  keyComposite?: string[];
   numeric?: string[];
   numericByType?: boolean;
   labels: string[];
 }
 
-const BALANCE_TABLES: Record<string, BalanceTable> = {
+export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['prodBase', 'prodGrowth', 'costWood', 'costClay', 'costIron', 'costCrop', 'costGrowth', 'timeBase', 'timeGrowth', 'maxLevel', 'prosperityPerLevel', 'popCapPerLevel', 'laborAmplified', 'laborSaturation', 'laborBonusMax'],
+    numeric: ['maxLevel', 'prosperityPerLevel', 'laborAmplified', 'laborSaturation', 'laborBonusMax'],
     labels: ['id', 'code', 'name'],
+  },
+  building_levels: {
+    file: 'building_levels.csv',
+    keyComposite: ['code', 'level'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'timeSec', 'popCap', 'prod'],
+    labels: ['code', 'level', 'name'],
   },
   units: {
     file: 'units.csv', key: 'id',
@@ -303,16 +312,25 @@ const BALANCE_TABLES: Record<string, BalanceTable> = {
  * 策略：读 srcDir 的结构化 CSV → 按主键匹配 → 仅覆盖客户端发来的字段（空值=不改动）→ 保留注释与表头写回。
  * 数值字段会做有限性校验，非法则抛错（由调用方捕获，绝不写半截文件）。
  */
-function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
+/** 取一行的主键字符串（复合主键用 '|' 连接）。 */
+function balanceRowKey(row: CsvRow, table: BalanceTable): string {
+  return table.keyComposite ? table.keyComposite.map((k) => row[k] ?? '').join('|') : (row[table.key ?? ''] ?? '');
+}
+/** 该列是否为主键列（写回时跳过）。 */
+function isBalanceKeyCol(col: string, table: BalanceTable): boolean {
+  return table.keyComposite ? table.keyComposite.includes(col) : col === (table.key ?? '');
+}
+
+export function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
   const doc = parseCsvStructured(readFileSync(join(srcDir, table.file), 'utf8'));
   const incByKey = new Map(Object.entries(changes));
   doc.rows = doc.rows.map((orig) => {
-    const keyVal = orig[table.key];
+    const keyVal = balanceRowKey(orig, table);
     const inc = incByKey.get(keyVal);
     if (!inc) return orig;
     const merged = { ...orig };
     for (const h of doc.header) {
-      if (h === table.key) continue;
+      if (isBalanceKeyCol(h, table)) continue;
       const newVal = inc[h];
       if (newVal === undefined || newVal === '') continue; // 空值=不改动该字段
       if (table.numericByType) {
@@ -365,6 +383,12 @@ table.bt td.lbl{color:#c9d1d9}
 table.bt input{width:90px;background:#0d1117;color:#c9d1d9;border:1px solid #0f3460;padding:3px 5px;border-radius:3px;font-family:monospace}
 table.bt input:focus{outline:1px solid #4cc9f0}
 .hint{color:#a0a8c0;font-size:12px;margin-bottom:6px}
+.bl-card{margin-bottom:8px;border:1px solid #0f3460;border-radius:4px;overflow:hidden}
+.bl-head{background:#0f3460;padding:6px 10px;cursor:pointer;font-size:13px;color:#e0e0e0;user-select:none}
+.bl-head:hover{color:#4cc9f0}
+.bl-arrow{display:inline-block;width:14px;color:#4cc9f0}
+.bl-sub{color:#7a86a8;font-size:11px;margin-left:6px}
+.bl-body{padding:6px 8px}
 </style>
 </head>
 <body>
@@ -380,8 +404,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','units','constants'];
-const CHANGES = {buildings:{}, units:{}, constants:{}};
+const TABLES = ['buildings','building_levels','units','constants'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, constants:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -397,7 +421,7 @@ async function load(){
   status('已加载，可编辑后保存');
 }
 
-function section(table){
+function sectionGeneric(table){
   var meta = DATA.meta[table];
   var rows = DATA[table] || [];
   var fields = meta.numericByType ? ['value'] : meta.numeric;
@@ -423,9 +447,58 @@ function section(table){
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
 }
 
+// 建筑逐级参数：按 code 分组，默认折叠，点开看每级 7 个数值输入
+function sectionLevels(table){
+  var meta = DATA.meta[table];
+  var rows = DATA[table] || [];
+  var fields = meta.numeric;
+  var byCode = {};
+  for (var i=0;i<rows.length;i++){ (byCode[rows[i].code] = byCode[rows[i].code] || []).push(rows[i]); }
+  var h = '<div class="hint">主键 code|level · 可编辑: ' + esc(fields.join(', ')) + '（点建筑名展开每级数值）</div>';
+  h += '<div class="bl-list">';
+  var codes = Object.keys(byCode).sort();
+  for (var c=0;c<codes.length;c++){
+    var code = codes[c];
+    var group = byCode[code].slice().sort(function(a,b){ return a.level - b.level; });
+    var name = group[0].name || code;
+    var bid = 'bl-' + code, aid = 'ar-' + code;
+    h += '<div class="bl-card">';
+    h += '<div class="bl-head" onclick="toggleBl(\''+esc(code)+'\')"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+group.length+'级</span></div>';
+    h += '<div class="bl-body" id="'+bid+'" style="display:none">';
+    h += '<table class="bt"><thead><tr><th>level</th>';
+    for (var f2=0;f2<fields.length;f2++) h += '<th>'+esc(fields[f2])+'</th>';
+    h += '</tr></thead><tbody>';
+    for (var g=0;g<group.length;g++){
+      var row = group[g];
+      var key = code + '|' + row.level;
+      h += '<tr><td class="lbl">'+esc(row.level)+'</td>';
+      for (var b2=0;b2<fields.length;b2++){
+        var f = fields[b2];
+        var val = row[f]==null?'':row[f];
+        h += '<td><input type="number" step="any" value="'+esc(val)+'" data-t="building_levels" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
+      }
+      h += '</tr>';
+    }
+    h += '</tbody></table></div></div>';
+  }
+  h += '</div>';
+  return '<div class="sec"><h2>建筑逐级参数</h2>'+h+'</div>';
+}
+
+function toggleBl(code){
+  var el = document.getElementById('bl-' + code);
+  var ar = document.getElementById('ar-' + code);
+  if (el.style.display === 'none'){ el.style.display = 'block'; ar.textContent = '▼'; }
+  else { el.style.display = 'none'; ar.textContent = '▶'; }
+}
+
 function render(){
   var html = '';
-  for (var i=0;i<TABLES.length;i++) html += section(TABLES[i]);
+  for (var i=0;i<TABLES.length;i++){
+    var t = TABLES[i];
+    if (t === 'building_levels') html += sectionLevels(t);
+    else html += sectionGeneric(t);
+  }
   document.getElementById('tables').innerHTML = html;
 }
 
@@ -584,13 +657,19 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.type('text/html; charset=utf-8').send(GM_BALANCE_HTML);
   });
 
-  // GET /gm/balance/data — 返回可编辑配置行（建筑 / 兵种 / 全局常量）
+  // GET /gm/balance/data — 返回可编辑配置行（建筑 / 建筑逐级 / 兵种 / 全局常量）
   fastify.get('/gm/balance/data', (req, reply) => {
     if (!auth(req, reply)) return;
     const dir = gameApp.configDir;
     const data: Record<string, unknown> = { meta: BALANCE_TABLES };
+    const buildingNames: Record<string, string> = {};
+    for (const r of loadCsv(join(dir, 'buildings.csv'))) buildingNames[r.code] = r.name;
     for (const name of Object.keys(BALANCE_TABLES)) {
-      data[name] = loadCsv(join(dir, BALANCE_TABLES[name].file));
+      const rows = loadCsv(join(dir, BALANCE_TABLES[name].file));
+      if (name === 'building_levels') {
+        for (const r of rows) r.name = buildingNames[r.code] ?? r.code;
+      }
+      data[name] = rows;
     }
     void reply.send({ ok: true, ...data });
   });

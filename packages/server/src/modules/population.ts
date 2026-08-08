@@ -184,11 +184,23 @@ export class PopulationModule {
     return s.hardCap > 0 ? s.currentPop / s.hardCap : 0;
   }
 
-  /** 繁荣度加成 ∈ [0,1]：种族最低占比处为 0，popProsperityFullRatio 处满值（线性）。 */
+  /**
+   * 繁荣度加成 ∈ [0,1]。
+   *  - ratio = currentPop / hardCap ≤ 1：种族最低占比处为 0，popProsperityFullRatio 处满值（线性）。
+   *  - ratio > 1（人口超上限/拥挤）：在 1 → popOvercapPenaltyFullRatio 之间由满值线性降到 0
+   *    （默认 ratio=2 即超出一倍时繁荣度加成归零），惩罚人口拥挤。
+   */
   private prosperityBonus(s: PopulationState): number {
     const c = this.config.constants;
     const rm = this.raceMin(s);
-    return clamp((this.laborRatio(s) - rm) / (c.popProsperityFullRatio - rm), 0, 1);
+    const ratio = this.laborRatio(s);
+    if (ratio <= 1) {
+      return clamp((ratio - rm) / (c.popProsperityFullRatio - rm), 0, 1);
+    }
+    // 超上限：baseAt1 为 ratio=1 时的基础加成（正常=1），按超出比例线性衰减到 0
+    const baseAt1 = clamp((1 - rm) / (c.popProsperityFullRatio - rm), 0, 1);
+    const over = clamp((ratio - 1) / (c.popOvercapPenaltyFullRatio - 1), 0, 1);
+    return baseAt1 * (1 - over);
   }
 
   /** 五轴统一的繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
@@ -249,7 +261,6 @@ export class PopulationModule {
       s.currentPop = Math.min(avail, s.currentPop + grow);
     }
     s.currentPop = Math.max(0, s.currentPop);
-    s.currentPop = Math.min(s.currentPop, s.hardCap);
 
     // 增长结束后即时上报 civilian_pop + pop_labor mult，使 economy 的 cropUpkeep 与服务端 currentPop 同步
     await this.reportToEconomy(s);
@@ -485,7 +496,6 @@ export class PopulationModule {
       returned += udef.popCost * cnt;
     }
     s.currentPop += returned;
-    s.currentPop = Math.min(s.currentPop, s.hardCap);
 
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);
@@ -541,7 +551,6 @@ export class PopulationModule {
     }
 
     s.currentPop += recovered;
-    s.currentPop = Math.min(s.currentPop, s.hardCap);
 
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);

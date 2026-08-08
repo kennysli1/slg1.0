@@ -9,7 +9,8 @@ export type { UnitTraitDef } from './combat-types.js';
  * 启动时从 config/*.csv 加载所有游戏数据，解析成模块用的结构。
  * 模块不再硬编码 *_DEFS，而是从这里读 → 改 CSV 即改游戏，不改代码。
  *
- * 成本/时间用"基数×增长率^(等级-1)"参数化，CSV 里存基数和增长率。
+ * 建筑成本/耗时/人口上限/产量改为「逐等级独立数值」，存于 building_levels.csv（code,level,cost*,timeSec,popCap,prod），
+ * 由 GM 平衡面板逐等级编辑；buildings.csv 只保留每建筑的归属/解锁/繁荣度等静态字段。
  *
  * ── 主键与引用约定（2.0 配置规范）──────────────────────────────
  * 目录表(buildings/units/pve_targets)每行有两个标识：
@@ -24,6 +25,18 @@ export type { UnitTraitDef } from './combat-types.js';
 /** 建筑归属区。center=城镇中心(阀门,唯一)；inner=城内(民生研发)；outer=城外(生产量产)。 */
 export type Zone = 'center' | 'inner' | 'outer';
 
+/** 建筑某一等级的独立参数（来自 building_levels.csv，替代旧的等比公式）。 */
+export interface BuildingLevelDef {
+  /** 升/建到该等级的花费（4 资源）。 */
+  cost: Record<string, number>;
+  /** 升/建到该等级耗时（秒）。 */
+  timeSec: number;
+  /** 该等级相对上一级的「增量」人口硬上限贡献。硬上限 = Σ 每栋已建建筑 levels[1..当前等级].popCap（增量求和，1:1 等价于旧 popCapPerLevel×level）。 */
+  popCap: number;
+  /** 仅资源田：该等级产量/小时。 */
+  prod?: number;
+}
+
 export interface BuildingDef {
   id: number;
   kind: string; // code
@@ -32,10 +45,6 @@ export interface BuildingDef {
   zone: Zone;
   /** 仅资源田：产出资源 key（wood/clay/iron/crop）；非产出建筑为 undefined。 */
   resource?: string;
-  /** 仅资源田：每级产量基数。 */
-  prodBase?: number;
-  /** 仅资源田：产量增长率/级。 */
-  prodGrowth?: number;
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
@@ -48,7 +57,9 @@ export interface BuildingDef {
   laborSaturation: number;
   /** laborAmplified=true 时满员的最大增幅（速率类=产率加成；建造类=时间缩减比）。 */
   laborBonusMax: number;
-  /** 每级提供的人口硬上限基数（硬上限 = Σ 已建建筑 popCapPerLevel × level）。 */
+  /** 逐等级参数（成本/耗时/人口上限/产量），见 building_levels.csv。 */
+  levels: Record<number, BuildingLevelDef>;
+  /** 前端展示用：第 1 级人口上限贡献（= levels[1]?.popCap ?? 0），卡片显示「+X/级」。 */
   popCapPerLevel: number;
   /** 展示用简介：这栋建筑干嘛的/有什么用（点开建筑详情展示；纯文本，缺列回退空串）。 */
   desc: string;
@@ -157,6 +168,8 @@ export interface GameConstants {
   popGrowthPerHour: number;
   /** 人口：劳动人口占比达到此值（占硬上限比例）时，繁荣度加成达到满值（默认 0.70）。 */
   popProsperityFullRatio: number;
+  /** 人口：超上限惩罚拐点；currentPop/hardCap 达到此比例时繁荣度加成归零（默认 2.0=超出一倍）。 */
+  popOvercapPenaltyFullRatio: number;
   /** 人口：各兵种的最低劳动人口占比（占硬上限），低于此值繁荣度加成为 0。 */
   popRaceLaborMin: { romans: number; gauls: number; teutons: number };
   /** 人口：劳动人口每小时消耗粮食量（平民口粮；士兵口粮见兵种 upkeep）。 */
@@ -207,19 +220,6 @@ export interface GameConfig {
   pveSpawns: PveSpawn[];
   constants: GameConstants;
   villageTemplates: Record<string, VillageTemplate>;
-}
-
-function costFn(base: { wood: number; clay: number; iron: number; crop: number }, growth: number) {
-  return (lv: number) => ({
-    wood: Math.round(base.wood * Math.pow(growth, lv - 1)),
-    clay: Math.round(base.clay * Math.pow(growth, lv - 1)),
-    iron: Math.round(base.iron * Math.pow(growth, lv - 1)),
-    crop: Math.round(base.crop * Math.pow(growth, lv - 1)),
-  });
-}
-
-function timeFn(base: number, growth: number) {
-  return (lv: number) => Math.round(base * Math.pow(growth, lv - 1));
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -309,24 +309,39 @@ export function loadGameConfig(configDir: string): GameConfig {
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
 
+  // 建筑逐级参数表（building_levels.csv）：code -> level -> BuildingLevelDef
+  const levelsByCode: Record<string, Record<number, BuildingLevelDef>> = {};
+  for (const r of loadCsv(p('building_levels.csv'))) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    const lv = num(r.level);
+    if (lv <= 0) continue;
+    (levelsByCode[code] ??= {})[lv] = {
+      cost: { wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) },
+      timeSec: num(r.timeSec),
+      popCap: num(r.popCap),
+      prod: r.prod ? num(r.prod) : undefined,
+    };
+  }
+
   const buildings: Record<string, BuildingDef> = {};
   for (const r of buildingRows) {
     const isField = !!r.resource;
+    const lvl = levelsByCode[r.code] ?? {};
     buildings[r.code] = {
       id: num(r.id), kind: r.code, name: r.name, icon: r.icon,
       zone: (r.zone as Zone) || 'inner',
       resource: isField ? r.resource : undefined,
-      prodBase: isField ? num(r.prodBase, 1000) : undefined,
-      prodGrowth: isField ? num(r.prodGrowth, 1.3) : undefined,
-      cost: costFn({ wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) }, num(r.costGrowth, 1.28)),
-      timeSec: timeFn(num(r.timeBase, 15), num(r.timeGrowth, 1.6)),
+      cost: (lv: number) => lvl[lv]?.cost ?? { wood: 0, clay: 0, iron: 0, crop: 0 },
+      timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
       laborAmplified: num(r.laborAmplified, 0) === 1,
       laborSaturation: num(r.laborSaturation, 0),
       laborBonusMax: num(r.laborBonusMax, 0),
-      popCapPerLevel: num(r.popCapPerLevel, 0),
+      levels: lvl,
+      popCapPerLevel: lvl[1]?.popCap ?? 0,
       desc: r.desc ?? '',
       effect: r.effect ?? '',
     };
@@ -439,6 +454,7 @@ export function loadGameConfig(configDir: string): GameConfig {
     pveLootVariance: cn('pve_loot_variance', 0.2),
     popGrowthPerHour: cn('pop_growth_per_hour', 20),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
+    popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
     popRaceLaborMin: {
       romans: cn('pop_race_labor_min_romans', 0.15),
       gauls: cn('pop_race_labor_min_gauls', 0.20),
@@ -517,10 +533,23 @@ export function validateGameConfig(config: GameConfig): void {
     if (b.zone === 'center') { centerCount++; centerMaxLevel = b.maxLevel; }
     if (b.resource !== undefined) {
       if (!resourceKeys.has(b.resource)) errors.push(`buildings.csv[${b.kind}] resource=${b.resource} 不在 resources.csv`);
-      if ((b.prodBase ?? 0) < 0) errors.push(`buildings.csv[${b.kind}] prodBase 不能为负`);
       if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
     }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    // 逐等级参数（building_levels.csv）：必须覆盖 1..maxLevel；popCap≥0；prod 仅资源田且≥0
+    for (let lv = 1; lv <= b.maxLevel; lv++) {
+      const ld = b.levels[lv];
+      if (!ld) {
+        errors.push(`building_levels.csv[${b.kind}] 缺少 level=${lv}（需覆盖 1..${b.maxLevel}）`);
+        continue;
+      }
+      if (ld.popCap < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} popCap 不能为负`);
+      if (b.resource !== undefined) {
+        if (ld.prod === undefined || ld.prod < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} 资源田 prod 必须≥0`);
+      } else if (ld.prod !== undefined) {
+        errors.push(`building_levels.csv[${b.kind}] level=${lv} 非资源田不应有 prod`);
+      }
+    }
     for (const r of b.requires) {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
@@ -638,6 +667,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 人口常量范围校验（硬上限模型）
   if (c.popGrowthPerHour <= 0) errors.push(`game_constants.csv pop_growth_per_hour 必须>0`);
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
+  if (c.popOvercapPenaltyFullRatio <= 1) errors.push(`game_constants.csv pop_overcap_penalty_full_ratio 必须>1（当前${c.popOvercapPenaltyFullRatio}）`);
   for (const [tribe, v] of Object.entries(c.popRaceLaborMin)) {
     if (v < 0 || v >= c.popProsperityFullRatio) {
       errors.push(`game_constants.csv pop_race_labor_min_${tribe} 必须在[0, pop_prosperity_full_ratio)（当前${v}）`);

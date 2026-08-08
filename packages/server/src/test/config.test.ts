@@ -36,7 +36,7 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   assert.equal(cfg.buildings['barracks'].zone, 'outer', '兵营归 outer');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
-  assert.ok((cfg.buildings['woodcutter'].prodBase ?? 0) > 0, '资源田应有产量基数');
+  assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');
   // 城镇中心 1 级槽位配额
   const t1 = cfg.townCenterSlots[1];
   assert.ok(t1 && t1.inner > 0 && t1.outer > 0 && t1.queue >= 2, '开局应有城内/城外槽位与≥2队列');
@@ -45,6 +45,54 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
 test('校验器：合法配置不抛错', () => {
   const cfg = loadGameConfig(configDir);
   assert.doesNotThrow(() => validateGameConfig(cfg));
+});
+
+test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', () => {
+  const cfg = loadGameConfig(configDir);
+  for (const b of Object.values(cfg.buildings)) {
+    for (let lv = 1; lv <= b.maxLevel; lv++) {
+      const ld = b.levels[lv];
+      assert.ok(ld, `建筑 ${b.kind} 应有 level=${lv} 的逐级参数`);
+      assert.ok(ld.popCap >= 0, `建筑 ${b.kind} level=${lv} popCap 应≥0`);
+      if (b.resource !== undefined) assert.ok((ld.prod ?? -1) >= 0, `资源田 ${b.kind} level=${lv} 应有 prod`);
+      else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
+    }
+  }
+  // 逐等级人口上限求和应等于「旧 popCapPerLevel × level」在 L10 时的值（1:1 迁移校验）
+  const main = cfg.buildings['main'];
+  const sumL10 = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
+  assert.equal(sumL10, 200, '主城 10 级每级 20，总和应为 200');
+  const res = cfg.buildings['residence'];
+  assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
+});
+
+test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {
+  const c = loadGameConfig(configDir).constants;
+  assert.equal(c.popOvercapPenaltyFullRatio, 2.0, '超上限惩罚拐点默认 2.0');
+});
+
+test('校验器：pop_overcap_penalty_full_ratio ≤1 应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, popOvercapPenaltyFullRatio: 1 },
+  };
+  assert.throws(() => validateGameConfig(bad), /pop_overcap_penalty_full_ratio/);
+});
+
+test('校验器：building_levels 缺级应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = {
+    ...cfg,
+    buildings: {
+      ...cfg.buildings,
+      main: {
+        ...cfg.buildings['main'],
+        levels: (() => { const cp = { ...cfg.buildings['main'].levels }; delete cp[5]; return cp; })(),
+      },
+    },
+  };
+  assert.throws(() => validateGameConfig(bad), /building_levels/);
 });
 
 test('校验器：跨表引用非法（兵种所需建筑不存在）应抛错', () => {
