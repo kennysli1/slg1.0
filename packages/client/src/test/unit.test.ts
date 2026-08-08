@@ -79,6 +79,12 @@ describe('errText', () => {
     assert.equal(errText('spend_failed'), '资源不足');
   });
 
+  it('训练/动员相关错误码返回中文（不再回退到“操作失败”）', () => {
+    assert.equal(errText('mobilize_cap_exceeded'), '已达本族动员上限（士兵占总人口比例超限），无法继续训练');
+    assert.equal(errText('smithy_busy'), '铁匠铺正在升级中，请稍后再试');
+    assert.notEqual(errText('mobilize_cap_exceeded'), '操作失败');
+  });
+
   it('bad_troops 前缀透传中文', () => {
     assert.equal(errText('bad_troops:cavalry'), '出征兵力不合法');
   });

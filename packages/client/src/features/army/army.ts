@@ -262,7 +262,18 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
         return;
       }
       act(req('TrainTroops', { unit: u, count: cnt }).then((res) => {
-        if (!res.ok) showToast(`训练失败：${errText(res.error?.code)}`);
+        if (!res.ok) {
+          const code = res.error?.code;
+          let msg = errText(code);
+          // 动员上限：用本族实际上限百分比解释“为什么失败”，并给出可操作建议
+          if (code === 'mobilize_cap_exceeded') {
+            const cap = getPopState()?.mobilizeCap;
+            if (cap) {
+              msg = `已达本族动员上限（上限 ${Math.round(cap * 100)}% 人口可参军），无法继续训练，请先提升人口上限或解散部分士兵`;
+            }
+          }
+          showToast(`训练失败：${msg}`);
+        }
         return res;
       }));
     });
