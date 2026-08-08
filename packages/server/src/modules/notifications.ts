@@ -57,6 +57,11 @@ export class NotificationsModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.commands.register('notifications.List', (c) => this.list(c));
     for (const internalName of Object.keys(EVENT_MAP)) {

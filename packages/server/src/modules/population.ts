@@ -73,6 +73,11 @@ export class PopulationModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.commands.register('population.GetSnapshot', (c) => this.getSnapshot(c));
     this.commands.register('population.GetLaborMult', (c) => this.getLaborMult(c));
@@ -376,7 +381,7 @@ export class PopulationModule {
 
   // ── 订阅处理：硬上限刷新 ─────────────────────────────────────────────────
 
-  private async refreshHardCap(villageId: string): Promise<void> {
+  async refreshHardCap(villageId: string): Promise<void> {
     const s = this.load(villageId);
     if (!s) return;
     const capRes = await this.commands.send({

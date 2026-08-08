@@ -68,6 +68,13 @@ export class WorldModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用），同步刷新缓存的世界尺寸。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+    this.worldW = config.constants.worldW ?? 41;
+    this.worldH = config.constants.worldH ?? 41;
+  }
+
   init(): void {
     const meta = this.store.get<WorldState>(COLLECTION_META, 'meta');
     if (meta && typeof meta.w === 'number') {

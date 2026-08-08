@@ -86,6 +86,11 @@ export class BuildingModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。模块运行时经 this.config 读取，替换引用即生效。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.commands.register('building.GetLayout', (c) => this.getLayout(c));
     this.commands.register('building.GetBuildOptions', (c) => this.getBuildOptions(c));
@@ -531,6 +536,17 @@ export class BuildingModule {
         capacity: { wood: solid, clay: solid, iron: solid, crop: cap(granaryLv) },
       },
     });
+  }
+
+  /**
+   * 热重载后，对本村重报全部资源田产率 + 仓储容量（让 CSV 改动的产率/容量即时生效，无需刷档）。
+   * 遍历全部 4 种资源（即使为 0 也重报，确保旧的缓存值被覆盖）。
+   */
+  reReportProduction(villageId: string): void {
+    const s = this.load(villageId);
+    if (!s) return;
+    for (const resource of ['wood', 'clay', 'iron', 'crop'] as const) this.reportFieldRate(s, resource);
+    this.reportCapacity(s);
   }
 
   /**

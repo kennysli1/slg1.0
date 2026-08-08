@@ -83,6 +83,11 @@ export class MilitaryModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   private units(): Record<string, UnitDef> {
     return this.config.units;
   }

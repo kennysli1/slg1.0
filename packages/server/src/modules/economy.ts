@@ -73,6 +73,11 @@ export class EconomyModule {
     private config: import('../infra/config.js').GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: import('../infra/config.js').GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.commands.register('economy.GetResources', (c) => this.getResources(c));
     this.commands.register('economy.TrySpend', (c) => this.trySpend(c));

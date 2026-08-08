@@ -484,6 +484,14 @@ export function loadGameConfig(configDir: string): GameConfig {
 }
 
 /**
+ * 热重载入口：重新从目录加载整套配置（含 validateGameConfig 校验；失败抛出 Error）。
+ * 配合 app.reloadConfig() 使用——先在此校验通过，再写回磁盘，避免半截配置。
+ */
+export function reloadGameConfig(configDir: string): GameConfig {
+  return loadGameConfig(configDir);
+}
+
+/**
  * 启动期配置校验：把"运行时才暴露的错误"提前到启动失败，错误信息定位到表/字段。
  * 覆盖：跨表引用合法性、关键值范围、建筑 requires 循环依赖。
  * 任何错误抛出 Error（聚合所有问题一次性报出，便于一次改完）。

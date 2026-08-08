@@ -99,6 +99,11 @@ export class CombatModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.commands.register('combat.Engage', (c) => this.engage(c)); // 内部：Movement 到达时调用
     this.commands.register('combat.GetBattle', (c) => this.getBattle(c));

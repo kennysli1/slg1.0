@@ -18,6 +18,11 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
+import { readFileSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadCsv, parseCsvStructured, serializeCsv } from '../infra/csv.js';
+import { loadGameConfig } from '../infra/config.js';
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
 <html lang="zh">
@@ -70,6 +75,7 @@ button.sm{padding:3px 7px;font-size:11px}
   <div id="ops-panel">
     <h3>运维操作</h3>
     <div class="ops-row">
+      <button class="warn sm" onclick="window.open('/gm/balance','_blank')">平衡调参</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -262,6 +268,191 @@ refreshAll();
 </body>
 </html>`;
 
+/**
+ * 平衡调参表元数据：声明每个可编辑表对应哪个 CSV 文件、主键列、哪些列是数值可编辑。
+ * 客户端据此渲染可编辑输入框；服务端据此校验并回写。新增可编辑列只需在此登记。
+ */
+interface BalanceTable {
+  file: string;
+  key: string;
+  numeric?: string[];
+  numericByType?: boolean;
+  labels: string[];
+}
+
+const BALANCE_TABLES: Record<string, BalanceTable> = {
+  buildings: {
+    file: 'buildings.csv', key: 'id',
+    numeric: ['prodBase', 'prodGrowth', 'costWood', 'costClay', 'costIron', 'costCrop', 'costGrowth', 'timeBase', 'timeGrowth', 'maxLevel', 'prosperityPerLevel', 'popCapPerLevel', 'laborAmplified', 'laborSaturation', 'laborBonusMax'],
+    labels: ['id', 'code', 'name'],
+  },
+  units: {
+    file: 'units.csv', key: 'id',
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'popPermanent'],
+    labels: ['id', 'code', 'name', 'tribe'],
+  },
+  constants: {
+    file: 'game_constants.csv', key: 'key',
+    numericByType: true, // 用行内 type 列判定（number/bool/string）
+    labels: ['key', 'note'],
+  },
+};
+
+/**
+ * 把一个表的改动（changes: { 主键: { 字段: 新值 } }）合并进 CSV 并写回 targetDir。
+ * 策略：读 srcDir 的结构化 CSV → 按主键匹配 → 仅覆盖客户端发来的字段（空值=不改动）→ 保留注释与表头写回。
+ * 数值字段会做有限性校验，非法则抛错（由调用方捕获，绝不写半截文件）。
+ */
+function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
+  const doc = parseCsvStructured(readFileSync(join(srcDir, table.file), 'utf8'));
+  const incByKey = new Map(Object.entries(changes));
+  doc.rows = doc.rows.map((orig) => {
+    const keyVal = orig[table.key];
+    const inc = incByKey.get(keyVal);
+    if (!inc) return orig;
+    const merged = { ...orig };
+    for (const h of doc.header) {
+      if (h === table.key) continue;
+      const newVal = inc[h];
+      if (newVal === undefined || newVal === '') continue; // 空值=不改动该字段
+      if (table.numericByType) {
+        const type = (orig['type'] ?? 'number').toString();
+        if (type === 'number') {
+          const n = Number(newVal);
+          if (!Number.isFinite(n)) throw new Error(table.file + ' 行 ' + keyVal + ' 字段 ' + h + '="' + newVal + '" 不是合法数字');
+          merged[h] = String(n);
+        } else if (type === 'bool') {
+          if (!['true', 'false', '0', '1'].includes(newVal)) throw new Error(table.file + ' 行 ' + keyVal + ' 字段 ' + h + '="' + newVal + '" 不是合法 bool(true/false/0/1)');
+          merged[h] = newVal;
+        } else {
+          merged[h] = newVal;
+        }
+      } else if (table.numeric?.includes(h)) {
+        const n = Number(newVal);
+        if (!Number.isFinite(n)) throw new Error(table.file + ' 行 ' + keyVal + ' 字段 ' + h + '="' + newVal + '" 不是合法数字');
+        merged[h] = String(n);
+      }
+      // 非声明可编辑字段：忽略（不覆盖原值）
+    }
+    return merged;
+  });
+  writeFileSync(join(targetDir, table.file), serializeCsv(doc), 'utf8');
+}
+
+const GM_BALANCE_HTML = `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>平衡调参</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;font-size:13px;background:#1a1a2e;color:#e0e0e0;padding:14px}
+#topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
+#topbar h1{font-size:15px;color:#4cc9f0}
+button{background:#0f3460;border:1px solid #4cc9f0;color:#4cc9f0;padding:5px 12px;cursor:pointer;border-radius:3px;font-family:monospace;font-size:12px}
+button:hover{background:#4cc9f0;color:#16213e}
+button.save{border-color:#70f070;color:#70f070}
+button.save:hover{background:#70f070;color:#16213e}
+#status{margin:8px 0;padding:6px 10px;border-radius:3px;font-size:12px}
+#status.ok{background:#16331f;color:#70f070}
+#status.bad{background:#331616;color:#f07070}
+.sec{margin-bottom:24px;background:#16213e;border:1px solid #0f3460;border-radius:4px;padding:10px;overflow-x:auto}
+.sec h2{font-size:13px;color:#a0a8c0;text-transform:uppercase;margin-bottom:8px}
+table.bt{border-collapse:collapse;font-size:12px}
+table.bt th{background:#0f3460;color:#4cc9f0;padding:4px 8px;text-align:left;border:1px solid #0f3460;white-space:nowrap}
+table.bt td{padding:3px 6px;border:1px solid #0f3460;white-space:nowrap}
+table.bt td.lbl{color:#c9d1d9}
+table.bt input{width:90px;background:#0d1117;color:#c9d1d9;border:1px solid #0f3460;padding:3px 5px;border-radius:3px;font-family:monospace}
+table.bt input:focus{outline:1px solid #4cc9f0}
+.hint{color:#a0a8c0;font-size:12px;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <h1>平衡调参 · 改 CSV 即时生效（无需刷档）</h1>
+  <div>
+    <button onclick="load()">重新加载</button>
+    <button class="save" onclick="save()">保存并热重载</button>
+  </div>
+</div>
+<div id="status" class="ok">就绪</div>
+<div id="tables"></div>
+<script>
+const TOKEN = '';
+const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
+const TABLES = ['buildings','units','constants'];
+const CHANGES = {buildings:{}, units:{}, constants:{}};
+let DATA = null;
+
+function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function status(msg, bad){ var el=document.getElementById('status'); el.textContent=msg; el.className = bad ? 'bad':'ok'; }
+async function api(method, path, body){ var r = await fetch('/gm'+path, {method:method, headers:H, body: body?JSON.stringify(body):undefined}); return r.json(); }
+
+async function load(){
+  status('加载中…');
+  var r = await api('GET','/balance/data');
+  if (!r.ok){ status('加载失败: '+(r.reason||''), true); return; }
+  DATA = r;
+  render();
+  status('已加载，可编辑后保存');
+}
+
+function section(table){
+  var meta = DATA.meta[table];
+  var rows = DATA[table] || [];
+  var fields = meta.numericByType ? ['value'] : meta.numeric;
+  var title = table==='buildings' ? '建筑 / 资源田' : (table==='units' ? '兵种' : '全局常量');
+  var h = '<div class="hint">主键 ' + esc(meta.key) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
+  h += '<table class="bt"><thead><tr>';
+  for (var i=0;i<meta.labels.length;i++) h += '<th>'+esc(meta.labels[i])+'</th>';
+  for (var j=0;j<fields.length;j++) h += '<th>'+esc(fields[j])+'</th>';
+  h += '</tr></thead><tbody>';
+  for (var k=0;k<rows.length;k++){
+    var row = rows[k];
+    var key = row[meta.key];
+    h += '<tr>';
+    for (var a=0;a<meta.labels.length;a++) h += '<td class="lbl">'+esc(row[meta.labels[a]])+'</td>';
+    for (var b=0;b<fields.length;b++){
+      var f = fields[b];
+      var val = row[f]==null?'':row[f];
+      h += '<td><input type="number" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
+    }
+    h += '</tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
+}
+
+function render(){
+  var html = '';
+  for (var i=0;i<TABLES.length;i++) html += section(TABLES[i]);
+  document.getElementById('tables').innerHTML = html;
+}
+
+function onEdit(el){
+  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+  if (!CHANGES[t][k]) CHANGES[t][k] = {};
+  if (v==='') delete CHANGES[t][k][f];
+  else CHANGES[t][k][f] = v;
+  status('已修改「'+t+' / '+k+' / '+f+'」，记得点保存');
+}
+
+async function save(){
+  var body = {};
+  var any = false;
+  for (var i=0;i<TABLES.length;i++){ if (Object.keys(CHANGES[TABLES[i]]).length){ body[TABLES[i]] = CHANGES[TABLES[i]]; any=true; } }
+  if (!any){ status('没有任何改动', true); return; }
+  status('保存中…');
+  var r = await api('POST','/balance/save', body);
+  if (r.ok){ status('已保存并热重载，改动对所有在线村庄即时生效'); CHANGES.buildings={};CHANGES.units={};CHANGES.constants={}; }
+  else status('保存失败: '+(r.reason||'未知错误'), true);
+}
+
+load();
+</script>
+</body>
+</html>`;
+
 export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp: GameApp): void {
   const token = process.env.GM_TOKEN?.trim() || null;
 
@@ -386,6 +577,57 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     store.flush();
     void reply.send({ ok: true, playerId, villageId: result.villageId });
+  });
+
+  // GET /gm/balance — 平衡调参 Web 面板
+  fastify.get('/gm/balance', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_BALANCE_HTML);
+  });
+
+  // GET /gm/balance/data — 返回可编辑配置行（建筑 / 兵种 / 全局常量）
+  fastify.get('/gm/balance/data', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const dir = gameApp.configDir;
+    const data: Record<string, unknown> = { meta: BALANCE_TABLES };
+    for (const name of Object.keys(BALANCE_TABLES)) {
+      data[name] = loadCsv(join(dir, BALANCE_TABLES[name].file));
+    }
+    void reply.send({ ok: true, ...data });
+  });
+
+  // POST /gm/balance/save — 校验 → 写回 CSV → 热重载（失败绝不留半截配置）
+  fastify.post('/gm/balance/save', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const body = (req.body ?? {}) as Record<string, Record<string, Record<string, string>>>;
+    const dir = gameApp.configDir;
+    const edits: Array<[string, BalanceTable, Record<string, Record<string, string>>]> = [];
+    for (const name of Object.keys(BALANCE_TABLES)) {
+      const c = (body as Record<string, Record<string, Record<string, string>>>)[name];
+      if (c && Object.keys(c).length) edits.push([name, BALANCE_TABLES[name], c]);
+    }
+    if (edits.length === 0) {
+      void reply.code(400).send({ ok: false, reason: '没有可保存的改动' });
+      return;
+    }
+    try {
+      // 1) 先复制到临时目录校验，确保不破坏线上文件；校验失败整段回滚
+      const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
+      try {
+        cpSync(dir, tmp, { recursive: true });
+        for (const [, table, changes] of edits) applyBalanceEdits(dir, tmp, table, changes);
+        loadGameConfig(tmp); // 失败在此抛出
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+      // 2) 校验通过 → 写回真实文件
+      for (const [, table, changes] of edits) applyBalanceEdits(dir, dir, table, changes);
+      // 3) 热重载（内存 + 存量村庄派生值即时生效）
+      gameApp.reloadConfig();
+      void reply.send({ ok: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      void reply.code(400).send({ ok: false, reason: msg });
+    }
   });
 }
 

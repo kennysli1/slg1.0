@@ -127,6 +127,11 @@ export class MovementModule {
     private config: GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.normalizeCoords();
     this.commands.register('movement.SendRaid', (c) => this.sendRaid(c));

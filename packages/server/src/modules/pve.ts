@@ -55,6 +55,11 @@ export class PveModule {
     private config: import('../infra/config.js').GameConfig,
   ) {}
 
+  /** 热重载配置（改 CSV 后调用）。 */
+  setConfig(config: import('../infra/config.js').GameConfig): void {
+    this.config = config;
+  }
+
   init(): void {
     this.normalizeCoords();
     this.commands.register('pve.GetTarget', (c) => this.getTarget(c));

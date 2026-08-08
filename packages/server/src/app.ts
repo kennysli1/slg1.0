@@ -52,6 +52,8 @@ const ACCOUNT_COLLECTIONS = [
 
 export interface GameApp {
   config: GameConfig;
+  /** 启动时使用的配置目录（config/*.csv 所在），热重载与平衡调参写回都基于它。 */
+  configDir: string;
   store: Store;
   bus: EventBus;
   commands: CommandBus;
@@ -78,6 +80,13 @@ export interface GameApp {
   setupWorld(): void;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
+  /**
+   * 热重载配置：重新从 configDir 读取全部 CSV（经校验），赋值给所有领域模块，
+   * 并让存量村庄即时重报派生值（资源田产率/仓储容量/人口硬上限），
+   * 使 GM 平衡调参的改动无需刷档即对所有在线村庄生效。
+   * 返回新加载的 GameConfig。
+   */
+  reloadConfig(): GameConfig;
   /**
    * 刷档：清空游戏进度并重建世界。三种粒度：
    *  - {keepAccounts:true,  reassignSpots:false} 新赛季：留账号+地图位置，进度归零
@@ -107,7 +116,8 @@ export function createGameApp(opts?: {
   storePath?: string;
 }): GameApp {
   const now = opts?.now ?? (() => Date.now());
-  const config = loadGameConfig(opts?.configDir ?? defaultConfigDir());
+  const configDir = opts?.configDir ?? defaultConfigDir();
+  const config = loadGameConfig(configDir);
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
   const bus = new EventBus();
@@ -203,7 +213,7 @@ export function createGameApp(opts?: {
   notifications.init();
 
   return {
-    config, store, bus, commands, scheduler, serialQueue,
+    config, configDir, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, movement, combat, player, meta, notifications, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
@@ -220,6 +230,31 @@ export function createGameApp(opts?: {
       movement.resume();
       combat.resume();
       pve.resume();
+    },
+    reloadConfig() {
+      const newConfig = loadGameConfig(configDir);
+      // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
+      economy.setConfig(newConfig);
+      building.setConfig(newConfig);
+      military.setConfig(newConfig);
+      population.setConfig(newConfig);
+      world.setConfig(newConfig);
+      pve.setConfig(newConfig);
+      movement.setConfig(newConfig);
+      combat.setConfig(newConfig);
+      meta.setConfig(newConfig);
+      notifications.setConfig(newConfig);
+      this.config = newConfig;
+      // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
+      for (const b of store.all<{ villageId: string }>('building')) {
+        try {
+          building.reReportProduction(b.villageId);
+          void population.refreshHardCap(b.villageId);
+        } catch (err) {
+          console.warn('[reloadConfig] 村庄 ' + b.villageId + ' 重报派生值失败:', err);
+        }
+      }
+      return newConfig;
     },
     resetWorld({ keepAccounts, reassignSpots = false }) {
       // 0. 先清空调度器：取消所有待处理定时任务，避免刷档后遗留任务触发旧逻辑。
