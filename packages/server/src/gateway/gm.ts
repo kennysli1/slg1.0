@@ -463,7 +463,7 @@ function sectionLevels(table){
     var name = group[0].name || code;
     var bid = 'bl-' + code, aid = 'ar-' + code;
     h += '<div class="bl-card">';
-    h += '<div class="bl-head" onclick="toggleBl(\''+esc(code)+'\')"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+group.length+'级</span></div>';
+    h += '<div class="bl-head" data-code="'+esc(code)+'" onclick="toggleBl(this.dataset.code)"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+group.length+'级</span></div>';
     h += '<div class="bl-body" id="'+bid+'" style="display:none">';
     h += '<table class="bt"><thead><tr><th>level</th>';
     for (var f2=0;f2<fields.length;f2++) h += '<th>'+esc(fields[f2])+'</th>';
