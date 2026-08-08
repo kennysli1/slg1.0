@@ -67,7 +67,7 @@ export class MetaModule {
           // 人口 v3（硬上限模型）展示/外插用常量：增长速率绑在城镇中心，由 main.popGrowthPerLevel × mainLevel 决定
           popGrowthPerLevel: c.buildings.main?.popGrowthPerLevel ?? 0,
           popProsperityFullRatio: c.constants.popProsperityFullRatio,
-          popRaceLaborMin: c.constants.popRaceLaborMin,
+          popRaceMobilizeMax: c.constants.popRaceMobilizeMax,
           popLaborFloor: c.constants.popLaborFloor,
           popCropPerLabor: c.constants.popCropPerLabor,
           popHospitalRecoveryBase: c.constants.popHospitalRecoveryBase,

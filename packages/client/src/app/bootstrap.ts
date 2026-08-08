@@ -91,7 +91,7 @@ async function refreshAll() {
     if (pop.ok) {
       const p = pop.payload as any;
       // GetPopulation 返回 v3 硬上限快照：currentPop/soldierPop/hardCap/availableLabor/
-      // laborRatio/prosperityBonus/prosperityMult/growthPerHour/raceMin/mainLevel/
+      // laborRatio/prosperityBonus/prosperityMult/growthPerHour/mobilizeCap/mainLevel/
       // inFamine/civilianCropPerHour + 兼容别名 softLimit=availableLabor + laborMults(五轴)。
       const currentPop: number = p.currentPop ?? 0;
       const soldierPop: number = p.soldierPop ?? 0;
@@ -108,7 +108,7 @@ async function refreshAll() {
         prosperityMult,
         growthPerHour: p.growthPerHour ?? 0,
         potentialGrowthPerHour: p.potentialGrowthPerHour ?? 0,
-        raceMin: p.raceMin ?? 0,
+        mobilizeCap: p.mobilizeCap ?? 0,
         mainLevel: p.mainLevel ?? 1,
         inFamine: !!p.inFamine,
         civilianCropPerHour: p.civilianCropPerHour ?? 0,

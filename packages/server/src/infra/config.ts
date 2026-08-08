@@ -272,8 +272,8 @@ export interface GameConstants {
   popProsperityFullRatio: number;
   /** 人口：超上限惩罚拐点；currentPop/hardCap 达到此比例时繁荣度加成归零（默认 2.0=超出一倍）。 */
   popOvercapPenaltyFullRatio: number;
-  /** 人口：各兵种的最低劳动人口占比（占硬上限），低于此值繁荣度加成为 0。 */
-  popRaceLaborMin: { romans: number; gauls: number; teutons: number };
+  /** 人口：各部族最大动员比例（士兵占总人口的上限）；条顿0.80/高卢0.70/罗马0.75；超过则禁止继续征兵。 */
+  popRaceMobilizeMax: { romans: number; gauls: number; teutons: number };
   /** 人口：劳动人口每小时消耗粮食量（平民口粮；士兵口粮见兵种 upkeep）。 */
   popCropPerLabor: number;
   /** 人口：零人口时所有速率类建筑的最低倍率（防死亡螺旋）。 */
@@ -576,10 +576,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     pveLootVariance: cn('pve_loot_variance', 0.2),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
-    popRaceLaborMin: {
-      romans: cn('pop_race_labor_min_romans', 0.15),
-      gauls: cn('pop_race_labor_min_gauls', 0.20),
-      teutons: cn('pop_race_labor_min_teutons', 0.10),
+    popRaceMobilizeMax: {
+      romans: cn('pop_race_mobilize_max_romans', 0.75),
+      gauls: cn('pop_race_mobilize_max_gauls', 0.70),
+      teutons: cn('pop_race_mobilize_max_teutons', 0.80),
     },
     popCropPerLabor: cn('pop_crop_per_labor', 1.0),
     popLaborFloor: cn('pop_labor_floor', 0.75),
@@ -787,9 +787,9 @@ export function validateGameConfig(config: GameConfig): void {
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
   if (c.popOvercapPenaltyFullRatio <= 1) errors.push(`game_constants.csv pop_overcap_penalty_full_ratio 必须>1（当前${c.popOvercapPenaltyFullRatio}）`);
-  for (const [tribe, v] of Object.entries(c.popRaceLaborMin)) {
-    if (v < 0 || v >= c.popProsperityFullRatio) {
-      errors.push(`game_constants.csv pop_race_labor_min_${tribe} 必须在[0, pop_prosperity_full_ratio)（当前${v}）`);
+  for (const [tribe, v] of Object.entries(c.popRaceMobilizeMax)) {
+    if (v <= 0 || v > 1) {
+      errors.push(`game_constants.csv pop_race_mobilize_max_${tribe} 必须在(0,1]（当前${v}）`);
     }
   }
   if (c.popCropPerLabor <= 0) errors.push(`game_constants.csv pop_crop_per_labor 必须>0（平民每小时口粮）`);

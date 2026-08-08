@@ -354,7 +354,7 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
   const required = [
     'villageId', 'currentPop', 'soldierPop', 'hardCap', 'availableLabor',
     'laborRatio', 'prosperityBonus', 'prosperityMult', 'growthPerHour',
-    'raceMin', 'mainLevel', 'inFamine', 'civilianCropPerHour', 'softLimit',
+    'mobilizeCap', 'mainLevel', 'inFamine', 'civilianCropPerHour', 'softLimit',
   ] as const;
   for (const field of required) {
     assert.ok(field in snap, `GetSnapshot 应包含字段: ${field}`);
@@ -432,4 +432,68 @@ test('v3 补充：nonCivilianUpkeep 不含 civilian_pop，且建筑不再耗粮'
     p.nonCivilianUpkeep < civilianCrop * 0.5 || snap.currentPop === 0,
     `nonCivilianUpkeep(${p.nonCivilianUpkeep}) 不应包含 civilian_pop 口粮（≈${civilianCrop.toFixed(1)}）`,
   );
+});
+
+// ── C12：动员上限（popRaceMobilizeMax）───────────────────────────────────────
+
+test('v3 C12：动员上限——士兵占总人口比例不得超过本部族 popRaceMobilizeMax（罗马0.75）', async () => {
+  const app = freshApp();
+  const vid = await reg(app, 'c12', 'romans'); // 罗马 cap=0.75
+  const cap = app.config.constants.popRaceMobilizeMax.romans;
+  assert.ok(cap > 0 && cap <= 1, `cap 应在(0,1]，实际 ${cap}`);
+
+  // 反复训练 1 个军团兵（popCost=1）：总兵力达上限附近后，下一批应被 mobilize_cap_exceeded 拒绝。
+  let rejected = false;
+  for (let i = 0; i < 60 && !rejected; i++) {
+    await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+    const r = await send(app, 'military.TrainTroops', { villageId: vid, unit: 'legionnaire', count: 1 });
+    if (!r.ok) {
+      if (r.reason === 'requires_building:barracks') {
+        // 首轮建兵营
+        const b = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+        assert.equal(b.ok, true, `建兵营应成功: ${b.reason ?? ''}`);
+        tick(30_000); await app.scheduler.advanceTo(clock, setClock); await flush();
+        continue;
+      }
+      if (r.reason === 'mobilize_cap_exceeded') { rejected = true; break; }
+      // queue_busy 等：推进时间清空队列后重试
+      for (let j = 0; j < 8; j++) { tick(5_000); await app.scheduler.advanceTo(clock, setClock); await flush(); }
+      continue;
+    }
+    // 训练成功：推进时间清空训练队列
+    for (let j = 0; j < 8; j++) { tick(5_000); await app.scheduler.advanceTo(clock, setClock); await flush(); }
+  }
+
+  assert.ok(rejected, '训练至超过 75% 应被 mobilize_cap_exceeded 拒绝');
+
+  const snap = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  const total = snap.currentPop + snap.soldierPop;
+  const soldierFrac = total > 0 ? snap.soldierPop / total : 0;
+  assert.ok(soldierFrac <= cap + 1e-6, `士兵占比(${soldierFrac.toFixed(3)}) 应≤ cap(${cap})`);
+  assert.ok(snap.mobilizeCap === cap, `快照应下发 mobilizeCap=${cap}（实际 ${snap.mobilizeCap}）`);
+});
+
+test('v3 C12b：高卢(0.70)/条顿(0.80) 动员上限按部族生效', async () => {
+  const unitByTribe = { gauls: 'phalanx', teutons: 'clubswinger' } as const;
+  for (const tribe of ['gauls', 'teutons'] as const) {
+    const app = freshApp();
+    const vid = await reg(app, `c12-${tribe}`, tribe);
+    const cap = app.config.constants.popRaceMobilizeMax[tribe];
+    // 模拟已重度动员：士兵远超平民，使 soldierFrac 已超过 cap → 继续征兵应被拒
+    const snap0 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+    const soldierPop = snap0.currentPop * 5 + 10; // 足够大，使 soldierFrac > cap（条顿 cap=0.80 → 需>4倍平民）
+    await send(app, 'population.SetGarrisonPop', { villageId: vid, popCostSum: soldierPop });
+    await flush();
+
+    await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+    let r = await send(app, 'military.TrainTroops', { villageId: vid, unit: unitByTribe[tribe], count: 1 });
+    if (!r.ok && r.reason === 'requires_building:barracks') {
+      const b = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+      assert.equal(b.ok, true, `[${tribe}] 建兵营应成功`);
+      tick(30_000); await app.scheduler.advanceTo(clock, setClock); await flush();
+      r = await send(app, 'military.TrainTroops', { villageId: vid, unit: unitByTribe[tribe], count: 1 });
+    }
+    assert.equal(r.ok, false, `[${tribe}] 已达动员上限应拒绝训练`);
+    assert.equal(r.reason, 'mobilize_cap_exceeded', `[${tribe}] 应返回 mobilize_cap_exceeded（实际 ${r.reason}）`);
+  }
 });

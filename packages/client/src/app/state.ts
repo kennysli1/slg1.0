@@ -27,8 +27,8 @@ export interface PopSnapshot {
   growthPerHour: number;
   /** 原始增长速率（未夹紧到硬上限缺口）；达上限时用于展示人口流动潜力。 */
   potentialGrowthPerHour?: number;
-  /** 种族最低劳动占比（繁荣度满值基准）。 */
-  raceMin: number;
+  /** 本部族最大动员比例（士兵占总人口上限；条顿0.80/高卢0.70/罗马0.75）。 */
+  mobilizeCap: number;
   /** 繁荣度满值阈值（劳动占比 ≥此值时繁荣度=100%）。 */
   popProsperityFullRatio?: number;
   /** 城镇中心等级（增长速率因子）。 */

@@ -39,7 +39,7 @@ interface PopulationState {
   garrisonPopCost: number;
   /** 在途部队人口权重（movement 经 SetEnRoutePop 上报）。 */
   enRoutePopCost: number;
-  /** 部族（原 raceMin 来源，现仅保留在快照中供 UI 展示，不再参与繁荣度计算）。 */
+  /** 部族（决定各部族最大动员比例 popRaceMobilizeMax，用于限制士兵占总人口上限；不再参与繁荣度计算，繁荣度由平民占比驱动）。 */
   tribe: string;
   /** 饥荒减员任务 id（运行中非空）。 */
   starveTaskId?: string;
@@ -179,8 +179,9 @@ export class PopulationModule {
     return Math.max(0, s.hardCap - this.soldierPop(s));
   }
 
-  private raceMin(s: PopulationState): number {
-    const rm = this.config.constants.popRaceLaborMin;
+  /** 本部族最大动员比例（士兵占总人口上限）：条顿0.80/高卢0.70/罗马0.75。 */
+  private mobilizeCap(s: PopulationState): number {
+    const rm = this.config.constants.popRaceMobilizeMax;
     return (rm as Record<string, number>)[s.tribe] ?? rm.romans;
   }
 
@@ -302,7 +303,8 @@ export class PopulationModule {
       growthPerHour: Math.round(growth),
       /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
       potentialGrowthPerHour: Math.round(this.growthRateRaw(s)),
-      raceMin: this.raceMin(s),
+      /** 本部族最大动员比例（士兵占总人口上限）；用于前端展示/校验。 */
+      mobilizeCap: this.mobilizeCap(s),
       /** 繁荣度满值阈值（平民占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
       popProsperityFullRatio: c.popProsperityFullRatio,
       mainLevel: s.mainLevel,
@@ -482,6 +484,16 @@ export class PopulationModule {
     if (s.currentPop < totalCost) {
       this.store.set(COLLECTION, villageId, s);
       return { ok: false, payload: {}, reason: 'insufficient_population' };
+    }
+
+    // 动员上限：士兵占总人口比例不得超过本部族 popRaceMobilizeMax（条顿0.80/高卢0.70/罗马0.75）。
+    // 训练把平民(popCost)转为士兵，总人口(currentPop+soldierPop)守恒，故只需校验转化后士兵占比。
+    const soldierPop = this.soldierPop(s);
+    const totalPop = s.currentPop + soldierPop;
+    const maxSoldier = this.mobilizeCap(s) * totalPop;
+    if (soldierPop + totalCost > maxSoldier + 1e-9) {
+      this.store.set(COLLECTION, villageId, s);
+      return { ok: false, payload: {}, reason: 'mobilize_cap_exceeded' };
     }
 
     s.currentPop -= totalCost;

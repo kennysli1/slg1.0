@@ -135,7 +135,7 @@ export function handlePush(event: string, payload: any): void {
       const newProsperityMult = payload.prosperityMult != null ? Number(payload.prosperityMult) : current.prosperityMult;
       const newGrowth = payload.growthPerHour != null ? Number(payload.growthPerHour) : current.growthPerHour;
       const newPotentialGrowth = payload.potentialGrowthPerHour != null ? Number(payload.potentialGrowthPerHour) : (current.potentialGrowthPerHour ?? 0);
-      const newRaceMin = payload.raceMin != null ? Number(payload.raceMin) : current.raceMin;
+      const newMobilizeCap = payload.mobilizeCap != null ? Number(payload.mobilizeCap) : current.mobilizeCap;
       const newMainLevel = payload.mainLevel != null ? Number(payload.mainLevel) : current.mainLevel;
       const newCivilianCrop = payload.civilianCropPerHour != null ? Number(payload.civilianCropPerHour) : current.civilianCropPerHour;
 
@@ -171,7 +171,7 @@ export function handlePush(event: string, payload: any): void {
         prosperityMult: newProsperityMult,
         growthPerHour: newGrowth,
         potentialGrowthPerHour: newPotentialGrowth,
-        raceMin: newRaceMin,
+        mobilizeCap: newMobilizeCap,
         mainLevel: newMainLevel,
         inFamine: newInFamine,
         civilianCropPerHour: newCivilianCrop,
