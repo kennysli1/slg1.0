@@ -5,7 +5,7 @@ import { CommandBus } from './infra/command-bus.js';
 import { Scheduler } from './infra/scheduler.js';
 import { KeyedSerialQueue } from './infra/keyed-serial-queue.js';
 import { MemoryStore, JsonFileStore, type Store } from './infra/store.js';
-import { loadGameConfig, type GameConfig } from './infra/config.js';
+import { loadGameConfig, loadBalanceOverrides, type GameConfig, type BalanceOverrides } from './infra/config.js';
 import { EconomyModule } from './modules/economy.js';
 import { BuildingModule } from './modules/building.js';
 import { MilitaryModule } from './modules/military.js';
@@ -54,6 +54,8 @@ export interface GameApp {
   config: GameConfig;
   /** 启动时使用的配置目录（config/*.csv 所在），热重载与平衡调参写回都基于它。 */
   configDir: string;
+  /** 平衡调参覆盖文件路径（持久化在 data/balance_overrides.json，git 忽略）。null 表示关闭覆盖。 */
+  balanceOverridePath: string | null;
   store: Store;
   bus: EventBus;
   commands: CommandBus;
@@ -114,10 +116,17 @@ export function createGameApp(opts?: {
   configDir?: string;
   /** 数据落盘路径。给了就用 JSON 文件持久化；不给用内存（测试）。 */
   storePath?: string;
+  /** 平衡调参覆盖文件路径。默认 <storePath 目录>/balance_overrides.json。 */
+  balanceOverridePath?: string;
 }): GameApp {
   const now = opts?.now ?? (() => Date.now());
   const configDir = opts?.configDir ?? defaultConfigDir();
-  const config = loadGameConfig(configDir);
+  // 平衡覆盖路径：与 game.json 同目录（在 data/ 下，git 忽略，wipe:all 不动）
+  const balanceOverridePath = opts?.balanceOverridePath
+    ?? (opts?.storePath ? join(dirname(opts.storePath), 'balance_overrides.json') : null);
+  // 启动时加载一次覆盖，灌进初始 config
+  const initialOverrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
+  const config = loadGameConfig(configDir, initialOverrides);
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
   const bus = new EventBus();
@@ -213,7 +222,7 @@ export function createGameApp(opts?: {
   notifications.init();
 
   return {
-    config, configDir, store, bus, commands, scheduler, serialQueue,
+    config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, movement, combat, player, meta, notifications, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
@@ -232,7 +241,9 @@ export function createGameApp(opts?: {
       pve.resume();
     },
     reloadConfig() {
-      const newConfig = loadGameConfig(configDir);
+      // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
+      const overrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
+      const newConfig = loadGameConfig(configDir, overrides);
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
       economy.setConfig(newConfig);
       building.setConfig(newConfig);

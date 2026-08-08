@@ -16,7 +16,6 @@ combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%,均值不变;确定性LCG按清空次数取种,可复现)
-pop_growth_per_hour,20,number,城镇中心每级每小时基础增长人口(再乘以主城等级;朝可用劳动人口=硬上限-士兵人口收敛)
 pop_prosperity_full_ratio,0.70,number,劳动人口占硬上限比例达到此值时繁荣度加成满值(默认0.70)
 pop_overcap_penalty_full_ratio,2.0,number,人口超过上限的惩罚拐点：currentPop/hardCap 达到此比例时繁荣度加成归零(默认2.0=超出一倍归零)
 pop_race_labor_min_romans,0.15,number,罗马最低劳动人口占比(占硬上限);低于此值繁荣度加成为0

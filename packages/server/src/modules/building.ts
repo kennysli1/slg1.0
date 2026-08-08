@@ -161,6 +161,7 @@ export class BuildingModule {
    *  - hardCap：Σ 每栋已建建筑(level≥1) 的 levels[1..level].popCap 之和。
    *    逐等级 popCap 是「该级相对上一级的增量贡献」，求和即 1:1 等价于旧模型 popCapPerLevel × level
    *    （例：main L10 = 20×10 = 200）。故必须累加 1..当前等级，而非只取当前等级。
+   *  - mainPopCap：仅城镇中心 1..当前等级 的 popCap 之和（开局人口；其他默认建筑不贡献）。
    *  - mainLevel：城镇中心等级（人口增长率基数）。
    */
   private getPopCap(cmd: Command): CommandResult {
@@ -168,16 +169,19 @@ export class BuildingModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     let hardCap = 0;
+    let mainPopCap = 0;
     for (const p of s.placed) {
       if (p.level < 1) continue;
       const def = this.config.buildings[p.kind];
       if (!def) continue;
       // 累加该建筑 1..当前等级 的逐等级人口上限（增量模型）
       for (let lv = 1; lv <= p.level; lv++) {
-        hardCap += def.levels[lv]?.popCap ?? 0;
+        const pop = def.levels[lv]?.popCap ?? 0;
+        hardCap += pop;
+        if (p.kind === 'main') mainPopCap += pop;
       }
     }
-    return { ok: true, payload: { hardCap, mainLevel: this.tcLevel(s) } };
+    return { ok: true, payload: { hardCap, mainPopCap, mainLevel: this.tcLevel(s) } };
   }
 
   // ---- 派生（全部在内部算，对外只给快照，铁律#4）----
@@ -555,18 +559,14 @@ export class BuildingModule {
   }
 
   /**
-   * 只读查询「劳动力上下文」（供 population 模块计算繁荣度与劳动力，无回调，无环）。
-   * 返回：
-   *  - prosperity：全村繁荣度（Σ level×prosperityPerLevel）
-   *  - buildings：所有 laborAmplified=true 的已建实例快照（含 kind/level/resource）
-   * population 拿到后缓存快照，不再查询 building 内部状态（铁律#1/#4）。
+   * 只读查询「劳动力上下文」（供 population 模块计算繁荣度，无回调，无环）。
+   * 返回：prosperity — 全村繁荣度（Σ level×prosperityPerLevel；level<1 的占位不计）。
+   * 注意：旧版的 `laborAmplified` 建筑列表已移除（v4 删除未投入使用的劳动力增幅机制）。
    */
   private getLaborContext(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-
-    // 计算繁荣度（全部建筑，包括 level=0 占位的不计，>=1 才算）
     let prosperity = 0;
     for (const p of s.placed) {
       if (p.level < 1) continue;
@@ -574,20 +574,6 @@ export class BuildingModule {
       if (!def) continue;
       prosperity += p.level * def.prosperityPerLevel;
     }
-
-    // 收集 laborAmplified=true 的已建实例
-    const buildings: Array<{ kind: string; level: number; resource?: string }> = [];
-    for (const p of s.placed) {
-      if (p.level < 1) continue;
-      const def = this.config.buildings[p.kind];
-      if (!def?.laborAmplified) continue;
-      buildings.push({
-        kind: p.kind,
-        level: p.level,
-        resource: def.resource,
-      });
-    }
-
-    return { ok: true, payload: { prosperity, buildings } };
+    return { ok: true, payload: { prosperity } };
   }
 }

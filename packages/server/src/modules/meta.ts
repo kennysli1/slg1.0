@@ -61,8 +61,8 @@ export class MetaModule {
           mapSize: c.constants.mapSize,
           worldW: c.constants.worldW,
           worldH: c.constants.worldH,
-          // 人口 v3（硬上限模型）展示/外插用常量
-          popGrowthPerHour: c.constants.popGrowthPerHour,
+          // 人口 v3（硬上限模型）展示/外插用常量：增长速率绑在城镇中心，由 main.popGrowthPerLevel × mainLevel 决定
+          popGrowthPerLevel: c.buildings.main?.popGrowthPerLevel ?? 0,
           popProsperityFullRatio: c.constants.popProsperityFullRatio,
           popRaceLaborMin: c.constants.popRaceLaborMin,
           popLaborFloor: c.constants.popLaborFloor,

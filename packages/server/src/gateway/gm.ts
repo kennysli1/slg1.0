@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
-import { loadGameConfig } from '../infra/config.js';
+import { loadGameConfig, loadBalanceOverrides, saveBalanceOverrides, mergeBalanceOverrides, type BalanceOverrides } from '../infra/config.js';
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
 <html lang="zh">
@@ -286,7 +286,7 @@ interface BalanceTable {
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['maxLevel', 'prosperityPerLevel', 'laborAmplified', 'laborSaturation', 'laborBonusMax'],
+    numeric: ['maxLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -674,11 +674,16 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.send({ ok: true, ...data });
   });
 
-  // POST /gm/balance/save — 校验 → 写回 CSV → 热重载（失败绝不留半截配置）
+  // POST /gm/balance/save — 校验 → 写覆盖到 data/balance_overrides.json → 热重载（失败绝不留半截配置）
   fastify.post('/gm/balance/save', (req, reply) => {
     if (!auth(req, reply)) return;
     const body = (req.body ?? {}) as Record<string, Record<string, Record<string, string>>>;
     const dir = gameApp.configDir;
+    const overridePath = gameApp.balanceOverridePath;
+    if (!overridePath) {
+      void reply.code(500).send({ ok: false, reason: 'balanceOverridePath 未配置（storePath 未设置？测试环境不支持平衡调参）' });
+      return;
+    }
     const edits: Array<[string, BalanceTable, Record<string, Record<string, string>>]> = [];
     for (const name of Object.keys(BALANCE_TABLES)) {
       const c = (body as Record<string, Record<string, Record<string, string>>>)[name];
@@ -689,18 +694,23 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     try {
-      // 1) 先复制到临时目录校验，确保不破坏线上文件；校验失败整段回滚
+      // 1) 读当前覆盖，合并本次编辑（深合并：表→主键→字段，后写覆盖先写）
+      const current = loadBalanceOverrides(overridePath);
+      const incoming: BalanceOverrides = {};
+      for (const [name, , changes] of edits) incoming[name] = changes;
+      const merged = mergeBalanceOverrides(current, incoming);
+      // 2) 校验：把合并后的覆盖应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
         cpSync(dir, tmp, { recursive: true });
-        for (const [, table, changes] of edits) applyBalanceEdits(dir, tmp, table, changes);
+        for (const [name, table, changes] of edits) applyBalanceEdits(dir, tmp, table, changes);
         loadGameConfig(tmp); // 失败在此抛出
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      // 2) 校验通过 → 写回真实文件
-      for (const [, table, changes] of edits) applyBalanceEdits(dir, dir, table, changes);
-      // 3) 热重载（内存 + 存量村庄派生值即时生效）
+      // 3) 校验通过 → 持久化覆盖（data/balance_overrides.json，git 忽略，wipe:all 不动）
+      saveBalanceOverrides(overridePath, merged);
+      // 4) 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();
       void reply.send({ ok: true });
     } catch (e) {

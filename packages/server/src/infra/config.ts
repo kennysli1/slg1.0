@@ -1,8 +1,116 @@
 import { join } from 'node:path';
-import { loadCsv, num } from './csv.js';
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync } from 'node:fs';
+import { loadCsv, num, parseCsvStructured, serializeCsv, type CsvRow } from './csv.js';
 import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
 
 export type { UnitTraitDef } from './combat-types.js';
+
+// ── 平衡调参覆盖（持久化在 data/balance_overrides.json，git 忽略，部署/wipe 都不动）────
+
+/**
+ * 平衡调参覆盖结构：与 GM 保存接口 body 同形。
+ * tableName → 行主键 → 字段名 → 新值（字符串，与 CSV 单元格同口径）。
+ * 例如：{ buildings: { '16': { maxLevel: '5' } }, building_levels: { 'main|1': { popCap: '99' } } }
+ */
+export type BalanceOverrides = Record<string, Record<string, Record<string, string>>>;
+
+/**
+ * 单个表的可编辑字段集合（与 gm.ts 的 BALANCE_TABLES 同形，但只关心覆盖逻辑所需的子集）。
+ * 这里只声明本文件需要的最小结构，避免直接依赖 gm.ts 造成循环引用。
+ */
+export interface BalanceTableMeta {
+  /** CSV 文件名（相对 configDir）。 */
+  file: string;
+  /** 单字段主键列名（如 'id'）。 */
+  key?: string;
+  /** 复合主键列名数组（如 ['code','level']）。 */
+  keyComposite?: string[];
+  /** 数字字段集合：用于校验与规范化。 */
+  numeric?: string[];
+}
+
+/**
+ * 读 data/balance_overrides.json。文件不存在或解析失败时返回空对象（视作「无覆盖」）。
+ * 注意：路径在 data/ 目录下，与 game.json 同级；data/ 已在 .gitignore 中，
+ * 所以部署（git reset --hard）和 wipe:all 都不会触碰。
+ */
+export function loadBalanceOverrides(overridePath: string): BalanceOverrides {
+  if (!existsSync(overridePath)) return {};
+  try {
+    const raw = readFileSync(overridePath, 'utf8');
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return {};
+    return obj as BalanceOverrides;
+  } catch {
+    // 文件损坏时降级为空对象（不影响启动；玩家改坏的下次保存会被覆盖）
+    return {};
+  }
+}
+
+/**
+ * 写 data/balance_overrides.json（原子写入：先写临时文件再 rename，避免半截文件）。
+ */
+export function saveBalanceOverrides(overridePath: string, overrides: BalanceOverrides): void {
+  const tmp = overridePath + '.tmp';
+  writeFileSync(tmp, JSON.stringify(overrides, null, 2), 'utf8');
+  // 原子重命名（跨平台：先 rename；失败则 copy + unlink 兜底）
+  try {
+    renameSync(tmp, overridePath);
+  } catch {
+    copyFileSync(tmp, overridePath);
+    unlinkSync(tmp);
+  }
+}
+
+/**
+ * 把单个表的覆盖合并到已解析的 CSV 行集合上，返回新行集合。
+ * 不做文件 I/O；调用方负责序列化与落盘。
+ * 校验逻辑与 gm.applyBalanceEdits 保持一致：数字字段必须能 parseFloat；非数字字段原样覆盖。
+ */
+export function mergeOverridesIntoRows(
+  rows: CsvRow[],
+  table: BalanceTableMeta,
+  changes: Record<string, Record<string, string>>,
+): CsvRow[] {
+  const incByKey = new Map(Object.entries(changes));
+  const keyCol = table.key;
+  const compCols = table.keyComposite ?? [];
+  return rows.map((orig) => {
+    const keyVal = keyCol
+      ? String(orig[keyCol] ?? '')
+      : compCols.map((c) => String(orig[c] ?? '')).join('|');
+    const inc = incByKey.get(keyVal);
+    if (!inc) return orig;
+    const merged = { ...orig };
+    for (const h of Object.keys(inc)) {
+      const newVal = inc[h];
+      if (newVal === undefined || newVal === '') continue;
+      if (table.numeric?.includes(h)) {
+        const n = Number(newVal);
+        if (!Number.isFinite(n)) throw new Error(`${table.file} 行 ${keyVal} 字段 ${h}="${newVal}" 不是合法数字`);
+        merged[h] = String(n);
+      } else {
+        merged[h] = newVal;
+      }
+    }
+    return merged;
+  });
+}
+
+/**
+ * 深合并两次平衡调参覆盖（表→主键→字段）。后写入覆盖先写入；缺失字段保留。
+ * 用于 GM 保存端点：读现有覆盖 → 合并本次编辑 → 落盘（避免一次保存抹掉之前的手改）。
+ */
+export function mergeBalanceOverrides(existing: BalanceOverrides, incoming: BalanceOverrides): BalanceOverrides {
+  const merged: BalanceOverrides = { ...existing };
+  for (const table of Object.keys(incoming)) {
+    merged[table] = { ...(merged[table] ?? {}) };
+    for (const key of Object.keys(incoming[table])) {
+      merged[table][key] = { ...(merged[table][key] ?? {}), ...incoming[table][key] };
+    }
+  }
+  return merged;
+}
 
 /**
  * 基础设施 · 配置注册表（GameConfig）
@@ -51,12 +159,8 @@ export interface BuildingDef {
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
   /** 每级贡献的繁荣度（按建筑主题分档，见 buildings.csv）。 */
   prosperityPerLevel: number;
-  /** 是否参与人口劳动力增幅（资源田/军事/学院/铁匠/城镇中心=true；仓库/粮仓/城墙/集结点=false）。 */
-  laborAmplified: boolean;
-  /** laborAmplified=true 时的饱和阈值基数（Lv1 时需要多少人口才能让该建筑满员）。 */
-  laborSaturation: number;
-  /** laborAmplified=true 时满员的最大增幅（速率类=产率加成；建造类=时间缩减比）。 */
-  laborBonusMax: number;
+  /** 每级人口增长/小时（仅 main 城镇中心有意义；其他建筑留 0）。替代旧的全局 popGrowthPerHour 常数。 */
+  popGrowthPerLevel: number;
   /** 逐等级参数（成本/耗时/人口上限/产量），见 building_levels.csv。 */
   levels: Record<number, BuildingLevelDef>;
   /** 前端展示用：第 1 级人口上限贡献（= levels[1]?.popCap ?? 0），卡片显示「+X/级」。 */
@@ -164,8 +268,6 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
-  /** 人口：基础每小时增长人口数（再乘以城镇中心等级）。 */
-  popGrowthPerHour: number;
   /** 人口：劳动人口占比达到此值（占硬上限比例）时，繁荣度加成达到满值（默认 0.70）。 */
   popProsperityFullRatio: number;
   /** 人口：超上限惩罚拐点；currentPop/hardCap 达到此比例时繁荣度加成归零（默认 2.0=超出一倍）。 */
@@ -296,7 +398,7 @@ function assertUniqueRows(rows: Record<string, string>[], table: string, idField
 }
 
 /** 从指定目录加载所有 CSV。configDir 默认指向仓库根的 config/。 */
-export function loadGameConfig(configDir: string): GameConfig {
+export function loadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   const p = (f: string) => join(configDir, f);
 
   const resourceRows = loadCsv(p('resources.csv'));
@@ -304,14 +406,25 @@ export function loadGameConfig(configDir: string): GameConfig {
   const resources = resourceRows.map((r) => ({ key: r.id, name: r.name, icon: r.icon }));
 
   // 先读建筑原始行，建立 数字ID→code 映射，再解析 requires（前置也是数字ID引用）
-  const buildingRows = loadCsv(p('buildings.csv'));
+  let buildingRows = loadCsv(p('buildings.csv'));
   assertUniqueRows(buildingRows, 'buildings.csv');
+  // 应用平衡覆盖（玩家在 /gm/balance 的手动修改；持久化在 data/balance_overrides.json，git 忽略）
+  if (overrides?.buildings) {
+    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
+  }
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
 
   // 建筑逐级参数表（building_levels.csv）：code -> level -> BuildingLevelDef
   const levelsByCode: Record<string, Record<number, BuildingLevelDef>> = {};
-  for (const r of loadCsv(p('building_levels.csv'))) {
+  let levelRows = loadCsv(p('building_levels.csv'));
+  if (overrides?.building_levels) {
+    levelRows = mergeOverridesIntoRows(levelRows, {
+      file: 'building_levels.csv', keyComposite: ['code','level'],
+      numeric: ['costWood','costClay','costIron','costCrop','timeSec','popCap','prod'],
+    }, overrides.building_levels);
+  }
+  for (const r of levelRows) {
     const code = r.code?.trim();
     if (!code) continue;
     const lv = num(r.level);
@@ -337,9 +450,7 @@ export function loadGameConfig(configDir: string): GameConfig {
       maxLevel: num(r.maxLevel, 10),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
-      laborAmplified: num(r.laborAmplified, 0) === 1,
-      laborSaturation: num(r.laborSaturation, 0),
-      laborBonusMax: num(r.laborBonusMax, 0),
+      popGrowthPerLevel: num(r.popGrowthPerLevel, 0),
       levels: lvl,
       popCapPerLevel: lvl[1]?.popCap ?? 0,
       desc: r.desc ?? '',
@@ -373,8 +484,14 @@ export function loadGameConfig(configDir: string): GameConfig {
     unitTraits[r.code] = { id: num(r.id), code: r.code, name: r.name, effects };
   }
 
-  const unitRows = loadCsv(p('units.csv'));
+  let unitRows = loadCsv(p('units.csv'));
   assertUniqueRows(unitRows, 'units.csv');
+  if (overrides?.units) {
+    unitRows = mergeOverridesIntoRows(unitRows, {
+      file: 'units.csv', key: 'code',
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+    }, overrides.units);
+  }
   const units: Record<string, UnitDef> = {};
   for (const r of unitRows) {
     units[r.code] = {
@@ -428,7 +545,12 @@ export function loadGameConfig(configDir: string): GameConfig {
 
   // 全局常量表
   const raw: Record<string, number | boolean | string> = {};
-  for (const r of loadCsv(p('game_constants.csv'))) {
+  let constRows = loadCsv(p('game_constants.csv'));
+  if (overrides?.game_constants) {
+    // game_constants 的主键是 key，value/type 都可改
+    constRows = mergeOverridesIntoRows(constRows, { file: 'game_constants.csv', key: 'key' }, overrides.game_constants);
+  }
+  for (const r of constRows) {
     if (!r.key) continue;
     raw[r.key] = parseConstantValue(r.value, r.type);
   }
@@ -452,7 +574,6 @@ export function loadGameConfig(configDir: string): GameConfig {
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
-    popGrowthPerHour: cn('pop_growth_per_hour', 20),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
     popRaceLaborMin: {
@@ -502,9 +623,10 @@ export function loadGameConfig(configDir: string): GameConfig {
 /**
  * 热重载入口：重新从目录加载整套配置（含 validateGameConfig 校验；失败抛出 Error）。
  * 配合 app.reloadConfig() 使用——先在此校验通过，再写回磁盘，避免半截配置。
+ * overrides 来自 data/balance_overrides.json（玩家在 /gm/balance 的手动修改）。
  */
-export function reloadGameConfig(configDir: string): GameConfig {
-  return loadGameConfig(configDir);
+export function reloadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
+  return loadGameConfig(configDir, overrides);
 }
 
 /**
@@ -555,10 +677,8 @@ export function validateGameConfig(config: GameConfig): void {
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
     if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
-    if (b.laborAmplified) {
-      if (b.laborSaturation <= 0) errors.push(`buildings.csv[${b.kind}] laborAmplified=1 时 laborSaturation 必须>0`);
-      if (b.laborBonusMax < 0 || b.laborBonusMax > 1) errors.push(`buildings.csv[${b.kind}] laborBonusMax 必须在[0,1]（当前${b.laborBonusMax}）`);
-    }
+    if (b.popGrowthPerLevel < 0) errors.push(`buildings.csv[${b.kind}] popGrowthPerLevel 必须≥0（当前${b.popGrowthPerLevel}）`);
+    if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
 
@@ -665,7 +785,6 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
-  if (c.popGrowthPerHour <= 0) errors.push(`game_constants.csv pop_growth_per_hour 必须>0`);
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
   if (c.popOvercapPenaltyFullRatio <= 1) errors.push(`game_constants.csv pop_overcap_penalty_full_ratio 必须>1（当前${c.popOvercapPenaltyFullRatio}）`);
   for (const [tribe, v] of Object.entries(c.popRaceLaborMin)) {

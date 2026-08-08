@@ -18,10 +18,12 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  *       prosperityBonus = clamp((laborRatio − raceMin) / (popProsperityFullRatio − raceMin), 0, 1)
  *       prosperityMult  = popLaborFloor + (1 − popLaborFloor) × prosperityBonus   // ∈ [popLaborFloor, 1.0]
  *     五条速率轴（资源产出 / 研究 / 练兵 / 锻造 / 建造）统一消费 prosperityMult。
- *  D. 增长 growthPerHour = popGrowthPerHour × mainLevel，朝 availableLabor 收敛（currentPop 已达则不再增长）。
- *  E. 口粮：平民 currentPop × popCropPerLabor /h（source='civilian_pop'）；士兵由 military 以 upkeep 上报（source='troops'）。
- *  F. 战死即时回收：RecoverCasualties 按医院等级比例把死亡士兵人口转回劳动人口，其余永久扣除（无伤兵池 / 无定时器）。
- *  G. 粮荒保留士兵逃兵 + 人口死亡（减员状态机重写，脱离软上限）。
+ *  D. 增长 growthPerHour = main.popGrowthPerLevel × mainLevel，朝 availableLabor 收敛（currentPop 已达则不再增长）。
+ *     速率绑在城镇中心上（GM 面板可调）；旧版全局常数 popGrowthPerHour 已废弃。
+ *  E. 开局人口：currentPop = 城镇中心当前等级贡献的 popCap 之和（mainPopCap），其他默认建筑只贡献 hardCap 不贡献人口。
+ *  F. 口粮：平民 currentPop × popCropPerLabor /h（source='civilian_pop'）；士兵由 military 以 upkeep 上报（source='troops'）。
+ *  G. 战死即时回收：RecoverCasualties 按医院等级比例把死亡士兵人口转回劳动人口，其余永久扣除（无伤兵池 / 无定时器）。
+ *  H. 粮荒保留士兵逃兵 + 人口死亡（减员状态机重写，脱离软上限）。
  */
 
 interface PopulationState {
@@ -131,8 +133,9 @@ export class PopulationModule {
   }
 
   /**
-   * 新村创建：查 building.GetPopCap 得 hardCap + mainLevel；
-   * 开局满劳动（currentPop = hardCap → 劳动占比 100% → 满加成），后续随建筑升级/造兵自然变化。
+   * 新村创建：查 building.GetPopCap 得 hardCap + mainLevel + mainPopCap；
+   * 开局人口 = 城镇中心当前等级贡献的 popCap 之和（= mainPopCap），其他默认建筑只贡献 hardCap 不贡献人口。
+   * 人口随后按 main.popGrowthPerLevel × mainLevel /h 慢慢增长至 hardCap。
    * 必须在 economy/building/military 已初始化之后调用。
    */
   async createVillage(villageId: string, tribe = 'romans'): Promise<void> {
@@ -143,10 +146,11 @@ export class PopulationModule {
     });
     const hardCap: number = (capRes.payload as any)?.hardCap ?? 0;
     const mainLevel: number = (capRes.payload as any)?.mainLevel ?? 1;
+    const mainPopCap: number = (capRes.payload as any)?.mainPopCap ?? 0;
 
     const s: PopulationState = {
       villageId,
-      currentPop: hardCap,
+      currentPop: mainPopCap,
       hardCap,
       mainLevel,
       garrisonPopCost: 0,
@@ -209,12 +213,16 @@ export class PopulationModule {
     return c.popLaborFloor + (1 - c.popLaborFloor) * this.prosperityBonus(s);
   }
 
-  /** 每小时增长量（已 clamp 到 availableLabor 缺口）。粮荒期间不增长（否则会与减员相互抵消）。 */
+  /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。 */
+  private growthRateRaw(s: PopulationState): number {
+    return (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
+  }
+
+  /** 每小时实际增长量（已 clamp 到 availableLabor 缺口）。粮荒期间不增长（否则会与减员相互抵消）。 */
   private growthPerHour(s: PopulationState): number {
     if (s.inFamine) return 0;
-    const c = this.config.constants;
     const gap = this.availableLabor(s) - s.currentPop;
-    return Math.max(0, Math.min(gap, c.popGrowthPerHour * s.mainLevel));
+    return Math.max(0, Math.min(gap, this.growthRateRaw(s)));
   }
 
   // ── Economy 同步（铁律#4：只上报，不回查软上限）──────────────────────────
@@ -257,7 +265,7 @@ export class PopulationModule {
     // 粮荒期间不增长（减员路径由 runStarveTick 独占），避免与减员相互抵消导致人口卡在平衡点。
     if (!s.inFamine && s.currentPop < avail) {
       const c = this.config.constants;
-      const grow = Math.min(avail - s.currentPop, c.popGrowthPerHour * s.mainLevel * dtHours);
+      const grow = Math.min(avail - s.currentPop, this.growthRateRaw(s) * dtHours);
       s.currentPop = Math.min(avail, s.currentPop + grow);
     }
     s.currentPop = Math.max(0, s.currentPop);
@@ -289,7 +297,7 @@ export class PopulationModule {
       prosperityMult: Math.round(mult * 100) / 100,
       growthPerHour: Math.round(growth),
       /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
-      potentialGrowthPerHour: Math.round(c.popGrowthPerHour * s.mainLevel),
+      potentialGrowthPerHour: Math.round(this.growthRateRaw(s)),
       raceMin: this.raceMin(s),
       /** 繁荣度满值阈值（劳动占比 ≥此值时 prosperityBonus=1）；面板文案使用。 */
       popProsperityFullRatio: c.popProsperityFullRatio,
@@ -427,7 +435,9 @@ export class PopulationModule {
     await this.settle(s);
     this.store.set(COLLECTION, villageId, s);
 
-    const mult = this.prosperityMult(s);
+    const multRaw = this.prosperityMult(s);
+    // 与 publicPayload 的 prosperityMult 同口径（显示级四舍五入到 2 位），保证两者严格相等
+    const mult = Math.round(multRaw * 100) / 100;
     const laborMults = {
       production: mult,
       build: mult,
