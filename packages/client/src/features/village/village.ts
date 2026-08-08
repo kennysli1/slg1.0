@@ -88,9 +88,6 @@ function renderPlaced(p: any): string {
     ? `<div class="hint-sm prod">+${p.producing.ratePerHour}/h</div>`
     : '';
   const popCap = buildingInfo(p.kind).popCapPerLevel ?? 0;
-  const popCapHint = popCap > 0
-    ? `<div class="hint-sm popcap"><span class="popcap-icon" aria-label="人口">👥</span>+${popCap}/级 · 升级 +${popCap}</div>`
-    : '';
   let btn: string;
   if (constructing) btn = '<small class="tag">建造中</small>';
   else if (max) btn = '<small class="tag">已满级</small>';
@@ -104,8 +101,7 @@ function renderPlaced(p: any): string {
     <div class="cardbody"><div class="card-title">${escapeHtml(p.name)} <b class="lv">${lv}</b>
       <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
-      ${popCapHint}
-      ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
+      ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec, popCap)}${btn}</div></div>`;
 }
 
 /** 侧边栏抽屉：某区可建建筑清单。整条选项可点开详情；建造按钮点击不冒泡。 */

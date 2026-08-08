@@ -80,17 +80,20 @@ export function canAfford(cost: Record<string, number> | null): boolean {
   return resourceKeys().every((r) => (have[r] ?? 0) >= (cost[r] ?? 0));
 }
 
-/** 消耗预览：带资源图标，买不起的项标红。 */
-export function costPreview(cost: Record<string, number> | null, timeSec?: number | null): string {
+/** 消耗预览：带资源图标，买不起的项标红。popCap>0 时在资源末尾追加一个人口项（图标+数字，与资源同形）。 */
+export function costPreview(cost: Record<string, number> | null, timeSec?: number | null, popCap?: number): string {
   if (!cost) return '';
   const have = getCache().res?.resources ?? {};
   const items = resourceKeys().filter((r) => (cost[r] ?? 0) > 0).map((r) => {
     const lack = (have[r] ?? 0) < (cost[r] ?? 0);
     const info = resInfo(r);
     return `<span class="cost-item${lack ? ' cost-lack' : ''}">${art(info.icon, info.name, 'xs')}${fmt(cost[r])}</span>`;
-  }).join('');
+  });
+  if (popCap && popCap > 0) {
+    items.push(`<span class="cost-item cost-pop" title="每级人口上限">👥+${popCap}</span>`);
+  }
   const time = timeSec ? `<span class="cost-time">⏱ ${secStr(Date.now() + timeSec * 1000)}</span>` : '';
-  return `<div class="cost">${items}${time}</div>`;
+  return `<div class="cost">${items.join('')}${time}</div>`;
 }
 
 /** 进度条 HTML（用 data 属性记录起止，由计时器更新宽度与剩余文字）。 */
