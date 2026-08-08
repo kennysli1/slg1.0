@@ -27,6 +27,8 @@ export interface PopSnapshot {
   growthPerHour: number;
   /** 种族最低劳动占比（繁荣度满值基准）。 */
   raceMin: number;
+  /** 繁荣度满值阈值（劳动占比 ≥此值时繁荣度=100%）。 */
+  popProsperityFullRatio?: number;
   /** 城镇中心等级（增长速率因子）。 */
   mainLevel: number;
   /** 是否处于饥荒（服务端权威）。 */

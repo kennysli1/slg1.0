@@ -175,6 +175,7 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     prosperityMult: 0.875,
     growthPerHour: 10,
     raceMin: 0.15,
+    popProsperityFullRatio: 0.7,
     mainLevel: 1,
     inFamine: false,
     civilianCropPerHour: 100,

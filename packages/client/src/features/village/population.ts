@@ -106,7 +106,7 @@ export function renderPopPanel(): string {
     </div>
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">繁荣度系数（劳动占比 ≥${Math.round(ps.raceMin * 100)}% 时满值 100%）</div>
+      <div class="pop-labor-title">繁荣度系数（劳动占比 ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%；劳动占比 越低加成越低，种族最低占比处为底线）</div>
       ${laborGrid}
     </div>
   </div>`;

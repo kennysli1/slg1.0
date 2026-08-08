@@ -227,6 +227,8 @@ export class PopulationModule {
   /**
    * 按 Δt 补算人口增长（朝 availableLabor 收敛）。不返回 context、不 emit
    * （铁律：减员只在 starve tick emit；其余离散写各自 emit）。
+   * 增长后即时同步 cropUpkeep + pop_labor mult 给 economy（铁律#4），
+   * 否则 civilian_pop 停在最后一次离散动作时刻 → UI 用外插值与服务端真实值脱节（耗粮低估）。
    */
   private async settle(s: PopulationState): Promise<void> {
     const now = this.now();
@@ -243,6 +245,9 @@ export class PopulationModule {
     }
     s.currentPop = Math.max(0, s.currentPop);
     s.currentPop = Math.min(s.currentPop, s.hardCap);
+
+    // 增长结束后即时上报 civilian_pop + pop_labor mult，使 economy 的 cropUpkeep 与服务端 currentPop 同步
+    await this.reportToEconomy(s);
   }
 
   // ── 公共 payload（快照与事件共用字段）────────────────────────────────────
@@ -268,6 +273,8 @@ export class PopulationModule {
       prosperityMult: Math.round(mult * 100) / 100,
       growthPerHour: Math.round(growth),
       raceMin: this.raceMin(s),
+      /** 繁荣度满值阈值（劳动占比 ≥此值时 prosperityBonus=1）；面板文案使用。 */
+      popProsperityFullRatio: c.popProsperityFullRatio,
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,

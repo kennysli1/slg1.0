@@ -757,6 +757,14 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
   padding: 1px 8px;
   margin: var(--s-1) 0;
 }
+/* pill 内的 👥 图标：略缩、垂直居中对齐，避免与文字基线错位 */
+.popcap-icon {
+  display: inline-block;
+  font-size: 0.9em;
+  line-height: 1;
+  vertical-align: -1px;
+  margin-right: 1px;
+}
 
 /* 训练面板：批次粮压标注 */
 .train-upkeep {
