@@ -1,10 +1,8 @@
 /**
- * Population 补充回归测试：WoundEntry 唯一 id / 单一减员任务
+ * Population 补充回归测试：战死即时回收 / 单一减员任务守卫 / 旧存档兼容
  *
- * 覆盖：
- *  - H) 伤兵 entry id 唯一（不因 healAt 相同而覆盖）
- *  - G) 单一减员任务守卫（deficitTaskId）
- *  - population.resume 兼容无 id 的旧 WoundEntry
+ * v3 硬上限模型：无伤兵池（woundedPool）、无伤兵治愈定时器；
+ * 战死经 population.RecoverCasualties 按医院等级即时回收。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,45 +14,47 @@ function makeApp() {
   clock = 1_000_000;
   return createGameApp({ now: () => clock, manualScheduler: true });
 }
+async function flush(n = 60): Promise<void> {
+  for (let i = 0; i < n; i++) await Promise.resolve();
+}
 
-// ── H) WoundEntry 唯一 id ────────────────────────────────────────────────
+// ── H) 战死即时回收（替代旧 AddWounded 伤兵池）─────────────────────────────
 
-test('Population WoundEntry: 多批同时添加各有唯一 id，均可治愈', async () => {
+test('Population RecoverCasualties: 战死即时回收，无伤兵池/无定时器', async () => {
   const app = makeApp();
   app.setupWorld();
 
   const reg = await app.commands.send({
     name: 'player.Register', from: 't',
-    payload: { name: '伤兵id测试', password: 'pass123', tribe: 'romans' },
+    payload: { name: '回收测试', password: 'pass123', tribe: 'romans' },
   });
   assert.ok(reg.ok);
   const vid = (reg.payload as any).player.villageId;
+  await flush();
 
-  // 同一毫秒注册三批伤兵（数量足够大保证 Math.floor(count * popCost * recoveryRatio) >= 1）
-  await app.commands.send({ name: 'population.AddWounded', from: 't', payload: { villageId: vid, losses: { legionnaire: 20 } } });
-  await app.commands.send({ name: 'population.AddWounded', from: 't', payload: { villageId: vid, losses: { legionnaire: 20 } } });
-  await app.commands.send({ name: 'population.AddWounded', from: 't', payload: { villageId: vid, losses: { legionnaire: 20 } } });
+  // 预留空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供回收回填
+  await app.commands.send({ name: 'population.ConsumePop', from: 't', payload: { villageId: vid, unit: 'legionnaire', count: 5 } });
 
-  // 直接读 store 验证（绕过 settle，避免 async 计算干扰）
+  const snap0 = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
+  const initPop = snap0.currentPop;
+
+  const r = await app.commands.send({
+    name: 'population.RecoverCasualties', from: 't',
+    payload: { villageId: vid, losses: { legionnaire: 20 } },
+  });
+  assert.equal(r.ok, true, `RecoverCasualties 应成功: ${r.reason ?? ''}`);
+  const p = r.payload as any;
+  // 医院 Lv0 → recoveryRatio = base 0.20；legionnaire popCost=1 → deadPop=20 → recovered=floor(20×0.20)=4
+  assert.equal(p.recovered, 4, `回收数应为4（floor(20×1×0.20)），实际 ${p.recovered}`);
+  assert.equal(p.permanentDead, 16, `永久阵亡应为16，实际 ${p.permanentDead}`);
+
+  const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
+  assert.ok(snap1.currentPop >= initPop + p.recovered, `回收后平民应即时增加（${initPop}→${snap1.currentPop}，回收${p.recovered}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  assert.equal(snap1.wounded, undefined, 'v3 快照不应含 wounded 字段');
+
   const popState = app.store.get<any>('population', vid);
-  const pool: any[] = popState?.woundedPool ?? [];
-
-  if (pool.length === 0) {
-    // popCost × recoveryRatio 极小导致 Math.floor = 0，是 config 数值问题，跳过
-    return;
-  }
-
-  // 验证每个 entry 都有唯一 id
-  const ids = pool.map((e: any) => e.id).filter(Boolean);
-  assert.equal(ids.length, pool.length, '每个 WoundEntry 都应有 id 字段');
-  const uniqueIds = new Set(ids);
-  assert.equal(uniqueIds.size, ids.length, `所有 entry id 应唯一（发现重复: ${JSON.stringify(ids)}）`);
-
-  // 快进让全部治愈
-  await app.scheduler.advanceTo(clock + 10 * 24 * 3600 * 1000, setClock);
-
-  const popAfter = app.store.get<any>('population', vid);
-  assert.equal(popAfter?.woundedPool?.length ?? -1, 0, '所有伤兵批次都应独立治愈完毕');
+  assert.equal(popState?.woundedPool, undefined, 'v3 PopulationState 不应有 woundedPool 字段');
 });
 
 // ── G) 单一减员任务守卫 ───────────────────────────────────────────────────
@@ -69,6 +69,7 @@ test('Population: CropDeficit 触发后只注册一个减员任务', async () =>
   });
   assert.ok(reg.ok);
   const vid = (reg.payload as any).player.villageId;
+  await flush();
 
   // 造成赤字
   await app.commands.send({
@@ -88,9 +89,9 @@ test('Population: CropDeficit 触发后只注册一个减员任务', async () =>
   assert.ok(added <= 1, `CropDeficit × 4 最多添加 1 个减员任务，实际: ${added}`);
 });
 
-// ── 旧存档兼容（无 id 字段的 WoundEntry）────────────────────────────────
+// ── 旧存档兼容（缺 v3 新增字段）────────────────────────────────────────────
 
-test('Population resume: 旧存档无 id 字段的 WoundEntry 自动补全', async () => {
+test('Population resume: 旧存档缺新字段自动补全，无 wounded', async () => {
   const app = makeApp();
   app.setupWorld();
 
@@ -100,23 +101,26 @@ test('Population resume: 旧存档无 id 字段的 WoundEntry 自动补全', asy
   });
   assert.ok(reg.ok);
   const vid = (reg.payload as any).player.villageId;
+  await flush();
 
-  // 直接向 store 写入一个"旧格式"的 PopulationState（无 id 字段）
+  // 模拟旧存档：抹掉 v3 新增字段
   const existing = app.store.get<any>('population', vid);
-  if (existing) {
-    existing.woundedPool = [
-      { count: 5, healAt: clock + 60_000, taskId: 'old-task' }, // 无 id 字段
-    ];
-    app.store.set('population', vid, existing);
-  }
+  assert.ok(existing, '应有 population 状态');
+  delete existing.garrisonPopCost;
+  delete existing.enRoutePopCost;
+  delete existing.hardCap;
+  delete existing.mainLevel;
+  delete existing.tribe;
+  delete existing.inFamine;
+  app.store.set('population', vid, existing);
 
-  // 模拟重启：调用 resume（应自动生成 id）
+  // 模拟重启：调用 resume（应自动补全字段，不抛错；派生硬上限从建筑重算）
   const popModule = app.population;
   popModule.resume();
+  await flush(60); // 等待 refreshHardCap（异步重算 hardCap/mainLevel）完成
 
-  // 快进让伤兵治愈
-  await app.scheduler.advanceTo(clock + 120_000, setClock);
-
-  const snap = await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } });
-  assert.equal((snap.payload as any)?.wounded?.total ?? -1, 0, '旧格式伤兵应自动补 id 并正常治愈');
+  const snap = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
+  assert.ok(typeof snap.currentPop === 'number', 'resume 后快照应有效');
+  assert.ok(snap.hardCap > 0, 'resume 后应重算补出 hardCap');
+  assert.equal(snap.wounded, undefined, 'v3 快照不应含 wounded');
 });

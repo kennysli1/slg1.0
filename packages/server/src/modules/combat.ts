@@ -430,10 +430,10 @@ export class CombatModule {
         for (const [t, v] of Object.entries(looted)) share[t] = Math.floor(v * ratio);
       }
 
-      // 向攻击方村庄登记伤兵（combat 只传原始损失，population 用 config 换算）
+      // 向攻击方村庄登记战死即时回收（combat 只传原始损失，population 按医院等级换算回收比例）
       if (Object.keys(attackerLossesForVillage).length > 0) {
         void this.commands.send({
-          name: 'population.AddWounded',
+          name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
           payload: { villageId: contrib.fromVillage, losses: attackerLossesForVillage },
         });
@@ -450,11 +450,11 @@ export class CombatModule {
       } as DomainEvent);
     }
 
-    // 防守方玩家（村庄战）收一份战报 + 登记伤兵
+    // 防守方玩家（村庄战）收一份战报 + 登记战死即时回收
     if (b.targetKind === 'village') {
       if (Object.keys(defenderLosses).length > 0) {
         void this.commands.send({
-          name: 'population.AddWounded',
+          name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
           payload: { villageId: b.targetId, losses: defenderLosses },
         });

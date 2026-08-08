@@ -1,7 +1,7 @@
 /**
  * 客户端单元测试（node:test + tsx）
  * 覆盖：escapeHtml/escapeAttr 转义函数 + errText 错误码翻译 + isCompatibleVersion 版本守卫
- *       + 人口系统 v2：PopSnapshot 新字段 + PopulationChanged 事件文案。
+ *       + 人口系统 v3 硬上限：PopSnapshot 新字段 + PopulationChanged 事件文案。
  * 纯逻辑，无浏览器依赖，可在 Node 环境直接运行。
  */
 import { describe, it } from 'node:test';
@@ -163,71 +163,71 @@ describe('isCompatibleVersion', () => {
 
 // ─── PopSnapshot v2 新字段 ─────────────────────────────────────────
 
-/** 构建测试用完整 PopSnapshot（含 v2 新增字段）。 */
+/** 构建测试用完整 PopSnapshot（v3 硬上限字段）。 */
 function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {}) {
   return {
     currentPop: 100,
-    garrisonPop: 50,
-    totalPop: 160,
-    softLimit: 200,
+    soldierPop: 40,
+    hardCap: 200,
+    availableLabor: 160,
+    laborRatio: 0.5,
+    prosperityBonus: 0.5,
+    prosperityMult: 0.875,
     growthPerHour: 10,
-    lambdaRatio: 0.5,
-    laborRatio: 0.625,
-    cropDeficitRate: 0,
+    raceMin: 0.15,
+    mainLevel: 1,
     inFamine: false,
-    wounded: { total: 10, entries: [] },
+    civilianCropPerHour: 100,
     laborMults: {
-      production: { wood: 1, clay: 1, iron: 1, crop: 1 },
-      build: 1,
-      train: { barracks: 1, stable: 1, workshop: 1 },
-      smithy: 1,
+      production: 0.875, build: 0.875, train: 0.875, research: 0.875, smithy: 0.875,
     },
+    softLimit: 160,
     lastTick: Date.now(),
     fetchedAt: Date.now(),
     ...overrides,
   };
 }
 
-describe('PopSnapshot v2 - 新字段', () => {
+describe('PopSnapshot v3 硬上限 - 新字段', () => {
   it('setPopState / getPopState 含新字段', () => {
     setPopState(makePopSnap());
     const ps = getPopState();
     assert.equal(ps?.currentPop, 100);
-    assert.equal(ps?.garrisonPop, 50);
-    assert.equal(ps?.totalPop, 160);
-    assert.equal(ps?.laborRatio, 0.625);
-    assert.equal(ps?.cropDeficitRate, 0);
+    assert.equal(ps?.soldierPop, 40);
+    assert.equal(ps?.hardCap, 200);
+    assert.equal(ps?.availableLabor, 160);
+    assert.equal(ps?.laborRatio, 0.5);
+    assert.equal(ps?.prosperityMult, 0.875);
     assert.equal(ps?.inFamine, false);
   });
 
   it('currentPop=0 能正确写入（不被 falsy 过滤）', () => {
-    setPopState(makePopSnap({ currentPop: 0, softLimit: 100, growthPerHour: 0 }));
+    setPopState(makePopSnap({ currentPop: 0, hardCap: 100, growthPerHour: 0 }));
     assert.equal(getPopState()?.currentPop, 0);
     assert.equal(interpolatePop(), 0);
   });
 
   it('inFamine=true 能正确写入', () => {
-    setPopState(makePopSnap({ inFamine: true, cropDeficitRate: 50 }));
+    setPopState(makePopSnap({ inFamine: true }));
     assert.equal(getPopState()?.inFamine, true);
-    assert.equal(getPopState()?.cropDeficitRate, 50);
   });
 
-  it('interpolatePop 在增长中线性外插，上限 softLimit', () => {
-    setPopState(makePopSnap({ currentPop: 100, softLimit: 200, growthPerHour: 3600, fetchedAt: Date.now() - 1000 }));
+  it('interpolatePop 在增长中线性外插，上限 availableLabor', () => {
+    setPopState(makePopSnap({ currentPop: 100, availableLabor: 200, growthPerHour: 3600, fetchedAt: Date.now() - 1000 }));
     const interp = interpolatePop();
     // 经过 1 秒，growthPerHour=3600 → 约 1 人/秒，应约为 101
     assert.ok(interp >= 100 && interp <= 102, `外插值 ${interp} 超出预期范围`);
   });
 
-  it('interpolatePop 超限（currentPop >= softLimit）时不外插', () => {
-    setPopState(makePopSnap({ currentPop: 200, softLimit: 200, growthPerHour: 10 }));
+  it('interpolatePop 达上限附近（currentPop >= availableLabor）时不外插', () => {
+    setPopState(makePopSnap({ currentPop: 200, availableLabor: 200, growthPerHour: 10 }));
     assert.equal(interpolatePop(), 200);
   });
 });
 
 // ─── PopulationChanged 事件文案 ────────────────────────────────────
 
-describe('notificationText - PopulationChanged v2', () => {
+describe('notificationText - PopulationChanged v3 硬上限', () => {
   it('无 event 字段时返回 null（静默增长不扰战报）', () => {
     const result = notificationText('PopulationChanged', { currentPop: 100 });
     assert.equal(result, null);
@@ -239,29 +239,27 @@ describe('notificationText - PopulationChanged v2', () => {
     assert.ok(result?.includes('50'), `应含当前值 50，实际：${result}`);
   });
 
-  // 服务端饥荒减员事件名为 famine_reduction（含 reduced 字段，非 death/lost）
-  it('famine_reduction 事件：含减员量与当前平民数', () => {
-    const result = notificationText('PopulationChanged', { event: 'famine_reduction', reduced: 25, currentPop: 325 });
+  // 服务端饥荒减员事件名为 famine / starved（含 reduced 字段）
+  it('famine/starved 事件：含减员量与当前平民数', () => {
+    const result = notificationText('PopulationChanged', { event: 'starved', reduced: 25, currentPop: 325 });
     assert.ok(result?.includes('25'), `应含减员量 25，实际：${result}`);
     assert.ok(result?.includes('325'), `应含当前值 325，实际：${result}`);
   });
 
-  // 旧 death 字段已废弃（服务端不再使用），不再测试
   it('recovery 事件：含恢复提示', () => {
     const result = notificationText('PopulationChanged', { event: 'recovery', currentPop: 325 });
     assert.ok(result != null, '恢复事件应有文案');
     assert.ok(result?.includes('恢复') || result?.includes('粮食'), `应含恢复描述，实际：${result}`);
   });
 
-  it('wounded 事件：含伤兵总数', () => {
-    const result = notificationText('PopulationChanged', { event: 'wounded', woundedTotal: 30, currentPop: 200 });
-    assert.ok(result?.includes('30'), `应含伤兵数 30，实际：${result}`);
+  it('recovered 事件：含医院回收提示', () => {
+    const result = notificationText('PopulationChanged', { event: 'recovered', recovered: 30, permanentDead: 5, currentPop: 200 });
+    assert.ok(result?.includes('30'), `应含回收数 30，实际：${result}`);
   });
 
-  it('healed 事件：含归队提示', () => {
-    const result = notificationText('PopulationChanged', { event: 'healed', healed: 15, currentPop: 215 });
-    assert.ok(result?.includes('15'), `应含治愈数 15，实际：${result}`);
-    assert.ok(result?.includes('215'), `应含当前值 215，实际：${result}`);
+  it('capChanged 事件：含硬上限', () => {
+    const result = notificationText('PopulationChanged', { event: 'capChanged', hardCap: 300, currentPop: 200 });
+    assert.ok(result?.includes('300'), `应含硬上限 300，实际：${result}`);
   });
 
   it('returned 事件：含归队提示', () => {

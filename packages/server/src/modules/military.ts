@@ -39,6 +39,8 @@ interface MilitaryState {
   smithyLevel: Record<string, number>;
   /** 当前训练队列（骨架阶段单条） */
   training: TrainOrder | null;
+  /** 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。 */
+  pendingSmithy?: { unit: string; taskId: string; doneAt: number };
 }
 
 const COLLECTION = 'military';
@@ -68,6 +70,7 @@ export class MilitaryModule {
     },
     eventPushMap: {
       'military.TroopTrained': 'TroopTrained',
+      'military.SmithyUpgraded': 'SmithyUpgraded',
     },
   };
 
@@ -123,6 +126,19 @@ export class MilitaryModule {
       s.training.taskId = this.scheduler.schedule(
         delay,
         () => this.produceOne(s.villageId),
+        `military:${s.villageId}`,
+        `village:${s.villageId}`,
+      );
+      this.store.set(COLLECTION, s.villageId, s);
+    }
+
+    // 重注册进行中的铁匠升级（v3 耗时操作）
+    for (const s of this.store.all<MilitaryState>(COLLECTION)) {
+      if (!s.pendingSmithy) continue;
+      const delay = Math.max(0, s.pendingSmithy.doneAt - this.now());
+      s.pendingSmithy.taskId = this.scheduler.schedule(
+        delay,
+        () => this.onSmithyDone(s.villageId),
         `military:${s.villageId}`,
         `village:${s.villageId}`,
       );
@@ -247,15 +263,14 @@ export class MilitaryModule {
       const haveLv = u.building ? (buildingLevels.get(u.building) ?? 0) : needLv;
       const unlocked = haveLv >= needLv;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
-      // 每兵每小时总粮食成本（军事维护 + 士兵池口粮）
-      const cropPerHourEach = st.upkeep + u.popCost * c.popPerCapitaCrop * c.popSoldierCropRatio;
       return {
         key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
         cost: u.cost, trainSec: u.trainSec,
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
-        cropPerHourEach,
+        // v3：士兵直接以 upkeep 计入 troops 口粮（人口硬上限模型已无 soldier_pool 额外口粮）
+        cropPerHourEach: st.upkeep,
         unlocked,
         lockReason: unlocked ? undefined : `需${bldName} ${needLv} 级`,
       };
@@ -375,14 +390,17 @@ export class MilitaryModule {
     void this.bus.emit(evt);
   }
 
-  /** 铁匠升级：扣资源 → 提升某兵种养成等级（派生管线加层）。
-   * 锻造速率钩子：当前锻造为瞬时扣费（无时长），仅读取 GetLaborMult('smithy') 记录（预留二期）。
+  /**
+   * 铁匠升级（v3 改为耗时操作）：扣资源 → 登记定时任务 → 完成时提升某兵种养成等级。
+   * 时长受繁荣度加成加速：durMs = smithyUpgradeSec × 1000 / prosperityMult（population.GetLaborMult('smithy')）。
+   * 同一时刻仅允许一个铁匠升级（队列占用则拒）。
    */
   private async upgradeSmithy(cmd: Command): Promise<CommandResult> {
     const { villageId, unit } = cmd.payload as { villageId: string; unit: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     if (!this.config.units[unit]) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
+    if (s.pendingSmithy) return { ok: false, payload: {}, reason: 'smithy_busy' };
 
     const nextLv = (s.smithyLevel[unit] ?? 0) + 1;
     const base = this.config.constants.smithyCostBase;
@@ -394,13 +412,35 @@ export class MilitaryModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
-    // 锻造速率钩子（当前锻造无时长，预留二期；此处只读快照）
-    // const smithyMult = await this.commands.send({ name: 'population.GetLaborMult', ... });
-    // 若二期加锻造时长：lockDurMs = baseDurMs / smithyMult.mult
+    // 读取人口劳动力锻造加速（GetLaborMult，只读快照，无副作用）
+    const laborRes = await this.commands.send({
+      name: 'population.GetLaborMult',
+      from: MilitaryModule.NAME,
+      payload: { villageId, buildingKind: 'smithy' },
+    });
+    const mult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
+    const durMs = Math.max(1, Math.round((this.config.constants.smithyUpgradeSec * 1000) / Math.max(0.01, mult)));
 
-    s.smithyLevel[unit] = nextLv;
+    const doneAt = this.now() + durMs;
+    const taskId = this.scheduler.schedule(durMs, () => this.onSmithyDone(villageId), `military:${villageId}`, `village:${villageId}`);
+    s.pendingSmithy = { unit, taskId, doneAt };
     this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { unit, smithyLevel: nextLv } };
+    return { ok: true, payload: { unit, nextLevel: nextLv, doneAt, durationMs: durMs } };
+  }
+
+  /** 铁匠升级完成：提升养成等级并广播。 */
+  private async onSmithyDone(villageId: string): Promise<void> {
+    const s = this.load(villageId);
+    if (!s || !s.pendingSmithy) return;
+    const unit = s.pendingSmithy.unit;
+    const level = (s.smithyLevel[unit] ?? 0) + 1;
+    s.smithyLevel[unit] = level;
+    s.pendingSmithy = undefined;
+    this.store.set(COLLECTION, villageId, s);
+    await this.bus.emit({
+      name: 'military.SmithyUpgraded', source: MilitaryModule.NAME, ts: this.now(),
+      payload: { villageId, unit, smithyLevel: level },
+    } as DomainEvent);
   }
 
   /**

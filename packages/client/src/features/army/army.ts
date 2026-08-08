@@ -70,7 +70,7 @@ export function renderArmy(): string {
           <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
           <small class="hint-sm" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></small>
           ${upkeep > 0
-            ? `<small class="hint-sm train-upkeep" title="此批次每小时新增耗粮（影响软上限）">粮压 +<b id="batchupkeep-${u.key}">${upkeep}</b>/h</small>`
+            ? `<small class="hint-sm train-upkeep" title="此批次每小时新增耗粮（消耗粮食产能）">粮压 +<b id="batchupkeep-${u.key}">${upkeep}</b>/h</small>`
             : ''}
           <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}">训练</button>
         </div>`
@@ -148,7 +148,7 @@ export function updateTrainCost(unitKey: string) {
   const batchUpkeepEl = document.getElementById(`batchupkeep-${unitKey}`);
   if (batchUpkeepEl) batchUpkeepEl.textContent = String(batchUpkeep);
 
-  // availablePop = currentPop（平民数），currentPop v2 已不含伤兵
+  // availablePop = currentPop（平民数，即硬上限内可训练人口）
   const ps = getPopState();
   const currentPop = interpolatePop(); // 平民外插值
   const popWarn = document.getElementById(`pop-warn-${unitKey}`);
@@ -158,21 +158,11 @@ export function updateTrainCost(unitKey: string) {
   if (popWarn) {
     if (!hasEnoughPop && ps) {
       popWarn.style.display = '';
-      // currentPop 是纯平民（v2 模型），伤兵另行休养不占可训槽位
-      const woundedNote = ps.wounded.total > 0
-        ? `（伤兵 ${fmt(ps.wounded.total)} 人另行休养）`
-        : '';
-      popWarn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}${woundedNote}`;
+      popWarn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}`;
     } else if (ps && ps.inFamine) {
-      // 饥荒中：训练会进一步加大粮食压力，给出软上限预警
+      // 饥荒中：人口正在减少，给出预警但不阻止（失败原因由 toast 即时反馈）
       popWarn.style.display = '';
-      popWarn.textContent = batchUpkeep > 0
-        ? `⚠️ 饥荒中，此批额外 +${fmt(batchUpkeep)}/h 耗粮将压低软上限`
-        : '⚠️ 当前处于饥荒，谨慎训练';
-    } else if (ps && ps.cropDeficitRate > 0 && batchUpkeep > 0) {
-      // 粮食已有赤字趋势：给予提示但不阻止
-      popWarn.style.display = '';
-      popWarn.textContent = `⚠️ 粮食已趋紧，此批 +${fmt(batchUpkeep)}/h 耗粮将进一步压低软上限`;
+      popWarn.textContent = '⚠️ 当前处于饥荒，人口正在减少，谨慎训练';
     } else {
       popWarn.style.display = 'none';
       popWarn.textContent = '';
@@ -266,7 +256,7 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
       for (const r of resourceKeys()) total[r] = (def.cost[r] ?? 0) * cnt;
       if (!canAfford(total)) { showToast('资源不足，无法训练'); return; }
       const needPop = calcPopCost(u, cnt);
-      const currentPop = interpolatePop(); // v2: 平民数 = availablePop
+      const currentPop = interpolatePop(); // v3: 平民数 = currentPop（硬上限内可训人口）
       if (getPopState() && currentPop < needPop) {
         showToast(`可用人口不足：需 ${needPop}，当前平民 ${currentPop}`);
         return;

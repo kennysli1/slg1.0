@@ -131,7 +131,7 @@ export function createGameApp(opts?: {
       building.createVillage(villageId, tribe);
       military.createVillage(villageId, tribe);
       // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
-      await population.createVillage(villageId);
+      await population.createVillage(villageId, tribe);
       const placeRes = await commands.send({
         name: 'world.PlaceVillage', from: 'app',
         payload: { q, r, refId: villageId, name },
@@ -155,8 +155,7 @@ export function createGameApp(opts?: {
     for (const prefix of [
       `building:${villageId}`,
       `military:${villageId}`,
-      `population:heal:${villageId}`,
-      `population:deficit:${villageId}`,
+      `population:starve:${villageId}`,
     ]) {
       scheduler.cancelByOwner(prefix);
     }
@@ -264,8 +263,7 @@ export function createGameApp(opts?: {
         for (const prefix of [
           `building:${villageId}`,
           `military:${villageId}`,
-          `population:heal:${villageId}`,
-          `population:deficit:${villageId}`,
+          `population:starve:${villageId}`,
         ]) {
           scheduler.cancelByOwner(prefix);
         }

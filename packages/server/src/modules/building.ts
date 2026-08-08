@@ -94,6 +94,7 @@ export class BuildingModule {
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
+    this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
   }
 
   /** 重启恢复：为每条未完成队列重新登记定时任务（过期则立即触发）。 */
@@ -147,6 +148,26 @@ export class BuildingModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const level = Math.max(0, ...s.placed.filter((p) => p.kind === kind).map((p) => p.level));
     return { ok: true, payload: { kind, level } };
+  }
+
+  /**
+   * 人口硬上限快照：供 population 模块（硬上限模型）取数，无回调，无环。
+   * 返回：
+   *  - hardCap：Σ placed(level≥1) def.popCapPerLevel × level（每栋建筑每级贡献人口上限基数）。
+   *  - mainLevel：城镇中心等级（人口增长率基数）。
+   */
+  private getPopCap(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    let hardCap = 0;
+    for (const p of s.placed) {
+      if (p.level < 1) continue;
+      const def = this.config.buildings[p.kind];
+      if (!def) continue;
+      hardCap += def.popCapPerLevel * p.level;
+    }
+    return { ok: true, payload: { hardCap, mainLevel: this.tcLevel(s) } };
   }
 
   // ---- 派生（全部在内部算，对外只给快照，铁律#4）----
@@ -219,7 +240,8 @@ export class BuildingModule {
     const c = this.config.constants;
     const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
     let timeSec = Math.max(1, Math.round(baseSec * speedup));
-    // 人口建造加速（population.GetLaborMult('main')）；未就绪时 mult=1.0（兜底，铁律#4）
+    // 人口建造加速：population.GetLaborMult('main') 返回 prosperityMult ∈ [popLaborFloor,1.0]，
+    // 越高越快 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
     try {
       const res = await this.commands.send({
         name: 'population.GetLaborMult',
@@ -228,8 +250,7 @@ export class BuildingModule {
       });
       if (res.ok) {
         const mult = (res.payload as any).mult as number;
-        // mult 此处是 time_mult（0.8 ~ 1.0），直接乘
-        timeSec = Math.max(1, Math.round(timeSec * mult));
+        if (mult > 0) timeSec = Math.max(1, Math.round(timeSec / mult));
       }
     } catch {
       // population 模块尚未就绪时静默忽略，用不带加速的时间

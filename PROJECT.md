@@ -103,7 +103,7 @@ slg1.0/
 | `movement.ts` | 在途部队 | 出征→逐格行军→到达发 `combat.Engage`→战斗结束(`BattleEnded`)带战利品返程（raid打PvE / attack打玩家 / return）；坐标为六边形 `{q,r}` |
 | `combat.ts` | **进行中的战斗**（`battle` 集合） | 有状态逐 tick 战斗：前后排承伤 + 近战/远程 + 特性；一地一场战、后到按阵营并入；结束发 Command 让 owner 扣兵/掠夺、发 Event 出战报（PvE/PvP 共用）；每 tick 推实时快照 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
-| `population.ts` | 每村当前人口(currentPop)/伤兵队列(woundedPool) | v2：三池口粮（平民/士兵/伤兵）、阶段递减增长、闭式新村固定点、饥荒状态机（CropDeficit→famine tick emit）、SetGarrisonPop、SetEnRoutePop；单向写 economy 的 civilian_pop/soldier_pool/wounded_pool 口粮及劳动加成，只读 economy.nonCivilianUpkeep 算软上限（无环） |
+| `population.ts` | 每村人口上限(hardCap,建筑累加)/劳动人口(currentPop)/士兵人口(soldierPop) | v3 硬上限模型：hardCap 由建筑 `popCapPerLevel×level` 累加；availableLabor=hardCap−soldierPop（兼容别名 softLimit）；laborRatio 驱动五轴统一的 `prosperityMult`∈[0.75,1]；growthPerHour 朝 availableLabor 收敛、粮荒不为0则停增；医院 `RecoverCasualties` 即时回收战死士兵人口（无伤兵池/无定时器）；铁匠升级耗时受繁荣加速；ConsumePop 只减 currentPop 腾空间；单向写 economy 口粮与劳动加成，只读 economy.nonCivilianUpkeep（无环） |
 | `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
@@ -139,15 +139,15 @@ slg1.0/
 | `server/src/test/hex.test.ts` | 六边形距离与路径 |
 | `server/src/test/movement-path.test.ts` | 逐格行军、到达接战、途中相遇 |
 | `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
-| `server/src/test/population.test.ts` | 人口系统：繁荣度增长、粮食软上限、赤字减员、伤兵治愈、扣人口发 `population.Changed` |
-| `server/src/test/population-v2.test.ts` | 人口系统 v2 T1-T8：三池口粮口径/SetGarrisonPop/SetEnRoutePop/阶段递减增长/软上限联动/饥荒状态机/settle 永不 emit/伤兵池口粮 |
+| `server/src/test/population.test.ts` | 人口系统 v3：硬上限/availableLabor、繁荣度五轴加成、增长收敛、粮荒减员、医院即时回收、ConsumePop 腾空间、扣人口发 `population.Changed` |
+| `server/src/test/population-v2.test.ts` | 人口系统 v3 回归：硬上限累加/availableLabor 门控/繁荣度联动/粮荒状态机/growthPerHour 粮荒为0/settle 永不 emit/RecoverCasualties 即时回收/resume 重算 hardCap/`population.Changed` 含 softLimit |
 | `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
 | `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
 | `server/src/test/notifications.test.ts` | 服务端通知/战报持久化与上限裁剪 |
-| `server/src/test/concurrency.test.ts` 等 | 并发串行化 / Scheduler / CropDeficit 边沿 / 伤兵 id / Gateway 边界 / WAL 恢复 |
+| `server/src/test/concurrency.test.ts` 等 | 并发串行化 / Scheduler / CropDeficit 边沿 / RecoverCasualties 即时回收（无伤兵池）/ Gateway 边界 / WAL 恢复 |
 | `client/src/test/unit.test.ts` | 前端转义、错误文案、协议版本兼容性 |
 
 ---
@@ -215,7 +215,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 七、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v2（三池口粮/阶段递减增长/饥荒状态机/SetGarrisonPop/SetEnRoutePop/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
+**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v3 硬上限模型（hardCap 由建筑累加/availableLabor 门控/五轴统一 prosperityMult/增长收敛/粮荒减员/医院即时回收战死/铁匠耗时/ConsumePop 腾空间/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`（与 pm2 `ecosystem.config.cjs` 同入口：`packages/server/dist/main.js`）。
 

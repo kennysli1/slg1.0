@@ -1,17 +1,12 @@
 /**
- * 人口面板：当前人口 / 软上限 / 增长率 / 充裕比 / 伤兵 / 劳动力加成。
- * v2 新增：totalPop、garrisonPop、laborRatio、cropDeficitRate、inFamine 展示；
- *         4 个状态标签区（饥荒 / 接近饱和 / 重伤 / 满员）。
- *
+ * 人口面板：劳动人口 / 硬上限 / 劳动占比 / 繁荣度系数 / 五轴速率 / 增长。
+ * v3 硬上限模型（对应设计文档 13/14）：
+ *   硬上限由建筑提供；士兵占用人口；劳动占比决定五轴繁荣度系数（资源/建造/练兵/研究/锻造）。
  * 本地外插：renderPopPanel() 生成含 id="pop-current"/"pop-bar-fill" 的 DOM；
- * bootstrap 的 1s 定时器调 syncPopDisplay() 按 growthPerHour 线性更新显示值，
- * 不发请求。服务端每 5s refreshAll() 校正权威值。
- * PopulationChanged push 到达时，由 handlePush 调 rerenderPopPanel() 局部刷新，
- * 禁止触发 refreshAll/GetPopulation 回环。
+ * bootstrap 的 1s 定时器调 syncPopDisplay() 按 growthPerHour 线性更新显示值，不发请求。
+ * PopulationChanged push 到达时，由 handlePush 调 rerenderPopPanel() 局部刷新，禁止整页回环。
  */
 import { fmt } from '../../shared/utils/format.js';
-import { secStr } from '../../shared/utils/format.js';
-import { escapeHtml } from '../../shared/ui/widgets.js';
 import { getPopState, interpolatePop } from '../../app/state.js';
 
 /** 速率类 mult → "XX%" */
@@ -19,49 +14,33 @@ function multPct(mult: number): string {
   return `${Math.round(mult * 100)}%`;
 }
 
-/** time_mult（建造） → 节省百分比文字。0.80 → "节省 20%" */
-function buildSaveStr(timeMult: number): string {
-  const save = Math.round((1 - timeMult) * 100);
-  return save > 0 ? `节省 ${save}%` : '无加速';
-}
-
 /**
- * 生成 4 个可选状态标签区的 HTML（饥荒/接近饱和/重伤/满员）。
+ * 生成状态标签区的 HTML（饥荒 / 接近饱和 / 满员）。
  * 每个标签仅在满足条件时出现；均不满足则返回空字符串。
  */
 function renderStatusLabels(ps: NonNullable<ReturnType<typeof getPopState>>, pop: number): string {
   const labels: string[] = [];
+  const ratio = ps.hardCap > 0 ? pop / ps.hardCap : 0;
 
-  // 🚨 饥荒中（currentPop > softLimit 且服务端已触发 famine_reduction 事件）
+  // 🚨 饥荒中（服务端权威标记）
   if (ps.inFamine) {
-    const excess = ps.softLimit > 0 ? Math.max(0, Math.round(ps.currentPop - ps.softLimit)) : 0;
-    const excessStr = excess > 0 ? `，超出软上限 ${escapeHtml(String(excess))} 人` : '';
     labels.push(`<div class="pop-status pop-status--famine">
-      🚨 饥荒中${excessStr}，人口正在减少
+      🚨 饥荒中，人口正在减少
     </div>`);
   }
 
-  // ⚠️ 接近饱和（85%–100% 但未超限）
-  if (!ps.inFamine && ps.softLimit > 0 && pop / ps.softLimit >= 0.85 && pop < ps.softLimit) {
-    const pct = Math.round((pop / ps.softLimit) * 100);
+  // ⚠️ 接近饱和（85%–100% 但未满）
+  if (!ps.inFamine && ratio >= 0.85 && ratio < 1.0) {
+    const pct = Math.round(ratio * 100);
     labels.push(`<div class="pop-status pop-status--near">
-      ⚠️ 接近饱和（${pct}%），宜扩建农业或结束征战
+      ⚠️ 接近硬上限（${pct}%），宜扩建建筑或结束征战
     </div>`);
   }
 
-  // ✅ 满员（已达软上限，停止增长）
-  if (!ps.inFamine && ps.softLimit > 0 && pop >= ps.softLimit) {
+  // ✅ 满员（已达硬上限，停止增长）
+  if (!ps.inFamine && ratio >= 1.0) {
     labels.push(`<div class="pop-status pop-status--full">
-      ✅ 已达软上限，人口停止增长
-    </div>`);
-  }
-
-  // 🩹 重伤（伤兵占总人口 ≥ 20%）
-  const totalForRatio = ps.totalPop > 0 ? ps.totalPop : ps.currentPop + ps.wounded.total;
-  if (totalForRatio > 0 && ps.wounded.total / totalForRatio >= 0.2) {
-    const wPct = Math.round((ps.wounded.total / totalForRatio) * 100);
-    labels.push(`<div class="pop-status pop-status--wound">
-      🩹 重伤：伤兵占 ${wPct}%，暂无法参战
+      ✅ 已达硬上限，人口停止增长
     </div>`);
   }
 
@@ -78,59 +57,35 @@ export function renderPopPanel(): string {
   if (!ps) return '';
 
   const pop = interpolatePop();
-  const pct = ps.softLimit > 0
-    ? Math.min(100, (pop / ps.softLimit) * 100).toFixed(1)
-    : '0';
-  const lambdaPct = Math.round(ps.lambdaRatio * 100);
+  const ratio = ps.hardCap > 0 ? Math.min(1, pop / ps.hardCap) : 0;
+  const ratioPct = (ratio * 100).toFixed(1);
+  const prosperityPct = Math.round(ps.prosperityMult * 100);
   const growthSign = ps.growthPerHour >= 0 ? '+' : '';
 
   // 进度条颜色类
   const barClass = ps.inFamine
     ? ' pop-bar-fill--famine'
-    : (ps.softLimit > 0 && pop / ps.softLimit >= 0.85 ? ' pop-bar-fill--near' : '');
+    : (ratio >= 0.85 ? ' pop-bar-fill--near' : '');
 
-  // 劳动力加成显示
+  // 五轴繁荣度系数（全 = prosperityMult）
   const lm = ps.laborMults;
-  const prodAvg = (lm.production.wood + lm.production.clay + lm.production.iron + lm.production.crop) / 4;
-  const trainMin = Math.min(lm.train.barracks, lm.train.stable, lm.train.workshop);
-
-  // 伤兵信息（带占比 & 治愈倒计时）
-  let woundedHtml = '';
-  if (ps.wounded.total > 0) {
-    const totalForRatio = ps.totalPop > 0 ? ps.totalPop : ps.currentPop + ps.wounded.total;
-    const wPct = totalForRatio > 0 ? Math.round((ps.wounded.total / totalForRatio) * 100) : 0;
-    let healInfo = '';
-    if (ps.wounded.entries?.length) {
-      const soonestHealAt = Math.min(...ps.wounded.entries.map((e) => e.healAt));
-      healInfo = `，<b class="progress-time" data-pop-heal="${soonestHealAt}">${secStr(soonestHealAt)}</b>后首批归队`;
-    }
-    woundedHtml = `<div class="pop-wounded">
-      <span class="pop-wounded-icon">🩹</span>
-      <span>伤兵 <b class="pop-wounded-count">${fmt(ps.wounded.total)}</b> 人（占 ${wPct}%）正在休养${healInfo}</span>
+  const laborGrid = `
+    <div class="pop-labor-grid">
+      <span class="pop-labor-item"><i>资源产率</i><b>${multPct(lm.production)}</b></span>
+      <span class="pop-labor-item pop-labor-build"><i>建造速度</i><b>${multPct(lm.build)}</b></span>
+      <span class="pop-labor-item"><i>练兵速率</i><b>${multPct(lm.train)}</b></span>
+      <span class="pop-labor-item"><i>研究速率</i><b>${multPct(lm.research)}</b></span>
+      <span class="pop-labor-item"><i>锻造速率</i><b>${multPct(lm.smithy)}</b></span>
     </div>`;
-  }
 
-  // 总人口分类行（totalPop / garrisonPop 展示）
-  const totalPop = ps.totalPop > 0 ? ps.totalPop : (ps.currentPop + ps.garrisonPop + ps.wounded.total);
+  // 人口构成（硬上限 = 平民 + 士兵）
   let popBreakHtml = '';
-  if (ps.garrisonPop > 0 || ps.wounded.total > 0) {
+  if (ps.soldierPop > 0) {
     popBreakHtml = `<div class="pop-breakdown hint-sm">
-      总 ${fmt(totalPop)}
-      ${ps.garrisonPop > 0 ? `= 平民 ${fmt(ps.currentPop)} + 驻军 ${fmt(ps.garrisonPop)}${ps.wounded.total > 0 ? ` + 伤兵 ${fmt(ps.wounded.total)}` : ''}` : ''}
+      硬上限 ${fmt(ps.hardCap)}
+      = 平民 ${fmt(ps.currentPop)} + 士兵 ${fmt(ps.soldierPop)}
     </div>`;
   }
-
-  // 劳动力比展示
-  const laborRatioPct = Math.round(ps.laborRatio * 100);
-  const laborRatioHtml = ps.laborRatio > 0
-    ? `<span class="pop-stat"><i>劳动比</i><b>${laborRatioPct}%</b></span>`
-    : '';
-
-  // 饥荒中：显示超出软上限的人口数（赤字速率需粮食数据，快照无此字段）
-  const excessPop = ps.inFamine && ps.softLimit > 0 ? Math.max(0, Math.round(ps.currentPop - ps.softLimit)) : 0;
-  const deficitHtml = excessPop > 0
-    ? `<span class="pop-stat pop-stat-deficit"><i>超限</i><b class="pop-deficit">+${excessPop}</b></span>`
-    : '';
 
   const statusLabels = renderStatusLabels(ps, pop);
 
@@ -138,32 +93,23 @@ export function renderPopPanel(): string {
     <div class="pop-head">
       <span class="pop-current" id="pop-current">${fmt(pop)}</span>
       <span class="pop-slash">/</span>
-      <span class="pop-limit">${fmt(ps.softLimit)}</span>
-      <small class="hint-sm pop-pct">${pct}%</small>
+      <span class="pop-limit">${fmt(ps.hardCap)}</span>
+      <small class="hint-sm pop-pct">${ratioPct}%</small>
     </div>
-    <div class="pop-bar-wrap" title="平民占软上限 ${pct}%">
-      <div class="pop-bar-fill${barClass}" id="pop-bar-fill" style="width:${pct}%"></div>
+    <div class="pop-bar-wrap" title="劳动人口占硬上限 ${ratioPct}%">
+      <div class="pop-bar-fill${barClass}" id="pop-bar-fill" style="width:${ratioPct}%"></div>
     </div>
     <div class="pop-meta">
       <span class="pop-stat"><i>增长</i><b>${growthSign}${Math.round(ps.growthPerHour)}/h</b></span>
-      <span class="pop-stat"><i>充裕比</i><b>${lambdaPct}%</b></span>
-      ${laborRatioHtml}
-      ${deficitHtml}
-      ${ps.wounded.total > 0
-        ? `<span class="pop-stat pop-stat-wound"><i>伤兵</i><b>${fmt(ps.wounded.total)}</b></span>`
-        : ''}
+      <span class="pop-stat"><i>劳动占比</i><b>${Math.round(ratio * 100)}%</b></span>
+      <span class="pop-stat"><i>士兵</i><b>${fmt(ps.soldierPop)}</b></span>
+      <span class="pop-stat"><i>繁荣系数</i><b>${prosperityPct}%</b></span>
     </div>
     ${popBreakHtml}
-    ${woundedHtml}
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">劳动力加成</div>
-      <div class="pop-labor-grid">
-        <span class="pop-labor-item"><i>资源产率</i><b>${multPct(prodAvg)}</b></span>
-        <span class="pop-labor-item pop-labor-build"><i>建造</i><b>${buildSaveStr(lm.build)}</b></span>
-        <span class="pop-labor-item"><i>练兵速率</i><b>${multPct(trainMin)}</b></span>
-        <span class="pop-labor-item"><i>锻造速率</i><b>${multPct(lm.smithy)}</b></span>
-      </div>
+      <div class="pop-labor-title">繁荣度系数（劳动占比 ≥${Math.round(ps.raceMin * 100)}% 时满值 100%）</div>
+      ${laborGrid}
     </div>
   </div>`;
 }
@@ -183,16 +129,10 @@ export function syncPopDisplay(): void {
   const pop = interpolatePop();
   numEl.textContent = fmt(pop);
 
-  if (barEl && ps.softLimit > 0) {
-    const pct = Math.min(100, (pop / ps.softLimit) * 100);
+  if (barEl && ps.hardCap > 0) {
+    const pct = Math.min(100, (pop / ps.hardCap) * 100);
     barEl.style.width = `${pct.toFixed(1)}%`;
   }
-
-  // 同步伤兵治愈倒计时
-  document.querySelectorAll<HTMLElement>('[data-pop-heal]').forEach((el) => {
-    const healAt = Number(el.dataset.popHeal);
-    if (healAt) el.textContent = secStr(healAt);
-  });
 }
 
 /**

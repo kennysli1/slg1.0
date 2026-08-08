@@ -48,6 +48,8 @@ export interface BuildingDef {
   laborSaturation: number;
   /** laborAmplified=true 时满员的最大增幅（速率类=产率加成；建造类=时间缩减比）。 */
   laborBonusMax: number;
+  /** 每级提供的人口硬上限基数（硬上限 = Σ 已建建筑 popCapPerLevel × level）。 */
+  popCapPerLevel: number;
   /** 展示用简介：这栋建筑干嘛的/有什么用（点开建筑详情展示；纯文本，缺列回退空串）。 */
   desc: string;
   /** 展示用升级效果说明：每级提升什么（纯文本，缺列回退空串）。 */
@@ -151,30 +153,28 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
-  /** 人口：每点繁荣度每小时增长人口数。 */
-  popGrowthPerProsperity: number;
-  /** 人口：每人每小时消耗粮食量（决定软上限大小）。 */
-  popPerCapitaCrop: number;
+  /** 人口：基础每小时增长人口数（再乘以城镇中心等级）。 */
+  popGrowthPerHour: number;
+  /** 人口：劳动人口占比达到此值（占硬上限比例）时，繁荣度加成达到满值（默认 0.70）。 */
+  popProsperityFullRatio: number;
+  /** 人口：各兵种的最低劳动人口占比（占硬上限），低于此值繁荣度加成为 0。 */
+  popRaceLaborMin: { romans: number; gauls: number; teutons: number };
+  /** 人口：劳动人口每小时消耗粮食量（平民口粮；士兵口粮见兵种 upkeep）。 */
+  popCropPerLabor: number;
   /** 人口：零人口时所有速率类建筑的最低倍率（防死亡螺旋）。 */
   popLaborFloor: number;
-  /** 人口：战斗阵亡中转化为伤兵的比例（30% 变伤兵，70% 永久阵亡）。 */
-  popDeathRecoveryRatio: number;
-  /** 人口：伤兵治愈基础时长（秒，满员时缩短）。 */
-  popHealTime: number;
-  /** 人口：满员时伤兵治愈速度加成（0.50 → 满员时耗时变 2400s）。 */
-  popHealBonus: number;
   /** 人口：净粮赤字→减员速率比例（值越大粮仓耗尽后减员越快；v2已拍板=0.5）。 */
   popDeathRateFactor: number;
-  /** 人口 v2：增长阶段递减指数（0=不递减；currentPop > scaleRef 时增速按 (scaleRef/P)^exp 衰减）。 */
-  popGrowthScaleExp: number;
-  /** 人口 v2：增长递减参考基准（人口超过此值时增速开始按指数下降）。 */
-  popGrowthScaleRef: number;
-  /** 人口 v2：驻军每点人口（popCost加权）每小时额外粮食消耗（三池口粮·士兵池）。 */
-  popSoldierCropRatio: number;
-  /** 人口 v2：伤兵每人每小时额外粮食消耗（三池口粮·伤兵池）。 */
-  popWoundedCropRatio: number;
-  /** 人口 v2：饥荒减员定时任务间隔（秒；默认 300=5 分钟）。 */
+  /** 人口：饥荒减员定时任务间隔（秒；默认 300=5 分钟）。 */
   popFamineTickSec: number;
+  /** 人口：医院 1 级回收战死士兵人口的比例（即时回收，无伤兵池）。 */
+  popHospitalRecoveryBase: number;
+  /** 人口：医院每级额外回收比例。 */
+  popHospitalRecoveryPerLevel: number;
+  /** 人口：医院回收比例上限。 */
+  popHospitalRecoveryMax: number;
+  /** 铁匠升级基础时长（秒），受繁荣度加成加速（除以 prosperityMult）。 */
+  smithyUpgradeSec: number;
   /** 拓荒：出发村主基地最低等级。 */
   foundMinMainLevel: number;
   /** 拓荒：出发村人口软上限最低门槛。 */
@@ -326,6 +326,7 @@ export function loadGameConfig(configDir: string): GameConfig {
       laborAmplified: num(r.laborAmplified, 0) === 1,
       laborSaturation: num(r.laborSaturation, 0),
       laborBonusMax: num(r.laborBonusMax, 0),
+      popCapPerLevel: num(r.popCapPerLevel, 0),
       desc: r.desc ?? '',
       effect: r.effect ?? '',
     };
@@ -436,18 +437,21 @@ export function loadGameConfig(configDir: string): GameConfig {
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
-    popGrowthPerProsperity: cn('pop_growth_per_prosperity', 5),
-    popPerCapitaCrop: cn('pop_per_capita_crop', 2.0),
+    popGrowthPerHour: cn('pop_growth_per_hour', 20),
+    popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
+    popRaceLaborMin: {
+      romans: cn('pop_race_labor_min_romans', 0.15),
+      gauls: cn('pop_race_labor_min_gauls', 0.20),
+      teutons: cn('pop_race_labor_min_teutons', 0.10),
+    },
+    popCropPerLabor: cn('pop_crop_per_labor', 1.0),
     popLaborFloor: cn('pop_labor_floor', 0.75),
-    popDeathRecoveryRatio: cn('pop_death_recovery_ratio', 0.30),
-    popHealTime: cn('pop_heal_time', 3600),
-    popHealBonus: cn('pop_heal_bonus', 0.50),
     popDeathRateFactor: cn('pop_death_rate_factor', 0.5),
-    popGrowthScaleExp: cn('pop_growth_scale_exp', 0.9),
-    popGrowthScaleRef: cn('pop_growth_scale_ref', 2000),
-    popSoldierCropRatio: cn('pop_soldier_crop_ratio', 1.0),
-    popWoundedCropRatio: cn('pop_wounded_crop_ratio', 1.0),
     popFamineTickSec: cn('pop_famine_tick_sec', 300),
+    popHospitalRecoveryBase: cn('pop_hospital_recovery_base', 0.20),
+    popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
+    popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
+    smithyUpgradeSec: cn('smithy_upgrade_sec', 30),
     foundMinMainLevel: cn('found_min_main_level', 10),
     foundMinSoftLimit: cn('found_min_soft_limit', 350),
     foundSettlerCount: cn('found_settler_count', 3),
@@ -623,37 +627,34 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
-  // 人口常量范围校验
-  if (c.popPerCapitaCrop <= 0) errors.push(`game_constants.csv pop_per_capita_crop 必须>0（防零除软上限）`);
+  // 人口常量范围校验（硬上限模型）
+  if (c.popGrowthPerHour <= 0) errors.push(`game_constants.csv pop_growth_per_hour 必须>0`);
+  if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
+  for (const [tribe, v] of Object.entries(c.popRaceLaborMin)) {
+    if (v < 0 || v >= c.popProsperityFullRatio) {
+      errors.push(`game_constants.csv pop_race_labor_min_${tribe} 必须在[0, pop_prosperity_full_ratio)（当前${v}）`);
+    }
+  }
+  if (c.popCropPerLabor <= 0) errors.push(`game_constants.csv pop_crop_per_labor 必须>0（平民每小时口粮）`);
   if (c.popLaborFloor <= 0 || c.popLaborFloor > 1) errors.push(`game_constants.csv pop_labor_floor 必须在(0,1]`);
-  if (c.popDeathRecoveryRatio < 0 || c.popDeathRecoveryRatio > 1) errors.push(`game_constants.csv pop_death_recovery_ratio 必须在[0,1]`);
-  if (c.popHealTime <= 0) errors.push(`game_constants.csv pop_heal_time 必须>0`);
   if (c.popDeathRateFactor <= 0) errors.push(`game_constants.csv pop_death_rate_factor 必须>0`);
-  if (c.popGrowthScaleExp < 0) errors.push(`game_constants.csv pop_growth_scale_exp 必须≥0`);
-  if (c.popGrowthScaleRef <= 0) errors.push(`game_constants.csv pop_growth_scale_ref 必须>0`);
-  if (c.popSoldierCropRatio < 0) errors.push(`game_constants.csv pop_soldier_crop_ratio 必须≥0`);
-  if (c.popWoundedCropRatio < 0) errors.push(`game_constants.csv pop_wounded_crop_ratio 必须≥0`);
   if (c.popFamineTickSec <= 0) errors.push(`game_constants.csv pop_famine_tick_sec 必须>0`);
+  if (c.popHospitalRecoveryBase < 0 || c.popHospitalRecoveryBase > 1) errors.push(`game_constants.csv pop_hospital_recovery_base 必须在[0,1]`);
+  if (c.popHospitalRecoveryPerLevel < 0) errors.push(`game_constants.csv pop_hospital_recovery_per_level 必须≥0`);
+  if (c.popHospitalRecoveryMax <= 0 || c.popHospitalRecoveryMax > 1) errors.push(`game_constants.csv pop_hospital_recovery_max 必须在(0,1]`);
+  if (c.smithyUpgradeSec <= 0) errors.push(`game_constants.csv smithy_upgrade_sec 必须>0`);
 
-  // 人口 v2 启动配置守卫：遍历全部兵种，断言训练后食物净余量严格减少（gap < 0）。
-  // 推导：将 1 名平民转化为 1 个兵时，食物净余量的变化：
-  //   freed    = popCost × perCapita（释放出的平民粮耗）
-  //   consumed = popCost × perCapita × ratio（士兵池口粮）+ upkeep（军事维护）
-  //   gapChange = freed - consumed = popCost × perCapita × (1 - ratio) - upkeep
-  // 要求 gapChange < 0（训练使食物余量严格缩减）：
-  //   upkeep > popCost × perCapita × (1 - ratio)
-  // ratio=1.0 时：upkeep > 0（有军事维护费即可）；ratio<1 时：需更高 upkeep。
-  // 此守卫防止「免费兵种」（训练后食物余量不减，可无限增兵而无惩罚）进入游戏。
-  if (c.popPerCapitaCrop > 0) {
-    for (const [key, u] of Object.entries(config.units)) {
-      if (u.popCost <= 0 && u.upkeep <= 0) continue; // 零资源零人口的特殊单位跳过
-      const gapChange = u.popCost * c.popPerCapitaCrop * (1 - c.popSoldierCropRatio) - u.upkeep;
-      if (gapChange >= 0) {
-        errors.push(
-          `units.csv[${key}] 训练后食物余量变化=${gapChange.toFixed(3)}≥0（不减反增/持平），` +
-          `须满足 upkeep(${u.upkeep}) > popCost(${u.popCost})×perCapita(${c.popPerCapitaCrop})×(1-ratio(${c.popSoldierCropRatio}))`
-        );
-      }
+  // 人口启动配置守卫：训练一个兵时，净粮食消耗不应下降（防止免费兵种）。
+  // 推导：转化 1 名平民(popCost)为 1 个兵 → 释放平民口粮 popCost×popCropPerLabor，
+  // 增加士兵口粮 popCost×upkeep；净变化 = popCost×(upkeep − popCropPerLabor)。
+  // 要求 upkeep ≥ popCropPerLabor（零资源零人口的特殊单位跳过）。
+  for (const [key, u] of Object.entries(config.units)) {
+    if (u.popCost <= 0 && u.upkeep <= 0) continue; // 特殊单位跳过
+    if (u.popCost > 0 && u.upkeep < c.popCropPerLabor - 1e-9) {
+      errors.push(
+        `units.csv[${key}] 训练后粮食净余量不减反增：upkeep(${u.upkeep}) < popCropPerLabor(${c.popCropPerLabor})，` +
+        `须提高该兵种 upkeep 或降低 popCost`
+      );
     }
   }
 

@@ -34,17 +34,18 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
-test('人口：新村创建即满员（currentPop ≈ softLimit）', async () => {
+test('人口：新村创建即满员（currentPop = hardCap，softLimit=availableLabor）', async () => {
   const app = freshApp();
   await flushMicrotasks(); // 等待 population.createVillage 的异步初始化完成
   const r = await send(app, 'population.GetSnapshot', { villageId: 'v1' });
   assert.equal(r.ok, true, `GetPopulation 应成功: ${r.reason ?? ''}`);
   const p = r.payload as any;
   assert.ok(p.currentPop > 0, '初始人口应>0');
-  assert.ok(p.softLimit > 0, '软上限应>0');
-  // v2 固定点迭代：currentPop/softLimit ≥ 0.99
-  const ratio = p.currentPop / p.softLimit;
-  assert.ok(ratio >= 0.99 && ratio <= 1.1, `新村应满员开局（当前比值 ${ratio.toFixed(3)}）`);
+  assert.ok(p.hardCap > 0, '硬上限应>0');
+  // v3 满员开局：currentPop = hardCap（劳动人口拉满）；无士兵时 availableLabor = hardCap
+  const ratio = p.currentPop / p.hardCap;
+  assert.ok(ratio >= 0.99 && ratio <= 1.1, `新村应满员开局（currentPop/hardCap=${ratio.toFixed(3)}）`);
+  assert.ok(p.softLimit === p.availableLabor, '兼容别名 softLimit 应等于 availableLabor');
 });
 
 test('人口：training 扣人口，扣减量精确', async () => {
@@ -159,37 +160,38 @@ test('人口：拓荒者永久消耗（解散时不返还人口）', async () =>
   assert.ok((returnR2.payload as any).returned >= 2, '普通兵ReturnPop应返还人口');
 });
 
-test('人口：AddWounded 登记伤兵，Scheduler 到点治愈', async () => {
+test('人口：RecoverCasualties 战死即时回收（无伤兵池/无定时器）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
-  // 获取初始人口
+  // 预留增长空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供回收回填
+  const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 5 });
+  assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
+
+  // 取消耗后基准人口
   const snap0 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  assert.equal(snap0.wounded.total, 0, '初始无伤兵');
   const initPop = snap0.currentPop;
 
-  // 模拟战斗：10个军团兵阵亡（legionnaire: popCost=1, 30%转伤兵=floor(10×1×0.3)=3人）
-  const addWoundedR = await send(app, 'population.AddWounded', {
+  // 模拟战斗：10个军团兵阵亡（legionnaire: popCost=1；医院 Lv0 → recoveryRatio=base 0.20）
+  // recovered = floor(10×1×0.20) = 2，permanentDead = 8
+  const recR = await send(app, 'population.RecoverCasualties', {
     villageId: 'v1',
     losses: { legionnaire: 10 },
   });
-  assert.equal(addWoundedR.ok, true, `AddWounded 应成功: ${addWoundedR.reason ?? ''}`);
-  const p = addWoundedR.payload as any;
-  assert.equal(p.wounded, 3, `伤兵数应为3（floor(10×1×0.3)）, 实际: ${p.wounded}`);
-  assert.equal(p.permanentDead, 7, `永久阵亡应为7（10×1 - 3）`);
+  assert.equal(recR.ok, true, `RecoverCasualties 应成功: ${recR.reason ?? ''}`);
+  const p = recR.payload as any;
+  assert.equal(p.recovered, 2, `回收数应为2（floor(10×1×0.20)）, 实际: ${p.recovered}`);
+  assert.equal(p.permanentDead, 8, `永久阵亡应为8（10×1 - 2）`);
 
-  // 验证伤兵已登记
+  // 验证平民人口即时回填（recover 同步完成，无定时器）
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  assert.equal(snap1.wounded.total, 3, '伤兵队列应有3人');
-
-  // 快进超过治愈时间（基础3600s，满员约2400s，快进4000s保险）
-  await app.scheduler.advanceTo(clock + 4_000_000, setClock);
-
-  const snap2 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  assert.equal(snap2.wounded.total, 0, '治愈时间到后伤兵队列应清空');
+  assert.ok(snap1.currentPop >= initPop + p.recovered, `回收后平民应即时增加（${initPop}→${snap1.currentPop}，回收${p.recovered}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  // v3 无伤兵字段
+  assert.equal(snap1.wounded, undefined, 'v3 快照不应含 wounded 字段');
 });
 
-test('人口：劳动力倍率随人口变化（laborMults 字段正确）', async () => {
+test('人口：五轴繁荣度乘数（laborMults 字段正确，v3 统一为数值）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -197,24 +199,21 @@ test('人口：劳动力倍率随人口变化（laborMults 字段正确）', asy
   assert.equal(r.ok, true, `GetPopulation 应成功: ${r.reason ?? ''}`);
   const snap = r.payload as any;
 
+  // v3：laborMults 五个轴均为数值（五轴统一 prosperityMult）
   assert.ok(snap.laborMults, '应有劳动力倍率对象');
-  assert.ok(typeof snap.laborMults.build === 'number', '应有建造倍率(main)');
-  assert.ok(snap.laborMults.production, '应有产率倍率对象');
-  assert.ok(snap.laborMults.train, '应有练兵倍率对象');
-  assert.ok(typeof snap.laborMults.smithy === 'number', '应有锻造倍率');
-
-  // 满员时：所有速率类倍率应在 [laborFloor, 1.0] 之间
-  const c = app.config.constants;
-  for (const res of ['wood', 'clay', 'iron', 'crop']) {
-    if (snap.laborMults.production[res] !== undefined) {
-      const m = snap.laborMults.production[res];
-      assert.ok(m >= c.popLaborFloor - 0.01 && m <= 1.01,
-        `${res} 产率倍率应在[${c.popLaborFloor},1.0]，当前 ${m.toFixed(3)}`);
-    }
+  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+    assert.ok(typeof snap.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
   }
-  // 建造时间倍率（<1 表示加速）
-  assert.ok(snap.laborMults.build >= 0.79 && snap.laborMults.build <= 1.01,
-    `建造倍率应在[0.79,1.0]，当前 ${snap.laborMults.build}`);
+
+  // 满员开局（laborRatio=1）→ 繁荣度满值 → 所有倍率=1.0
+  const c = app.config.constants;
+  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+    const m = snap.laborMults[axis];
+    assert.ok(m >= c.popLaborFloor - 0.01 && m <= 1.01,
+      `${axis} 倍率应在[${c.popLaborFloor},1.0]，当前 ${m.toFixed(3)}`);
+  }
+  assert.ok(Math.abs(snap.laborMults.production - snap.prosperityMult) < 1e-6,
+    'production 倍率应与 prosperityMult 一致');
 });
 
 test('人口：GetCropContext 口径验证（不含civilian_pop）', async () => {
@@ -262,19 +261,24 @@ test('人口：DisbandTroops 兵力不足时拒绝', async () => {
   assert.equal(r.reason, 'insufficient_troops:legionnaire');
 });
 
-test('人口：settle 后人口接近软上限（5步迭代收敛≥90%）', async () => {
+test('人口：满员开局无增长空间（growthPerHour=0）；消耗人口后出现增长空间（growthPerHour>0）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
   const snap = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
   assert.ok(snap.softLimit > 0, '软上限应>0');
-  // v2 固定点：新村满员开局 P/L ≥ 0.99
+  // v3 满员开局：currentPop = softLimit(=availableLabor)，无增长空间
   const ratio = snap.currentPop / snap.softLimit;
   assert.ok(ratio >= 0.99, `新村开局人口应≥99%软上限，当前比值=${ratio.toFixed(3)}`);
-  // 增长率 = 繁荣度 × pop_growth_per_prosperity
-  assert.ok(snap.growthPerHour >= 0, '增长率应≥0');
-  // 繁荣度应>0（有建筑就有繁荣度）
-  assert.ok(snap.growthPerHour > 0, '新村有建筑，增长率应>0');
+  // v3：朝 availableLabor 收敛，已满则增长空间为0
+  assert.equal(snap.growthPerHour, 0, `满员开局 growthPerHour 应为0（实际 ${snap.growthPerHour}）`);
+
+  // 消耗人口制造增长空间：ConsumePop 只扣 currentPop（不增 soldierPop）→ availableLabor 不变 → 出现缺口
+  const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 5 });
+  assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
+  const snap2 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  // 缺口 = 5（popCost=1×5），growthPerHour 应>0 且被缺口/速率夹住
+  assert.ok(snap2.growthPerHour > 0, `消耗人口后应有增长空间 growthPerHour>0（实际 ${snap2.growthPerHour}）`);
 });
 
 /**

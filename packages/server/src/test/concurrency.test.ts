@@ -16,6 +16,9 @@ function makeApp() {
   clock = 1_000_000;
   return createGameApp({ now: () => clock, manualScheduler: true });
 }
+async function flush(n = 60): Promise<void> {
+  for (let i = 0; i < n; i++) await Promise.resolve();
+}
 
 // ── D) Combat TOCTOU：同一目标两次并发 Engage 只开一场战 ─────────────────
 
@@ -134,9 +137,9 @@ test('Population: 多次 CropDeficit 事件只注册一个减员 Scheduler 任�
   assert.ok(added <= 1, `多次 CropDeficit 应最多新增 1 个减员任务，实际新增 ${added}`);
 });
 
-// ── H) WoundEntry 唯一 id：同时多批伤兵不碰撞 ────────────────────────────
+// ── H) RecoverCasualties 即时回收（v3 无伤兵池/无定时器）───────────────────
 
-test('Population: 同时登记多批伤兵（相同 healAt）各自独立治愈', async () => {
+test('Population: 多次 RecoverCasualties 各自即时回收，无伤兵池无定时器', async () => {
   const app = makeApp();
   app.setupWorld();
 
@@ -146,41 +149,36 @@ test('Population: 同时登记多批伤兵（相同 healAt）各自独立治愈'
   });
   assert.ok(reg.ok);
   const vid = (reg.payload as any).player.villageId;
+  await flush();
 
-  // 同时添加两批伤兵（clock 相同，healAt 会相同）
-  // 使用足够大的损失数量，确保 Math.floor(count * popCost * recoveryRatio) >= 1
+  // 预留空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供两次回收回填（共约 +8）
+  await app.commands.send({ name: 'population.ConsumePop', from: 'test', payload: { villageId: vid, unit: 'legionnaire', count: 10 } });
+
+  const snap0 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
+  const initPop = snap0.currentPop;
+
+  // 同时发两批战死回收（clock 相同）
   const r1 = await app.commands.send({
-    name: 'population.AddWounded', from: 'test',
+    name: 'population.RecoverCasualties', from: 'test',
     payload: { villageId: vid, losses: { legionnaire: 20 } },
   });
   const r2 = await app.commands.send({
-    name: 'population.AddWounded', from: 'test',
+    name: 'population.RecoverCasualties', from: 'test',
     payload: { villageId: vid, losses: { legionnaire: 20 } },
   });
 
-  // 确认伤兵被成功添加（如果 AddWounded 本身就返回 ok）
-  assert.ok(r1.ok, `AddWounded 1 应成功: ${r1.reason ?? ''}`);
-  assert.ok(r2.ok, `AddWounded 2 应成功: ${r2.reason ?? ''}`);
+  assert.ok(r1.ok, `RecoverCasualties 1 应成功: ${r1.reason ?? ''}`);
+  assert.ok(r2.ok, `RecoverCasualties 2 应成功: ${r2.reason ?? ''}`);
+  // 医院 Lv0 → recoveryRatio=0.20；legionnaire popCost=1 → deadPop=20 → recovered=floor(20×0.20)=4
+  assert.equal((r1.payload as any).recovered, 4, '第一批应回收4');
+  assert.equal((r2.payload as any).recovered, 4, '第二批应回收4');
 
-  // 获取伤兵状态：使用 store 直接读（绕过 settle 计算，确认伤兵池有数据）
+  // 平民人口即时回填（无定时器）
+  const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
+  assert.ok(snap1.currentPop >= initPop + 7, `两批回收后平民应即时增加约8（${initPop}→${snap1.currentPop}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+
+  // v3 无伤兵池（无 woundedPool / 无 heal 定时器）
   const popState = app.store.get<any>('population', vid);
-  const poolSize = popState?.woundedPool?.length ?? 0;
-
-  if (poolSize === 0) {
-    // 可能 popCost * recoveryRatio 很小导致 Math.floor = 0，跳过此测试
-    // 这是 config 的数值问题而非 id 机制问题
-    return;
-  }
-
-  // 验证每个 entry 都有唯一 id
-  const ids = (popState.woundedPool as any[]).map((e: any) => e.id);
-  const uniqueIds = new Set(ids);
-  assert.equal(uniqueIds.size, ids.length, `伤兵 entry id 应全部唯一（发现重复: ${JSON.stringify(ids)}）`);
-
-  // 快进让伤兵治愈
-  const healTime = 10 * 24 * 3600 * 1000; // 10天，确保治愈
-  await app.scheduler.advanceTo(clock + healTime, setClock);
-
-  const popAfter = app.store.get<any>('population', vid);
-  assert.equal(popAfter?.woundedPool?.length ?? -1, 0, '所有伤兵批次都应被独立治愈，不因 id 碰撞而遗漏');
+  assert.equal(popState?.woundedPool, undefined, 'v3 不应有 woundedPool（无伤兵池）');
 });

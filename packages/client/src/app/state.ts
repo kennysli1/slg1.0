@@ -7,33 +7,42 @@ export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
-/** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。 */
+/** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型。 */
 export interface PopSnapshot {
-  /**
-   * 平民人口（不含驻军、不含伤兵）。
-   * availablePop = currentPop（平民即可训练上限）。
-   */
+  /** 劳动人口（平民）。 */
   currentPop: number;
-  /** 驻军占用人口（已征召的兵种）。 */
-  garrisonPop: number;
-  /** 总人口 = currentPop + garrisonPop + wounded.total。 */
-  totalPop: number;
-  softLimit: number;
-  growthPerHour: number;
-  lambdaRatio: number;
-  /** 劳动力比（平民 / 总人口），体现劳动力是否充裕。 */
+  /** 士兵人口（驻军 + 在途，由 military/movement 上报）。 */
+  soldierPop: number;
+  /** 人口硬上限（建筑提供：Σ popCapPerLevel × level）。 */
+  hardCap: number;
+  /** 可用劳动人口 = 硬上限 − 士兵人口（增长目标 / 拓荒门槛）。 */
+  availableLabor: number;
+  /** 劳动人口占硬上限比例 [0,1]。 */
   laborRatio: number;
-  /** 粮食赤字速率（/h），伤兵与驻军的耗粮共同影响；仅饥荒时非零。 */
-  cropDeficitRate: number;
-  /** 是否处于饥荒状态（服务端权威）。 */
+  /** 繁荣度加成 [0,1]（劳动占比从种族最低到满值处的线性插值）。 */
+  prosperityBonus: number;
+  /** 五轴统一繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
+  prosperityMult: number;
+  /** 每小时增长（朝 availableLabor 收敛）。 */
+  growthPerHour: number;
+  /** 种族最低劳动占比（繁荣度满值基准）。 */
+  raceMin: number;
+  /** 城镇中心等级（增长速率因子）。 */
+  mainLevel: number;
+  /** 是否处于饥荒（服务端权威）。 */
   inFamine: boolean;
-  wounded: { total: number; entries: { count: number; healAt: number }[] };
+  /** 平民耗粮 /h。 */
+  civilianCropPerHour: number;
+  /** 五轴繁荣度乘数（全 = prosperityMult）。 */
   laborMults: {
-    production: { wood: number; clay: number; iron: number; crop: number };
+    production: number;
     build: number;
-    train: { barracks: number; stable: number; workshop: number };
+    train: number;
+    research: number;
     smithy: number;
   };
+  /** 兼容别名 = availableLabor（movement 拓荒门槛）。 */
+  softLimit: number;
   lastTick: number;
   /** 客户端本地记录的快照获取时刻（ms），用于本地外插。 */
   fetchedAt: number;
@@ -88,15 +97,15 @@ export function setPopState(s: PopSnapshot): void { popState = s; }
 
 /**
  * 本地外插当前人口（不发请求）。
- * 公式：若 currentPop < softLimit 且增长率 > 0，则按 growthPerHour 线性外插，上限 softLimit。
- * 下降（超限减员）由服务端处理，客户端保守显示不模拟减员。
+ * 公式：若 currentPop < availableLabor 且增长率 > 0，则按 growthPerHour 线性外插，上限 availableLabor。
+ * 下降（饥荒减员 / 超限）由服务端处理，客户端保守显示不模拟减员。
  */
 export function interpolatePop(): number {
   if (!popState) return 0;
-  const { currentPop, softLimit, growthPerHour, fetchedAt } = popState;
-  if (currentPop < softLimit && growthPerHour > 0) {
+  const { currentPop, availableLabor, growthPerHour, fetchedAt } = popState;
+  if (currentPop < availableLabor && growthPerHour > 0) {
     const elapsedHours = (Date.now() - fetchedAt) / 3_600_000;
-    return Math.min(softLimit, Math.round(currentPop + growthPerHour * elapsedHours));
+    return Math.min(availableLabor, Math.round(currentPop + growthPerHour * elapsedHours));
   }
   return Math.round(currentPop);
 }

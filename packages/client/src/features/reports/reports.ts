@@ -66,15 +66,6 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     const evTag: string | undefined = (payload as any).event;
     if (!evTag) return null;
     const popVal = fmt(Math.round(Number((payload as any).currentPop) ?? 0));
-    if (evTag === 'wounded') {
-      const wTotal = fmt(Number((payload as any).woundedTotal) || 0);
-      return `${time}🩹 战斗伤兵登记，伤兵池 ${wTotal} 人，当前平民 ${popVal}`;
-    }
-    if (evTag === 'healed') {
-      const healed = Number((payload as any).healed);
-      const healedStr = healed > 0 ? `+${fmt(healed)} 人归队，` : '';
-      return `${time}💚 伤兵治愈归队，${healedStr}当前平民 ${popVal}`;
-    }
     if (evTag === 'consumed') {
       const consumed = fmt(Number((payload as any).consumed) || 0);
       return `${time}🎯 征兵消耗 -${consumed} 人口 → 当前平民 ${popVal}`;
@@ -84,13 +75,26 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       const retStr = returned > 0 ? `+${fmt(returned)} 人返还，` : '';
       return `${time}🏠 解散归队，${retStr}当前平民 ${popVal}`;
     }
-    // server 推送事件名为 famine_reduction（含减员量 reduced、快照 softLimit）
-    if (evTag === 'famine_reduction') {
+    // 饥荒减员：服务端首触为 famine，持续为 starved（均含 reduced 减员量）
+    if (evTag === 'famine' || evTag === 'starved') {
       const reduced = fmt(Number((payload as any).reduced) || 0);
       return `${time}💀 粮食告急，减员 -${reduced} 人 → 当前平民 ${popVal}`;
     }
     if (evTag === 'recovery') {
       return `${time}✅ 粮食恢复，人口停止下降`;
+    }
+    // 建筑建造/升级导致硬上限或主城等级变化
+    if (evTag === 'capChanged') {
+      const hardCap = fmt(Number((payload as any).hardCap) ?? 0);
+      return `${time}🏗️ 人口上限变更 → 硬上限 ${hardCap}`;
+    }
+    // 战死即时回收：医院按比例回收死亡士兵人口
+    if (evTag === 'recovered') {
+      const recovered = Number((payload as any).recovered) || 0;
+      const permanentDead = Number((payload as any).permanentDead) || 0;
+      const recStr = recovered > 0 ? `+${fmt(recovered)} 人经医院回收` : '';
+      const deadStr = permanentDead > 0 ? `（永久损失 ${fmt(permanentDead)} 人）` : '';
+      return `${time}⚕️ 战死回收${recStr}${deadStr} → 当前平民 ${popVal}`;
     }
     return `${time}👥 人口变化：当前平民 ${popVal}`;
   }
@@ -105,55 +109,71 @@ export function handlePush(event: string, payload: any): void {
   }
   if (event === 'BattleEnded') clearBattleSnapshot(payload.battleId);
 
-  // T7.5：PopulationChanged — 立即校正本地人口快照，不等下次全量刷新。
+  // T7：PopulationChanged — 立即校正本地人口快照，不等下次全量刷新。
   // 严禁在此处调 refreshAll() / GetPopulation，防止 push→refresh→settle→emit 正反馈死循环。
   //
-  // 字段说明（与服务端实际 payload 对齐）：
-  //   famine_reduction 事件：currentPop, woundedTotal, reduced, softLimit
-  //   consumed 事件：currentPop, woundedTotal, consumed
-  //   returned 事件：currentPop, woundedTotal, returned
-  //   wounded  事件：currentPop, woundedTotal, wounded, permanentDead
-  //   healed   事件：currentPop, woundedTotal, healed
-  //   garrisonPop/totalPop/laborRatio 不在 push payload 中，保留快照旧值
+  // 字段说明（与服务端 v3 硬上限 payload 对齐）：
+  //   consumed   事件：currentPop, consumed
+  //   returned   事件：currentPop, returned
+  //   famine/starved 事件：currentPop, reduced, inFamine
+  //   recovery   事件：currentPop, inFamine
+  //   capChanged 事件：currentPop, hardCap, availableLabor, soldierPop, laborMults, prosperityMult...
+  //   recovered  事件：currentPop, recovered, permanentDead
+  // 不带 event 字段的静默增长不进战报，也无需校正（下一次 refreshAll 会拉新值）。
   if (event === 'PopulationChanged') {
     const current = getPopState();
     if (current) {
+      const evTag: string | undefined = payload.event;
       // 用 != null 判断（非 !== 0），确保 currentPop=0 能正确写入
       const newCurrentPop = payload.currentPop != null ? Number(payload.currentPop) : current.currentPop;
-      const newSoftLimit = payload.softLimit != null ? Number(payload.softLimit) : current.softLimit;
-      const evTag: string | undefined = payload.event;
+      const newHardCap = payload.hardCap != null ? Number(payload.hardCap) : current.hardCap;
+      const newSoldierPop = payload.soldierPop != null ? Number(payload.soldierPop) : current.soldierPop;
+      const newAvailableLabor = payload.availableLabor != null ? Number(payload.availableLabor) : current.availableLabor;
+      const newSoftLimit = payload.softLimit != null ? Number(payload.softLimit) : newAvailableLabor;
+      const newLaborRatio = payload.laborRatio != null ? Number(payload.laborRatio) : current.laborRatio;
+      const newProsperityBonus = payload.prosperityBonus != null ? Number(payload.prosperityBonus) : current.prosperityBonus;
+      const newProsperityMult = payload.prosperityMult != null ? Number(payload.prosperityMult) : current.prosperityMult;
+      const newGrowth = payload.growthPerHour != null ? Number(payload.growthPerHour) : current.growthPerHour;
+      const newRaceMin = payload.raceMin != null ? Number(payload.raceMin) : current.raceMin;
+      const newMainLevel = payload.mainLevel != null ? Number(payload.mainLevel) : current.mainLevel;
+      const newCivilianCrop = payload.civilianCropPerHour != null ? Number(payload.civilianCropPerHour) : current.civilianCropPerHour;
 
-      // inFamine 推断：
-      //   famine_reduction 事件 → 明确处于饥荒（服务端已触发减员）
-      //   recovery 事件 → 明确脱离饥荒
-      //   其他 → 由 currentPop vs softLimit 推断
+      // inFamine：服务端权威字段优先；否则按事件推断
       let newInFamine: boolean;
-      if (evTag === 'famine_reduction') {
+      if (payload.inFamine != null) {
+        newInFamine = !!payload.inFamine;
+      } else if (evTag === 'famine' || evTag === 'starved') {
         newInFamine = true;
       } else if (evTag === 'recovery') {
         newInFamine = false;
       } else {
-        newInFamine = newSoftLimit > 0 && newCurrentPop > newSoftLimit;
+        newInFamine = current.inFamine;
       }
 
-      // totalPop 重新推算（garrisonPop 保留快照，无 push 更新）
-      const newWoundedTotal = payload.woundedTotal != null ? Number(payload.woundedTotal) : current.wounded.total;
-      const newTotalPop = newCurrentPop + current.garrisonPop + newWoundedTotal;
-      const newLaborRatio = newTotalPop > 0 ? newCurrentPop / newTotalPop : 1;
+      const newLaborMults = payload.laborMults != null ? {
+        production: Number(payload.laborMults.production ?? newProsperityMult),
+        build: Number(payload.laborMults.build ?? newProsperityMult),
+        train: Number(payload.laborMults.train ?? newProsperityMult),
+        research: Number(payload.laborMults.research ?? newProsperityMult),
+        smithy: Number(payload.laborMults.smithy ?? newProsperityMult),
+      } : current.laborMults;
 
       setPopState({
         ...current,
         currentPop: newCurrentPop,
-        totalPop: newTotalPop,
+        soldierPop: newSoldierPop,
+        hardCap: newHardCap,
+        availableLabor: newAvailableLabor,
         softLimit: newSoftLimit,
         laborRatio: newLaborRatio,
+        prosperityBonus: newProsperityBonus,
+        prosperityMult: newProsperityMult,
+        growthPerHour: newGrowth,
+        raceMin: newRaceMin,
+        mainLevel: newMainLevel,
         inFamine: newInFamine,
-        growthPerHour: payload.growthPerHour != null ? Number(payload.growthPerHour) : current.growthPerHour,
-        lambdaRatio: payload.lambdaRatio != null ? Number(payload.lambdaRatio) : current.lambdaRatio,
-        wounded: {
-          ...current.wounded,
-          total: newWoundedTotal,
-        },
+        civilianCropPerHour: newCivilianCrop,
+        laborMults: newLaborMults,
         fetchedAt: Date.now(),
       });
       // 局部刷新人口面板（不重建整页）

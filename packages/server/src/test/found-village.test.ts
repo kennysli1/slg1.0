@@ -29,6 +29,15 @@ async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
   main.level = app.config.constants.foundMinMainLevel;
   app.store.set('building', villageId, b);
 
+  // 模拟主基地升级完成 → 触发 building.Upgraded，让 population 重算硬上限缓存
+  // （直接改 store 不会触发事件，population 的 hardCap 仍是建村时的 main L1 值）
+  await app.bus.emit({
+    name: 'building.Upgraded', source: 'test', ts: clock,
+    payload: { villageId, slotId: 'center', kind: 'main', level: app.config.constants.foundMinMainLevel },
+  });
+  // 等待 refreshHardCap 异步完成
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+
   const pop = (await send(app, 'population.GetSnapshot', { villageId })).payload as any;
   assert.ok(
     pop.softLimit >= app.config.constants.foundMinSoftLimit,

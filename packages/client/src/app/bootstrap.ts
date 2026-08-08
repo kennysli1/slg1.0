@@ -90,38 +90,32 @@ async function refreshAll() {
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       const p = pop.payload as any;
-      // GetPopulation payload 实际字段：currentPop, softLimit, growthPerHour, lambdaRatio,
-      // wounded{total,entries}, pools{garrisonPopCost,enRoutePopCost,woundedTotal}, laborMults, lastTick
-      // garrisonPop/totalPop/laborRatio 为客户端派生；inFamine/cropDeficitRate 由 push 事件持续校正。
+      // GetPopulation 返回 v3 硬上限快照：currentPop/soldierPop/hardCap/availableLabor/
+      // laborRatio/prosperityBonus/prosperityMult/growthPerHour/raceMin/mainLevel/
+      // inFamine/civilianCropPerHour + 兼容别名 softLimit=availableLabor + laborMults(五轴)。
       const currentPop: number = p.currentPop ?? 0;
-      const woundedTotal: number = p.wounded?.total ?? 0;
-      // garrisonPop = 驻军人口（含在途）；server 用 pools.garrisonPopCost 存放
-      const garrisonPop: number = (p.pools?.garrisonPopCost ?? 0) + (p.pools?.enRoutePopCost ?? 0);
-      const totalPop: number = currentPop + garrisonPop + woundedTotal;
-      const laborRatio: number = totalPop > 0 ? currentPop / totalPop : 1;
-      const softLimit: number = p.softLimit ?? 0;
-      // inFamine：currentPop > softLimit 为必要条件（充分条件还需粮仓触底，但快照无此数据）
-      const inFamine: boolean = softLimit > 0 && currentPop > softLimit;
+      const soldierPop: number = p.soldierPop ?? 0;
+      const hardCap: number = p.hardCap ?? 0;
+      const availableLabor: number = p.availableLabor ?? hardCap;
+      const prosperityMult: number = p.prosperityMult ?? 1;
       setPopState({
         currentPop,
-        garrisonPop,
-        totalPop,
-        softLimit,
+        soldierPop,
+        hardCap,
+        availableLabor,
+        laborRatio: p.laborRatio ?? 0,
+        prosperityBonus: p.prosperityBonus ?? 0,
+        prosperityMult,
         growthPerHour: p.growthPerHour ?? 0,
-        lambdaRatio: p.lambdaRatio ?? 0,
-        laborRatio,
-        cropDeficitRate: 0, // 快照无粮食赤字速率；由 famine_reduction push 事件校正
-        inFamine,
-        wounded: {
-          total: woundedTotal,
-          entries: p.wounded?.entries ?? [],
-        },
+        raceMin: p.raceMin ?? 0,
+        mainLevel: p.mainLevel ?? 1,
+        inFamine: !!p.inFamine,
+        civilianCropPerHour: p.civilianCropPerHour ?? 0,
         laborMults: p.laborMults ?? {
-          production: { wood: 1, clay: 1, iron: 1, crop: 1 },
-          build: 1,
-          train: { barracks: 1, stable: 1, workshop: 1 },
-          smithy: 1,
+          production: prosperityMult, build: prosperityMult, train: prosperityMult,
+          research: prosperityMult, smithy: prosperityMult,
         },
+        softLimit: p.softLimit ?? availableLabor,
         lastTick: p.lastTick ?? Date.now(),
         fetchedAt: Date.now(),
       });
@@ -162,17 +156,17 @@ function renderPopCell(): string {
   const pop = interpolatePop();
   const growth = Math.round(ps.growthPerHour);
   const sign = growth >= 0 ? '+' : '';
-  // 饥荒优先显示红色，接近饱和显示橙色
-  const famineClass = ps.inFamine ? ' res-famine' : (ps.softLimit > 0 && pop / ps.softLimit >= 0.95 ? ' res-low' : '');
+  // 饥荒优先显示红色，接近硬上限显示橙色
+  const famineClass = ps.inFamine ? ' res-famine' : (ps.hardCap > 0 && pop / ps.hardCap >= 0.95 ? ' res-low' : '');
   const famineIcon = ps.inFamine ? '🚨' : '👥';
   const titleSuffix = ps.inFamine
-    ? `（饥荒！赤字 ${Math.round(ps.cropDeficitRate)}/h）`
-    : ps.garrisonPop > 0
-      ? `· 驻军 ${fmt(ps.garrisonPop)} 人`
+    ? '（饥荒！人口正在减少）'
+    : ps.soldierPop > 0
+      ? `· 士兵 ${fmt(ps.soldierPop)} 人`
       : '';
-  return `<span class="res res-pop${famineClass}" title="平民 ${fmt(pop)}/${fmt(ps.softLimit)}（软上限）· 增长 ${sign}${growth}/h${titleSuffix}">
+  return `<span class="res res-pop${famineClass}" title="平民 ${fmt(pop)}/${fmt(ps.hardCap)}（硬上限）· 增长 ${sign}${growth}/h${titleSuffix}">
     <span class="res-pop-icon">${famineIcon}</span>
-    <span class="res-num">${fmt(pop)}<small>/${fmt(ps.softLimit)}</small></span>
+    <span class="res-num">${fmt(pop)}<small>/${fmt(ps.hardCap)}</small></span>
     <span class="res-rate">${sign}${growth}/h</span></span>`;
 }
 

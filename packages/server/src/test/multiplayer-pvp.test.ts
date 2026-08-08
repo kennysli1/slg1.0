@@ -115,7 +115,7 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   assert.ok((army.troops.legionnaire ?? 0) > 0, 'A 幸存兵应返回');
 });
 
-test('PvP：战后攻守双方各自村庄登记伤兵', async () => {
+test('PvP：战后攻守双方人口快照结构有效（v3 无伤兵池，战死即时回收）', async () => {
   const app = freshApp();
   const a = (await reg(app, 'A伤兵', 'p1234')).payload as any;
   const b = (await reg(app, 'B伤兵', 'p1234')).payload as any;
@@ -154,15 +154,19 @@ test('PvP：战后攻守双方各自村庄登记伤兵', async () => {
 
   await drain(app);
 
-  // 检查B村（防守方）人口快照结构是否正常
+  // 检查A村（进攻方）与B村（防守方）人口快照结构是否正常（v3 无伤兵池，战死经 RecoverCasualties 即时回收）
+  const popSnapA2 = (await send(app, 'population.GetSnapshot', { villageId: va })).payload as any;
   const popSnapB = (await send(app, 'population.GetSnapshot', { villageId: vb })).payload as any;
-  assert.ok(typeof popSnapB.currentPop === 'number', 'B村应有人口快照');
-  assert.ok(typeof popSnapB.wounded === 'object', 'B村应有伤兵字段');
-  // B村守军10人被消灭时：伤兵数 = floor(10 × 1 × 0.3) = 3
-  if (popSnapB.wounded.total > 0) {
-    assert.ok(popSnapB.wounded.total >= 0, '伤兵数应≥0');
-    assert.ok(popSnapB.wounded.entries.length > 0, '伤兵队列应有条目');
+  for (const [tag, ps] of [['A', popSnapA2], ['B', popSnapB]] as const) {
+    assert.ok(typeof ps.currentPop === 'number', `${tag}村应有 currentPop 数字`);
+    assert.ok(typeof ps.hardCap === 'number', `${tag}村应有 hardCap 数字`);
+    assert.ok(typeof ps.availableLabor === 'number', `${tag}村应有 availableLabor 数字`);
+    assert.ok(typeof ps.laborRatio === 'number', `${tag}村应有 laborRatio 数字`);
+    assert.ok(typeof ps.prosperityMult === 'number', `${tag}村应有 prosperityMult 数字`);
+    assert.equal(ps.wounded, undefined, `v3 ${tag}村快照不应含 wounded 字段`);
   }
+  // 进攻方A：训练消耗的兵力在战斗减员后经 RecoverCasualties 即时回收，战后人口快照应有效
+  assert.ok(popSnapA2.currentPop > 0, 'A村战后应有人口');
 });
 
 test('安全：不能攻击自己', async () => {
