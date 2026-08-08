@@ -76,6 +76,9 @@ export class PopulationModule {
     private config: GameConfig,
   ) {}
 
+  /** 周期结算是否已调度（防止 resume 重复注册）。 */
+  private settleAllScheduled = false;
+
   /** 热重载配置（改 CSV 后调用）。 */
   setConfig(config: GameConfig): void {
     this.config = config;
@@ -131,6 +134,33 @@ export class PopulationModule {
       // 派生硬上限是建筑等级的纯函数，重启时一律从 building 重算（旧存档缺字段也能补全）
       void this.refreshHardCap(s.villageId);
     }
+    // 周期结算：金币税与人口增长持续累加，不依赖客户端是否在线轮询（否则离线/未开面板时金币显示 +X/时却不涨）。
+    this.scheduleSettleAll();
+  }
+
+  /**
+   * 周期结算全部村庄（金币税 + 人口增长），使产出持续累加，离线也生效。
+   * 每 INTERVAL_MS 触发一次，回调内再次 schedule 形成循环。settle 基于 lastTick 计算 Δt，
+   * 与客户端轮询触发的 getSnapshot/consumePop 等结算互不重复计数（后者会把 lastTick 推前，本 tick 见到的 Δt 自然变小）。
+   * 注意：settle 永不 emit，故周期 tick 不会产生 PopulationChanged 推送（避免刷屏）。
+   */
+  private scheduleSettleAll(): void {
+    if (this.settleAllScheduled) return;
+    this.settleAllScheduled = true;
+    const INTERVAL_MS = 30_000;
+    const tick = () => {
+      for (const s of this.store.all<PopulationState>(COLLECTION)) {
+        void this.settleAndPersist(s);
+      }
+      this.scheduler.schedule(INTERVAL_MS, tick, 'population:settleAll');
+    };
+    this.scheduler.schedule(INTERVAL_MS, tick, 'population:settleAll');
+  }
+
+  /** 结算并持久化单个村庄状态（供周期 tick 复用；命令路径各自在结算后自行 store.set）。 */
+  private async settleAndPersist(s: PopulationState): Promise<void> {
+    await this.settle(s);
+    this.store.set(COLLECTION, s.villageId, s);
   }
 
   /**

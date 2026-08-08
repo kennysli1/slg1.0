@@ -124,3 +124,55 @@ test('Population resume: 旧存档缺新字段自动补全，无 wounded', async
   assert.ok(snap.hardCap > 0, 'resume 后应重算补出 hardCap');
   assert.equal(snap.wounded, undefined, 'v3 快照不应含 wounded');
 });
+
+// ── 金币：历史 null/NaN 自愈 + 周期结算累加 ────────────────────────────────
+
+test('Economy: 历史残留 null 金币经 settle 自愈为 startGoldAmount(=100)', async () => {
+  const app = makeApp();
+  app.setupWorld();
+  const reg = await app.commands.send({
+    name: 'player.Register', from: 't',
+    payload: { name: '金币自愈', password: 'pass123', tribe: 'romans' },
+  });
+  assert.ok(reg.ok);
+  const vid = (reg.payload as any).player.villageId;
+  await flush();
+
+  // 模拟历史损坏：金币被写成 null（早期金币税算出 NaN 被 JSON.stringify 序列化成 null 的残留）
+  const econ = app.store.get<any>('economy', vid);
+  assert.ok(econ, '应有 economy 状态');
+  econ.resources.gold = null;
+  app.store.set('economy', vid, econ);
+
+  // 任意一次结算（GetResources 走 settle → 迁移兜底）应把 null 自愈为合法数字
+  const r = await app.commands.send({ name: 'economy.GetResources', from: 't', payload: { villageId: vid } });
+  assert.ok(r.ok);
+  const after = app.store.get<any>('economy', vid);
+  assert.equal(typeof after.resources.gold, 'number', '金币应从 null 自愈为数字');
+  assert.ok(Number.isFinite(after.resources.gold), '金币应为有限数字（非 NaN）');
+  assert.equal(after.resources.gold, 100, '金币自愈应回退到 startGoldAmount(=100)');
+});
+
+test('Population 周期结算: 金币税随 tick 持续累加（不依赖客户端轮询/开面板）', async () => {
+  const app = makeApp();
+  app.setupWorld();
+  const reg = await app.commands.send({
+    name: 'player.Register', from: 't',
+    payload: { name: '金币tick', password: 'pass123', tribe: 'romans' },
+  });
+  assert.ok(reg.ok);
+  const vid = (reg.payload as any).player.villageId;
+  await flush();
+  app.resume(); // 调度周期结算 tick（每 30s 结算全部村庄的金币税+人口增长）
+
+  const goldBefore = (app.store.get<any>('economy', vid)).resources.gold;
+  assert.ok(Number.isFinite(goldBefore), '起始金币应为有限数字');
+
+  // 推进 1 小时：周期 tick 多次结算金币税，金币应持续累加
+  await app.scheduler.advanceTo(clock + 3600_000, setClock);
+  await flush(120);
+
+  const goldAfter = (app.store.get<any>('economy', vid)).resources.gold;
+  assert.ok(Number.isFinite(goldAfter), '结算后金币应为有限数字');
+  assert.ok(goldAfter > goldBefore, `金币应随周期 tick 持续累加（${goldBefore} → ${goldAfter}）`);
+});

@@ -121,10 +121,18 @@ export class EconomyModule {
   private settle(s: EconomyState): void {
     const now = this.now();
     const elapsed = (now - s.lastTick) / 1000;
-    // 迁移兜底：旧存档（新增 gold 前）缺 gold 字段 → 补初始金币存量与无限容量；避免 NaN 且不让老玩家被 +1 建造费卡死。
+    // 迁移兜底：旧存档（新增 gold 前）缺字段，或历史残留的 null/NaN（如早期金币税算出 NaN 被 JSON 序列化成 null）
+    // → 统一重置为合法数值，避免后续算术被污染成 NaN 并再次持久化为 null。
+    const startGold = Number.isFinite(this.config.constants.startGoldAmount) ? this.config.constants.startGoldAmount : 0;
     for (const t of RESOURCE_TYPES) {
-      if (s.resources[t] === undefined) s.resources[t] = t === 'gold' ? this.config.constants.startGoldAmount : 0;
-      if (s.capacity[t] === undefined) s.capacity[t] = t === 'gold' ? GOLD_CAP : 0;
+      const r = s.resources[t] as number | null | undefined;
+      if (r === undefined || r === null || !Number.isFinite(r)) {
+        s.resources[t] = t === 'gold' ? startGold : 0;
+      }
+      const cap = s.capacity[t] as number | null | undefined;
+      if (cap === undefined || cap === null || !Number.isFinite(cap)) {
+        s.capacity[t] = t === 'gold' ? GOLD_CAP : 0;
+      }
     }
     if (elapsed <= 0) return;
     for (const t of RESOURCE_TYPES) {
@@ -134,6 +142,8 @@ export class EconomyModule {
       next = Math.max(0, next);
       // 未超额时，自然产出顶到容量为止；金币容量=MAX 永不触发（无上限）
       if (!wasOver && next > s.capacity[t]) next = s.capacity[t];
+      // 兜底：任何非有限值（理论不应出现）都归 0，避免污染持久化为 null
+      if (!Number.isFinite(next)) next = 0;
       s.resources[t] = next;
     }
     s.lastTick = now;
@@ -230,7 +240,9 @@ export class EconomyModule {
     const applied = zero();
     const overflow = zero();
     for (const t of RESOURCE_TYPES) {
-      const add = Math.max(0, gain[t] ?? 0);
+      // 防御非有限值（NaN/null/undefined）→ 当 0 处理，避免污染存量后持久化为 null
+      const raw = Number(gain[t]);
+      const add = Number.isFinite(raw) && raw > 0 ? raw : 0;
       s.resources[t] += add;
       applied[t] = add;
       overflow[t] = Math.max(0, s.resources[t] - s.capacity[t]);
