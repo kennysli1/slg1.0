@@ -132,8 +132,8 @@ export class BuildingModule {
     const s: BuildingState = { villageId, tribe, placed, queue: [] };
     this.store.set(COLLECTION, villageId, s);
 
-    // 开局即上报派生（人口/容量/各资源田产率），让 economy 初值正确
-    this.reportPopulation(s);
+    // 开局即上报派生（容量/各资源田产率），让 economy 初值正确。
+    // 注意：建筑不再上报 crop 维护（人口耗粮模型 v3：只有人口会耗粮，建筑只提供人口上限）。
     this.reportCapacity(s);
     for (const r of ['wood', 'clay', 'iron', 'crop']) this.reportFieldRate(s, r);
   }
@@ -472,7 +472,6 @@ export class BuildingModule {
     await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
 
     // 刷新派生：人口/容量始终；资源田刷该资源产率
-    this.reportPopulation(s);
     this.reportCapacity(s);
     const def = this.config.buildings[kind];
     if (def?.resource) this.reportFieldRate(s, def.resource);
@@ -497,17 +496,6 @@ export class BuildingModule {
   }
 
   // ---- 派生聚合上报（对内口径，铁律#4）----
-
-  /** 全村建筑维护（crop消耗/小时）上报 Economy。source 从 'population' 改名为 'building' 避免语义混淆。 */
-  private reportPopulation(s: BuildingState): void {
-    let pop = 0;
-    for (const p of s.placed) pop += sumPop(p.level);
-    void this.commands.send({
-      name: 'economy.SetUpkeep',
-      from: BuildingModule.NAME,
-      payload: { villageId: s.villageId, source: 'building', cropPerHour: pop },
-    });
-  }
 
   /** 全村某类资源的资源田总产率(每小时)上报 Economy。 */
   private reportFieldRate(s: BuildingState, resource: string): void {
@@ -581,9 +569,4 @@ export class BuildingModule {
 
     return { ok: true, payload: { prosperity, buildings } };
   }
-}
-
-/** 累计人口：1+2+...+lv。 */
-function sumPop(lv: number): number {
-  return (lv * (lv + 1)) / 2;
 }

@@ -368,7 +368,7 @@ test('v3 C11：GetSnapshot × 10 不产生任何 population.Changed 推送', asy
 
 // ── 补充：nonCivilianUpkeep 不含 civilian_pop ─────────────────────────────
 
-test('v3 补充：nonCivilianUpkeep 不含 civilian_pop，≥ buildingUpkeepPerHour', async () => {
+test('v3 补充：nonCivilianUpkeep 不含 civilian_pop，且建筑不再耗粮', async () => {
   const app = freshApp();
   const vid = await reg(app, 'cex', 'romans');
 
@@ -378,6 +378,8 @@ test('v3 补充：nonCivilianUpkeep 不含 civilian_pop，≥ buildingUpkeepPerH
 
   assert.ok(typeof p.nonCivilianUpkeep === 'number');
   assert.ok(p.nonCivilianUpkeep >= 0);
+  // v3：建筑不再耗粮，buildingUpkeepPerHour 恒为 0
+  assert.equal(p.buildingUpkeepPerHour, 0, 'v3：建筑不再耗粮，buildingUpkeepPerHour 应=0');
   assert.ok(p.nonCivilianUpkeep >= p.buildingUpkeepPerHour, `nonCivilianUpkeep(${p.nonCivilianUpkeep}) ≥ buildingUpkeep(${p.buildingUpkeepPerHour})`);
 
   const snap = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;

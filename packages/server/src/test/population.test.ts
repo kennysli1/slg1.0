@@ -226,9 +226,8 @@ test('人口：GetCropContext 口径验证（不含civilian_pop）', async () =>
   assert.ok(p.baseCropPerHour >= 0, 'baseCropPerHour 应≥0');
   assert.ok(p.buildingUpkeepPerHour >= 0, 'buildingUpkeepPerHour 应≥0');
   assert.ok(p.troopUpkeepPerHour >= 0, 'troopUpkeepPerHour 应≥0');
-  // 建筑维护应来自 source='building'（不含 'civilian_pop'）
-  // 新村7栋建筑各Lv1: sumPop(1)×7 = 7
-  assert.ok(p.buildingUpkeepPerHour > 0, '建筑维护应>0（建筑upkeep来自building模块）');
+  // v3 人口模型：建筑不再耗粮（建筑只提供人口上限），buildingUpkeepPerHour 恒为 0
+  assert.equal(p.buildingUpkeepPerHour, 0, 'v3：建筑不再耗粮，buildingUpkeepPerHour 应=0');
   assert.equal(p.troopUpkeepPerHour, 0, '新村无兵，军队维护应=0');
   // civilian_pop 不应计入这里（GetCropContext 口径定义：不含 civilian_pop）
   // 无法直接验证，但可以验证 upkeep 数值合理（不超过总产率）

@@ -89,7 +89,7 @@ function renderPlaced(p: any): string {
     : '';
   const popCap = buildingInfo(p.kind).popCapPerLevel ?? 0;
   const popCapHint = popCap > 0
-    ? `<div class="hint-sm popcap">人口上限 +${popCap}/级</div>`
+    ? `<div class="hint-sm popcap">人口上限 +${popCap}/级 · 升级 +${popCap}</div>`
     : '';
   let btn: string;
   if (constructing) btn = '<small class="tag">建造中</small>';
@@ -118,7 +118,7 @@ function renderDrawer(): string {
     const afford = canAfford(o.cost);
     const prod = o.producing ? `<span class="hint-sm prod">+${o.producing.ratePerHour}/h</span>` : '';
     const popCap = buildingInfo(o.kind).popCapPerLevel ?? 0;
-    const popCapHint = popCap > 0 ? `<span class="hint-sm popcap">人口上限 +${popCap}/级</span>` : '';
+    const popCapHint = popCap > 0 ? `<span class="hint-sm popcap">人口上限 +${popCap}/级 · 升级 +${popCap}</span>` : '';
     let action: string;
     if (!o.unlocked) {
       action = `<small class="tag tag-lock">${escapeHtml(o.lockReason ?? '未解锁')}</small>`;
@@ -195,7 +195,8 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
 
   const popCap = buildingInfo(kind).popCapPerLevel ?? 0;
   const popCapSec = popCap > 0
-    ? `<div class="bld-detail-row"><span class="bld-detail-k">每级人口上限</span><span class="bld-detail-v">+${popCap}</span></div>`
+    ? `<div class="bld-detail-row"><span class="bld-detail-k">每级人口上限</span><span class="bld-detail-v">+${popCap}</span></div>
+       <div class="bld-detail-row"><span class="bld-detail-k">${ctx.isBuild ? '建造后贡献' : `升至 Lv${ctx.level + 1} 贡献`}</span><span class="bld-detail-v">+${popCap * (ctx.level + 1)}</span></div>`
     : '';
 
   const wrap = document.createElement('div');

@@ -325,7 +325,7 @@ export class EconomyModule {
    * 只读查询「粮食上下文」（供 population 模块计算软上限，无回调，无环）。
    * 返回：
    *  - baseCropPerHour：农田原始产率×3600（不含劳动力修正的裸值，pop 自己算 effMult）
-   *  - buildingUpkeepPerHour：建筑维护耗粮（source='building'）
+   *  - buildingUpkeepPerHour：建筑维护耗粮（v3 人口模型已移除：建筑只提供人口上限，不耗粮；恒为 0）
    *  - troopUpkeepPerHour：军队维护耗粮（source='troops'）
    *  - nonCivilianUpkeep：所有非 civilian_pop 来源的 crop 每小时总消耗（含 building/troops/
    *    soldier_pool/wounded_pool/enroute_pop 等全部来源；供 v2 软上限一步算出，省去逐条手算）

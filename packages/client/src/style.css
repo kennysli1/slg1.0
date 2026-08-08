@@ -746,8 +746,17 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .pop-head { position: relative; }
 .pop-head:hover .pop-breakdown { display: block; }
 
-/* 建筑卡/抽屉：每级提供的人口上限提示 */
-.popcap { color: var(--c-brand); font-weight: 600; }
+/* 建筑卡/抽屉：每级提供的人口上限提示（醒目 pill，确保一眼可见） */
+.popcap {
+  display: inline-block;
+  color: var(--c-brand);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--c-brand) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-brand) 40%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin: var(--s-1) 0;
+}
 
 /* 训练面板：批次粮压标注 */
 .train-upkeep {
