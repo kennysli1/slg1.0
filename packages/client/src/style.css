@@ -736,10 +736,18 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
   color: var(--c-danger); font-weight: 700; font-family: var(--ff-num);
 }
 
-/* 人口分类小字行（平民 / 驻军 / 伤兵） */
+/* 人口分类小字行（劳动 / 军队）：默认隐藏，hover 人口数字时展开 */
 .pop-breakdown {
-  font-size: var(--f-xs); color: var(--c-ink-soft); margin-bottom: var(--s-1);
+  display: none; position: absolute; left: 0; top: 100%; z-index: 6; margin-top: 4px;
+  font-size: var(--f-xs); color: var(--c-ink-soft); white-space: nowrap;
+  background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-sm);
+  padding: 3px 8px; box-shadow: var(--sh-1);
 }
+.pop-head { position: relative; }
+.pop-head:hover .pop-breakdown { display: block; }
+
+/* 建筑卡/抽屉：每级提供的人口上限提示 */
+.popcap { color: var(--c-brand); font-weight: 600; }
 
 /* 训练面板：批次粮压标注 */
 .train-upkeep {

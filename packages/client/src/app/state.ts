@@ -96,9 +96,10 @@ export function getPopState(): PopSnapshot | null { return popState; }
 export function setPopState(s: PopSnapshot): void { popState = s; }
 
 /**
- * 本地外插当前人口（不发请求）。
+ * 本地外插当前「劳动人口」（不发请求）。
  * 公式：若 currentPop < availableLabor 且增长率 > 0，则按 growthPerHour 线性外插，上限 availableLabor。
  * 下降（饥荒减员 / 超限）由服务端处理，客户端保守显示不模拟减员。
+ * 注意：这是平民（可训/可增长）人口，不含士兵；训练容量判定用此值（见 army.ts）。
  */
 export function interpolatePop(): number {
   if (!popState) return 0;
@@ -108,4 +109,14 @@ export function interpolatePop(): number {
     return Math.min(availableLabor, Math.round(currentPop + growthPerHour * elapsedHours));
   }
   return Math.round(currentPop);
+}
+
+/**
+ * 本地外插「占用总人口」= 劳动人口 + 士兵人口（占用硬上限的那部分）。
+ * 用于顶栏/人口面板的大数字与进度条（分子 = 总人口 / 硬上限）。
+ * 与 military.reportUpkeep 上报的 soldier_pop（士兵基础粮）口径一致：士兵算作人口占用。
+ */
+export function interpolateTotalPop(): number {
+  if (!popState) return 0;
+  return interpolatePop() + popState.soldierPop;
 }

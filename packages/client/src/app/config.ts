@@ -11,13 +11,13 @@ import * as fallback from '../info.js';
 
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
-export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string }
+export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number }
 export interface UnitInfo { name: string; icon: string; form: string; popCost: number }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
-  buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string }[];
+  buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number }[];
   units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number };
@@ -38,7 +38,7 @@ export async function loadGameConfig(): Promise<void> {
     cfg = r.payload as unknown as ServerConfig;
     for (const x of cfg.resources) res[x.key] = { name: x.name, icon: x.icon };
     for (const x of cfg.buildings) {
-      buildings[x.kind] = { name: x.name, icon: x.icon, zone: x.zone, resource: x.resource ?? undefined, desc: x.desc, effect: x.effect };
+      buildings[x.kind] = { name: x.name, icon: x.icon, zone: x.zone, resource: x.resource ?? undefined, desc: x.desc, effect: x.effect, popCapPerLevel: x.popCapPerLevel };
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
@@ -77,6 +77,10 @@ export function fieldInfo(type: string): FieldInfo {
 }
 export function buildingInfo(kind: string): BuildingInfo {
   return buildings[kind] ?? fallback.BUILDING_INFO[kind] ?? { name: kind, icon: 'bld_main' };
+}
+/** 建筑每级提供的人口上限基数（popCapPerLevel）；缺省 0（非人口建筑）。 */
+export function buildingPopCapPerLevel(kind: string): number {
+  return buildingInfo(kind).popCapPerLevel ?? 0;
 }
 export function unitInfo(key: string): UnitInfo {
   if (units[key]) return units[key];

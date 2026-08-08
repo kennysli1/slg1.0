@@ -41,6 +41,7 @@ export class MetaModule {
           kind: b.kind, name: b.name, icon: b.icon, zone: b.zone,
           resource: b.resource ?? null,
           desc: b.desc, effect: b.effect,
+          popCapPerLevel: b.popCapPerLevel,
         })),
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,

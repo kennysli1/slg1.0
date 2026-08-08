@@ -9,7 +9,7 @@ import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop } from './state.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
@@ -153,18 +153,17 @@ function renderResBar() {
 function renderPopCell(): string {
   const ps = getPopState();
   if (!ps) return '';
-  const pop = interpolatePop();
+  const pop = interpolateTotalPop(); // 占用总人口 = 劳动 + 士兵
+  const labor = Math.max(0, Math.round(pop - ps.soldierPop));
   const growth = Math.round(ps.growthPerHour);
   const sign = growth >= 0 ? '+' : '';
   // 饥荒优先显示红色，接近硬上限显示橙色
   const famineClass = ps.inFamine ? ' res-famine' : (ps.hardCap > 0 && pop / ps.hardCap >= 0.95 ? ' res-low' : '');
   const famineIcon = ps.inFamine ? '🚨' : '👥';
-  const titleSuffix = ps.inFamine
-    ? '（饥荒！人口正在减少）'
-    : ps.soldierPop > 0
-      ? `· 士兵 ${fmt(ps.soldierPop)} 人`
-      : '';
-  return `<span class="res res-pop${famineClass}" title="平民 ${fmt(pop)}/${fmt(ps.hardCap)}（硬上限）· 增长 ${sign}${growth}/h${titleSuffix}">
+  const title = ps.inFamine
+    ? `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（饥荒！人口正在减少）· 增长 ${sign}${growth}/h`
+    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)} = 劳动 ${fmt(labor)} + 军队 ${fmt(ps.soldierPop)} · 增长 ${sign}${growth}/h`;
+  return `<span class="res res-pop${famineClass}" title="${title}">
     <span class="res-pop-icon">${famineIcon}</span>
     <span class="res-num">${fmt(pop)}<small>/${fmt(ps.hardCap)}</small></span>
     <span class="res-rate">${sign}${growth}/h</span></span>`;

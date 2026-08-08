@@ -7,7 +7,7 @@
  * PopulationChanged push 到达时，由 handlePush 调 rerenderPopPanel() 局部刷新，禁止整页回环。
  */
 import { fmt } from '../../shared/utils/format.js';
-import { getPopState, interpolatePop } from '../../app/state.js';
+import { getPopState, interpolatePop, interpolateTotalPop } from '../../app/state.js';
 
 /** 速率类 mult → "XX%" */
 function multPct(mult: number): string {
@@ -56,11 +56,15 @@ export function renderPopPanel(): string {
   const ps = getPopState();
   if (!ps) return '';
 
-  const pop = interpolatePop();
+  const pop = interpolateTotalPop(); // 占用总人口 = 劳动 + 士兵（与硬上限口径一致）
   const ratio = ps.hardCap > 0 ? Math.min(1, pop / ps.hardCap) : 0;
   const ratioPct = (ratio * 100).toFixed(1);
   const prosperityPct = Math.round(ps.prosperityMult * 100);
   const growthSign = ps.growthPerHour >= 0 ? '+' : '';
+  // 劳动人口 = 总占用 − 士兵人口（hover 明细用）
+  const laborPop = Math.max(0, Math.round(pop - ps.soldierPop));
+  // 劳动占比（驱动繁荣度）仍按真实 劳动人口/硬上限（服务端口径 ps.laborRatio）
+  const laborRatioPct = Math.round((ps.laborRatio ?? 0) * 100);
 
   // 进度条颜色类
   const barClass = ps.inFamine
@@ -78,34 +82,28 @@ export function renderPopPanel(): string {
       <span class="pop-labor-item"><i>锻造速率</i><b>${multPct(lm.smithy)}</b></span>
     </div>`;
 
-  // 人口构成（硬上限 = 平民 + 士兵）
-  let popBreakHtml = '';
-  if (ps.soldierPop > 0) {
-    popBreakHtml = `<div class="pop-breakdown hint-sm">
-      硬上限 ${fmt(ps.hardCap)}
-      = 平民 ${fmt(ps.currentPop)} + 士兵 ${fmt(ps.soldierPop)}
-    </div>`;
-  }
+  // 人口构成明细：默认隐藏，hover 人口数字时展开（劳动 + 军队）
+  const popBreakHtml = `<div class="pop-breakdown">劳动人口 ${fmt(laborPop)} · 军队人口 ${fmt(ps.soldierPop)}</div>`;
 
   const statusLabels = renderStatusLabels(ps, pop);
 
   return `<div class="pop-panel">
-    <div class="pop-head">
+    <div class="pop-head" title="人口占用 ${fmt(pop)} / ${fmt(ps.hardCap)} = 劳动 ${fmt(laborPop)} + 军队 ${fmt(ps.soldierPop)}（硬上限）">
       <span class="pop-current" id="pop-current">${fmt(pop)}</span>
       <span class="pop-slash">/</span>
       <span class="pop-limit">${fmt(ps.hardCap)}</span>
       <small class="hint-sm pop-pct">${ratioPct}%</small>
+      ${popBreakHtml}
     </div>
-    <div class="pop-bar-wrap" title="劳动人口占硬上限 ${ratioPct}%">
+    <div class="pop-bar-wrap" title="人口占用 ${ratioPct}%（${fmt(pop)}/${fmt(ps.hardCap)}）">
       <div class="pop-bar-fill${barClass}" id="pop-bar-fill" style="width:${ratioPct}%"></div>
     </div>
     <div class="pop-meta">
       <span class="pop-stat"><i>增长</i><b>${growthSign}${Math.round(ps.growthPerHour)}/h</b></span>
-      <span class="pop-stat"><i>劳动占比</i><b>${Math.round(ratio * 100)}%</b></span>
+      <span class="pop-stat"><i>劳动占比</i><b>${laborRatioPct}%</b></span>
       <span class="pop-stat"><i>士兵</i><b>${fmt(ps.soldierPop)}</b></span>
       <span class="pop-stat"><i>繁荣系数</i><b>${prosperityPct}%</b></span>
     </div>
-    ${popBreakHtml}
     ${statusLabels}
     <div class="pop-labor">
       <div class="pop-labor-title">繁荣度系数（劳动占比 ≥${Math.round(ps.raceMin * 100)}% 时满值 100%）</div>
@@ -126,7 +124,7 @@ export function syncPopDisplay(): void {
   const ps = getPopState();
   if (!ps) return;
 
-  const pop = interpolatePop();
+  const pop = interpolateTotalPop();
   numEl.textContent = fmt(pop);
 
   if (barEl && ps.hardCap > 0) {

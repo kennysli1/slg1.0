@@ -87,6 +87,10 @@ function renderPlaced(p: any): string {
   const prod = p.producing
     ? `<div class="hint-sm prod">+${p.producing.ratePerHour}/h</div>`
     : '';
+  const popCap = buildingInfo(p.kind).popCapPerLevel ?? 0;
+  const popCapHint = popCap > 0
+    ? `<div class="hint-sm popcap">人口上限 +${popCap}/级</div>`
+    : '';
   let btn: string;
   if (constructing) btn = '<small class="tag">建造中</small>';
   else if (max) btn = '<small class="tag">已满级</small>';
@@ -100,6 +104,7 @@ function renderPlaced(p: any): string {
     <div class="cardbody"><div class="card-title">${escapeHtml(p.name)} <b class="lv">${lv}</b>
       <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
+      ${popCapHint}
       ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
 }
 
@@ -112,6 +117,8 @@ function renderDrawer(): string {
   const opts = drawer.options.map((o: any) => {
     const afford = canAfford(o.cost);
     const prod = o.producing ? `<span class="hint-sm prod">+${o.producing.ratePerHour}/h</span>` : '';
+    const popCap = buildingInfo(o.kind).popCapPerLevel ?? 0;
+    const popCapHint = popCap > 0 ? `<span class="hint-sm popcap">人口上限 +${popCap}/级</span>` : '';
     let action: string;
     if (!o.unlocked) {
       action = `<small class="tag tag-lock">${escapeHtml(o.lockReason ?? '未解锁')}</small>`;
@@ -119,7 +126,7 @@ function renderDrawer(): string {
       action = `<button class="btn-sm" data-do-build="${o.kind}" ${!afford ? 'disabled' : ''}>建造</button>`;
     }
     return `<div class="opt ${o.unlocked ? '' : 'locked'}" data-bld-opt="${o.kind}" title="点击查看 ${escapeAttr(o.name)} 详情">${art(o.icon, o.name, 'md')}
-      <div class="opt-body"><div class="opt-title">${escapeHtml(o.name)} ${prod}<small class="bld-detail-hint">详情 ›</small></div>
+      <div class="opt-body"><div class="opt-title">${escapeHtml(o.name)} ${prod}${popCapHint}<small class="bld-detail-hint">详情 ›</small></div>
         ${costPreview(o.cost, o.timeSec)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
@@ -186,6 +193,11 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
     ? `<div class="bld-detail-row"><span class="bld-detail-k">当前产量</span><span class="bld-detail-v">+${ctx.producing.ratePerHour}/h</span></div>`
     : '';
 
+  const popCap = buildingInfo(kind).popCapPerLevel ?? 0;
+  const popCapSec = popCap > 0
+    ? `<div class="bld-detail-row"><span class="bld-detail-k">每级人口上限</span><span class="bld-detail-v">+${popCap}</span></div>`
+    : '';
+
   const wrap = document.createElement('div');
   wrap.id = 'building-detail-modal';
   wrap.innerHTML = `
@@ -203,6 +215,7 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
         <div class="drawer-sec-title">升级效果</div>
         <div class="bld-detail-desc">${escapeHtml(info.effect || '每级提升该建筑的相关能力。')}</div>
         ${prodSec}
+        ${popCapSec}
         ${costSec}
       </div>
     </aside>`;
