@@ -133,6 +133,11 @@ export class EconomyModule {
       if (cap === undefined || cap === null || !Number.isFinite(cap)) {
         s.capacity[t] = t === 'gold' ? GOLD_CAP : 0;
       }
+      // baseRate 旧存档也可能缺 gold 键（undefined）→ 兜底 0，否则 grossRate 算出 NaN 污染存量
+      const rate = s.baseRate[t] as number | null | undefined;
+      if (rate === undefined || rate === null || !Number.isFinite(rate)) {
+        s.baseRate[t] = 0;
+      }
     }
     if (elapsed <= 0) return;
     for (const t of RESOURCE_TYPES) {
@@ -167,7 +172,9 @@ export class EconomyModule {
   private grossRate(s: EconomyState, t: ResourceType): number {
     let mult = 1;
     for (const m of s.rateModifiers) mult += m.mult[t] ?? 0;
-    return s.baseRate[t] * mult;
+    // baseRate[t] 可能为旧存档缺失的 undefined（如 early 村庄在 gold 字段加入前创建）→ 兜底为 0，避免 NaN 污染
+    const base = Number.isFinite(s.baseRate[t]) ? s.baseRate[t] : 0;
+    return base * mult;
   }
 
   /** 净产率：超额时毛产=0；crop 仍减每秒消耗。 */

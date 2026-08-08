@@ -153,6 +153,31 @@ test('Economy: 历史残留 null 金币经 settle 自愈为 startGoldAmount(=100
   assert.equal(after.resources.gold, 100, '金币自愈应回退到 startGoldAmount(=100)');
 });
 
+test('Economy: 旧村庄 baseRate 缺 gold 键时金币自愈为 100（而非 NaN→0）', async () => {
+  const app = makeApp();
+  app.setupWorld();
+  const reg = await app.commands.send({
+    name: 'player.Register', from: 't',
+    payload: { name: '旧村baseRate', password: 'pass123', tribe: 'romans' },
+  });
+  assert.ok(reg.ok);
+  const vid = (reg.payload as any).player.villageId;
+  await flush();
+
+  // 模拟 gold 加入前的旧村庄：金币为 null 且 baseRate 缺 gold 键
+  const econ = app.store.get<any>('economy', vid);
+  econ.resources.gold = null;
+  delete econ.baseRate.gold;
+  app.store.set('economy', vid, econ);
+
+  const r = await app.commands.send({ name: 'economy.GetResources', from: 't', payload: { villageId: vid } });
+  assert.ok(r.ok);
+  const after = app.store.get<any>('economy', vid);
+  assert.equal(typeof after.resources.gold, 'number', '金币应为数字');
+  assert.equal(after.resources.gold, 100, '旧村庄金币应自愈为 startGoldAmount(=100)，而非被 NaN 清成 0');
+  assert.equal(typeof after.baseRate.gold, 'number', 'baseRate.gold 应被补齐为数字（0）');
+});
+
 test('Population 周期结算: 金币税随 tick 持续累加（不依赖客户端轮询/开面板）', async () => {
   const app = makeApp();
   app.setupWorld();
