@@ -96,14 +96,14 @@ slg1.0/
 | 模块 | 拥有的状态 | 主要能力 |
 |------|-----------|---------|
 | `player.ts` | 玩家账号(密码scrypt)、玩家↔村庄映射、种族 | 注册/登录、分配地图空位、村庄归属反查 |
-| `economy.ts` | 资源存量/产率/容量/crop消耗 | 4资源、惰性结算、扣费/给资源、crop净消耗与告急 |
+| `economy.ts` | 资源存量/产率/容量/crop消耗 | **5 种资源（含金币 gold，无上限）**、惰性结算、扣费/给资源、crop净消耗与告急；金币靠人口交税 `economy.Grant` 入账（非自然产出）；`settle` 含健壮迁移：旧存档缺字段或残留 `null/NaN` 一律自愈为合法值（gold→`startGoldAmount`，cap→`GOLD_CAP`，`baseRate` 缺键兜底 0） |
 | `building.ts` | 三区建筑布局（城镇中心+城内+城外，含资源田）+ 多条建造队列 | 点空槽建造、升级、科技树前置、城镇中心派生槽位/队列容量、主基地降耗时、上报人口耗粮/产率/仓储容量、城墙防御快照 |
 | `military.ts` | 兵力/训练队列/铁匠等级 | 训练（逐个产出）、铁匠养成、参战快照、增减兵力 |
 | `world.ts` | 地图地块（村庄/PvE/空地） | **六边形网格**（轴坐标 `{q,r}`）坐标、`hexDistance` 距离、放置村庄/PvE |
 | `movement.ts` | 在途部队 | 出征→逐格行军→到达发 `combat.Engage`→战斗结束(`BattleEnded`)带战利品返程（raid打PvE / attack打玩家 / return）；坐标为六边形 `{q,r}` |
 | `combat.ts` | **进行中的战斗**（`battle` 集合） | 有状态逐 tick 战斗：前后排承伤 + 近战/远程 + 特性；一地一场战、后到按阵营并入；结束发 Command 让 owner 扣兵/掠夺、发 Event 出战报（PvE/PvP 共用）；每 tick 推实时快照 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
-| `population.ts` | 每村人口上限(hardCap,建筑累加)/劳动人口(currentPop)/士兵人口(soldierPop) | v3 硬上限模型：hardCap 由建筑 `popCapPerLevel×level` 累加；availableLabor=hardCap−soldierPop（兼容别名 softLimit）；laborRatio 驱动五轴统一的 `prosperityMult`∈[0.75,1]；growthPerHour 朝 availableLabor 收敛、粮荒不为0则停增；医院 `RecoverCasualties` 即时回收战死士兵人口（无伤兵池/无定时器）；铁匠升级耗时受繁荣加速；ConsumePop 只减 currentPop 腾空间；单向写 economy 口粮与劳动加成，只读 economy.nonCivilianUpkeep（无环） |
+| `population.ts` | 每村人口上限(hardCap,建筑累加)/劳动人口(currentPop)/士兵人口(soldierPop) | v3 硬上限模型：hardCap 由建筑 `popCapPerLevel×level` 累加；availableLabor=hardCap−soldierPop（兼容别名 softLimit）；laborRatio 驱动五轴统一的 `prosperityMult`∈[0.75,1]；**增长速率绑定城镇中心**（`main.popGrowthPerLevel × mainLevel`，GM 可改；旧全局 `pop_growth_per_hour` 已废弃）；开局人口=城镇中心当前等级贡献的 popCap；**金币税随结算累加**：`goldGained=currentPop×goldTaxPerCivilianPerHour×Δt`，经 `economy.Grant` 入账（不受繁荣度影响）；医院 `RecoverCasualties` 即时回收战死士兵人口（无伤兵池/无定时器）；铁匠升级耗时受繁荣加速；ConsumePop 只减 currentPop 腾空间；单向写 economy 口粮与劳动加成，只读 economy.nonCivilianUpkeep（无环）；**含周期结算 tick（每 30s 结算全部村庄）使金币税与人口增长持续累加、离线也生效** |
 | `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
@@ -213,9 +213,39 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ---
 
-## 七、当前状态与下一步
+## 七、金币经济（Gold Economy）
 
-**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v3 硬上限模型（hardCap 由建筑累加/availableLabor 门控/五轴统一 prosperityMult/增长收敛/粮荒减员/医院即时回收战死/铁匠耗时/ConsumePop 腾空间/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
+金币是**第 5 种资源**（wood/clay/iron/crop/**gold**），用于雇佣兵体系。核心三点：**来源=人口交税、花费=建造/升级逐等级 gold、用途=买雇佣兵**。
+
+### 1. 来源：人口交税（持续产金）
+- 每个**劳动人口（currentPop）** 按税率交税：`金币/时 = currentPop × goldTaxPerCivilianPerHour`。
+- 税率由 `gold_tax_per_civilian_per_hour` 控制（默认 1，GM 曾调到 100 → 显示 +2100/时）。**绑定城镇中心、不受繁荣度影响**。
+- 金币**无自然产出**（不像木/土/铁/粮有 baseRate），只靠税收 `economy.Grant` 入账；容量 `GOLD_CAP = Number.MAX_SAFE_INTEGER`（无上限）。
+
+### 2. 花费：建造/升级逐建筑逐等级 gold
+- `config/building_levels.csv` 新增 **`costGold`** 列（在 `costCrop` 之后、`timeSec` 之前），表示"升/建到该等级**额外**消耗的金币数"（默认全 =1，叠加在原四资源之上）。
+- 经济 `TrySpend` 已覆盖 gold，所以 per-level `costGold` 直接进花费对象，无需全局变量。
+- **GM 面板可对每个建筑、每一级单独微调 `costGold`**（不再依赖单一 `gold_cost_per_build` 全局变量）。
+
+### 3. 用途
+- 雇佣兵营地购买 10 种雇佣兵：金币购买、永久拥有、不耗粮、不占人口。详见 `mercenaries.csv` 的 `goldCost` 列。
+
+### 4. 怎么调参（两种口径，后者优先）
+| 方式 | 改哪里 | 说明 |
+|------|--------|------|
+| 改 CSV | `config/game_constants.csv`：`gold_tax_per_civilian_per_hour` / `start_gold_amount`；`config/building_levels.csv`：`costGold` | 重启生效；CSV 是权威默认 |
+| 在线 GM | `/gm/balance` 面板（覆盖层） | 改完即时热重载，**跨部署/刷档存活**（见下方注意事项③） |
+
+### 5. 注意事项 / 已知坑
+1. **金币会真实累加**：税收与人口增长由 `population` 模块的**周期结算 tick（每 30s 结算全部村庄）** 持续累加，客户端在线时每 5s 轮询也会触发；两者都按 `lastTick` 算 Δt，**互不重复计数**。所以"资源条显示 +X/时"是真实速率，离线也照常增长。
+2. **旧存档自动自愈**：金币功能加入前创建的村庄，存档可能缺 `gold`/`baseRate.gold` 字段、或残留早期算出的 `null/NaN`（JSON 把 NaN 序列化成 `null`）。`economy.settle` 每次结算会把这些**非有限值自愈为合法值**（gold→`startGoldAmount`，cap→`GOLD_CAP`，`baseRate` 缺键兜底 0），**无需手动修档**。所以若看到金币从 `null`/异常值变成正常数字，是正常自愈。
+3. **平衡覆盖层长期生效**：GM 手动调参写在 `data/balance_overrides.json`（与 `game.json` 同目录、`gitignore`）。部署的 `git reset --hard` 只清 git 跟踪的 `config/*.csv`，不碰 `data/`；`wipe:all` 只重置 `game.json`，不删覆盖文件。故 GM 调参跨部署/刷档存活。
+
+---
+
+## 八、当前状态与下一步
+
+**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v3 硬上限模型（hardCap 由建筑累加/availableLabor 门控/五轴统一 prosperityMult/增长收敛/粮荒减员/医院即时回收战死/铁匠耗时/ConsumePop 腾空间/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）** + **金币经济（第 5 资源·人口交税·建造/升级 per-level costGold·雇佣兵营地+10 雇佣兵）** + **GM 平衡调参面板 `/gm/balance`（覆盖层热重载·跨部署/刷档存活·修复常量覆盖键名错配 bug）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`（与 pm2 `ecosystem.config.cjs` 同入口：`packages/server/dist/main.js`）。
 
