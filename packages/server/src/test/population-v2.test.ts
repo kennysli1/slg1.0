@@ -3,7 +3,8 @@
  *
  * 覆盖设计文档 13/14「硬上限重做」核心不变量：
  *  C1  三部族 createVillage 开局人口=城镇中心popCap：currentPop=Σmain[1..level].popCap，hardCap>currentPop（其他默认建筑只提供上限），softLimit===availableLabor
- *  C2  新村开局未满员：laborRatio∈(0,1) → prosperityMult∈(popLaborFloor,1)、五轴统一、存在正增长潜力(growthPerHour>0)
+ *  C2  平民占比驱动繁荣度：新村无士兵→平民占总人口100%→繁荣度满值1.0；建兵营抬高硬上限不降繁荣度（与上限解耦，原「升级得负收益」bug 已修复）；
+ *      征兵(setGarrisonPop)降平民占比→降繁荣度（仍≥popLaborFloor）；五轴统一；开局存在正增长潜力(growthPerHour>0)
  *  C3  全部兵种 cropPerHourEach>0（士兵以 upkeep 计入口粮，训练严格增加粮食压力）
  *  C4  增长朝 availableLabor 线性收敛：growthPerHour = main.popGrowthPerLevel×mainLevel，夹在缺口内
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
@@ -68,25 +69,55 @@ for (const tribe of ['romans', 'gauls', 'teutons'] as const) {
   });
 }
 
-// ── C2：未满员 → 部分繁荣度 ───────────────────────────────────────────────
+// ── C2：平民占比驱动繁荣度（与硬上限解耦）─────────────────────────────────
 
-test('v3 C2：新村开局未满员 → laborRatio∈(0,1)、prosperityMult∈(popLaborFloor,1)、五轴统一且存在增长潜力', async () => {
+test('v3 C2：平民占比驱动繁荣度——新村满值、升上限不变、征兵下降', async () => {
   const app = freshApp();
   const vid = await reg(app, 'c2', 'romans');
-  const snap = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  // 新模型：开局人口只来自城镇中心，劳动占比未满员
-  assert.ok(snap.laborRatio > 0 && snap.laborRatio < 1, `新村 laborRatio 应∈(0,1)，实际 ${snap.laborRatio}`);
   const floor = app.config.constants.popLaborFloor;
-  assert.ok(snap.prosperityMult > floor - 1e-6 && snap.prosperityMult < 1.0 + 1e-6, `prosperityMult 应∈(floor,1)，实际 ${snap.prosperityMult}`);
-  // 满员时 prosperityMult 才=1（此处未满员，应<1）
-  assert.ok(snap.prosperityMult < 1.0 - 1e-6, `未满员 prosperityMult 应<1.0，实际 ${snap.prosperityMult}`);
+
+  // 1) 新村：无士兵 → 平民占总人口=100% → 繁荣度满值（与硬上限无关）
+  const snap0 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.equal(snap0.soldierPop, 0, '新村应无士兵');
+  assert.ok(snap0.laborRatio > 0 && snap0.laborRatio <= 1.0 + 1e-6, `laborRatio 应∈(0,1]，实际 ${snap0.laborRatio}`);
+  assert.ok(Math.abs(snap0.laborRatio - 1) < 1e-6, `无士兵→平民占比应≈100%，实际 ${snap0.laborRatio}`);
+  // 平民占比 100% → prosperityBonus=1 → prosperityMult=1.0（满值，与人口上限无关）
+  assert.ok(Math.abs(snap0.prosperityMult - 1) < 1e-6, `无士兵 prosperityMult 应≈1.0，实际 ${snap0.prosperityMult}`);
   // 存在增长潜力：growthPerHour>0（速率=main.popGrowthPerLevel×mainLevel，缺口>0）
-  assert.ok(snap.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${snap.growthPerHour}`);
+  assert.ok(snap0.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${snap0.growthPerHour}`);
   // 五轴统一
   for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
-    assert.ok(typeof snap.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
-    assert.ok(Math.abs(snap.laborMults[axis] - snap.prosperityMult) < 1e-6, `${axis} 倍率应=prosperityMult`);
+    assert.ok(typeof snap0.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
+    assert.ok(Math.abs(snap0.laborMults[axis] - snap0.prosperityMult) < 1e-6, `${axis} 倍率应=prosperityMult`);
   }
+
+  // 2) 建兵营抬高硬上限：currentPop/soldierPop 不变 → 平民占比与繁荣度不变（证明与硬上限解耦，原「升级得负收益」bug 已修复）
+  const before = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  const buildRes = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+  assert.equal(buildRes.ok, true, `建兵营应成功: ${buildRes.reason ?? ''}`);
+  tick(60_000);
+  await app.scheduler.advanceTo(clock, setClock);
+  await flush();
+  const afterBuild = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.ok(afterBuild.hardCap > before.hardCap, `建兵营应提高 hardCap（${before.hardCap}→${afterBuild.hardCap}）`);
+  assert.ok(
+    Math.abs(afterBuild.prosperityMult - before.prosperityMult) < 1e-6,
+    `升上限不应降低繁荣度（${before.prosperityMult}→${afterBuild.prosperityMult}）`,
+  );
+  assert.ok(
+    Math.abs(afterBuild.laborRatio - before.laborRatio) < 1e-6,
+    `升上限不应改变平民占比（${before.laborRatio}→${afterBuild.laborRatio}）`,
+  );
+
+  // 3) 征兵（SetGarrisonPop）：平民占比下降 → 繁荣度下降（仍≥popLaborFloor）
+  await send(app, 'population.SetGarrisonPop', { villageId: vid, popCostSum: 1000 });
+  await flush();
+  const afterSoldiers = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.ok(afterSoldiers.soldierPop > 0, `应有士兵上报，实际 ${afterSoldiers.soldierPop}`);
+  assert.ok(afterSoldiers.laborRatio < before.laborRatio - 1e-6, `征兵后平民占比应下降（${before.laborRatio}→${afterSoldiers.laborRatio}）`);
+  assert.ok(afterSoldiers.prosperityMult < before.prosperityMult - 1e-6, `征兵后繁荣度应下降（${before.prosperityMult}→${afterSoldiers.prosperityMult}）`);
+  assert.ok(afterSoldiers.prosperityMult >= floor - 1e-6, `繁荣度不应低于 popLaborFloor(${floor})，实际 ${afterSoldiers.prosperityMult}`);
 });
 
 // ── C3：兵种口粮 ──────────────────────────────────────────────────────────

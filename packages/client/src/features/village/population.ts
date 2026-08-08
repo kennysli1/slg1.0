@@ -1,7 +1,8 @@
 /**
- * 人口面板：劳动人口 / 硬上限 / 劳动占比 / 繁荣度系数 / 五轴速率 / 增长。
+ * 人口面板：劳动人口 / 硬上限 / 平民占比 / 繁荣度系数 / 五轴速率 / 增长。
  * v3 硬上限模型（对应设计文档 13/14）：
- *   硬上限由建筑提供；士兵占用人口；劳动占比决定五轴繁荣度系数（资源/建造/练兵/研究/锻造）。
+ *   硬上限由建筑提供；士兵占用人口；平民占总人口比例决定五轴繁荣度系数（资源/建造/练兵/研究/锻造）。
+ *   繁荣度与硬上限解耦：建造/升级抬高硬上限不再降低繁荣度（否则「升级得负收益」）。
  * 本地外插：renderPopPanel() 生成含 id="pop-current"/"pop-bar-fill" 的 DOM；
  * bootstrap 的 1s 定时器调 syncPopDisplay() 按 growthPerHour 线性更新显示值，不发请求。
  * PopulationChanged push 到达时，由 handlePush 调 rerenderPopPanel() 局部刷新，禁止整页回环。
@@ -71,7 +72,7 @@ export function renderPopPanel(): string {
   const growthNote = atCap ? ' <small class="hint-sm pop-capped">上限·不增长</small>' : '';
   // 劳动人口 = 总占用 − 士兵人口（hover 明细用）
   const laborPop = Math.max(0, Math.round(pop - ps.soldierPop));
-  // 劳动占比（驱动繁荣度）仍按真实 劳动人口/硬上限（服务端口径 ps.laborRatio）
+  // 平民占比（驱动繁荣度）= 劳动人口 / 总人口（服务端口径 ps.laborRatio，已与硬上限解耦）
   const laborRatioPct = Math.round((ps.laborRatio ?? 0) * 100);
 
   // 进度条颜色类
@@ -108,13 +109,13 @@ export function renderPopPanel(): string {
     </div>
     <div class="pop-meta">
       <span class="pop-stat"><i>增长</i><b>${growthSign}${Math.round(growthDisplay)}/h${growthNote}</b></span>
-      <span class="pop-stat"><i>劳动占比</i><b>${laborRatioPct}%</b></span>
+      <span class="pop-stat"><i>平民占比</i><b>${laborRatioPct}%</b></span>
       <span class="pop-stat"><i>士兵</i><b>${fmt(ps.soldierPop)}</b></span>
       <span class="pop-stat"><i>繁荣系数</i><b>${prosperityPct}%</b></span>
     </div>
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">繁荣度系数（劳动占比 ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%；劳动占比 越低加成越低，种族最低占比处为底线）</div>
+      <div class="pop-labor-title">繁荣度系数（平民占总人口比例 ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%；征兵越多平民占比越低，繁荣度越低；与人口上限无关）</div>
       ${laborGrid}
     </div>
   </div>`;

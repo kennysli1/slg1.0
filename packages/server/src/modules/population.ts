@@ -14,8 +14,9 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  *  A. 硬上限 hardCap = Σ 建筑 popCapPerLevel × level（由 building.GetPopCap 提供，缓存到 state）。
  *  B. 劳动人口 currentPop（平民）；士兵人口 soldierPop = garrisonPopCost + enRoutePopCost（军事/行军上报）。
  *     availableLabor = hardCap − soldierPop（增长目标 / 拓荒门槛 / 三池口径）。
- *  C. 劳动占比 laborRatio = currentPop / hardCap；繁荣度加成：
- *       prosperityBonus = clamp((laborRatio − raceMin) / (popProsperityFullRatio − raceMin), 0, 1)
+ *  C. 繁荣度由「平民占总人口比例」驱动（与硬上限解耦，建造/升级不再造成负收益）：
+ *       civilFrac = currentPop / (currentPop + soldierPop)   // 平民(劳动)占总人口比例，∈[0,1]
+ *       prosperityBonus = clamp(civilFrac / popProsperityFullRatio, 0, 1)   // ≥即满值；再乘拥挤惩罚
  *       prosperityMult  = popLaborFloor + (1 − popLaborFloor) × prosperityBonus   // ∈ [popLaborFloor, 1.0]
  *     五条速率轴（资源产出 / 研究 / 练兵 / 锻造 / 建造）统一消费 prosperityMult。
  *  D. 增长 growthPerHour = main.popGrowthPerLevel × mainLevel，朝 availableLabor 收敛（currentPop 已达则不再增长）。
@@ -38,7 +39,7 @@ interface PopulationState {
   garrisonPopCost: number;
   /** 在途部队人口权重（movement 经 SetEnRoutePop 上报）。 */
   enRoutePopCost: number;
-  /** 部族（决定 raceMin）。 */
+  /** 部族（原 raceMin 来源，现仅保留在快照中供 UI 展示，不再参与繁荣度计算）。 */
   tribe: string;
   /** 饥荒减员任务 id（运行中非空）。 */
   starveTaskId?: string;
@@ -183,28 +184,31 @@ export class PopulationModule {
     return (rm as Record<string, number>)[s.tribe] ?? rm.romans;
   }
 
-  /** 劳动人口占硬上限比例。 */
+  /** 平民（劳动人口）占总人口（平民+士兵）比例；与硬上限解耦，建造/升级不再影响繁荣度。 */
   private laborRatio(s: PopulationState): number {
-    return s.hardCap > 0 ? s.currentPop / s.hardCap : 0;
+    const total = s.currentPop + this.soldierPop(s);
+    return total > 0 ? s.currentPop / total : 0;
   }
 
   /**
-   * 繁荣度加成 ∈ [0,1]。
-   *  - ratio = currentPop / hardCap ≤ 1：种族最低占比处为 0，popProsperityFullRatio 处满值（线性）。
-   *  - ratio > 1（人口超上限/拥挤）：在 1 → popOvercapPenaltyFullRatio 之间由满值线性降到 0
-   *    （默认 ratio=2 即超出一倍时繁荣度加成归零），惩罚人口拥挤。
+   * 繁荣度加成 ∈ [0,1]，由「平民占总人口比例」驱动（与硬上限解耦，建造/升级不再造成负收益）：
+   *  - civilFrac = currentPop / (currentPop + soldierPop)，∈ [0,1]；平民占比越高越繁荣。
+   *  - 达到 popProsperityFullRatio（默认 0.70，即≥70%平民）为满值，低于则线性降到 0。
+   *  - 拥挤惩罚（保底）：平民实际超过硬上限（人口超 housing，多在拆房/减员回补瞬态）时，
+   *    按 popOvercapPenaltyFullRatio 在 1→2 倍间线性降到 0。正常稳态 currentPop ≤ hardCap−soldierPop，不触发。
    */
   private prosperityBonus(s: PopulationState): number {
     const c = this.config.constants;
-    const rm = this.raceMin(s);
-    const ratio = this.laborRatio(s);
-    if (ratio <= 1) {
-      return clamp((ratio - rm) / (c.popProsperityFullRatio - rm), 0, 1);
+    const total = s.currentPop + this.soldierPop(s);
+    const civilFrac = total > 0 ? s.currentPop / total : 0;
+    const fillBonus = clamp(civilFrac / c.popProsperityFullRatio, 0, 1);
+    let overcrowd = 1;
+    if (s.hardCap > 0 && s.currentPop > s.hardCap) {
+      const overRatio = s.currentPop / s.hardCap;
+      const over = clamp((overRatio - 1) / (c.popOvercapPenaltyFullRatio - 1), 0, 1);
+      overcrowd = 1 - over;
     }
-    // 超上限：baseAt1 为 ratio=1 时的基础加成（正常=1），按超出比例线性衰减到 0
-    const baseAt1 = clamp((1 - rm) / (c.popProsperityFullRatio - rm), 0, 1);
-    const over = clamp((ratio - 1) / (c.popOvercapPenaltyFullRatio - 1), 0, 1);
-    return baseAt1 * (1 - over);
+    return fillBonus * overcrowd;
   }
 
   /** 五轴统一的繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
@@ -299,7 +303,7 @@ export class PopulationModule {
       /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
       potentialGrowthPerHour: Math.round(this.growthRateRaw(s)),
       raceMin: this.raceMin(s),
-      /** 繁荣度满值阈值（劳动占比 ≥此值时 prosperityBonus=1）；面板文案使用。 */
+      /** 繁荣度满值阈值（平民占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
       popProsperityFullRatio: c.popProsperityFullRatio,
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
