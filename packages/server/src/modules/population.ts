@@ -288,6 +288,8 @@ export class PopulationModule {
       prosperityBonus: Math.round(bonus * 100) / 100,
       prosperityMult: Math.round(mult * 100) / 100,
       growthPerHour: Math.round(growth),
+      /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
+      potentialGrowthPerHour: Math.round(c.popGrowthPerHour * s.mainLevel),
       raceMin: this.raceMin(s),
       /** 繁荣度满值阈值（劳动占比 ≥此值时 prosperityBonus=1）；面板文案使用。 */
       popProsperityFullRatio: c.popProsperityFullRatio,

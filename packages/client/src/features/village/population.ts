@@ -37,10 +37,13 @@ function renderStatusLabels(ps: NonNullable<ReturnType<typeof getPopState>>, pop
     </div>`);
   }
 
-  // ✅ 满员（已达硬上限，停止增长）
+  // ✅ 满员（已达硬上限，停止增长，但仍展示人口流动潜力）
   if (!ps.inFamine && ratio >= 1.0) {
+    const capVal = fmt(ps.hardCap);
+    const pot = ps.potentialGrowthPerHour ?? 0;
+    const potStr = pot > 0 ? `（本可 +${pot}/h 增长，已被上限锁住）` : '';
     labels.push(`<div class="pop-status pop-status--full">
-      ✅ 已达硬上限，人口停止增长
+      ✅ 已达人口硬上限（${capVal}），人口停止增长${potStr}
     </div>`);
   }
 
@@ -57,10 +60,15 @@ export function renderPopPanel(): string {
   if (!ps) return '';
 
   const pop = interpolateTotalPop(); // 占用总人口 = 劳动 + 士兵（与硬上限口径一致）
-  const ratio = ps.hardCap > 0 ? Math.min(1, pop / ps.hardCap) : 0;
+  const rawRatio = ps.hardCap > 0 ? pop / ps.hardCap : 0;
+  const ratio = Math.min(1, rawRatio);
+  const atCap = !ps.inFamine && rawRatio >= 1.0;
   const ratioPct = (ratio * 100).toFixed(1);
   const prosperityPct = Math.round(ps.prosperityMult * 100);
-  const growthSign = ps.growthPerHour >= 0 ? '+' : '';
+  // 达上限时展示原始增长潜力（被上限锁住），否则展示真实增长
+  const growthDisplay = atCap ? (ps.potentialGrowthPerHour ?? 0) : ps.growthPerHour;
+  const growthSign = growthDisplay >= 0 ? '+' : '';
+  const growthNote = atCap ? ' <small class="hint-sm pop-capped">上限·不增长</small>' : '';
   // 劳动人口 = 总占用 − 士兵人口（hover 明细用）
   const laborPop = Math.max(0, Math.round(pop - ps.soldierPop));
   // 劳动占比（驱动繁荣度）仍按真实 劳动人口/硬上限（服务端口径 ps.laborRatio）
@@ -99,7 +107,7 @@ export function renderPopPanel(): string {
       <div class="pop-bar-fill${barClass}" id="pop-bar-fill" style="width:${ratioPct}%"></div>
     </div>
     <div class="pop-meta">
-      <span class="pop-stat"><i>增长</i><b>${growthSign}${Math.round(ps.growthPerHour)}/h</b></span>
+      <span class="pop-stat"><i>增长</i><b>${growthSign}${Math.round(growthDisplay)}/h${growthNote}</b></span>
       <span class="pop-stat"><i>劳动占比</i><b>${laborRatioPct}%</b></span>
       <span class="pop-stat"><i>士兵</i><b>${fmt(ps.soldierPop)}</b></span>
       <span class="pop-stat"><i>繁荣系数</i><b>${prosperityPct}%</b></span>

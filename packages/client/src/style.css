@@ -711,6 +711,12 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
   background: rgba(79, 122, 63, .08);
   border-left-color: var(--c-ok);
 }
+/* 达上限时增长数值后的「上限·不增长」标注 */
+.pop-capped {
+  color: var(--c-ok);
+  font-weight: 600;
+  margin-left: var(--s-1);
+}
 /* 🩹 重伤（蓝） */
 .pop-status--wound {
   color: #3a6a99;

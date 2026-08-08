@@ -107,6 +107,7 @@ async function refreshAll() {
         prosperityBonus: p.prosperityBonus ?? 0,
         prosperityMult,
         growthPerHour: p.growthPerHour ?? 0,
+        potentialGrowthPerHour: p.potentialGrowthPerHour ?? 0,
         raceMin: p.raceMin ?? 0,
         mainLevel: p.mainLevel ?? 1,
         inFamine: !!p.inFamine,
@@ -155,18 +156,21 @@ function renderPopCell(): string {
   if (!ps) return '';
   const pop = interpolateTotalPop(); // 占用总人口 = 劳动 + 士兵
   const labor = Math.max(0, Math.round(pop - ps.soldierPop));
-  const growth = Math.round(ps.growthPerHour);
+  const atCap = !ps.inFamine && ps.hardCap > 0 && pop / ps.hardCap >= 1.0;
+  // 达上限展示原始增长潜力（被锁），否则展示真实增长
+  const growth = atCap ? Math.round(ps.potentialGrowthPerHour ?? 0) : Math.round(ps.growthPerHour);
   const sign = growth >= 0 ? '+' : '';
+  const capTag = atCap ? ' 上限' : '';
   // 饥荒优先显示红色，接近硬上限显示橙色
   const famineClass = ps.inFamine ? ' res-famine' : (ps.hardCap > 0 && pop / ps.hardCap >= 0.95 ? ' res-low' : '');
   const famineIcon = ps.inFamine ? '🚨' : '👥';
   const title = ps.inFamine
     ? `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（饥荒！人口正在减少）· 增长 ${sign}${growth}/h`
-    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)} = 劳动 ${fmt(labor)} + 军队 ${fmt(ps.soldierPop)} · 增长 ${sign}${growth}/h`;
+    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)} = 劳动 ${fmt(labor)} + 军队 ${fmt(ps.soldierPop)} · 增长 ${sign}${growth}/h${atCap ? '（已达上限，实际不增长）' : ''}`;
   return `<span class="res res-pop${famineClass}" title="${title}">
     <span class="res-pop-icon">${famineIcon}</span>
     <span class="res-num">${fmt(pop)}<small>/${fmt(ps.hardCap)}</small></span>
-    <span class="res-rate">${sign}${growth}/h</span></span>`;
+    <span class="res-rate">${sign}${growth}/h${capTag}</span></span>`;
 }
 
 let lastRenderedTab: string | null = null;

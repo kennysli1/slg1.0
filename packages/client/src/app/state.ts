@@ -25,6 +25,8 @@ export interface PopSnapshot {
   prosperityMult: number;
   /** 每小时增长（朝 availableLabor 收敛）。 */
   growthPerHour: number;
+  /** 原始增长速率（未夹紧到硬上限缺口）；达上限时用于展示人口流动潜力。 */
+  potentialGrowthPerHour?: number;
   /** 种族最低劳动占比（繁荣度满值基准）。 */
   raceMin: number;
   /** 繁荣度满值阈值（劳动占比 ≥此值时繁荣度=100%）。 */
