@@ -265,15 +265,25 @@ export class PopulationModule {
     const dtHours = (now - s.lastTick) / 3600_000;
     s.lastTick = now;
     if (dtHours <= 0) return;
+    const c = this.config.constants;
 
     const avail = this.availableLabor(s);
     // 粮荒期间不增长（减员路径由 runStarveTick 独占），避免与减员相互抵消导致人口卡在平衡点。
     if (!s.inFamine && s.currentPop < avail) {
-      const c = this.config.constants;
       const grow = Math.min(avail - s.currentPop, this.growthRateRaw(s) * dtHours);
       s.currentPop = Math.min(avail, s.currentPop + grow);
     }
     s.currentPop = Math.max(0, s.currentPop);
+
+    // 交税：仅劳动人口(currentPop)按税率交金币，绑定城镇中心、不受繁荣度影响。
+    // 单向 Grant 到 economy（不读回，无环）；与资源惰性结算同节奏，按 Δt 累加。
+    const goldGained = s.currentPop * c.goldTaxPerCivilianPerHour * dtHours;
+    if (goldGained > 0) {
+      await this.commands.send({
+        name: 'economy.Grant', from: PopulationModule.NAME,
+        payload: { villageId: s.villageId, gain: { gold: goldGained } },
+      });
+    }
 
     // 增长结束后即时上报 civilian_pop + pop_labor mult，使 economy 的 cropUpkeep 与服务端 currentPop 同步
     await this.reportToEconomy(s);
@@ -310,6 +320,8 @@ export class PopulationModule {
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,
+      /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
+      goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour),
     };
   }
 

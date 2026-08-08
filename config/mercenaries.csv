@@ -1,0 +1,12 @@
+id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building,traits,popCost,popPermanent,goldCost
+#雇佣兵（全种族共用 tribe=merc）：不耗粮 不占人口 金币购买 永久拥有。popCost/upkeep/cost*/trainSec 一律 0（不经过 military.TrainTroops，直接经 mercenary.Hire 用金币购买并永久写入 troops）。traits 留空。goldCost=雇佣单价。
+1,merc_slinger,merc,佣兵投石手,unit_merc_slinger,ranged,10,35,5,15,6,10,0,0,0,0,0,0,,,0,0,20
+2,merc_spearman,merc,佣兵长矛兵,unit_merc_spearman,melee,30,0,25,20,5,30,0,0,0,0,0,0,,,0,0,25
+3,merc_archer,merc,佣兵弓手,unit_merc_archer,ranged,0,45,8,25,6,15,0,0,0,0,0,0,,,0,0,40
+4,merc_sword,merc,佣兵剑士,unit_merc_sword,melee,50,0,35,30,6,30,0,0,0,0,0,0,,,0,0,45
+5,merc_cavalry,merc,佣兵骑兵,unit_merc_cavalry,melee,55,0,40,45,12,50,0,0,0,0,0,0,,,0,0,60
+6,merc_axe,merc,佣兵斧兵,unit_merc_axe,melee,70,0,40,25,5,40,0,0,0,0,0,0,,,0,0,80
+7,merc_crossbow,merc,佣兵弩手,unit_merc_crossbow,ranged,0,65,10,35,5,20,0,0,0,0,0,0,,,0,0,90
+8,merc_knight,merc,佣兵骑士,unit_merc_knight,melee,90,0,70,70,11,70,0,0,0,0,0,0,,,0,0,120
+9,merc_berserker,merc,狂战士,unit_merc_berserker,melee,120,0,60,30,7,50,0,0,0,0,0,0,,,0,0,160
+10,merc_champion,merc,精锐卫队,unit_merc_champion,melee,150,0,120,120,8,90,0,0,0,0,0,0,,,0,0,220

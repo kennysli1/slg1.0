@@ -12,15 +12,18 @@ import * as fallback from '../info.js';
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[] }
-export interface UnitInfo { name: string; icon: string; form: string; popCost: number }
+export interface UnitInfo { name: string; icon: string; form: string; popCost: number; isMercenary?: boolean }
+export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[] }[];
-  units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number }[];
+  units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number; isMercenary?: boolean }[];
+  /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
+  mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
-  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number };
+  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; goldCostPerBuild: number; startGoldAmount: number };
 }
 
 let cfg: ServerConfig | null = null;
@@ -28,6 +31,7 @@ const res: Record<string, ResInfo> = {};
 const fields: Record<string, FieldInfo> = {};
 const buildings: Record<string, BuildingInfo> = {};
 const units: Record<string, UnitInfo> = {};
+const mercenaries: Record<string, MercenaryInfo> = {};
 const pve: Record<string, PveInfo> = {};
 
 /** 拉取并缓存服务端配置。失败时静默回退到 info.ts 本地表。 */
@@ -42,7 +46,8 @@ export async function loadGameConfig(): Promise<void> {
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
-    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1 };
+    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1, isMercenary: !!x.isMercenary };
+    for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, form: x.form, meleeAtk: x.meleeAtk, rangedAtk: x.rangedAtk, meleeDef: x.meleeDef, rangedDef: x.rangedDef, speed: x.speed, carry: x.carry, goldCost: x.goldCost };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
   } catch {
     /* 网络/协议异常 → 继续用 info.ts 回退 */
@@ -83,10 +88,18 @@ export function buildingPopCapPerLevel(kind: string): number {
   return buildingInfo(kind).popCapPerLevel ?? 0;
 }
 export function unitInfo(key: string): UnitInfo {
-  if (units[key]) return units[key];
+  if (units[key]) {
+    const u = units[key];
+    return { name: u.name, icon: u.icon, form: u.form, popCost: u.isMercenary ? 0 : (u.popCost ?? 1), isMercenary: !!u.isMercenary };
+  }
   const fb = fallback.UNIT_INFO[key];
-  if (fb) return { ...fb, popCost: 1 };
-  return { name: key, icon: `unit_${key}`, form: 'melee', popCost: 1 };
+  const isMerc = key.startsWith('merc_');
+  if (fb) return { ...fb, popCost: isMerc ? 0 : 1, isMercenary: isMerc };
+  return { name: key, icon: `unit_${key}`, form: 'melee', popCost: 1, isMercenary: isMerc };
+}
+/** 雇佣兵详情（含金币单价 + 战斗属性）；仅 merc_* 兵种有。 */
+export function mercenaryInfo(key: string): MercenaryInfo | undefined {
+  return mercenaries[key];
 }
 /** PvE：服务端按 code 给名称/图标。地图 tile 只有 name 时按关键字猜测回退。 */
 export function pveInfoByType(type: string): PveInfo | undefined {
@@ -95,4 +108,17 @@ export function pveInfoByType(type: string): PveInfo | undefined {
 /** 已知全部资源 key（服务端优先，回退木泥铁粮）。 */
 export function resourceKeys(): string[] {
   return cfg ? cfg.resources.map((r) => r.key) : ['wood', 'clay', 'iron', 'crop'];
+}
+
+/** 金币：每个劳动人口每小时交税额（绑定城镇中心，不受繁荣度影响）。 */
+export function goldTaxPerCivilianPerHour(): number {
+  return cfg?.constants?.goldTaxPerCivilianPerHour ?? 1;
+}
+/** 金币：建造/升级任意建筑额外消耗的金币（叠加在原四资源之上）。 */
+export function goldCostPerBuild(): number {
+  return cfg?.constants?.goldCostPerBuild ?? 1;
+}
+/** 金币：新村初始金币存量。 */
+export function startGoldAmount(): number {
+  return cfg?.constants?.startGoldAmount ?? 100;
 }

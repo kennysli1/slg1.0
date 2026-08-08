@@ -35,6 +35,8 @@ export interface PopSnapshot {
   mainLevel: number;
   /** 是否处于饥荒（服务端权威）。 */
   inFamine: boolean;
+  /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
+  goldPerHour?: number;
   /** 平民耗粮 /h。 */
   civilianCropPerHour: number;
   /** 五轴繁荣度乘数（全 = prosperityMult）。 */

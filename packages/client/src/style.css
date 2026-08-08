@@ -787,3 +787,24 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .toast--out { opacity: 0; transform: translateY(6px); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ---------- 金币资源格（无上限，区别于四资源） ---------- */
+.res-gold { border: 1px solid color-mix(in srgb, var(--c-gold) 45%, transparent); background: color-mix(in srgb, var(--c-gold) 12%, transparent); }
+.res-gold .res-rate { color: var(--c-gold); opacity: 1; }
+
+/* ---------- 雇佣兵部队标签（与普通兵种区分） ---------- */
+.troop-merc { border: 1px solid color-mix(in srgb, var(--c-gold) 45%, transparent); }
+.troop-merc .troop-count { color: var(--c-gold); }
+
+/* ---------- 雇佣兵营地抽屉 ---------- */
+.merc-drawer .merc-drawer-title { font-weight: 700; }
+.merc-gold { display: flex; align-items: center; gap: var(--s-1); font-size: var(--f-md); padding: var(--s-2) 0; }
+.merc-gold b { color: var(--c-gold); font-family: var(--ff-num); }
+.merc-refresh-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-2); }
+.merc-next { font-size: var(--f-xs); opacity: .7; margin-bottom: var(--s-2); }
+.merc-offers { display: flex; flex-direction: column; gap: var(--s-2); }
+.merc-offer { display: flex; gap: var(--s-2); align-items: center; border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: var(--s-2); }
+.merc-offer-body { flex: 1; min-width: 0; }
+.merc-offer-title { font-weight: 600; display: flex; align-items: center; gap: var(--s-1); }
+.merc-stats { font-size: var(--f-xs); opacity: .8; margin: 2px 0 6px; }
+
+

@@ -17,6 +17,7 @@ import { CombatModule } from './modules/combat.js';
 import { PlayerModule } from './modules/player.js';
 import { MetaModule } from './modules/meta.js';
 import { NotificationsModule } from './modules/notifications.js';
+import { MercenaryModule } from './modules/mercenary.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -40,6 +41,7 @@ const PROGRESS_COLLECTIONS = [
   'world_meta',
   'world_tile',
   'notifications',
+  'merc',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -77,6 +79,7 @@ export interface GameApp {
   player: PlayerModule;
   meta: MetaModule;
   notifications: NotificationsModule;
+  mercenary: MercenaryModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -168,6 +171,7 @@ export function createGameApp(opts?: {
   const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue);
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
+  const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {
@@ -175,6 +179,7 @@ export function createGameApp(opts?: {
       `building:${villageId}`,
       `military:${villageId}`,
       `population:starve:${villageId}`,
+      `mercenary:${villageId}`,
     ]) {
       scheduler.cancelByOwner(prefix);
     }
@@ -187,7 +192,7 @@ export function createGameApp(opts?: {
         Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
       if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
     }
-    for (const c of ['economy', 'building', 'military', 'population', 'notifications'] as const) {
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc'] as const) {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
@@ -220,10 +225,11 @@ export function createGameApp(opts?: {
   player.init();
   meta.init();
   notifications.init();
+  mercenary.init();
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, now,
+    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },
@@ -239,6 +245,7 @@ export function createGameApp(opts?: {
       movement.resume();
       combat.resume();
       pve.resume();
+      mercenary.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
@@ -255,6 +262,7 @@ export function createGameApp(opts?: {
       combat.setConfig(newConfig);
       meta.setConfig(newConfig);
       notifications.setConfig(newConfig);
+      mercenary.setConfig(newConfig);
       this.config = newConfig;
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {
@@ -310,6 +318,7 @@ export function createGameApp(opts?: {
           `building:${villageId}`,
           `military:${villageId}`,
           `population:starve:${villageId}`,
+          `mercenary:${villageId}`,
         ]) {
           scheduler.cancelByOwner(prefix);
         }
@@ -330,7 +339,7 @@ export function createGameApp(opts?: {
       store.delete('player_byname', name);
       for (const villageId of villageIds) store.delete('player_byvillage', villageId);
 
-      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications'] as const;
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc'] as const;
       for (const villageId of villageIds) {
         for (const c of progressByVillage) store.delete(c, villageId);
       }

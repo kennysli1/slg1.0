@@ -101,6 +101,8 @@ export class MilitaryModule {
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
+    // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
+    this.commands.register('military.AddMercenaries', (c) => this.addMercenaries(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -224,6 +226,8 @@ export class MilitaryModule {
     for (const unit of Object.keys(s.troops)) {
       const have = s.troops[unit] ?? 0;
       if (have <= 0) continue;
+      // 雇佣兵(popCost=0)永久拥有，灾荒不逃兵——避免玩家花金币买的兵被饥荒清掉。
+      if ((this.config.units[unit]?.popCost ?? 0) <= 0) continue;
       const desert = Math.max(1, Math.floor(have * desertRatio));
       s.troops[unit] = have - desert;
       if (s.troops[unit] <= 0) delete s.troops[unit];
@@ -518,6 +522,26 @@ export class MilitaryModule {
       snapshot[unit] = { count: n, ...stats };
     }
     return { ok: true, payload: { snapshot } };
+  }
+
+  /**
+   * 雇佣兵入库：把雇佣兵永久加入 troops（popCost=0/upkeep=0 → reportUpkeep/reportGarrisonPop 自动零副作用，
+   * 战斗快照自动含其战力）。与行军/训练是同一份 troops 数据，故雇佣兵自动参战、无需新字段/迁移。
+   */
+  private addMercenaries(cmd: Command): CommandResult {
+    const { villageId, units } = cmd.payload as { villageId: string; units: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    for (const [unit, n] of Object.entries(units)) {
+      if (!this.config.units[unit]) continue;
+      const v = Math.floor(n);
+      if (v <= 0) continue;
+      s.troops[unit] = (s.troops[unit] ?? 0) + v;
+    }
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
+    return { ok: true, payload: { troops: { ...s.troops } } };
   }
 
   /** 增减驻村兵力（出征扣出用负数，返程/补充用正数）。 */

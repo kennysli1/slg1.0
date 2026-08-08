@@ -5,6 +5,7 @@ import { buildingInfo } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
+import { openMercenaryCamp } from '../army/mercenary.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
@@ -254,12 +255,14 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   document.querySelectorAll<HTMLButtonElement>('[data-up-slot]').forEach((b) =>
     b.onclick = () => act(req('UpgradeBuilding', { slotId: b.dataset.upSlot })));
 
-  // 整卡可点开建筑详情（点到卡内按钮不触发）
+  // 整卡可点开建筑详情（点到卡内按钮不触发）；雇佣兵营地则打开招募 UI
   document.querySelectorAll<HTMLElement>('[data-bld-slot]').forEach((el) =>
     el.onclick = (e) => {
       if ((e.target as HTMLElement)?.closest('button')) return; // 升级按钮：不展开详情
       const found = ctxFromSlot(el.dataset.bldSlot!);
-      if (found) openBuildingDetail(found.kind, found.ctx);
+      if (!found) return;
+      if (found.kind === 'mercenarycamp') { openMercenaryCamp(act); return; }
+      openBuildingDetail(found.kind, found.ctx);
     });
 
   // 点空槽 → 队列满则提示；否则拉该区可建清单 → 打开抽屉

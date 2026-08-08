@@ -300,6 +300,18 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'popPermanent'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
+  // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
+  mercenaries: {
+    file: 'mercenaries.csv', key: 'id',
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'goldCost'],
+    labels: ['id', 'code', 'name', 'tribe'],
+  },
+  // 雇佣兵营地刷新参数（merc_camp.csv）：level → {refreshSec, mercCount, maxStoredRefreshes}
+  merc_camp: {
+    file: 'merc_camp.csv', key: 'level',
+    numeric: ['refreshSec', 'mercCount', 'maxStoredRefreshes'],
+    labels: ['level'],
+  },
   constants: {
     file: 'game_constants.csv', key: 'key',
     numericByType: true, // 用行内 type 列判定（number/bool/string）
@@ -404,8 +416,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','constants'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, constants:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','constants'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, constants:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -425,7 +437,8 @@ function sectionGeneric(table){
   var meta = DATA.meta[table];
   var rows = DATA[table] || [];
   var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var title = table==='buildings' ? '建筑 / 资源田' : (table==='units' ? '兵种' : '全局常量');
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', constants:'全局常量' };
+  var title = TITLES[table] || table;
   var h = '<div class="hint">主键 ' + esc(meta.key) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
   h += '<table class="bt"><thead><tr>';
   for (var i=0;i<meta.labels.length;i++) h += '<th>'+esc(meta.labels[i])+'</th>';
@@ -517,7 +530,7 @@ async function save(){
   if (!any){ status('没有任何改动', true); return; }
   status('保存中…');
   var r = await api('POST','/balance/save', body);
-  if (r.ok){ status('已保存并热重载，改动对所有在线村庄即时生效'); CHANGES.buildings={};CHANGES.units={};CHANGES.constants={}; }
+  if (r.ok){ status('已保存并热重载，改动对所有在线村庄即时生效'); for (var i=0;i<TABLES.length;i++) CHANGES[TABLES[i]]={}; }
   else status('保存失败: '+(r.reason||'未知错误'), true);
 }
 

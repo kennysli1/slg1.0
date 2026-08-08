@@ -19,8 +19,8 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   const r = await app.commands.send({ name: 'meta.GetGameConfig', from: 'test', payload: {} });
   assert.equal(r.ok, true);
   const p = r.payload as any;
-  // 资源 4 种，字段齐全
-  assert.equal(p.resources.length, 4);
+  // 资源 5 种（含金币），字段齐全
+  assert.equal(p.resources.length, 5);
   assert.ok(p.resources[0].key && p.resources[0].name && p.resources[0].icon);
   // 兵种：下发数量 = config 兵种数量（新增 CSV 行会自动出现）
   assert.equal(p.units.length, Object.keys(app.config.units).length);

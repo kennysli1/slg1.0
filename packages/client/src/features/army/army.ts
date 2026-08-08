@@ -2,7 +2,7 @@
 import { art, unitArt, unitArtFallback, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
 import { errText, formName, tribeName } from '../../shared/ui/text.js';
-import { unitInfo, resourceKeys } from '../../app/config.js';
+import { unitInfo, mercenaryInfo, resourceKeys } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
@@ -44,11 +44,17 @@ export function renderArmy(): string {
   const army = getCache().army;
   if (!army) return '<div class="loading">加载中…</div>';
 
-  // 驻军展示（点击兵种 → 弹出属性详情）
+  // 驻军展示（点击兵种 → 弹出属性详情）。雇佣兵（tribe=merc）单独成区，与普通兵种区分。
   const troops = Object.entries(army.troops || {});
-  const troopList = troops.length
-    ? troops.map(([u, n]: any) => `<span class="troop" data-unit-detail="${u}" title="点击查看 ${escapeAttr(unitName(u))} 属性">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="troop-name">${escapeHtml(unitName(u))}</span><b class="troop-count">×${n}</b></span>`).join('')
+  const regTroops = troops.filter(([u]) => !unitInfo(u).isMercenary);
+  const mercTroops = troops.filter(([u]) => unitInfo(u).isMercenary);
+  const troopList = regTroops.length
+    ? regTroops.map(([u, n]: any) => `<span class="troop" data-unit-detail="${u}" title="点击查看 ${escapeAttr(unitName(u))} 属性">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="troop-name">${escapeHtml(unitName(u))}</span><b class="troop-count">×${n}</b></span>`).join('')
     : '<small class="muted">暂无驻军</small>';
+  const mercList = mercTroops.length
+    ? `<h3>雇佣兵 <small>（金币招募 · 永久持有 · 不耗粮不占人口）</small></h3>
+       <div class="troopbar">${mercTroops.map(([u, n]: any) => `<span class="troop troop-merc" data-unit-detail="${u}" title="点击查看 ${escapeAttr(unitName(u))} 属性">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="troop-name">${escapeHtml(unitName(u))}</span><b class="troop-count">×${n}</b></span>`).join('')}</div>`
+    : '';
 
   // 训练进度横幅
   const tr = army.training;
@@ -94,13 +100,14 @@ export function renderArmy(): string {
     <div class="troopbar">${troopList}</div>
     ${training}
     ${disbandSection}
+    ${mercList}
     <h3>训练</h3>
     <div class="grid grid-units">${trainCards}</div>`;
 }
 
-/** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。 */
+/** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。雇佣兵为永久持有，不可解散。 */
 function renderDisbandSection(army: any): string {
-  const troops = Object.entries(army.troops || {});
+  const troops = Object.entries(army.troops || {}).filter(([k]) => !unitInfo(k).isMercenary);
   if (!troops.length) return '';
 
   const rows = troops.map(([key, count]: any) => {
@@ -189,10 +196,13 @@ function openUnitDetail(unitKey: string): void {
   const u = (getCache().army?.trainable || []).find((x: any) => x.key === unitKey);
   const info = unitInfo(unitKey);
   const name = u?.name ?? info.name;
+  // 雇佣兵无训练表项(u)，但 mercenaryInfo 含完整属性 → 构造一个虚拟表项供详情渲染
+  const m = mercenaryInfo(unitKey);
+  const uForStats = u ?? (m ? { key: unitKey, form: m.form, meleeAtk: m.meleeAtk, rangedAtk: m.rangedAtk, meleeDef: m.meleeDef, rangedDef: m.rangedDef, speed: m.speed, carry: m.carry, upkeep: 0 } : null);
 
   const wrap = document.createElement('div');
   wrap.id = 'unit-detail-modal';
-  const stats = u ? renderUnitDetailRows(u) : '<div class="hint-sm">该兵种暂无详细数据</div>';
+  const stats = uForStats ? renderUnitDetailRows(uForStats) : '<div class="hint-sm">该兵种暂无详细数据</div>';
   const costHtml = u ? costPreview(u.cost, u.trainSec) : '';
   const lockHtml = u && u.unlocked === false
     ? `<div class="drawer-sec-title">解锁条件</div><small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`

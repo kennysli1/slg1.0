@@ -4,3 +4,4 @@ wood,木材,res_wood,建造与造兵
 clay,泥土,res_clay,建造与造兵
 iron,铁矿,res_iron,造兵为主
 crop,粮食,res_crop,养建筑人口与军队
+gold,金币,res_gold,由人口交税获得 无上限 用于雇佣雇佣兵

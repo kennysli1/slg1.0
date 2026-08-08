@@ -54,6 +54,14 @@ export class MetaModule {
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,
           popCost: u.popCost,
+          isMercenary: !!u.isMercenary,
+        })),
+        // 雇佣兵单独下发（含完整战斗属性 + 金币单价），供招募店 UI 与军队详情展示
+        mercenaries: Object.values(c.units).filter((u) => u.isMercenary).map((u) => ({
+          key: u.key, name: u.name, icon: u.icon, form: u.form,
+          meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
+          meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+          speed: u.speed, carry: u.carry, goldCost: u.goldCost ?? 0,
         })),
         pveTemplates: Object.values(c.pveTemplates).map((p) => ({
           type: p.type, name: p.name, icon: p.icon,
@@ -75,6 +83,10 @@ export class MetaModule {
           popHospitalRecoveryMax: c.constants.popHospitalRecoveryMax,
           smithyUpgradeSec: c.constants.smithyUpgradeSec,
           popFamineTickSec: c.constants.popFamineTickSec,
+          // 金币经济展示/外插用常量
+          goldTaxPerCivilianPerHour: c.constants.goldTaxPerCivilianPerHour,
+          goldCostPerBuild: c.constants.goldCostPerBuild,
+          startGoldAmount: c.constants.startGoldAmount,
         },
       },
     };

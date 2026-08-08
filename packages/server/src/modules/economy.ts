@@ -23,9 +23,11 @@ const log = makeLogger('economy');
  * 扩展点：资源种类来自 config.resources（resources.csv），初始量/容量/成长来自 config.constants。
  */
 
-export const RESOURCE_TYPES = ['wood', 'clay', 'iron', 'crop'] as const;
+export const RESOURCE_TYPES = ['wood', 'clay', 'iron', 'crop', 'gold'] as const;
 export type ResourceType = (typeof RESOURCE_TYPES)[number];
 export type ResMap = Record<ResourceType, number>;
+/** 金币无上限：用有限大值代替 Infinity（避免 JSON 序列化变 null 后客户端读到 null）。 */
+export const GOLD_CAP = Number.MAX_SAFE_INTEGER;
 
 interface EconomyState {
   villageId: string;
@@ -49,7 +51,7 @@ interface EconomyState {
 const COLLECTION = 'economy';
 
 function zero(): ResMap {
-  return { wood: 0, clay: 0, iron: 0, crop: 0 };
+  return { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 };
 }
 
 export class EconomyModule {
@@ -98,13 +100,13 @@ export class EconomyModule {
     const baseRatePerSec = c.baseProductionPerHour / 3600;
     const s: EconomyState = {
       villageId,
-      resources: { wood: start, clay: start, iron: start, crop: start },
+      resources: { wood: start, clay: start, iron: start, crop: start, gold: c.startGoldAmount },
       lastTick: this.now(),
-      // 初始每小时各产约 baseProductionPerHour（来自 config），换算到每秒
-      baseRate: { wood: baseRatePerSec, clay: baseRatePerSec, iron: baseRatePerSec, crop: baseRatePerSec },
+      // 初始每小时各产约 baseProductionPerHour（来自 config），换算到每秒；金币无基础产出（靠人口交税 Grant）
+      baseRate: { wood: baseRatePerSec, clay: baseRatePerSec, iron: baseRatePerSec, crop: baseRatePerSec, gold: 0 },
       rateModifiers: [],
       cropUpkeep: {},
-      capacity: { wood: cap, clay: cap, iron: cap, crop: cap },
+      capacity: { wood: cap, clay: cap, iron: cap, crop: cap, gold: GOLD_CAP },
     };
     this.store.set(COLLECTION, villageId, s);
   }
@@ -119,13 +121,18 @@ export class EconomyModule {
   private settle(s: EconomyState): void {
     const now = this.now();
     const elapsed = (now - s.lastTick) / 1000;
+    // 迁移兜底：旧存档（新增 gold 前）缺 gold 字段 → 补初始金币存量与无限容量；避免 NaN 且不让老玩家被 +1 建造费卡死。
+    for (const t of RESOURCE_TYPES) {
+      if (s.resources[t] === undefined) s.resources[t] = t === 'gold' ? this.config.constants.startGoldAmount : 0;
+      if (s.capacity[t] === undefined) s.capacity[t] = t === 'gold' ? GOLD_CAP : 0;
+    }
     if (elapsed <= 0) return;
     for (const t of RESOURCE_TYPES) {
       const wasOver = s.resources[t] > s.capacity[t];
       const rate = this.netRate(s, t);
       let next = s.resources[t] + rate * elapsed;
       next = Math.max(0, next);
-      // 未超额时，自然产出顶到容量为止
+      // 未超额时，自然产出顶到容量为止；金币容量=MAX 永不触发（无上限）
       if (!wasOver && next > s.capacity[t]) next = s.capacity[t];
       s.resources[t] = next;
     }
@@ -177,7 +184,7 @@ export class EconomyModule {
     const netRate = zero();
     const overCapacity: ResMap = zero();
     const productionPaused: Record<ResourceType, boolean> = {
-      wood: false, clay: false, iron: false, crop: false,
+      wood: false, clay: false, iron: false, crop: false, gold: false,
     };
     for (const t of RESOURCE_TYPES) {
       netRate[t] = this.netRate(s, t);

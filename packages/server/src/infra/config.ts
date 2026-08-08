@@ -202,6 +202,10 @@ export interface UnitDef {
   popCost: number;
   /** 是否永久消耗人口（拓荒者=true：解散/死亡时人口不返还）。 */
   popPermanent: boolean;
+  /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买、永久拥有；不进训练队列。 */
+  isMercenary?: boolean;
+  /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
+  goldCost?: number;
 }
 
 export interface PveTemplate {
@@ -252,6 +256,12 @@ export interface GameConstants {
   storageBase: number;
   storageGrowthPerLevel: number;
   startResourceAmount: number;
+  /** 金币：每个劳动人口每小时交税金币数（绑定城镇中心，与人口增速同节奏，不受繁荣度影响）。 */
+  goldTaxPerCivilianPerHour: number;
+  /** 金币：建造/升级任意建筑额外消耗的金币（叠加在原四资源之上）。 */
+  goldCostPerBuild: number;
+  /** 金币：新村初始金币存量。 */
+  startGoldAmount: number;
   baseProductionPerHour: number;
   mapSize: number;
   mapViewRadius: number;
@@ -310,12 +320,24 @@ export interface GameConstants {
   raw: Record<string, number | boolean | string>;
 }
 
+/** 雇佣兵营地某等级的刷新参数（来自 merc_camp.csv）。 */
+export interface MercCampLevel {
+  /** 自动刷新间隔（秒）。 */
+  refreshSec: number;
+  /** 每次刷新刷出的可雇佣名额数。 */
+  mercCount: number;
+  /** 可存储的刷新次数上限（玩家手动点刷新消耗，营地自动刷新累积）。 */
+  maxStoredRefreshes: number;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
   /** 城镇中心等级 → 槽位配额（town_center_slots.csv），索引 = tcLevel（1..maxLevel）。 */
   townCenterSlots: Record<number, TownCenterSlotTier>;
   units: Record<string, UnitDef>;
+  /** 雇佣兵营地刷新参数（merc_camp.csv）：level → 参数。 */
+  mercCamp: Record<number, MercCampLevel>;
   /** 兵种特性表（unit_traits.csv），按 code 索引。 */
   unitTraits: Record<string, UnitTraitDef>;
   pveTemplates: Record<string, PveTemplate>;
@@ -509,6 +531,56 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // 雇佣兵（tribe=merc）：解析 mercenaries.csv，合并进 config.units（key=code），
+  // 强制 popCost=0/upkeep=0/cost*=0/trainSec=0（不经 military.TrainTroops，直接经 mercenary.Hire 金币购买）。
+  // 覆盖层：与 units 同源，key='id'，numeric 含战斗属性 + goldCost。
+  let mercRows = loadCsv(p('mercenaries.csv'));
+  assertUniqueRows(mercRows, 'mercenaries.csv');
+  if (overrides?.mercenaries) {
+    mercRows = mergeOverridesIntoRows(mercRows, {
+      file: 'mercenaries.csv', key: 'id',
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','carry','upkeep','goldCost','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+    }, overrides.mercenaries);
+  }
+  for (const r of mercRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    units[code] = {
+      id: num(r.id), key: code, tribe: 'merc', name: r.name, icon: r.icon,
+      form: (r.form as UnitForm) || 'melee',
+      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
+      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef),
+      speed: num(r.speed, 6), carry: num(r.carry), upkeep: 0,
+      cost: { wood: 0, clay: 0, iron: 0, crop: 0 },
+      trainSec: 0,
+      building: '', // 雇佣兵不经训练建筑
+      traits: parseTraitRefs(r.traits, traitIdToCode),
+      popCost: 0,
+      popPermanent: false,
+      isMercenary: true,
+      goldCost: num(r.goldCost, 0),
+    };
+  }
+
+  // 雇佣兵营地刷新参数（merc_camp.csv）：level → MercCampLevel。覆盖层 key='level'。
+  const mercCamp: Record<number, MercCampLevel> = {};
+  let mercCampRows = loadCsv(p('merc_camp.csv'));
+  if (overrides?.merc_camp) {
+    mercCampRows = mergeOverridesIntoRows(mercCampRows, {
+      file: 'merc_camp.csv', key: 'level',
+      numeric: ['refreshSec','mercCount','maxStoredRefreshes'],
+    }, overrides.merc_camp);
+  }
+  for (const r of mercCampRows) {
+    const lv = num(r.level);
+    if (lv <= 0) continue;
+    mercCamp[lv] = {
+      refreshSec: num(r.refreshSec, 3600),
+      mercCount: num(r.mercCount, 3),
+      maxStoredRefreshes: num(r.maxStoredRefreshes, 1),
+    };
+  }
+
   // PvE：主表 + 守军表 + 分布点，三表用数字目标ID互相引用，解析回 code
   const pveRows = loadCsv(p('pve_targets.csv'));
   assertUniqueRows(pveRows, 'pve_targets.csv');
@@ -564,6 +636,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     storageBase: cn('storage_base', 800),
     storageGrowthPerLevel: cn('storage_growth_per_level', 0.5),
     startResourceAmount: cn('start_resource_amount', 750),
+    goldTaxPerCivilianPerHour: cn('gold_tax_per_civilian_per_hour', 1),
+    goldCostPerBuild: cn('gold_cost_per_build', 1),
+    startGoldAmount: cn('start_gold_amount', 100),
     baseProductionPerHour: cn('base_production_per_hour', 10),
     mapSize: cn('map_size', 20),
     mapViewRadius: cn('map_view_radius', 6),
@@ -613,8 +688,18 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // mercCamp 缺级回退：从已解析的最高有效级向下复制，保证任意营地等级都能取到参数。
+  const maxMercLv = Object.keys(mercCamp).map(Number).sort((a, b) => a - b);
+  if (maxMercLv.length) {
+    let last = mercCamp[maxMercLv[0]];
+    for (let lv = 1; lv <= maxMercLv[maxMercLv.length - 1]; lv++) {
+      if (mercCamp[lv]) last = mercCamp[lv];
+      else mercCamp[lv] = { ...last };
+    }
+  }
+
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp,
   };
   validateGameConfig(config);
   return config;
@@ -715,7 +800,7 @@ export function validateGameConfig(config: GameConfig): void {
 
   // units：所需建筑必须存在；form 枚举；traits 引用存在；范围
   for (const u of Object.values(config.units)) {
-    if (!knownTribes.has(u.tribe)) {
+    if (!u.isMercenary && !knownTribes.has(u.tribe)) {
       errors.push(`units.csv[${u.key}] tribe=${u.tribe} 必须是 romans/gauls/teutons`);
     }
     if (u.building && !buildingCodes.has(u.building)) {
@@ -727,7 +812,8 @@ export function validateGameConfig(config: GameConfig): void {
     for (const tc of u.traits) {
       if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
     }
-    if (u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
+    // 雇佣兵不走 military.TrainTroops（trainSec=0 合法），普通兵种仍要求 trainSec>0 防零除
+    if (!u.isMercenary && u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
     if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
     if (u.popCost < 0) errors.push(`units.csv[${u.key}] popCost 必须≥0（当前${u.popCost}）`);
   }

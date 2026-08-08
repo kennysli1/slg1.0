@@ -14,6 +14,7 @@ import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
+import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
 import { renderMap, bindMap, resetMapCenter } from '../features/map/map.js';
 import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
 
@@ -111,6 +112,7 @@ async function refreshAll() {
         mobilizeCap: p.mobilizeCap ?? 0,
         mainLevel: p.mainLevel ?? 1,
         inFamine: !!p.inFamine,
+        goldPerHour: p.goldPerHour ?? 0,
         civilianCropPerHour: p.civilianCropPerHour ?? 0,
         laborMults: p.laborMults ?? {
           production: prosperityMult, build: prosperityMult, train: prosperityMult,
@@ -132,6 +134,15 @@ function renderResBar() {
   const r = getCache().res;
   if (!r) return;
   const cells = resourceKeys().map((t) => {
+    // 金币：无上限、无产能条、速率来自人口交税（goldPerHour，非 economy.netRate）
+    if (t === 'gold') {
+      const info = resInfo(t);
+      const gold = r.resources[t] ?? 0;
+      const rate = getPopState()?.goldPerHour ?? 0;
+      return `<span class="res res-gold" title="${info.name}（无上限 · 由劳动人口交税获得 · 用于雇佣雇佣兵）">${art(info.icon, info.name, 'sm')}
+        <span class="res-num">${fmt(gold)}</span>
+        <span class="res-rate">${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/h</span></span>`;
+    }
     const rate = r.netRate[t] * 3600;
     const over = !!(r.productionPaused?.[t] || (r.overCapacity?.[t] > 0));
     const low = t === 'crop' && rate < 0 ? ' res-low' : '';
@@ -244,7 +255,9 @@ onPush((event, payload) => {
   // PopulationChanged 由 handlePush 完成快照校正 + 局部 DOM 更新（rerenderPopPanel），
   // 严禁在此触发 refreshAll/GetPopulation，防止 push→refresh→settle→emit 正反馈死循环。
   if (event !== 'PopulationChanged') {
-    void refreshAll();
+    // 雇佣兵营地抽屉打开时，由营地模块自行刷新（避免整页刷新关掉抽屉）
+    if (event === 'MercenaryCampUpdated') refreshMercCampIfOpen();
+    else void refreshAll();
   }
 });
 

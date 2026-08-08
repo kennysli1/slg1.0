@@ -12,6 +12,7 @@ export const RES_INFO: Record<string, { name: string; icon: string }> = {
   clay: { name: '泥土', icon: 'res_clay' },
   iron: { name: '铁矿', icon: 'res_iron' },
   crop: { name: '粮食', icon: 'res_crop' },
+  gold: { name: '金币', icon: 'res_gold' },
 };
 
 export const FIELD_INFO: Record<string, { name: string; icon: string }> = {
@@ -21,7 +22,7 @@ export const FIELD_INFO: Record<string, { name: string; icon: string }> = {
   cropland: { name: '农田', icon: 'field_cropland' },
 };
 
-export const BUILDING_INFO: Record<string, { name: string; icon: string }> = {
+export const BUILDING_INFO: Record<string, { name: string; icon: string; zone?: string }> = {
   main: { name: '主基地', icon: 'bld_main' },
   warehouse: { name: '仓库', icon: 'bld_warehouse' },
   granary: { name: '粮仓', icon: 'bld_granary' },
@@ -32,6 +33,7 @@ export const BUILDING_INFO: Record<string, { name: string; icon: string }> = {
   smithy: { name: '铁匠铺', icon: 'bld_smithy' },
   wall: { name: '城墙', icon: 'bld_wall' },
   rallypoint: { name: '集结点', icon: 'bld_rallypoint' },
+  mercenarycamp: { name: '雇佣兵营地', icon: 'bld_mercenarycamp', zone: 'outer' },
 };
 
 export const UNIT_INFO: Record<string, { name: string; icon: string; form: string }> = {
@@ -65,6 +67,17 @@ export const UNIT_INFO: Record<string, { name: string; icon: string; form: strin
   teucatapult: { name: '投石机', icon: 'unit_teucatapult', form: 'ranged' },
   teuchief: { name: '首领', icon: 'unit_teuchief', form: 'melee' },
   teusettler: { name: '拓荒者', icon: 'unit_teusettler', form: 'melee' },
+  // 雇佣兵（tribe=merc）：金币购买、永久持有、不耗粮不占人口
+  merc_slinger: { name: '投石雇佣兵', icon: 'unit_merc_slinger', form: 'ranged' },
+  merc_spearman: { name: '长矛雇佣兵', icon: 'unit_merc_spearman', form: 'melee' },
+  merc_archer: { name: '弓箭雇佣兵', icon: 'unit_merc_archer', form: 'ranged' },
+  merc_sword: { name: '剑士雇佣兵', icon: 'unit_merc_sword', form: 'melee' },
+  merc_cavalry: { name: '雇佣骑兵', icon: 'unit_merc_cavalry', form: 'melee' },
+  merc_axe: { name: '斧兵雇佣兵', icon: 'unit_merc_axe', form: 'melee' },
+  merc_crossbow: { name: '弩手雇佣兵', icon: 'unit_merc_crossbow', form: 'ranged' },
+  merc_knight: { name: '雇佣骑士', icon: 'unit_merc_knight', form: 'melee' },
+  merc_berserker: { name: '狂战雇佣兵', icon: 'unit_merc_berserker', form: 'melee' },
+  merc_champion: { name: '冠军雇佣兵', icon: 'unit_merc_champion', form: 'melee' },
 };
 
 export const PVE_INFO: Record<string, { icon: string }> = {
