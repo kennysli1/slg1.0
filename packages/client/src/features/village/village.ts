@@ -116,11 +116,9 @@ function renderDrawer(): string {
   const opts = drawer.options.map((o: any) => {
     const afford = canAfford(o.cost);
     const prod = o.producing ? `<span class="hint-sm prod">+${o.producing.ratePerHour}/h</span>` : '';
-    const _dinfo = buildingInfo(o.kind);
-    const _popCapL1 = _dinfo.popCapPerLevel ?? 0;
-    // 「升级 +X」= 首次升级（L1→L2）的增量；与升级卡口径一致（不再是 L1 popCap）。
-    const _popCapNext = _dinfo.popCapByLevel?.[1] ?? _popCapL1;
-    const popCapHint = _popCapL1 > 0 ? `<span class="hint-sm popcap"><span class="popcap-icon" aria-label="人口">👥</span>+${_popCapL1}/级 · 升级 +${_popCapNext}</span>` : '';
+    // 城外可建卡片：人口增量直接并入 cost 行（图标+数字，与资源同形），不再单独一个 pill。
+    // 「建造后获得的人口」= L1 popCap（= popCapPerLevel）；user override 后随 CSV/覆盖层变化。
+    const _popCap = buildingInfo(o.kind).popCapPerLevel ?? 0;
     let action: string;
     if (!o.unlocked) {
       action = `<small class="tag tag-lock">${escapeHtml(o.lockReason ?? '未解锁')}</small>`;
@@ -128,8 +126,8 @@ function renderDrawer(): string {
       action = `<button class="btn-sm" data-do-build="${o.kind}" ${!afford ? 'disabled' : ''}>建造</button>`;
     }
     return `<div class="opt ${o.unlocked ? '' : 'locked'}" data-bld-opt="${o.kind}" title="点击查看 ${escapeAttr(o.name)} 详情">${art(o.icon, o.name, 'md')}
-      <div class="opt-body"><div class="opt-title">${escapeHtml(o.name)} ${prod}${popCapHint}<small class="bld-detail-hint">详情 ›</small></div>
-        ${costPreview(o.cost, o.timeSec)}${action}</div></div>`;
+      <div class="opt-body"><div class="opt-title">${escapeHtml(o.name)} ${prod}<small class="bld-detail-hint">详情 ›</small></div>
+        ${costPreview(o.cost, o.timeSec, _popCap)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
     <aside class="drawer${opening ? ' drawer--opening' : ''}">
