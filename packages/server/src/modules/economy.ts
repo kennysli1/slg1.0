@@ -166,6 +166,7 @@ export class EconomyModule {
   private getResources(cmd: Command): CommandResult {
     const s = this.load((cmd.payload as any).villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.stripBuildingUpkeep(s); // v3：剔除历史残留的建筑耗粮，避免影响结算/净产率
     this.settle(s);
     this.store.set(COLLECTION, s.villageId, s);
     const netRate = zero();
@@ -254,7 +255,11 @@ export class EconomyModule {
     return { ok: true, payload: { taken } };
   }
 
-  /** 上报某来源的 crop 每小时消耗（building 人口/military 耗粮算好后调用）。 */
+  /**
+   * 上报某来源的 crop 每小时消耗（population/military 耗粮算好后调用）。
+   * v3 人口模型：建筑不再耗粮（建筑只提供人口上限），故 source='building' 直接忽略；
+   * 旧版本残留的 'building' 条目也会在此统一剔除并写回，确保口径干净。
+   */
   private setUpkeep(cmd: Command): CommandResult {
     const { villageId, source, cropPerHour } = cmd.payload as {
       villageId: string;
@@ -264,9 +269,21 @@ export class EconomyModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s); // 改消耗前先按旧消耗结算
+    if (source === 'building') {
+      this.stripBuildingUpkeep(s);
+      return { ok: true, payload: {} };
+    }
     s.cropUpkeep[source] = cropPerHour;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /** v3：剔除历史残留的 'building' 耗粮来源（建筑不再耗粮）。存在则删并写回。 */
+  private stripBuildingUpkeep(s: EconomyState): void {
+    if ('building' in s.cropUpkeep) {
+      delete s.cropUpkeep['building'];
+      this.store.set(COLLECTION, s.villageId, s);
+    }
   }
 
   /** Building 上报某资源类型的全村总产率（每小时），Economy 换算后更新 baseRate。 */
@@ -337,6 +354,7 @@ export class EconomyModule {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.stripBuildingUpkeep(s); // v3：剔除历史残留的建筑耗粮
     // 不 settle（纯读，不产生副作用；population 只需要 baseRate/cropUpkeep 的快照）
     const nonCivilianUpkeep = Object.entries(s.cropUpkeep)
       .filter(([src]) => src !== 'civilian_pop')
