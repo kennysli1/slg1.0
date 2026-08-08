@@ -125,3 +125,29 @@ test('P6：连续两次保存对同/异字段深合并', () => {
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('P7：meta.GetGameConfig 下发的 popCapByLevel 反映平衡覆盖（per-level）', async () => {
+  const dataDir = tmpDataDir();
+  const storePath = join(dataDir, 'game.json');
+  try {
+    const app = createGameApp({ now: () => clock, manualScheduler: true, storePath });
+    const overridePath = app.balanceOverridePath!;
+    const baseline = app.config.buildings.woodcutter.levels[1].popCap;
+    assert.ok(baseline > 0, 'woodcutter L1 默认 popCap 应 > 0');
+    saveBalanceOverrides(overridePath, {
+      building_levels: { 'woodcutter|1': { popCap: '99' }, 'woodcutter|2': { popCap: '88' } },
+    });
+    app.reloadConfig();
+    const r = await app.commands.send({ name: 'meta.GetGameConfig', from: 'test', payload: {} });
+    assert.equal(r.ok, true);
+    const payload = r.payload as any;
+    const wc = (payload.buildings as any[]).find((b) => b.kind === 'woodcutter');
+    assert.ok(wc, 'meta 应含 woodcutter');
+    assert.ok(Array.isArray(wc.popCapByLevel), 'popCapByLevel 应为数组');
+    assert.equal(wc.popCapByLevel[0], 99, 'woodcutter L1 覆盖 99 应反映到 meta.popCapByLevel[0]');
+    assert.equal(wc.popCapByLevel[1], 88, 'woodcutter L2 覆盖 88 应反映到 meta.popCapByLevel[1]');
+    assert.notEqual(wc.popCapByLevel[0], baseline, 'meta 不应回退到默认 CSV 值');
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

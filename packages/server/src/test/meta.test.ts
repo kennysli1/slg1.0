@@ -34,4 +34,9 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   assert.equal(p.constants.mapViewRadius, app.config.constants.mapViewRadius);
   // 不泄漏平衡参数（如成本公式/铁匠加成）
   assert.equal(p.constants.smithyBonusPerLevel, undefined);
+  // 每栋建筑下发 popCapByLevel（升级卡显示「本次升级获得的人口」用；反映覆盖）
+  assert.ok(p.buildings.every((b: any) => Array.isArray(b.popCapByLevel) && b.popCapByLevel.length === app.config.buildings[b.kind].maxLevel), '每栋建筑应下发 popCapByLevel 数组（长度=maxLevel）');
+  const mainMeta = p.buildings.find((b: any) => b.kind === 'main');
+  const mainCfg = app.config.buildings.main;
+  assert.deepEqual(mainMeta.popCapByLevel, Array.from({ length: mainCfg.maxLevel }, (_, i) => mainCfg.levels[i + 1].popCap), 'main.popCapByLevel 应等于 levels[].popCap');
 });

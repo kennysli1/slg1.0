@@ -47,6 +47,9 @@ export class MetaModule {
           resource: b.resource ?? null,
           desc: b.desc, effect: b.effect,
           popCapPerLevel: b.popCapPerLevel,
+          // 每级人口增量（反映覆盖）：下标 i = 等级 (i+1) 的 popCap；用于升级卡显示「本次升级获得的人口」与详情累计求和。
+          // 当 GM 通过 /gm/balance 把不同等级改成不同 popCap 时，旧字段 popCapPerLevel（=levels[1].popCap）不足以表达，故新增。
+          popCapByLevel: Array.from({ length: b.maxLevel }, (_, i) => b.levels[i + 1]?.popCap ?? 0),
         })),
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,

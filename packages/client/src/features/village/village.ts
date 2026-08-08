@@ -87,7 +87,10 @@ function renderPlaced(p: any): string {
   const prod = p.producing
     ? `<div class="hint-sm prod">+${p.producing.ratePerHour}/h</div>`
     : '';
-  const popCap = buildingInfo(p.kind).popCapPerLevel ?? 0;
+  // 本次升级（p.level → p.level+1）获得的人口增量：取目标等级 popCap；
+  // 若服务端未下发 popCapByLevel（旧版本）则回退到 popCapPerLevel（=L1 popCap）。
+  const _info = buildingInfo(p.kind);
+  const popCap = _info.popCapByLevel?.[p.level] ?? _info.popCapPerLevel ?? 0;
   let btn: string;
   if (constructing) btn = '<small class="tag">建造中</small>';
   else if (max) btn = '<small class="tag">已满级</small>';
@@ -113,8 +116,11 @@ function renderDrawer(): string {
   const opts = drawer.options.map((o: any) => {
     const afford = canAfford(o.cost);
     const prod = o.producing ? `<span class="hint-sm prod">+${o.producing.ratePerHour}/h</span>` : '';
-    const popCap = buildingInfo(o.kind).popCapPerLevel ?? 0;
-    const popCapHint = popCap > 0 ? `<span class="hint-sm popcap"><span class="popcap-icon" aria-label="人口">👥</span>+${popCap}/级 · 升级 +${popCap}</span>` : '';
+    const _dinfo = buildingInfo(o.kind);
+    const _popCapL1 = _dinfo.popCapPerLevel ?? 0;
+    // 「升级 +X」= 首次升级（L1→L2）的增量；与升级卡口径一致（不再是 L1 popCap）。
+    const _popCapNext = _dinfo.popCapByLevel?.[1] ?? _popCapL1;
+    const popCapHint = _popCapL1 > 0 ? `<span class="hint-sm popcap"><span class="popcap-icon" aria-label="人口">👥</span>+${_popCapL1}/级 · 升级 +${_popCapNext}</span>` : '';
     let action: string;
     if (!o.unlocked) {
       action = `<small class="tag tag-lock">${escapeHtml(o.lockReason ?? '未解锁')}</small>`;
@@ -189,10 +195,19 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
     ? `<div class="bld-detail-row"><span class="bld-detail-k">当前产量</span><span class="bld-detail-v">+${ctx.producing.ratePerHour}/h</span></div>`
     : '';
 
-  const popCap = buildingInfo(kind).popCapPerLevel ?? 0;
-  const popCapSec = popCap > 0
-    ? `<div class="bld-detail-row"><span class="bld-detail-k">每级人口上限</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${popCap}</span></div>
-       <div class="bld-detail-row"><span class="bld-detail-k">${ctx.isBuild ? '建造后贡献' : `升至 Lv${ctx.level + 1} 贡献`}</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${popCap * (ctx.level + 1)}</span></div>`
+  const _dinfo2 = buildingInfo(kind);
+  const _pcb = _dinfo2.popCapByLevel;
+  const _nextLevel = ctx.level + 1;
+  // 增量 = 目标等级 popCap；累计 = Σ 1..nextLevel popCap（用 popCapByLevel 求和，对可变 popCap 正确）
+  const _inc = _pcb?.[_nextLevel - 1] ?? _dinfo2.popCapPerLevel ?? 0;
+  const _cum = _pcb
+    ? _pcb.slice(0, _nextLevel).reduce((a, b) => a + b, 0)
+    : (_dinfo2.popCapPerLevel ?? 0) * _nextLevel;
+  const _hasPopCap = (_dinfo2.popCapPerLevel ?? 0) > 0 || (_pcb?.some((v) => v > 0) ?? false);
+  const _lvLabel = ctx.isBuild ? `建造到 Lv${_nextLevel}` : `升至 Lv${_nextLevel}`;
+  const popCapSec = _hasPopCap
+    ? `<div class="bld-detail-row"><span class="bld-detail-k">${_lvLabel} 增量</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${_inc}</span></div>
+       <div class="bld-detail-row"><span class="bld-detail-k">${_lvLabel} 累计</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${_cum}</span></div>`
     : '';
 
   const wrap = document.createElement('div');
