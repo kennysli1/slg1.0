@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
-import { loadGameConfig, loadBalanceOverrides, saveBalanceOverrides, mergeBalanceOverrides, type BalanceOverrides } from '../infra/config.js';
+import { loadGameConfig, loadBalanceOverrides, saveBalanceOverrides, mergeBalanceOverrides, mergeOverridesIntoRows, type BalanceOverrides } from '../infra/config.js';
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
 <html lang="zh">
@@ -658,14 +658,22 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // GET /gm/balance/data — 返回可编辑配置行（建筑 / 建筑逐级 / 兵种 / 全局常量）
+  // 必须把 data/balance_overrides.json 的覆盖叠在 CSV 之上后再返回，否则编辑器会一直显示 CSV 默认值，
+  // 而实际 app.config（meta + 游戏逻辑）已是覆盖后的值——造成「编辑器与游戏不一致」的误导。
   fastify.get('/gm/balance/data', (req, reply) => {
     if (!auth(req, reply)) return;
     const dir = gameApp.configDir;
     const data: Record<string, unknown> = { meta: BALANCE_TABLES };
     const buildingNames: Record<string, string> = {};
     for (const r of loadCsv(join(dir, 'buildings.csv'))) buildingNames[r.code] = r.name;
+    const overrides = gameApp.balanceOverridePath ? loadBalanceOverrides(gameApp.balanceOverridePath) : {} as BalanceOverrides;
     for (const name of Object.keys(BALANCE_TABLES)) {
-      const rows = loadCsv(join(dir, BALANCE_TABLES[name].file));
+      let rows = loadCsv(join(dir, BALANCE_TABLES[name].file));
+      const tableChanges = overrides[name];
+      if (tableChanges && Object.keys(tableChanges).length) {
+        const t = BALANCE_TABLES[name];
+        rows = mergeOverridesIntoRows(rows, { file: t.file, key: t.key, keyComposite: t.keyComposite, numeric: t.numeric }, tableChanges);
+      }
       if (name === 'building_levels') {
         for (const r of rows) r.name = buildingNames[r.code] ?? r.code;
       }
