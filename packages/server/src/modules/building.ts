@@ -248,16 +248,6 @@ export class BuildingModule {
     return '需' + missing.map((r) => `${this.config.buildings[r.kind]?.name ?? r.kind} ${r.level} 级`).join('、');
   }
 
-  /** 建造/升级任意建筑额外消耗的金币（叠加在原四资源之上；GM 可改 goldCostPerBuild）。 */
-  private goldCostPerBuild(): number {
-    return this.config.constants.goldCostPerBuild ?? 1;
-  }
-
-  /** 把 +1 金币并入某等级成本（返回新对象，不污染 def.cost）。 */
-  private withGold(cost: Record<string, number>): Record<string, number> {
-    return { ...cost, gold: this.goldCostPerBuild() };
-  }
-
   /** 城镇中心降低建造时间；再乘人口劳动力建造加速（time_mult_pop）。 */
   private async buildTime(s: BuildingState, baseSec: number): Promise<number> {
     const mainLv = this.tcLevel(s);
@@ -325,7 +315,7 @@ export class BuildingModule {
           icon: centerDef?.icon ?? 'bld_main',
           level: tcLv,
           maxLevel: centerDef?.maxLevel ?? 20,
-          nextCost: centerNext ? this.withGold(centerDef!.cost(tcLv + 1)) : null,
+          nextCost: centerNext ? centerDef!.cost(tcLv + 1) : null,
           nextTimeSec: centerNext ? buildTimeSyncEstimate(centerDef!.timeSec(tcLv + 1)) : null,
           building: !!centerQueue,
           buildingStartAt: centerQueue?.startAt,
@@ -378,7 +368,7 @@ export class BuildingModule {
           building: constructing || !!pending,
           buildingStartAt: pending?.startAt,
           buildingFinishAt: pending?.finishAt,
-          nextCost: canUp ? this.withGold(def!.cost(p.level + 1)) : null,
+          nextCost: canUp ? def!.cost(p.level + 1) : null,
           nextTimeSec: canUp ? buildTimeSyncEstimate(def!.timeSec(p.level + 1)) : null,
           producing: def?.resource
             ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, p.level)) }
@@ -407,7 +397,7 @@ export class BuildingModule {
         kind: def.kind,
         name: def.name,
         icon: def.icon,
-        cost: this.withGold(def.cost(1)),
+        cost: def.cost(1),
         timeSec: buildTimeSyncEstimate(def.timeSec(1)),
         unlocked: this.meetsRequires(s, def.requires),
         requires: def.requires,
@@ -433,7 +423,7 @@ export class BuildingModule {
     const spend = await this.commands.send({
       name: 'economy.TrySpend',
       from: BuildingModule.NAME,
-      payload: { villageId, cost: this.withGold(def.cost(1)) },
+      payload: { villageId, cost: def.cost(1) },
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
@@ -467,7 +457,7 @@ export class BuildingModule {
     const spend = await this.commands.send({
       name: 'economy.TrySpend',
       from: BuildingModule.NAME,
-      payload: { villageId, cost: this.withGold(def.cost(toLevel)) },
+      payload: { villageId, cost: def.cost(toLevel) },
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 

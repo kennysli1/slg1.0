@@ -23,7 +23,7 @@ interface ServerConfig {
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
-  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; goldCostPerBuild: number; startGoldAmount: number };
+  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; startGoldAmount: number };
 }
 
 let cfg: ServerConfig | null = null;
@@ -113,10 +113,6 @@ export function resourceKeys(): string[] {
 /** 金币：每个劳动人口每小时交税额（绑定城镇中心，不受繁荣度影响）。 */
 export function goldTaxPerCivilianPerHour(): number {
   return cfg?.constants?.goldTaxPerCivilianPerHour ?? 1;
-}
-/** 金币：建造/升级任意建筑额外消耗的金币（叠加在原四资源之上）。 */
-export function goldCostPerBuild(): number {
-  return cfg?.constants?.goldCostPerBuild ?? 1;
 }
 /** 金币：新村初始金币存量。 */
 export function startGoldAmount(): number {

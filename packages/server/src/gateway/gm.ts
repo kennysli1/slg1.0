@@ -292,7 +292,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'timeSec', 'popCap', 'prod'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod'],
     labels: ['code', 'level', 'name'],
   },
   units: {

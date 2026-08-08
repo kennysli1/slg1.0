@@ -137,6 +137,8 @@ export type Zone = 'center' | 'inner' | 'outer';
 export interface BuildingLevelDef {
   /** 升/建到该等级的花费（4 资源）。 */
   cost: Record<string, number>;
+  /** 升/建到该等级额外消耗的金币（逐等级独立，替代旧全局 goldCostPerBuild；GM 可改）。 */
+  costGold: number;
   /** 升/建到该等级耗时（秒）。 */
   timeSec: number;
   /** 该等级相对上一级的「增量」人口硬上限贡献。硬上限 = Σ 每栋已建建筑 levels[1..当前等级].popCap（增量求和，1:1 等价于旧 popCapPerLevel×level）。 */
@@ -258,8 +260,6 @@ export interface GameConstants {
   startResourceAmount: number;
   /** 金币：每个劳动人口每小时交税金币数（绑定城镇中心，与人口增速同节奏，不受繁荣度影响）。 */
   goldTaxPerCivilianPerHour: number;
-  /** 金币：建造/升级任意建筑额外消耗的金币（叠加在原四资源之上）。 */
-  goldCostPerBuild: number;
   /** 金币：新村初始金币存量。 */
   startGoldAmount: number;
   baseProductionPerHour: number;
@@ -443,7 +443,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','timeSec','popCap','prod'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','prod'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -453,6 +453,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (lv <= 0) continue;
     (levelsByCode[code] ??= {})[lv] = {
       cost: { wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) },
+      costGold: num(r.costGold, 0),
       timeSec: num(r.timeSec),
       popCap: num(r.popCap),
       prod: r.prod ? num(r.prod) : undefined,
@@ -467,7 +468,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       id: num(r.id), kind: r.code, name: r.name, icon: r.icon,
       zone: (r.zone as Zone) || 'inner',
       resource: isField ? r.resource : undefined,
-      cost: (lv: number) => lvl[lv]?.cost ?? { wood: 0, clay: 0, iron: 0, crop: 0 },
+      cost: (lv: number): Record<string, number> => {
+        const l = lvl[lv];
+        if (l) return { ...l.cost, gold: l.costGold ?? 0 };
+        return { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 };
+      },
       timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
       requires: parseRequires(r.requires, buildingIdToCode),
@@ -618,9 +623,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   // 全局常量表
   const raw: Record<string, number | boolean | string> = {};
   let constRows = loadCsv(p('game_constants.csv'));
-  if (overrides?.game_constants) {
-    // game_constants 的主键是 key，value/type 都可改
-    constRows = mergeOverridesIntoRows(constRows, { file: 'game_constants.csv', key: 'key' }, overrides.game_constants);
+  if (overrides?.constants) {
+    // game_constants 的主键是 key，value/type 都可改（GM 保存路由以表名 'constants' 写入覆盖）
+    constRows = mergeOverridesIntoRows(constRows, { file: 'game_constants.csv', key: 'key' }, overrides.constants);
   }
   for (const r of constRows) {
     if (!r.key) continue;
@@ -637,7 +642,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     storageGrowthPerLevel: cn('storage_growth_per_level', 0.5),
     startResourceAmount: cn('start_resource_amount', 750),
     goldTaxPerCivilianPerHour: cn('gold_tax_per_civilian_per_hour', 1),
-    goldCostPerBuild: cn('gold_cost_per_build', 1),
     startGoldAmount: cn('start_gold_amount', 100),
     baseProductionPerHour: cn('base_production_per_hour', 10),
     mapSize: cn('map_size', 20),

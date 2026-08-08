@@ -48,7 +48,7 @@ const LEGACY_BASES = {
 };
 
 const out = [
-  'code,level,costWood,costClay,costIron,costCrop,timeSec,popCap,prod',
+  'code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod',
   '#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时',
 ];
 
@@ -79,7 +79,7 @@ for (const r of rows) {
     const time = Math.round(base.tb * Math.pow(base.tg, lv - 1));
     const popCap = base.pc; // 每级增量（恒定），硬上限=Σ1..level
     const prod = isField ? Math.round(base.pb * Math.pow(base.pg, lv - 1)) : '';
-    out.push([r.code, lv, costW, costC, costI, costR, time, popCap, prod].join(','));
+    out.push([r.code, lv, costW, costC, costI, costR, 1, time, popCap, prod].join(','));
   }
 }
 

@@ -85,7 +85,6 @@ export class MetaModule {
           popFamineTickSec: c.constants.popFamineTickSec,
           // 金币经济展示/外插用常量
           goldTaxPerCivilianPerHour: c.constants.goldTaxPerCivilianPerHour,
-          goldCostPerBuild: c.constants.goldCostPerBuild,
           startGoldAmount: c.constants.startGoldAmount,
         },
       },
