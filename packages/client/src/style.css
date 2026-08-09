@@ -176,6 +176,9 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 .card.enemy { background: linear-gradient(180deg, #fdeeee, var(--c-surface)); border-color: #e8b6b6; }
 .cardbody { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* 训练卡片：把训练控件（步进行+训练按钮+meta）绝对定位到卡底，cost-slot 多高都不再顶动按钮位置 */
+/* 训练卡：整卡固定最小高度 + 纵向拉伸，让卡内 body 等高，控件绝对定位到卡底后所有卡按钮位置完全一致 */
+.grid > .unit-card:not(.locked) { align-items: stretch; min-height: 280px; }
+.unit-card:not(.locked) > .icon { align-self: center; flex: none; }
 .unit-card:not(.locked) .cardbody { position: relative; padding-bottom: 108px; }
 .unit-card:not(.locked) .train-controls {
   position: absolute; left: 0; right: 0; bottom: var(--s-3);
