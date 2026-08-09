@@ -734,6 +734,13 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .bld-drawer { z-index: 61; }
 /* 详情页（含兵种训练卡）加宽至可一行排满兵种，无需滚动 */
 .drawer.drawer--center.bld-drawer { width: min(720px, 94vw); }
+/* 贸易中心 / 雇佣兵营地 / 兵种详情：与其他建筑详情一致居中加宽 */
+.drawer.drawer--center.merc-drawer { width: min(560px, 94vw); z-index: 61; }
+.drawer.drawer--center.trade-drawer { width: min(640px, 94vw); z-index: 61; }
+.drawer.drawer--center.unit-drawer { width: min(520px, 94vw); z-index: 61; }
+#trade-center-modal .drawer-mask,
+#merc-camp-modal .drawer-mask,
+#unit-detail-modal .drawer-mask { z-index: 60; }
 .bld-drawer-name { font-family: var(--ff-display, inherit); font-size: var(--f-lg); font-weight: 700; }
 .bld-detail-desc { color: var(--c-ink); line-height: 1.6; font-size: var(--f-sm); }
 .bld-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3);

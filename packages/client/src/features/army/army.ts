@@ -192,7 +192,7 @@ export function openUnitDetail(unitKey: string): void {
     : '';
   wrap.innerHTML = `
     <div class="drawer-mask" data-close-detail="1"></div>
-    <aside class="drawer drawer--opening unit-drawer" role="dialog" aria-modal="true">
+    <aside class="drawer drawer--opening unit-drawer drawer--center" role="dialog" aria-modal="true">
       <div class="drawer-head">
         ${art(unitArt(unitKey), name, 'sm', unitArtFallback(unitKey))}
         <span class="unit-drawer-name">${escapeHtml(name)}</span>

@@ -37,7 +37,7 @@ export function openTradeCenter(act: (p: Promise<any>) => void): void {
   const el = document.createElement('div');
   el.id = 'trade-center-modal';
   el.innerHTML = `<div class="drawer-mask" data-close-trade="1"></div>
-    <aside class="drawer drawer--opening trade-drawer" role="dialog" aria-modal="true">
+    <aside class="drawer drawer--opening trade-drawer drawer--center" role="dialog" aria-modal="true">
       <div class="drawer-head"><span class="trade-drawer-title">贸易中心</span><button class="drawer-close" data-close-trade="1" aria-label="关闭">✕</button></div>
       <div class="drawer-body"><div class="loading">加载中…</div></div>
     </aside>`;

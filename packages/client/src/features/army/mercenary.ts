@@ -31,7 +31,7 @@ export function openMercenaryCamp(act: (p: Promise<any>) => void): void {
   const wrap = document.createElement('div');
   wrap.id = 'merc-camp-modal';
   wrap.innerHTML = `<div class="drawer-mask" data-close-merc="1"></div>
-    <aside class="drawer drawer--opening merc-drawer" role="dialog" aria-modal="true">
+    <aside class="drawer drawer--opening merc-drawer drawer--center" role="dialog" aria-modal="true">
       <div class="drawer-head"><span class="merc-drawer-title">雇佣兵营地</span><button class="drawer-close" data-close-merc="1" aria-label="关闭">✕</button></div>
       <div class="drawer-body"><div class="loading">加载中…</div></div>
     </aside>`;
