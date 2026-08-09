@@ -3,7 +3,7 @@ import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr, unitA
 import { showToast } from '../../shared/ui/toast.js';
 import { fmt } from '../../shared/utils/format.js';
 import { errText, formName } from '../../shared/ui/text.js';
-import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax, unitInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo } from '../../app/config.js';
+import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax, unitInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo, trainTimeReducePerLevel, trainTimeReduceCap, trainCostReducePerLevel, trainCostReduceCap } from '../../app/config.js';
 import { getCache, setCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
@@ -361,23 +361,21 @@ async function renderBuildingTrainSection(slotId: string): Promise<void> {
       ${progressBar(slot.training.nextDoneAt - (u?.trainSec ?? 30) * 1000, slot.training.nextDoneAt, '下一个')}</div>`;
   }
 
-  // 基础值（顶部 trainable）用于展示建筑等级带来的提速/降费百分比
-  const baseById: Record<string, any> = {};
-  for (const t of (army.trainable || [])) baseById[t.key] = t;
+  // 军事建筑训练提速/降费：固定为建筑等级的纯函数（与兵种无关），直接按配置因子展示固定减幅
+  const timeRpl = trainTimeReducePerLevel();
+  const timeCap = trainTimeReduceCap();
+  const costRpl = trainCostReducePerLevel();
+  const costCap = trainCostReduceCap();
 
   const cards = (slot.trainable || []).map((u: any) => {
     const unlocked = u.unlocked !== false;
     const popCost = unitInfo(u.key).popCost;
     const perGrain = unitCropPerHour(u.key);
     let bonus = '';
-    const base = baseById[u.key];
-    if (base && base.trainSec > 0) {
-      const tPct = Math.round((1 - u.trainSec / base.trainSec) * 100);
-      const baseCostSum = resourceKeys().reduce((a: number, r: string) => a + (base.cost?.[r] ?? 0), 0);
-      const effCostSum = resourceKeys().reduce((a: number, r: string) => a + (u.cost?.[r] ?? 0), 0);
-      const cPct = baseCostSum > 0 ? Math.round((1 - effCostSum / baseCostSum) * 100) : 0;
-      if (tPct > 0 || cPct > 0) bonus = `<small class="tag tag-bonus">本建筑 Lv${u.level} · 训练 -${tPct}% · 资源 -${cPct}%</small>`;
-    }
+    const lvl = u.level ?? 1;
+    const tPct = Math.round(Math.min(timeCap, Math.max(0, lvl - 1) * timeRpl) * 100);
+    const cPct = Math.round(Math.min(costCap, Math.max(0, lvl - 1) * costRpl) * 100);
+    if (tPct > 0 || cPct > 0) bonus = `<small class="tag tag-bonus">本建筑 Lv${lvl} · 训练 -${tPct}% · 资源 -${cPct}%</small>`;
     const action = unlocked
       ? `<div class="cost-slot" id="bld-cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="train-controls">

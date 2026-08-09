@@ -34,6 +34,9 @@ interface ServerConfig {
     wallBonusPerLevel: number;
     /** 医院战死回收比例：min(max, base+等级×perLevel)。 */
     popHospitalRecoveryBase: number; popHospitalRecoveryPerLevel: number; popHospitalRecoveryMax: number;
+    /** 军事建筑每级训练提速/降费（前端按建筑等级展示固定减幅，与兵种无关）。 */
+    trainTimeReducePerLevel: number; trainTimeReduceCap: number;
+    trainCostReducePerLevel: number; trainCostReduceCap: number;
   };
 }
 
@@ -175,4 +178,20 @@ export function popHospitalRecoveryPerLevel(): number {
 /** 医院战死回收：比例上限。 */
 export function popHospitalRecoveryMax(): number {
   return cfg?.constants?.popHospitalRecoveryMax ?? 0.8;
+}
+/** 军事建筑每级训练提速比例（cap∈[0,1)）；前端按比例显示固定减幅。 */
+export function trainTimeReducePerLevel(): number {
+  return cfg?.constants?.trainTimeReducePerLevel ?? 0.05;
+}
+/** 军事建筑训练提速比例上限（cap∈[0,1)）。 */
+export function trainTimeReduceCap(): number {
+  return cfg?.constants?.trainTimeReduceCap ?? 0.6;
+}
+/** 军事建筑每级训练降费比例（cap∈[0,1)）；前端按比例显示固定减幅。 */
+export function trainCostReducePerLevel(): number {
+  return cfg?.constants?.trainCostReducePerLevel ?? 0.03;
+}
+/** 军事建筑训练降费比例上限（cap∈[0,1)）。 */
+export function trainCostReduceCap(): number {
+  return cfg?.constants?.trainCostReduceCap ?? 0.5;
 }

@@ -92,6 +92,11 @@ export class MetaModule {
           storageGrowthPerLevel: c.constants.storageGrowthPerLevel,
           smithyBonusPerLevel: c.constants.smithyBonusPerLevel,
           wallBonusPerLevel: c.constants.wallBonusPerLevel,
+          // 军事建筑训练提速/降费（建筑等级带来的收益，前端按等级展示固定减幅用）
+          trainTimeReducePerLevel: c.constants.trainTimeReducePerLevel,
+          trainTimeReduceCap: c.constants.trainTimeReduceCap,
+          trainCostReducePerLevel: c.constants.trainCostReducePerLevel,
+          trainCostReduceCap: c.constants.trainCostReduceCap,
         },
       },
     };
