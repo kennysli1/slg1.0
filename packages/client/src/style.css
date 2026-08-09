@@ -250,11 +250,11 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 input[type="number"], .train-row input { width: 56px; }
 input { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: var(--s-1) var(--s-2); font-family: inherit; font-size: var(--f-sm); background: #fff; }
 input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
-.train-row { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); }
+.train-row { display: flex; gap: var(--s-1); align-items: center; margin-top: var(--s-2); justify-content: flex-start; }
 .train-row .btn-sm { flex: 1; margin-top: 0; }
 /* 数量步进按钮：左右 − + 包裹输入框，点按区域大、移动端易点 */
 .step-btn {
-  flex: none; width: 40px; min-height: 40px; padding: 0; line-height: 1;
+  flex: none; width: 36px; min-height: 40px; padding: 0; line-height: 1;
   border: 1px solid var(--c-line); border-radius: var(--r-sm);
   background: var(--c-surface-2); color: var(--c-ink);
   font-size: var(--f-md); font-weight: 700; cursor: pointer;
@@ -264,7 +264,7 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .step-btn:active { background: color-mix(in srgb, var(--c-brand) 18%, transparent); }
 /* 训练数量框：与两侧 −/+ 步进按钮融为一体，去边框 + 去原生上下微调箭头 */
 .train-row input[type="number"] {
-  width: 64px; text-align: center;
+  width: 52px; min-width: 0; flex: 1; text-align: center;
   border: 0; background: transparent;
   -moz-appearance: textfield; appearance: textfield;
 }
