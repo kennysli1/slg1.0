@@ -439,6 +439,16 @@ function bindBuildingTrainSection(sec: HTMLElement, slot: any): void {
         showToast(`可用人口不足：需 ${needPop}，当前平民 ${fmt(currentPop)}`);
         return;
       }
+      // ③ 动员上限：士兵足迹（含训练中）超过本族 popRaceMobilizeMax × 总人口则拦截，给出明确提示
+      const psMob = getPopState();
+      if (psMob) {
+        const footprint = (psMob.soldierPop ?? 0) + (psMob.trainingPop ?? 0);
+        const maxSoldier = (psMob.mobilizeCap ?? 0) * (psMob.totalPop ?? 0);
+        if (footprint + needPop > maxSoldier + 1e-9) {
+          showToast(`超过本族动员上限（${Math.round((psMob.mobilizeCap ?? 0) * 100)}%），无法继续训练`);
+          return;
+        }
+      }
       const r = req('TrainTroops', { slotId: currentTrainSlotId!, unit: u, count: cnt });
       if (actFn) {
         void actFn(r);
@@ -481,9 +491,22 @@ function updateBldTrainCost(unit: string, sec: HTMLElement, slot: any): void {
   const totalPop = unitInfo(unit).popCost * cnt;
   const currentPop = interpolatePop();
   if (warn) {
-    if (ps && currentPop < totalPop) warn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}`;
-    else if (ps && ps.inFamine) warn.textContent = '⚠️ 当前处于饥荒，人口正在减少，谨慎训练';
-    else warn.textContent = '';
+    if (ps && currentPop < totalPop) {
+      warn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}`;
+    } else if (ps) {
+      // ③ 动员上限：士兵足迹（驻军+在途+训练中）+ 本次转化后，不得超过本族 popRaceMobilizeMax × 总人口
+      const footprint = (ps.soldierPop ?? 0) + (ps.trainingPop ?? 0);
+      const maxSoldier = (ps.mobilizeCap ?? 0) * (ps.totalPop ?? 0);
+      if (footprint + totalPop > maxSoldier + 1e-9) {
+        warn.textContent = `超过本族动员上限（上限 ${Math.round((ps.mobilizeCap ?? 0) * 100)}% 总人口）：士兵足迹 ${fmt(footprint + totalPop)} / 上限 ${fmt(Math.round(maxSoldier))}`;
+      } else if (ps.inFamine) {
+        warn.textContent = '⚠️ 当前处于饥荒，人口正在减少，谨慎训练';
+      } else {
+        warn.textContent = '';
+      }
+    } else {
+      warn.textContent = '';
+    }
   }
 }
 
