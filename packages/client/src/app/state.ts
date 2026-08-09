@@ -2,6 +2,7 @@
  * 应用级共享状态：服务端数据缓存、战报列表、当前页签、地图选中目标。
  * 各 feature 模块通过这里读写，避免互相直接依赖。
  */
+import { resourceKeys } from './config.js';
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
@@ -132,4 +133,37 @@ export function interpolateTotalPop(): number {
   if (!popState) return 0;
   const civ = interpolatePop();
   return Math.round(civ + (popState.soldierPop ?? 0) + (popState.trainingPop ?? 0));
+}
+
+/** 资源快照时刻（ms）。refreshAll 拉到 res 后校正回 now，资源条据此本地外插。
+ *  必须放在 state 而非 bootstrap：widgets.canAfford/costPreview 也要用它来跟资源条同源判断买得起，
+ *  否则资源条按 base+rate×elapsed 显示充足、买得起按原始快照看到 0，会误报「资源不足」。 */
+let resFetchedAt = 0;
+export function markResFetched(): void { resFetchedAt = Date.now(); }
+export function getResFetchedAt(): number { return resFetchedAt; }
+
+/** 单资源实时本地外插值：缓存快照 + 净速率×elapsed，受 capacity 上限约束（gold 无限）。
+ *  与资源条渲染同一公式，确保 canAfford/costPreview 与资源条数字一致。 */
+export function liveResource(t: string): number {
+  const r = getCache().res;
+  if (!r || !r.resources) return 0;
+  const base = r.resources[t] ?? 0;
+  if (!resFetchedAt) return base;
+  const elapsedSec = (Date.now() - resFetchedAt) / 1000;
+  let ratePerSec: number;
+  if (t === 'gold') ratePerSec = (popState?.goldPerHour ?? 0) / 3600;
+  else ratePerSec = r.netRate?.[t] ?? 0;
+  let v = base + ratePerSec * elapsedSec;
+  if (t !== 'gold') {
+    const cap = r.capacity?.[t] ?? Infinity;
+    v = Math.min(cap, Math.max(0, v));
+  }
+  return v;
+}
+
+/** 全资源实时快照（覆盖全部 resourceKeys，缓存缺键也按 0+速率外插，不为 0）。用于 canAfford/costPreview。 */
+export function liveResources(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of resourceKeys()) out[t] = liveResource(t);
+  return out;
 }

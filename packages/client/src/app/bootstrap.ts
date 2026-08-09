@@ -9,7 +9,7 @@ import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop } from './state.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop, liveResource, markResFetched } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage, refreshTrainingIfOpen } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
@@ -88,7 +88,7 @@ async function refreshAll() {
       return;
     }
     setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
-    resFetchedAt = Date.now(); // 资源快照时刻：之后 1s 定时器据此本地外插资源数字，无需再访问服务器
+    markResFetched(); // 资源快照时刻：之后 1s 定时器据此本地外插资源数字，无需再访问服务器
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       const p = pop.payload as any;
@@ -140,27 +140,9 @@ async function refreshAll() {
 }
 
 /**
- * 资源"实时"量：用缓存快照 + 净速率按经过时间本地外插，使资源条每秒平滑增长，无需访问服务器。
- * 仅用于展示；真实值以 refreshAll 拉取的快照为准（每次 act/onPush/可见性刷新都会把 resFetchedAt 校正回 now）。
- * 与人口外插（interpolatePop）同理，但资源是纯本地计算——这就是"纯 UI 更新"那层。
+ * 资源"实时"量：见 state.ts 的 liveResource（与资源条、canAfford/costPreview 同源，
+ * 缓存快照 + 净速率按经过时间本地外插），避免买得起判定与资源条两套数值源不一致。
  */
-let resFetchedAt = 0;
-function liveResource(t: string): number {
-  const r = getCache().res;
-  if (!r || !r.resources) return 0;
-  const base = r.resources[t] ?? 0;
-  if (!resFetchedAt) return base;
-  const elapsedSec = (Date.now() - resFetchedAt) / 1000;
-  let ratePerSec: number;
-  if (t === 'gold') ratePerSec = (getPopState()?.goldPerHour ?? 0) / 3600;
-  else ratePerSec = r.netRate?.[t] ?? 0;
-  let v = base + ratePerSec * elapsedSec;
-  if (t !== 'gold') {
-    const cap = r.capacity?.[t] ?? Infinity;
-    v = Math.min(cap, Math.max(0, v)); // 不超仓、不为负（速率本身已含停产/负产）
-  }
-  return v;
-}
 
 function renderResBar() {
   const r = getCache().res;

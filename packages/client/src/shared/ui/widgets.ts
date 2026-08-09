@@ -4,7 +4,7 @@
  */
 import { fmt, secStr } from '../utils/format.js';
 import { resInfo, resourceKeys, unitInfo } from '../../app/config.js';
-import { getCache } from '../../app/state.js';
+import { liveResources } from '../../app/state.js';
 import { escapeHtml, escapeAttr } from '../utils/escape.js';
 export { escapeHtml, escapeAttr };
 
@@ -72,18 +72,17 @@ export function installIconFallback(): void {
 export const unitArt = (code: string) => unitInfo(code).icon ?? `unit_${code}`;
 export const unitArtFallback = (code: string) => UNIT_ART_FALLBACKS[code];
 
-/** 是否买得起。 */
+/** 是否买得起。读 liveResources()（与资源条同源外插），避免资源条显示充足但快照为旧值/缺键误报「资源不足」。 */
 export function canAfford(cost: Record<string, number> | null): boolean {
   if (!cost) return false;
-  const have = getCache().res?.resources;
-  if (!have) return false;
+  const have = liveResources();
   return resourceKeys().every((r) => (have[r] ?? 0) >= (cost[r] ?? 0));
 }
 
 /** 消耗预览：带资源图标，买不起的项标红。popCap>0 时在资源末尾追加一个人口项（图标+数字，与资源同形）。 */
 export function costPreview(cost: Record<string, number> | null, timeSec?: number | null, popCap?: number): string {
   if (!cost) return '';
-  const have = getCache().res?.resources ?? {};
+  const have = liveResources();
   const items = resourceKeys().filter((r) => (cost[r] ?? 0) > 0).map((r) => {
     const lack = (have[r] ?? 0) < (cost[r] ?? 0);
     const info = resInfo(r);
