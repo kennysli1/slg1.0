@@ -176,14 +176,13 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 .card.enemy { background: linear-gradient(180deg, #fdeeee, var(--c-surface)); border-color: #e8b6b6; }
 .cardbody { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* 训练卡片：把训练控件（步进行+训练按钮+meta）绝对定位到卡底，cost-slot 多高都不再顶动按钮位置 */
-/* 训练卡：整卡固定最小高度 + 纵向拉伸，让卡内 body 等高，控件绝对定位到卡底后所有卡按钮位置完全一致 */
-.grid > .unit-card:not(.locked) { align-items: stretch; min-height: 260px; }
-.unit-card:not(.locked) > .icon { align-self: center; flex: none; }
-.unit-card:not(.locked) .cardbody { position: relative; padding-bottom: 120px; }
-.unit-card:not(.locked) .train-controls {
-  position: absolute; left: 0; right: 0; bottom: var(--s-3);
-  display: flex; flex-direction: column; gap: var(--s-2);
-}
+/* 训练卡：垂直布局——图标+标题在顶、消耗 4 行竖排在中间、训练控件在底；卡高贴合内容，按钮位置所有卡一致 */
+.grid > .unit-card:not(.locked) { align-items: stretch; }
+.unit-card:not(.locked) { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); }
+.unit-card:not(.locked) .unit-head { display: flex; align-items: center; gap: var(--s-3); }
+.unit-card:not(.locked) .unit-head > .icon { flex: none; }
+.unit-card:not(.locked) .cost-slot { display: flex; flex-direction: column; gap: 1px; }
+.unit-card:not(.locked) .train-controls { display: flex; flex-direction: column; gap: var(--s-1); }
 .unit-card .btn-train { width: 100%; }
 /* 建筑卡的升级按钮整宽，撑满底部一行、消除右侧空白 */
 .cardbody > .btn-sm { display: block; width: 100%; }
@@ -302,6 +301,9 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .cost .cost-time { grid-column: 1 / -1; opacity: .8; white-space: nowrap; font-family: var(--ff-num); }
 .cost-item { display: inline-flex; align-items: center; gap: 3px; font-family: var(--ff-num); font-weight: 600; }
 .cost-lack { color: var(--c-danger); font-weight: 700; }
+/* 兵种卡内的消耗：单列竖排，每行一个资源 + 时间独占整行 */
+.unit-card .cost { display: flex; flex-direction: column; gap: 1px; margin: 0; }
+.unit-card .cost .cost-time { grid-column: auto; margin-top: 2px; }
 
 /* ---------- 进度条 ---------- */
 .progress { position: relative; height: 18px; margin-top: var(--s-2); background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; }

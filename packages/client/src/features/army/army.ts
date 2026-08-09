@@ -89,13 +89,13 @@ export function renderArmy(): string {
       : `<div class="cost-slot">${costPreview(u.cost, u.trainSec)}</div>
         <small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`;
     return `<div class="card unit-card${unlocked ? '' : ' locked'}" data-unit-detail="${u.key}" title="点击查看 ${escapeAttr(u.name)} 详细属性">
-      ${art(unitArt(u.key), u.name, 'md', unitArtFallback(u.key))}
-      <div class="cardbody">
+      <div class="unit-head">
+        ${art(unitArt(u.key), u.name, 'lg', unitArtFallback(u.key))}
         <div class="card-title">${escapeHtml(u.name)} <small class="tag">${formName(u.form)}</small>
           <small class="unit-detail-hint">详情 ›</small>
         </div>
-        ${action}
       </div>
+        ${action}
     </div>`;
   }).join('');
 
