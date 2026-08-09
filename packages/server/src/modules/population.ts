@@ -23,7 +23,7 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  *  D. 增长 growthPerHour = main.popGrowthPerLevel × mainLevel，朝 popCeiling（硬上限−士兵足迹）收敛（currentPop 已达则不再增长）。
  *     速率绑在城镇中心上（GM 面板可调）；旧版全局常数 popGrowthPerHour 已废弃。
  *  E. 开局人口：currentPop = 城镇中心当前等级贡献的 popCap 之和（mainPopCap），其他默认建筑只贡献 hardCap 不贡献人口。
- *  F. 口粮：平民 currentPop × popCropPerLabor /h（source='civilian_pop'）；士兵由 military 以 upkeep 上报（source='troops'）。
+ *  F. 口粮：平民 currentPop × popCropPerLabor /h（source='civilian_pop'）；士兵由 military 以 popCost×(popCropPerLabor+upkeep) 上报（source='troops'，默认口粮 + 军晌）。
  *  G. 战死回收：RecoverCasualties 按医院等级比例把死亡士兵人口（deadPop）的一部分回收为平民(currentPop)，其余计为永久损失；totalPop 净降 permanentDead。
  *  H. 粮荒保留士兵逃兵 + 人口死亡（减员状态机重写，脱离软上限）。
  */

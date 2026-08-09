@@ -177,15 +177,21 @@ export class MilitaryModule {
    *        一次性预扣的 costCrop 是训练费，养兵费是另一口径，叠加不冲突。
    */
   private reportUpkeep(s: MilitaryState): void {
-    let ration = 0; // 军晌（纯口粮）
+    // v5b：每个兵的耗粮 = 默认口粮(popCost×popCropPerLabor，与平民同源) + 军晌(popCost×upkeep)。
+    // 旧模型只算 upkeep、训练时平民那份口粮被"释放"；新模型士兵保留平民口粮再叠加 upkeep，
+    // 即"每个兵默认1耗粮 + 1军晌"（popCost=1 的标准兵）。佣兵 popCost=0 自动零副作用。
+    const base = this.config.constants.popCropPerLabor;
+    let ration = 0; // 军晌（默认口粮 + upkeep）
     for (const [unit, n] of Object.entries(s.troops)) {
       const def = this.config.units[unit];
-      ration += (def?.upkeep ?? 0) * n;
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * n;
     }
-    // 训练队列：每个未产出的兵也按 unit.upkeep 计入（即便尚未入 troops）。
+    // 训练队列：每个未产出的兵也按 (默认口粮 + upkeep) × popCost 计入（即便尚未入 troops）。
     if (s.training) {
       const def = this.config.units[s.training.unit];
-      ration += (def?.upkeep ?? 0) * s.training.remaining;
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * s.training.remaining;
     }
     void this.commands.send({
       name: 'economy.SetUpkeep',

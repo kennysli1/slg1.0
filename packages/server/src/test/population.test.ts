@@ -374,11 +374,12 @@ test('回归·v5 训练中士兵按 unit.upkeep 立即计入 troops 耗粮', asy
   const before = (await send(app, 'economy.GetCropContext', { villageId: 'v1' })).payload as any;
   assert.equal(before.troopUpkeepPerHour, 0, `训练前 troopUpkeepPerHour 应为 0（实际 ${before.troopUpkeepPerHour}）`);
 
-  // 训练 3 个军团兵（legionnaire.upkeep=1）—— 队列在派兵之前的状态
+  // 训练 3 个军团兵（legionnaire：popCost=1、upkeep=1）→ 每兵耗粮 = 1×(1+1)=2/h
   const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 3 });
   assert.equal(r.ok, true, `训练应成功: ${r.reason ?? ''}`);
 
-  // 训练启动后立即查：troops 队列里 3 个未产出的兵应当立刻贡献 3/h
+  // 训练启动后立即查：troops 队列里 3 个未产出的兵应当立刻贡献 3×2=6/h
+  // （默认口粮 popCost×popCropPerLabor=1 + 军晌 upkeep=1，每兵 2/h）
   const after = (await send(app, 'economy.GetCropContext', { villageId: 'v1' })).payload as any;
-  assert.equal(after.troopUpkeepPerHour, 3, `训练后 troopUpkeepPerHour 应为 3（实际 ${after.troopUpkeepPerHour}）— 训练中士兵必须按 unit.upkeep 计入`);
+  assert.equal(after.troopUpkeepPerHour, 6, `训练后 troopUpkeepPerHour 应为 6（实际 ${after.troopUpkeepPerHour}）— 训练中士兵必须按 popCost×(默认口粮+upkeep) 计入`);
 });

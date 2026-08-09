@@ -54,6 +54,7 @@ export class MetaModule {
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,
           popCost: u.popCost,
+          upkeep: u.upkeep,
           isMercenary: !!u.isMercenary,
         })),
         // 雇佣兵单独下发（含完整战斗属性 + 金币单价），供招募店 UI 与军队详情展示

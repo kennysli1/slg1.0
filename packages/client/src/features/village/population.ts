@@ -116,7 +116,7 @@ export function renderPopPanel(): string {
     </div>
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">繁荣度系数由「平民占总人口比例」驱动（currentPop/totalPop ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%）。训练士兵=劳动人口转化为军队，总人数守恒（不闪烁）；士兵占人口并受本族动员上限约束，且只额外增加军晌耗粮（口粮由 troops 军晌计，不重复吃平民粮）</div>
+      <div class="pop-labor-title">繁荣度系数由「平民占总人口比例」驱动（currentPop/totalPop ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%）。训练士兵=劳动人口转化为军队，总人数守恒（不闪烁）；士兵占人口并受本族动员上限约束，且按 popCost×(默认口粮 + upkeep) 计耗粮——既吃与平民同源的默认口粮，再叠加军晌（见部队页每兵耗粮）</div>
       ${laborGrid}
     </div>
   </div>`;

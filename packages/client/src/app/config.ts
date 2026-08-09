@@ -12,18 +12,18 @@ import * as fallback from '../info.js';
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[] }
-export interface UnitInfo { name: string; icon: string; form: string; popCost: number; isMercenary?: boolean }
+export interface UnitInfo { name: string; icon: string; form: string; popCost: number; upkeep?: number; isMercenary?: boolean }
 export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }
 export interface PveInfo { name?: string; icon: string }
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[] }[];
-  units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number; isMercenary?: boolean }[];
+  units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number; upkeep?: number; isMercenary?: boolean }[];
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
-  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; startGoldAmount: number };
+  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number };
 }
 
 let cfg: ServerConfig | null = null;
@@ -46,7 +46,7 @@ export async function loadGameConfig(): Promise<void> {
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
-    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1, isMercenary: !!x.isMercenary };
+    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1, upkeep: x.upkeep ?? 0, isMercenary: !!x.isMercenary };
     for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, form: x.form, meleeAtk: x.meleeAtk, rangedAtk: x.rangedAtk, meleeDef: x.meleeDef, rangedDef: x.rangedDef, speed: x.speed, carry: x.carry, goldCost: x.goldCost };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
   } catch {
@@ -90,12 +90,12 @@ export function buildingPopCapPerLevel(kind: string): number {
 export function unitInfo(key: string): UnitInfo {
   if (units[key]) {
     const u = units[key];
-    return { name: u.name, icon: u.icon, form: u.form, popCost: u.isMercenary ? 0 : (u.popCost ?? 1), isMercenary: !!u.isMercenary };
+    return { name: u.name, icon: u.icon, form: u.form, popCost: u.isMercenary ? 0 : (u.popCost ?? 1), upkeep: u.upkeep ?? 0, isMercenary: !!u.isMercenary };
   }
   const fb = fallback.UNIT_INFO[key];
   const isMerc = key.startsWith('merc_');
-  if (fb) return { ...fb, popCost: isMerc ? 0 : 1, isMercenary: isMerc };
-  return { name: key, icon: `unit_${key}`, form: 'melee', popCost: 1, isMercenary: isMerc };
+  if (fb) return { ...fb, popCost: isMerc ? 0 : 1, upkeep: 0, isMercenary: isMerc };
+  return { name: key, icon: `unit_${key}`, form: 'melee', popCost: 1, upkeep: 0, isMercenary: isMerc };
 }
 /** 雇佣兵详情（含金币单价 + 战斗属性）；仅 merc_* 兵种有。 */
 export function mercenaryInfo(key: string): MercenaryInfo | undefined {
@@ -117,4 +117,16 @@ export function goldTaxPerCivilianPerHour(): number {
 /** 金币：新村初始金币存量。 */
 export function startGoldAmount(): number {
   return cfg?.constants?.startGoldAmount ?? 100;
+}
+/** 每个劳动人口/士兵每小时默认口粮（平民与士兵基础耗粮同源）。 */
+export function popCropPerLabor(): number {
+  return cfg?.constants?.popCropPerLabor ?? 1;
+}
+/** 单个兵（popCost 份人口）每小时耗粮 = popCost×(默认口粮 + upkeep)。 */
+export function unitCropPerHour(key: string): number {
+  const u = unitInfo(key);
+  const base = popCropPerLabor();
+  const upkeep = u.upkeep ?? 0;
+  const popCost = u.popCost ?? 1;
+  return popCost * (base + upkeep);
 }

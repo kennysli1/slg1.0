@@ -2,7 +2,7 @@
 import { art, unitArt, unitArtFallback, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
 import { errText, formName, tribeName } from '../../shared/ui/text.js';
-import { unitInfo, mercenaryInfo, resourceKeys } from '../../app/config.js';
+import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, popCropPerLabor } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
@@ -29,8 +29,7 @@ function renderUnitDetailRows(u: any): string {
     ${row('近战防御', r(u.meleeDef), '挨近战时耐久')}
     ${row('远程防御', r(u.rangedDef), '挨远程时耐久')}
     ${row('移动速度', r(u.speed), '格/小时')}
-    ${row('掠夺负重', r(u.carry))}
-    ${row('每小时耗粮', r(u.upkeep))}
+    ${row('每小时耗粮', r(unitCropPerHour(u.key ?? u.code ?? '')))}
     ${row('训练消耗人口', popCost, '每兵')}
   </div>`;
 }
@@ -68,15 +67,15 @@ export function renderArmy(): string {
   const trainCards = (army.trainable || []).map((u: any) => {
     const unlocked = u.unlocked !== false; // 旧缓存无字段时视为可训
     const popCost = unitInfo(u.key).popCost;
-    const upkeep = u.upkeep ?? 0;
+    const perGrain = unitCropPerHour(u.key); // 每兵耗粮 = popCost×(默认口粮 + upkeep)
     const action = unlocked
       ? `<div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="pop-warn" id="pop-warn-${u.key}" style="display:none"></div>
         <div class="train-row">
           <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
           <small class="hint-sm" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></small>
-          ${upkeep > 0
-            ? `<small class="hint-sm train-upkeep" title="此批次每小时新增耗粮（消耗粮食产能）">粮压 +<b id="batchupkeep-${u.key}">${upkeep}</b>/h</small>`
+          ${perGrain > 0
+            ? `<small class="hint-sm train-upkeep" title="此批次每小时新增耗粮（${popCropPerLabor()} 默认口粮 + ${u.upkeep ?? 0} 军晌，×${popCost} 人口份）">粮压 +<b id="batchupkeep-${u.key}">${perGrain}</b>/h</small>`
             : ''}
           <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}">训练</button>
         </div>`
@@ -150,8 +149,8 @@ export function updateTrainCost(unitKey: string) {
   const popCostEl = document.getElementById(`popcost-${unitKey}`);
   if (popCostEl) popCostEl.textContent = String(totalPop);
 
-  // 批次总耗粮（upkeep /h × 数量）
-  const batchUpkeep = (u.upkeep ?? 0) * cnt;
+  // 批次总耗粮（每兵耗粮 popCost×(默认口粮+upkeep) /h × 数量）
+  const batchUpkeep = unitCropPerHour(unitKey) * cnt;
   const batchUpkeepEl = document.getElementById(`batchupkeep-${unitKey}`);
   if (batchUpkeepEl) batchUpkeepEl.textContent = String(batchUpkeep);
 

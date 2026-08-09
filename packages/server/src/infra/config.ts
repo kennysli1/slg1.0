@@ -893,14 +893,14 @@ export function validateGameConfig(config: GameConfig): void {
 
   // 人口启动配置守卫：训练一个兵时，净粮食消耗不应下降（防止免费兵种）。
   // 推导：转化 1 名平民(popCost)为 1 个兵 → 释放平民口粮 popCost×popCropPerLabor，
-  // 增加士兵口粮 popCost×upkeep；净变化 = popCost×(upkeep − popCropPerLabor)。
-  // 要求 upkeep ≥ popCropPerLabor（零资源零人口的特殊单位跳过）。
+  // 增加士兵口粮 popCost×(popCropPerLabor + upkeep)（默认口粮 + 军晌）；
+  // 净变化 = popCost×upkeep ≥ 0（始终不降，除非 upkeep 为负）。
+  // 故仅需守卫 upkeep ≥ 0（零资源零人口的特殊单位跳过）。
   for (const [key, u] of Object.entries(config.units)) {
     if (u.popCost <= 0 && u.upkeep <= 0) continue; // 特殊单位跳过
-    if (u.popCost > 0 && u.upkeep < c.popCropPerLabor - 1e-9) {
+    if (u.upkeep < 0) {
       errors.push(
-        `units.csv[${key}] 训练后粮食净余量不减反增：upkeep(${u.upkeep}) < popCropPerLabor(${c.popCropPerLabor})，` +
-        `须提高该兵种 upkeep 或降低 popCost`
+        `units.csv[${key}] 兵种 upkeep(${u.upkeep}) 不能为负`
       );
     }
   }
