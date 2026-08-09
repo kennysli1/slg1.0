@@ -346,7 +346,9 @@ async function renderBuildingTrainSection(slotId: string): Promise<void> {
 
   const res = await req('GetArmy');
   if (!res.ok) { sec.innerHTML = `<div class="hint-sm">加载失败：${escapeHtml(res.error?.code ?? '未知')}</div>`; return; }
-  setCache({ army: res.payload });
+  // 合并而非整体替换：setCache 会整体覆盖 cache，若只传 {army} 会清掉 res/vil/area/moves，
+  // 导致资源条/买得起判定读到 undefined → 误报「资源不足」且资源芯片标红。
+  setCache({ ...getCache(), army: res.payload });
   const army: any = res.payload;
   const slot = (army.slots || []).find((s: any) => s.slotId === slotId);
   if (!slot) { sec.innerHTML = '<div class="hint-sm">该建筑暂不提供训练</div>'; return; }
