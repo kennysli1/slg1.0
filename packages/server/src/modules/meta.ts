@@ -92,9 +92,6 @@ export class MetaModule {
           storageGrowthPerLevel: c.constants.storageGrowthPerLevel,
           smithyBonusPerLevel: c.constants.smithyBonusPerLevel,
           wallBonusPerLevel: c.constants.wallBonusPerLevel,
-          popHospitalRecoveryBase: c.constants.popHospitalRecoveryBase,
-          popHospitalRecoveryPerLevel: c.constants.popHospitalRecoveryPerLevel,
-          popHospitalRecoveryMax: c.constants.popHospitalRecoveryMax,
         },
       },
     };
