@@ -252,6 +252,22 @@ input { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: va
 input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .train-row { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); }
 .train-row .btn-sm { flex: 1; margin-top: 0; }
+/* 数量步进按钮：左右 − + 包裹输入框，点按区域大、移动端易点 */
+.step-btn {
+  flex: none; width: 40px; min-height: 40px; padding: 0; line-height: 1;
+  border: 1px solid var(--c-line); border-radius: var(--r-sm);
+  background: var(--c-surface-2); color: var(--c-ink);
+  font-size: var(--f-md); font-weight: 700; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.step-btn:hover { background: var(--c-surface); border-color: var(--c-brand); }
+.step-btn:active { background: color-mix(in srgb, var(--c-brand) 18%, transparent); }
+.train-row input[type="number"] { width: 64px; text-align: center; }
+/* 训练信息条：人口占用 + 兵种军晌（耗粮图标 + 数字） */
+.train-meta { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: center; margin-top: var(--s-2); }
+.train-meta .cost-item { font-size: var(--f-xs); }
+.grain-chip { color: var(--c-raid); }
+.grain-chip b { color: var(--c-raid); font-family: var(--ff-num); }
 
 /* ---------- 横幅 ---------- */
 .banner {

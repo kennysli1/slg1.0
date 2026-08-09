@@ -2,7 +2,7 @@
 import { art, unitArt, unitArtFallback, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
 import { errText, formName, tribeName } from '../../shared/ui/text.js';
-import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, popCropPerLabor } from '../../app/config.js';
+import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
@@ -59,6 +59,7 @@ export function renderArmy(): string {
   const tr = army.training;
   const training = tr
     ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
+        <span class="cost-item grain-chip" title="额外军晌：每小时在默认口粮之上额外消耗的粮">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>+${unitInfo(tr.unit).upkeep ?? 0}</b>/h</span>
         ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
 
   // 训练卡片：整张卡可点 → 右侧抽屉展开详细属性；卡面默认只显示造价 + 训练操作。
@@ -72,12 +73,16 @@ export function renderArmy(): string {
       ? `<div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
         <div class="pop-warn" id="pop-warn-${u.key}" style="display:none"></div>
         <div class="train-row">
-          <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" />
-          <small class="hint-sm" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></small>
+          <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
+          <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
+          <button type="button" class="step-btn" data-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
+          <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
+        </div>
+        <div class="train-meta">
+          <span class="cost-item" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></span>
           ${perGrain > 0
-            ? `<small class="hint-sm train-upkeep" title="此批次每小时新增耗粮（${popCropPerLabor()} 默认口粮 + ${u.upkeep ?? 0} 军晌，×${popCost} 人口份）">粮压 +<b id="batchupkeep-${u.key}">${perGrain}</b>/h</small>`
+            ? `<span class="cost-item grain-chip" title="兵种军晌：每兵在默认口粮（${popCropPerLabor()}）之上额外耗粮 ${u.upkeep ?? 0}；按 ${popCost} 人口份折算约 ${perGrain}/h·兵">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>${u.upkeep ?? 0}</b>/h·兵</span>`
             : ''}
-          <button class="btn-sm" id="btn-${u.key}" data-train="${u.key}">训练</button>
         </div>`
       : `<div class="cost-slot">${costPreview(u.cost, u.trainSec)}</div>
         <small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`;
@@ -149,10 +154,7 @@ export function updateTrainCost(unitKey: string) {
   const popCostEl = document.getElementById(`popcost-${unitKey}`);
   if (popCostEl) popCostEl.textContent = String(totalPop);
 
-  // 批次总耗粮（每兵耗粮 popCost×(默认口粮+upkeep) /h × 数量）
-  const batchUpkeep = unitCropPerHour(unitKey) * cnt;
-  const batchUpkeepEl = document.getElementById(`batchupkeep-${unitKey}`);
-  if (batchUpkeepEl) batchUpkeepEl.textContent = String(batchUpkeep);
+  // 耗粮标注（兵种军晌）为每兵固定值，已在渲染时写死，无需随数量更新。
 
   // availablePop = currentPop（平民数，即可转化为士兵的劳动人口）
   const ps = getPopState();
@@ -286,6 +288,20 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
         return res;
       }));
     });
+
+  // 训练数量步进：− / + 包裹输入框，点按友好（手动输入仍可用）
+  document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach((b) => {
+    b.onclick = () => {
+      const unit = b.dataset.unit!;
+      const inp = document.getElementById(`cnt-${unit}`) as HTMLInputElement | null;
+      if (!inp) return;
+      const step = Number(b.dataset.step) || 0;
+      const cur = Math.max(1, Math.floor(Number(inp.value) || 1));
+      const next = Math.max(1, cur + step);
+      inp.value = String(next);
+      updateTrainCost(unit);
+    };
+  });
 
   // 训练数量变化
   document.querySelectorAll<HTMLInputElement>('input[data-unit]').forEach((inp) => {
