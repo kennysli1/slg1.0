@@ -154,17 +154,18 @@ async function render(): Promise<void> {
 
   wrap.querySelectorAll<HTMLElement>('[data-close-trade]').forEach((e) => e.onclick = () => closeTradeCenter());
 
-  // 创建表单：实时预估路线占用
-  const inputs = Array.from(wrap.querySelectorAll<HTMLInputElement>('input[data-give], input[data-want]'));
+  // 创建表单：实时预估路线占用（仅「提供」方由本村商队运出；
+  //   「求购」由接单方商队送到本村，不计本方路线占用——与服务端 createTradeOrder 一致）
+  const giveInputs = Array.from(wrap.querySelectorAll<HTMLInputElement>('input[data-give]'));
   const routeNeed = wrap.querySelector<HTMLElement>('#routeNeed');
   const computeRoutes = () => {
     let units = 0;
-    inputs.forEach((i) => { units += Math.max(0, Math.floor(Number(i.value) || 0)); });
+    giveInputs.forEach((i) => { units += Math.max(0, Math.floor(Number(i.value) || 0)); });
     const need = Math.ceil(units / Math.max(1, cap));
     if (routeNeed) routeNeed.textContent = String(need);
     return need;
   };
-  inputs.forEach((i) => i.oninput = computeRoutes);
+  giveInputs.forEach((i) => i.oninput = computeRoutes);
   computeRoutes();
 
   // NPC 成交（即时）
