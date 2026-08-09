@@ -169,3 +169,44 @@ test('仓储容量：建仓库后 economy 容量上升', async () => {
   const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   assert.ok(after.capacity.wood > before.capacity.wood, '建仓库后木材容量应上升');
 });
+
+test('迁移：旧存档军事建筑从城外归位到城内（reconcileZones）', async () => {
+  const app = freshApp();
+  // 模拟 CSV 改区前创建的旧存档：兵营被持久化为城外（zone/slotId 冻结在原区）
+  const raw = app.store.get('building', 'v1') as any;
+  assert.ok(raw, '应有建筑存档');
+  const barracks = raw.placed.find((p: any) => p.kind === 'barracks');
+  assert.ok(barracks, '开局应有兵营');
+  barracks.zone = 'outer';
+  barracks.slotId = 'outer-9';
+  app.store.set('building', 'v1', raw);
+
+  // 触发迁移（resume 内部调用 reconcileZones，把 zone 对齐回当前 CSV 的 def.zone）
+  app.resume();
+
+  const l = await layout(app);
+  assert.ok(l.zones.inner.placed.some((p: any) => p.kind === 'barracks'), '兵营应归入城内');
+  assert.ok(!l.zones.outer.placed.some((p: any) => p.kind === 'barracks'), '城外不应再有兵营');
+  assert.ok(l.zones.inner.slots > 0, '城内仍有槽位');
+});
+
+test('城镇中心升级逐等级开放城内槽位（无平坡）', async () => {
+  const app = freshApp();
+  const l0 = await layout(app);
+  const inner1 = l0.zones.inner.slots;
+  assert.equal(l0.townCenter.level, 1);
+  // 逐等级升城镇中心，记录城内槽位变化
+  let prev = inner1;
+  for (let target = 2; target <= 5; target++) {
+    const r = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: 'center' });
+    assert.equal(r.ok, true, `升城镇中心到 ${target} 应成功: ${r.reason ?? ''}`);
+    await app.scheduler.advanceTo(clock + 300_000, setClock);
+    const l = await layout(app);
+    assert.equal(l.townCenter.level, target, `城镇中心达 ${target} 级`);
+    assert.ok(l.zones.inner.slots >= prev, `城内槽位不应减少（TC${target}）`);
+    prev = l.zones.inner.slots;
+  }
+  // TC1->TC5 至少应净增多个城内槽位（曲线早期逐等级+1）
+  assert.ok(prev > inner1, `城镇中心升级应开放更多城内槽位（TC1=${inner1} -> TC5=${prev}）`);
+});
+

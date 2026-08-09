@@ -102,8 +102,9 @@ export class BuildingModule {
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
   }
 
-  /** 重启恢复：为每条未完成队列重新登记定时任务（过期则立即触发）。 */
+  /** 重启恢复：先把旧存档建筑 zone/slotId 对齐到当前 CSV（迁移），再为未完成队列登记定时任务。 */
   resume(): void {
+    this.reconcileZones();
     for (const s of this.store.all<BuildingState>(COLLECTION)) {
       if (!s.queue?.length) continue;
       for (const q of s.queue) {
@@ -117,6 +118,53 @@ export class BuildingModule {
       }
       this.store.set(COLLECTION, s.villageId, s);
     }
+  }
+
+  /**
+   * 迁移：把已存村庄的 placed 建筑 zone/slotId 对齐到当前 CSV 的 def.zone。
+   * 解决「CSV 改了建筑区域（如军事建筑迁入城内），但旧存档建筑仍冻结在原 zone」导致
+   * 兵营等卡在城外、且占用了错误区域槽位的问题。对所有村庄幂等：仅在实际不一致时写回。
+   *
+   * 实现：按当前 def.zone 把 placed 重新分组，逐区顺序重编号 slotId（center 固定 'center'），
+   * 并把队列项里引用的旧 slotId 一并重映射，保证 complete() 仍能定位到正确的建筑。
+   */
+  private reconcileZones(): void {
+    let anyChanged = false;
+    for (const s of this.store.all<BuildingState>(COLLECTION)) {
+      // 按当前 CSV 的 def.zone 分组（未知建筑兜底归 outer）
+      const desired: Record<Zone, PlacedBuilding[]> = { center: [], inner: [], outer: [] };
+      for (const p of s.placed) {
+        const def = this.config.buildings[p.kind];
+        const z: Zone = def?.zone ?? 'outer';
+        desired[z].push(p);
+      }
+      // 是否真的需要修正：zone 不一致，或 slotId 前缀与 zone 不符
+      const needFix = s.placed.some((p) => {
+        const def = this.config.buildings[p.kind];
+        const z: Zone = def?.zone ?? 'outer';
+        const prefix = z === 'center' ? 'center' : `${z}-`;
+        return p.zone !== z || !p.slotId.startsWith(prefix);
+      });
+      if (!needFix) continue;
+
+      const reassigned: PlacedBuilding[] = [];
+      const remap = new Map<string, string>();
+      for (const z of ['center', 'inner', 'outer'] as Zone[]) {
+        desired[z].forEach((p, i) => {
+          const newSlot = z === 'center' ? CENTER_SLOT : `${z}-${i}`;
+          remap.set(p.slotId, newSlot);
+          p.zone = z;
+          p.slotId = newSlot;
+          reassigned.push(p);
+        });
+      }
+      // 队列项引用的 slotId 一并重映射
+      for (const q of s.queue) if (remap.has(q.slotId)) q.slotId = remap.get(q.slotId)!;
+      s.placed = reassigned;
+      this.store.set(COLLECTION, s.villageId, s);
+      anyChanged = true;
+    }
+    if (anyChanged) console.log('[building] reconciled zone/slotId for existing villages');
   }
 
   createVillage(villageId: string, tribe = 'romans'): void {
