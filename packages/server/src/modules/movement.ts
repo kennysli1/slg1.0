@@ -35,7 +35,7 @@ const log = makeLogger('movement');
 
 interface Movement {
   id: string;
-  type: 'raid' | 'attack' | 'return' | 'found' | 'transport';
+  type: 'raid' | 'attack' | 'return' | 'found' | 'transport' | 'caravan';
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -68,6 +68,12 @@ interface Movement {
    * 只有令牌匹配才执行——作废因相遇/暂停而遗留的过期定时任务，防止重复推进。
    */
   stepToken: number;
+  /** 商队（贸易）：返程归属村与到达本村时需回收的贸易路线数（由 trade 模块写入）。 */
+  homeVillage?: string;
+  /** 商队（贸易）：到达本村回收的贸易路线数。 */
+  routesFreed?: number;
+  /** 商队（贸易）：true=正在返程（到家即回收路线）；false=去程（到目标村交付货物后启动返程）。 */
+  returning?: boolean;
 }
 
 const COLLECTION = 'movement';
@@ -138,6 +144,7 @@ export class MovementModule {
     this.commands.register('movement.SendAttack', (c) => this.sendAttack(c));
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
+    this.commands.register('movement.SendCaravan', (c) => this.sendCaravan(c));
     this.commands.register('movement.List', (c) => this.list(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
@@ -473,6 +480,103 @@ export class MovementModule {
     };
   }
 
+  /** 清洗商队货物：仅保留 wood/clay/iron/crop/gold 的正整数，返回清洁副本与总单位数。 */
+  private cleanCargo(cargo: Record<string, number> | undefined): { clean: Record<string, number>; total: number } {
+    const clean: Record<string, number> = {};
+    let total = 0;
+    for (const t of ['wood', 'clay', 'iron', 'crop', 'gold'] as const) {
+      const n = Math.max(0, Math.floor(cargo?.[t] ?? 0));
+      if (n > 0) { clean[t] = n; total += n; }
+    }
+    return { clean, total };
+  }
+
+  /**
+   * 发起商队（贸易）：与 launch 同形，但无 troops、用独立的商人速度（tradeCaravanSpeed）。
+   * homeVillage/routesFreed 透传给返程回收使用（由 trade 模块解释）。
+   */
+  private launchCaravan(opts: {
+    id: string; fromVillage: string; fromXY: Hex; toXY: Hex; cargo: Record<string, number>;
+    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string;
+  }): Movement {
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
+    const steps = Math.max(1, path.length - 1);
+    const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+    const dist = hexDistanceWrapped(opts.fromXY, opts.toXY, W, H);
+    const totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
+    const perStepMs = Math.max(1, Math.round(totalMs / steps));
+    const full: Movement = {
+      id: opts.id, type: 'caravan', fromVillage: opts.fromVillage, fromXY: opts.fromXY, toXY: opts.toXY,
+      targetVillage: opts.targetVillage, troops: {}, cargo: opts.cargo, departAt: this.now(),
+      path, stepIndex: 0, pos: path[0], perStepMs, nextStepAt: this.now() + perStepMs,
+      arriveAt: this.now() + perStepMs * steps, status: 'marching', stepToken: 1,
+      homeVillage: opts.homeVillage, routesFreed: opts.routesFreed, returning: opts.returning ?? false,
+    };
+    this.store.set(COLLECTION, full.id, full);
+    this.scheduler.schedule(perStepMs, () => this.step(full.id, full.stepToken), `movement:${full.id}`, `movement:${full.id}`);
+    return full;
+  }
+
+  /**
+   * 发起商队（内部命令，不经网关暴露；由 trade 模块调用）。货物带走程，到达目标村交付，
+   * 随后自动返程；返程到家时经 bus 发 `movement.CaravanReturned`（携带 homeVillage + routesFreed），
+   * 由 trade 模块回收该村的贸易路线。
+   */
+  private async sendCaravan(cmd: Command): Promise<CommandResult> {
+    const { fromVillage, targetVillage, cargo, homeVillage, routesFreed, returning } = cmd.payload as {
+      fromVillage: string; targetVillage: string; cargo?: Record<string, number>;
+      homeVillage?: string; routesFreed?: number; returning?: boolean;
+    };
+    if (targetVillage === fromVillage) return { ok: false, payload: {}, reason: 'same_village' };
+    const cleaned = this.cleanCargo(cargo);
+    if (cleaned.total <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
+    const fromXY = await this.villageXY(fromVillage);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const mv = this.launchCaravan({
+      id: this.nextId(), fromVillage, fromXY, toXY, cargo: cleaned.clean,
+      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage,
+    });
+    log('出征(caravan)', { id: mv.id, from: fromVillage, to: targetVillage, cargo: cleaned.clean, returning: !!returning });
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  /** 商队到达：去程→把货物交给目标村（目标村不存在则跳过交付）后启动返程；返程→到家回收贸易路线。 */
+  private async arriveCaravan(mv: Movement): Promise<void> {
+    if (mv.returning) {
+      if (mv.routesFreed && mv.homeVillage) {
+        void this.bus.emit({
+          name: 'movement.CaravanReturned', source: MovementModule.NAME, ts: this.now(),
+          payload: { villageId: mv.homeVillage, routesFreed: mv.routesFreed },
+        } as DomainEvent);
+      }
+      this.store.delete(COLLECTION, mv.id);
+      return;
+    }
+    // 去程：把货物交给目标村（目标村不存在则跳过交付，仍正常返程回收路线）
+    if (mv.cargo && Object.keys(mv.cargo).length > 0) {
+      const tgt = await this.commands.send({
+        name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
+      });
+      if (tgt.ok) {
+        await this.commands.send({
+          name: 'economy.Grant', from: MovementModule.NAME,
+          payload: { villageId: mv.targetVillage, gain: mv.cargo },
+        });
+      }
+    }
+    const home = mv.homeVillage ?? mv.fromVillage;
+    const homeXY = await this.villageXY(home);
+    if (!homeXY) { this.store.delete(COLLECTION, mv.id); return; }
+    this.launchCaravan({
+      id: this.nextId(), fromVillage: home, fromXY: mv.toXY, toXY: homeXY, cargo: {},
+      homeVillage: home, routesFreed: mv.routesFreed ?? 0, returning: true, targetVillage: home,
+    });
+    this.store.delete(COLLECTION, mv.id);
+  }
+
   /** 运输到达：货物入库（可超额）+ 部队并入目标村。 */
   private async arriveTransport(mv: Movement): Promise<void> {
     const target = mv.targetVillage;
@@ -706,8 +810,8 @@ export class MovementModule {
     mv.nextStepAt = this.now() + mv.perStepMs;
     this.store.set(COLLECTION, id, mv);
 
-    // 相遇检测（仅两支出征军相遇即战；返程军脱战免疫）
-    if (mv.type !== 'return') {
+    // 相遇检测（仅两支出征军相遇即战；返程军/商队脱战免疫）
+    if (mv.type !== 'return' && mv.type !== 'caravan') {
       const opponent = await this.findEncounter(mv);
       if (opponent) {
         await this.resolveFieldEncounter(mv, opponent);
@@ -725,8 +829,9 @@ export class MovementModule {
     this.scheduler.schedule(mv.perStepMs, () => this.step(id, mv.stepToken), `movement:${id}`, `movement:${id}`);
   }
 
-  /** 到达终点：按类型分派（出征→交给 Combat；返程→归队入库；拓荒→建村；运输→留守入库）。 */
+  /** 到达终点：按类型分派（出征→交给 Combat；返程→归队入库；拓荒→建村；运输→留守入库；商队→交付/回收）。 */
   private async arrive(mv: Movement): Promise<void> {
+    if (mv.type === 'caravan') { await this.arriveCaravan(mv); return; }
     if (mv.type === 'return') { await this.arriveReturn(mv.id); return; }
     if (mv.type === 'found') { await this.arriveFound(mv); return; }
     if (mv.type === 'transport') { await this.arriveTransport(mv); return; }
@@ -772,7 +877,7 @@ export class MovementModule {
     const myOwner = await this.ownerOf(mv.fromVillage);
     for (const other of this.store.all<Movement>(COLLECTION)) {
       if (other.id === mv.id) continue;
-      if (other.type === 'return' || other.status !== 'marching') continue;
+      if (other.type === 'return' || other.type === 'caravan' || other.status !== 'marching') continue;
       if (other.pos.q !== mv.pos.q || other.pos.r !== mv.pos.r) continue;
       const otherOwner = await this.ownerOf(other.fromVillage);
       if (otherOwner && myOwner && otherOwner === myOwner) continue; // 同一玩家不相互交战

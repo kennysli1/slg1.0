@@ -8,6 +8,7 @@ import { getCache, setCache, interpolatePop, getPopState } from '../../app/state
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
 import { openMercenaryCamp } from '../army/mercenary.js';
+import { openTradeCenter } from '../trade/tradecenter.js';
 import { openUnitDetail } from '../army/army.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
@@ -192,6 +193,7 @@ export function openBuilding(slotId: string): void {
   const found = ctxFromSlot(slotId);
   if (found) {
     if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    if (found.kind === 'tradecenter') { openTradeCenter(actFn!); return; }
     openBuildingDetail(found.kind, found.ctx, found.slotId);
     return;
   }
@@ -199,6 +201,7 @@ export function openBuilding(slotId: string): void {
   const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
   if (slot) {
     if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    if (slot.kind === 'tradecenter') { openTradeCenter(actFn!); return; }
     openBuildingDetail(slot.kind, { level: slot.level, isBuild: slot.level < 1 }, slotId);
     return;
   }
@@ -604,6 +607,7 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       const found = ctxFromSlot(el.dataset.bldSlot!);
       if (!found) return;
       if (found.kind === 'mercenarycamp') { openMercenaryCamp(act); return; }
+      if (found.kind === 'tradecenter') { openTradeCenter(act); return; }
       openBuildingDetail(found.kind, found.ctx, found.slotId);
     });
 

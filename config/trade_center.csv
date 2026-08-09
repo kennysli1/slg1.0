@@ -1,0 +1,17 @@
+﻿level,tradeRoutes,tradeViewRadius,npcOrderCount,npcRefreshSec,npcStoredRefreshes
+#贸易中心逐级参数：每 level 一行。
+#tradeRoutes=本村拥有的贸易路线数（派商队消耗 商队返回回收）；
+#tradeViewRadius=可看见/接受贸易对象的最大六边形距离(格) 等级越高看得越远；
+#npcOrderCount=同时可见的 NPC 订单数量；
+#npcRefreshSec=NPC 订单自动刷新间隔(秒)；
+#npcStoredRefreshes=可囤积的手动刷新次数（营地自动刷新累积 手动刷新消耗）
+1,2,5,3,3600,1
+2,3,7,3,3300,1
+3,4,9,4,3000,2
+4,5,11,4,2700,2
+5,6,13,5,2400,3
+6,8,16,5,2100,3
+7,9,19,6,1800,4
+8,10,22,6,1500,5
+9,11,26,7,1200,6
+10,12,30,8,900,8

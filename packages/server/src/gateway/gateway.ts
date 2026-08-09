@@ -16,6 +16,7 @@ import { CombatModule } from '../modules/combat.js';
 import { MetaModule } from '../modules/meta.js';
 import { NotificationsModule } from '../modules/notifications.js';
 import { MercenaryModule } from '../modules/mercenary.js';
+import { TradeModule } from '../modules/trade.js';
 
 /**
  * 接入层 · Gateway（唯一翻译官 + 多人会话管理）
@@ -63,6 +64,7 @@ const MODULE_MANIFESTS: ModuleManifest[] = [
   CombatModule.MANIFEST,
   NotificationsModule.MANIFEST,
   MercenaryModule.MANIFEST,
+  TradeModule.MANIFEST,
 ];
 
 const { actionRoutes: ACTION_ROUTES, eventToPush: EVENT_TO_PUSH } = aggregateManifests(MODULE_MANIFESTS);

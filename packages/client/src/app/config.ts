@@ -37,6 +37,10 @@ interface ServerConfig {
     /** 军事建筑每级训练提速/降费（前端按建筑等级展示固定减幅，与兵种无关）。 */
     trainTimeReducePerLevel: number; trainTimeReduceCap: number;
     trainCostReducePerLevel: number; trainCostReduceCap: number;
+    /** 贸易中心：路线运力/商队速度/NPC 计价/挂单上限与存活时长 */
+    tradeRouteCapacity: number; tradeCaravanSpeed: number;
+    tradeNpcGoldPerResource: number; tradeNpcSellMargin: number;
+    tradeOrderMaxPerVillage: number; tradeOrderTtlSec: number;
   };
 }
 
@@ -194,4 +198,31 @@ export function trainCostReducePerLevel(): number {
 /** 军事建筑训练降费比例上限（cap∈[0,1)）。 */
 export function trainCostReduceCap(): number {
   return cfg?.constants?.trainCostReduceCap ?? 0.5;
+}
+
+// ---------- 贸易中心展示用常量（服务端白名单下发） ----------
+
+/** 每条贸易路线可运送的货物单位数（各资源按 1 单位计，多条路线叠加）。 */
+export function tradeRouteCapacity(): number {
+  return cfg?.constants?.tradeRouteCapacity ?? 500;
+}
+/** 商人车队行进速度（格/小时，独立于行军倍率）。 */
+export function tradeCaravanSpeed(): number {
+  return cfg?.constants?.tradeCaravanSpeed ?? 12;
+}
+/** NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）。 */
+export function tradeNpcGoldPerResource(): number {
+  return cfg?.constants?.tradeNpcGoldPerResource ?? 0.5;
+}
+/** 玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价）。 */
+export function tradeNpcSellMargin(): number {
+  return cfg?.constants?.tradeNpcSellMargin ?? 0.8;
+}
+/** 每个村庄同时可挂出的玩家贸易订单上限。 */
+export function tradeOrderMaxPerVillage(): number {
+  return cfg?.constants?.tradeOrderMaxPerVillage ?? 5;
+}
+/** 玩家贸易订单未被人接受时的存活时长（秒）。 */
+export function tradeOrderTtlSec(): number {
+  return cfg?.constants?.tradeOrderTtlSec ?? 86400;
 }

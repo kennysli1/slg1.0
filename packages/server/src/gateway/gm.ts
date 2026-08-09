@@ -312,6 +312,12 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['refreshSec', 'mercCount', 'maxStoredRefreshes'],
     labels: ['level'],
   },
+  // 贸易中心逐级参数（trade_center.csv）：level → {tradeRoutes, tradeViewRadius, npcOrderCount, npcRefreshSec, npcStoredRefreshes}
+  trade_center: {
+    file: 'trade_center.csv', key: 'level',
+    numeric: ['tradeRoutes', 'tradeViewRadius', 'npcOrderCount', 'npcRefreshSec', 'npcStoredRefreshes'],
+    labels: ['level'],
+  },
   constants: {
     file: 'game_constants.csv', key: 'key',
     numericByType: true, // 用行内 type 列判定（number/bool/string）
@@ -416,8 +422,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','constants'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, constants:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','constants'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, constants:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -437,7 +443,7 @@ function sectionGeneric(table){
   var meta = DATA.meta[table];
   var rows = DATA[table] || [];
   var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', constants:'全局常量' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', constants:'全局常量' };
   var title = TITLES[table] || table;
   var h = '<div class="hint">主键 ' + esc(meta.key) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
   h += '<table class="bt"><thead><tr>';

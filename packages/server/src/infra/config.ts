@@ -322,6 +322,18 @@ export interface GameConstants {
   foundMaxInflight: number;
   /** 分城新建后禁止放弃的秒数。 */
   foundAbandonLockSec: number;
+  /** 贸易：每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各计 1 单位）。 */
+  tradeRouteCapacity: number;
+  /** 贸易：商人车队行进速度（格/小时），独立于行军速度倍率。 */
+  tradeCaravanSpeed: number;
+  /** 贸易：NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）。 */
+  tradeNpcGoldPerResource: number;
+  /** 贸易：玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价）。 */
+  tradeNpcSellMargin: number;
+  /** 贸易：每个村庄同时可挂出的玩家贸易订单上限。 */
+  tradeOrderMaxPerVillage: number;
+  /** 贸易：玩家贸易订单未被人接受时的存活时长（秒），超时自动下架。 */
+  tradeOrderTtlSec: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -336,6 +348,20 @@ export interface MercCampLevel {
   maxStoredRefreshes: number;
 }
 
+/** 贸易中心某等级的参数（来自 trade_center.csv）。 */
+export interface TradeCenterLevel {
+  /** 本村拥有的贸易路线数（派商队消耗，商队返回回收）。 */
+  tradeRoutes: number;
+  /** 可看见/接受贸易对象的最大六边形距离（格），等级越高看得越远。 */
+  tradeViewRadius: number;
+  /** 同时可见的 NPC 订单数量。 */
+  npcOrderCount: number;
+  /** NPC 订单自动刷新间隔（秒）。 */
+  npcRefreshSec: number;
+  /** 可囤积的手动刷新次数上限。 */
+  npcStoredRefreshes: number;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -344,6 +370,8 @@ export interface GameConfig {
   units: Record<string, UnitDef>;
   /** 雇佣兵营地刷新参数（merc_camp.csv）：level → 参数。 */
   mercCamp: Record<number, MercCampLevel>;
+  /** 贸易中心逐级参数（trade_center.csv）：level → 参数。 */
+  tradeCenter: Record<number, TradeCenterLevel>;
   /** 兵种特性表（unit_traits.csv），按 code 索引。 */
   unitTraits: Record<string, UnitTraitDef>;
   pveTemplates: Record<string, PveTemplate>;
@@ -592,6 +620,27 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // 贸易中心逐级参数（trade_center.csv）：level → TradeCenterLevel。覆盖层 key='level'。
+  const tradeCenter: Record<number, TradeCenterLevel> = {};
+  let tradeCenterRows = loadCsv(p('trade_center.csv'));
+  if (overrides?.trade_center) {
+    tradeCenterRows = mergeOverridesIntoRows(tradeCenterRows, {
+      file: 'trade_center.csv', key: 'level',
+      numeric: ['tradeRoutes', 'tradeViewRadius', 'npcOrderCount', 'npcRefreshSec', 'npcStoredRefreshes'],
+    }, overrides.trade_center);
+  }
+  for (const r of tradeCenterRows) {
+    const lv = num(r.level);
+    if (lv <= 0) continue;
+    tradeCenter[lv] = {
+      tradeRoutes: num(r.tradeRoutes, 2),
+      tradeViewRadius: num(r.tradeViewRadius, 5),
+      npcOrderCount: num(r.npcOrderCount, 3),
+      npcRefreshSec: num(r.npcRefreshSec, 3600),
+      npcStoredRefreshes: num(r.npcStoredRefreshes, 1),
+    };
+  }
+
   // PvE：主表 + 守军表 + 分布点，三表用数字目标ID互相引用，解析回 code
   const pveRows = loadCsv(p('pve_targets.csv'));
   assertUniqueRows(pveRows, 'pve_targets.csv');
@@ -686,6 +735,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     foundMinTileDistance: cn('found_min_tile_distance', 3),
     foundMaxInflight: cn('found_max_inflight', 1),
     foundAbandonLockSec: cn('found_abandon_lock_sec', 86400),
+    tradeRouteCapacity: cn('trade_route_capacity', 500),
+    tradeCaravanSpeed: cn('trade_caravan_speed', 12),
+    tradeNpcGoldPerResource: cn('trade_npc_gold_per_resource', 0.5),
+    tradeNpcSellMargin: cn('trade_npc_sell_margin', 0.8),
+    tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
+    tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     raw,
   };
 
@@ -712,8 +767,18 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     }
   }
 
+  // tradeCenter 缺级回退：从已解析的最高有效级向下复制，保证任意贸易中心等级都能取到参数。
+  const maxTcLv = Object.keys(tradeCenter).map(Number).sort((a, b) => a - b);
+  if (maxTcLv.length) {
+    let last = tradeCenter[maxTcLv[0]];
+    for (let lv = 1; lv <= maxTcLv[maxTcLv.length - 1]; lv++) {
+      if (tradeCenter[lv]) last = tradeCenter[lv];
+      else tradeCenter[lv] = { ...last };
+    }
+  }
+
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter,
   };
   validateGameConfig(config);
   return config;

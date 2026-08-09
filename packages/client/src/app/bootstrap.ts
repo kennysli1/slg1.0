@@ -15,6 +15,7 @@ import { renderVillage, bindVillage, refreshTrainingIfOpen } from '../features/v
 import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
 import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
+import { refreshTradeIfOpen } from '../features/trade/tradecenter.js';
 import { renderMap, bindMap, resetMapCenter } from '../features/map/map.js';
 import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
 
@@ -287,6 +288,7 @@ onPush((event, payload) => {
   if (event !== 'PopulationChanged') {
     // 雇佣兵营地抽屉打开时，由营地模块自行刷新（避免整页刷新关掉抽屉）
     if (event === 'MercenaryCampUpdated') refreshMercCampIfOpen();
+    else if (event === 'TradeCenterUpdated') refreshTradeIfOpen();
     else void refreshAll();
   } else {
     // 人口变化频繁：不整页刷新（避免抢焦点）；训练抽屉打开时仅刷新其人口提示

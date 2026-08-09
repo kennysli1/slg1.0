@@ -17,3 +17,4 @@ id,code,name,icon,zone,resource,maxLevel,requires,prosperityPerLevel,popGrowthPe
 15,hospital,医院,bld_hospital,inner,,10,1:3,5,0,治疗与收容战场的医院 战死士兵按等级比例即时回收为劳动人口,每级提升战死士兵的人口回收比例
 16,residence,居民楼,bld_residence,inner,,10,1:1,0,0,纯人口建筑 每级提供人口上限,每级提升村庄人口上限
 17,mercenarycamp,雇佣兵营地,bld_mercenarycamp,inner,,10,1:1,3,0,雇佣兵的招募处 周期性刷新可雇佣名单 用金币换取不占人口不耗粮的永久雇佣兵,每级缩短刷新间隔 增加每次刷新数量与可存储刷新次数
+18,tradecenter,贸易中心,bld_tradecenter,outer,,10,1:1,3,0,玩家之间与 NPC 的贸易枢纽 派商队运送货物换取资源或金币 等级越高贸易路线越多看得越远 NPC 订单越频繁,每级增加贸易路线数/可见交易距离/NPC订单频率与数量

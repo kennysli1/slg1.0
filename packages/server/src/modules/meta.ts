@@ -97,6 +97,13 @@ export class MetaModule {
           trainTimeReduceCap: c.constants.trainTimeReduceCap,
           trainCostReducePerLevel: c.constants.trainCostReducePerLevel,
           trainCostReduceCap: c.constants.trainCostReduceCap,
+          // 贸易中心：路线运力/商队速度/NPC 计价/挂单上限与存活时长
+          tradeRouteCapacity: c.constants.tradeRouteCapacity,
+          tradeCaravanSpeed: c.constants.tradeCaravanSpeed,
+          tradeNpcGoldPerResource: c.constants.tradeNpcGoldPerResource,
+          tradeNpcSellMargin: c.constants.tradeNpcSellMargin,
+          tradeOrderMaxPerVillage: c.constants.tradeOrderMaxPerVillage,
+          tradeOrderTtlSec: c.constants.tradeOrderTtlSec,
         },
       },
     };

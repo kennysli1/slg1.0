@@ -216,6 +216,7 @@ export function renderMap(): string {
     const cls = m.type === 'return' ? 'march-path march-return'
       : m.type === 'transport' ? 'march-path march-transport'
       : m.type === 'found' ? 'march-path march-found'
+      : m.type === 'caravan' ? 'march-path march-caravan'
       : 'march-path';
     paths += `<polyline class="${cls}" points="${pts}"></polyline>`;
   }
@@ -229,6 +230,7 @@ export function renderMap(): string {
       : m.type === 'raid' ? '🏇'
       : m.type === 'found' ? '🚩'
       : m.type === 'transport' ? '📦'
+      : m.type === 'caravan' ? '💰'
       : '🏠';
     markers += `<g class="march-marker" id="march-mk-${i}" data-mvidx="${i}" transform="translate(${(p.x + ox).toFixed(1)},${(p.y + oy).toFixed(1)})">
         <circle r="10" class="march-dot ${m.status === 'paused' ? 'paused' : ''}"></circle>
@@ -250,6 +252,7 @@ export function renderMap(): string {
       : m.type === 'raid' ? '🏇 掠夺'
       : m.type === 'found' ? '🚩 拓荒'
       : m.type === 'transport' ? '📦 运输'
+      : m.type === 'caravan' ? '💰 商队'
       : '🏠 返程';
     const loot = m.loot || m.cargo
       ? ` · 货物 ${Object.values(m.loot || m.cargo).reduce((a: any, b: any) => a + (b as number), 0)}`
