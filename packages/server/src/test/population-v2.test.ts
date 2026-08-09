@@ -10,7 +10,7 @@
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
  *  C6  极端粮荒 currentPop 降至 0，v3 无伤兵字段（无 woundedPool/无定时器）
  *  C7  粮荒正确停止 → recovery 事件，inFamine 变 false
- *  C8  训练后 currentPop 下降、soldierPop 上升（经济一致）
+ *  C8  训练后 currentPop 不变、soldierPop 上升（v4 解耦：士兵不占人口）
  *  C9  resume 对已有驻军也上报 soldierPop
  *  C10 GetSnapshot 公共字段齐全（v3 字段集）
  *  C11 settle 永不 emit（GetSnapshot 纯读零副作用）
@@ -290,9 +290,9 @@ test('v3 C7：粮荒停止后发出 recovery 事件，inFamine 变 false', async
   assert.equal(snapRecovered.inFamine, false, '恢复后 inFamine 应为 false');
 });
 
-// ── C8：训练 → currentPop 降、soldierPop 升 ──────────────────────────────
+// ── C8：训练 → currentPop 不变（v4 解耦）、soldierPop 升 ──────────────────
 
-test('v3 C8：训练后 currentPop 下降、soldierPop 上升（经济一致）', async () => {
+test('v4 C8：训练后 currentPop 不变、soldierPop 上升（经济一致）', async () => {
   const app = freshApp();
   const vid = await reg(app, 'c8', 'romans');
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
@@ -308,7 +308,8 @@ test('v3 C8：训练后 currentPop 下降、soldierPop 上升（经济一致）'
   for (let i = 0; i < 3; i++) { tick(5_000); await app.scheduler.advanceTo(clock, setClock); await flush(); }
 
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  assert.ok(snap1.currentPop <= pop0 - 2, `训练后 currentPop 应下降（${pop0}→${snap1.currentPop}）`);
+  // v4：训练不再改动人口（无先扣后补），故 currentPop 不会下降（自然增长只可能上升）
+  assert.ok(snap1.currentPop >= pop0 - 1e-6, `v4 训练不应减少 currentPop（${pop0}→${snap1.currentPop}）`);
   assert.ok(snap1.soldierPop >= 3 - 0.01, `soldierPop 应≈3（${snap1.soldierPop}）`);
 });
 
@@ -443,8 +444,10 @@ test('v3 C12：动员上限——士兵占总人口比例不得超过本部族 p
   assert.ok(cap > 0 && cap <= 1, `cap 应在(0,1]，实际 ${cap}`);
 
   // 反复训练 1 个军团兵（popCost=1）：总兵力达上限附近后，下一批应被 mobilize_cap_exceeded 拒绝。
+  // 注意：v4 解耦后 availableLabor=hardCap（士兵不再挤占增长目标），训练过程中平民可长到满 housing，
+  // 故动员上限（士兵 ≤ 75%×(平民+士兵)）需要更多兵才触顶——迭代上限需足够大（远超 v3 的 60）。
   let rejected = false;
-  for (let i = 0; i < 60 && !rejected; i++) {
+  for (let i = 0; i < 400 && !rejected; i++) {
     await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
     const r = await send(app, 'military.TrainTroops', { villageId: vid, unit: 'legionnaire', count: 1 });
     if (!r.ok) {

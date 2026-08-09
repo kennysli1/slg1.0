@@ -139,7 +139,7 @@ test('Population: 多次 CropDeficit 事件只注册一个减员 Scheduler 任�
 
 // ── H) RecoverCasualties 即时回收（v3 无伤兵池/无定时器）───────────────────
 
-test('Population: 多次 RecoverCasualties 各自即时回收，无伤兵池无定时器', async () => {
+test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无定时器（v4 不回收人口）', async () => {
   const app = makeApp();
   app.setupWorld();
 
@@ -151,7 +151,7 @@ test('Population: 多次 RecoverCasualties 各自即时回收，无伤兵池无�
   const vid = (reg.payload as any).player.villageId;
   await flush();
 
-  // 预留空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供两次回收回填（共约 +8）
+  // ConsumePop 仅校验动员上限（不再扣 currentPop）→ 不影响后续回收断言
   await app.commands.send({ name: 'population.ConsumePop', from: 'test', payload: { villageId: vid, unit: 'legionnaire', count: 10 } });
 
   const snap0 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
@@ -169,16 +169,18 @@ test('Population: 多次 RecoverCasualties 各自即时回收，无伤兵池无�
 
   assert.ok(r1.ok, `RecoverCasualties 1 应成功: ${r1.reason ?? ''}`);
   assert.ok(r2.ok, `RecoverCasualties 2 应成功: ${r2.reason ?? ''}`);
-  // 医院 Lv0 → recoveryRatio=0.20；legionnaire popCost=1 → deadPop=20 → recovered=floor(20×0.20)=4
-  assert.equal((r1.payload as any).recovered, 4, '第一批应回收4');
-  assert.equal((r2.payload as any).recovered, 4, '第二批应回收4');
+  // v4 解耦：士兵不占人口 → 战死不再回收劳动人口（recovered 恒为 0）；deadPop=20 全计永久损失
+  assert.equal((r1.payload as any).recovered, 0, 'v4 第一批应回收0');
+  assert.equal((r2.payload as any).recovered, 0, 'v4 第二批应回收0');
+  assert.equal((r1.payload as any).permanentDead, 20, 'v4 第一批永久损失应为20');
+  assert.equal((r2.payload as any).permanentDead, 20, 'v4 第二批永久损失应为20');
 
-  // 平民人口即时回填（无定时器）
+  // 平民人口不变（不回收、不扣减）
   const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
-  assert.ok(snap1.currentPop >= initPop + 7, `两批回收后平民应即时增加约8（${initPop}→${snap1.currentPop}）`);
-  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  assert.equal(snap1.currentPop, initPop, `v4 战死不应改变 currentPop（${initPop}→${snap1.currentPop}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
 
-  // v3 无伤兵池（无 woundedPool / 无 heal 定时器）
+  // v4 无伤兵池（无 woundedPool / 无 heal 定时器）
   const popState = app.store.get<any>('population', vid);
-  assert.equal(popState?.woundedPool, undefined, 'v3 不应有 woundedPool（无伤兵池）');
+  assert.equal(popState?.woundedPool, undefined, 'v4 不应有 woundedPool（无伤兵池）');
 });

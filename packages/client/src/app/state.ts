@@ -118,11 +118,11 @@ export function interpolatePop(): number {
 }
 
 /**
- * 本地外插「占用总人口」= 劳动人口 + 士兵人口（占用硬上限的那部分）。
- * 用于顶栏/人口面板的大数字与进度条（分子 = 总人口 / 硬上限）。
- * 与 military.reportUpkeep 上报的 soldier_pop（士兵基础粮）口径一致：士兵算作人口占用。
+ * 本地外插「占用人口」= 劳动人口（v4 解耦：士兵不占人口上限，故只算平民 currentPop）。
+ * 用于顶栏/人口面板的大数字与进度条（分子 = 人口 / 硬上限）。
+ * 士兵规模由 ps.soldierPop 单独展示，不计入人口占用。
  */
 export function interpolateTotalPop(): number {
   if (!popState) return 0;
-  return interpolatePop() + popState.soldierPop;
+  return interpolatePop();
 }

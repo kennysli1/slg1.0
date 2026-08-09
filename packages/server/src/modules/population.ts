@@ -12,8 +12,8 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  *
  * v3 核心机制：
  *  A. 硬上限 hardCap = Σ 建筑 popCapPerLevel × level（由 building.GetPopCap 提供，缓存到 state）。
- *  B. 劳动人口 currentPop（平民）；士兵人口 soldierPop = garrisonPopCost + enRoutePopCost（军事/行军上报）。
- *     availableLabor = hardCap − soldierPop（增长目标 / 拓荒门槛 / 三池口径）。
+ *  B. 劳动人口 currentPop（平民）；士兵人口 soldierPop = garrisonPopCost + enRoutePopCost（军事/行军上报，仅用于军队规模/动员上限展示，不占人口上限）。
+ *     availableLabor = hardCap（v4 解耦：士兵不再占人口，劳动人口可增长到满 housing）。
  *  C. 繁荣度由「平民占总人口比例」驱动（与硬上限解耦，建造/升级不再造成负收益）：
  *       civilFrac = currentPop / (currentPop + soldierPop)   // 平民(劳动)占总人口比例，∈[0,1]
  *       prosperityBonus = clamp(civilFrac / popProsperityFullRatio, 0, 1)   // ≥即满值；再乘拥挤惩罚
@@ -204,9 +204,9 @@ export class PopulationModule {
     return s.garrisonPopCost + s.enRoutePopCost;
   }
 
-  /** 可用劳动人口 = 硬上限 − 士兵人口（增长目标 / 拓荒门槛）。 */
+  /** 可用劳动人口 = 硬上限（v4 解耦：士兵不再占人口，劳动人口可增长到满 housing；军队只增耗粮，不挤占增长目标/拓荒门槛）。 */
   private availableLabor(s: PopulationState): number {
-    return Math.max(0, s.hardCap - this.soldierPop(s));
+    return Math.max(0, s.hardCap);
   }
 
   /** 本部族最大动员比例（士兵占总人口上限）：条顿0.80/高卢0.70/罗马0.75。 */
@@ -215,18 +215,22 @@ export class PopulationModule {
     return (rm as Record<string, number>)[s.tribe] ?? rm.romans;
   }
 
-  /** 平民（劳动人口）占总人口（平民+士兵）比例；与硬上限解耦，建造/升级不再影响繁荣度。 */
+  /**
+   * 平民占总人口比例 = currentPop / (currentPop + soldierPop)（与 prosperityBonus 同口径）。
+   * v4 解耦：士兵不占人口上限（availableLabor = hardCap），但军队规模仍参与此比例——
+   * 士兵越多，平民占比越低，繁荣度越低（经济效率惩罚），且仅影响动员上限/耗粮/繁荣，不再造成人口先扣后补。
+   */
   private laborRatio(s: PopulationState): number {
     const total = s.currentPop + this.soldierPop(s);
-    return total > 0 ? s.currentPop / total : 0;
+    return total > 0 ? Math.min(1, s.currentPop / total) : 0;
   }
 
   /**
-   * 繁荣度加成 ∈ [0,1]，由「平民占总人口比例」驱动（与硬上限解耦，建造/升级不再造成负收益）：
-   *  - civilFrac = currentPop / (currentPop + soldierPop)，∈ [0,1]；平民占比越高越繁荣。
-   *  - 达到 popProsperityFullRatio（默认 0.70，即≥70%平民）为满值，低于则线性降到 0。
+   * 繁荣度加成 ∈ [0,1]，由「平民占住房比例」驱动（v4 解耦：士兵不占人口，故繁荣度与军队规模无关）：
+   *  - civilFrac = currentPop / hardCap（laborRatio），∈ [0,1]；住房越满越繁荣。
+   *  - 达到 popProsperityFullRatio（默认 0.70）为满值，低于则线性降到 0。
    *  - 拥挤惩罚（保底）：平民实际超过硬上限（人口超 housing，多在拆房/减员回补瞬态）时，
-   *    按 popOvercapPenaltyFullRatio 在 1→2 倍间线性降到 0。正常稳态 currentPop ≤ hardCap−soldierPop，不触发。
+   *    按 popOvercapPenaltyFullRatio 在 1→2 倍间线性降到 0。正常稳态 currentPop ≤ hardCap，不触发。
    */
   private prosperityBonus(s: PopulationState): number {
     const c = this.config.constants;
@@ -512,7 +516,7 @@ export class PopulationModule {
     return { ok: true, payload: { mult: this.prosperityMult(s) } };
   }
 
-  /** 训练扣劳动人口。不足则拒绝（不改动状态）。 */
+  /** 训练校验动员上限（v4 解耦：士兵不再扣人口，仅校验军队规模上限）。超出则拒绝（不改动状态）。 */
   private async consumePop(cmd: Command): Promise<CommandResult> {
     const { villageId, unit, count } = cmd.payload as { villageId: string; unit: string; count: number };
     const s = this.load(villageId);
@@ -522,68 +526,49 @@ export class PopulationModule {
 
     await this.settle(s);
 
-    const totalCost = def.popCost * count;
-    if (s.currentPop < totalCost) {
-      this.store.set(COLLECTION, villageId, s);
-      return { ok: false, payload: {}, reason: 'insufficient_population' };
-    }
+    // v4：士兵不再占人口，故不再校验/扣除 currentPop（insufficient_population 由人口不足触发的情况已不复存在）。
+    // 资源不足由 military 侧 TrySpend 拦截；此处仅校验动员上限。
 
     // 动员上限：士兵占总人口比例不得超过本部族 popRaceMobilizeMax（条顿0.80/高卢0.70/罗马0.75）。
-    // 训练把平民(popCost)转为士兵，总人口(currentPop+soldierPop)守恒，故只需校验转化后士兵占比。
+    // 士兵不占人口，totalPop = currentPop + soldierPop 仍是人口+军队总量，校验转化后士兵占比即可。
     const soldierPop = this.soldierPop(s);
     const totalPop = s.currentPop + soldierPop;
     const maxSoldier = this.mobilizeCap(s) * totalPop;
-    if (soldierPop + totalCost > maxSoldier + 1e-9) {
+    if (soldierPop + def.popCost * count > maxSoldier + 1e-9) {
       this.store.set(COLLECTION, villageId, s);
       return { ok: false, payload: {}, reason: 'mobilize_cap_exceeded' };
     }
 
-    s.currentPop -= totalCost;
+    // 不再扣 currentPop：训练对人口无任何影响，仅 military 在出兵时经 SetGarrisonPop 上报 soldierPop（用于军队规模/动员上限展示）。
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);
 
     await this.bus.emit({
       name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
-      payload: { ...this.publicPayload(s), event: 'consumed', consumed: totalCost },
+      payload: { ...this.publicPayload(s), event: 'consumed', consumed: 0 },
     } as DomainEvent);
 
-    return { ok: true, payload: { ok: true, consumed: totalCost } };
+    return { ok: true, payload: { ok: true, consumed: 0 } };
   }
 
-  /** 解散/返程归还劳动人口（跳过 popPermanent 单位）。 */
+  /** 解散/返程：v4 解耦后士兵不占人口，故不返还人口（returned=0）；military 侧已自行 reportUpkeep/reportGarrisonPop 更新军队与耗粮。 */
   private async returnPop(cmd: Command): Promise<CommandResult> {
-    const { villageId, units } = cmd.payload as { villageId: string; units: Record<string, number> };
+    const { villageId } = cmd.payload as { villageId: string; units: Record<string, number> };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
 
     await this.settle(s);
-
-    let returned = 0;
-    for (const [unit, cnt] of Object.entries(units)) {
-      if (cnt <= 0) continue;
-      const udef = this.config.units[unit];
-      if (!udef || udef.popPermanent) continue;
-      returned += udef.popCost * cnt;
-    }
-    s.currentPop += returned;
-
+    // 不再改动 currentPop；returned 恒为 0（士兵不占人口，无人口可返还）。
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);
 
-    if (returned > 0) {
-      await this.bus.emit({
-        name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
-        payload: { ...this.publicPayload(s), event: 'returned', returned },
-      } as DomainEvent);
-    }
-
-    return { ok: true, payload: { ok: true, returned } };
+    return { ok: true, payload: { ok: true, returned: 0 } };
   }
 
   /**
-   * 战死即时回收（替代旧 AddWounded 伤兵池）：按医院等级比例把死亡士兵人口转回劳动人口，
-   * 其余永久扣除。死亡士兵已在 military 侧 AdjustTroops 扣掉 → soldierPopCost 自动下降 → availableLabor 上升。
-   * popPermanent 单位（拓荒者）死亡不回收人口。
+   * 战死处理（v4 解耦）：士兵不占人口，故战死不再回收/扣减劳动人口——死亡士兵的全部 popCost 计为永久损失（仅用于事件展示）。
+   * 死亡士兵已在 military 侧 AdjustTroops 扣掉 → soldierPopCost 自动下降（仅影响军队规模/动员上限展示）。
+   * popPermanent 单位（拓荒者）同样计为永久损失。
    */
   private async recoverCasualties(cmd: Command): Promise<CommandResult> {
     const { villageId, losses } = cmd.payload as { villageId: string; losses: Record<string, number> };
@@ -610,17 +595,15 @@ export class PopulationModule {
       const udef = this.config.units[unit];
       if (!udef) continue;
       const deadPop = lostCount * udef.popCost;
+      // v4 解耦：士兵不占人口，战死不再回收/扣减劳动人口（recovered 恒为 0）；仅统计用于事件展示。
       if (udef.popPermanent) {
         // 拓荒者等永久人口：死亡不回收
         permanentDead += deadPop;
         continue;
       }
-      const rec = Math.floor(deadPop * recoveryRatio);
-      recovered += rec;
-      permanentDead += deadPop - rec;
+      // 普通士兵：deadPop 全部计为永久损失（无人口回收）
+      permanentDead += deadPop;
     }
-
-    s.currentPop += recovered;
 
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);

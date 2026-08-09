@@ -88,6 +88,7 @@ async function refreshAll() {
       return;
     }
     setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
+    resFetchedAt = Date.now(); // 资源快照时刻：之后 1s 定时器据此本地外插资源数字，无需再访问服务器
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       const p = pop.payload as any;
@@ -131,6 +132,29 @@ async function refreshAll() {
   }
 }
 
+/**
+ * 资源"实时"量：用缓存快照 + 净速率按经过时间本地外插，使资源条每秒平滑增长，无需访问服务器。
+ * 仅用于展示；真实值以 refreshAll 拉取的快照为准（每次 act/onPush/可见性刷新都会把 resFetchedAt 校正回 now）。
+ * 与人口外插（interpolatePop）同理，但资源是纯本地计算——这就是"纯 UI 更新"那层。
+ */
+let resFetchedAt = 0;
+function liveResource(t: string): number {
+  const r = getCache().res;
+  if (!r || !r.resources) return 0;
+  const base = r.resources[t] ?? 0;
+  if (!resFetchedAt) return base;
+  const elapsedSec = (Date.now() - resFetchedAt) / 1000;
+  let ratePerSec: number;
+  if (t === 'gold') ratePerSec = (getPopState()?.goldPerHour ?? 0) / 3600;
+  else ratePerSec = r.netRate?.[t] ?? 0;
+  let v = base + ratePerSec * elapsedSec;
+  if (t !== 'gold') {
+    const cap = r.capacity?.[t] ?? Infinity;
+    v = Math.min(cap, Math.max(0, v)); // 不超仓、不为负（速率本身已含停产/负产）
+  }
+  return v;
+}
+
 function renderResBar() {
   const r = getCache().res;
   if (!r) return;
@@ -138,7 +162,7 @@ function renderResBar() {
     // 金币：无上限、无产能条、速率来自人口交税（goldPerHour，非 economy.netRate）
     if (t === 'gold') {
       const info = resInfo(t);
-      const gold = r.resources[t] ?? 0;
+      const gold = liveResource(t);
       const rate = getPopState()?.goldPerHour ?? 0;
       return `<span class="res res-gold" title="${info.name}（无上限 · 由劳动人口交税获得 · 用于雇佣雇佣兵）">${art(info.icon, info.name, 'sm')}
         <span class="res-num">${fmt(gold)}</span>
@@ -152,7 +176,7 @@ function renderResBar() {
     const info = resInfo(t);
     const overTip = over ? ' · 超额·停产' : '';
     return `<span class="res${low}${overCls}" title="${info.name}${overTip}">${art(info.icon, info.name, 'sm')}
-      <span class="res-num">${fmt(r.resources[t])}<small>/${fmt(r.capacity[t])}</small>${over ? '<small class="res-over-tag">超额</small>' : ''}</span>
+      <span class="res-num">${fmt(liveResource(t))}<small>/${fmt(r.capacity[t])}</small>${over ? '<small class="res-over-tag">超额</small>' : ''}</span>
       <span class="res-rate">${over ? '停产' : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/h`}</span>
       <span class="res-bar"><i style="width:${pct}%"></i></span></span>`;
   }).join('');
@@ -166,8 +190,8 @@ function renderResBar() {
 function renderPopCell(): string {
   const ps = getPopState();
   if (!ps) return '';
-  const pop = interpolateTotalPop(); // 占用总人口 = 劳动 + 士兵
-  const labor = Math.max(0, Math.round(pop - ps.soldierPop));
+  const pop = interpolateTotalPop(); // v4 解耦：士兵不占人口，占用人口 = 劳动人口（currentPop）
+  const labor = Math.round(pop); // 劳动人口即占用人口（士兵已不计入）
   const atCap = !ps.inFamine && ps.hardCap > 0 && pop / ps.hardCap >= 1.0;
   // 达上限展示原始增长潜力（被锁），否则展示真实增长
   const growth = atCap ? Math.round(ps.potentialGrowthPerHour ?? 0) : Math.round(ps.growthPerHour);
@@ -178,7 +202,7 @@ function renderPopCell(): string {
   const famineIcon = ps.inFamine ? '🚨' : '👥';
   const title = ps.inFamine
     ? `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（饥荒！人口正在减少）· 增长 ${sign}${growth}/h`
-    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)} = 劳动 ${fmt(labor)} + 军队 ${fmt(ps.soldierPop)} · 增长 ${sign}${growth}/h${atCap ? '（已达上限，实际不增长）' : ''}`;
+    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（平民）· 军队 ${fmt(ps.soldierPop)}（不占人口）· 增长 ${sign}${growth}/h${atCap ? '（已达上限，实际不增长）' : ''}`;
   return `<span class="res res-pop${famineClass}" title="${title}">
     <span class="res-pop-icon">${famineIcon}</span>
     <span class="res-num">${fmt(pop)}<small>/${fmt(ps.hardCap)}</small></span>

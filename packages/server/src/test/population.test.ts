@@ -6,9 +6,9 @@ import { createGameApp, type GameApp } from '../app.js';
  * 人口系统单测（T8.1）：
  * - 增长收敛（复现设计§4.2 迭代表）
  * - 超限减员（粮仓触底后减员）
- * - 伤兵到期治愈（Scheduler 到点回补）
- * - 解散驻村军队返还人口
- * - 拓荒者永久消耗（popPermanent=true）
+ * - 战死处理（v4 解耦：士兵不占人口，战死不回收人口，deadPop 全计永久损失）
+ * - 解散驻村军队不返还人口（v4 解耦：士兵不占人口）
+ * - 拓荒者配置（popPermanent=true）；v4 下 ReturnPop 对所有单位均返回 0
  * - 劳动力饱和加权收敛（effMult 随人口增加趋向 1.0）
  *
  * 注意：population.createVillage 是异步的（内部有多个 await commands.send），
@@ -53,7 +53,7 @@ test('人口：新村创建开局人口=城镇中心popCap（currentPop = mainPo
   assert.ok(p.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${p.growthPerHour}`);
 });
 
-test('人口：training 扣人口，扣减量精确', async () => {
+test('人口：v4 训练不再扣人口（population 不变，仅士兵加耗粮）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -62,25 +62,27 @@ test('人口：training 扣人口，扣减量精确', async () => {
   assert.equal(barracksR.ok, true, `建兵营应成功`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
-  // 获取当前人口（before training, 紧接建兵营完成后）
+  // 训练前人口（紧接建兵营完成后，未推进时钟）
   const snap0 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
   const popBefore = snap0.currentPop;
   assert.ok(popBefore > 0, '初始人口应>0');
 
-  // 训练 2 个军团兵（各消耗 1 pop）
+  // 训练 2 个军团兵
   const trainResult = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 2 });
   assert.equal(trainResult.ok, true, `训练应成功: ${trainResult.reason ?? ''}`);
 
-  // 立即获取人口（不推进时钟，避免时间增长影响）
+  // 立即获取人口（不推进时钟，避免时间增长干扰）
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  // 由于 getSnapshot 内部 settle 使用相同时间戳，人口减少应精确等于 count×popCost
-  const popAfter = snap1.currentPop;
-  const consumed = popBefore - popAfter;
-  // 允许1点误差（settle 使用 dtHours 可能有极小浮点误差）
-  assert.ok(consumed >= 1 && consumed <= 3, `训练2兵应消耗2人口（实际消耗 ${consumed}）`);
+  // v4：训练对人口无任何影响（不再先扣后补）
+  assert.equal(snap1.currentPop, popBefore, `v4 训练不应改变 currentPop（${popBefore}→${snap1.currentPop}）`);
+
+  // ConsumePop 现在返回 consumed=0（不再扣除人口）
+  const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 2 });
+  assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
+  assert.equal((cR.payload as any).consumed, 0, 'v4 ConsumePop 应返回 consumed=0（士兵不占人口）');
 });
 
-test('人口：人口不足时拒绝训练（insufficient_population）', async () => {
+test('人口：v4 训练不再受人口不足限制（无 insufficient_population 拒绝）', async () => {
   const app = freshApp();
   await flushMicrotasks();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
@@ -88,23 +90,20 @@ test('人口：人口不足时拒绝训练（insufficient_population）', async 
   assert.equal(barracksR.ok, true, `建兵营应成功`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
-  // 获取当前人口
-  const popSnap = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  const curPop = Math.floor(popSnap.currentPop);
-  assert.ok(curPop > 0, '初始人口应>0');
+  // 训练前资源
+  const ecoBefore = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
 
-  // 尝试训练数量超过人口的兵（each legionnaire consumes 1 pop）
-  const tooMany = curPop + 100;
-  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: tooMany });
-  assert.equal(r.ok, false, '人口不足时训练应被拒绝');
-  assert.equal(r.reason, 'insufficient_population', `应返回 insufficient_population，实际: ${r.reason}`);
+  // v4：训练不受人口数量限制——充足资源下始终可训练（人口只影响增长，不影响出兵门槛）
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 5 });
+  assert.equal(r.ok, true, `v4 训练不应因人口不足被拒: ${r.reason ?? ''}`);
+  assert.notEqual(r.reason, 'insufficient_population', 'v4 不应再有 insufficient_population 拒绝原因');
 
-  // 确认资源未被扣（训练被回滚）
-  const eco = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
-  assert.ok(eco.resources.wood > 0, '训练拒绝后资源不应被扣（回滚成功）');
+  // 资源被正常扣减（训练路径本身仍生效）
+  const ecoAfter = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.ok(ecoAfter.resources.wood < ecoBefore.resources.wood, '训练应扣资源（wood 下降）');
 });
 
-test('人口：解散军队后人口返还', async () => {
+test('人口：v4 解散军队不返还人口（人口不变，仅减耗粮）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -117,28 +116,28 @@ test('人口：解散军队后人口返还', async () => {
   const trainR = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 3 });
   assert.equal(trainR.ok, true, `训练应成功: ${trainR.reason ?? ''}`);
 
-  // 获取训练后（消耗人口后）的人口基准
-  const snapAfterConsume = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  const popAfterConsume = snapAfterConsume.currentPop;
+  // 等待训练完成（推进时间清空队列，使兵归队）
+  for (let i = 0; i < 4; i++) await app.scheduler.advanceTo(clock + 30_000, setClock);
+  await flushMicrotasks();
 
-  // 等待训练完成（不关心时间增长，只需兵完成）
-  for (let i = 0; i < 3; i++) await app.scheduler.advanceTo(clock + 30_000, setClock);
+  // 解散前人口基准（此刻不推进时间，仅作为解散动作前的基准）
+  const snapBefore = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  const popBefore = snapBefore.currentPop;
 
   // 解散 2 个军团兵
   const disbandR = await send(app, 'military.DisbandTroops', { villageId: 'v1', units: { legionnaire: 2 } });
   assert.equal(disbandR.ok, true, `解散应成功: ${disbandR.reason ?? ''}`);
-  const returnedPop = (disbandR.payload as any).returnedPop;
-  assert.ok(returnedPop >= 2, `解散2兵应返还至少2人口（每兵1popCost，实际 ${returnedPop}）`);
+  assert.equal((disbandR.payload as any).returnedPop, 0, 'v4 解散不应返还人口（returnedPop=0）');
 
-  // 立即获取人口（不推进时间以避免增长干扰）
-  const snapAfterDisband = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  // 验证人口比 disband 前增加了 returnedPop
-  // 允许小误差（settle 的 dtHours 极小时增量微乎其微）
-  assert.ok(snapAfterDisband.currentPop >= popAfterConsume - 0.1,
-    '解散后人口应回补（不低于消耗后基准）');
+  // 立即获取人口（不推进时间以避免自然增长干扰）
+  const snapAfter = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  // v4：解散不改变人口（不返还）
+  assert.equal(snapAfter.currentPop, popBefore, `v4 解散不应改变 currentPop（${popBefore}→${snapAfter.currentPop}）`);
+  // 但军队减少、耗粮下降
+  assert.ok(snapAfter.soldierPop <= snapBefore.soldierPop - 2 + 1e-6, `解散后 soldierPop 应下降（${snapBefore.soldierPop}→${snapAfter.soldierPop}）`);
 });
 
-test('人口：拓荒者永久消耗（解散时不返还人口）', async () => {
+test('人口：v4 所有单位 ReturnPop 均返回 0（士兵不占人口）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -148,52 +147,52 @@ test('人口：拓荒者永久消耗（解散时不返还人口）', async () =>
   assert.ok(settlerDef.popPermanent, 'settler 应是 popPermanent=true');
   assert.equal(settlerDef.popCost, 5, 'settler popCost 应为5');
 
-  // 验证 ReturnPop 对 popPermanent 单位返还0
+  // v4：士兵不占人口 → ReturnPop 对任何单位都返回 0（无人口可返还）
   const returnR = await send(app, 'population.ReturnPop', {
     villageId: 'v1',
     units: { settler: 1 },
   });
   assert.equal(returnR.ok, true);
-  assert.equal((returnR.payload as any).returned, 0, '拓荒者 ReturnPop 应返还0人口');
+  assert.equal((returnR.payload as any).returned, 0, 'v4 settler ReturnPop 应返还0人口');
 
-  // 对比：普通兵种 ReturnPop 应返还
+  // 普通兵种同样返回 0（v4 解耦，士兵不占人口 → 无人口可返还）
   const returnR2 = await send(app, 'population.ReturnPop', {
     villageId: 'v1',
     units: { legionnaire: 2 },
   });
   assert.equal(returnR2.ok, true);
-  assert.ok((returnR2.payload as any).returned >= 2, '普通兵ReturnPop应返还人口');
+  assert.equal((returnR2.payload as any).returned, 0, 'v4 普通兵 ReturnPop 应返还0人口');
 });
 
-test('人口：RecoverCasualties 战死即时回收（无伤兵池/无定时器）', async () => {
+test('人口：v4 RecoverCasualties 战死不回收人口（deadPop 全计永久损失）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
-  // 预留增长空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供回收回填
+  // ConsumePop 仅校验动员上限（不再扣 currentPop）→ 不影响后续回收断言
   const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 5 });
   assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
 
-  // 取消耗后基准人口
+  // 取基准人口（ConsumePop 不改变 currentPop，故即为当前值）
   const snap0 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
   const initPop = snap0.currentPop;
 
-  // 模拟战斗：10个军团兵阵亡（legionnaire: popCost=1；医院 Lv0 → recoveryRatio=base 0.20）
-  // recovered = floor(10×1×0.20) = 2，permanentDead = 8
+  // 模拟战斗：10个军团兵阵亡（legionnaire: popCost=1 → deadPop=10）
   const recR = await send(app, 'population.RecoverCasualties', {
     villageId: 'v1',
     losses: { legionnaire: 10 },
   });
   assert.equal(recR.ok, true, `RecoverCasualties 应成功: ${recR.reason ?? ''}`);
   const p = recR.payload as any;
-  assert.equal(p.recovered, 2, `回收数应为2（floor(10×1×0.20)）, 实际: ${p.recovered}`);
-  assert.equal(p.permanentDead, 8, `永久阵亡应为8（10×1 - 2）`);
+  // v4 解耦：士兵不占人口，战死不再回收劳动人口（recovered 恒为 0）；全部 deadPop 计为永久损失
+  assert.equal(p.recovered, 0, `v4 回收数应为0（实际: ${p.recovered}）`);
+  assert.equal(p.permanentDead, 10, `永久阵亡应为10（10×1）`);
 
-  // 验证平民人口即时回填（recover 同步完成，无定时器）
+  // 验证平民人口不变（不回收、不扣减）
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  assert.ok(snap1.currentPop >= initPop + p.recovered, `回收后平民应即时增加（${initPop}→${snap1.currentPop}，回收${p.recovered}）`);
-  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
-  // v3 无伤兵字段
-  assert.equal(snap1.wounded, undefined, 'v3 快照不应含 wounded 字段');
+  assert.equal(snap1.currentPop, initPop, `v4 战死不应改变 currentPop（${initPop}→${snap1.currentPop}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  // v4 无伤兵字段
+  assert.equal(snap1.wounded, undefined, 'v4 快照不应含 wounded 字段');
 });
 
 test('人口：五轴繁荣度乘数（laborMults 字段正确，v3 统一为数值）', async () => {
@@ -272,7 +271,7 @@ test('人口：开局未满员有增长空间（growthPerHour>0）；消耗人�
   assert.ok(snap.currentPop < snap.hardCap, `开局人口(${snap.currentPop}) 应<硬上限(${snap.hardCap})`);
   assert.ok(snap.growthPerHour > 0, `开局应有增长空间 growthPerHour>0（实际 ${snap.growthPerHour}）`);
 
-  // 消耗人口制造更大增长空间：ConsumePop 只扣 currentPop（不增 soldierPop）→ 缺口增大
+  // v4：ConsumePop 不再改变 currentPop（士兵不占人口）——此处仅验证调用成功、增长空间仍>0
   const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 5 });
   assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
   const snap2 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
@@ -323,9 +322,9 @@ test('回归·读无副作用：GetPopulation 不得产生 population.Changed �
 
 /**
  * 与上条互补：离散写操作仍必须推送（否则客户端看不到即时变化）。
- * 训练扣人口后应至少 emit 一次 population.Changed（consumePop 内显式 emit）。
+ * 训练（ConsumePop）仍应至少 emit 一次 population.Changed（consumePop 内显式 emit，consumed=0）。
  */
-test('回归·写有推送：训练扣人口应 emit population.Changed', async () => {
+test('回归·写有推送：训练（ConsumePop）应 emit population.Changed', async () => {
   const app = freshApp();
   await flushMicrotasks();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });

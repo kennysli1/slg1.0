@@ -154,7 +154,7 @@ test('PvP：战后攻守双方人口快照结构有效（v3 无伤兵池，战�
 
   await drain(app);
 
-  // 检查A村（进攻方）与B村（防守方）人口快照结构是否正常（v3 无伤兵池，战死经 RecoverCasualties 即时回收）
+  // 检查A村（进攻方）与B村（防守方）人口快照结构是否正常（v4 无伤兵池；战死经 RecoverCasualties 全计永久损失，不回收人口）
   const popSnapA2 = (await send(app, 'population.GetSnapshot', { villageId: va })).payload as any;
   const popSnapB = (await send(app, 'population.GetSnapshot', { villageId: vb })).payload as any;
   for (const [tag, ps] of [['A', popSnapA2], ['B', popSnapB]] as const) {
@@ -163,9 +163,9 @@ test('PvP：战后攻守双方人口快照结构有效（v3 无伤兵池，战�
     assert.ok(typeof ps.availableLabor === 'number', `${tag}村应有 availableLabor 数字`);
     assert.ok(typeof ps.laborRatio === 'number', `${tag}村应有 laborRatio 数字`);
     assert.ok(typeof ps.prosperityMult === 'number', `${tag}村应有 prosperityMult 数字`);
-    assert.equal(ps.wounded, undefined, `v3 ${tag}村快照不应含 wounded 字段`);
+    assert.equal(ps.wounded, undefined, `v4 ${tag}村快照不应含 wounded 字段`);
   }
-  // 进攻方A：训练消耗的兵力在战斗减员后经 RecoverCasualties 即时回收，战后人口快照应有效
+  // 进攻方A：战后平民人口应仍然有效（v4 战死不回收人口，但平民人口本身不会因战斗减员而归零）
   assert.ok(popSnapA2.currentPop > 0, 'A村战后应有人口');
 });
 

@@ -67,8 +67,10 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     if (!evTag) return null;
     const popVal = fmt(Math.round(Number((payload as any).currentPop) ?? 0));
     if (evTag === 'consumed') {
-      const consumed = fmt(Number((payload as any).consumed) || 0);
-      return `${time}🎯 征兵消耗 -${consumed} 人口 → 当前平民 ${popVal}`;
+      const consumed = Number((payload as any).consumed) || 0;
+      // v4 解耦：训练不再消耗人口（consumed=0），不写战报（避免"消耗 -0 人口"噪音）
+      if (consumed <= 0) return null;
+      return `${time}🎯 征兵消耗 -${fmt(consumed)} 人口 → 当前平民 ${popVal}`;
     }
     if (evTag === 'returned') {
       const returned = Number((payload as any).returned);
@@ -88,13 +90,18 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       const hardCap = fmt(Number((payload as any).hardCap) ?? 0);
       return `${time}🏗️ 人口上限变更 → 硬上限 ${hardCap}`;
     }
-    // 战死即时回收：医院按比例回收死亡士兵人口
+    // 战死回收：v4 解耦后士兵不占人口，战死不再回收劳动人口（recovered 恒为 0）
     if (evTag === 'recovered') {
       const recovered = Number((payload as any).recovered) || 0;
       const permanentDead = Number((payload as any).permanentDead) || 0;
-      const recStr = recovered > 0 ? `+${fmt(recovered)} 人经医院回收` : '';
-      const deadStr = permanentDead > 0 ? `（永久损失 ${fmt(permanentDead)} 人）` : '';
-      return `${time}⚕️ 战死回收${recStr}${deadStr} → 当前平民 ${popVal}`;
+      if (recovered > 0) {
+        const recStr = `+${fmt(recovered)} 人经医院回收`;
+        const deadStr = permanentDead > 0 ? `（永久损失 ${fmt(permanentDead)} 人）` : '';
+        return `${time}⚕️ 战死回收${recStr}${deadStr} → 当前平民 ${popVal}`;
+      }
+      // recovered=0：纯战损，无人口回收
+      const deadStr = permanentDead > 0 ? `永久损失 ${fmt(permanentDead)} 人` : '无伤亡';
+      return `${time}⚕️ 战损（${deadStr}） → 当前平民 ${popVal}`;
     }
     return `${time}👥 人口变化：当前平民 ${popVal}`;
   }

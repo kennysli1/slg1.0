@@ -20,7 +20,7 @@ async function flush(n = 60): Promise<void> {
 
 // ── H) 战死即时回收（替代旧 AddWounded 伤兵池）─────────────────────────────
 
-test('Population RecoverCasualties: 战死即时回收，无伤兵池/无定时器', async () => {
+test('Population RecoverCasualties: v4 战死不回收人口（deadPop 全计永久损失，无伤兵池/无定时器）', async () => {
   const app = makeApp();
   app.setupWorld();
 
@@ -32,7 +32,7 @@ test('Population RecoverCasualties: 战死即时回收，无伤兵池/无定时�
   const vid = (reg.payload as any).player.villageId;
   await flush();
 
-  // 预留空间：ConsumePop 仅扣 currentPop（不减 soldierPop）→ 留出余量供回收回填
+  // ConsumePop 仅校验动员上限（不再扣 currentPop）→ 不影响后续回收断言
   await app.commands.send({ name: 'population.ConsumePop', from: 't', payload: { villageId: vid, unit: 'legionnaire', count: 5 } });
 
   const snap0 = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
@@ -44,17 +44,17 @@ test('Population RecoverCasualties: 战死即时回收，无伤兵池/无定时�
   });
   assert.equal(r.ok, true, `RecoverCasualties 应成功: ${r.reason ?? ''}`);
   const p = r.payload as any;
-  // 医院 Lv0 → recoveryRatio = base 0.20；legionnaire popCost=1 → deadPop=20 → recovered=floor(20×0.20)=4
-  assert.equal(p.recovered, 4, `回收数应为4（floor(20×1×0.20)），实际 ${p.recovered}`);
-  assert.equal(p.permanentDead, 16, `永久阵亡应为16，实际 ${p.permanentDead}`);
+  // v4 解耦：士兵不占人口 → 战死不再回收劳动人口（recovered 恒为 0）；deadPop=20 全计永久损失
+  assert.equal(p.recovered, 0, `v4 回收数应为0，实际 ${p.recovered}`);
+  assert.equal(p.permanentDead, 20, `永久阵亡应为20，实际 ${p.permanentDead}`);
 
   const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
-  assert.ok(snap1.currentPop >= initPop + p.recovered, `回收后平民应即时增加（${initPop}→${snap1.currentPop}，回收${p.recovered}）`);
-  assert.ok(snap1.currentPop <= snap1.hardCap, `回收后 currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
-  assert.equal(snap1.wounded, undefined, 'v3 快照不应含 wounded 字段');
+  assert.equal(snap1.currentPop, initPop, `v4 战死不应改变 currentPop（${initPop}→${snap1.currentPop}）`);
+  assert.ok(snap1.currentPop <= snap1.hardCap, `currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  assert.equal(snap1.wounded, undefined, 'v4 快照不应含 wounded 字段');
 
   const popState = app.store.get<any>('population', vid);
-  assert.equal(popState?.woundedPool, undefined, 'v3 PopulationState 不应有 woundedPool 字段');
+  assert.equal(popState?.woundedPool, undefined, 'v4 PopulationState 不应有 woundedPool 字段');
 });
 
 // ── G) 单一减员任务守卫 ───────────────────────────────────────────────────

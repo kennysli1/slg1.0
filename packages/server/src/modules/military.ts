@@ -170,29 +170,26 @@ export class MilitaryModule {
 
   /**
    * 计算驻军总耗粮(每小时)并上报 Economy。
-   *  - source='troops'：军晌（unit.upkeep，纯口粮消耗，不含人口粮）。
-   *  - source='soldier_pop'：士兵基础人口粮（每个士兵=1 个军队人口，吃 popCropPerLabor 粮，
-   *    与平民 civilian_pop 口径一致：基础 1 人口粮 + 军晌）。
+   *  - source='troops'：军晌（unit.upkeep，纯口粮消耗）。
+   *  - source='soldier_pop'：v4 解耦后士兵不再占人口、不再吃人口粮，恒为 0（此处显式置 0 以覆盖旧存档残留值）。
    *  两来源均属"非平民"，纳入 nonCivilianUpkeep，参与粮荒判定。
    */
   private reportUpkeep(s: MilitaryState): void {
-    const popCropPerLabor = this.config.constants.popCropPerLabor ?? 1;
     let ration = 0; // 军晌（纯口粮）
-    let basePop = 0; // 士兵基础人口粮权重（Σ popCost×n）
     for (const [unit, n] of Object.entries(s.troops)) {
       const def = this.config.units[unit];
       ration += (def?.upkeep ?? 0) * n;
-      basePop += (def?.popCost ?? 0) * n;
     }
     void this.commands.send({
       name: 'economy.SetUpkeep',
       from: MilitaryModule.NAME,
       payload: { villageId: s.villageId, source: 'troops', cropPerHour: ration },
     });
+    // v4：士兵不占人口，故 soldier_pop 基础人口粮恒为 0（显式上报以清掉历史残留值）。
     void this.commands.send({
       name: 'economy.SetUpkeep',
       from: MilitaryModule.NAME,
-      payload: { villageId: s.villageId, source: 'soldier_pop', cropPerHour: basePop * popCropPerLabor },
+      payload: { villageId: s.villageId, source: 'soldier_pop', cropPerHour: 0 },
     });
   }
 
