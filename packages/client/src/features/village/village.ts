@@ -412,10 +412,10 @@ async function renderBuildingTrainSection(slotId: string): Promise<void> {
 
 /** 绑定训练区交互（兵种详情 / 训练 / 步进 / 数量重算）。 */
 function bindBuildingTrainSection(sec: HTMLElement, slot: any): void {
-  // 兵种详情抽屉（点到训练控件不触发）
+  // 兵种详情抽屉：仅点卡片头部（图标+名称）才打开；点到训练区（消耗预览/数量/步进/训练按钮/人口提示）不触发
   sec.querySelectorAll<HTMLElement>('[data-unit-detail]').forEach((el) =>
     el.onclick = (e) => {
-      if ((e.target as HTMLElement)?.closest('.train-row')) return;
+      if ((e.target as HTMLElement)?.closest('.train-controls')) return;
       openUnitDetail(el.dataset.unitDetail!);
     });
 
