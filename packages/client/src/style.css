@@ -262,7 +262,16 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 }
 .step-btn:hover { background: var(--c-surface); border-color: var(--c-brand); }
 .step-btn:active { background: color-mix(in srgb, var(--c-brand) 18%, transparent); }
-.train-row input[type="number"] { width: 64px; text-align: center; }
+/* 训练数量框：与两侧 −/+ 步进按钮融为一体，去边框 + 去原生上下微调箭头 */
+.train-row input[type="number"] {
+  width: 64px; text-align: center;
+  border: 0; background: transparent;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.train-row input[type="number"]::-webkit-outer-spin-button,
+.train-row input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
 /* 训练信息条：人口占用 + 兵种军晌（耗粮图标 + 数字） */
 .train-meta { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: center; margin-top: var(--s-2); }
 .train-meta .cost-item { font-size: var(--f-xs); }
