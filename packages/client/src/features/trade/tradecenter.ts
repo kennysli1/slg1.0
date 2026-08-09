@@ -101,8 +101,9 @@ async function render(): Promise<void> {
   // 附近玩家挂单
   const playerHtml = (c.playerOrders || []).map((o: any) => {
     const canRoutes = o.routesNeeded <= c.availableRoutes;
+    const owner = o.ownerName ? escapeHtml(o.ownerName) : '玩家';
     return `<div class="trade-offer">
-      <div class="trade-offer-head"><span class="tag tag--player">玩家</span><small class="hint-sm">${o.distance}格 · 需 ${o.routesNeeded} 路线</small></div>
+      <div class="trade-offer-head"><span class="tag tag--player">玩家 · ${owner}</span><small class="hint-sm">${o.distance}格 · 需 ${o.routesNeeded} 路线</small></div>
       <div class="trade-line"><small>提供</small>${resChips(o.give, '+')}</div>
       <div class="trade-line"><small>求购</small>${resChips(o.want, '-')}</div>
       <button class="btn-sm" data-accept-player="${escapeAttr(o.id)}" ${!canRoutes ? 'disabled' : ''}>接单（派商队）</button>

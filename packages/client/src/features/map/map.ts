@@ -1,6 +1,6 @@
 /** 地图页：六边形网格 + 行军路径与实时部队位置 + 目标选中面板 + 出征。 */
 import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
-import { secStr } from '../../shared/utils/format.js';
+import { secStr, fmt } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
@@ -248,17 +248,24 @@ export function renderMap(): string {
     </svg>`;
 
   const movesList = moves.map((m: any) => {
-    const kind = m.type === 'attack' ? '⚔️ 进攻'
+    const inDir = m.dir === 'in';
+    const kind = m.type === 'attack' ? (inDir ? '🚨 来袭' : '⚔️ 进攻')
       : m.type === 'raid' ? '🏇 掠夺'
       : m.type === 'found' ? '🚩 拓荒'
       : m.type === 'transport' ? '📦 运输'
-      : m.type === 'caravan' ? '💰 商队'
+      : m.type === 'caravan' ? (inDir ? '💰 商队抵达' : '💰 商队出发')
       : '🏠 返程';
     const loot = m.loot || m.cargo
       ? ` · 货物 ${Object.values(m.loot || m.cargo).reduce((a: any, b: any) => a + (b as number), 0)}`
       : '';
+    // 进攻类：显示来袭/出征部队组成（攻方兵力），供玩家评估威胁
+    const troops = (m.type === 'attack' || m.type === 'raid') && m.troops && Object.keys(m.troops).length
+      ? ` · 部队 ${Object.entries(m.troops).map(([u, n]: any) => `${unitName(u)}${fmt(n)}`).join(' ')}`
+      : '';
     const st = m.status === 'paused' ? ' · <b>交战中</b>' : '';
-    return `<div class="banner banner-move">${kind} → (${m.to.q},${m.to.r}) 抵达 <b>${secStr(m.arriveAt)}</b>${st}${loot}</div>`;
+    // 来袭：显示来源坐标；出发：显示目标坐标
+    const dest = inDir ? `来自 (${m.from.q},${m.from.r})` : `→ (${m.to.q},${m.to.r})`;
+    return `<div class="banner banner-move">${kind} ${dest} 抵达 <b>${secStr(m.arriveAt)}</b>${st}${loot}${troops}</div>`;
   }).join('');
 
   // 导航控件：方向键 + 坐标跳转（环面世界无边界，方向键始终可用）

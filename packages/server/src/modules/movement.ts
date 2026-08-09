@@ -247,16 +247,24 @@ export class MovementModule {
     return res.ok && tile ? { q: tile.q, r: tile.r } : null;
   }
 
-  /** 列出某村相关的在途行军（含路径/当前位置/状态，供前端可视化）。 */
+  /**
+   * 列出某村相关的在途行军（含路径/当前位置/状态，供前端可视化）。
+   * 同时返回「我发出的」(fromVillage===me) 与「来袭/送达我的」(targetVillage===me) 两类，
+   * 用 dir 区分：out=我方出发，in=朝我而来（来袭商队/进攻/送达运输）。
+   * 攻击类 in 会带上 troops，供地图显示来袭部队组成。
+   */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
-    const all = this.store.all<Movement>(COLLECTION).filter((m) => m.fromVillage === villageId);
+    const all = this.store.all<Movement>(COLLECTION).filter(
+      (m) => m.fromVillage === villageId || m.targetVillage === villageId,
+    );
     return {
       ok: true,
       payload: {
         movements: all.map((m) => ({
           id: m.id,
           type: m.type,
+          dir: m.targetVillage === villageId && m.fromVillage !== villageId ? 'in' : 'out',
           targetId: m.targetId,
           targetVillage: m.targetVillage,
           from: m.fromXY,

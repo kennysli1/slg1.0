@@ -337,8 +337,9 @@ export class TradeModule {
     const { W, H } = this.worldSize();
 
     // 可见玩家订单：在视野半径内且非本村挂单
-    const playerOrders = myXY
-      ? [...this.orders.values()]
+    let playerOrders: Array<Record<string, any>> = [];
+    if (myXY) {
+      const raw = [...this.orders.values()]
         .filter((o) => o.villageId !== villageId && o.ttlAt > this.now())
         .map((o) => ({
           id: o.id, villageId: o.villageId, give: o.give, want: o.want,
@@ -346,8 +347,16 @@ export class TradeModule {
           distance: hexDistanceWrapped(myXY, o.fromXY, W, H),
           ttlAt: o.ttlAt,
         }))
-        .filter((o) => o.distance <= tc.tradeViewRadius)
-      : [];
+        .filter((o) => o.distance <= tc.tradeViewRadius);
+      // 解析每条订单对应玩家名字（经 village→player 反查），供贸易中心展示归属
+      const nameByVillage = new Map<string, string>();
+      for (const o of raw) {
+        if (nameByVillage.has(o.villageId)) continue;
+        const r = await this.commands.send({ name: 'player.GetByVillage', from: TradeModule.NAME, payload: { villageId: o.villageId } });
+        nameByVillage.set(o.villageId, r.ok ? ((r.payload as any).player?.name ?? '玩家') : '玩家');
+      }
+      playerOrders = raw.map((o) => ({ ...o, ownerName: nameByVillage.get(o.villageId) ?? '玩家' }));
+    }
 
     const myOrders = s.createdOrders.map((o) => ({
       id: o.id, villageId: o.villageId, give: o.give, want: o.want,
