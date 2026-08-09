@@ -717,6 +717,8 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* ---------- 建筑详情抽屉（复用 .drawer / .drawer-mask / .drawer-head / .drawer-body / .drawer-sec-title） ---------- */
 #building-detail-modal .drawer-mask { z-index: 60; }
 .bld-drawer { z-index: 61; }
+/* 详情页（含兵种训练卡）加宽至可一行排满兵种，无需滚动 */
+.drawer.drawer--center.bld-drawer { width: min(720px, 94vw); }
 .bld-drawer-name { font-family: var(--ff-display, inherit); font-size: var(--f-lg); font-weight: 700; }
 .bld-detail-desc { color: var(--c-ink); line-height: 1.6; font-size: var(--f-sm); }
 .bld-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3);
