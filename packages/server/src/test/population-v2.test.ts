@@ -10,7 +10,7 @@
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
  *  C6  极端粮荒 currentPop 降至 0，v3 无伤兵字段（无 woundedPool/无定时器）
  *  C7  粮荒正确停止 → recovery 事件，inFamine 变 false
- *  C8  训练后 currentPop 不变、soldierPop 上升（v4 解耦：士兵不占人口）
+ *  C8  训练后 currentPop 下降、soldierPop 上升（v5 原子转化：士兵=劳动人口转出，总人数守恒）
  *  C9  resume 对已有驻军也上报 soldierPop
  *  C10 GetSnapshot 公共字段齐全（v3 字段集）
  *  C11 settle 永不 emit（GetSnapshot 纯读零副作用）
@@ -53,7 +53,7 @@ async function reg(app: GameApp, name: string, tribe = 'romans'): Promise<string
 // ── C1：三部族满员 ────────────────────────────────────────────────────────
 
 for (const tribe of ['romans', 'gauls', 'teutons'] as const) {
-  test(`v3 C1 [${tribe}] createVillage 开局人口=城镇中心popCap：hardCap>currentPop 且 softLimit===availableLabor`, async () => {
+  test(`v3 C1 [${tribe}] createVillage 开局人口=城镇中心popCap：hardCap>currentPop 且 softLimit===hardCap`, async () => {
     const app = freshApp();
     const vid = await reg(app, `c1-${tribe}`, tribe);
     const snap = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
@@ -64,7 +64,7 @@ for (const tribe of ['romans', 'gauls', 'teutons'] as const) {
     for (let lv = 1; lv <= snap.mainLevel; lv++) expectedMainPopCap += mainDef.levels[lv]?.popCap ?? 0;
     assert.equal(snap.currentPop, expectedMainPopCap, `[${tribe}] currentPop 应=城镇中心popCap(${expectedMainPopCap})，实际 ${snap.currentPop}`);
     assert.ok(snap.hardCap > snap.currentPop, `[${tribe}] hardCap(${snap.hardCap}) 应>currentPop(${snap.currentPop})（其他建筑只提供上限）`);
-    assert.equal(snap.softLimit, snap.availableLabor, 'v3 兼容别名 softLimit 应等于 availableLabor');
+    assert.equal(snap.softLimit, snap.hardCap, 'v3 兼容别名 softLimit 应等于 hardCap（拓荒门槛衡量人口容量，取硬上限）');
     assert.equal(snap.soldierPop, 0, '新村无士兵，soldierPop=0');
   });
 }
@@ -144,7 +144,7 @@ test('v3 C3：GetArmy.trainable 每兵种 cropPerHourEach > 0（士兵以 upkeep
 
 // ── C4：增长线性收敛 ──────────────────────────────────────────────────────
 
-test('v3 C4：增长朝 availableLabor 线性收敛（main.popGrowthPerLevel × mainLevel）', async () => {
+test('v3 C4：增长朝 popCeiling 线性收敛（main.popGrowthPerLevel × mainLevel）', async () => {
   const app = freshApp();
   const vid = await reg(app, 'c4', 'romans');
 
@@ -160,7 +160,8 @@ test('v3 C4：增长朝 availableLabor 线性收敛（main.popGrowthPerLevel × 
   const cRes = await send(app, 'population.ConsumePop', { villageId: vid, unit: 'legionnaire', count: consumeCount });
   assert.equal(cRes.ok, true, `ConsumePop 应成功: ${cRes.reason ?? ''}`);
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  const gap = hardCap - snap1.currentPop;
+  // 增长目标 = 增长上限 popCeiling（硬上限 − 士兵足迹）；ConsumePop 预留的 5 人口占用 footprint，故 popCeiling=hardCap−5
+  const gap = snap1.popCeiling - snap1.currentPop;
   const expectedGrowth = Math.min(gap, rate);
   assert.ok(
     Math.abs(snap1.growthPerHour - expectedGrowth) < 1e-6,
@@ -180,7 +181,7 @@ test('v3 C4：增长朝 availableLabor 线性收敛（main.popGrowthPerLevel × 
   await app.scheduler.advanceTo(clock, setClock);
   await flush();
   const snap3 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  assert.equal(snap3.currentPop, hardCap, '长期快进后人口应收敛到 hardCap');
+  assert.equal(snap3.currentPop, snap3.popCeiling, '长期快进后人口应收敛到增长上限 popCeiling');
   assert.equal(snap3.growthPerHour, 0, '满员后 growthPerHour 应归0');
 });
 
@@ -292,7 +293,7 @@ test('v3 C7：粮荒停止后发出 recovery 事件，inFamine 变 false', async
 
 // ── C8：训练 → currentPop 不变（v4 解耦）、soldierPop 升 ──────────────────
 
-test('v4 C8：训练后 currentPop 不变、soldierPop 上升（经济一致）', async () => {
+test('v5 C8：训练后 currentPop 下降、soldierPop 上升（原子转化·总人数守恒）', async () => {
   const app = freshApp();
   const vid = await reg(app, 'c8', 'romans');
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
@@ -305,12 +306,13 @@ test('v4 C8：训练后 currentPop 不变、soldierPop 上升（经济一致）'
   const pop0 = snap0.currentPop;
 
   await send(app, 'military.TrainTroops', { villageId: vid, unit: 'legionnaire', count: 3 });
-  for (let i = 0; i < 3; i++) { tick(5_000); await app.scheduler.advanceTo(clock, setClock); await flush(); }
+  for (let i = 0; i < 4; i++) { tick(5_000); await app.scheduler.advanceTo(clock, setClock); await flush(); }
 
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  // v4：训练不再改动人口（无先扣后补），故 currentPop 不会下降（自然增长只可能上升）
-  assert.ok(snap1.currentPop >= pop0 - 1e-6, `v4 训练不应减少 currentPop（${pop0}→${snap1.currentPop}）`);
+  // v5：训练即时把劳动人口转为士兵（currentPop 下降≈3、soldierPop 上升），总人数守恒（无先扣后补闪烁）
+  assert.ok(Math.abs(snap1.currentPop - (pop0 - 3)) < 1.5, `v5 训练应使 currentPop 下降约 3（${pop0}→${snap1.currentPop}）`);
   assert.ok(snap1.soldierPop >= 3 - 0.01, `soldierPop 应≈3（${snap1.soldierPop}）`);
+  assert.ok(Math.abs(snap1.totalPop - pop0) < 1.5, `v5 总人数应守恒（${pop0}→${snap1.totalPop}）`);
 });
 
 // ── C9：resume 上报 soldierPop ────────────────────────────────────────────
@@ -356,6 +358,7 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
     'villageId', 'currentPop', 'soldierPop', 'hardCap', 'availableLabor',
     'laborRatio', 'prosperityBonus', 'prosperityMult', 'growthPerHour',
     'mobilizeCap', 'mainLevel', 'inFamine', 'civilianCropPerHour', 'softLimit',
+    'totalPop', 'trainingPop', 'popCeiling',
   ] as const;
   for (const field of required) {
     assert.ok(field in snap, `GetSnapshot 应包含字段: ${field}`);
@@ -376,7 +379,7 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
   assert.ok(snap.laborRatio >= 0 && snap.laborRatio <= 1, `laborRatio(${snap.laborRatio}) 应在 [0,1]`);
   assert.ok(snap.prosperityMult >= app.config.constants.popLaborFloor - 0.01 && snap.prosperityMult <= 1.01,
     `prosperityMult 应在 [popLaborFloor,1.0]（${snap.prosperityMult}）`);
-  assert.equal(snap.softLimit, snap.availableLabor, 'softLimit 应等于 availableLabor');
+  assert.equal(snap.softLimit, snap.hardCap, 'softLimit 应等于 hardCap（拓荒门槛取硬上限）');
 
   // push 事件也含这些字段（通过 ConsumePop 触发）
   const pushed: any[] = [];

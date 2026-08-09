@@ -169,13 +169,16 @@ describe('isCompatibleVersion', () => {
 
 // ─── PopSnapshot v2 新字段 ─────────────────────────────────────────
 
-/** 构建测试用完整 PopSnapshot（v3 硬上限字段）。 */
+/** 构建测试用完整 PopSnapshot（v3 硬上限 + 劳动→士兵转化模型字段）。 */
 function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {}) {
   return {
     currentPop: 100,
     soldierPop: 40,
+    totalPop: 140,
+    trainingPop: 0,
     hardCap: 200,
     availableLabor: 160,
+    popCeiling: 160,
     laborRatio: 0.5,
     prosperityBonus: 0.5,
     prosperityMult: 0.875,
@@ -219,15 +222,15 @@ describe('PopSnapshot v3 硬上限 - 新字段', () => {
     assert.equal(getPopState()?.inFamine, true);
   });
 
-  it('interpolatePop 在增长中线性外插，上限 availableLabor', () => {
-    setPopState(makePopSnap({ currentPop: 100, availableLabor: 200, growthPerHour: 3600, fetchedAt: Date.now() - 1000 }));
+  it('interpolatePop 在增长中线性外插，上限 popCeiling', () => {
+    setPopState(makePopSnap({ currentPop: 100, popCeiling: 200, growthPerHour: 3600, fetchedAt: Date.now() - 1000 }));
     const interp = interpolatePop();
     // 经过 1 秒，growthPerHour=3600 → 约 1 人/秒，应约为 101
     assert.ok(interp >= 100 && interp <= 102, `外插值 ${interp} 超出预期范围`);
   });
 
-  it('interpolatePop 达上限附近（currentPop >= availableLabor）时不外插', () => {
-    setPopState(makePopSnap({ currentPop: 200, availableLabor: 200, growthPerHour: 10 }));
+  it('interpolatePop 达上限附近（currentPop >= popCeiling）时不外插', () => {
+    setPopState(makePopSnap({ currentPop: 200, popCeiling: 200, growthPerHour: 10 }));
     assert.equal(interpolatePop(), 200);
   });
 });

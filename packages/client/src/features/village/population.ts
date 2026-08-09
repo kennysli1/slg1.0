@@ -70,9 +70,10 @@ export function renderPopPanel(): string {
   const growthDisplay = atCap ? (ps.potentialGrowthPerHour ?? 0) : ps.growthPerHour;
   const growthSign = growthDisplay >= 0 ? '+' : '';
   const growthNote = atCap ? ' <small class="hint-sm pop-capped">上限·不增长</small>' : '';
-  // 劳动人口 = 占用人口（v4 解耦：士兵不占人口，故劳动人口即为 pop 本身）
-  const laborPop = Math.round(pop);
-  // 平民占比（驱动繁荣度）= 劳动人口 / 总人口（服务端口径 ps.laborRatio，已与硬上限解耦）
+  // 平民(劳动)人口 = 当前可转化为士兵的池子；大数字 pop 是总人口
+  const laborPop = Math.round(interpolatePop());
+  const trainingStr = (ps.trainingPop ?? 0) > 0 ? ` · 训练中 ${fmt(ps.trainingPop)}` : '';
+  // 平民占比（驱动繁荣度）= 平民 / 总人口（服务端口径 ps.laborRatio）
   const laborRatioPct = Math.round((ps.laborRatio ?? 0) * 100);
 
   // 进度条颜色类
@@ -91,13 +92,13 @@ export function renderPopPanel(): string {
       <span class="pop-labor-item"><i>锻造速率</i><b>${multPct(lm.smithy)}</b></span>
     </div>`;
 
-  // 人口构成明细：默认隐藏，hover 人口数字时展开（平民 + 军队；军队不占人口上限）
-  const popBreakHtml = `<div class="pop-breakdown">平民(劳动) ${fmt(laborPop)} · 军队 ${fmt(ps.soldierPop)}（不占人口）</div>`;
+  // 人口构成明细：默认隐藏，hover 人口数字时展开（平民 + 军队；军队占人口，训练=劳动人口转化）
+  const popBreakHtml = `<div class="pop-breakdown">平民(劳动) ${fmt(laborPop)} · 军队 ${fmt(ps.soldierPop)}${trainingStr}（占人口·训练=劳动人口转化，总人数守恒）</div>`;
 
   const statusLabels = renderStatusLabels(ps, pop);
 
   return `<div class="pop-panel">
-    <div class="pop-head" title="人口 ${fmt(pop)} / ${fmt(ps.hardCap)}（平民）· 军队 ${fmt(ps.soldierPop)}（不占人口上限）">
+    <div class="pop-head" title="人口 ${fmt(pop)} / ${fmt(ps.hardCap)}（总人口=平民+军队+训练中）· 平民 ${fmt(laborPop)} · 军队 ${fmt(ps.soldierPop)}${trainingStr}">
       <span class="pop-current" id="pop-current">${fmt(pop)}</span>
       <span class="pop-slash">/</span>
       <span class="pop-limit">${fmt(ps.hardCap)}</span>
@@ -115,7 +116,7 @@ export function renderPopPanel(): string {
     </div>
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">繁荣度系数（平民占总人口比例 currentPop/(currentPop+soldierPop) ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%；v4 解耦后士兵不再占用人口上限/不再先扣后补人口，但军队规模仍影响繁荣度与动员上限，士兵只额外增加军晌耗粮）</div>
+      <div class="pop-labor-title">繁荣度系数由「平民占总人口比例」驱动（currentPop/totalPop ≥${Math.round((ps.popProsperityFullRatio ?? 0.7) * 100)}% 时满值 100%）。训练士兵=劳动人口转化为军队，总人数守恒（不闪烁）；士兵占人口并受本族动员上限约束，且只额外增加军晌耗粮（口粮由 troops 军晌计，不重复吃平民粮）</div>
       ${laborGrid}
     </div>
   </div>`;

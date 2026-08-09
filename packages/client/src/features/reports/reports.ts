@@ -68,9 +68,9 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     const popVal = fmt(Math.round(Number((payload as any).currentPop) ?? 0));
     if (evTag === 'consumed') {
       const consumed = Number((payload as any).consumed) || 0;
-      // v4 解耦：训练不再消耗人口（consumed=0），不写战报（避免"消耗 -0 人口"噪音）
       if (consumed <= 0) return null;
-      return `${time}🎯 征兵消耗 -${fmt(consumed)} 人口 → 当前平民 ${popVal}`;
+      // 劳动人口即时转为士兵（总人数守恒）：payload.currentPop 为转化后平民数
+      return `${time}🎯 征兵：劳动人口 -${fmt(consumed)} 转为军队 → 当前平民 ${popVal}（总人口不变）`;
     }
     if (evTag === 'returned') {
       const returned = Number((payload as any).returned);
@@ -90,12 +90,12 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       const hardCap = fmt(Number((payload as any).hardCap) ?? 0);
       return `${time}🏗️ 人口上限变更 → 硬上限 ${hardCap}`;
     }
-    // 战死回收：v4 解耦后士兵不占人口，战死不再回收劳动人口（recovered 恒为 0）
+    // 战死回收：按医院等级把死亡士兵中的一部分回收为平民，其余计永久损失（总人数净降 permanentDead）
     if (evTag === 'recovered') {
       const recovered = Number((payload as any).recovered) || 0;
       const permanentDead = Number((payload as any).permanentDead) || 0;
       if (recovered > 0) {
-        const recStr = `+${fmt(recovered)} 人经医院回收`;
+        const recStr = `+${fmt(recovered)} 人经医院回收为平民`;
         const deadStr = permanentDead > 0 ? `（永久损失 ${fmt(permanentDead)} 人）` : '';
         return `${time}⚕️ 战死回收${recStr}${deadStr} → 当前平民 ${popVal}`;
       }
@@ -135,7 +135,10 @@ export function handlePush(event: string, payload: any): void {
       const newCurrentPop = payload.currentPop != null ? Number(payload.currentPop) : current.currentPop;
       const newHardCap = payload.hardCap != null ? Number(payload.hardCap) : current.hardCap;
       const newSoldierPop = payload.soldierPop != null ? Number(payload.soldierPop) : current.soldierPop;
+      const newTotalPop = payload.totalPop != null ? Number(payload.totalPop) : (current.totalPop ?? newCurrentPop + newSoldierPop);
+      const newTrainingPop = payload.trainingPop != null ? Number(payload.trainingPop) : (current.trainingPop ?? 0);
       const newAvailableLabor = payload.availableLabor != null ? Number(payload.availableLabor) : current.availableLabor;
+      const newPopCeiling = payload.popCeiling != null ? Number(payload.popCeiling) : (current.popCeiling ?? newHardCap);
       const newSoftLimit = payload.softLimit != null ? Number(payload.softLimit) : newAvailableLabor;
       const newLaborRatio = payload.laborRatio != null ? Number(payload.laborRatio) : current.laborRatio;
       const newProsperityBonus = payload.prosperityBonus != null ? Number(payload.prosperityBonus) : current.prosperityBonus;
@@ -170,8 +173,11 @@ export function handlePush(event: string, payload: any): void {
         ...current,
         currentPop: newCurrentPop,
         soldierPop: newSoldierPop,
+        totalPop: newTotalPop,
+        trainingPop: newTrainingPop,
         hardCap: newHardCap,
         availableLabor: newAvailableLabor,
+        popCeiling: newPopCeiling,
         softLimit: newSoftLimit,
         laborRatio: newLaborRatio,
         prosperityBonus: newProsperityBonus,

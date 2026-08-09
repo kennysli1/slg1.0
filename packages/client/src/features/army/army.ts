@@ -155,7 +155,7 @@ export function updateTrainCost(unitKey: string) {
   const batchUpkeepEl = document.getElementById(`batchupkeep-${unitKey}`);
   if (batchUpkeepEl) batchUpkeepEl.textContent = String(batchUpkeep);
 
-  // availablePop = currentPop（平民数，即硬上限内可训练人口）
+  // availablePop = currentPop（平民数，即可转化为士兵的劳动人口）
   const ps = getPopState();
   const currentPop = interpolatePop(); // 平民外插值
   const popWarn = document.getElementById(`pop-warn-${unitKey}`);
@@ -266,7 +266,7 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
       for (const r of resourceKeys()) total[r] = (def.cost[r] ?? 0) * cnt;
       if (!canAfford(total)) { showToast('资源不足，无法训练'); return; }
       const needPop = calcPopCost(u, cnt);
-      const currentPop = interpolatePop(); // v3: 平民数 = currentPop（硬上限内可训人口）
+      const currentPop = interpolatePop(); // 平民数 = currentPop（可转化为士兵的劳动人口）
       if (getPopState() && currentPop < needPop) {
         showToast(`可用人口不足：需 ${needPop}，当前平民 ${currentPop}`);
         return;

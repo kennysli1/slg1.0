@@ -92,19 +92,26 @@ async function refreshAll() {
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       const p = pop.payload as any;
-      // GetPopulation 返回 v3 硬上限快照：currentPop/soldierPop/hardCap/availableLabor/
-      // laborRatio/prosperityBonus/prosperityMult/growthPerHour/mobilizeCap/mainLevel/
-      // inFamine/civilianCropPerHour + 兼容别名 softLimit=availableLabor + laborMults(五轴)。
+      // GetPopulation 返回 v3 硬上限快照 + 劳动→士兵转化模型：
+      // currentPop(平民)/soldierPop(驻军+在途)/totalPop(总人口)/trainingPop(训练中)/hardCap/
+      // availableLabor(=平民)/popCeiling(平民增长上限)/laborRatio/prosperityBonus/prosperityMult/
+      // growthPerHour/mobilizeCap/mainLevel/inFamine/civilianCropPerHour + softLimit=availableLabor + laborMults(五轴)。
       const currentPop: number = p.currentPop ?? 0;
       const soldierPop: number = p.soldierPop ?? 0;
+      const totalPop: number = p.totalPop ?? (currentPop + soldierPop);
+      const trainingPop: number = p.trainingPop ?? 0;
       const hardCap: number = p.hardCap ?? 0;
-      const availableLabor: number = p.availableLabor ?? hardCap;
+      const availableLabor: number = p.availableLabor ?? currentPop;
+      const popCeiling: number = p.popCeiling ?? hardCap;
       const prosperityMult: number = p.prosperityMult ?? 1;
       setPopState({
         currentPop,
         soldierPop,
+        totalPop,
+        trainingPop,
         hardCap,
         availableLabor,
+        popCeiling,
         laborRatio: p.laborRatio ?? 0,
         prosperityBonus: p.prosperityBonus ?? 0,
         prosperityMult,
@@ -190,8 +197,7 @@ function renderResBar() {
 function renderPopCell(): string {
   const ps = getPopState();
   if (!ps) return '';
-  const pop = interpolateTotalPop(); // v4 解耦：士兵不占人口，占用人口 = 劳动人口（currentPop）
-  const labor = Math.round(pop); // 劳动人口即占用人口（士兵已不计入）
+  const pop = interpolateTotalPop(); // 总人口 = 平民 + 士兵(驻军+在途) + 训练中，训练守恒不闪烁
   const atCap = !ps.inFamine && ps.hardCap > 0 && pop / ps.hardCap >= 1.0;
   // 达上限展示原始增长潜力（被锁），否则展示真实增长
   const growth = atCap ? Math.round(ps.potentialGrowthPerHour ?? 0) : Math.round(ps.growthPerHour);
@@ -200,9 +206,10 @@ function renderPopCell(): string {
   // 饥荒优先显示红色，接近硬上限显示橙色
   const famineClass = ps.inFamine ? ' res-famine' : (ps.hardCap > 0 && pop / ps.hardCap >= 0.95 ? ' res-low' : '');
   const famineIcon = ps.inFamine ? '🚨' : '👥';
+  const trainingStr = (ps.trainingPop ?? 0) > 0 ? ` · 训练中 ${fmt(ps.trainingPop)}` : '';
   const title = ps.inFamine
     ? `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（饥荒！人口正在减少）· 增长 ${sign}${growth}/h`
-    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)}（平民）· 军队 ${fmt(ps.soldierPop)}（不占人口）· 增长 ${sign}${growth}/h${atCap ? '（已达上限，实际不增长）' : ''}`;
+    : `人口 ${fmt(pop)}/${fmt(ps.hardCap)} · 平民 ${fmt(Math.round(interpolatePop()))} · 军队 ${fmt(ps.soldierPop)}${trainingStr}（训练=劳动人口转化，总人数守恒）· 增长 ${sign}${growth}/h${atCap ? '（已达上限，实际不增长）' : ''}`;
   return `<span class="res res-pop${famineClass}" title="${title}">
     <span class="res-pop-icon">${famineIcon}</span>
     <span class="res-num">${fmt(pop)}<small>/${fmt(ps.hardCap)}</small></span>

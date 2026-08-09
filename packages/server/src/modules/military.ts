@@ -348,11 +348,12 @@ export class MilitaryModule {
       payload: { villageId, cost: totalCost },
     });
     if (!spend.ok) {
-      // 资源不足：回滚已扣的人口
+      // 资源不足：回滚已预留的训练人口（释放 trainingPopCost 并恢复平民，与 ConsumePop 相反）
+      const consumed = (popResult.payload as any)?.consumed ?? def.popCost * count;
       void this.commands.send({
-        name: 'population.ReturnPop',
+        name: 'population.ReleaseTrainingPop',
         from: MilitaryModule.NAME,
-        payload: { villageId, units: { [unit]: count } },
+        payload: { villageId, amount: consumed, restoreCivilian: true },
       });
       return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
     }
@@ -401,6 +402,16 @@ export class MilitaryModule {
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
+    // 每产出一个兵：把训练中预留(trainingPopCost)等量释放——该兵已由 SetGarrisonPop 计入 garrisonPopCost，
+    // footprint 不变 → 总人口守恒，无"先扣后补"闪烁。
+    const uDef = this.config.units[order.unit];
+    if (uDef) {
+      void this.commands.send({
+        name: 'population.ReleaseTrainingPop',
+        from: MilitaryModule.NAME,
+        payload: { villageId, amount: uDef.popCost, restoreCivilian: false },
+      });
+    }
 
     const evt: DomainEvent = {
       name: 'military.TroopTrained',

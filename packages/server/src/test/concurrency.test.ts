@@ -139,7 +139,7 @@ test('Population: 多次 CropDeficit 事件只注册一个减员 Scheduler 任�
 
 // ── H) RecoverCasualties 即时回收（v3 无伤兵池/无定时器）───────────────────
 
-test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无定时器（v4 不回收人口）', async () => {
+test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无定时器（v5 按医院等级回收平民）', async () => {
   const app = makeApp();
   app.setupWorld();
 
@@ -151,8 +151,12 @@ test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无�
   const vid = (reg.payload as any).player.villageId;
   await flush();
 
-  // ConsumePop 仅校验动员上限（不再扣 currentPop）→ 不影响后续回收断言
-  await app.commands.send({ name: 'population.ConsumePop', from: 'test', payload: { villageId: vid, unit: 'legionnaire', count: 10 } });
+  const c = app.config.constants;
+  const legDef = app.config.units['legionnaire'];
+  const recoveryRatio = Math.min(c.popHospitalRecoveryMax, c.popHospitalRecoveryBase);
+  const deadPop = 20 * legDef.popCost;
+  const rec = Math.round(deadPop * recoveryRatio);
+  const perm = deadPop - rec;
 
   const snap0 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
   const initPop = snap0.currentPop;
@@ -169,18 +173,18 @@ test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无�
 
   assert.ok(r1.ok, `RecoverCasualties 1 应成功: ${r1.reason ?? ''}`);
   assert.ok(r2.ok, `RecoverCasualties 2 应成功: ${r2.reason ?? ''}`);
-  // v4 解耦：士兵不占人口 → 战死不再回收劳动人口（recovered 恒为 0）；deadPop=20 全计永久损失
-  assert.equal((r1.payload as any).recovered, 0, 'v4 第一批应回收0');
-  assert.equal((r2.payload as any).recovered, 0, 'v4 第二批应回收0');
-  assert.equal((r1.payload as any).permanentDead, 20, 'v4 第一批永久损失应为20');
-  assert.equal((r2.payload as any).permanentDead, 20, 'v4 第二批永久损失应为20');
+  // v5：按医院等级即时回收平民（无伤兵池/无定时器）
+  assert.equal((r1.payload as any).recovered, rec, `v5 第一批应回收 ${rec}`);
+  assert.equal((r2.payload as any).recovered, rec, `v5 第二批应回收 ${rec}`);
+  assert.equal((r1.payload as any).permanentDead, perm, `v5 第一批永久损失应为 ${perm}`);
+  assert.equal((r2.payload as any).permanentDead, perm, `v5 第二批永久损失应为 ${perm}`);
 
-  // 平民人口不变（不回收、不扣减）
+  // 平民人口增加 recovered（每批各自回收）
   const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } })).payload as any;
-  assert.equal(snap1.currentPop, initPop, `v4 战死不应改变 currentPop（${initPop}→${snap1.currentPop}）`);
+  assert.ok(snap1.currentPop >= initPop + rec + rec - 1e-6, `战死回收应使平民+${2 * rec}（${initPop}→${snap1.currentPop}）`);
   assert.ok(snap1.currentPop <= snap1.hardCap, `currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
 
-  // v4 无伤兵池（无 woundedPool / 无 heal 定时器）
+  // v5 无伤兵池（无 woundedPool / 无 heal 定时器）
   const popState = app.store.get<any>('population', vid);
-  assert.equal(popState?.woundedPool, undefined, 'v4 不应有 woundedPool（无伤兵池）');
+  assert.equal(popState?.woundedPool, undefined, 'v5 不应有 woundedPool（无伤兵池）');
 });

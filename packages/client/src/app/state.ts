@@ -7,29 +7,35 @@ export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
-/** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型。 */
+/** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型 + 劳动→士兵原子转化。 */
 export interface PopSnapshot {
-  /** 劳动人口（平民）。 */
+  /** 劳动人口（平民）。训练士兵即时转出，是可用于转化为士兵的池子。 */
   currentPop: number;
-  /** 士兵人口（驻军 + 在途，由 military/movement 上报）。 */
+  /** 实际驻军人口权重（驻军 + 在途，由 military/movement 上报）。 */
   soldierPop: number;
+  /** 总人口 = 平民 + 士兵足迹（驻军+在途+训练中）。训练/战死回收守恒，是面板大数字。 */
+  totalPop: number;
+  /** 训练中预留人口（已转出劳动人口、尚未产出为驻军）。 */
+  trainingPop: number;
   /** 人口硬上限（建筑提供：Σ popCapPerLevel × level）。 */
   hardCap: number;
-  /** 可用劳动人口 = 硬上限 − 士兵人口（增长目标 / 拓荒门槛）。 */
+  /** 可用劳动人口 = 平民(currentPop)，用于生产/建造/练兵。 */
   availableLabor: number;
-  /** 劳动人口占硬上限比例 [0,1]。 */
+  /** 平民增长上限（占 housing 余量）= 硬上限 − 士兵足迹；客户端外插增长用。 */
+  popCeiling: number;
+  /** 平民占总人口比例 [0,1]（驱动繁荣度）。 */
   laborRatio: number;
-  /** 繁荣度加成 [0,1]（劳动占比从种族最低到满值处的线性插值）。 */
+  /** 繁荣度加成 [0,1]（平民占比从种族最低到满值处的线性插值）。 */
   prosperityBonus: number;
   /** 五轴统一繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
   prosperityMult: number;
-  /** 每小时增长（朝 availableLabor 收敛）。 */
+  /** 每小时增长（朝 popCeiling 收敛）。 */
   growthPerHour: number;
   /** 原始增长速率（未夹紧到硬上限缺口）；达上限时用于展示人口流动潜力。 */
   potentialGrowthPerHour?: number;
   /** 本部族最大动员比例（士兵占总人口上限；条顿0.80/高卢0.70/罗马0.75）。 */
   mobilizeCap: number;
-  /** 繁荣度满值阈值（劳动占比 ≥此值时繁荣度=100%）。 */
+  /** 繁荣度满值阈值（平民占比 ≥此值时繁荣度=100%）。 */
   popProsperityFullRatio?: number;
   /** 城镇中心等级（增长速率因子）。 */
   mainLevel: number;
@@ -102,27 +108,28 @@ export function getPopState(): PopSnapshot | null { return popState; }
 export function setPopState(s: PopSnapshot): void { popState = s; }
 
 /**
- * 本地外插当前「劳动人口」（不发请求）。
- * 公式：若 currentPop < availableLabor 且增长率 > 0，则按 growthPerHour 线性外插，上限 availableLabor。
+ * 本地外插当前「平民（劳动）人口」（不发请求）。
+ * 公式：若 currentPop < popCeiling 且增长率 > 0，则按 growthPerHour 线性外插，上限 popCeiling。
  * 下降（饥荒减员 / 超限）由服务端处理，客户端保守显示不模拟减员。
  * 注意：这是平民（可训/可增长）人口，不含士兵；训练容量判定用此值（见 army.ts）。
  */
 export function interpolatePop(): number {
   if (!popState) return 0;
-  const { currentPop, availableLabor, growthPerHour, fetchedAt } = popState;
-  if (currentPop < availableLabor && growthPerHour > 0) {
+  const { currentPop, popCeiling, growthPerHour, fetchedAt } = popState;
+  if (currentPop < popCeiling && growthPerHour > 0) {
     const elapsedHours = (Date.now() - fetchedAt) / 3_600_000;
-    return Math.min(availableLabor, Math.round(currentPop + growthPerHour * elapsedHours));
+    return Math.min(popCeiling, Math.round(currentPop + growthPerHour * elapsedHours));
   }
   return Math.round(currentPop);
 }
 
 /**
- * 本地外插「占用人口」= 劳动人口（v4 解耦：士兵不占人口上限，故只算平民 currentPop）。
- * 用于顶栏/人口面板的大数字与进度条（分子 = 人口 / 硬上限）。
- * 士兵规模由 ps.soldierPop 单独展示，不计入人口占用。
+ * 本地外插「总人口」= 平民 + 士兵(驻军+在途) + 训练中。
+ * 训练士兵是劳动→士兵的原子转化，总人口守恒，故大数字在训练中不会闪烁。
+ * 用于顶栏/人口面板的大数字与进度条（分子 = 总人口 / 硬上限）。
  */
 export function interpolateTotalPop(): number {
   if (!popState) return 0;
-  return interpolatePop();
+  const civ = interpolatePop();
+  return Math.round(civ + (popState.soldierPop ?? 0) + (popState.trainingPop ?? 0));
 }
