@@ -210,3 +210,80 @@ test('城镇中心升级逐等级开放城内槽位（无平坡）', async () =>
   assert.ok(prev > inner1, `城镇中心升级应开放更多城内槽位（TC1=${inner1} -> TC5=${prev}）`);
 });
 
+// ── 拆除（DemolishBuilding）────────────────────────────────────────
+test('拆除：已建成非城镇中心建筑 → 成功占槽、拆除期间无加成、完成后整栋移除并释放槽位', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+
+  // 建居民楼（纯人口建筑，提供 popCap）
+  const r = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'residence' });
+  assert.equal(r.ok, true, `建居民楼应成功: ${r.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 600_000, setClock);
+
+  const built = await layout(app);
+  const res = built.zones.inner.placed.find((p: any) => p.kind === 'residence');
+  assert.ok(res && res.level === 1, '居民楼落成 1 级');
+  const freeBefore = built.zones.inner.freeSlots;
+
+  const capBefore = (await send(app, 'building.GetPopCap', { villageId: 'v1' })).payload as any;
+  assert.ok(capBefore.hardCap > 0, '开局已有硬上限');
+
+  // 拆除
+  const d = await send(app, 'building.Demolish', { villageId: 'v1', slotId: res.slotId });
+  assert.equal(d.ok, true, `拆除应成功: ${d.reason ?? ''}`);
+  assert.ok(typeof d.payload.finishAt === 'number', '应返回 finishAt');
+
+  // 拆除期间：level=0、demolishing=true、不产出、仍占槽、硬上限已扣除
+  const during = await layout(app);
+  const dslot = during.zones.inner.placed.find((p: any) => p.kind === 'residence');
+  assert.ok(dslot, '拆除期间建筑仍在槽位');
+  assert.equal(dslot.level, 0, '拆除期间 level 置 0（无加成）');
+  assert.equal(dslot.demolishing, true, '应标记 demolishing');
+  assert.ok(!dslot.producing, '拆除期间不产出');
+  assert.equal(during.zones.inner.freeSlots, freeBefore, '拆除期间仍占槽（未释放）');
+
+  const capDuring = (await send(app, 'building.GetPopCap', { villageId: 'v1' })).payload as any;
+  assert.ok(capDuring.hardCap < capBefore.hardCap, '拆除期间人口上限应已扣除居民楼贡献');
+
+  // 完成
+  await app.scheduler.advanceTo((d.payload.finishAt as number) + 1000, setClock);
+  const after = await layout(app);
+  const gone = after.zones.inner.placed.find((p: any) => p.kind === 'residence');
+  assert.ok(!gone, '完成后居民楼整栋移除');
+  assert.equal(after.zones.inner.freeSlots, freeBefore + 1, '完成后槽位释放');
+
+  const capAfter = (await send(app, 'building.GetPopCap', { villageId: 'v1' })).payload as any;
+  assert.equal(capAfter.hardCap, capDuring.hardCap, '完成后硬上限与拆除期间一致（居民楼贡献为 0）');
+});
+
+test('拆除：城镇中心不可拆除', async () => {
+  const app = freshApp();
+  const r = await send(app, 'building.Demolish', { villageId: 'v1', slotId: 'center' });
+  assert.equal(r.ok, false, '城镇中心应拒绝拆除');
+  assert.equal(r.reason, 'cannot_demolish_center');
+});
+
+test('拆除：建造中的建筑（level<1）不可拆除', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+  const r = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'warehouse' });
+  assert.equal(r.ok, true, '建造应成功');
+  const wh = (await layout(app)).zones.inner.placed.find((p: any) => p.kind === 'warehouse');
+  const r2 = await send(app, 'building.Demolish', { villageId: 'v1', slotId: wh.slotId });
+  assert.equal(r2.ok, false, '建造中不可拆除');
+  assert.equal(r2.reason, 'still_constructing');
+});
+
+test('拆除：重复拆除同一建筑应被拒（already_demolishing）', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+  await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'warehouse' });
+  await app.scheduler.advanceTo(clock + 600_000, setClock);
+  const wh = (await layout(app)).zones.inner.placed.find((p: any) => p.kind === 'warehouse');
+  const d1 = await send(app, 'building.Demolish', { villageId: 'v1', slotId: wh.slotId });
+  assert.equal(d1.ok, true, '首次拆除应成功');
+  const d2 = await send(app, 'building.Demolish', { villageId: 'v1', slotId: wh.slotId });
+  assert.equal(d2.ok, false, '重复拆除应被拒');
+  assert.equal(d2.reason, 'already_demolishing');
+});
+

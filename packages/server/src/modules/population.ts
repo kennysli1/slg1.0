@@ -106,6 +106,11 @@ export class PopulationModule {
       const { villageId } = evt.payload as { villageId: string };
       void this.refreshHardCap(villageId);
     });
+    // 拆除开始即置 level=0，硬上限须同步重算（否则拆除期间仍按旧上限计，违反"期间无加成"）
+    this.bus.on('building.Demolishing', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      void this.refreshHardCap(villageId);
+    });
 
     // 经济进入粮食赤字 → 启动饥荒减员（若未在运行）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {

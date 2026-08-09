@@ -82,13 +82,14 @@ function renderZone(zone: 'inner' | 'outer', title: string, z: any): string {
     <div class="grid">${placed}${empties}</div>`;
 }
 
-/** 单个已建建筑卡（含资源田；建造中显示进度占位）。整卡可点开详情；升级按钮点击不冒泡。 */
+/** 单个已建建筑卡（含资源田；建造中/拆除中显示进度占位）。整卡可点开详情；升级按钮点击不冒泡。 */
 function renderPlaced(p: any): string {
-  const constructing = p.level < 1;
+  const constructing = p.level < 1 && !p.demolishing;
+  const demolishing = !!p.demolishing;
   const busy = p.building;
   const max = p.level >= p.maxLevel;
   const afford = canAfford(p.nextCost);
-  const prod = p.producing
+  const prod = !demolishing && p.producing
     ? `<div class="hint-sm prod">+${p.producing.ratePerHour}/h</div>`
     : '';
   // 本次升级（p.level → p.level+1）获得的人口增量：取目标等级 popCap；
@@ -96,19 +97,22 @@ function renderPlaced(p: any): string {
   const _info = buildingInfo(p.kind);
   const popCap = _info.popCapByLevel?.[p.level] ?? _info.popCapPerLevel ?? 0;
   let btn: string;
-  if (constructing) btn = '<small class="tag">建造中</small>';
+  if (demolishing) btn = '<small class="tag tag-danger">拆除中</small>';
+  else if (constructing) btn = '<small class="tag">建造中</small>';
   else if (max) btn = '<small class="tag">已满级</small>';
   else if (busy) btn = '<small class="tag">建造中</small>';
   else btn = `<button class="btn-sm" data-up-slot="${p.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
-  const lv = constructing ? '建造中' : `Lv${p.level}`;
+  const lv = demolishing ? '拆除中' : constructing ? '建造中' : `Lv${p.level}`;
   const progress = busy && p.buildingStartAt && p.buildingFinishAt
-    ? progressBar(p.buildingStartAt, p.buildingFinishAt, constructing ? '建造中' : '升级中')
+    ? progressBar(p.buildingStartAt, p.buildingFinishAt, demolishing ? '拆除中' : constructing ? '建造中' : '升级中')
     : '';
+  // 拆除中不展示升级消耗；其余照常
+  const costPart = demolishing || constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec, popCap);
   return `<div class="card" data-bld-slot="${p.slotId}" title="点击查看 ${escapeAttr(p.name)} 详情">${art(p.icon, p.name, 'md')}
     <div class="cardbody"><div class="card-title">${escapeHtml(p.name)} <b class="lv">${lv}</b>
       <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
-      ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec, popCap)}${btn}</div></div>`;
+      ${progress}${costPart}${btn}</div></div>`;
 }
 
 /** 侧边栏抽屉：某区可建建筑清单。整条选项可点开详情；建造按钮点击不冒泡。 */
@@ -151,6 +155,9 @@ interface BldDetailCtx {
   timeSec?: number | null;
   producing?: { ratePerHour: number } | null;
   isBuild?: boolean; // true=尚未建造(建造消耗)；false=升级消耗
+  demolishing?: boolean; // 拆除进行中：期间无加成，不可取消
+  buildingStartAt?: number;
+  buildingFinishAt?: number;
 }
 
 /** 从当前布局缓存按 slotId 找到已建建筑/城镇中心，组装详情上下文。 */
@@ -167,7 +174,11 @@ function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx; slotId:
       return {
         kind: p.kind,
         slotId,
-        ctx: { level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec, producing: p.producing, isBuild: p.level < 1 },
+        ctx: {
+          level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec,
+          producing: p.producing, isBuild: p.level < 1,
+          demolishing: !!p.demolishing, buildingStartAt: p.buildingStartAt, buildingFinishAt: p.buildingFinishAt,
+        },
       };
     }
   }
@@ -246,33 +257,38 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
   closeBuildingDetail(); // 单例
   const info = buildingInfo(kind);
   const max = ctx.maxLevel != null && ctx.level >= ctx.maxLevel;
+  const isMain = kind === 'main';
 
   // 训练区仅对军事训练建筑（其详情抽屉内嵌训练 UI）展示
   const army = getCache().army;
   const isTrainer = !!(slotId && army?.slots?.some((s: any) => s.slotId === slotId));
-  const trainSectionHtml = isTrainer
+  const trainSectionHtml = isTrainer && !ctx.demolishing
     ? `<div class="drawer-sec-title">训练 <small>（本建筑独立队列 · 升级可提速降费）</small></div><div id="bld-train-sec" class="bld-train-sec"><div class="loading">加载中…</div></div>`
     : '';
 
   // 等级行
-  const lvStr = ctx.isBuild
-    ? '尚未建造'
-    : `Lv${ctx.level}${ctx.maxLevel ? ` / ${ctx.maxLevel}` : ''}`;
+  const lvStr = ctx.demolishing
+    ? '拆除中'
+    : ctx.isBuild
+      ? '尚未建造'
+      : `Lv${ctx.level}${ctx.maxLevel ? ` / ${ctx.maxLevel}` : ''}`;
 
-  // 消耗区标题 + 内容
+  // 消耗区标题 + 内容（拆除中/建造中均不展示）
   let costSec = '';
-  if (max) {
+  if (ctx.demolishing) {
+    costSec = `<div class="drawer-sec-title">拆除中</div><div class="hint-sm">建筑正在拆除，期间不提供任何加成，且不可取消。完成后整栋消失、槽位释放。</div>`;
+  } else if (max) {
     costSec = `<div class="drawer-sec-title">已满级</div><div class="hint-sm">该建筑已达最高等级，无需继续升级。</div>`;
   } else if (ctx.cost) {
     const label = ctx.isBuild ? '建造消耗' : `升级到 Lv${ctx.level + 1} 消耗`;
     costSec = `<div class="drawer-sec-title">${label}</div>${costPreview(ctx.cost, ctx.timeSec)}`;
   }
 
-  const prodSec = ctx.producing
+  const prodSec = !ctx.demolishing && ctx.producing
     ? `<div class="bld-detail-row"><span class="bld-detail-k">当前产量</span><span class="bld-detail-v">+${ctx.producing.ratePerHour}/h</span></div>`
     : '';
 
-  const providesSec = renderProvidesSection(kind, ctx);
+  const providesSec = ctx.demolishing ? '' : renderProvidesSection(kind, ctx);
 
   const _dinfo2 = buildingInfo(kind);
   const _pcb = _dinfo2.popCapByLevel;
@@ -284,9 +300,22 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
     : (_dinfo2.popCapPerLevel ?? 0) * _nextLevel;
   const _hasPopCap = (_dinfo2.popCapPerLevel ?? 0) > 0 || (_pcb?.some((v) => v > 0) ?? false);
   const _lvLabel = ctx.isBuild ? `建造到 Lv${_nextLevel}` : `升至 Lv${_nextLevel}`;
-  const popCapSec = _hasPopCap
+  const popCapSec = !ctx.demolishing && _hasPopCap
     ? `<div class="bld-detail-row"><span class="bld-detail-k">${_lvLabel} 增量</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${_inc}</span></div>
        <div class="bld-detail-row"><span class="bld-detail-k">${_lvLabel} 累计</span><span class="bld-detail-v"><span class="popcap-icon" aria-label="人口">👥</span>+${_cum}</span></div>`
+    : '';
+
+  // 拆除进度条（拆除中）
+  const demoProgress = ctx.demolishing && ctx.buildingStartAt && ctx.buildingFinishAt
+    ? `<div class="drawer-sec-title">拆除进度</div>${progressBar(ctx.buildingStartAt, ctx.buildingFinishAt, '拆除中')}`
+    : '';
+
+  // 拆除按钮区（仅已建成、非城镇中心、未在拆除中）
+  const demolishArea = !ctx.demolishing && !isMain && slotId
+    ? `<div class="drawer-sec-title">危险操作</div>
+       <div id="bld-demolish-zone">
+         <button type="button" class="btn-sm btn-danger" data-demolish="${slotId}">拆除建筑</button>
+       </div>`
     : '';
 
   const wrap = document.createElement('div');
@@ -308,7 +337,9 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
         ${providesSec}
         ${prodSec}
         ${popCapSec}
+        ${demoProgress}
         ${costSec}
+        ${demolishArea}
         ${trainSectionHtml}
       </div>
     </aside>`;
@@ -317,7 +348,30 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
   wrap.querySelectorAll<HTMLElement>('[data-close-bld]').forEach((el) =>
     el.onclick = () => closeBuildingDetail());
 
-  if (isTrainer && slotId) void renderBuildingTrainSection(slotId);
+  // 拆除：二级确认（提示"整个建筑将完全拆除"，不可取消）
+  const demoBtn = wrap.querySelector<HTMLButtonElement>('[data-demolish]');
+  if (demoBtn) {
+    demoBtn.onclick = () => {
+      const zone = document.getElementById('bld-demolish-zone');
+      if (!zone) return;
+      zone.innerHTML = `<div class="confirm-warn">⚠️ 整个建筑将完全拆除，不消耗也不返还资源，且<b>不可取消</b>。拆除期间不提供任何加成。</div>
+        <div class="confirm-actions">
+          <button type="button" class="btn-sm btn-danger" data-demolish-confirm="${demoBtn.dataset.demolish}">确认拆除</button>
+          <button type="button" class="btn-sm" data-demolish-cancel="1">取消</button>
+        </div>`;
+      zone.querySelector<HTMLButtonElement>('[data-demolish-confirm]')!.onclick = () => {
+        if (actFn) actFn(req('DemolishBuilding', { slotId: demoBtn.dataset.demolish! }));
+        closeBuildingDetail();
+      };
+      zone.querySelector<HTMLButtonElement>('[data-demolish-cancel]')!.onclick = () => {
+        zone.innerHTML = `<button type="button" class="btn-sm btn-danger" data-demolish="${demoBtn.dataset.demolish}">拆除建筑</button>`;
+        const again = wrap.querySelector<HTMLButtonElement>('[data-demolish]');
+        if (again) again.onclick = demoBtn.onclick;
+      };
+    };
+  }
+
+  if (isTrainer && !ctx.demolishing && slotId) void renderBuildingTrainSection(slotId);
 }
 
 /** 当前打开的军事建筑训练 slotId（供全局 push 触发刷新）。 */

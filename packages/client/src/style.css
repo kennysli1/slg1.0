@@ -270,6 +270,20 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 .btn-raid { background: var(--c-raid); }
 .btn-attack { background: var(--c-danger); }
 .btn-danger { background: var(--c-danger); }
+.btn-danger:hover { filter: brightness(1.08); }
+
+/* ---------- 危险/确认元素 ---------- */
+.tag-danger { background: var(--c-danger); color: #fff; border-color: var(--c-danger); }
+.confirm-warn {
+  font-size: var(--f-sm); line-height: 1.5; color: var(--c-danger);
+  background: rgba(178,59,59,.10);
+  border: 1px solid rgba(178,59,59,.35);
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  margin: var(--s-2) 0;
+}
+.confirm-actions { display: flex; gap: var(--s-2); margin-top: var(--s-1); }
+.confirm-actions .btn-sm { margin-top: 0; }
 
 /* 数字输入 */
 input[type="number"], .train-row input { width: 56px; }

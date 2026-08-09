@@ -25,6 +25,7 @@ interface PlacedBuilding {
   zone: Zone;
   kind: string; // 建筑 code（含资源田）
   level: number; // 0=建造中(占位)，>=1=已建成
+  demolishing?: boolean; // 拆除进行中：期间不提供任何加成（level 已置 0），完成后整栋移除
 }
 
 interface QueueItem {
@@ -32,6 +33,7 @@ interface QueueItem {
   kind: string;
   toLevel: number; // 新建=1，升级=当前+1
   isNew: boolean; // true=新建(完成发 Built)，false=升级(完成发 Upgraded)
+  demolish?: boolean; // true=拆除（完成整栋移除，发 Demolished），完成后释放槽位
   startAt: number;
   finishAt: number;
   taskId: string;
@@ -70,10 +72,16 @@ export class BuildingModule {
         command: 'building.Upgrade', ownVillage: true, needAuth: true,
         schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
       },
+      DemolishBuilding: {
+        command: 'building.Demolish', ownVillage: true, needAuth: true,
+        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
+      },
     },
     eventPushMap: {
       'building.Built': 'BuildingBuilt',
       'building.Upgraded': 'BuildingUpgraded',
+      'building.Demolishing': 'BuildingDemolishing',
+      'building.Demolished': 'BuildingDemolished',
     },
   };
 
@@ -96,6 +104,7 @@ export class BuildingModule {
     this.commands.register('building.GetBuildOptions', (c) => this.getBuildOptions(c));
     this.commands.register('building.Build', (c) => this.build(c));
     this.commands.register('building.Upgrade', (c) => this.upgrade(c));
+    this.commands.register('building.Demolish', (c) => this.demolish(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
@@ -384,6 +393,7 @@ export class BuildingModule {
               name: this.config.buildings[q.kind]?.name ?? q.kind,
               toLevel: q.toLevel,
               isNew: q.isNew,
+              demolishing: !!q.demolish,
               startAt: q.startAt,
               finishAt: q.finishAt,
             })),
@@ -399,13 +409,13 @@ export class BuildingModule {
       const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
       return Math.max(1, Math.round(baseSec * speedup));
     };
-    const placed = s.placed
+        const placed = s.placed
       .filter((p) => p.zone === zone)
       .map((p) => {
         const def = this.config.buildings[p.kind];
         const constructing = p.level < 1;
         const pending = this.pendingOp(s, p.slotId);
-        const canUp = !constructing && p.level < (def?.maxLevel ?? 1);
+        const canUp = !constructing && !p.demolishing && p.level < (def?.maxLevel ?? 1);
         return {
           slotId: p.slotId,
           kind: p.kind,
@@ -413,12 +423,14 @@ export class BuildingModule {
           icon: def?.icon ?? 'bld_main',
           level: p.level,
           maxLevel: def?.maxLevel ?? 1,
+          demolishing: !!p.demolishing,
           building: constructing || !!pending,
           buildingStartAt: pending?.startAt,
           buildingFinishAt: pending?.finishAt,
           nextCost: canUp ? def!.cost(p.level + 1) : null,
           nextTimeSec: canUp ? buildTimeSyncEstimate(def!.timeSec(p.level + 1)) : null,
-          producing: def?.resource
+          // 拆除期间不展示产量（已无加成）
+          producing: def?.resource && !p.demolishing
             ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, p.level)) }
             : undefined,
         };
@@ -519,23 +531,73 @@ export class BuildingModule {
     return { ok: true, payload: { slotId, toLevel, finishAt } };
   }
 
+  /**
+   * 拆除已建建筑：耗时 = 该建筑建造到 1 级所需时间（与新建同源加速公式），不消耗也不返还资源；
+   * 期间立即置 level=0 + demolishing，所有派生（人口上限/仓储/产率/繁荣/防御…因 level<1 自动跳过）即时失效；
+   * 完成后整栋移除、释放槽位，不可取消；城镇中心不可拆。
+   */
+  private async demolish(cmd: Command): Promise<CommandResult> {
+    const { villageId, slotId } = cmd.payload as { villageId: string; slotId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const p = s.placed.find((x) => x.slotId === slotId);
+    if (!p) return { ok: false, payload: {}, reason: 'slot_empty' };
+    if (p.kind === CENTER_KIND) return { ok: false, payload: {}, reason: 'cannot_demolish_center' };
+    if (p.demolishing) return { ok: false, payload: {}, reason: 'already_demolishing' };
+    if (p.level < 1) return { ok: false, payload: {}, reason: 'still_constructing' };
+    if (this.hasPendingOp(s, slotId)) return { ok: false, payload: {}, reason: 'slot_busy' };
+    if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
+    const def = this.config.buildings[p.kind];
+    if (!def) return { ok: false, payload: {}, reason: `unknown_building:${p.kind}` };
+
+    const durSec = await this.buildTime(s, def.timeSec(1));
+    const durMs = durSec * 1000;
+    const startAt = this.now();
+    const finishAt = startAt + durMs;
+    const taskId = this.scheduler.schedule(durMs, () => this.complete(villageId, slotId), `building:${villageId}`, `village:${villageId}`);
+
+    // 立即置 0 + 标记拆除中：派生因 level<1 自动跳过 → 期间零加成
+    p.demolishing = true;
+    p.level = 0;
+    s.queue.push({ slotId, kind: p.kind, toLevel: 0, isNew: false, demolish: true, startAt, finishAt, taskId });
+    this.store.set(COLLECTION, villageId, s);
+
+    // 即时刷新下游派生（与完整落成/升级一致口径）：仓储容量 + 资源田产率
+    this.reportCapacity(s);
+    if (def.resource) this.reportFieldRate(s, def.resource);
+    // 广播"开始拆除"：人口硬上限等缓存型派生据此从 building 重算（level 已为 0，加成即时消失）
+    await this.emit('building.Demolishing', villageId, slotId, p.kind, 0);
+
+    return { ok: true, payload: { slotId, kind: p.kind, finishAt } };
+  }
+
   /** 队列项完成：落级、移出队列、广播、刷新派生。 */
   private async complete(villageId: string, slotId: string): Promise<void> {
     const s = this.load(villageId);
     if (!s) return;
     const qi = s.queue.find((q) => q.slotId === slotId);
     if (!qi) return;
+    const kind = qi.kind;
+    const def = this.config.buildings[kind];
     const p = s.placed.find((x) => x.slotId === slotId);
-    if (p) p.level = qi.toLevel;
+
+    if (qi.demolish) {
+      // 拆除完成：整栋移除，释放槽位（所有加成已因 level<1 在拆除期间失效）
+      s.placed = s.placed.filter((x) => x.slotId !== slotId);
+    } else if (p) {
+      p.level = qi.toLevel;
+    }
     s.queue = s.queue.filter((q) => q !== qi);
     this.store.set(COLLECTION, villageId, s);
 
-    const kind = qi.kind;
-    await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
+    if (qi.demolish) {
+      await this.emit('building.Demolished', villageId, slotId, kind, 0);
+    } else {
+      await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
+    }
 
     // 刷新派生：人口/容量始终；资源田刷该资源产率
     this.reportCapacity(s);
-    const def = this.config.buildings[kind];
     if (def?.resource) this.reportFieldRate(s, def.resource);
   }
 
