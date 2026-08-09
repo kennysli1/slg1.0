@@ -76,8 +76,8 @@ export function renderArmy(): string {
           <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
           <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
           <button type="button" class="step-btn" data-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
-          <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
         </div>
+        <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
         <div class="train-meta">
           <span class="cost-item" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></span>
           ${perGrain > 0
