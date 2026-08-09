@@ -134,7 +134,7 @@ function renderDrawer(): string {
         ${costPreview(o.cost, o.timeSec, _popCap)}${action}</div></div>`;
   }).join('');
   return `<div class="drawer-mask" data-close-drawer="1"></div>
-    <aside class="drawer${opening ? ' drawer--opening' : ''}">
+    <aside class="drawer${opening ? ' drawer--opening' : ''} drawer--center">
       <div class="drawer-head">${title} <small>（空槽 ${drawer.freeSlots}）</small>
         <button class="drawer-close" data-close-drawer="1">✕</button></div>
       <div class="drawer-body">${opts || '<div class="hint-sm">暂无可建建筑</div>'}</div>
@@ -293,7 +293,7 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
   wrap.id = 'building-detail-modal';
   wrap.innerHTML = `
     <div class="drawer-mask" data-close-bld="1"></div>
-    <aside class="drawer drawer--opening bld-drawer" role="dialog" aria-modal="true">
+    <aside class="drawer drawer--opening bld-drawer drawer--center" role="dialog" aria-modal="true">
       <div class="drawer-head">
         ${art(info.icon, info.name, 'sm')}
         <span class="bld-drawer-name">${escapeHtml(info.name)}</span>

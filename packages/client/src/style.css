@@ -230,6 +230,22 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
   border-bottom: 1px solid var(--c-line); font-weight: 600; }
 .drawer-close { margin-left: auto; border: 0; background: none; cursor: pointer; font-size: var(--f-md); color: var(--c-ink-soft); }
 .drawer-body { flex: 1; overflow-y: auto; padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-3); }
+/* 建筑操作页 / 详情页：居中悬浮（替代默认右侧抽屉），格式不变 */
+.drawer.drawer--center {
+  top: 50%; left: 50%; right: auto; bottom: auto;
+  width: min(440px, 92vw);
+  max-height: min(86dvh, 760px);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  box-shadow: 0 20px 60px rgba(0,0,0,.42);
+  transform: translate(-50%, -50%);
+  animation: modal-pop .2s ease;
+}
+@keyframes modal-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@media (max-width: 860px) { .drawer.drawer--center { max-height: 90dvh; } }
 .opt { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3);
   border: 1px solid var(--c-line); border-radius: var(--r-md); background: var(--c-surface); }
 .opt.locked { opacity: .6; }
