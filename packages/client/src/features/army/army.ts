@@ -71,8 +71,8 @@ export function renderArmy(): string {
     const perGrain = unitCropPerHour(u.key); // 每兵耗粮 = popCost×(默认口粮 + upkeep)
     const action = unlocked
       ? `<div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
-        <div class="pop-warn" id="pop-warn-${u.key}"></div>
         <div class="train-controls">
+          <div class="pop-warn" id="pop-warn-${u.key}"></div>
           <div class="train-row">
             <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
             <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
