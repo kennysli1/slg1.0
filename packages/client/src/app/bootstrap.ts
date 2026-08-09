@@ -124,7 +124,8 @@ async function refreshAll() {
       });
     }
     renderResBar();
-    renderPage();
+    if (isInteracting()) pendingRender = true;        // 玩家正在操作：只更缓存与资源条，不重建 #page，避免打断
+    else { renderPage(); pendingRender = false; }      // 空闲：正常整页重渲（同步最新数据）
   } catch {
     addReport('刷新失败：网络连接异常');
   }
@@ -185,6 +186,22 @@ function renderPopCell(): string {
 }
 
 let lastRenderedTab: string | null = null;
+/** 交互中推迟的整页重渲标记：refreshAll 在玩家操作时只更新缓存与资源条，置此位，待操作结束后由 1s tick 补渲。 */
+let pendingRender = false;
+
+/**
+ * 是否处于"会被整页重渲打断"的进行中交互。为真时 refreshAll 不重建 #page：
+ *  - 地图拖拽中（map.ts 在 mousedown/mouseup 间置位 body[data-dragging]）；
+ *  - #page 内有 INPUT/TEXTAREA/SELECT 获得焦点（如军队页正在填训练数量）；
+ *  - body 挂着抽屉/对话框（详情/招募等，避免重建其背后 #page 的竞态）。
+ */
+function isInteracting(): boolean {
+  if (document.body.dataset.dragging === '1') return true;
+  const a = document.activeElement as HTMLElement | null;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') && a.closest('#page')) return true;
+  if (document.querySelector('.drawer[role="dialog"], [role="dialog"]')) return true;
+  return false;
+}
 
 function renderPage() {
   const page = document.getElementById('page');
@@ -284,10 +301,19 @@ export async function bootstrap() {
     renderResBar();
     syncTimers();
     syncPopDisplay(); // 人口本地外插：每秒平滑更新显示值
+    // 交互中推迟的整页重渲：玩家操作结束（失焦/关弹窗/停拖）后补一次，避免打断进行中的操作
+    if (pendingRender && !isInteracting()) { pendingRender = false; renderPage(); }
     // 资源每秒增长，军队页训练按钮的"买得起"状态随之实时刷新
     if (getTab() === 'army') {
       document.querySelectorAll<HTMLInputElement>('input[data-unit]').forEach((inp) => updateTrainCost(inp.dataset.unit!));
     }
   }, 1000);
-  setInterval(() => { if (me) refreshAll(); }, 5000);
+  // 不再使用周期性盲轮询：强制刷新只发生在两处——
+  //   (1) 客户端发起实质操作（act：建造/升级/购买）→ 操作后 refreshAll；
+  //   (2) 服务器推送确认（onPush：升级完成/进攻/报告等）→ refreshAll。
+  // 纯 UI（资源数字、建造倒计时、人口外插）由上面 1s 定时器本地更新，完全不访问服务器。
+  // 唯一例外：标签页被后台挂起后切回（setInterval 被浏览器节流、WS 可能重连），此时补一次刷新拉取最新真相（事件驱动，非轮询）。
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && me) void refreshAll();
+  });
 }

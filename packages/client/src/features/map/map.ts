@@ -646,6 +646,7 @@ function bindMapMouse(): void {
     if (e.button !== 0 || !mapSvg) return;
     if (!(e.target as Element)?.closest?.('.map-svg')) return;
     mapDragging = true;
+    document.body.dataset.dragging = '1'; // 通知 bootstrap：地图拖拽中，暂停整页重渲（避免打断拖拽）
     mapDragMoved = false;
     mapDragStartX = e.clientX;
     mapDragStartY = e.clientY;
@@ -680,6 +681,7 @@ function bindMapMouse(): void {
   window.addEventListener('mouseup', () => {
     if (!mapDragging) return;
     mapDragging = false;
+    delete document.body.dataset.dragging; // 拖拽结束，允许 bootstrap 在空闲时补渲
     mapSvg?.classList.remove('grabbing');
     if (mapDragMoved) {
       mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
