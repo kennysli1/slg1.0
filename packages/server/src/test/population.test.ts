@@ -358,3 +358,27 @@ test('回归·写有推送：训练（ConsumePop）应 emit population.Changed',
   assert.equal(r.ok, true, `训练应成功: ${r.reason ?? ''}`);
   assert.ok(pushes >= 1, `训练扣人口应至少推送一次 population.Changed（实际 ${pushes} 次）`);
 });
+
+/**
+ * v5：训练队列中的士兵立即按 unit.upkeep 计入 troops 耗粮（不必等 produceOne）。
+ * 否则 UI 上每个训练卡显示 +1/h 但 economy 那边要把全部 cohort 训完才上报，期间 grain 净产率虚高。
+ */
+test('回归·v5 训练中士兵按 unit.upkeep 立即计入 troops 耗粮', async () => {
+  const app = freshApp();
+  await flushMicrotasks();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  await app.scheduler.advanceTo(clock + 10_000, setClock);
+
+  // 训练前：trainset 为 0
+  const before = (await send(app, 'economy.GetCropContext', { villageId: 'v1' })).payload as any;
+  assert.equal(before.troopUpkeepPerHour, 0, `训练前 troopUpkeepPerHour 应为 0（实际 ${before.troopUpkeepPerHour}）`);
+
+  // 训练 3 个军团兵（legionnaire.upkeep=1）—— 队列在派兵之前的状态
+  const r = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 3 });
+  assert.equal(r.ok, true, `训练应成功: ${r.reason ?? ''}`);
+
+  // 训练启动后立即查：troops 队列里 3 个未产出的兵应当立刻贡献 3/h
+  const after = (await send(app, 'economy.GetCropContext', { villageId: 'v1' })).payload as any;
+  assert.equal(after.troopUpkeepPerHour, 3, `训练后 troopUpkeepPerHour 应为 3（实际 ${after.troopUpkeepPerHour}）— 训练中士兵必须按 unit.upkeep 计入`);
+});

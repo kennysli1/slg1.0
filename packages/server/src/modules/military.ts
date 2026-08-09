@@ -173,12 +173,19 @@ export class MilitaryModule {
    *  - source='troops'：军晌（unit.upkeep，纯口粮消耗）。
    *  - source='soldier_pop'：v4 解耦后士兵不再占人口、不再吃人口粮，恒为 0（此处显式置 0 以覆盖旧存档残留值）。
    *  两来源均属"非平民"，纳入 nonCivilianUpkeep，参与粮荒判定。
+   *  v5 起：训练队列中的士兵亦按 unit.upkeep 计入口粮（训练中已在吃粮，UI 也按 +1/h 显示）。
+   *        一次性预扣的 costCrop 是训练费，养兵费是另一口径，叠加不冲突。
    */
   private reportUpkeep(s: MilitaryState): void {
     let ration = 0; // 军晌（纯口粮）
     for (const [unit, n] of Object.entries(s.troops)) {
       const def = this.config.units[unit];
       ration += (def?.upkeep ?? 0) * n;
+    }
+    // 训练队列：每个未产出的兵也按 unit.upkeep 计入（即便尚未入 troops）。
+    if (s.training) {
+      const def = this.config.units[s.training.unit];
+      ration += (def?.upkeep ?? 0) * s.training.remaining;
     }
     void this.commands.send({
       name: 'economy.SetUpkeep',
@@ -379,6 +386,8 @@ export class MilitaryModule {
       trainMsEach: firstDoneMs,
     };
     this.store.set(COLLECTION, villageId, s);
+    // v5：训练中士兵立刻按 unit.upkeep 计入 cropUpkeep（不必等 produceOne）。
+    this.reportUpkeep(s);
     return { ok: true, payload: { unit, count } };
   }
 
