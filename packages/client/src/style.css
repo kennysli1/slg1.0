@@ -301,9 +301,9 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .cost .cost-time { grid-column: 1 / -1; opacity: .8; white-space: nowrap; font-family: var(--ff-num); }
 .cost-item { display: inline-flex; align-items: center; gap: 3px; font-family: var(--ff-num); font-weight: 600; }
 .cost-lack { color: var(--c-danger); font-weight: 700; }
-/* 兵种卡内的消耗：单列竖排，每行一个资源 + 时间独占整行 */
-.unit-card .cost { display: flex; flex-direction: column; gap: 1px; margin: 0; }
-.unit-card .cost .cost-time { grid-column: auto; margin-top: 2px; }
+/* 兵种卡内的消耗：2×2 网格——4 个资源两列两行、时间独占整行 */
+.unit-card .cost { display: grid; grid-template-columns: 1fr 1fr; gap: 1px var(--s-2); margin: 0; }
+.unit-card .cost .cost-time { grid-column: 1 / -1; margin-top: 2px; }
 
 /* ---------- 进度条 ---------- */
 .progress { position: relative; height: 18px; margin-top: var(--s-2); background: rgba(0,0,0,.08); border-radius: 999px; overflow: hidden; }
