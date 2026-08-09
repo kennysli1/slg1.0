@@ -2,9 +2,10 @@
 import { art, unitArt, unitArtFallback, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
 import { errText, formName, tribeName } from '../../shared/ui/text.js';
-import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo } from '../../app/config.js';
+import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo, buildingInfo } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
+import { openBuilding } from '../village/village.js';
 import { fmt } from '../../shared/utils/format.js';
 
 export function unitName(key: string): string {
@@ -58,11 +59,39 @@ export function renderArmy(): string {
   // 训练功能已迁入各军事建筑详情抽屉（兵营/马厩/兵工厂/城镇中心），军队页只展示驻军与解散。
   // 解散部队区（仅有驻军时显示）
   const disbandSection = renderDisbandSection(army);
+  // 训练队列区：哪些军事建筑正在练兵（点击打开该建筑详情抽屉查看/操作）
+  const trainQueue = renderTrainingQueue(army);
 
   return `<h3>驻军 <small>（${tribeName(army.tribe)}族 · 点击兵种看属性）</small></h3>
     <div class="troopbar">${troopList}</div>
+    ${trainQueue}
     ${disbandSection}
     ${mercList}`;
+}
+
+/** 训练队列区：列出当前正在练兵的军事建筑（建筑名/兵种/剩余数量/进度），点击打开该建筑详情抽屉查看与操作。 */
+function renderTrainingQueue(army: any): string {
+  const slots = (army.slots || []).filter((s: any) => s.training);
+  if (!slots.length) return '';
+  const cards = slots.map((s: any) => {
+    const info = buildingInfo(s.kind);
+    const tr = s.training;
+    const u = (s.trainable || []).find((t: any) => t.key === tr.unit);
+    const name = u?.name ?? unitName(tr.unit);
+    const trainSec = (u?.trainSec ?? 30) * 1000;
+    const startAt = (tr.nextDoneAt || 0) - trainSec; // 按首兵 trainSec 反推起点，用于进度条
+    return `<div class="card train-queue-card" data-open-bld="${escapeAttr(s.slotId)}" title="点击查看 ${escapeAttr(info.name)} 详情">
+      ${art(info.icon, info.name, 'md')}
+      <div class="cardbody">
+        <div class="card-title">${escapeHtml(info.name)} <b class="lv">Lv${s.level}</b>
+          <small class="bld-detail-hint">详情 ›</small></div>
+        <div class="hint-sm">🎯 ${escapeHtml(name)} ×${tr.remaining}</div>
+        ${progressBar(startAt, tr.nextDoneAt, '训练中')}
+      </div>
+    </div>`;
+  }).join('');
+  return `<h3>训练队列 <small>（正在练兵的军事建筑 · 点击看详情）</small></h3>
+    <div class="grid">${cards}</div>`;
 }
 
 /** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。雇佣兵为永久持有，不可解散。 */
@@ -202,6 +231,10 @@ export function bindArmy(act: (p: Promise<any>) => void): void {
       if ((e.target as HTMLElement)?.closest('.train-row')) return; // 训练输入/按钮：不展开详情
       openUnitDetail(el.dataset.unitDetail!);
     });
+
+  // 训练队列区：点击正在练兵的建筑卡 → 打开该建筑详情抽屉（查看/操作训练）
+  document.querySelectorAll<HTMLElement>('[data-open-bld]').forEach((el) =>
+    el.onclick = () => openBuilding(el.dataset.openBld!));
 
   // 训练
   document.querySelectorAll<HTMLButtonElement>('[data-train]').forEach((b) =>

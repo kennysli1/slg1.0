@@ -185,6 +185,26 @@ function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx; slotId:
   return null;
 }
 
+/** 从任意页面（村庄/军队/地图）按 slotId 打开建筑详情抽屉。
+ *  优先用村庄布局缓存(vil)组装完整上下文；若 vil 缺失（如军队页缓存未就绪）则用 army.slots 降级到最小上下文。
+ *  雇佣兵营地仍走独立招募 UI。 */
+export function openBuilding(slotId: string): void {
+  const found = ctxFromSlot(slotId);
+  if (found) {
+    if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    openBuildingDetail(found.kind, found.ctx, found.slotId);
+    return;
+  }
+  // 降级：军队页等场景下 vil 可能未加载，用 army.slots 的 kind/level 打开（训练区会自行拉取最新 army）
+  const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
+  if (slot) {
+    if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    openBuildingDetail(slot.kind, { level: slot.level, isBuild: slot.level < 1 }, slotId);
+    return;
+  }
+  showToast('找不到该建筑');
+}
+
 /** 统计全村某类已建建筑（等级≥1）的总等级，用于仓储上限聚合。 */
 function sumLevelsOfKind(kind: string): number {
   const vil = getCache().vil;

@@ -748,6 +748,12 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* 卡内可交互控件保持默认光标，避免"整卡可点"误导 */
 .card[data-bld-slot] .btn-sm, .opt[data-bld-opt] .btn-sm { cursor: pointer; }
 
+/* 军队页训练队列：可点击的"正在练兵"建筑卡，复用建筑卡的可点样式 */
+.train-queue-card { cursor: pointer; }
+.train-queue-card:hover { border-color: var(--c-brand); box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.train-queue-card:hover .bld-detail-hint { color: var(--c-brand); }
+
+
 /* ---------- 右上角人口速览单元格（复用 .res 结构） ---------- */
 .res-pop-icon { font-size: var(--f-md); line-height: 1; }
 
