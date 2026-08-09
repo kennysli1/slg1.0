@@ -71,18 +71,20 @@ export function renderArmy(): string {
     const perGrain = unitCropPerHour(u.key); // 每兵耗粮 = popCost×(默认口粮 + upkeep)
     const action = unlocked
       ? `<div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
-        <div class="pop-warn" id="pop-warn-${u.key}" style="display:none"></div>
-        <div class="train-row">
-          <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
-          <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
-          <button type="button" class="step-btn" data-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
-        </div>
-        <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
-        <div class="train-meta">
-          <span class="cost-item" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></span>
-          ${perGrain > 0
-            ? `<span class="cost-item grain-chip" title="兵种军晌：每兵在默认口粮（${popCropPerLabor()}）之上额外耗粮 ${u.upkeep ?? 0}；按 ${popCost} 人口份折算约 ${perGrain}/h·兵">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>${u.upkeep ?? 0}</b>/h·兵</span>`
-            : ''}
+        <div class="pop-warn" id="pop-warn-${u.key}"></div>
+        <div class="train-controls">
+          <div class="train-row">
+            <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
+            <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
+            <button type="button" class="step-btn" data-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
+          </div>
+          <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
+          <div class="train-meta">
+            <span class="cost-item" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></span>
+            ${perGrain > 0
+              ? `<span class="cost-item grain-chip" title="兵种军晌：每兵在默认口粮（${popCropPerLabor()}）之上额外耗粮 ${u.upkeep ?? 0}；按 ${popCost} 人口份折算约 ${perGrain}/h·兵">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>${u.upkeep ?? 0}</b>/h·兵</span>`
+              : ''}
+          </div>
         </div>`
       : `<div class="cost-slot">${costPreview(u.cost, u.trainSec)}</div>
         <small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`;
@@ -165,14 +167,11 @@ export function updateTrainCost(unitKey: string) {
 
   if (popWarn) {
     if (!hasEnoughPop && ps) {
-      popWarn.style.display = '';
       popWarn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}`;
     } else if (ps && ps.inFamine) {
       // 饥荒中：人口正在减少，给出预警但不阻止（失败原因由 toast 即时反馈）
-      popWarn.style.display = '';
       popWarn.textContent = '⚠️ 当前处于饥荒，人口正在减少，谨慎训练';
     } else {
-      popWarn.style.display = 'none';
       popWarn.textContent = '';
     }
   }

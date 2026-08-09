@@ -175,6 +175,13 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 .card.target { background: linear-gradient(180deg, #fff8ec, var(--c-surface)); border-color: #e8cf9f; }
 .card.enemy { background: linear-gradient(180deg, #fdeeee, var(--c-surface)); border-color: #e8b6b6; }
 .cardbody { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 训练卡片：把训练控件（步进行+训练按钮+meta）绝对定位到卡底，cost-slot 多高都不再顶动按钮位置 */
+.unit-card:not(.locked) .cardbody { position: relative; padding-bottom: 108px; }
+.unit-card:not(.locked) .train-controls {
+  position: absolute; left: 0; right: 0; bottom: var(--s-3);
+  display: flex; flex-direction: column; gap: var(--s-2);
+}
+.unit-card .btn-train { width: 100%; }
 /* 建筑卡的升级按钮整宽，撑满底部一行、消除右侧空白 */
 .cardbody > .btn-sm { display: block; width: 100%; }
 .card-title { font-size: var(--f-sm); font-weight: 600; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
@@ -250,7 +257,7 @@ h3 small { font-size: var(--f-sm); color: var(--c-ink-soft); font-weight: 400; l
 input[type="number"], .train-row input { width: 56px; }
 input { border: 1px solid var(--c-line); border-radius: var(--r-sm); padding: var(--s-1) var(--s-2); font-family: inherit; font-size: var(--f-sm); background: #fff; }
 input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
-.train-row { display: flex; gap: var(--s-1); align-items: center; margin-top: auto; justify-content: flex-start; }
+.train-row { display: flex; gap: var(--s-1); align-items: center; margin-top: 0; justify-content: flex-start; }
 .train-row .btn-sm { flex: 1; margin-top: 0; }
 /* 数量步进按钮：左右 − + 包裹输入框，点按区域大、移动端易点 */
 .step-btn {
@@ -489,8 +496,10 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .pop-warn {
   color: var(--c-danger); font-size: var(--f-xs); font-weight: 600;
   margin: var(--s-1) 0; padding: 2px var(--s-2);
-  background: rgba(178,59,59,.07); border-radius: var(--r-sm);
+  border-radius: var(--r-sm);
+  min-height: 1.4em; /* 始终保留行高，避免按钮位置因显示/隐藏而漂移 */
 }
+.pop-warn:not(:empty) { background: rgba(178,59,59,.07); }
 /* 人口消耗标注（训练行内） */
 .ustat.us-pop { background: #f0eaf8; border-color: #d4c8e8; }
 .ustat.us-pop b { color: #7a5a99; }
