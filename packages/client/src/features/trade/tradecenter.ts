@@ -98,12 +98,15 @@ async function render(): Promise<void> {
     </div>`;
   }).join('') || '<div class="hint-sm">暂无可交易 NPC 订单。</div>';
 
-  // 附近玩家挂单
+  // 附近玩家挂单（接单方视角）：只显示「你自己」为运出「求购」要占的路线，
+  // 不显示对方的运力占用（与服务端 acceptPlayer 按 sum(want) 算 acceptorRoutes 一致）
   const playerHtml = (c.playerOrders || []).map((o: any) => {
-    const canRoutes = o.routesNeeded <= c.availableRoutes;
+    const wantUnits = TRADE_RES.reduce((s: number, k: any) => s + Math.max(0, Math.floor(o.want[k] ?? 0)), 0);
+    const ownRoutes = Math.ceil(wantUnits / Math.max(1, cap));
+    const canRoutes = ownRoutes <= c.availableRoutes;
     const owner = o.ownerName ? escapeHtml(o.ownerName) : '玩家';
     return `<div class="trade-offer">
-      <div class="trade-offer-head"><span class="tag tag--player">玩家 · ${owner}</span><small class="hint-sm">${o.distance}格 · 需 ${o.routesNeeded} 路线</small></div>
+      <div class="trade-offer-head"><span class="tag tag--player">玩家 · ${owner}</span><small class="hint-sm">${o.distance}格 · 你需 ${ownRoutes} 路线</small></div>
       <div class="trade-line"><small>提供</small>${resChips(o.give, '+')}</div>
       <div class="trade-line"><small>求购</small>${resChips(o.want, '-')}</div>
       <button class="btn-sm" data-accept-player="${escapeAttr(o.id)}" ${!canRoutes ? 'disabled' : ''}>接单（派商队）</button>
