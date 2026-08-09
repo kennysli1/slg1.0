@@ -37,6 +37,12 @@ test('冒烟·Wire：注册→建造→训练→出征→战报', async () => {
   const finishAt = (build.payload as any).finishAt as number;
   await app.scheduler.advanceTo(finishAt + 1, (t) => { clock = t; });
 
+  // 训练需要军事建筑（兵营）存在；先建造兵营并完成
+  const bldBarracks = await req('Build', { zone: 'inner', kind: 'barracks' });
+  assert.equal(bldBarracks.ok, true, `建造兵营失败: ${bldBarracks.error?.code}`);
+  const barracksDone = (bldBarracks.payload as any).finishAt as number;
+  await app.scheduler.advanceTo(barracksDone + 1, (t) => { clock = t; });
+
   const train = await req('TrainTroops', { unit: 'legionnaire', count: 2 });
   assert.equal(train.ok, true, `训练失败: ${train.error?.code}`);
 

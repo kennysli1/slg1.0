@@ -11,7 +11,7 @@ import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
 import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop } from './state.js';
 import { renderLogin } from '../features/login/login.js';
-import { renderVillage, bindVillage } from '../features/village/village.js';
+import { renderVillage, bindVillage, refreshTrainingIfOpen } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
 import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
@@ -306,7 +306,12 @@ onPush((event, payload) => {
     // 雇佣兵营地抽屉打开时，由营地模块自行刷新（避免整页刷新关掉抽屉）
     if (event === 'MercenaryCampUpdated') refreshMercCampIfOpen();
     else void refreshAll();
+  } else {
+    // 人口变化频繁：不整页刷新（避免抢焦点）；训练抽屉打开时仅刷新其人口提示
+    refreshTrainingIfOpen();
   }
+  // 训练完成 / 建筑升级影响本建筑训练队列与提速降费，抽屉打开时刷新内容
+  if (event === 'TroopTrained' || event === 'BuildingUpgraded') refreshTrainingIfOpen();
 });
 
 /** 应用入口：先拉配置 → 连接 WS → 据登录态进入登录页或游戏。 */

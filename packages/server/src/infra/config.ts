@@ -255,6 +255,12 @@ export interface GameConstants {
   smithyCostBase: number;
   mainBuildSpeedupPerLevel: number;
   mainBuildSpeedupCap: number;
+  /** 军事建筑每级训练提速比例 + 上限（与 main_build_speedup 同形态，作用于该建筑训练兵种）。 */
+  trainTimeReducePerLevel: number;
+  trainTimeReduceCap: number;
+  /** 军事建筑每级训练降费比例 + 上限（作用于该建筑训练兵种的资源消耗）。 */
+  trainCostReducePerLevel: number;
+  trainCostReduceCap: number;
   storageBase: number;
   storageGrowthPerLevel: number;
   startResourceAmount: number;
@@ -638,6 +644,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     smithyCostBase: cn('smithy_cost_base', 200),
     mainBuildSpeedupPerLevel: cn('main_build_speedup_per_level', 0.05),
     mainBuildSpeedupCap: cn('main_build_speedup_cap', 0.6),
+    trainTimeReducePerLevel: cn('train_time_reduce_per_level', 0.05),
+    trainTimeReduceCap: cn('train_time_reduce_cap', 0.6),
+    trainCostReducePerLevel: cn('train_cost_reduce_per_level', 0.03),
+    trainCostReduceCap: cn('train_cost_reduce_cap', 0.5),
     storageBase: cn('storage_base', 800),
     storageGrowthPerLevel: cn('storage_growth_per_level', 0.5),
     startResourceAmount: cn('start_resource_amount', 750),
@@ -869,6 +879,8 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.worldW <= 0) errors.push(`game_constants.csv world_width 必须>0`);
   if (c.worldH <= 0) errors.push(`game_constants.csv world_height 必须>0`);
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
+  if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
+  if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);

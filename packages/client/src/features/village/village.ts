@@ -1,11 +1,14 @@
 /** 村庄页：三区结构（城镇中心 + 城内 + 城外）+ 空槽点击建造 + 多队列 + 建筑详情抽屉。 */
-import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
+import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
-import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax } from '../../app/config.js';
-import { getCache } from '../../app/state.js';
+import { fmt } from '../../shared/utils/format.js';
+import { errText, formName } from '../../shared/ui/text.js';
+import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax, unitInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo } from '../../app/config.js';
+import { getCache, setCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
 import { openMercenaryCamp } from '../army/mercenary.js';
+import { openUnitDetail } from '../army/army.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
@@ -151,18 +154,19 @@ interface BldDetailCtx {
 }
 
 /** 从当前布局缓存按 slotId 找到已建建筑/城镇中心，组装详情上下文。 */
-function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx } | null {
+function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx; slotId: string } | null {
   const vil = getCache().vil;
   if (!vil) return null;
   const tc = vil.townCenter;
   if (tc && tc.slotId === slotId) {
-    return { kind: tc.kind, ctx: { level: tc.level, maxLevel: tc.maxLevel, cost: tc.nextCost, timeSec: tc.nextTimeSec, isBuild: false } };
+    return { kind: tc.kind, slotId, ctx: { level: tc.level, maxLevel: tc.maxLevel, cost: tc.nextCost, timeSec: tc.nextTimeSec, isBuild: false } };
   }
   for (const zone of ['inner', 'outer'] as const) {
     const p = (vil.zones?.[zone]?.placed || []).find((x: any) => x.slotId === slotId);
     if (p) {
       return {
         kind: p.kind,
+        slotId,
         ctx: { level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec, producing: p.producing, isBuild: p.level < 1 },
       };
     }
@@ -236,11 +240,19 @@ function renderProvidesSection(kind: string, ctx: BldDetailCtx): string {
   return `<div class="drawer-sec-title">功能 · 提供</div>${rows.join('')}`;
 }
 
-/** 打开建筑详情抽屉：简介 + 升级效果 + 当前等级 + 下一级(建造)消耗。注入 body，避免被 5s 刷新重建。 */
-function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
+/** 打开建筑详情抽屉：简介 + 升级效果 + 当前等级 + 下一级(建造)消耗。注入 body，避免被 5s 刷新重建。
+ *  slotId 提供时若是军事训练建筑（兵营/马厩/兵工厂/城镇中心），额外内嵌训练区。 */
+function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): void {
   closeBuildingDetail(); // 单例
   const info = buildingInfo(kind);
   const max = ctx.maxLevel != null && ctx.level >= ctx.maxLevel;
+
+  // 训练区仅对军事训练建筑（其详情抽屉内嵌训练 UI）展示
+  const army = getCache().army;
+  const isTrainer = !!(slotId && army?.slots?.some((s: any) => s.slotId === slotId));
+  const trainSectionHtml = isTrainer
+    ? `<div class="drawer-sec-title">训练 <small>（本建筑独立队列 · 升级可提速降费）</small></div><div id="bld-train-sec" class="bld-train-sec"><div class="loading">加载中…</div></div>`
+    : '';
 
   // 等级行
   const lvStr = ctx.isBuild
@@ -297,16 +309,23 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
         ${prodSec}
         ${popCapSec}
         ${costSec}
+        ${trainSectionHtml}
       </div>
     </aside>`;
   document.body.appendChild(wrap);
 
   wrap.querySelectorAll<HTMLElement>('[data-close-bld]').forEach((el) =>
     el.onclick = () => closeBuildingDetail());
+
+  if (isTrainer && slotId) void renderBuildingTrainSection(slotId);
 }
+
+/** 当前打开的军事建筑训练 slotId（供全局 push 触发刷新）。 */
+let currentTrainSlotId: string | null = null;
 
 function closeBuildingDetail(): void {
   document.getElementById('building-detail-modal')?.remove();
+  currentTrainSlotId = null;
 }
 
 // Esc 关闭建筑详情（装一次即可，全程有效）
@@ -314,6 +333,163 @@ if (typeof document !== 'undefined') {
   document.addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Escape') closeBuildingDetail();
   });
+}
+
+/**
+ * 拉取最新军队数据并渲染某军事建筑实例的训练区（兵种卡 + 本建筑独立队列）。
+ * 兵种造价/耗时已由服务端按该建筑当前等级折算（升级→提速+降费）。
+ */
+async function renderBuildingTrainSection(slotId: string): Promise<void> {
+  const sec = document.getElementById('bld-train-sec');
+  if (!sec) return;
+  currentTrainSlotId = slotId;
+
+  const res = await req('GetArmy');
+  if (!res.ok) { sec.innerHTML = `<div class="hint-sm">加载失败：${escapeHtml(res.error?.code ?? '未知')}</div>`; return; }
+  setCache({ army: res.payload });
+  const army: any = res.payload;
+  const slot = (army.slots || []).find((s: any) => s.slotId === slotId);
+  if (!slot) { sec.innerHTML = '<div class="hint-sm">该建筑暂不提供训练</div>'; return; }
+
+  // 本建筑独立训练队列进度横幅
+  let banner = '';
+  if (slot.training) {
+    const u = (slot.trainable || []).find((t: any) => t.key === slot.training.unit);
+    banner = `<div class="banner banner-train">🎯 训练中：<b>${escapeHtml(u?.name ?? slot.training.unit)}</b> ×${slot.training.remaining}
+      ${progressBar(slot.training.nextDoneAt - (u?.trainSec ?? 30) * 1000, slot.training.nextDoneAt, '下一个')}</div>`;
+  }
+
+  // 基础值（顶部 trainable）用于展示建筑等级带来的提速/降费百分比
+  const baseById: Record<string, any> = {};
+  for (const t of (army.trainable || [])) baseById[t.key] = t;
+
+  const cards = (slot.trainable || []).map((u: any) => {
+    const unlocked = u.unlocked !== false;
+    const popCost = unitInfo(u.key).popCost;
+    const perGrain = unitCropPerHour(u.key);
+    let bonus = '';
+    const base = baseById[u.key];
+    if (base && base.trainSec > 0) {
+      const tPct = Math.round((1 - u.trainSec / base.trainSec) * 100);
+      const baseCostSum = resourceKeys().reduce((a: number, r: string) => a + (base.cost?.[r] ?? 0), 0);
+      const effCostSum = resourceKeys().reduce((a: number, r: string) => a + (u.cost?.[r] ?? 0), 0);
+      const cPct = baseCostSum > 0 ? Math.round((1 - effCostSum / baseCostSum) * 100) : 0;
+      if (tPct > 0 || cPct > 0) bonus = `<small class="tag tag-bonus">本建筑 Lv${u.level} · 训练 -${tPct}% · 资源 -${cPct}%</small>`;
+    }
+    const action = unlocked
+      ? `<div class="cost-slot" id="bld-cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
+        <div class="train-controls">
+          <div class="pop-warn" id="bld-pop-warn-${u.key}"></div>
+          <div class="train-row">
+            <button type="button" class="step-btn" data-bld-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
+            <input type="number" min="1" value="1" id="bld-cnt-${u.key}" data-bld-unit="${u.key}" aria-label="训练数量" />
+            <button type="button" class="step-btn" data-bld-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
+          </div>
+          <button type="button" class="btn-sm btn-train" data-bld-train="${u.key}">训练</button>
+          <div class="train-meta">
+            <span class="cost-item" title="训练此批次消耗人口">人口 <b id="bld-popcost-${u.key}">${popCost}</b></span>
+            ${perGrain > 0 ? `<span class="cost-item grain-chip" title="兵种军晌">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>${u.upkeep ?? 0}</b>/h·兵</span>` : ''}
+          </div>
+        </div>${bonus}`
+      : `<div class="cost-slot">${costPreview(u.cost, u.trainSec)}</div>
+        <small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`;
+    return `<div class="card unit-card${unlocked ? '' : ' locked'}" data-unit-detail="${u.key}" title="点击查看 ${escapeAttr(u.name)} 详细属性">
+      <div class="unit-head">
+        ${art(unitArt(u.key), u.name, 'lg', unitArtFallback(u.key))}
+        <div class="card-title">${escapeHtml(u.name)} <small class="tag">${formName(u.form)}</small>
+          <small class="unit-detail-hint">详情 ›</small>
+        </div>
+      </div>
+      ${action}
+    </div>`;
+  }).join('');
+
+  sec.innerHTML = `${banner}<div class="grid grid-units">${cards || '<div class="hint-sm">暂无可训练兵种</div>'}</div>`;
+  bindBuildingTrainSection(sec, slot);
+}
+
+/** 绑定训练区交互（兵种详情 / 训练 / 步进 / 数量重算）。 */
+function bindBuildingTrainSection(sec: HTMLElement, slot: any): void {
+  // 兵种详情抽屉（点到训练控件不触发）
+  sec.querySelectorAll<HTMLElement>('[data-unit-detail]').forEach((el) =>
+    el.onclick = (e) => {
+      if ((e.target as HTMLElement)?.closest('.train-row')) return;
+      openUnitDetail(el.dataset.unitDetail!);
+    });
+
+  // 训练按钮
+  sec.querySelectorAll<HTMLButtonElement>('[data-bld-train]').forEach((b) =>
+    b.onclick = () => {
+      const cur = getCache().army?.slots?.find((s: any) => s.slotId === currentTrainSlotId);
+      if (cur?.training) { showToast('该建筑正在训练中，请等当前批次完成'); return; }
+      const u = b.dataset.bldTrain!;
+      const inp = document.getElementById(`bld-cnt-${u}`) as HTMLInputElement;
+      const cnt = Math.max(1, Math.floor(Number(inp?.value || 1)));
+      const def = (slot.trainable || []).find((x: any) => x.key === u);
+      if (!def) { showToast('该兵种暂不可训练'); return; }
+      if (def.unlocked === false) { showToast(def.lockReason ? String(def.lockReason) : '前置建筑未满足'); return; }
+      const total: Record<string, number> = {};
+      for (const r of resourceKeys()) total[r] = (def.cost[r] ?? 0) * cnt;
+      if (!canAfford(total)) { showToast('资源不足，无法训练'); return; }
+      const needPop = unitInfo(u).popCost * cnt;
+      const currentPop = interpolatePop();
+      if (getPopState() && currentPop < needPop) {
+        showToast(`可用人口不足：需 ${needPop}，当前平民 ${fmt(currentPop)}`);
+        return;
+      }
+      const r = req('TrainTroops', { slotId: currentTrainSlotId!, unit: u, count: cnt });
+      if (actFn) {
+        void actFn(r);
+        void renderBuildingTrainSection(currentTrainSlotId!); // 重新拉取以显示新队列
+      }
+    });
+
+  // 数量步进
+  sec.querySelectorAll<HTMLButtonElement>('[data-bld-step]').forEach((b) => {
+    b.onclick = () => {
+      const unit = b.dataset.unit!;
+      const inp = document.getElementById(`bld-cnt-${unit}`) as HTMLInputElement | null;
+      if (!inp) return;
+      const step = Number(b.dataset.bldStep) || 0;
+      const cur = Math.max(1, Math.floor(Number(inp.value) || 1));
+      inp.value = String(Math.max(1, cur + step));
+      updateBldTrainCost(unit, sec, slot);
+    };
+  });
+  sec.querySelectorAll<HTMLInputElement>('input[data-bld-unit]').forEach((inp) => {
+    inp.oninput = () => updateBldTrainCost(inp.dataset.bldUnit!, sec, slot);
+    updateBldTrainCost(inp.dataset.bldUnit!, sec, slot);
+  });
+}
+
+/** 训练数量变化时，按总价重算消耗预览、人口需求。 */
+function updateBldTrainCost(unit: string, sec: HTMLElement, slot: any): void {
+  const u = (slot.trainable || []).find((x: any) => x.key === unit);
+  if (!u) return;
+  const inp = document.getElementById(`bld-cnt-${unit}`) as HTMLInputElement;
+  const cnt = Math.max(1, Math.floor(Number(inp?.value) || 1));
+  const total: Record<string, number> = {};
+  for (const r of resourceKeys()) total[r] = (u.cost[r] ?? 0) * cnt;
+  const slotEl = sec.querySelector<HTMLElement>(`#bld-cost-${unit}`);
+  if (slotEl) slotEl.innerHTML = costPreview(total, u.trainSec * cnt);
+  const popCostEl = sec.querySelector<HTMLElement>(`#bld-popcost-${unit}`);
+  if (popCostEl) popCostEl.textContent = String(unitInfo(unit).popCost * cnt);
+  const ps = getPopState();
+  const warn = sec.querySelector<HTMLElement>(`#bld-pop-warn-${unit}`);
+  const totalPop = unitInfo(unit).popCost * cnt;
+  const currentPop = interpolatePop();
+  if (warn) {
+    if (ps && currentPop < totalPop) warn.textContent = `可用人口不足：需 ${totalPop}，当前平民 ${fmt(currentPop)}`;
+    else if (ps && ps.inFamine) warn.textContent = '⚠️ 当前处于饥荒，人口正在减少，谨慎训练';
+    else warn.textContent = '';
+  }
+}
+
+/** 由全局 push（TroopTrained / BuildingUpgraded）触发：训练抽屉打开时刷新内容。 */
+export function refreshTrainingIfOpen(): void {
+  if (currentTrainSlotId && document.getElementById('bld-train-sec')) {
+    void renderBuildingTrainSection(currentTrainSlotId);
+  }
 }
 
 /** 绑定村庄页交互。act 为统一的"发请求并刷新"回调。 */
@@ -331,7 +507,7 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       const found = ctxFromSlot(el.dataset.bldSlot!);
       if (!found) return;
       if (found.kind === 'mercenarycamp') { openMercenaryCamp(act); return; }
-      openBuildingDetail(found.kind, found.ctx);
+      openBuildingDetail(found.kind, found.ctx, found.slotId);
     });
 
   // 点空槽 → 队列满则提示；否则拉该区可建清单 → 打开抽屉

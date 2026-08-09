@@ -22,10 +22,12 @@ export type { UnitDef };
 
 interface TrainOrder {
   unit: string;
+  /** 所属军事建筑实例 slotId（多实例并行训练的关键标识）。 */
+  slotId: string;
   remaining: number; // 还要出几个
   nextDoneAt: number; // 下一个出兵的时刻
   taskId: string;
-  /** 每个兵的实际训练时长(ms)，含人口加速（训练开始时快照，整批一致）。 */
+  /** 每个兵的实际训练时长(ms)，含人口加速与建筑等级提速（训练开始时快照，整批一致）。 */
   trainMsEach: number;
 }
 
@@ -37,8 +39,10 @@ interface MilitaryState {
   troops: Record<string, number>;
   /** 铁匠对各兵种的强化等级（养成层） */
   smithyLevel: Record<string, number>;
-  /** 当前训练队列（骨架阶段单条） */
+  /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
   training: TrainOrder | null;
+  /** 逐建筑实例训练队列：slotId -> 该建筑的独立训练队列（多实例并行训练）。 */
+  trainingBySlot: Record<string, TrainOrder>;
   /** 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。 */
   pendingSmithy?: { unit: string; taskId: string; doneAt: number };
 }
@@ -55,6 +59,7 @@ export class MilitaryModule {
       TrainTroops: {
         command: 'military.TrainTroops', ownVillage: true, needAuth: true,
         schema: {
+          slotId: { type: 'string', minLen: 1, maxLen: 32, optional: true },
           unit:  { type: 'string', minLen: 1, maxLen: 32 },
           count: { type: 'integer', min: 1, max: 10000 },
         },
@@ -119,25 +124,29 @@ export class MilitaryModule {
    */
   resume(): void {
     for (const s of this.store.all<MilitaryState>(COLLECTION)) {
-      // 每个 state 都必须上报（包含无训练的驻村）
-      this.reportUpkeep(s);
-      this.reportGarrisonPop(s);
+    // 每个 state 都必须上报（包含无训练的驻村）
+    this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
 
-      if (!s.training) continue;
-
-      // 旧存档兼容：trainMsEach 缺失时回退到 def.trainSec
-      if (!s.training.trainMsEach) {
-        s.training.trainMsEach = (this.config.units[s.training.unit]?.trainSec ?? 30) * 1000;
+    s.trainingBySlot = s.trainingBySlot || {};
+    // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
+    const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
+      if (!order) return;
+      if (!order.trainMsEach) {
+        order.trainMsEach = (this.config.units[order.unit]?.trainSec ?? 30) * 1000;
       }
-      const delay = Math.max(0, s.training.nextDoneAt - this.now());
-      s.training.taskId = this.scheduler.schedule(
+      const delay = Math.max(0, order.nextDoneAt - this.now());
+      order.taskId = this.scheduler.schedule(
         delay,
-        () => this.produceOne(s.villageId),
+        () => this.produceOne(s.villageId, slotId),
         `military:${s.villageId}`,
         `village:${s.villageId}`,
       );
-      this.store.set(COLLECTION, s.villageId, s);
-    }
+    };
+    scheduleOrder(s.training); // 旧单队列（迁移前兼容，无 slotId）
+    for (const [slotId, order] of Object.entries(s.trainingBySlot)) scheduleOrder(order, slotId);
+    this.store.set(COLLECTION, s.villageId, s);
+  }
 
     // 重注册进行中的铁匠升级（v3 耗时操作）
     for (const s of this.store.all<MilitaryState>(COLLECTION)) {
@@ -160,6 +169,7 @@ export class MilitaryModule {
       troops: {},
       smithyLevel: {},
       training: null,
+      trainingBySlot: {},
     };
     this.store.set(COLLECTION, villageId, s);
   }
@@ -192,6 +202,11 @@ export class MilitaryModule {
       const def = this.config.units[s.training.unit];
       const popCost = def?.popCost ?? 1;
       ration += (base + (def?.upkeep ?? 0)) * popCost * s.training.remaining;
+    }
+    for (const order of Object.values(s.trainingBySlot || {})) {
+      const def = this.config.units[order.unit];
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * order.remaining;
     }
     void this.commands.send({
       name: 'economy.SetUpkeep',
@@ -271,31 +286,73 @@ export class MilitaryModule {
 
   // ---- Commands ----
 
+  /** 训练用军事建筑（其详情抽屉内嵌训练 UI）：兵营/马厩/兵工厂 + 城镇中心(特殊兵种)。 */
+  private static readonly TRAINER_KINDS = new Set(['barracks', 'stable', 'workshop', 'main']);
+
+  /** 解析本村建筑布局：返回所有槽位(slotId/kind/level)与每种建筑的最高等级。失败返回空（仅影响训练/可训展示）。 */
+  private async resolveLayout(villageId: string): Promise<{ slots: { slotId: string; kind: string; level: number }[]; kindLevels: Map<string, number> }> {
+    try {
+      const res = await this.commands.send({ name: 'building.GetLayout', from: MilitaryModule.NAME, payload: { villageId } });
+      if (!res.ok) return { slots: [], kindLevels: new Map() };
+      const layout = res.payload as any;
+      const slots: { slotId: string; kind: string; level: number }[] = [];
+      const kindLevels = new Map<string, number>();
+      const add = (slotId: string, kind: string, level: number) => {
+        slots.push({ slotId, kind, level });
+        kindLevels.set(kind, Math.max(kindLevels.get(kind) ?? 0, level));
+      };
+      const tc = layout.townCenter;
+      if (tc) add(tc.slotId, tc.kind, tc.level);
+      for (const zone of ['inner', 'outer'] as const) {
+        for (const p of (layout.zones?.[zone]?.placed || []) as any[]) add(p.slotId, p.kind, p.level);
+      }
+      return { slots, kindLevels };
+    } catch {
+      return { slots: [], kindLevels: new Map() };
+    }
+  }
+
+  /** 军事建筑每级训练提速系数：1 - min(cap, (lv-1)×perLevel)，下限保护避免归零。 */
+  private trainTimeFactor(level: number): number {
+    const c = this.config.constants;
+    const f = 1 - Math.min(c.trainTimeReduceCap, Math.max(0, level - 1) * c.trainTimeReducePerLevel);
+    return Math.max(0.05, f);
+  }
+
+  /** 军事建筑每级训练降费系数：1 - min(cap, (lv-1)×perLevel)，下限保护避免归零。 */
+  private trainCostFactor(level: number): number {
+    const c = this.config.constants;
+    const f = 1 - Math.min(c.trainCostReduceCap, Math.max(0, level - 1) * c.trainCostReducePerLevel);
+    return Math.max(0.05, f);
+  }
+
+  /** 按建筑等级计算某兵种的实际资源消耗（逐资源四舍五入，最低 1）。 */
+  private effectiveCost(base: Record<string, number>, level: number): Record<string, number> {
+    const f = this.trainCostFactor(level);
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(base)) out[k] = Math.max(1, Math.round(v * f));
+    return out;
+  }
+
+  /** 某兵种是否由该建筑 kind 训练。 */
+  private unitBuildingMatches(unit: string, kind: string): boolean {
+    return this.config.units[unit]?.building === kind;
+  }
+
   private async getArmy(cmd: Command): Promise<CommandResult> {
     const s = this.load((cmd.payload as any).villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.trainingBySlot = s.trainingBySlot || {};
 
-    // 批量查询本族兵种所需建筑等级（跨模块只走 Command）
     const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe);
-    const buildingCodes = [...new Set(tribeUnits.map((u) => u.building).filter(Boolean))];
-    const buildingLevels = new Map<string, number>();
-    for (const kind of buildingCodes) {
-      const res = await this.commands.send({
-        name: 'building.GetBuildingLevel',
-        from: MilitaryModule.NAME,
-        payload: { villageId: s.villageId, kind },
-      });
-      buildingLevels.set(kind, (res.payload as any)?.level ?? 0);
-    }
+    const { slots, kindLevels } = await this.resolveLayout(s.villageId);
 
     // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
-    const c = this.config.constants;
     const trainable = tribeUnits.map((u) => {
       const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
-      const needLv = 1;
-      const haveLv = u.building ? (buildingLevels.get(u.building) ?? 0) : needLv;
-      const unlocked = haveLv >= needLv;
+      const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
+      const unlocked = haveLv >= 1;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
       return {
         key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
@@ -306,9 +363,52 @@ export class MilitaryModule {
         // v3：士兵直接以 upkeep 计入 troops 口粮（人口硬上限模型已无 soldier_pool 额外口粮）
         cropPerHourEach: st.upkeep,
         unlocked,
-        lockReason: unlocked ? undefined : `需${bldName} ${needLv} 级`,
+        lockReason: unlocked ? undefined : `需${bldName} 1 级`,
       };
     });
+
+    // 逐建筑训练队列：每个军事建筑实例一份独立队列（多实例并行训练）。
+    const slotsOut = slots
+      .filter((sl) => MilitaryModule.TRAINER_KINDS.has(sl.kind))
+      .map((sl) => {
+        const trainableHere = tribeUnits
+          .filter((u) => u.building === sl.kind)
+          .map((u) => {
+            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
+            const unlocked = sl.level >= 1;
+            return {
+              key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
+              cost: this.effectiveCost(u.cost, sl.level), // 已按建筑等级降费
+              trainSec: Math.round(u.trainSec * this.trainTimeFactor(sl.level)), // 已按建筑等级提速
+              meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
+              meleeDef: st.meleeDef, rangedDef: st.rangedDef,
+              speed: st.speed, carry: st.carry, upkeep: st.upkeep,
+              cropPerHourEach: st.upkeep,
+              unlocked,
+              lockReason: unlocked ? undefined : '建筑建造中',
+              level: sl.level,
+            };
+          });
+        const order = s.trainingBySlot[sl.slotId];
+        const training = order
+          ? { unit: order.unit, remaining: order.remaining, nextDoneAt: order.nextDoneAt }
+          : null;
+        return { slotId: sl.slotId, kind: sl.kind, level: sl.level, trainable: trainableHere, training };
+      });
+
+    // 旧单队列兼容：挂到首个匹配建筑槽位上展示（避免重复挂多个槽位）。
+    if (s.training) {
+      const legacy = { unit: s.training.unit, remaining: s.training.remaining, nextDoneAt: s.training.nextDoneAt };
+      const target = slotsOut.find((x) => !x.training && this.unitBuildingMatches(s.training!.unit, x.kind));
+      if (target) target.training = legacy;
+    }
+
+    // top-level training：首个活跃队列（兼容旧调用方 / movement 读取）。
+    const firstActive = Object.values(s.trainingBySlot)[0] ?? s.training;
+    const training = firstActive
+      ? { unit: firstActive.unit, remaining: firstActive.remaining, nextDoneAt: firstActive.nextDoneAt }
+      : null;
+
     return {
       ok: true,
       payload: {
@@ -316,32 +416,44 @@ export class MilitaryModule {
         troops: { ...s.troops },
         smithyLevel: { ...s.smithyLevel },
         trainable,
-        training: s.training
-          ? { unit: s.training.unit, remaining: s.training.remaining, nextDoneAt: s.training.nextDoneAt }
-          : null,
+        training,
+        slots: slotsOut,
       },
     };
   }
 
-  /** 训练：校验兵种(含种族) → 扣人口 → 一次性预扣资源(数量×单价) → 入队，逐个产出。 */
+  /**
+   * 训练：在指定军事建筑实例(slotId)内训练某兵种。
+   * 校验兵种(含种族) → 校验该 slot 确为该兵种所属建筑且已建成 → 该建筑独立队列未占用 →
+   * 扣人口 → 一次性预扣资源(数量×单价×建筑等级降费) → 入该 slot 队列，逐个产出。
+   * slotId 缺省时回退到该兵种所属建筑的第一个已建成实例（兼容旧调用 / 测试）。
+   */
   private async trainTroops(cmd: Command): Promise<CommandResult> {
-    const { villageId, unit, count } = cmd.payload as { villageId: string; unit: string; count: number };
+    const { villageId, unit, count, slotId } = cmd.payload as { villageId: string; unit: string; count: number; slotId?: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.trainingBySlot = s.trainingBySlot || {};
 
     const def = this.config.units[unit];
     if (!def) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
     if (def.tribe !== s.tribe) return { ok: false, payload: {}, reason: 'wrong_tribe_unit' };
     if (!Number.isInteger(count) || count <= 0) return { ok: false, payload: {}, reason: 'bad_count' };
-    if (s.training) return { ok: false, payload: {}, reason: 'queue_busy' };
 
-    const building = await this.commands.send({
-      name: 'building.GetBuildingLevel',
-      from: MilitaryModule.NAME,
-      payload: { villageId, kind: def.building },
-    });
-    const level = (building.payload as any)?.level ?? 0;
-    if (!building.ok || level < 1) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
+    // 该兵种所属建筑：必须通过 slotId 指向的实例，且该实例确为 def.building
+    const layout = await this.resolveLayout(villageId);
+    let targetSlot = slotId;
+    if (!targetSlot) {
+      // 缺省：取该兵种所属建筑第一个 level>=1 的实例
+      const found = layout.slots.find((sl) => sl.kind === def.building && sl.level >= 1);
+      targetSlot = found?.slotId;
+    }
+    if (!targetSlot) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
+    const slotInfo = layout.slots.find((sl) => sl.slotId === targetSlot);
+    if (!slotInfo || slotInfo.kind !== def.building) return { ok: false, payload: {}, reason: 'wrong_slot' };
+    if (slotInfo.level < 1) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
+    // 该建筑实例独立队列占用则拒绝（多实例并行：各自独立队列）
+    if (s.trainingBySlot[targetSlot]) return { ok: false, payload: {}, reason: 'queue_busy' };
+    if (s.training) return { ok: false, payload: {}, reason: 'queue_busy' }; // 旧单队列兼容
 
     // 扣人口（训练开始时扣，不足则拒绝训练）
     const popResult = await this.commands.send({
@@ -351,9 +463,10 @@ export class MilitaryModule {
     });
     if (!popResult.ok) return { ok: false, payload: {}, reason: popResult.reason ?? 'insufficient_population' };
 
-    // 一次性预扣 count 份资源（人口已扣，资源失败需回滚人口）
+    // 一次性预扣 count 份资源（已按建筑等级降费；人口已扣，资源失败需回滚人口）
+    const perUnit = this.effectiveCost(def.cost, slotInfo.level);
     const totalCost: Record<string, number> = {};
-    for (const [r, v] of Object.entries(def.cost)) totalCost[r] = v * count;
+    for (const [r, v] of Object.entries(perUnit)) totalCost[r] = v * count;
 
     const spend = await this.commands.send({
       name: 'economy.TrySpend',
@@ -371,37 +484,43 @@ export class MilitaryModule {
       return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
     }
 
-    // 读取人口劳动力练兵加速（GetLaborMult，只读快照，无副作用）
+    // 读取人口劳动力练兵加速（GetLaborMult，只读快照，无副作用）；再叠建筑等级提速
     const laborRes = await this.commands.send({
       name: 'population.GetLaborMult',
       from: MilitaryModule.NAME,
       payload: { villageId, buildingKind: def.building },
     });
     const laborMult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
-    // trainSec_eff = trainSec / rate_mult（人多练得快）
-    const effectiveTrainSec = def.trainSec / Math.max(0.01, laborMult);
+    // 实际单兵耗时 = 基础耗时 × 建筑等级提速 ÷ 人口劳动力加速（人多练得快）
+    const effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level)) / Math.max(0.01, laborMult);
 
-    // 入队，登记第一个出兵
-    const firstDoneMs = effectiveTrainSec * 1000;
-    const taskId = this.scheduler.schedule(firstDoneMs, () => this.produceOne(villageId), `military:${villageId}`, `village:${villageId}`);
-    s.training = {
+    // 入该 slot 队列，登记第一个出兵
+    const trainMsEach = Math.max(1, Math.round(effectiveTrainSec * 1000));
+    const firstDoneMs = trainMsEach;
+    const taskId = this.scheduler.schedule(firstDoneMs, () => this.produceOne(villageId, targetSlot), `military:${villageId}`, `village:${villageId}`);
+    s.trainingBySlot[targetSlot] = {
       unit,
+      slotId: targetSlot,
       remaining: count,
       nextDoneAt: this.now() + firstDoneMs,
       taskId,
-      trainMsEach: firstDoneMs,
+      trainMsEach,
     };
     this.store.set(COLLECTION, villageId, s);
     // v5：训练中士兵立刻按 unit.upkeep 计入 cropUpkeep（不必等 produceOne）。
     this.reportUpkeep(s);
-    return { ok: true, payload: { unit, count } };
+    return { ok: true, payload: { unit, count, slotId: targetSlot } };
   }
 
-  /** 出一个兵，若还有剩余则登记下一个（逐个产出）。 */
-  private produceOne(villageId: string): void {
+  /**
+   * 出一个兵，若还有剩余则登记下一个（逐个产出）。
+   * slotId 指定则从 trainingBySlot[slotId] 取队列；缺省兼容旧单队列 s.training。
+   */
+  private produceOne(villageId: string, slotId?: string): void {
     const s = this.load(villageId);
-    if (!s || !s.training) return;
-    const order = s.training;
+    if (!s) return;
+    const order = slotId ? (s.trainingBySlot?.[slotId]) : s.training;
+    if (!order) return;
 
     s.troops[order.unit] = (s.troops[order.unit] ?? 0) + 1;
     order.remaining -= 1;
@@ -410,7 +529,9 @@ export class MilitaryModule {
       // 用开始训练时快照的每兵耗时（整批一致）
       const nextMs = order.trainMsEach ?? (this.config.units[order.unit]?.trainSec ?? 30) * 1000;
       order.nextDoneAt = this.now() + nextMs;
-      order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId), `military:${villageId}`, `village:${villageId}`);
+      order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId, slotId), `military:${villageId}`, `village:${villageId}`);
+    } else if (slotId) {
+      delete s.trainingBySlot[slotId];
     } else {
       s.training = null;
     }

@@ -55,60 +55,14 @@ export function renderArmy(): string {
        <div class="troopbar">${mercTroops.map(([u, n]: any) => `<span class="troop troop-merc" data-unit-detail="${u}" title="点击查看 ${escapeAttr(unitName(u))} 属性">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="troop-name">${escapeHtml(unitName(u))}</span><b class="troop-count">×${n}</b></span>`).join('')}</div>`
     : '';
 
-  // 训练进度横幅
-  const tr = army.training;
-  const training = tr
-    ? `<div class="banner banner-train">🎯 训练中：<b>${unitName(tr.unit)}</b> ×${tr.remaining}
-        <span class="cost-item grain-chip" title="额外军晌：每小时在默认口粮之上额外消耗的粮">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>+${unitInfo(tr.unit).upkeep ?? 0}</b>/h</span>
-        ${progressBar(tr.nextDoneAt - unitTrainSec(tr.unit) * 1000, tr.nextDoneAt, '下一个')}</div>` : '';
-
-  // 训练卡片：整张卡可点 → 右侧抽屉展开详细属性；卡面默认只显示造价 + 训练操作。
-  // 未解锁（缺前置建筑）与建筑页一致：灰显 + tag-lock 写明要求，不显示训练控件。
-  // 训练输入框/按钮区(.train-row)点击不冒泡到卡片（见 bindArmy），避免误触发详情。
-  const trainCards = (army.trainable || []).map((u: any) => {
-    const unlocked = u.unlocked !== false; // 旧缓存无字段时视为可训
-    const popCost = unitInfo(u.key).popCost;
-    const perGrain = unitCropPerHour(u.key); // 每兵耗粮 = popCost×(默认口粮 + upkeep)
-    const action = unlocked
-      ? `<div class="cost-slot" id="cost-${u.key}">${costPreview(u.cost, u.trainSec)}</div>
-        <div class="train-controls">
-          <div class="pop-warn" id="pop-warn-${u.key}"></div>
-          <div class="train-row">
-            <button type="button" class="step-btn" data-step="-1" data-unit="${u.key}" aria-label="减少数量">−</button>
-            <input type="number" min="1" value="1" id="cnt-${u.key}" data-unit="${u.key}" aria-label="训练数量" />
-            <button type="button" class="step-btn" data-step="1" data-unit="${u.key}" aria-label="增加数量">+</button>
-          </div>
-          <button type="button" class="btn-sm btn-train" id="btn-${u.key}" data-train="${u.key}">训练</button>
-          <div class="train-meta">
-            <span class="cost-item" title="训练此批次消耗人口">人口 <b id="popcost-${u.key}">${popCost}</b></span>
-            ${perGrain > 0
-              ? `<span class="cost-item grain-chip" title="兵种军晌：每兵在默认口粮（${popCropPerLabor()}）之上额外耗粮 ${u.upkeep ?? 0}；按 ${popCost} 人口份折算约 ${perGrain}/h·兵">${art(resInfo('crop').icon, '耗粮', 'xs')}<b>${u.upkeep ?? 0}</b>/h·兵</span>`
-              : ''}
-          </div>
-        </div>`
-      : `<div class="cost-slot">${costPreview(u.cost, u.trainSec)}</div>
-        <small class="tag tag-lock">${escapeHtml(u.lockReason ?? '未解锁')}</small>`;
-    return `<div class="card unit-card${unlocked ? '' : ' locked'}" data-unit-detail="${u.key}" title="点击查看 ${escapeAttr(u.name)} 详细属性">
-      <div class="unit-head">
-        ${art(unitArt(u.key), u.name, 'lg', unitArtFallback(u.key))}
-        <div class="card-title">${escapeHtml(u.name)} <small class="tag">${formName(u.form)}</small>
-          <small class="unit-detail-hint">详情 ›</small>
-        </div>
-      </div>
-        ${action}
-    </div>`;
-  }).join('');
-
+  // 训练功能已迁入各军事建筑详情抽屉（兵营/马厩/兵工厂/城镇中心），军队页只展示驻军与解散。
   // 解散部队区（仅有驻军时显示）
   const disbandSection = renderDisbandSection(army);
 
   return `<h3>驻军 <small>（${tribeName(army.tribe)}族 · 点击兵种看属性）</small></h3>
     <div class="troopbar">${troopList}</div>
-    ${training}
     ${disbandSection}
-    ${mercList}
-    <h3>训练</h3>
-    <div class="grid grid-units">${trainCards}</div>`;
+    ${mercList}`;
 }
 
 /** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。雇佣兵为永久持有，不可解散。 */
@@ -191,7 +145,7 @@ function updateDisbandPopReturn(unitKey: string) {
 
 /** 兵种详情：右侧抽屉展开（与建造抽屉一致的形态），属性一行一项清晰列出 + 训练造价。
  *  直接注入 body（不进 #page，避免 5s 全量刷新把它一起重建/关掉）。点遮罩、✕ 或 Esc 关闭。 */
-function openUnitDetail(unitKey: string): void {
+export function openUnitDetail(unitKey: string): void {
   closeUnitDetail(); // 单例：先关旧的
   const u = (getCache().army?.trainable || []).find((x: any) => x.key === unitKey);
   const info = unitInfo(unitKey);
