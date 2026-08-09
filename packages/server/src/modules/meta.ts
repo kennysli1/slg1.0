@@ -87,6 +87,14 @@ export class MetaModule {
           // 金币经济展示/外插用常量
           goldTaxPerCivilianPerHour: c.constants.goldTaxPerCivilianPerHour,
           startGoldAmount: c.constants.startGoldAmount,
+          // 建筑"功能/提供"展示用常量（客户端详情弹窗计算仓储上限/加成）
+          storageBase: c.constants.storageBase,
+          storageGrowthPerLevel: c.constants.storageGrowthPerLevel,
+          smithyBonusPerLevel: c.constants.smithyBonusPerLevel,
+          wallBonusPerLevel: c.constants.wallBonusPerLevel,
+          popHospitalRecoveryBase: c.constants.popHospitalRecoveryBase,
+          popHospitalRecoveryPerLevel: c.constants.popHospitalRecoveryPerLevel,
+          popHospitalRecoveryMax: c.constants.popHospitalRecoveryMax,
         },
       },
     };

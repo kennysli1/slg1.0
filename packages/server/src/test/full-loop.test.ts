@@ -21,7 +21,7 @@ async function send(app: GameApp, action: string, payload: any) {
 }
 
 async function buildBarracks(app: GameApp, villageId = 'v1'): Promise<void> {
-  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  const r = await send(app, 'building.Build', { villageId, zone: 'inner', kind: 'barracks' });
   assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 }

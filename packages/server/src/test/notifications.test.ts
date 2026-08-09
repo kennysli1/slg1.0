@@ -13,7 +13,7 @@ const setClock = (t: number) => (clock = t);
 const send = (app: GameApp, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 const reg = (app: GameApp, name: string) => send(app, 'player.Register', { name, password: 'pass123', tribe: 'romans' });
 async function buildBarracks(app: GameApp, villageId: string): Promise<void> {
-  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  const r = await send(app, 'building.Build', { villageId, zone: 'inner', kind: 'barracks' });
   assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 }

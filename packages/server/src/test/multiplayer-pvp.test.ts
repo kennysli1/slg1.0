@@ -18,7 +18,7 @@ const send = (app: GameApp, name: string, payload: any) => app.commands.send({ n
 const reg = (app: GameApp, name: string, pwd: string, tribe = 'romans') =>
   send(app, 'player.Register', { name, password: pwd, tribe });
 async function buildBarracks(app: GameApp, villageId: string): Promise<void> {
-  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'barracks' });
+  const r = await send(app, 'building.Build', { villageId, zone: 'inner', kind: 'barracks' });
   assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 }

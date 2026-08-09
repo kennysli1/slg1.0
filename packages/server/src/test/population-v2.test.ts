@@ -94,7 +94,7 @@ test('v3 C2：平民占比驱动繁荣度——新村满值、升上限不变、
   // 2) 建兵营抬高硬上限：currentPop/soldierPop 不变 → 平民占比与繁荣度不变（证明与硬上限解耦，原「升级得负收益」bug 已修复）
   const before = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const buildRes = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+  const buildRes = await send(app, 'building.Build', { villageId: vid, zone: 'inner', kind: 'barracks' });
   assert.equal(buildRes.ok, true, `建兵营应成功: ${buildRes.reason ?? ''}`);
   tick(60_000);
   await app.scheduler.advanceTo(clock, setClock);
@@ -297,7 +297,7 @@ test('v5 C8：训练后 currentPop 下降、soldierPop 上升（原子转化·�
   const app = freshApp();
   const vid = await reg(app, 'c8', 'romans');
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+  await send(app, 'building.Build', { villageId: vid, zone: 'inner', kind: 'barracks' });
   tick(30_000);
   await app.scheduler.advanceTo(clock, setClock);
   await flush();
@@ -321,7 +321,7 @@ test('v3 C9：military.resume 对已有驻军也上报 soldierPop', async () => 
   const app = freshApp();
   const vid = await reg(app, 'c9', 'romans');
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+  await send(app, 'building.Build', { villageId: vid, zone: 'inner', kind: 'barracks' });
   tick(30_000);
   await app.scheduler.advanceTo(clock, setClock);
   await flush();
@@ -456,7 +456,7 @@ test('v3 C12：动员上限——士兵占总人口比例不得超过本部族 p
     if (!r.ok) {
       if (r.reason === 'requires_building:barracks') {
         // 首轮建兵营
-        const b = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+        const b = await send(app, 'building.Build', { villageId: vid, zone: 'inner', kind: 'barracks' });
         assert.equal(b.ok, true, `建兵营应成功: ${b.reason ?? ''}`);
         tick(30_000); await app.scheduler.advanceTo(clock, setClock); await flush();
         continue;
@@ -494,7 +494,7 @@ test('v3 C12b：高卢(0.70)/条顿(0.80) 动员上限按部族生效', async ()
     await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
     let r = await send(app, 'military.TrainTroops', { villageId: vid, unit: unitByTribe[tribe], count: 1 });
     if (!r.ok && r.reason === 'requires_building:barracks') {
-      const b = await send(app, 'building.Build', { villageId: vid, zone: 'outer', kind: 'barracks' });
+      const b = await send(app, 'building.Build', { villageId: vid, zone: 'inner', kind: 'barracks' });
       assert.equal(b.ok, true, `[${tribe}] 建兵营应成功`);
       tick(30_000); await app.scheduler.advanceTo(clock, setClock); await flush();
       r = await send(app, 'military.TrainTroops', { villageId: vid, unit: unitByTribe[tribe], count: 1 });

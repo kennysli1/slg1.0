@@ -32,8 +32,14 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   assert.equal(p.pveTemplates.length, Object.keys(app.config.pveTemplates).length);
   // 白名单常量
   assert.equal(p.constants.mapViewRadius, app.config.constants.mapViewRadius);
-  // 不泄漏平衡参数（如成本公式/铁匠加成）
-  assert.equal(p.constants.smithyBonusPerLevel, undefined);
+  // 建筑"功能/提供"展示用常量现已下发（客户端详情弹窗计算仓储上限/加成）
+  assert.equal(p.constants.storageBase, app.config.constants.storageBase);
+  assert.equal(p.constants.storageGrowthPerLevel, app.config.constants.storageGrowthPerLevel);
+  assert.equal(p.constants.smithyBonusPerLevel, app.config.constants.smithyBonusPerLevel);
+  assert.equal(p.constants.wallBonusPerLevel, app.config.constants.wallBonusPerLevel);
+  assert.equal(p.constants.popHospitalRecoveryBase, app.config.constants.popHospitalRecoveryBase);
+  assert.equal(p.constants.popHospitalRecoveryPerLevel, app.config.constants.popHospitalRecoveryPerLevel);
+  assert.equal(p.constants.popHospitalRecoveryMax, app.config.constants.popHospitalRecoveryMax);
   // 每栋建筑下发 popCapByLevel（升级卡显示「本次升级获得的人口」用；反映覆盖）
   assert.ok(p.buildings.every((b: any) => Array.isArray(b.popCapByLevel) && b.popCapByLevel.length === app.config.buildings[b.kind].maxLevel), '每栋建筑应下发 popCapByLevel 数组（长度=maxLevel）');
   const mainMeta = p.buildings.find((b: any) => b.kind === 'main');

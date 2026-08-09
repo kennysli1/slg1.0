@@ -33,7 +33,7 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   const cfg = loadGameConfig(configDir);
   assert.equal(cfg.buildings['main'].zone, 'center', '城镇中心归 center');
   assert.equal(cfg.buildings['warehouse'].zone, 'inner', '仓库归 inner');
-  assert.equal(cfg.buildings['barracks'].zone, 'outer', '兵营归 outer');
+  assert.equal(cfg.buildings['barracks'].zone, 'inner', '兵营归 inner（军事建筑迁入城内）');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
   assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');

@@ -42,8 +42,8 @@ test('可建清单：城内/城外各只列本区建筑，前置未满足给灰�
   const inner = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'inner' })).payload as any;
   const outer = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'outer' })).payload as any;
   assert.ok(inner.options.some((o: any) => o.kind === 'warehouse'), '城内可建仓库');
-  assert.ok(!inner.options.some((o: any) => o.kind === 'barracks'), '城内不列兵营');
-  assert.ok(outer.options.some((o: any) => o.kind === 'barracks'), '城外可建兵营');
+  assert.ok(inner.options.some((o: any) => o.kind === 'barracks'), '城内可建兵营');
+  assert.ok(!outer.options.some((o: any) => o.kind === 'barracks'), '城外不列兵营');
   // 学院需城镇中心 3 级 → 开局锁定并给理由
   const academy = inner.options.find((o: any) => o.kind === 'academy');
   assert.ok(academy && !academy.unlocked && academy.lockReason, '学院应锁定且有理由');
@@ -110,8 +110,8 @@ test('前置门控：学院开局锁定（需城镇中心3级），Build 应拒�
 test('zone 校验：把城外建筑建到城内应拒绝', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const r = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
-  assert.equal(r.ok, false, '兵营是城外建筑，建到城内应拒绝');
+  const r = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'wall' });
+  assert.equal(r.ok, false, '城墙是城外建筑，建到城内应拒绝');
   assert.equal(r.reason, 'zone_mismatch');
 });
 

@@ -1,7 +1,7 @@
 /** 村庄页：三区结构（城镇中心 + 城内 + 城外）+ 空槽点击建造 + 多队列 + 建筑详情抽屉。 */
 import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
-import { buildingInfo } from '../../app/config.js';
+import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
@@ -170,6 +170,72 @@ function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx } | null
   return null;
 }
 
+/** 统计全村某类已建建筑（等级≥1）的总等级，用于仓储上限聚合。 */
+function sumLevelsOfKind(kind: string): number {
+  const vil = getCache().vil;
+  if (!vil) return 0;
+  let sum = 0;
+  const tally = (zone: any) => {
+    for (const p of (zone?.placed || []) as any[]) {
+      if (p.kind === kind && (p.level ?? 0) >= 1) sum += p.level;
+    }
+  };
+  tally(vil.zones?.inner);
+  tally(vil.zones?.outer);
+  return sum;
+}
+
+/**
+ * 建筑"功能 · 提供"区块：按 kind 计算并展示该建筑实际提供的量化能力。
+ * 仓库/粮仓→仓储上限（base×(1+Σ等级×growth)）；铁匠/城墙→百分比加成；
+ * 医院→战死回收比例；居民楼→人口上限累计。其余建筑回退到"升级效果"文案（不渲染本区块）。
+ */
+function renderProvidesSection(kind: string, ctx: BldDetailCtx): string {
+  if (!gameConstants()) return '';
+  const row = (k: string, v: string) =>
+    `<div class="bld-detail-row"><span class="bld-detail-k">${k}</span><span class="bld-detail-v">${v}</span></div>`;
+  const capOf = (totalLv: number) => Math.round(storageBase() * (1 + totalLv * storageGrowthPerLevel()));
+  const marginal = () => Math.round(storageBase() * storageGrowthPerLevel());
+  const rows: string[] = [];
+  switch (kind) {
+    case 'warehouse': {
+      rows.push(row('木 · 泥 · 铁 上限（全村）', String(capOf(sumLevelsOfKind('warehouse')))));
+      rows.push(row(ctx.level >= 1 ? '本建筑贡献' : '建成 Lv1 贡献', `+${marginal() * (ctx.level >= 1 ? ctx.level : 1)}`));
+      break;
+    }
+    case 'granary': {
+      rows.push(row('粮食 上限（全村）', String(capOf(sumLevelsOfKind('granary')))));
+      rows.push(row(ctx.level >= 1 ? '本建筑贡献' : '建成 Lv1 贡献', `+${marginal() * (ctx.level >= 1 ? ctx.level : 1)}`));
+      break;
+    }
+    case 'smithy': {
+      rows.push(row('全军攻防加成', `+${(ctx.level * smithyBonusPerLevel() * 100).toFixed(0)}%`));
+      break;
+    }
+    case 'wall': {
+      rows.push(row('守城防御加成', `+${(ctx.level * wallBonusPerLevel() * 100).toFixed(0)}%`));
+      break;
+    }
+    case 'hospital': {
+      const ratio = Math.min(popHospitalRecoveryMax(), popHospitalRecoveryBase() + ctx.level * popHospitalRecoveryPerLevel()) * 100;
+      rows.push(row('战死士兵回收', `${ratio.toFixed(0)}%`));
+      break;
+    }
+    case 'residence': {
+      const info = buildingInfo('residence');
+      const cum = info.popCapByLevel
+        ? info.popCapByLevel.slice(0, ctx.level).reduce((a, b) => a + b, 0)
+        : (info.popCapPerLevel ?? 0) * ctx.level;
+      rows.push(row('人口上限（本建筑累计）', `👥 +${cum}`));
+      break;
+    }
+    default:
+      return '';
+  }
+  if (!rows.length) return '';
+  return `<div class="drawer-sec-title">功能 · 提供</div>${rows.join('')}`;
+}
+
 /** 打开建筑详情抽屉：简介 + 升级效果 + 当前等级 + 下一级(建造)消耗。注入 body，避免被 5s 刷新重建。 */
 function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
   closeBuildingDetail(); // 单例
@@ -193,6 +259,8 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
   const prodSec = ctx.producing
     ? `<div class="bld-detail-row"><span class="bld-detail-k">当前产量</span><span class="bld-detail-v">+${ctx.producing.ratePerHour}/h</span></div>`
     : '';
+
+  const providesSec = renderProvidesSection(kind, ctx);
 
   const _dinfo2 = buildingInfo(kind);
   const _pcb = _dinfo2.popCapByLevel;
@@ -225,6 +293,7 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
         <div class="bld-detail-desc">${escapeHtml(info.desc || '这栋建筑暂无简介。')}</div>
         <div class="drawer-sec-title">升级效果</div>
         <div class="bld-detail-desc">${escapeHtml(info.effect || '每级提升该建筑的相关能力。')}</div>
+        ${providesSec}
         ${prodSec}
         ${popCapSec}
         ${costSec}

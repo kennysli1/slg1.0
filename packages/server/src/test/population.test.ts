@@ -58,7 +58,7 @@ test('人口：v5 训练原子转化——currentPop 即时扣减、trainingPopC
   await flushMicrotasks();
 
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
   assert.equal(barracksR.ok, true, `建兵营应成功`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
@@ -102,7 +102,7 @@ test('人口：v4 训练不再受人口不足限制（无 insufficient_populatio
   const app = freshApp();
   await flushMicrotasks();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
   assert.equal(barracksR.ok, true, `建兵营应成功`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
@@ -124,7 +124,7 @@ test('人口：v5 解散军队返还平民（士兵=转化出去的平民，退�
   await flushMicrotasks();
 
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  const barracksR = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
   assert.equal(barracksR.ok, true, `建兵营应成功`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
@@ -349,7 +349,7 @@ test('回归·写有推送：训练（ConsumePop）应 emit population.Changed',
   const app = freshApp();
   await flushMicrotasks();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
   let pushes = 0;
@@ -367,7 +367,7 @@ test('回归·v5 训练中士兵按 unit.upkeep 立即计入 troops 耗粮', asy
   const app = freshApp();
   await flushMicrotasks();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'barracks' });
+  await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'barracks' });
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 
   // 训练前：trainset 为 0

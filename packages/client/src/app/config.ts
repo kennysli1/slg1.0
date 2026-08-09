@@ -23,7 +23,18 @@ interface ServerConfig {
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
-  constants: { mapViewRadius: number; mapSize: number; worldW: number; worldH: number; goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number };
+  constants: {
+    mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
+    goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
+    /** 仓储容量：base×(1+Σ等级×growth)，仓库→木泥铁 / 粮仓→粮。 */
+    storageBase: number; storageGrowthPerLevel: number;
+    /** 铁匠每级全军攻防加成系数（ratio=1+等级×该值）。 */
+    smithyBonusPerLevel: number;
+    /** 城墙每级守城防御加成系数（ratio=1+等级×该值）。 */
+    wallBonusPerLevel: number;
+    /** 医院战死回收比例：min(max, base+等级×perLevel)。 */
+    popHospitalRecoveryBase: number; popHospitalRecoveryPerLevel: number; popHospitalRecoveryMax: number;
+  };
 }
 
 let cfg: ServerConfig | null = null;
@@ -129,4 +140,39 @@ export function unitCropPerHour(key: string): number {
   const upkeep = u.upkeep ?? 0;
   const popCost = u.popCost ?? 1;
   return popCost * (base + upkeep);
+}
+
+// ---------- 建筑"功能/提供"展示用常量（服务端白名单下发） ----------
+
+/** 全部白名单常量（详情弹窗计算仓储上限/加成用）；未加载返回 null。 */
+export function gameConstants(): ServerConfig['constants'] | null {
+  return cfg?.constants ?? null;
+}
+/** 仓库/粮仓基础容量（base×(1+Σ等级×growth) 中的 base）。 */
+export function storageBase(): number {
+  return cfg?.constants?.storageBase ?? 800;
+}
+/** 仓库/粮仓每级容量增长系数。 */
+export function storageGrowthPerLevel(): number {
+  return cfg?.constants?.storageGrowthPerLevel ?? 0.5;
+}
+/** 铁匠每级全军攻防加成系数。 */
+export function smithyBonusPerLevel(): number {
+  return cfg?.constants?.smithyBonusPerLevel ?? 0.1;
+}
+/** 城墙每级守城防御加成系数。 */
+export function wallBonusPerLevel(): number {
+  return cfg?.constants?.wallBonusPerLevel ?? 0.03;
+}
+/** 医院战死回收：基础比例。 */
+export function popHospitalRecoveryBase(): number {
+  return cfg?.constants?.popHospitalRecoveryBase ?? 0.2;
+}
+/** 医院战死回收：每级额外比例。 */
+export function popHospitalRecoveryPerLevel(): number {
+  return cfg?.constants?.popHospitalRecoveryPerLevel ?? 0.1;
+}
+/** 医院战死回收：比例上限。 */
+export function popHospitalRecoveryMax(): number {
+  return cfg?.constants?.popHospitalRecoveryMax ?? 0.8;
 }
