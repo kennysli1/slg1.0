@@ -43,7 +43,9 @@ function renderPendingCard(p: PendingTreasureView): string {
     ? `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="take">收下</button>
        <button class="btn" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="sell">出售 +${fmt(p.priceGold)}金</button>
        <button class="btn btn-danger" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="discard">遗弃</button>`
-    : `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>`;
+    : (p.arrivedAt
+        ? `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>`
+        : `<button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>`);
   return `<div class="treasure-card pending-card kind-${p.kind ?? 'camp'} rarity-${p.rarity}" data-expires-at="${p.expiresAt}">
     <div class="icon">${icon}</div>
     <div class="treasure-body">

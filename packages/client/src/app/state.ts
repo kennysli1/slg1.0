@@ -23,6 +23,8 @@ export interface PendingTreasureView {
   /** 'camp'=本村军队带回（默认收下即可）；'deliver'=送达另一村/宝库拆除（需玩家选 收下/出售/遗弃）。 */
   kind?: 'camp' | 'deliver';
   expiresAt: number;
+  /** camp 类型专用：军队是否已归村。未归村时不可领取（Bug3 修复）。 */
+  arrivedAt?: number;
 }
 
 /** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型 + 劳动→士兵原子转化。 */

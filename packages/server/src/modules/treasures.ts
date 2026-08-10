@@ -592,6 +592,8 @@ export class TreasureModule {
     if (p.arrivedAt) return { ok: true, payload: { movementId, marked: false } };
     p.arrivedAt = this.now();
     this.store.set(COLLECTION_PENDING, movementId, p);
+    // 推动客户端 refreshAll → 重新拉取 pending（含 arrivedAt），让领取按钮从「等待归村」转为可点
+    await this.emitChanged(p.villageId);
     return { ok: true, payload: { movementId, marked: true } };
   }
 
