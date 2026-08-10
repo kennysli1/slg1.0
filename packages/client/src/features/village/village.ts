@@ -59,7 +59,7 @@ function renderTreasurePanel(): string {
         const cat = treasureCategoryName(t.category ?? '');
         const rar = treasureRarityName(t.rarity ?? '');
         const effectTxt = treasureEffectText(info as any);
-        return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}" data-open-treasure="${escapeAttr(t.code)}" title="点击前往宝库管理">
+        return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}" data-open-treasure="${escapeAttr(t.code)}" title="点击前往储存该宝物的建筑管理">
           ${art(t.icon, t.name, 'md')}
           <div class="treasure-body">
             <div class="treasure-title">${escapeHtml(t.name)}
@@ -91,7 +91,7 @@ function renderTreasurePanel(): string {
     : `<div class="treasure-summary treasure-summary--none"><span class="treasure-summary-label">本村加成</span><span class="eff-chip eff-chip--none">暂无加成</span></div>`;
 
   const hint = list.length
-    ? `<div class="treasure-jump-hint">点击宝物卡片前往「宝库」管理（使用 / 出售 / 丢弃）</div>`
+    ? `<div class="treasure-jump-hint">点击宝物卡片前往其所在建筑（城镇中心 / 宝库）管理（使用 / 出售 / 丢弃）</div>`
     : '';
   return `<h3>宝物栏 <small>（${codes.length}/${slots}）</small></h3>
     <div class="treasure-panel">
@@ -510,16 +510,30 @@ function treasureEffectChips(eff: any): string {
 }
 
 /**
- * 点击主界面宝物卡片 → 跳转至「储存宝物的建筑」详情页（宝库优先；未建则退回城镇中心）。
+ * 点击主界面宝物卡片 → 跳转至「储存该宝物的建筑」详情页：
+ *  - 宝物在城镇中心(town) → 打开城镇中心；
+ *  - 宝物在宝库(treasury) → 打开宝库；
+ *  - 未指定 code / 对应建筑未建 → 回退「宝库优先，未建则城镇中心」。
  * 宝物的使用/出售/丢弃交互全部在该建筑详情页内进行。
  */
-function openTreasureBuilding(): void {
+function openTreasureBuilding(code?: string): void {
   const vil = getCache().vil;
   if (!vil) { showToast('村庄数据未就绪'); return; }
   const placed = [...(vil.zones?.inner?.placed || []), ...(vil.zones?.outer?.placed || [])];
   const tre = placed.find((p: any) => p.kind === 'treasury');
+  const tc = vil.townCenter;
+  // 知道点击的宝物所在位置 → 打开对应建筑（城镇中心的宝物点开城镇中心，而非总是宝库）
+  if (code) {
+    const t = getCache().treasures as any;
+    const inTown = Array.isArray(t?.town) && t.town.includes(code);
+    const inTre = Array.isArray(t?.treasury) && t.treasury.includes(code);
+    if (inTown && tc) { openBuilding(tc.slotId); return; }
+    if (inTre && tre) { openBuilding(tre.slotId); return; }
+    // 对应建筑未建（异常态）→ 继续走下面的兜底
+  }
+  // 兜底：宝库优先（未建则城镇中心）
   if (tre) { openBuilding(tre.slotId); return; }
-  if (vil.townCenter) { openBuilding(vil.townCenter.slotId); return; }
+  if (tc) { openBuilding(tc.slotId); return; }
   showToast('尚未建造宝库，宝物暂存于城镇中心');
 }
 
@@ -867,9 +881,9 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   document.querySelectorAll<HTMLElement>('[data-close-drawer]').forEach((el) =>
     el.onclick = () => { drawer = null; rerenderPage(); });
 
-  // 主界面宝物卡片：点击 → 跳转至「储存宝物的建筑」详情页（宝库优先，未建则城镇中心）进行使用/出售/丢弃
+  // 主界面宝物卡片：点击 → 跳转至「储存该宝物的建筑」详情页（城镇中心宝物开城镇中心，宝库宝物开宝库）
   document.querySelectorAll<HTMLElement>('[data-open-treasure]').forEach((el) =>
-    el.onclick = () => openTreasureBuilding());
+    el.onclick = () => openTreasureBuilding(el.getAttribute('data-open-treasure') || undefined));
 }
 
 /** 抽屉开合只影响村庄页局部，重渲染 #page 即可（不触发全量 refresh）。 */
