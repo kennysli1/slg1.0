@@ -126,6 +126,8 @@ export class BuildingModule {
         );
       }
       this.store.set(COLLECTION, s.villageId, s);
+      // 重启恢复：把贸易中心存在性镜像到宝物模块（决定待领取宝物能否「出售」）
+      this.reportTradeCenter(s);
     }
   }
 
