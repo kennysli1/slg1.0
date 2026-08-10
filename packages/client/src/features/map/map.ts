@@ -425,7 +425,13 @@ function renderCarrySection(): string {
     <div class="treasure-carry-list" id="carryList">${list}</div>`;
 }
 
-/** 重新计算携带上限（基于当前出征兵力）并刷新显示。cap=0 时禁用勾选并显警告。 */
+/**
+ * 重新计算携带上限（基于当前出征兵力）并刷新显示。
+ * 警告红框仅在「玩家正在尝试携带但带不动」时出现：
+ *   - cap=0 且没勾选 → 只显示状态文字「不可携带 · 兵力不足...」（红字），不弹警告
+ *   - cap=0 且勾选了 → 不可能（勾选已被禁用/取消），走不到这里
+ *   - checked > cap → 超出上限警告（玩家已勾选超量）
+ */
 function updateCarryCap(): void {
   const capEl = document.getElementById('carryCap');
   if (!capEl) return;
@@ -445,9 +451,10 @@ function updateCarryCap(): void {
   if (cap === 0) {
     capEl.textContent = `不可携带 · 兵力不足（当前 ${total}，至少 ${perSlot} 才能携带 1 格）`;
     capEl.classList.add('cap-zero');
-    if (warnEl) warnEl.innerHTML = `<span class="carry-warn">⚠️ 兵力不足，无法携带宝物。请增加出征兵力至 ≥ ${perSlot}，或在下方取消勾选。</span>`;
     // 禁用所有勾选并强制取消（防止已勾选状态泄漏）
     checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; });
+    // 没人勾选就不挂警告 — 状态文字（红色）已经说明问题，避免无意义噪音
+    if (warnEl) warnEl.innerHTML = '';
   } else {
     capEl.textContent = `可携带 ${cap} 格（兵力 ${total}）`;
     checkboxes.forEach((cb) => { cb.disabled = false; });
@@ -470,14 +477,10 @@ function collectTreasures(): string[] {
   const cap = treasureCarryCap(total);
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.carry-check:checked')).map((c) => c.value);
   if (!checked.length) return [];
-  if (cap === 0) {
-    addReport(`携带宝物至少需要 ${treasureCarryTroopsPerSlot()} 兵力（当前 ${total}），请增加兵力或取消勾选`);
-    return [];
-  }
-  if (checked.length > cap) {
-    addReport(`携带宝物超出上限（上限 ${cap} 格），仅携带前 ${cap} 个`);
-    return checked.slice(0, cap);
-  }
+  // cap=0 时 updateCarryCap 已禁用/取消所有勾选，正常流程走不到这里（兜底返回 []）
+  if (cap === 0) return [];
+  // 超上限截断 — 派兵页红框已经预防性提醒过「仅前 N 个会随军携带」，此处不再重复报告
+  if (checked.length > cap) return checked.slice(0, cap);
   return checked;
 }
 
