@@ -338,6 +338,49 @@ test('宝库：旧存档（town 有宝+extraSlots 已存在）加载时自动迁
   assert.deepEqual(l2.treasury, ['chainsaw'], '幂等：宝库应仍含 1 个');
 });
 
+test('迁移：resume 修复 pre-Bug3 遗留 pending（无 arrivedAt 且行军已删除）→ 标记归村', async () => {
+  const app = await freshApp();
+  // 模拟 pre-Bug3 真实线上数据：camp pending 无 arrivedAt，对应行军记录已被删除
+  app.store.set('treasure_pending', 'mv-legacy-1', {
+    movementId: 'mv-legacy-1', villageId: 'v1', code: 'chainsaw',
+    name: '电锯', icon: '', category: 'economy', rarity: 'rare',
+    effectType: 'woodRate', effectValue: 5, applyType: 'passive', priceGold: 30,
+    kind: 'camp', createdAt: 100, expiresAt: clock + 3600_000,
+  });
+  await app.treasure.resume();
+  const after = app.store.get<any>('treasure_pending', 'mv-legacy-1');
+  assert.ok(after, '未过期记录应仍存在');
+  assert.ok(after.arrivedAt, '无 arrivedAt 且行军已删除 → 应被标记归村（玩家可领取）');
+});
+
+test('迁移：resume 清理已超时的遗留 pending', async () => {
+  const app = await freshApp();
+  app.store.set('treasure_pending', 'mv-legacy-2', {
+    movementId: 'mv-legacy-2', villageId: 'v1', code: 'war_flag',
+    name: '军旗', icon: '', category: 'military', rarity: 'common',
+    effectType: 'atkMult', effectValue: 5, applyType: 'passive', priceGold: 10,
+    kind: 'camp', createdAt: 100, expiresAt: clock - 1000,
+  });
+  await app.treasure.resume();
+  assert.equal(app.store.get('treasure_pending', 'mv-legacy-2'), undefined, '已超时记录应被清理');
+});
+
+test('迁移：resume 不误标仍在外的行军 pending（保持等待归村）', async () => {
+  const app = await freshApp();
+  // 行军记录仍存在（军队还在外，未归村）
+  app.store.set('movement', 'mv-inflight', { id: 'mv-inflight', status: 'out', fromVillage: 'v1' });
+  app.store.set('treasure_pending', 'mv-inflight', {
+    movementId: 'mv-inflight', villageId: 'v1', code: 'chainsaw',
+    name: '电锯', icon: '', category: 'economy', rarity: 'rare',
+    effectType: 'woodRate', effectValue: 5, applyType: 'passive', priceGold: 30,
+    kind: 'camp', createdAt: 100, expiresAt: clock + 3600_000,
+  });
+  await app.treasure.resume();
+  const after = app.store.get<any>('treasure_pending', 'mv-inflight');
+  assert.ok(after, '记录应存在');
+  assert.equal(after.arrivedAt, undefined, '行军仍在场 → 不应标记归村（保持等待归村）');
+});
+
 test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加', async () => {
   const app = await freshApp();
   // 给足资源以秒建

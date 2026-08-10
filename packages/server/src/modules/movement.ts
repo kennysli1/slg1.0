@@ -119,6 +119,8 @@ export class MovementModule {
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
+      // 供其他模块（宝物迁移）在不直接读 movement 集合的前提下查询某行军是否仍存在
+      GetMovement: { command: 'movement.GetMovement', ownVillage: false, needAuth: false, schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } } },
     },
     eventPushMap: {
       'movement.Sent': 'MarchSent',
@@ -151,6 +153,7 @@ export class MovementModule {
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendCaravan', (c) => this.sendCaravan(c));
     this.commands.register('movement.List', (c) => this.list(c));
+    this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
   }
@@ -312,6 +315,13 @@ export class MovementModule {
         })),
       },
     };
+  }
+
+  /** 查询某行军是否仍存在（供其他模块跨模块查询，避免直接读 movement 集合，违反铁律#1）。 */
+  private getMovement(cmd: Command): CommandResult {
+    const { movementId } = cmd.payload as { movementId: string };
+    const mv = this.store.get<Movement>(COLLECTION, movementId);
+    return { ok: true, payload: { exists: !!mv } };
   }
 
   /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */

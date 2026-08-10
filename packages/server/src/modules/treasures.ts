@@ -193,11 +193,53 @@ export class TreasureModule {
   }
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
-  resume(): void {
+  async resume(): Promise<void> {
     // 注意：不在此遍历其他模块的集合来补齐旧村庄的宝物文档——那样会违反铁律#1（集合归属唯一）。
     // 旧村庄（宝物模块上线前创建）的宝物文档由 ensureState 在首次 grant/list 时懒创建。
     for (const s of this.store.all<TreasureState>(COLLECTION)) {
       void this.recomputeAndPush(s.villageId);
+    }
+    await this.migratePendingsOnResume();
+  }
+
+  /**
+   * 启动迁移：修复 pre-Bug3 修复前遗留的待领取记录。
+   * 这批记录缺少 arrivedAt 字段，且其对应行军记录已随归村/全歼被删除，
+   * 导致 MarkPendingArrived 从未触发、调度器超时任务也可能在服务器重启时丢失 —— 宝物卡在「等待归村」无法领取。
+   * 处理：
+   *  - 已过期 → 直接清理（超时任务可能因重启丢失）；
+   *  - camp 类且未标记归村、对应行军已不存在（军队已归村或全歼）→ 视为已归村，允许玩家领取；
+   *  - 其余未过期记录 → 重新登记调度器超时任务（防重启后丢失），归村时 MarkPendingArrived 仍会正常触发。
+   */
+  private async migratePendingsOnResume(): Promise<void> {
+    const now = this.now();
+    for (const p of this.store.all<PendingTreasure>(COLLECTION_PENDING)) {
+      const owner = `treasure-pending:${p.movementId}`;
+      // 1) 已超时（调度任务可能已丢失）→ 直接清理
+      if (p.expiresAt <= now) {
+        this.store.delete(COLLECTION_PENDING, p.movementId);
+        this.scheduler.cancelByOwner(owner);
+        continue;
+      }
+      // 2) camp 类、未标记归村、且对应行军已不存在 → 视为已归村
+      //    跨模块查询走 Command（movement.GetMovement），绝不直读 movement 集合（铁律#1）。
+      if (p.kind === 'camp' && !p.arrivedAt) {
+        const res = await this.commands.send({
+          name: 'movement.GetMovement',
+          from: TreasureModule.NAME,
+          payload: { movementId: p.movementId },
+        });
+        const exists = res.ok && ((res.payload as { exists?: boolean } | undefined)?.exists === true);
+        if (!exists) {
+          p.arrivedAt = now;
+          this.store.set(COLLECTION_PENDING, p.movementId, p);
+        }
+        // 行军仍存在（军队还在外）→ 保持「等待归村」，归村时 MarkPendingArrived 会触发
+      }
+      // 3) 重新登记超时任务（先取消可能残留的，再登记，防重复 / 防重启丢失）
+      const delay = Math.max(0, p.expiresAt - now);
+      this.scheduler.cancelByOwner(owner);
+      this.scheduler.schedule(delay, () => this.expirePending(p.movementId), owner, `village:${p.villageId}`);
     }
   }
 
