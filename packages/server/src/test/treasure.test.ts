@@ -324,6 +324,20 @@ test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根
   assert.deepEqual(l2.treasury, ['chainsaw'], '原城镇中心宝物应迁入宝库');
 });
 
+test('宝库：旧存档（town 有宝+extraSlots 已存在）加载时自动迁入宝库', async () => {
+  // 模拟部署前的真实线上数据：宝库已建（extraSlots=1），但城镇中心仍留有 1 个旧宝物
+  const app = await freshApp();
+  app.store.set('treasure', 'v1', { villageId: 'v1', town: ['chainsaw'], treasury: [], carried: {}, extraSlots: 1 });
+  // 任意触发 ensureState 的命令都会触发迁移
+  const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l.town, [], '加载时城镇中心应自动清空');
+  assert.deepEqual(l.treasury, ['chainsaw'], '加载时旧城镇中心宝物应迁入宝库');
+  // 再次 List 应幂等（无重复写入/迁移）
+  const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l2.town, [], '幂等：城镇中心应仍为空');
+  assert.deepEqual(l2.treasury, ['chainsaw'], '幂等：宝库应仍含 1 个');
+});
+
 test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加', async () => {
   const app = await freshApp();
   // 给足资源以秒建

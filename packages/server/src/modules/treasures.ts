@@ -253,6 +253,11 @@ export class TreasureModule {
     if (!s.carried || typeof s.carried !== 'object') { s.carried = {}; dirty = true; }
     // 兼容旧存档（缺 extraSlots 字段）
     if (typeof s.extraSlots !== 'number') { s.extraSlots = 0; dirty = true; }
+    // 兼容旧存档：宝库已扩容但城镇中心仍有宝物的历史数据，自动迁移到宝库（宝物优先存宝库）
+    while (s.treasury.length < s.extraSlots && s.town.length > 0) {
+      s.treasury.push(s.town.pop()!);
+      dirty = true;
+    }
     // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
     if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
