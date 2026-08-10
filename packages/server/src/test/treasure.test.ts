@@ -99,3 +99,13 @@ test('宝物：槽位满时拒绝授予', async () => {
   assert.equal(g2.ok, false, '第二格应被拒');
   assert.equal(g2.reason, 'treasure_slots_full', '应返回槽位满原因');
 });
+
+test('宝物：旧村庄缺 treasure 文档也能授予（懒创建 ensureState）', async () => {
+  const app = await freshApp();
+  // 模拟宝物模块上线前创建的村庄：删掉已生成的 treasure 文档，再授予
+  app.store.delete('treasure', 'v1');
+  const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  assert.equal(g.ok, true, '缺文档的旧村庄授予也应成功（懒创建）: ' + (g.reason ?? ''));
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], '懒创建后应有 chainsaw');
+});

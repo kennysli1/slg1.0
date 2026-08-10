@@ -89,6 +89,8 @@ export class TreasureModule {
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
   resume(): void {
+    // 注意：不在此遍历其他模块的集合来补齐旧村庄的宝物文档——那样会违反铁律#1（集合归属唯一）。
+    // 旧村庄（宝物模块上线前创建）的宝物文档由 ensureState 在首次 grant/list 时懒创建。
     for (const s of this.store.all<TreasureState>(COLLECTION)) {
       void this.recomputeAndPush(s.villageId);
     }
@@ -109,6 +111,16 @@ export class TreasureModule {
 
   private load(villageId: string): TreasureState | undefined {
     return this.store.get<TreasureState>(COLLECTION, villageId);
+  }
+
+  /** 确保村庄有宝物状态：旧村庄在模块上线前创建、缺 treasure 文档时懒创建（避免 grant/list 报 village_not_found）。 */
+  private ensureState(villageId: string): TreasureState {
+    let s = this.load(villageId);
+    if (!s) {
+      s = { villageId, codes: [] };
+      this.store.set(COLLECTION, villageId, s);
+    }
+    return s;
   }
 
   /** 当前宝物栏槽位数（城镇中心基础 1 格；宝库建筑实装后叠加）。 */
@@ -190,8 +202,7 @@ export class TreasureModule {
   /** 授予宝物到村庄宝物栏（受槽位限制；重复持有被拒）。 */
   private async grant(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
     const slots = this.getTreasureSlots(villageId);
@@ -212,8 +223,7 @@ export class TreasureModule {
    */
   private async use(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const s = this.ensureState(villageId);
     const idx = s.codes.indexOf(code);
     if (idx < 0) return { ok: false, payload: {}, reason: 'not_held' };
     const t = this.config.treasures[code];
@@ -236,8 +246,7 @@ export class TreasureModule {
   /** 列出村庄已储存宝物 + 聚合效果（客户端渲染用）。 */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const s = this.ensureState(villageId);
     const eff = this.aggregate(s.codes);
     return {
       ok: true,
