@@ -369,8 +369,6 @@ export interface GameConstants {
   tradeOrderTtlSec: number;
   /** 宝物掉落：清理野外营地后掉落宝物的总体概率（0-1）。 */
   treasureCampDropChance: number;
-  /** 宝物掉落：贸易中心自动/手动刷新 NPC 订单时掉落宝物的总体概率（0-1）。 */
-  treasureTradeDropChance: number;
   /** 宝物：贸易中心 NPC 订单池中出现「宝物出售」订单的概率（0-1）。 */
   treasureNpcOfferChance: number;
   /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
@@ -787,7 +785,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
     tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
-    treasureTradeDropChance: cn('treasure_trade_drop_chance', 0.25),
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     raw,
@@ -1041,7 +1038,6 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
-  if (c.treasureTradeDropChance < 0 || c.treasureTradeDropChance > 1) errors.push(`game_constants.csv treasure_trade_drop_chance 必须在[0,1]（当前${c.treasureTradeDropChance}）`);
   if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);

@@ -356,8 +356,8 @@ export class TreasureModule {
   }
 
   /**
-   * 掉落结算：由 combat(清营)/trade(刷新) 触发。
-   *  - 先按总体概率门控（treasureCampDropChance / treasureTradeDropChance）；
+   * 掉落结算：由 combat(清野营) 触发。
+   *  - 先按总体概率门控（treasureCampDropChance）；
    *  - 命中后按各宝物 dropRate 加权抽选（轮盘赌）；
    *  - 宝物栏未满且不重复 → 入栏（被动即生效、即时即占位）；
    *  - 栏满或重复持有 → 自动卖给 NPC 换金币（等价于「溢出自动售卖」）。
@@ -366,13 +366,13 @@ export class TreasureModule {
   private async rollDrop(cmd: Command): Promise<CommandResult> {
     const { villageId, source, forceCode } = cmd.payload as {
       villageId: string;
-      source: 'camp' | 'trade';
+      source: 'camp';
       /** 测试/调试用：强制抽中指定 code（跳过概率门控与加权）。 */
       forceCode?: string;
     };
     const s = this.ensureState(villageId);
     const c = this.config.constants;
-    const baseChance = source === 'trade' ? c.treasureTradeDropChance : c.treasureCampDropChance;
+    const baseChance = c.treasureCampDropChance;
 
     // 门控：未命中总体概率 → 无掉落
     const hit = forceCode ? true : this.rng() < baseChance;

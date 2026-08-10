@@ -87,8 +87,31 @@ async function render(): Promise<void> {
     ? `<button class="btn-sm" data-trade-refresh>手动刷新 (${c.npcStoredRefreshes}/${c.npcMaxStored})</button>`
     : '<small class="tag">无存储刷新次数</small>';
 
-  // NPC 订单
+  // NPC 订单（含「宝物出售」订单：宝物订单以 treasure 字段呈现，占用一个普通订单名额，内联展示）
   const npcHtml = (c.npcOrders || []).map((o: any) => {
+    if (o.treasure) {
+      const t = o.treasure;
+      const info = treasureInfo(t.code) ?? t;
+      const cat = treasureCategoryName(t.category ?? '');
+      const rar = treasureRarityName(t.rarity ?? '');
+      const effectTxt = treasureEffectText(info as any);
+      const canPay = gold >= (t.buyPrice ?? 0);
+      return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
+        ${art(t.icon, t.name, 'md')}
+        <div class="treasure-body">
+          <div class="treasure-title">${escapeHtml(t.name)}
+            <small class="treasure-cat cat-${escapeAttr(t.category ?? '')}">${escapeHtml(cat)}</small>
+            <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
+          </div>
+          <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
+          <div class="treasure-actions">
+            <button class="btn-sm treasure-sell trade-treasure-buy" data-accept-npc-treasure="${escapeAttr(o.id)}" ${!canPay ? 'disabled' : ''}>
+              ${art(resInfo('gold').icon, '金币', 'xs')}<span class="gold-amt">${fmt(t.buyPrice ?? 0)}</span> 购买
+            </button>
+          </div>
+        </div>
+      </div>`;
+    }
     const canPay = TRADE_RES.every((k) => (gold >= (o.want[k] ?? 0)));
     const sellSide = (o.give.gold ?? 0) > 0; // 玩家卖出资源换金币
     const tag = sellSide ? '卖' : '买';
@@ -99,30 +122,6 @@ async function render(): Promise<void> {
       <button class="btn-sm" data-accept-npc="${escapeAttr(o.id)}" ${!canPay ? 'disabled' : ''}>成交（即时交付）</button>
     </div>`;
   }).join('') || '<div class="hint-sm">暂无可交易 NPC 订单。</div>';
-
-  // 宝物出售订单（NPC 卖宝物给玩家，金币买；栏满时可替换/卖给NPC/放弃）
-  const npcTreasureHtml = (c.npcTreasureOffers || []).map((o: any) => {
-    const info = treasureInfo(o.code) ?? o;
-    const cat = treasureCategoryName(o.category ?? '');
-    const rar = treasureRarityName(o.rarity ?? '');
-    const effectTxt = treasureEffectText(info as any);
-    const canPay = gold >= (o.buyPrice ?? 0);
-    return `<div class="treasure-card rarity-${escapeAttr(o.rarity ?? 'common')}">
-      ${art(o.icon, o.name, 'md')}
-      <div class="treasure-body">
-        <div class="treasure-title">${escapeHtml(o.name)}
-          <small class="treasure-cat cat-${escapeAttr(o.category ?? '')}">${escapeHtml(cat)}</small>
-          <small class="treasure-rar rar-${escapeAttr(o.rarity ?? '')}">${escapeHtml(rar)}</small>
-        </div>
-        <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
-        <div class="treasure-actions">
-          <button class="btn-sm treasure-sell trade-treasure-buy" data-accept-npc-treasure="${escapeAttr(o.id)}" ${!canPay ? 'disabled' : ''}>
-            ${art(resInfo('gold').icon, '金币', 'xs')}<span class="gold-amt">${fmt(o.buyPrice ?? 0)}</span> 购买
-          </button>
-        </div>
-      </div>
-    </div>`;
-  }).join('') || '';
 
   // 附近玩家挂单（接单方视角）：只显示「你自己」为运出「求购」要占的路线，
   // 不显示对方的运力占用（与服务端 acceptPlayer 按 sum(want) 算 acceptorRoutes 一致）
@@ -158,11 +157,8 @@ async function render(): Promise<void> {
     <div class="trade-refresh-row">${refreshBtn}<small class="hint-sm">每 ${c.npcRefreshSec}s 自动刷新（囤积上限 ${c.npcMaxStored}）</small></div>
     <div class="trade-next">下次自动刷新：约 ${nextIn}s</div>
 
-    <div class="drawer-sec-title">NPC 订单 <small>（即时交付）</small></div>
+    <div class="drawer-sec-title">NPC 订单 <small>（即时交付 · 含宝物出售）</small></div>
     <div class="trade-offers">${npcHtml}</div>
-
-    ${npcTreasureHtml ? `<div class="drawer-sec-title">宝物出售 <small>（金币购买 · 栏满可替换/转卖）</small></div>
-    <div class="trade-offers">${npcTreasureHtml}</div>` : ''}
 
     <div class="drawer-sec-title">附近玩家订单 <small>（视野半径 ${c.viewRadius} 格内）</small></div>
     <div class="trade-offers">${playerHtml}</div>

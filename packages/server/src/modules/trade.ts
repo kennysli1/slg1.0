@@ -263,13 +263,9 @@ export class TradeModule {
     return Math.max(1, this.config.constants.tradeRouteCapacity ?? 500);
   }
 
-  /** 生成单条 NPC 订单：随机选资源，随机买卖双方，按金币基准价值计价。 */
+  /** 生成单条 NPC 资源订单：随机选资源，随机买卖双方，按金币基准价值计价。 */
   private rollNpcOrder(level: number, viewRadius: number, expiresAt: number): NpcOrder {
     const c = this.config.constants;
-    // 宝物出售订单：按概率出现（需存在可交易宝物）
-    if (this.tradeableTreasures.length > 0 && Math.random() < c.treasureNpcOfferChance) {
-      return this.rollTreasureOffer(expiresAt);
-    }
     const res = TRADE_RES[Math.floor(Math.random() * TRADE_RES.length)];
     // 交易量随等级温和放大
     const qty = 200 + Math.floor(Math.random() * (400 + level * 120));
@@ -314,6 +310,20 @@ export class TradeModule {
     return { id: this.nextId(), give: {}, want: { gold: buyPrice }, distance: 0, expiresAt, treasure };
   }
 
+  /**
+   * 生成整池 NPC 订单：先铺满 npcOrderCount 条普通资源订单，
+   * 再以 treasureNpcOfferChance 概率「覆盖其中一条」普通订单为宝物出售订单
+   * （而非在普通订单之外额外多塞一条）。宝物出售订单在数量上始终占用一个普通订单名额。
+   */
+  private buildPool(tc: { npcOrderCount: number; tradeViewRadius: number }, level: number, expiresAt: number): NpcOrder[] {
+    const pool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(level, tc.tradeViewRadius, expiresAt));
+    if (this.tradeableTreasures.length > 0 && Math.random() < this.config.constants.treasureNpcOfferChance) {
+      const idx = Math.floor(Math.random() * pool.length);
+      pool[idx] = this.rollTreasureOffer(expiresAt);
+    }
+    return pool;
+  }
+
   private nextId(): string {
     return `tc_${this.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -340,7 +350,7 @@ export class TradeModule {
     const existing = this.load(villageId);
     if (!existing) {
       const expiresAt = this.now() + tc.npcRefreshSec * 1000;
-      const pool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(level, tc.tradeViewRadius, expiresAt));
+      const pool = this.buildPool(tc, level, expiresAt);
       const nextRefreshAt = expiresAt;
       const s: TradeCenterState = {
         villageId, level, npcOrderPool: pool, storedRefreshes: 0,
@@ -365,17 +375,12 @@ export class TradeModule {
     if (!s) return;
     const tc = this.config.tradeCenter[s.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const expiresAt = this.now() + tc.npcRefreshSec * 1000;
-    s.npcOrderPool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(s.level, tc.tradeViewRadius, expiresAt));
+    s.npcOrderPool = this.buildPool(tc, s.level, expiresAt);
     s.storedRefreshes = Math.min(tc.npcStoredRefreshes, s.storedRefreshes + 1);
     s.nextRefreshAt = expiresAt;
     s.taskId = this.scheduleRefresh(villageId, expiresAt);
     this.store.set(COLLECTION, s.villageId, s);
     await this.emitUpdated(villageId);
-    // 刷新时按概率掉落宝物到本村宝物栏（溢出则自动售卖换金），结果经 treasure.Dropped 进战报
-    void this.commands.send({
-      name: 'treasure.RollDrop', from: TradeModule.NAME,
-      payload: { villageId, source: 'trade' },
-    });
     log('NPC 订单自动刷新', { village: villageId, level: s.level, stored: s.storedRefreshes });
   }
 
@@ -402,7 +407,7 @@ export class TradeModule {
     const s = this.load(villageId);
     const level = await this.getCenterLevel(villageId);
     if (!s || level <= 0) {
-      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcTreasureOffers: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
+      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
     }
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
@@ -450,9 +455,18 @@ export class TradeModule {
         tradeRoutesUsed: s.tradeRoutesUsed,
         availableRoutes: available,
         viewRadius: tc.tradeViewRadius,
-        npcOrders: s.npcOrderPool.filter((o) => !o.treasure).map((o) => ({ id: o.id, give: o.give, want: o.want, distance: o.distance, expiresAt: o.expiresAt })),
-        // 宝物出售订单（NPC 卖宝物给玩家，金币买；栏满时可替换/卖给NPC/放弃）
-        npcTreasureOffers: s.npcOrderPool.filter((o) => !!o.treasure).map((o) => ({ id: o.id, ...o.treasure, expiresAt: o.expiresAt })),
+        // NPC 订单池：普通资源订单 + 宝物出售订单（宝物出售按概率覆盖其中一条普通订单，随 normal 一起在此展示）
+        npcOrders: s.npcOrderPool.map((o) => ({
+          id: o.id, give: o.give, want: o.want, distance: o.distance, expiresAt: o.expiresAt,
+          treasure: o.treasure
+            ? {
+                code: o.treasure.code, name: o.treasure.name, icon: o.treasure.icon,
+                category: o.treasure.category, rarity: o.treasure.rarity,
+                effectType: o.treasure.effectType, effectValue: o.treasure.effectValue,
+                applyType: o.treasure.applyType, buyPrice: o.treasure.buyPrice, sellPrice: o.treasure.sellPrice,
+              }
+            : undefined,
+        })),
         npcStoredRefreshes: s.storedRefreshes,
         npcMaxStored: tc.npcStoredRefreshes,
         npcRefreshSec: tc.npcRefreshSec,
@@ -474,14 +488,9 @@ export class TradeModule {
     s.storedRefreshes -= 1;
     const tc = this.config.tradeCenter[s.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const expiresAt = s.nextRefreshAt;
-    s.npcOrderPool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(s.level, tc.tradeViewRadius, expiresAt));
+    s.npcOrderPool = this.buildPool(tc, s.level, expiresAt);
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
-    // 手动刷新时同样按概率掉落宝物（与自动刷新一致）
-    void this.commands.send({
-      name: 'treasure.RollDrop', from: TradeModule.NAME,
-      payload: { villageId, source: 'trade' },
-    });
     const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
     return { ok: true, payload: (base.payload as any) };
   }
@@ -493,6 +502,8 @@ export class TradeModule {
     const idx = s.npcOrderPool.findIndex((o) => o.id === orderId);
     if (idx < 0) return { ok: false, payload: {}, reason: 'order_not_found' };
     const order = s.npcOrderPool[idx];
+    // 宝物出售订单必须经 AcceptNpcTreasure 处理（需扣金币+入栏/替换）；误走普通成交会扣金却不给宝物
+    if (order.treasure) return { ok: false, payload: {}, reason: 'treasure_offer_use_special' };
 
     // 即时交付：先扣后给，NPC 订单无需等待商队。
     const spend = await this.commands.send({

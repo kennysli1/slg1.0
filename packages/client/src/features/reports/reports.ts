@@ -62,7 +62,7 @@ export function notificationText(event: string, payload: any, ts?: number): stri
   } else if (event === 'TreasureDropped') {
     const d = payload.dropped || {};
     const rare = treasureRarityName(d.rarity) || d.rarity || '';
-    const where = payload.source === 'camp' ? '清理野营' : '贸易刷新';
+    const where = '清理野营';
     if (d.sold) {
       return `${time}💎 ${where}获得宝物「${d.name}」(${rare})，宝物栏已满自动售出 → +${fmt(d.gold)} 金币`;
     }

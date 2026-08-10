@@ -11,7 +11,7 @@ import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
 import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop, liveResource, markResFetched } from './state.js';
 import { renderLogin } from '../features/login/login.js';
-import { renderVillage, bindVillage, refreshTrainingIfOpen } from '../features/village/village.js';
+import { renderVillage, bindVillage, refreshTrainingIfOpen, refreshTreasureDetailIfOpen } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
 import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js';
 import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
@@ -292,6 +292,7 @@ onPush((event, payload) => {
     // 雇佣兵营地抽屉打开时，由营地模块自行刷新（避免整页刷新关掉抽屉）
     if (event === 'MercenaryCampUpdated') refreshMercCampIfOpen();
     else if (event === 'TradeCenterUpdated') refreshTradeIfOpen();
+    else if (event === 'TreasureChanged') { void refreshAll(); refreshTreasureDetailIfOpen(); }
     else void refreshAll();
   } else {
     // 人口变化频繁：不整页刷新（避免抢焦点）；训练抽屉打开时仅刷新其人口提示

@@ -59,13 +59,7 @@ function renderTreasurePanel(): string {
         const cat = treasureCategoryName(t.category ?? '');
         const rar = treasureRarityName(t.rarity ?? '');
         const effectTxt = treasureEffectText(info as any);
-        const isInstant = (t.applyType ?? '') === 'instant';
-        const useBtn = isInstant
-          ? `<button class="btn-sm treasure-use" data-use-treasure="${escapeAttr(t.code)}">使用</button>`
-          : '';
-        const sellBtn = `<button class="btn-sm treasure-sell" data-sell-treasure="${escapeAttr(t.code)}">出售</button>`;
-        const discardBtn = `<button class="btn-sm treasure-discard" data-discard-treasure="${escapeAttr(t.code)}">丢弃</button>`;
-        return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
+        return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}" data-open-treasure="${escapeAttr(t.code)}" title="点击前往宝库管理">
           ${art(t.icon, t.name, 'md')}
           <div class="treasure-body">
             <div class="treasure-title">${escapeHtml(t.name)}
@@ -73,13 +67,10 @@ function renderTreasurePanel(): string {
               <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
             </div>
             <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
-            <div class="treasure-actions">
-              ${useBtn}${sellBtn}${discardBtn}
-            </div>
           </div>
         </div>`;
       }).join('')
-    : `<div class="treasure-empty">暂无宝物。清理野外营地、贸易中心刷新或击败敌军有几率获得；亦可向 NPC 购买（宝库建筑建成后槽位随等级增加）。</div>`;
+    : `<div class="treasure-empty">暂无宝物。清理野营、击败敌军或在贸易中心向 NPC 购买（宝库建筑建成后槽位随等级增加）。</div>`;
 
   // 聚合效果摘要（服务端已按 (1+Σ) 算好的乘数；resMult 为加性分数）
   const chips: string[] = [];
@@ -99,9 +90,13 @@ function renderTreasurePanel(): string {
     ? `<div class="treasure-summary"><span class="treasure-summary-label">本村加成</span>${chips.join('')}</div>`
     : `<div class="treasure-summary treasure-summary--none"><span class="treasure-summary-label">本村加成</span><span class="eff-chip eff-chip--none">暂无加成</span></div>`;
 
+  const hint = list.length
+    ? `<div class="treasure-jump-hint">点击宝物卡片前往「宝库」管理（使用 / 出售 / 丢弃）</div>`
+    : '';
   return `<h3>宝物栏 <small>（${codes.length}/${slots}）</small></h3>
     <div class="treasure-panel">
       <div class="treasure-grid">${cards}</div>
+      ${hint}
       ${summary}
     </div>`;
 }
@@ -411,6 +406,14 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
        </div>`
     : '';
 
+  // 宝物管理区：仅「宝库」与「城镇中心（基础栏）」两类承载宝物存储，详情页内提供使用/出售/丢弃
+  const showTreasureMgmt = kind === 'treasury' || kind === 'main';
+  currentTreasureDrawerKind = showTreasureMgmt ? (kind as 'treasury' | 'main') : null;
+  const treasureSecHtml = showTreasureMgmt
+    ? `<div class="drawer-sec-title">宝物管理 <small>（${kind === 'main' ? '城镇中心基础栏' : '宝库存储'} · 点击按钮使用/出售/丢弃）</small></div>
+       <div id="bld-treasure-sec" class="bld-treasure-sec"><div class="loading">加载中…</div></div>`
+    : '';
+
   const wrap = document.createElement('div');
   wrap.id = 'building-detail-modal';
   wrap.innerHTML = `
@@ -430,6 +433,7 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
         ${providesSec}
         ${prodSec}
         ${popCapSec}
+        ${treasureSecHtml}
         ${demoProgress}
         ${costSec}
         ${demolishArea}
@@ -465,15 +469,147 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx, slotId?: string): v
   }
 
   if (isTrainer && !ctx.demolishing && slotId) void renderBuildingTrainSection(slotId);
+
+  if (showTreasureMgmt) {
+    const sec = wrap.querySelector<HTMLElement>('#bld-treasure-sec');
+    if (sec) void populateTreasureSection(sec);
+  }
 }
 
 /** 当前打开的军事建筑训练 slotId（供全局 push 触发刷新）。 */
 let currentTrainSlotId: string | null = null;
+/** 当前打开的「宝物管理」建筑详情种类（'treasury' / 'main'），供全局 push 触发刷新。 */
+let currentTreasureDrawerKind: 'treasury' | 'main' | null = null;
 
 function closeBuildingDetail(): void {
   document.getElementById('building-detail-modal')?.remove();
   currentTrainSlotId = null;
+  currentTreasureDrawerKind = null;
 }
+
+/**
+ * 把聚合后的宝物效果转成 chip 串（与村庄页宝物栏摘要一致）。
+ * eff 来自 ListTreasures 的 effect 字段（resMult 加性分数，其余为乘数）。
+ */
+function treasureEffectChips(eff: any): string {
+  if (!eff) return '';
+  const chips: string[] = [];
+  const resMult: Record<string, number> = eff.resMult ?? {};
+  for (const k of ['wood', 'clay', 'iron', 'crop']) {
+    if ((resMult[k] ?? 0) !== 0) chips.push(`<span class="eff-chip">${resInfo(k).name} ${fmt((resMult[k] * 100))}%</span>`);
+  }
+  const goldMult: number = eff.goldMult ?? 1;
+  if (goldMult !== 1) chips.push(`<span class="eff-chip">金币 ${fmt((goldMult - 1) * 100)}%</span>`);
+  const atkMult: number = eff.atkMult ?? 1;
+  if (atkMult !== 1) chips.push(`<span class="eff-chip">全军攻击 ${fmt((atkMult - 1) * 100)}%</span>`);
+  const defMult: number = eff.defMult ?? 1;
+  if (defMult !== 1) chips.push(`<span class="eff-chip">全军防御 ${fmt((defMult - 1) * 100)}%</span>`);
+  const popMult: number = eff.popGrowthMult ?? 1;
+  if (popMult !== 1) chips.push(`<span class="eff-chip">人口增长 ${fmt((popMult - 1) * 100)}%</span>`);
+  return chips.join('');
+}
+
+/**
+ * 点击主界面宝物卡片 → 跳转至「储存宝物的建筑」详情页（宝库优先；未建则退回城镇中心）。
+ * 宝物的使用/出售/丢弃交互全部在该建筑详情页内进行。
+ */
+function openTreasureBuilding(): void {
+  const vil = getCache().vil;
+  if (!vil) { showToast('村庄数据未就绪'); return; }
+  const placed = [...(vil.zones?.inner?.placed || []), ...(vil.zones?.outer?.placed || [])];
+  const tre = placed.find((p: any) => p.kind === 'treasury');
+  if (tre) { openBuilding(tre.slotId); return; }
+  if (vil.townCenter) { openBuilding(vil.townCenter.slotId); return; }
+  showToast('尚未建造宝库，宝物暂存于城镇中心');
+}
+
+/** 渲染「宝物管理」区内部 HTML（卡 + 聚合加成摘要）。 */
+function renderTreasureSectionInner(data: any): string {
+  const list: any[] = data.treasures ?? [];
+  const codes: string[] = data.codes ?? [];
+  const slots: number = data.slots ?? 1;
+  const eff = data.effect ?? {};
+  if (!list.length) {
+    return `<div class="hint-sm">宝物栏为空（${codes.length}/${slots}）。清理野营、击败敌军或在贸易中心向 NPC 购买可获得宝物。</div>`;
+  }
+  const cards = list.map((t: any) => {
+    const info = treasureInfo(t.code) ?? t;
+    const cat = treasureCategoryName(t.category ?? '');
+    const rar = treasureRarityName(t.rarity ?? '');
+    const effectTxt = treasureEffectText(info as any);
+    const isInstant = (t.applyType ?? '') === 'instant';
+    const useBtn = isInstant
+      ? `<button class="btn-sm treasure-use" data-bld-use-treasure="${escapeAttr(t.code)}">使用</button>`
+      : '';
+    const sellBtn = `<button class="btn-sm treasure-sell" data-bld-sell-treasure="${escapeAttr(t.code)}">出售</button>`;
+    const discardBtn = `<button class="btn-sm treasure-discard" data-bld-discard-treasure="${escapeAttr(t.code)}">丢弃</button>`;
+    return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
+      ${art(t.icon, t.name, 'md')}
+      <div class="treasure-body">
+        <div class="treasure-title">${escapeHtml(t.name)}
+          <small class="treasure-cat cat-${escapeAttr(t.category ?? '')}">${escapeHtml(cat)}</small>
+          <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
+        </div>
+        <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
+        <div class="treasure-actions">${useBtn}${sellBtn}${discardBtn}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const chips = treasureEffectChips(eff);
+  const summary = chips
+    ? `<div class="treasure-summary"><span class="treasure-summary-label">本村加成</span>${chips}</div>`
+    : `<div class="treasure-summary treasure-summary--none"><span class="treasure-summary-label">本村加成</span><span class="eff-chip eff-chip--none">暂无加成</span></div>`;
+  return `<div class="treasure-panel">
+    <div class="treasure-grid">${cards}</div>
+    ${summary}
+  </div>`;
+}
+
+/** 拉取最新宝物数据并填充「宝物管理」容器（独立请求，确保抽屉内即时刷新）。 */
+async function populateTreasureSection(sec: HTMLElement): Promise<void> {
+  const res = await req('ListTreasures');
+  if (!res.ok) { sec.innerHTML = `<div class="hint-sm">宝物加载失败：${escapeHtml(res.error?.code ?? '未知')}</div>`; return; }
+  sec.innerHTML = renderTreasureSectionInner(res.payload as any);
+  bindTreasureSectionButtons(sec);
+}
+
+/** 绑定「宝物管理」区内的使用/出售/丢弃按钮（走全局 actFn，成功经 push 重新拉取）。 */
+function bindTreasureSectionButtons(sec: HTMLElement): void {
+  sec.querySelectorAll<HTMLButtonElement>('[data-bld-use-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.bldUseTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('UseTreasure', { code }), (payload) => {
+        const gold = (payload as any)?.gold ?? info?.effectValue ?? 0;
+        showToast(`已使用「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
+      });
+    });
+  sec.querySelectorAll<HTMLButtonElement>('[data-bld-sell-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.bldSellTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('SellTreasure', { code }), (payload) => {
+        const gold = (payload as any)?.gold ?? 0;
+        showToast(`已出售「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
+      });
+    });
+  sec.querySelectorAll<HTMLButtonElement>('[data-bld-discard-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.bldDiscardTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('DiscardTreasure', { code }), () => {
+        showToast(`已丢弃「${info?.name ?? code}」`);
+      });
+    });
+}
+
+/** 由全局 push（TreasureChanged）触发：宝物管理抽屉打开时刷新内容。 */
+export function refreshTreasureDetailIfOpen(): void {
+  if (!currentTreasureDrawerKind) return;
+  const sec = document.getElementById('bld-treasure-sec');
+  if (sec) void populateTreasureSection(sec);
+}
+
 
 // Esc 关闭建筑详情（装一次即可，全程有效）
 if (typeof document !== 'undefined') {
@@ -719,37 +855,9 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   document.querySelectorAll<HTMLElement>('[data-close-drawer]').forEach((el) =>
     el.onclick = () => { drawer = null; rerenderPage(); });
 
-  // 宝物「使用」：即时类宝物(instantGold)发放金币并移除（被动宝物不可用，服务端返回 not_usable）
-  document.querySelectorAll<HTMLButtonElement>('[data-use-treasure]').forEach((b) =>
-    b.onclick = () => {
-      const code = b.dataset.useTreasure!;
-      const info = treasureInfo(code);
-      if (actFn) actFn(req('UseTreasure', { code }), (payload) => {
-        const gold = (payload as any)?.gold ?? info?.effectValue ?? 0;
-        showToast(`已使用「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
-      });
-    });
-
-  // 宝物「出售」：卖给 NPC 换金币(priceGold)并移除
-  document.querySelectorAll<HTMLButtonElement>('[data-sell-treasure]').forEach((b) =>
-    b.onclick = () => {
-      const code = b.dataset.sellTreasure!;
-      const info = treasureInfo(code);
-      if (actFn) actFn(req('SellTreasure', { code }), (payload) => {
-        const gold = (payload as any)?.gold ?? 0;
-        showToast(`已出售「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
-      });
-    });
-
-  // 宝物「丢弃」：直接移除（不给金币），用于腾出格子
-  document.querySelectorAll<HTMLButtonElement>('[data-discard-treasure]').forEach((b) =>
-    b.onclick = () => {
-      const code = b.dataset.discardTreasure!;
-      const info = treasureInfo(code);
-      if (actFn) actFn(req('DiscardTreasure', { code }), () => {
-        showToast(`已丢弃「${info?.name ?? code}」`);
-      });
-    });
+  // 主界面宝物卡片：点击 → 跳转至「储存宝物的建筑」详情页（宝库优先，未建则城镇中心）进行使用/出售/丢弃
+  document.querySelectorAll<HTMLElement>('[data-open-treasure]').forEach((el) =>
+    el.onclick = () => openTreasureBuilding());
 }
 
 /** 抽屉开合只影响村庄页局部，重渲染 #page 即可（不触发全量 refresh）。 */

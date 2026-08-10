@@ -521,6 +521,10 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .treasure-sell:hover { background: linear-gradient(180deg, #ffd468, #eab544); }
 .treasure-discard { align-self: flex-start; background: var(--c-surface); border-color: var(--c-line); color: var(--c-ink-soft); }
 .treasure-discard:hover { color: var(--c-danger, #c0392b); border-color: var(--c-danger, #c0392b); }
+/* 主界面宝物卡片可点击跳转至「宝库」管理 */
+.treasure-card[data-open-treasure] { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
+.treasure-card[data-open-treasure]:hover { transform: translateY(-1px); box-shadow: var(--sh-2, 0 2px 8px rgba(0,0,0,.08)); border-left-color: var(--c-brand); }
+.treasure-jump-hint { font-size: var(--f-xs); color: var(--c-ink-soft); margin: -2px 0 var(--s-1); }
 .treasure-empty {
   font-size: var(--f-sm); color: var(--c-ink-soft); background: var(--c-surface-2);
   border: 1px dashed var(--c-line); border-radius: var(--r-sm); padding: var(--s-3);
