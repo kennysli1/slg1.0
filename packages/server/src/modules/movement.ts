@@ -1092,13 +1092,13 @@ export class MovementModule {
       return; // 全灭无返程
     }
     const returnId = this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures, p.movementId);
-    // 精化 camp pending 的预计归村时间为返程 movement 的真实 arrivesAt（覆盖 rollDrop 的 60s 占位），
+    // 精化 camp pending 的预计归村时间为返程 movement 的真实 arriveAt（覆盖 rollDrop 的 60s 占位），
     // 让客户端「还有多久抵达」倒计时精确。pending 按出征 id 索引，故用 p.movementId（非 returnId）。
     const returnMv = returnId ? this.load(returnId) : undefined;
-    if (returnMv && typeof returnMv.arrivesAt === 'number') {
+    if (returnMv && typeof returnMv.arriveAt === 'number') {
       void this.commands.send({
         name: 'treasure.SetExpectedArrival', from: MovementModule.NAME,
-        payload: { movementId: p.movementId, expectedArrivalAt: returnMv.arrivesAt },
+        payload: { movementId: p.movementId, expectedArrivalAt: returnMv.arriveAt },
       });
     }
   }
