@@ -19,6 +19,7 @@ import { MetaModule } from './modules/meta.js';
 import { NotificationsModule } from './modules/notifications.js';
 import { MercenaryModule } from './modules/mercenary.js';
 import { TradeModule } from './modules/trade.js';
+import { TreasureModule } from './modules/treasures.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -44,6 +45,7 @@ const PROGRESS_COLLECTIONS = [
   'notifications',
   'merc',
   'trade',
+  'treasure',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -83,6 +85,7 @@ export interface GameApp {
   notifications: NotificationsModule;
   mercenary: MercenaryModule;
   trade: TradeModule;
+  treasure: TreasureModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -157,6 +160,7 @@ export function createGameApp(opts?: {
       military.createVillage(villageId, tribe);
       // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
       await population.createVillage(villageId, tribe);
+      treasure.createVillage(villageId);
       const placeRes = await commands.send({
         name: 'world.PlaceVillage', from: 'app',
         payload: { q, r, refId: villageId, name },
@@ -168,6 +172,7 @@ export function createGameApp(opts?: {
       store.delete('building', villageId);
       store.delete('military', villageId);
       store.delete('population', villageId);
+      store.delete('treasure', villageId);
       throw err;
     }
   };
@@ -176,6 +181,7 @@ export function createGameApp(opts?: {
   const notifications = new NotificationsModule(store, bus, commands, now, config);
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
+  const treasure = new TreasureModule(store, bus, commands, scheduler, now, config);
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {
@@ -198,7 +204,7 @@ export function createGameApp(opts?: {
         Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
       if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
     }
-    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade'] as const) {
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure'] as const) {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
@@ -233,10 +239,11 @@ export function createGameApp(opts?: {
   notifications.init();
   mercenary.init();
   trade.init();
+  treasure.init();
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, now,
+    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },
@@ -254,6 +261,7 @@ export function createGameApp(opts?: {
       pve.resume();
       mercenary.resume();
       trade.resume();
+      treasure.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
@@ -272,12 +280,14 @@ export function createGameApp(opts?: {
       notifications.setConfig(newConfig);
       mercenary.setConfig(newConfig);
       trade.setConfig(newConfig);
+      treasure.setConfig(newConfig);
       this.config = newConfig;
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {
         try {
           building.reReportProduction(b.villageId);
           void population.refreshHardCap(b.villageId);
+          void treasure.recomputeAndPush(b.villageId);
         } catch (err) {
           console.warn('[reloadConfig] 村庄 ' + b.villageId + ' 重报派生值失败:', err);
         }
@@ -350,7 +360,7 @@ export function createGameApp(opts?: {
       store.delete('player_byname', name);
       for (const villageId of villageIds) store.delete('player_byvillage', villageId);
 
-      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade'] as const;
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure'] as const;
       for (const villageId of villageIds) {
         for (const c of progressByVillage) store.delete(c, villageId);
       }

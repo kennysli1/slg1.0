@@ -45,6 +45,9 @@ interface MilitaryState {
   trainingBySlot: Record<string, TrainOrder>;
   /** 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。 */
   pendingSmithy?: { unit: string; taskId: string; doneAt: number };
+  /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
+  treasureAtkMult?: number;
+  treasureDefMult?: number;
 }
 
 const COLLECTION = 'military';
@@ -93,6 +96,17 @@ export class MilitaryModule {
     this.config = config;
   }
 
+  /** 宝物军事倍率（由 treasure 模块推送，无环）：攻/防分别作用。 */
+  private setTreasureCombatMult(cmd: Command): CommandResult {
+    const { villageId, atkMult, defMult } = cmd.payload as { villageId: string; atkMult: number; defMult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.treasureAtkMult = atkMult > 0 ? atkMult : 1;
+    s.treasureDefMult = defMult > 0 ? defMult : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { atkMult: s.treasureAtkMult, defMult: s.treasureDefMult } };
+  }
+
   private units(): Record<string, UnitDef> {
     return this.config.units;
   }
@@ -108,6 +122,8 @@ export class MilitaryModule {
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
     this.commands.register('military.AddMercenaries', (c) => this.addMercenaries(c));
+    // 宝物军事倍率（攻/防分别作用），由 treasure 模块推送，无环。
+    this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -129,6 +145,9 @@ export class MilitaryModule {
     this.reportGarrisonPop(s);
 
     s.trainingBySlot = s.trainingBySlot || {};
+    // 宝物军事倍率迁移默认值（旧存档缺省置 1，无倍率）。
+    if (s.treasureAtkMult === undefined) s.treasureAtkMult = 1;
+    if (s.treasureDefMult === undefined) s.treasureDefMult = 1;
     // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
     const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
       if (!order) return;
@@ -264,16 +283,16 @@ export class MilitaryModule {
     this.reportGarrisonPop(s); // 同步更新士兵池口粮（不返还人口）
   }
 
-  /** 派生管线：最终数值 = 基础 × (1 + 铁匠等级×每级加成)。对外只暴露这个结果（含形态/特性）。 */
-  private finalStats(unit: string, smithyLv: number) {
+  /** 派生管线：最终数值 = 基础 × (1 + 铁匠等级×每级加成) × 宝物军事倍率。对外只暴露这个结果（含形态/特性）。 */
+  private finalStats(unit: string, smithyLv: number, atkMult = 1, defMult = 1) {
     const def = this.config.units[unit];
     const bonus = 1 + smithyLv * this.config.constants.smithyBonusPerLevel; // 每级加成来自 config
     return {
       form: def.form,
-      meleeAtk: def.meleeAtk * bonus,
-      rangedAtk: def.rangedAtk * bonus,
-      meleeDef: def.meleeDef * bonus,
-      rangedDef: def.rangedDef * bonus,
+      meleeAtk: def.meleeAtk * bonus * atkMult,
+      rangedAtk: def.rangedAtk * bonus * atkMult,
+      meleeDef: def.meleeDef * bonus * defMult,
+      rangedDef: def.rangedDef * bonus * defMult,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
@@ -350,7 +369,7 @@ export class MilitaryModule {
     // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
-      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
+      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
       const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
       const unlocked = haveLv >= 1;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
@@ -374,7 +393,7 @@ export class MilitaryModule {
         const trainableHere = tribeUnits
           .filter((u) => u.building === sl.kind)
           .map((u) => {
-            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0);
+            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
             const unlocked = sl.level >= 1;
             return {
               key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
@@ -662,7 +681,7 @@ export class MilitaryModule {
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
       if (!this.config.units[unit] || n <= 0) continue;
-      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0);
+      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
       snapshot[unit] = { count: n, ...stats };
     }
     return { ok: true, payload: { snapshot } };

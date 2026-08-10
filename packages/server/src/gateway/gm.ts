@@ -11,6 +11,8 @@
  *   DELETE /gm/:collection                清空整个集合（危险，需 ?confirm=yes）
  *   POST   /gm/ops/reset                  刷档（body: {mode:"season"|"respawn"|"wipe"}，需 ?confirm=yes）
  *   DELETE /gm/ops/player/:playerId       删除单个玩家账号及所有进度（需 ?confirm=yes）
+ *   POST   /gm/ops/grant-treasure         GM 测试：授予村庄某宝物并推送效果（body: {villageId, code}）
+ *   POST   /gm/ops/use-treasure           GM 测试：使用村庄某特殊宝物（即时发金币，body: {villageId, code}）
  *
  * 安全：GM_TOKEN=<secret> 时所有请求需带 X-GM-Token header（面板自动处理）。
  */
@@ -675,6 +677,40 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     store.flush();
     void reply.send({ ok: true, playerId, villageId: result.villageId });
+  });
+
+  // POST /gm/ops/grant-treasure — GM 测试：授予村庄某宝物并推送效果（body: {villageId, code}）
+  fastify.post('/gm/ops/grant-treasure', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { villageId, code } = (req.body ?? {}) as { villageId?: string; code?: string };
+    if (!villageId || !code) {
+      void reply.code(400).send({ ok: false, reason: 'villageId 与 code 必填' });
+      return;
+    }
+    const res: any = await gameApp.commands.send({ name: 'treasure.Grant', from: 'gm', payload: { villageId, code } });
+    if (!res.ok) {
+      void reply.code(400).send({ ok: false, reason: res.reason ?? 'grant_failed', payload: res.payload });
+      return;
+    }
+    store.flush();
+    void reply.send(res);
+  });
+
+  // POST /gm/ops/use-treasure — GM 测试：使用村庄某特殊宝物（即时发放金币并移除，body: {villageId, code}）
+  fastify.post('/gm/ops/use-treasure', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { villageId, code } = (req.body ?? {}) as { villageId?: string; code?: string };
+    if (!villageId || !code) {
+      void reply.code(400).send({ ok: false, reason: 'villageId 与 code 必填' });
+      return;
+    }
+    const res: any = await gameApp.commands.send({ name: 'treasure.Use', from: 'gm', payload: { villageId, code } });
+    if (!res.ok) {
+      void reply.code(400).send({ ok: false, reason: res.reason ?? 'use_failed', payload: res.payload });
+      return;
+    }
+    store.flush();
+    void reply.send(res);
   });
 
   // GET /gm/balance — 平衡调参 Web 面板

@@ -48,6 +48,10 @@ interface PopulationState {
   starveTaskId?: string;
   /** 是否处于饥荒（用于快照/事件展示）。 */
   inFamine?: boolean;
+  /** 宝物人口增长倍率（乘数，默认 1；由 treasure 模块推送，无环）。 */
+  treasureGrowthMult?: number;
+  /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
+  treasureGoldMult?: number;
   lastTick: number;
 }
 
@@ -96,6 +100,8 @@ export class PopulationModule {
     this.commands.register('population.ReleaseTrainingPop', (c) => this.releaseTrainingPop(c));
     this.commands.register('population.SetGarrisonPop', (c) => this.setGarrisonPop(c));
     this.commands.register('population.SetEnRoutePop', (c) => this.setEnRoutePop(c));
+    // 宝物模块推送的人口增长倍率（乘数），无环（treasure 只发命令，不回查）
+    this.commands.register('population.SetTreasureGrowthMult', (c) => this.setTreasureGrowthMult(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -126,6 +132,8 @@ export class PopulationModule {
       if (s.enRoutePopCost === undefined) s.enRoutePopCost = 0;
       if (s.trainingPopCost === undefined) s.trainingPopCost = 0;
       if (s.inFamine === undefined) s.inFamine = false;
+      if (s.treasureGrowthMult === undefined) s.treasureGrowthMult = 1;
+      if (s.treasureGoldMult === undefined) s.treasureGoldMult = 1;
       if (s.tribe === undefined) s.tribe = 'romans';
       if (s.mainLevel === undefined) s.mainLevel = 1;
       if (s.hardCap === undefined) s.hardCap = 0;
@@ -284,9 +292,10 @@ export class PopulationModule {
     return c.popLaborFloor + (1 - c.popLaborFloor) * this.prosperityBonus(s);
   }
 
-  /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。 */
+  /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。再乘宝物人口增长倍率。 */
   private growthRateRaw(s: PopulationState): number {
-    return (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
+    const base = (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
+    return base * (s.treasureGrowthMult ?? 1);
   }
 
   /** 每小时实际增长量（已 clamp 到 popCeiling 缺口）。粮荒期间不增长（否则会与减员相互抵消）。 */
@@ -344,7 +353,7 @@ export class PopulationModule {
 
     // 交税：仅劳动人口(currentPop)按税率交金币，绑定城镇中心、不受繁荣度影响。
     // 单向 Grant 到 economy（不读回，无环）；与资源惰性结算同节奏，按 Δt 累加。
-    const goldGained = s.currentPop * c.goldTaxPerCivilianPerHour * dtHours;
+    const goldGained = s.currentPop * c.goldTaxPerCivilianPerHour * dtHours * (s.treasureGoldMult ?? 1);
     if (goldGained > 0) {
       await this.commands.send({
         name: 'economy.Grant', from: PopulationModule.NAME,
@@ -401,7 +410,7 @@ export class PopulationModule {
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,
       /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
-      goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour),
+      goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour * (s.treasureGoldMult ?? 1)),
     };
   }
 
@@ -724,6 +733,17 @@ export class PopulationModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.enRoutePopCost = Math.max(0, popCostSum);
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /** 宝物模块推送的人口增长/金币税倍率（乘数，默认 1）。增长速率(growthRateRaw)/金币税实时读取，无需重算。 */
+  private async setTreasureGrowthMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult, goldMult } = cmd.payload as { villageId: string; mult: number; goldMult?: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.treasureGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
+    if (goldMult !== undefined) s.treasureGoldMult = Number.isFinite(goldMult) && goldMult > 0 ? goldMult : 1;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }

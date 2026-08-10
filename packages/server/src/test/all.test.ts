@@ -38,4 +38,5 @@ import './found-village.test.js';
 import './transport-abandon.test.js';
 import './balance-roundtrip.test.js';
 import './balance-override.test.js';
+import './treasure.test.js';
 
