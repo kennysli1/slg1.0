@@ -123,6 +123,10 @@ test('宝物掉落：门控命中(forceCode) → 生成待领取记录（不直�
   assert.deepEqual(list.codes, [], '确认前不应入栏');
   assert.equal(list.pending.length, 1, '应有 1 条待领取');
   assert.equal(list.pending[0].code, 'chainsaw', '待领取 code 应为 chainsaw');
+  // 模拟军队归村（标记 pending 已到达），方可领取
+  const pend1 = app.store.get<any>('treasure_pending', 'mv-1');
+  pend1.arrivedAt = 1_000_001;
+  app.store.set('treasure_pending', 'mv-1', pend1);
   // 确认领取 → 入栏
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-1' });
   assert.equal(claim.ok, true, '确认应成功');
@@ -141,6 +145,10 @@ test('宝物掉落：栏满时确认 → 自动售卖换金', async () => {
   const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-2', forceCode: 'chainsaw' });
   assert.equal(drop.ok, true);
   assert.ok(drop.payload.dropped, '应掉落（待领取）');
+  // 模拟军队归村（标记 pending 已到达），方可领取
+  const pend2 = app.store.get<any>('treasure_pending', 'mv-2');
+  pend2.arrivedAt = 1_000_001;
+  app.store.set('treasure_pending', 'mv-2', pend2);
   // 确认领取 → 栏满 → 自动售卖（chainsaw 售价 60 金币）
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-2' });
   assert.equal(claim.ok, true, '确认应成功');
@@ -193,6 +201,38 @@ test('待领取：过期后确认 → pending_expired 且记录已清除', async
   assert.equal(claim.ok, false, '应失败');
   assert.equal(claim.reason, 'pending_expired', '应返回 pending_expired');
   assert.equal(app.store.get('treasure_pending', 'mv-exp'), undefined, '过期记录应被清除');
+});
+
+test('待领取：军队未归村时确认 → army_not_returned（Bug3 回归）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-noret', forceCode: 'chainsaw' });
+  // 未标记 arrivedAt（军队尚未归村），直接确认应被拒绝
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-noret' });
+  assert.equal(claim.ok, false, '应失败');
+  assert.equal(claim.reason, 'army_not_returned', '应返回 army_not_returned');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(list.pending.length, 1, '待领取记录应仍存在（未误删）');
+  // 标记归村后再次确认应成功
+  const pend = app.store.get<any>('treasure_pending', 'mv-noret');
+  pend.arrivedAt = 1_000_001;
+  app.store.set('treasure_pending', 'mv-noret', pend);
+  const claim2 = await send(app, 'treasure.ClaimPending', { movementId: 'mv-noret' });
+  assert.equal(claim2.ok, true, '归村后确认应成功');
+});
+
+test('待领取：MarkPendingArrived 仅对 camp 生效且幂等', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-arr', forceCode: 'chainsaw' });
+  const r1 = await send(app, 'treasure.MarkPendingArrived', { movementId: 'mv-arr' });
+  assert.equal(r1.ok, true, '应成功');
+  assert.equal(r1.payload.marked, true, '首次标记应 marked=true');
+  const p1 = app.store.get<any>('treasure_pending', 'mv-arr');
+  assert.ok(p1.arrivedAt, 'arrivedAt 应被设置');
+  const r2 = await send(app, 'treasure.MarkPendingArrived', { movementId: 'mv-arr' });
+  assert.equal(r2.payload.marked, false, '重复标记应 marked=false');
+  const r3 = await send(app, 'treasure.MarkPendingArrived', { movementId: 'mv-missing' });
+  assert.equal(r3.ok, true, '不存在的 movementId 也应 ok');
+  assert.equal(r3.payload.marked, false, '不存在应 marked=false');
 });
 
 test('待领取：超时由调度器自动遗弃（真实时钟推进）', async () => {

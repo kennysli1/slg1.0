@@ -1122,6 +1122,11 @@ export class MovementModule {
         payload: { movementId: mv.id, villageId: mv.fromVillage },
       });
     }
+    // 标记本军队对应的 camp 掉落 pending 为已到达（无论是否有携带宝物都要发——清营掉落的 pending 单独存在）
+    await this.commands.send({
+      name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,
+      payload: { movementId: mv.id },
+    });
     this.store.delete(COLLECTION, id);
     // v2：通知 population 在途兵力减少（返程到家）
     this.updateEnRoutePop(mv.fromVillage);

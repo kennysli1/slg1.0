@@ -523,14 +523,19 @@ function openTreasureBuilding(): void {
   showToast('尚未建造宝库，宝物暂存于城镇中心');
 }
 
-/** 渲染「宝物管理」区内部 HTML（卡 + 聚合加成摘要）。 */
+/** 渲染「宝物管理」区内部 HTML（卡 + 聚合加成摘要）。按当前抽屉类型过滤：城镇中心只显示 town，宝库只显示 treasury。 */
 function renderTreasureSectionInner(data: any): string {
-  const list: any[] = data.treasures ?? [];
-  const codes: string[] = data.codes ?? [];
   const slots: number = data.slots ?? 1;
   const eff = data.effect ?? {};
+  const kind = currentTreasureDrawerKind;
+  const locCodes: string[] = kind === 'treasury'
+    ? (data.treasury ?? [])
+    : (data.town ?? []);
+  const list: any[] = (data.treasures ?? []).filter((t: any) => locCodes.includes(t.code));
+  const totalCodes: number = data.codes?.length ?? 0;
   if (!list.length) {
-    return `<div class="hint-sm">宝物栏为空（${codes.length}/${slots}）。清理野营、击败敌军或在贸易中心向 NPC 购买可获得宝物。</div>`;
+    const locLabel = kind === 'treasury' ? '宝库' : '城镇中心';
+    return `<div class="hint-sm">${locLabel}为空（${totalCodes}/${slots}）。清理野营、击败敌军或在贸易中心向 NPC 购买可获得宝物。</div>`;
   }
   const cards = list.map((t: any) => {
     const info = treasureInfo(t.code) ?? t;

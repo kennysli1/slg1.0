@@ -61,6 +61,12 @@ const ERR_MSG: Record<string, string> = {
   cannot_abandon_capital: '不能放弃主城',
   abandon_locked: '新建分城冷却中，暂不可放弃',
   village_not_owned: '不是你的村庄',
+  // 宝物相关
+  army_not_returned: '军队尚未归村，无法领取',
+  carry_cap_exceeded: '携带宝物超出兵力上限',
+  pending_not_found: '该战报已不存在或已被处理',
+  pending_expired: '该战报已超时遗弃',
+  no_room: '宝物栏已满，无法替换入栏',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */

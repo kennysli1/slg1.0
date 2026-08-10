@@ -2,7 +2,7 @@
 import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { secStr, fmt } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
-import { worldW, worldH, pveInfoByType, treasureInfo, treasureRarityName, treasureCarryCap } from '../../app/config.js';
+import { worldW, worldH, pveInfoByType, treasureInfo, treasureRarityName, treasureCarryCap, treasureCarryTroopsPerSlot } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
@@ -445,6 +445,10 @@ function collectTreasures(): string[] {
   const cap = treasureCarryCap(total);
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.carry-check:checked')).map((c) => c.value);
   if (!checked.length) return [];
+  if (cap === 0) {
+    addReport(`携带宝物至少需要 ${treasureCarryTroopsPerSlot()} 兵力（当前 ${total}），请增加兵力或取消勾选`);
+    return [];
+  }
   if (checked.length > cap) {
     addReport(`携带宝物超出上限（上限 ${cap} 格），仅携带前 ${cap} 个`);
     return checked.slice(0, cap);

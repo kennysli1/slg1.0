@@ -77,6 +77,8 @@ interface PendingTreasure {
   kind: 'camp' | 'deliver';
   createdAt: number;
   expiresAt: number;
+  /** 军队到家时间戳（仅 kind='camp' 有效；deliver 在创建时已在场故无此字段）。claimPending 必须等军队归村后才允许领取 camp 掉落。 */
+  arrivedAt?: number;
 }
 
 /** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
@@ -93,6 +95,8 @@ interface PendingTreasureView {
   priceGold: number;
   kind: 'camp' | 'deliver';
   expiresAt: number;
+  /** 军队到家时间戳（kind='camp' 才有，deliver 创建时已在场故为 undefined）。客户端据此前端显示「军队未归」不可领取。 */
+  arrivedAt?: number;
 }
 
 /**
@@ -182,6 +186,8 @@ export class TreasureModule {
     this.commands.register('treasure.OffloadForeign', (c) => this.offloadForeign(c));
     // 携带宝物的军队被全歼：pve 回收系统池 / pvp 转交防守方
     this.commands.register('treasure.LoseCarried', (c) => this.loseCarried(c));
+    // 军队到家：标记本军队对应的 camp 掉落 pending 为已到达（仅标记，不删记录；claimPending 据此放行）
+    this.commands.register('treasure.MarkPendingArrived', (c) => this.markPendingArrived(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
   }
@@ -562,6 +568,8 @@ export class TreasureModule {
       movementId: string; mode: 'pve' | 'pvp'; defenderVillage?: string;
     };
     const codes = this.removeCarried(movementId) ?? [];
+    // 军队被全歼 → 该军队关联的 camp 掉落 pending 一并作废（宝物随军覆灭消失）
+    const lostPending = this.cancelPending(movementId);
     if (mode === 'pvp' && defenderVillage) {
       for (const code of codes) this.createDeliverPending(defenderVillage, code, undefined);
       if (codes.length > 0) {
@@ -572,7 +580,28 @@ export class TreasureModule {
       }
     }
     // pve：codes 已被 removeCarried 清除（等价回收到系统池），无需额外动作
-    return { ok: true, payload: { mode, codes } };
+    return { ok: true, payload: { mode, codes, lostPending } };
+  }
+
+  /** 军队到家：标记本军队对应的 camp 掉落 pending 为已到达（claimPending 据此放行）。 */
+  private async markPendingArrived(cmd: Command): Promise<CommandResult> {
+    const { movementId } = cmd.payload as { movementId: string };
+    const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
+    if (!p) return { ok: true, payload: { movementId, marked: false } };
+    if (p.kind !== 'camp') return { ok: true, payload: { movementId, marked: false } };
+    if (p.arrivedAt) return { ok: true, payload: { movementId, marked: false } };
+    p.arrivedAt = this.now();
+    this.store.set(COLLECTION_PENDING, movementId, p);
+    return { ok: true, payload: { movementId, marked: true } };
+  }
+
+  /** 取消指定 movementId 的 pending 记录（用于军队被全歼）；返回是否成功取消。 */
+  private cancelPending(movementId: string): boolean {
+    const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
+    if (!p) return false;
+    this.store.delete(COLLECTION_PENDING, movementId);
+    this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
+    return true;
   }
 
   /** 查询某支军队当前携带宝物的聚合效果（供 movement 叠加到出征快照）。 */
@@ -763,6 +792,10 @@ export class TreasureModule {
       this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
       return { ok: false, payload: {}, reason: 'pending_expired' };
     }
+    // camp 掉落必须等军队归村后才能领取（防止军队还在返程时直接收走宝物）
+    if (p.kind === 'camp' && !p.arrivedAt) {
+      return { ok: false, payload: {}, reason: 'army_not_returned' };
+    }
     if (p.kind === 'deliver' && !decision) {
       return { ok: false, payload: {}, reason: 'decision_required' };
     }
@@ -849,7 +882,7 @@ export class TreasureModule {
         movementId: p.movementId, code: p.code, name: p.name, icon: p.icon,
         category: p.category, rarity: p.rarity, effectType: p.effectType,
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
-        kind: p.kind, expiresAt: p.expiresAt,
+        kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
       }));
   }
 
