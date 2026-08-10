@@ -67,6 +67,13 @@ export class MetaModule {
         pveTemplates: Object.values(c.pveTemplates).map((p) => ({
           type: p.type, name: p.name, icon: p.icon,
         })),
+        // 宝物目录：供贸易中心 NPC 售卖 / 战报拾取 / 宝物栏 UI 展示
+        treasures: Object.values(c.treasures).map((t) => ({
+          code: t.code, name: t.name, icon: t.icon,
+          category: t.category, rarity: t.rarity,
+          effectType: t.effectType, effectValue: t.effectValue,
+          priceGold: t.priceGold, dropRate: t.dropRate, applyType: t.applyType,
+        })),
         // 仅下发前端需要的白名单常量（不泄漏平衡参数）
         constants: {
           mapViewRadius: c.constants.mapViewRadius,

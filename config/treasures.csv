@@ -1,0 +1,18 @@
+﻿id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,applyType
+#数字ID,代码(勿改),显示名,图标基名,类别(经济/军事/社会/特殊),稀有度(普通/稀有/史诗/传说),效果类型,效果数值(rate类=百分比加成, instantGold=金币数),NPC售价(金),掉落/出现概率(0-1),应用方式(持续/即时)
+1,chainsaw,电锯,trs_chainsaw,economic,common,woodRate,5,60,0.08,passive
+2,fine_axe,精工斧,trs_fineaxe,economic,rare,clayRate,10,180,0.04,passive
+3,harvest_totem,丰收图腾,trs_totem,economic,epic,allResRate,12,500,0.015,passive
+4,master_hammer,神匠之锤,trs_hammer,economic,legendary,allResRate,25,1500,0.005,passive
+5,war_flag,军旗,trs_warflag,military,common,atkMult,5,70,0.08,passive
+6,iron_wall_medal,铁壁勋章,trs_medal,military,rare,defMult,10,200,0.04,passive
+7,spear_of_ares,战神之矛,trs_spear,military,epic,atkMult,18,600,0.015,passive
+8,dragon_banner,巨龙战旗,trs_banner,military,legendary,atkMult,30,1800,0.005,passive
+9,holy_water,圣水,trs_holywater,social,common,popGrowth,5,50,0.08,passive
+10,elder_staff,族长权杖,trs_staff,social,rare,popGrowth,12,160,0.04,passive
+11,tree_of_life,生命之树,trs_tree,social,epic,popGrowth,22,480,0.015,passive
+12,blessing_of_gods,众神祝福,trs_blessing,social,legendary,popGrowth,40,1400,0.004,passive
+13,money_bag,钱袋子,trs_moneybag,special,common,instantGold,300,40,0.10,instant
+14,mystery_chest,神秘宝箱,trs_chest,special,rare,instantGold,900,150,0.05,instant
+15,philosophers_stone,贤者之石,trs_stone,special,epic,instantGold,2500,600,0.015,instant
+16,golden_idol,黄金神像,trs_idol,special,legendary,instantGold,8000,2000,0.004,instant

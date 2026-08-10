@@ -15,6 +15,12 @@ export interface BuildingInfo { name: string; icon: string; zone?: string; resou
 export interface UnitInfo { name: string; icon: string; form: string; popCost: number; upkeep?: number; isMercenary?: boolean }
 export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }
 export interface PveInfo { name?: string; icon: string }
+export interface TreasureInfo {
+  name: string; icon: string;
+  category: string; rarity: string;
+  effectType: string; effectValue: number;
+  priceGold: number; dropRate: number; applyType: string;
+}
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
@@ -23,6 +29,8 @@ interface ServerConfig {
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
+  /** 宝物目录（服务端下发）：code → 展示与数值信息。 */
+  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; priceGold: number; dropRate: number; applyType: string }[];
   constants: {
     mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
@@ -51,6 +59,7 @@ const buildings: Record<string, BuildingInfo> = {};
 const units: Record<string, UnitInfo> = {};
 const mercenaries: Record<string, MercenaryInfo> = {};
 const pve: Record<string, PveInfo> = {};
+const treasures: Record<string, TreasureInfo> = {};
 
 /** 拉取并缓存服务端配置。失败时静默回退到 info.ts 本地表。 */
 export async function loadGameConfig(): Promise<void> {
@@ -67,6 +76,7 @@ export async function loadGameConfig(): Promise<void> {
     for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1, upkeep: x.upkeep ?? 0, isMercenary: !!x.isMercenary };
     for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, form: x.form, meleeAtk: x.meleeAtk, rangedAtk: x.rangedAtk, meleeDef: x.meleeDef, rangedDef: x.rangedDef, speed: x.speed, carry: x.carry, goldCost: x.goldCost };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
+    for (const x of (cfg.treasures ?? [])) treasures[x.code] = x;
   } catch {
     /* 网络/协议异常 → 继续用 info.ts 回退 */
   }
@@ -122,6 +132,34 @@ export function mercenaryInfo(key: string): MercenaryInfo | undefined {
 /** PvE：服务端按 code 给名称/图标。地图 tile 只有 name 时按关键字猜测回退。 */
 export function pveInfoByType(type: string): PveInfo | undefined {
   return pve[type] ?? (fallback.PVE_INFO[type] ? { icon: fallback.PVE_INFO[type].icon } : undefined);
+}
+
+/** 宝物：服务端按 code 给展示与数值信息。 */
+export function treasureInfo(code: string): TreasureInfo | undefined {
+  return treasures[code];
+}
+/** 已知全部宝物 code（初始化后）。 */
+export function treasureCodes(): string[] {
+  return cfg ? Object.keys(treasures) : [];
+}
+/** 宝物类别 → 中文名。 */
+export function treasureCategoryName(category: string): string {
+  return ({ economic: '经济', military: '军事', social: '社会', special: '特殊' } as Record<string, string>)[category] ?? category;
+}
+/** 宝物稀有度 → 中文名。 */
+export function treasureRarityName(rarity: string): string {
+  return ({ common: '普通', rare: '稀有', epic: '史诗', legendary: '传说' } as Record<string, string>)[rarity] ?? rarity;
+}
+/** 宝物效果类型 → 中文描述（含数值，value 单位：rate 类为 %，instantGold 为金币）。 */
+export function treasureEffectText(info: TreasureInfo): string {
+  const v = info.effectValue;
+  const map: Record<string, string> = {
+    woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,
+    cropRate: `粮食产出 +${v}%`, goldRate: `金币产出 +${v}%`, allResRate: `全资源产出 +${v}%`,
+    atkMult: `全军攻击 +${v}%`, defMult: `全军防御 +${v}%`,
+    popGrowth: `人口增长 +${v}%`, instantGold: `立即获得 ${v} 金币`,
+  };
+  return map[info.effectType] ?? info.effectType;
 }
 /** 已知全部资源 key（服务端优先，回退木泥铁粮）。 */
 export function resourceKeys(): string[] {

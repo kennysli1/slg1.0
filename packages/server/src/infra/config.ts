@@ -173,6 +173,35 @@ export interface BuildingDef {
   effect: string;
 }
 
+/** 宝物目录（来自 treasures.csv）。宝物属于城镇，提供持续加成或即时效果，按稀有度分档。 */
+export interface TreasureDef {
+  /** 数字主键（CSV id 列，跨表引用用）。 */
+  id: number;
+  /** 英文代码（引擎内部与存档统一用它，勿改）。 */
+  code: string;
+  name: string;
+  icon: string; // 基名（前端拼 <美术根>/<基名>.png）
+  /** 类别：economic(经济)/military(军事)/social(社会)/special(特殊)。 */
+  category: string;
+  /** 稀有度：common(普通)/rare(稀有)/epic(史诗)/legendary(传说)，越稀有效果越强。 */
+  rarity: string;
+  /**
+   * 效果类型：
+   *  - woodRate/clayRate/ironRate/cropRate/goldRate/allResRate：资源产出倍率加成（value=百分比，如 5=+5%）
+   *  - atkMult/defMult：全军攻/防倍率加成（value=百分比）
+   *  - popGrowth：人口增速倍率加成（value=百分比）
+   *  - instantGold：获得时立即结算一次的金币数（value=数量）
+   */
+  effectType: string;
+  effectValue: number;
+  /** NPC 售卖价（金币）。 */
+  priceGold: number;
+  /** 掉落/出现概率（0-1）：清理野外营地、贸易中心刷新时按此概率出现。 */
+  dropRate: number;
+  /** 应用方式：passive(持续加成，储存在宝物栏)/instant(获得即结算一次，如钱袋子)。 */
+  applyType: string;
+}
+
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
 export interface TownCenterSlotTier {
   inner: number;
@@ -378,6 +407,8 @@ export interface GameConfig {
   pveSpawns: PveSpawn[];
   constants: GameConstants;
   villageTemplates: Record<string, VillageTemplate>;
+  /** 宝物目录（treasures.csv）：code → TreasureDef。 */
+  treasures: Record<string, TreasureDef>;
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -757,6 +788,34 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // 宝物目录（treasures.csv）：code → TreasureDef。覆盖层 key='id'，numeric=effectValue/priceGold/dropRate。
+  let treasureRows = loadCsv(p('treasures.csv'));
+  if (overrides?.treasures) {
+    treasureRows = mergeOverridesIntoRows(treasureRows, {
+      file: 'treasures.csv', key: 'id',
+      numeric: ['effectValue', 'priceGold', 'dropRate'],
+    }, overrides.treasures);
+  }
+  assertUniqueRows(treasureRows, 'treasures.csv');
+  const treasures: Record<string, TreasureDef> = {};
+  for (const r of treasureRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    treasures[code] = {
+      id: num(r.id),
+      code,
+      name: r.name ?? code,
+      icon: r.icon ?? 'trs_generic',
+      category: r.category ?? 'economic',
+      rarity: r.rarity ?? 'common',
+      effectType: r.effectType ?? '',
+      effectValue: num(r.effectValue, 0),
+      priceGold: num(r.priceGold, 0),
+      dropRate: num(r.dropRate, 0),
+      applyType: r.applyType ?? 'passive',
+    };
+  }
+
   // mercCamp 缺级回退：从已解析的最高有效级向下复制，保证任意营地等级都能取到参数。
   const maxMercLv = Object.keys(mercCamp).map(Number).sort((a, b) => a - b);
   if (maxMercLv.length) {
@@ -778,7 +837,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   }
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures,
   };
   validateGameConfig(config);
   return config;
@@ -908,6 +967,24 @@ export function validateGameConfig(config: GameConfig): void {
       errors.push(`pve_spawns.csv[${s.id}] 坐标非数值`);
     }
     // 注：坐标可为负或超出 [0,W)×[0,H)，放置时 world.PlacePve 会按环面取模归一。
+  }
+
+  // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
+  const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
+  const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold']);
+  const TREASURE_APPLY = new Set(['passive', 'instant']);
+  for (const t of Object.values(config.treasures)) {
+    if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
+    if (!t.name) errors.push(`treasures.csv[${t.code}] name 不能为空`);
+    if (!t.icon) errors.push(`treasures.csv[${t.code}] icon 不能为空`);
+    if (!TREASURE_CATEGORIES.has(t.category)) errors.push(`treasures.csv[${t.code}] category=${t.category} 必须是 economic/military/social/special`);
+    if (!TREASURE_RARITIES.has(t.rarity)) errors.push(`treasures.csv[${t.code}] rarity=${t.rarity} 必须是 common/rare/epic/legendary`);
+    if (!TREASURE_EFFECTS.has(t.effectType)) errors.push(`treasures.csv[${t.code}] effectType=${t.effectType} 不是已知效果`);
+    if (!TREASURE_APPLY.has(t.applyType)) errors.push(`treasures.csv[${t.code}] applyType=${t.applyType} 必须是 passive/instant`);
+    if (t.effectValue < 0) errors.push(`treasures.csv[${t.code}] effectValue 必须≥0（当前${t.effectValue}）`);
+    if (t.priceGold < 0) errors.push(`treasures.csv[${t.code}] priceGold 必须≥0（当前${t.priceGold}）`);
+    if (t.dropRate < 0 || t.dropRate > 1) errors.push(`treasures.csv[${t.code}] dropRate 必须在[0,1]（当前${t.dropRate}）`);
   }
 
   // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
