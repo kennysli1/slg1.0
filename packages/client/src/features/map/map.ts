@@ -898,11 +898,7 @@ export function bindMap(act: (p: Promise<any>) => void): void {
   }
   bindTargetEvents(act);
 
-  // 携带宝物上限随出征兵力实时更新（每次重渲后重新绑定到新节点）
-  document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
-    inp.addEventListener('input', updateCarryCap);
-  });
-  updateCarryCap();
+  // 携带宝物上限随出征兵力实时更新（bindTargetEvents 内部已重绑到当前节点）
 
   // 方向键（全图模式下 = 视觉平移到相邻区域中心，不重拉数据）
   const STEP = 4;
@@ -1023,4 +1019,14 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
     if (!Object.keys(cargo).length) { addReport('请填写运输货物'); return; }
     act(req('SendTransport', { targetVillage: getSelected()!.refId, troops, cargo, treasures: collectTreasures() }));
   };
+
+  // 携带宝物上限随出征兵力实时更新（每次重渲后重新绑定到当前节点，否则旧 listener 会被 innerHTML 替换掉）
+  document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
+    inp.addEventListener('input', updateCarryCap);
+  });
+  // 勾选/取消携带宝物时也要重算上限（点击前已是检查状态，cap=0 会被强制 uncheck+disable 并显红字警告）
+  document.querySelectorAll<HTMLInputElement>('.carry-check').forEach((cb) => {
+    cb.addEventListener('change', updateCarryCap);
+  });
+  updateCarryCap();
 }
