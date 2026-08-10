@@ -99,6 +99,8 @@ export class TreasureModule {
     // 玩家主动出售/丢弃（客户端宝物面板触发）
     this.commands.register('treasure.Sell', (c) => this.sell(c));
     this.commands.register('treasure.Discard', (c) => this.discard(c));
+    // 替换宝物：丢弃一个已持有的宝物并入新宝物（贸易中心「购买宝物-栏满替换」路径；内部命令）
+    this.commands.register('treasure.Replace', (c) => this.replaceTreasure(c));
     // 宝库建筑推送的额外槽位（由 building 模块在建造/升级/拆除时发送；铁律#4：building 拥有数值，此处只存镜像）
     this.commands.register('treasure.SetSlots', (c) => this.setSlots(c));
   }
@@ -311,6 +313,27 @@ export class TreasureModule {
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
     return { ok: true, payload: { codes: [...s.codes] } };
+  }
+
+  /**
+   * 替换宝物：丢弃一个已持有的宝物(oldCode)，并入新宝物(newCode)。
+   * 用于贸易中心「购买宝物-宝物栏满时替换」路径：一次性腾出格子并储存新宝物。
+   * 不返还 oldCode 的金币（等价于「丢弃换新」）；新宝物重复持有或栏位不足时拒绝。
+   */
+  private async replaceTreasure(cmd: Command): Promise<CommandResult> {
+    const { villageId, oldCode, newCode } = cmd.payload as { villageId: string; oldCode: string; newCode: string };
+    const s = this.ensureState(villageId);
+    if (!s.codes.includes(oldCode)) return { ok: false, payload: { codes: [...s.codes] }, reason: 'not_held' };
+    if (s.codes.includes(newCode)) return { ok: false, payload: { codes: [...s.codes] }, reason: 'already_have' };
+    const t = this.config.treasures[newCode];
+    if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    // 替换是「先移除 oldCode 再入 newCode」，净数量不变，原数量本就 ≤ 槽位，故无需再做槽位检查。
+    s.codes = s.codes.filter((c) => c !== oldCode);
+    s.codes.push(newCode);
+    this.store.set(COLLECTION, villageId, s);
+    await this.recomputeAndPush(villageId);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { codes: [...s.codes], treasure: t } };
   }
 
   /** 列出村庄已储存宝物 + 聚合效果（客户端渲染用）。 */

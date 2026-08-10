@@ -371,6 +371,10 @@ export interface GameConstants {
   treasureCampDropChance: number;
   /** 宝物掉落：贸易中心自动/手动刷新 NPC 订单时掉落宝物的总体概率（0-1）。 */
   treasureTradeDropChance: number;
+  /** 宝物：贸易中心 NPC 订单池中出现「宝物出售」订单的概率（0-1）。 */
+  treasureNpcOfferChance: number;
+  /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
+  treasureNpcBuyMarkup: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -784,6 +788,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
     treasureTradeDropChance: cn('treasure_trade_drop_chance', 0.25),
+    treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
+    treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     raw,
   };
 

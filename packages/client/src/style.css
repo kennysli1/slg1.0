@@ -973,4 +973,23 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .trade-create-route { font-size: var(--f-xs); opacity: .85; }
 .trade-create-route b { color: var(--c-gold); font-family: var(--ff-num); }
 
+/* 宝物出售订单（NPC 卖宝物给玩家） */
+.trade-treasure-buy { display: inline-flex; align-items: center; gap: var(--s-1); }
+.trade-treasure-buy .gold-amt { font-family: var(--ff-num); color: var(--c-gold); font-weight: 700; }
+
+/* 宝物栏满时的「替换/卖给NPC/放弃」溢出选择弹层 */
+.trade-overflow { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; }
+.trade-overflow-mask { position: absolute; inset: 0; background: rgba(0,0,0,.38); }
+.trade-overflow-card {
+  position: relative; max-width: 360px; width: 92%; padding: var(--s-3);
+  background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-lg); box-shadow: var(--sh-3);
+}
+.trade-overflow-card .drawer-head { margin-bottom: var(--s-2); }
+.trade-overflow-card .treasure-card { margin-bottom: var(--s-2); }
+.trade-overflow-title { font-weight: 700; color: var(--c-ink); margin-bottom: var(--s-1); }
+.trade-overflow-hint { font-size: var(--f-sm); color: var(--c-ink-soft); margin-bottom: var(--s-2); }
+.trade-overflow-actions { display: flex; flex-direction: column; gap: var(--s-2); }
+.trade-overflow-row { display: flex; align-items: center; gap: var(--s-2); }
+.trade-overflow-row select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--c-line); border-radius: var(--r-sm); background: var(--c-surface); color: var(--c-ink); }
+
 

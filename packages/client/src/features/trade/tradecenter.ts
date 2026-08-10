@@ -8,8 +8,10 @@
  */
 import { req } from '../../api.js';
 import { art, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
-import { resInfo } from '../../app/config.js';
+import { resInfo, treasureInfo, treasureCategoryName, treasureRarityName, treasureEffectText } from '../../app/config.js';
 import { fmt } from '../../shared/utils/format.js';
+import { errText } from '../../shared/ui/text.js';
+import { showToast } from '../../shared/ui/toast.js';
 import { tradeRouteCapacity, tradeCaravanSpeed } from '../../app/config.js';
 
 /** 贸易涉及的全部资源（含金币；resources.csv 不登记 gold，故此处显式列出）。 */
@@ -98,6 +100,30 @@ async function render(): Promise<void> {
     </div>`;
   }).join('') || '<div class="hint-sm">暂无可交易 NPC 订单。</div>';
 
+  // 宝物出售订单（NPC 卖宝物给玩家，金币买；栏满时可替换/卖给NPC/放弃）
+  const npcTreasureHtml = (c.npcTreasureOffers || []).map((o: any) => {
+    const info = treasureInfo(o.code) ?? o;
+    const cat = treasureCategoryName(o.category ?? '');
+    const rar = treasureRarityName(o.rarity ?? '');
+    const effectTxt = treasureEffectText(info as any);
+    const canPay = gold >= (o.buyPrice ?? 0);
+    return `<div class="treasure-card rarity-${escapeAttr(o.rarity ?? 'common')}">
+      ${art(o.icon, o.name, 'md')}
+      <div class="treasure-body">
+        <div class="treasure-title">${escapeHtml(o.name)}
+          <small class="treasure-cat cat-${escapeAttr(o.category ?? '')}">${escapeHtml(cat)}</small>
+          <small class="treasure-rar rar-${escapeAttr(o.rarity ?? '')}">${escapeHtml(rar)}</small>
+        </div>
+        <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
+        <div class="treasure-actions">
+          <button class="btn-sm treasure-sell trade-treasure-buy" data-accept-npc-treasure="${escapeAttr(o.id)}" ${!canPay ? 'disabled' : ''}>
+            ${art(resInfo('gold').icon, '金币', 'xs')}<span class="gold-amt">${fmt(o.buyPrice ?? 0)}</span> 购买
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') || '';
+
   // 附近玩家挂单（接单方视角）：只显示「你自己」为运出「求购」要占的路线，
   // 不显示对方的运力占用（与服务端 acceptPlayer 按 sum(want) 算 acceptorRoutes 一致）
   const playerHtml = (c.playerOrders || []).map((o: any) => {
@@ -134,6 +160,9 @@ async function render(): Promise<void> {
 
     <div class="drawer-sec-title">NPC 订单 <small>（即时交付）</small></div>
     <div class="trade-offers">${npcHtml}</div>
+
+    ${npcTreasureHtml ? `<div class="drawer-sec-title">宝物出售 <small>（金币购买 · 栏满可替换/转卖）</small></div>
+    <div class="trade-offers">${npcTreasureHtml}</div>` : ''}
 
     <div class="drawer-sec-title">附近玩家订单 <small>（视野半径 ${c.viewRadius} 格内）</small></div>
     <div class="trade-offers">${playerHtml}</div>
@@ -184,6 +213,21 @@ async function render(): Promise<void> {
     await actFn(req('AcceptNpcOrder', { orderId: b.dataset.acceptNpc }));
     void render();
   });
+  // 宝物购买：能存则直接入栏；栏满则服务端回 overflow，弹「替换/卖给NPC/放弃」选择
+  wrap.querySelectorAll<HTMLButtonElement>('[data-accept-npc-treasure]').forEach((b) => b.onclick = async () => {
+    if (!actFn) return;
+    const orderId = b.dataset.acceptNpcTreasure!;
+    const res = await req('AcceptNpcTreasure', { orderId });
+    if (!res.ok) {
+      showToast(errText(res.error?.code));
+      void render();
+      return;
+    }
+    const p = res.payload as any;
+    if (p?.overflow) { showTreasureOverflow(p, orderId); return; }
+    await actFn(Promise.resolve(res));
+    void render();
+  });
   // 接玩家单（派商队）
   wrap.querySelectorAll<HTMLButtonElement>('[data-accept-player]').forEach((b) => b.onclick = async () => {
     if (!actFn) return;
@@ -227,4 +271,81 @@ async function render(): Promise<void> {
 function showTradeHint(body: HTMLElement, msg: string): void {
   const el = body.querySelector<HTMLElement>('.trade-create-route');
   if (el) { el.textContent = msg; el.style.color = 'var(--bad,#c0392b)'; }
+}
+
+/**
+ * 宝物栏满时的「替换/卖给NPC/放弃购买」选择弹层。
+ *  - 替换：丢弃下拉框中选中的已持有宝物，并入新宝物（新宝物占格）。
+ *  - 卖给NPC：新宝物直接转卖回收 sellPrice 金币（不占格，净亏 buyPrice - sellPrice）。
+ *  - 放弃：不花钱，订单保留。
+ */
+function showTreasureOverflow(p: any, orderId: string): void {
+  if (!wrap) return;
+  wrap.querySelector('.trade-overflow')?.remove();
+  const t = p.treasure ?? {};
+  const codes: string[] = p.codes ?? [];
+  const slots: number = p.slots ?? 1;
+  const info = treasureInfo(t.code) ?? t;
+  const effectTxt = treasureEffectText(info as any);
+  const cat = treasureCategoryName(t.category ?? '');
+  const rar = treasureRarityName(t.rarity ?? '');
+  const options = codes.map((c) => {
+    const oi = treasureInfo(c);
+    const label = oi ? `${oi.name}（${treasureRarityName(oi.rarity)}）` : c;
+    return `<option value="${escapeAttr(c)}">${escapeHtml(label)}</option>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'trade-overflow';
+  overlay.innerHTML = `
+    <div class="trade-overflow-mask" data-of-close="1"></div>
+    <div class="trade-overflow-card">
+      <div class="drawer-head"><span class="trade-overflow-title">宝物栏已满（${codes.length}/${slots}）</span>
+        <button class="drawer-close" data-of-close="1" aria-label="关闭">✕</button></div>
+      <div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
+        ${art(t.icon, t.name, 'md')}
+        <div class="treasure-body">
+          <div class="treasure-title">${escapeHtml(t.name)}
+            <small class="treasure-cat cat-${escapeAttr(t.category ?? '')}">${escapeHtml(cat)}</small>
+            <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
+          </div>
+          <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
+        </div>
+      </div>
+      <div class="trade-overflow-hint">购买需 ${fmt(t.buyPrice ?? 0)} 金币。栏位已满，请选择处理方式：</div>
+      <div class="trade-overflow-actions">
+        <div class="trade-overflow-row">
+          <select id="of-replace-sel" aria-label="选择要替换掉的宝物">${options}</select>
+          <button class="btn-sm" data-of-replace="1" ${codes.length ? '' : 'disabled'}>替换选中宝物</button>
+        </div>
+        <div class="trade-overflow-row">
+          <button class="btn-sm treasure-sell" data-of-sell="1">卖给 NPC（回收 ${fmt(t.sellPrice ?? 0)} 金币）</button>
+        </div>
+        <div class="trade-overflow-row">
+          <button class="btn-sm btn-ghost" data-of-discard="1">放弃购买（不花钱）</button>
+        </div>
+      </div>
+    </div>`;
+  wrap.appendChild(overlay);
+  overlay.querySelectorAll<HTMLElement>('[data-of-close]').forEach((e) => e.onclick = () => overlay.remove());
+
+  const runAction = async (action: string, replaceCode?: string) => {
+    overlay.remove();
+    const res = await req('AcceptNpcTreasure', { orderId, action, ...(replaceCode ? { replaceCode } : {}) });
+    if (!res.ok) {
+      showToast(errText(res.error?.code));
+      void render();
+      return;
+    }
+    if (actFn) actFn(Promise.resolve(res));
+    void render();
+  };
+  overlay.querySelector<HTMLElement>('[data-of-replace]')!.onclick = () => {
+    const sel = overlay.querySelector<HTMLSelectElement>('#of-replace-sel');
+    const replaceCode = sel?.value;
+    if (!replaceCode) { showToast('请先选择要替换的宝物'); return; }
+    void runAction('replace', replaceCode);
+  };
+  overlay.querySelector<HTMLElement>('[data-of-sell]')!.onclick = () => void runAction('sell');
+  overlay.querySelector<HTMLElement>('[data-of-discard]')!.onclick = () => void runAction('discard');
 }

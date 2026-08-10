@@ -272,3 +272,134 @@ async function layoutOf(app: GameApp): Promise<{ slotId: string }> {
   return { slotId: t.slotId };
 }
 
+/** 直接给 v1 植入一条贸易中心「宝物出售」订单（绕过随机 roll，便于确定性测试）。 */
+function seedTreasureOffer(app: GameApp, over: Partial<{ code: string; buyPrice: number; sellPrice: number }> = {}): void {
+  const code = over.code ?? 'chainsaw';
+  const def = (app.config as any).treasures[code];
+  app.store.set('trade', 'v1', {
+    villageId: 'v1', level: 1,
+    npcOrderPool: [{
+      id: 'offer1', give: {}, want: { gold: over.buyPrice ?? 96 }, distance: 0, expiresAt: 1_000_000 + 999_999,
+      treasure: {
+        code: def.code, name: def.name, icon: def.icon, category: def.category, rarity: def.rarity,
+        effectType: def.effectType, effectValue: def.effectValue, applyType: def.applyType,
+        buyPrice: over.buyPrice ?? 96, sellPrice: over.sellPrice ?? 60,
+      },
+    }],
+    storedRefreshes: 0, nextRefreshAt: 1_000_000 + 3_600_000, tradeRoutesUsed: 0, createdOrders: [],
+  });
+}
+const tradePoolLen = (app: GameApp) => (app.store.get<any>('trade', 'v1')?.npcOrderPool?.length ?? -1);
+async function goldOf(app: GameApp): Promise<number> {
+  return ((await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any).resources.gold;
+}
+
+test('宝物购买：栏有空位时直接买入入栏（扣 buyPrice）', async () => {
+  const app = await freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
+  seedTreasureOffer(app); // chainsaw buyPrice=96 sellPrice=60
+  const gold0 = await goldOf(app);
+
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1' });
+  assert.equal(r.ok, true, `购买应成功: ${r.reason ?? ''}`);
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], 'chainsaw 应入栏');
+  assert.equal(await goldOf(app), gold0 - 96, '应扣 buyPrice=96 金币');
+  assert.equal(tradePoolLen(app), 0, '订单应被消费');
+});
+
+test('宝物购买：栏满且无 action 时返回 overflow（不扣金、不消费订单）', async () => {
+  const app = await freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
+  seedTreasureOffer(app);
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' }); // 占满唯一格
+  const gold0 = await goldOf(app);
+
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1' });
+  assert.equal(r.ok, true);
+  assert.equal(r.payload.overflow, true, '栏满应回 overflow');
+  assert.equal(r.payload.reason, 'treasure_slots_full');
+  assert.deepEqual(r.payload.codes, ['war_flag'], '应带当前持有 codes 供替换选择');
+  assert.equal(r.payload.slots, 1);
+  assert.equal(r.payload.treasure.code, 'chainsaw');
+  assert.equal(await goldOf(app), gold0, 'overflow 不应扣金');
+  assert.equal(tradePoolLen(app), 1, 'overflow 不应消费订单');
+});
+
+test('宝物购买：栏满选 replace → 丢弃旧宝物并入新宝物', async () => {
+  const app = await freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
+  seedTreasureOffer(app); // 新宝物 chainsaw
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' }); // 已持有 war_flag
+  const gold0 = await goldOf(app);
+
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1', action: 'replace', replaceCode: 'war_flag' });
+  assert.equal(r.ok, true, `replace 应成功: ${r.reason ?? ''}`);
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], 'war_flag 应被 chainsaw 替换');
+  assert.equal(await goldOf(app), gold0 - 96, '应扣 buyPrice=96');
+  assert.equal(tradePoolLen(app), 0, '订单应被消费');
+});
+
+test('宝物购买：栏满选 sell → 新宝物转卖 NPC 回收 sellPrice（净亏 buyPrice-sellPrice，不占格）', async () => {
+  const app = await freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
+  seedTreasureOffer(app); // buyPrice=96 sellPrice=60
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' }); // 占满
+  const gold0 = await goldOf(app);
+
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1', action: 'sell' });
+  assert.equal(r.ok, true, `sell 应成功: ${r.reason ?? ''}`);
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['war_flag'], '新宝物不占格，仍只有 war_flag');
+  assert.equal(await goldOf(app), gold0 - 96 + 60, '净亏 buyPrice-sellPrice=36');
+  assert.equal(tradePoolLen(app), 0, '订单应被消费');
+});
+
+test('宝物购买：栏满选 discard → 放弃购买（不扣金、订单保留）', async () => {
+  const app = await freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
+  seedTreasureOffer(app);
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const gold0 = await goldOf(app);
+
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1', action: 'discard' });
+  assert.equal(r.ok, true);
+  assert.equal(r.payload.discarded, true);
+  assert.equal(await goldOf(app), gold0, 'discard 不应扣金');
+  assert.equal(tradePoolLen(app), 1, 'discard 不应消费订单');
+});
+
+test('宝物购买：金币不足时 spend_failed（不入栏）', async () => {
+  const app = await freshApp();
+  seedTreasureOffer(app, { buyPrice: 999_999, sellPrice: 60 }); // 远超开局金币，必定不足
+  const r = await send(app, 'trade.AcceptNpcTreasure', { villageId: 'v1', orderId: 'offer1' });
+  assert.equal(r.ok, false, '金币不足应失败');
+  assert.equal(r.reason, 'insufficient:gold', '应返回金币不足');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, [], '不应入栏');
+  assert.equal(tradePoolLen(app), 1, '失败不应消费订单');
+});
+
+test('宝物替换：treasure.Replace 丢弃旧宝物入新宝物', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  const r = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'chainsaw', newCode: 'war_flag' });
+  assert.equal(r.ok, true, `replace 应成功: ${r.reason ?? ''}`);
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['war_flag'], 'chainsaw 应被 war_flag 替换');
+});
+
+test('宝物替换：旧宝物未持有 / 新宝物重复持有均被拒', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 扩到 2 格
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const r1 = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'money_bag', newCode: 'holy_water' });
+  assert.equal(r1.ok, false);
+  assert.equal(r1.reason, 'not_held', '未持有 oldCode 应 not_held');
+  const r2 = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'chainsaw', newCode: 'war_flag' });
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, 'already_have', 'newCode 重复应 already_have');
+});
+

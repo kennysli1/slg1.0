@@ -32,6 +32,21 @@ const TRADE_RES = ['wood', 'clay', 'iron', 'crop'];
  *  - 玩家挂单在 tradeOrderTtlSec 后过期自动下架；仅本村可见自己挂的单（含撤销）。
  */
 
+interface NpcTreasureOffer {
+  code: string;
+  name: string;
+  icon: string;
+  category: string;
+  rarity: string;
+  effectType: string;
+  effectValue: number;
+  applyType: string;
+  /** 玩家买下需支付的金币。 */
+  buyPrice: number;
+  /** 溢出时卖给 NPC 回收的金币（≤ buyPrice）。 */
+  sellPrice: number;
+}
+
 interface NpcOrder {
   id: string;
   /** 村庄可获得的资源（NPC 给玩家）。 */
@@ -42,6 +57,8 @@ interface NpcOrder {
   distance: number;
   /** 随下次自动刷新失效。 */
   expiresAt: number;
+  /** 若为宝物出售订单，则带此字段（give/want 同时为空）。 */
+  treasure?: NpcTreasureOffer;
 }
 
 interface PlayerOrder {
@@ -91,6 +108,15 @@ export class TradeModule {
         command: 'trade.AcceptNpc', ownVillage: true, needAuth: true,
         schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
       },
+      // 购买 NPC 出售的宝物；宝物栏满时经 action 选择 替换(replace)/卖给NPC(sell)/放弃(discard)。
+      AcceptNpcTreasure: {
+        command: 'trade.AcceptNpcTreasure', ownVillage: true, needAuth: true,
+        schema: {
+          orderId: { type: 'string', minLen: 1, maxLen: 64 },
+          action: { type: 'enum', values: ['store', 'replace', 'sell', 'discard'], optional: true },
+          replaceCode: { type: 'string', minLen: 1, maxLen: 64, optional: true },
+        },
+      },
       CreateTradeOrder: {
         command: 'trade.CreateOrder', ownVillage: true, needAuth: true,
         schema: {
@@ -115,6 +141,9 @@ export class TradeModule {
   /** 全局玩家挂单索引（orderId → PlayerOrder），用于快速可见性查询与生命周期管理。 */
   private orders = new Map<string, PlayerOrder>();
 
+  /** 可交易宝物清单（priceGold>0），按稀有度加权抽取，热重载时刷新。 */
+  private tradeableTreasures: Array<{ code: string; priceGold: number; rarity: string }> = [];
+
   constructor(
     private store: Store,
     private bus: EventBus,
@@ -122,16 +151,27 @@ export class TradeModule {
     private scheduler: Scheduler,
     private now: () => number,
     private config: GameConfig,
-  ) {}
+  ) {
+    this.refreshTradeable();
+  }
 
   setConfig(config: GameConfig): void {
     this.config = config;
+    this.refreshTradeable();
+  }
+
+  /** 重算可交易宝物清单（priceGold>0 才有 NPC 出售意义）。 */
+  private refreshTradeable(): void {
+    this.tradeableTreasures = Object.values(this.config.treasures)
+      .filter((t) => (t.priceGold ?? 0) > 0)
+      .map((t) => ({ code: t.code, priceGold: t.priceGold, rarity: t.rarity }));
   }
 
   init(): void {
     this.commands.register('trade.GetCenter', (c) => this.getCenter(c));
     this.commands.register('trade.Refresh', (c) => this.refresh(c));
     this.commands.register('trade.AcceptNpc', (c) => this.acceptNpc(c));
+    this.commands.register('trade.AcceptNpcTreasure', (c) => this.acceptNpcTreasure(c));
     this.commands.register('trade.CreateOrder', (c) => this.createOrder(c));
     this.commands.register('trade.AcceptPlayer', (c) => this.acceptPlayer(c));
     this.commands.register('trade.CancelOrder', (c) => this.cancelOrder(c));
@@ -226,6 +266,10 @@ export class TradeModule {
   /** 生成单条 NPC 订单：随机选资源，随机买卖双方，按金币基准价值计价。 */
   private rollNpcOrder(level: number, viewRadius: number, expiresAt: number): NpcOrder {
     const c = this.config.constants;
+    // 宝物出售订单：按概率出现（需存在可交易宝物）
+    if (this.tradeableTreasures.length > 0 && Math.random() < c.treasureNpcOfferChance) {
+      return this.rollTreasureOffer(expiresAt);
+    }
     const res = TRADE_RES[Math.floor(Math.random() * TRADE_RES.length)];
     // 交易量随等级温和放大
     const qty = 200 + Math.floor(Math.random() * (400 + level * 120));
@@ -242,6 +286,32 @@ export class TradeModule {
     }
     const distance = 1 + Math.floor(Math.random() * Math.max(1, viewRadius));
     return { id: this.nextId(), give, want, distance, expiresAt };
+  }
+
+  /** 生成一条「NPC 出售宝物」订单：按稀有度加权选宝物（普通多、传说少），买价=目录价×加价倍率，卖出回收价=目录价。 */
+  private rollTreasureOffer(expiresAt: number): NpcOrder {
+    const c = this.config.constants;
+    // 稀有度权重：越稀有价值越高、越罕见
+    const weightByRarity: Record<string, number> = { common: 8, rare: 4, epic: 2, legendary: 1 };
+    const pool = this.tradeableTreasures;
+    const weights = pool.map((t) => weightByRarity[t.rarity] ?? 1);
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = Math.random() * total;
+    let chosen = pool[0];
+    for (let i = 0; i < pool.length; i++) {
+      r -= weights[i];
+      if (r <= 0) { chosen = pool[i]; break; }
+    }
+    const def = this.config.treasures[chosen.code];
+    if (!def) return this.rollNpcOrder(1, 5, expiresAt); // 兜底：理论上不会触发
+    const buyPrice = Math.max(1, Math.round((def.priceGold ?? 0) * (c.treasureNpcBuyMarkup ?? 1.6)));
+    const sellPrice = def.priceGold ?? 0;
+    const treasure: NpcTreasureOffer = {
+      code: def.code, name: def.name, icon: def.icon, category: def.category,
+      rarity: def.rarity, effectType: def.effectType, effectValue: def.effectValue,
+      applyType: def.applyType, buyPrice, sellPrice,
+    };
+    return { id: this.nextId(), give: {}, want: { gold: buyPrice }, distance: 0, expiresAt, treasure };
   }
 
   private nextId(): string {
@@ -332,7 +402,7 @@ export class TradeModule {
     const s = this.load(villageId);
     const level = await this.getCenterLevel(villageId);
     if (!s || level <= 0) {
-      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
+      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcTreasureOffers: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
     }
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
@@ -380,7 +450,9 @@ export class TradeModule {
         tradeRoutesUsed: s.tradeRoutesUsed,
         availableRoutes: available,
         viewRadius: tc.tradeViewRadius,
-        npcOrders: s.npcOrderPool.map((o) => ({ id: o.id, give: o.give, want: o.want, distance: o.distance, expiresAt: o.expiresAt })),
+        npcOrders: s.npcOrderPool.filter((o) => !o.treasure).map((o) => ({ id: o.id, give: o.give, want: o.want, distance: o.distance, expiresAt: o.expiresAt })),
+        // 宝物出售订单（NPC 卖宝物给玩家，金币买；栏满时可替换/卖给NPC/放弃）
+        npcTreasureOffers: s.npcOrderPool.filter((o) => !!o.treasure).map((o) => ({ id: o.id, ...o.treasure, expiresAt: o.expiresAt })),
         npcStoredRefreshes: s.storedRefreshes,
         npcMaxStored: tc.npcStoredRefreshes,
         npcRefreshSec: tc.npcRefreshSec,
@@ -435,6 +507,91 @@ export class TradeModule {
 
     // 从池中移除该笔订单；不立即补新单，腾出的槽位留空，
     // 直到下一次自动刷新（npcRefreshSec）或手动刷新（消耗存储次数）。
+    s.npcOrderPool.splice(idx, 1);
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
+
+    const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
+    return { ok: true, payload: (base.payload as any) };
+  }
+
+  /**
+   * 购买 NPC 出售的宝物。
+   * 流程：未传 action 时，宝物栏有空位 → 直接买入储存；栏满 → 返回 overflow 让客户端弹「替换/卖给NPC/放弃」。
+   *  - store：   扣 buyPrice，treasure.Grant 入栏。
+   *  - replace： 扣 buyPrice，treasure.Replace 丢弃 replaceCode 并入新宝物。
+   *  - sell：    扣 buyPrice 后把新宝物卖给 NPC 回收 sellPrice（净亏 buyPrice - sellPrice），不占格。
+   *  - discard： 不扣金、不消费订单（放弃购买）。
+   */
+  private async acceptNpcTreasure(cmd: Command): Promise<CommandResult> {
+    const { villageId, orderId, action, replaceCode } = cmd.payload as {
+      villageId: string; orderId: string; action?: 'store' | 'replace' | 'sell' | 'discard'; replaceCode?: string;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'no_center' };
+    const idx = s.npcOrderPool.findIndex((o) => o.id === orderId);
+    if (idx < 0) return { ok: false, payload: {}, reason: 'order_not_found' };
+    const order = s.npcOrderPool[idx];
+    if (!order.treasure) return { ok: false, payload: {}, reason: 'not_treasure_offer' };
+    const t = this.config.treasures[order.treasure.code];
+    if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    const buyPrice = order.treasure.buyPrice;
+    const sellPrice = order.treasure.sellPrice;
+
+    // 当前宝物栏状态（treasure 模块拥有，仅经命令查询；铁律#2：不 import、不回查 store）
+    const listRes = await this.commands.send({ name: 'treasure.List', from: TradeModule.NAME, payload: { villageId } });
+    const slots = (listRes.payload as any)?.slots ?? 1;
+    const codes: string[] = (listRes.payload as any)?.codes ?? [];
+    const hasRoom = codes.length < slots;
+
+    // 未指定 action：能存则直接存；满了回 overflow 让客户端弹选择
+    const act = action ?? (hasRoom ? 'store' : undefined);
+    const treasureInfo = {
+      code: t.code, name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
+      effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
+      buyPrice, sellPrice,
+    };
+    if (!act) {
+      return { ok: true, payload: { overflow: true, reason: 'treasure_slots_full', treasure: treasureInfo, slots, codes } };
+    }
+    if (act === 'discard') {
+      // 放弃购买：不扣金、不消费订单
+      return { ok: true, payload: { discarded: true } };
+    }
+
+    // store/replace/sell 均需先扣金币
+    const spend = await this.commands.send({
+      name: 'economy.TrySpend', from: TradeModule.NAME,
+      payload: { villageId, cost: { gold: buyPrice } },
+    });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+    const refund = async () => {
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: { gold: buyPrice } } });
+    };
+
+    if (act === 'store') {
+      const res = await this.commands.send({ name: 'treasure.Grant', from: TradeModule.NAME, payload: { villageId, code: t.code } });
+      if (!res.ok) {
+        // 竞态：查询后槽位被占满 → 退款并回 overflow
+        await refund();
+        return { ok: true, payload: { overflow: true, reason: 'treasure_slots_full', treasure: treasureInfo, slots, codes } };
+      }
+    } else if (act === 'replace') {
+      if (!replaceCode || !codes.includes(replaceCode)) {
+        await refund();
+        return { ok: false, payload: { codes }, reason: 'bad_replace' };
+      }
+      const res = await this.commands.send({ name: 'treasure.Replace', from: TradeModule.NAME, payload: { villageId, oldCode: replaceCode, newCode: t.code } });
+      if (!res.ok) {
+        await refund();
+        return { ok: false, payload: res.payload, reason: res.reason ?? 'replace_failed' };
+      }
+    } else if (act === 'sell') {
+      // 买下后立即卖给 NPC 回收 sellPrice，不占格
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: { gold: sellPrice } } });
+    }
+
+    // 成功消费订单（store/replace/sell 都消费；discard 已提前返回）
     s.npcOrderPool.splice(idx, 1);
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
