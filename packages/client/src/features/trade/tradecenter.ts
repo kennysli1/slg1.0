@@ -152,7 +152,7 @@ async function render(): Promise<void> {
         </div>`;
       }).join('')}
       <div class="trade-create-route">将占用路线：<b id="routeNeed">0</b> / 可用 ${c.availableRoutes}</div>
-      <button class="btn-sm btn-primary" data-create-order ${orderLimit ? 'disabled' : ''}>${orderLimit ? '已达挂单上限' : '挂出订单'}</button>
+      <button class="btn-sm btn-primary" data-create-order id="createOrderBtn" ${orderLimit ? 'disabled' : ''}>${orderLimit ? '已达挂单上限' : '挂出订单'}</button>
     </div>`;
 
   wrap.querySelectorAll<HTMLElement>('[data-close-trade]').forEach((e) => e.onclick = () => closeTradeCenter());
@@ -166,6 +166,13 @@ async function render(): Promise<void> {
     giveInputs.forEach((i) => { units += Math.max(0, Math.floor(Number(i.value) || 0)); });
     const need = Math.ceil(units / Math.max(1, cap));
     if (routeNeed) routeNeed.textContent = String(need);
+    // 实时联动挂单按钮：路线不足时禁用并提示（创建即预占路线，故需大于可用即不可挂）
+    const btn = wrap!.querySelector<HTMLButtonElement>('#createOrderBtn');
+    if (btn && !orderLimit) {
+      const noRoute = need > c.availableRoutes;
+      btn.disabled = noRoute;
+      btn.textContent = noRoute ? '路线不足' : '挂出订单';
+    }
     return need;
   };
   giveInputs.forEach((i) => i.oninput = computeRoutes);

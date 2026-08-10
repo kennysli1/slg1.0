@@ -423,10 +423,9 @@ export class TradeModule {
       payload: { villageId, gain: order.give },
     });
 
-    // 从池中移除，并补一条新 NPC 订单保持池满。
+    // 从池中移除该笔订单；不立即补新单，腾出的槽位留空，
+    // 直到下一次自动刷新（npcRefreshSec）或手动刷新（消耗存储次数）。
     s.npcOrderPool.splice(idx, 1);
-    const tc = this.config.tradeCenter[s.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
-    s.npcOrderPool.push(this.rollNpcOrder(s.level, tc.tradeViewRadius, s.nextRefreshAt));
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
 
@@ -465,6 +464,7 @@ export class TradeModule {
       ttlAt: this.now() + (this.config.constants.tradeOrderTtlSec ?? 86400) * 1000,
     };
     s.createdOrders.push(order);
+    s.tradeRoutesUsed += routesNeeded; // 创建即预占路线：避免仅 1 条路线时重复挂多单
     this.store.set(COLLECTION, villageId, s);
     this.orders.set(order.id, order);
     await this.emitUpdated(villageId);
@@ -545,9 +545,8 @@ export class TradeModule {
       return { ok: false, payload: {}, reason: aCaravan.reason ?? 'caravan_failed' };
     }
 
-    // 消耗双方路线 + 移除订单
-    creator.tradeRoutesUsed += order.routesNeeded;
-    this.store.set(COLLECTION, creator.villageId, creator);
+    // 移除订单；创建方路线已在挂单时预占（createOrder 已 +routesNeeded），此处不再重复累加。
+    // 接单方路线在此预占（其送出 want 的运力）。
     acceptor.tradeRoutesUsed += acceptorRoutes;
     this.store.set(COLLECTION, villageId, acceptor);
     this.removeOrder(order);
@@ -565,6 +564,7 @@ export class TradeModule {
     if (!s) return { ok: false, payload: {}, reason: 'no_center' };
     const order = s.createdOrders.find((o) => o.id === orderId);
     if (!order) return { ok: false, payload: {}, reason: 'order_not_found' };
+    s.tradeRoutesUsed = Math.max(0, s.tradeRoutesUsed - order.routesNeeded); // 撤销挂单释放预占路线
     this.removeOrder(order);
     await this.emitUpdated(villageId);
     const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
