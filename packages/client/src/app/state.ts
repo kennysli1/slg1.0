@@ -25,6 +25,8 @@ export interface PendingTreasureView {
   expiresAt: number;
   /** camp 类型专用：军队是否已归村。未归村时不可领取（Bug3 修复）。 */
   arrivedAt?: number;
+  /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币；客户端据此显示「卖出」还是「丢弃」）。 */
+  hasTradeCenter?: boolean;
 }
 
 /** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型 + 劳动→士兵原子转化。 */

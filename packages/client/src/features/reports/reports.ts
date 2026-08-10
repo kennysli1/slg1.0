@@ -1,7 +1,7 @@
 /** 报告页：战报列表 + 服务端推送事件 → 战报文案。 */
 import { secStr } from '../../shared/utils/format.js';
 import { fieldInfo, buildingInfo, resInfo, treasureRarityName, treasureInfo, treasureEffectText, treasureCategoryName } from '../../app/config.js';
-import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState, getPendingTreasures, setPendingTreasures, type PendingTreasureView } from '../../app/state.js';
+import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState, getPendingTreasures, getCache, type PendingTreasureView } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
 import { escapeHtml, art } from '../../shared/ui/widgets.js';
@@ -39,13 +39,34 @@ function renderPendingCard(p: PendingTreasureView): string {
   const kindTag = isDeliver
     ? `<span class="treasure-kind kind-deliver" title="军队把宝物送达本村，需你决定如何处理">送达·待决策</span>`
     : `<span class="treasure-kind kind-camp" title="本村军队带回的宝物，确认即收入宝物栏">本村带回</span>`;
-  const actions = isDeliver
-    ? `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="take">收下</button>
-       <button class="btn" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="sell">出售 +${fmt(p.priceGold)}金</button>
-       <button class="btn btn-danger" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="discard">遗弃</button>`
-    : (p.arrivedAt
-        ? `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>`
-        : `<button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>`);
+
+  // 宝物栏状态：判定「收下」是否可用（满格 / 已持有 → 禁用并说明原因）
+  const tre = getCache().treasures;
+  const storedCodes: string[] = (tre && Array.isArray(tre.codes)) ? tre.codes : [];
+  const slots: number = (tre && typeof tre.slots === 'number') ? tre.slots : 0;
+  const isHeld = storedCodes.includes(p.code);
+  const isFull = storedCodes.length >= slots;
+  const hasTradeCenter = !!p.hasTradeCenter;
+
+  // 「收下 / 确认领取」按钮：未归村 / 已持有 / 宝物栏已满 → 禁用并说明原因（杜绝误点后静默自动卖出）
+  let takeBtn: string;
+  if (!p.arrivedAt) {
+    takeBtn = `<button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>`;
+  } else if (isHeld) {
+    takeBtn = `<button class="btn btn-primary" disabled title="已持有该宝物，无法重复收入宝物栏">已持有·不可收下</button>`;
+  } else if (isFull) {
+    takeBtn = `<button class="btn btn-primary" disabled title="宝物栏已满（${storedCodes.length}/${slots}），请先「卖出 / 丢弃」腾出空位">宝物栏已满·不可收下</button>`;
+  } else {
+    const takeLabel = isDeliver ? '收下' : '确认领取';
+    takeBtn = `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">${takeLabel}</button>`;
+  }
+
+  // 处置按钮：有贸易中心→卖出（换金币）；无→丢弃（不给金币）。均为玩家显式操作，不会再静默自动卖出
+  const disposeBtn = hasTradeCenter
+    ? `<button class="btn" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="sell">卖出 +${fmt(p.priceGold)}金</button>`
+    : `<button class="btn btn-danger" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="discard">丢弃</button>`;
+
+  const actions = `${takeBtn}${disposeBtn}`;
   return `<div class="treasure-card pending-card kind-${p.kind ?? 'camp'} rarity-${p.rarity}" data-expires-at="${p.expiresAt}">
     <div class="icon">${icon}</div>
     <div class="treasure-body">

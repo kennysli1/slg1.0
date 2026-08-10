@@ -199,6 +199,7 @@ export class BuildingModule {
     this.reportCapacity(s);
     for (const r of ['wood', 'clay', 'iron', 'crop']) this.reportFieldRate(s, r);
     this.reportTreasureSlots(s);
+    this.reportTradeCenter(s);
   }
 
   private load(villageId: string): BuildingState | undefined {
@@ -567,6 +568,7 @@ export class BuildingModule {
     this.reportCapacity(s);
     if (def.resource) this.reportFieldRate(s, def.resource);
     this.reportTreasureSlots(s);
+    this.reportTradeCenter(s);
     // 广播"开始拆除"：人口硬上限等缓存型派生据此从 building 重算（level 已为 0，加成即时消失）
     await this.emit('building.Demolishing', villageId, slotId, p.kind, 0);
 
@@ -602,6 +604,7 @@ export class BuildingModule {
     this.reportCapacity(s);
     if (def?.resource) this.reportFieldRate(s, def.resource);
     this.reportTreasureSlots(s);
+    this.reportTradeCenter(s);
   }
 
   private getDefenseSnapshot(cmd: Command): CommandResult {
@@ -658,6 +661,19 @@ export class BuildingModule {
       name: 'treasure.SetSlots',
       from: BuildingModule.NAME,
       payload: { villageId: s.villageId, extra },
+    });
+  }
+
+  /**
+   * 本村是否拥有贸易中心(tradecenter)上报 Treasures 模块（决定待领取宝物能否「出售」换金币）。
+   * 铁律#4：建筑只发命令（treasure.SetTradeCenter），宝物状态由 treasure 模块持有；本模块不回查。
+   */
+  private reportTradeCenter(s: BuildingState): void {
+    const hasTradeCenter = s.placed.some((p) => p.kind === 'tradecenter');
+    void this.commands.send({
+      name: 'treasure.SetTradeCenter',
+      from: BuildingModule.NAME,
+      payload: { villageId: s.villageId, hasTradeCenter },
     });
   }
 

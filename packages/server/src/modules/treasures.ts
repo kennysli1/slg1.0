@@ -54,6 +54,8 @@ interface TreasureState {
   carried: Record<string, { villageId: string; codes: string[] }>;
   /** 宝库(treasury)建筑贡献的额外宝物栏槽位（由 building 模块经 treasure.SetSlots 推送）。总槽位 = 城镇中心基础 1 格 + 此值。持久化以避免重启丢失（铁律#4：数值由 building 拥有，此处只存镜像）。 */
   extraSlots: number;
+  /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。由 building 模块经 treasure.SetTradeCenter 推送镜像（铁律#4：建筑拥有，此处只存镜像）。 */
+  hasTradeCenter: boolean;
 }
 
 const COLLECTION = 'treasure';
@@ -97,6 +99,8 @@ interface PendingTreasureView {
   expiresAt: number;
   /** 军队到家时间戳（kind='camp' 才有，deliver 创建时已在场故为 undefined）。客户端据此前端显示「军队未归」不可领取。 */
   arrivedAt?: number;
+  /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。客户端据此决定显示「卖出」还是「丢弃」。 */
+  hasTradeCenter: boolean;
 }
 
 /**
@@ -120,7 +124,7 @@ export class TreasureModule {
       // 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。
       DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
       // 确认领取待领取宝物（军队带回/送达 → 战报确认；超时由服务端自动遗弃）。
-      // decision 仅对 kind='deliver' 的待领取必填：take=收下(替换入城镇中心)/sell=出售/discard=遗弃。
+      // 收下(take)遇「已持有」「宝物栏已满」一律拒绝（玩家须显式 出售/遗弃）；出售(sell)需本村有贸易中心。
       ClaimPendingTreasure: {
         command: 'treasure.ClaimPending', ownVillage: true, needAuth: true,
         schema: {
@@ -130,6 +134,8 @@ export class TreasureModule {
       },
       // 把已储存的宝物装上某支出征/运输军队（携带上限由调用方按兵力计算后传入 maxCarry）。
       AssignToArmy: { command: 'treasure.AssignToArmy', ownVillage: true, needAuth: true, schema: {} },
+      // 由 building 模块推送：本村是否拥有贸易中心（决定待领取宝物能否「出售」）。铁律#4：建筑只发命令（内部命令，非客户端动作）。
+      SetTradeCenter: { command: 'treasure.SetTradeCenter', ownVillage: false, needAuth: false, schema: { hasTradeCenter: { type: 'boolean' } } },
       // 把跟随军队的宝物在返程到家后存回该村（优先宝库格子）。
       StoreCarried: { command: 'treasure.StoreCarried', ownVillage: false, needAuth: false, schema: {} },
       // 把跟随军队的宝物在抵达「另一个村庄」时转为该村庄玩家的待处理报告（deliver）。
@@ -178,6 +184,8 @@ export class TreasureModule {
     this.commands.register('treasure.Replace', (c) => this.replaceTreasure(c));
     // 宝库建筑推送的额外槽位（由 building 模块在建造/升级/拆除时发送；铁律#4：building 拥有数值，此处只存镜像）
     this.commands.register('treasure.SetSlots', (c) => this.setSlots(c));
+    // 贸易中心推送：本村是否拥有贸易中心（决定待领取宝物能否「出售」；铁律#4：building 拥有，此处只存镜像）
+    this.commands.register('treasure.SetTradeCenter', (c) => this.setTradeCenter(c));
     // 军队携带宝物（出征/运输时把储存的宝物装上军队；在途时城镇失去加成、军队获得加成）
     this.commands.register('treasure.AssignToArmy', (c) => this.assignToArmy(c));
     // 返程到家后把携带宝物存回该村
@@ -251,7 +259,7 @@ export class TreasureModule {
   }
 
   createVillage(villageId: string): void {
-    this.store.set(COLLECTION, villageId, { villageId, town: [], treasury: [], carried: {}, extraSlots: 0 } satisfies TreasureState);
+    this.store.set(COLLECTION, villageId, { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false } satisfies TreasureState);
     // 推送空效果（各层清零/置 1），保证其他模块的宝物修饰层存在且一致。
     void this.recomputeAndPush(villageId);
   }
@@ -282,7 +290,7 @@ export class TreasureModule {
   private ensureState(villageId: string): TreasureState {
     let s = this.load(villageId);
     if (!s) {
-      s = { villageId, town: [], treasury: [], carried: {}, extraSlots: 0 };
+      s = { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false };
       this.store.set(COLLECTION, villageId, s);
       return s;
     }
@@ -295,6 +303,8 @@ export class TreasureModule {
     if (!s.carried || typeof s.carried !== 'object') { s.carried = {}; dirty = true; }
     // 兼容旧存档（缺 extraSlots 字段）
     if (typeof s.extraSlots !== 'number') { s.extraSlots = 0; dirty = true; }
+    // 兼容旧存档（缺 hasTradeCenter 字段）
+    if (typeof s.hasTradeCenter !== 'boolean') { s.hasTradeCenter = false; dirty = true; }
     // 兼容旧存档：宝库已扩容但城镇中心仍有宝物的历史数据，自动迁移到宝库（宝物优先存宝库）
     while (s.treasury.length < s.extraSlots && s.town.length > 0) {
       s.treasury.push(s.town.pop()!);
@@ -404,6 +414,21 @@ export class TreasureModule {
     return { ok: true, payload: { slots: this.getTreasureSlots(villageId), kept: [all[0]], pending: pendingCodes } };
   }
 
+  /**
+   * 由 building 模块推送：本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。
+   * 铁律#4：building 拥有数值，此处只存镜像并广播客户端刷新面板。
+   */
+  private async setTradeCenter(cmd: Command): Promise<CommandResult> {
+    const { villageId, hasTradeCenter } = cmd.payload as { villageId: string; hasTradeCenter: boolean };
+    const s = this.ensureState(villageId);
+    const next = !!hasTradeCenter;
+    if (s.hasTradeCenter === next) return { ok: true, payload: { hasTradeCenter: next } };
+    s.hasTradeCenter = next;
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { hasTradeCenter: next } };
+  }
+
   /** 把已储存宝物 codes 聚合成统一效果。 */
   aggregate(codes: string[]): TreasureEffects {
     const resMult: ResMult = {};
@@ -504,25 +529,6 @@ export class TreasureModule {
     return false;
   }
 
-  /**
-   * 把宝物存进村庄（deliver 收下语义）：优先宝库，其次城镇中心；
-   * 两者皆满时挤掉城镇中心里价值最低的宝物、把新宝物放进去（替换入城镇中心）。
-   * 返回 'stored' | 'replaced' | 'full'。
-   */
-  private storeOne(s: TreasureState, code: string): 'stored' | 'replaced' | 'full' {
-    if (s.treasury.length < s.extraSlots) { s.treasury.push(code); return 'stored'; }
-    if (s.town.length < TOWN_CENTER_BASE_SLOTS) { s.town.push(code); return 'stored'; }
-    // 两者皆满：仅当新宝物价值高于城镇中心里最低价者才替换（避免用低价值覆盖高价值）
-    let lowIdx = -1; let lowVal = Infinity;
-    s.town.forEach((c, i) => { const v = this.config.treasures[c]?.priceGold ?? 0; if (v < lowVal) { lowVal = v; lowIdx = i; } });
-    const incoming = this.config.treasures[code]?.priceGold ?? 0;
-    if (lowIdx >= 0 && incoming > lowVal) {
-      s.town[lowIdx] = code;
-      return 'replaced';
-    }
-    return 'full';
-  }
-
   /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。 */
   private createDeliverPending(villageId: string, code: string, movementId?: string): void {
     const t = this.config.treasures[code];
@@ -607,31 +613,24 @@ export class TreasureModule {
     if (!entry || entry.codes.length === 0) return { ok: true, payload: { stored: [], pending: [] } };
     const storedCodes: string[] = [];
     const pendingCodes: string[] = [];
-    const soldCodes: string[] = [];
     for (const code of entry.codes) {
       if (this.storedCodes(s).includes(code)) {
-        // 已持有 → 等价溢出，直接卖给 NPC 换金币（避免重复入库）
-        soldCodes.push(code);
+        // 已持有（重复宝物）→ 转为 deliver 待处理报告，由玩家明确决策（收下/出售/遗弃），不再静默自动出售
+        pendingCodes.push(code);
       } else if (this.storeIfRoom(s, code)) {
+        // 宝物栏有空位 → 默认放回宝物栏
         storedCodes.push(code);
       } else {
+        // 宝物栏已满 → 转为 deliver 待处理报告，与「新获得的宝物」同等等待处理
         pendingCodes.push(code);
       }
     }
     delete s.carried[movementId];
     this.store.set(COLLECTION, villageId, s);
-    let soldGold = 0;
-    for (const code of soldCodes) soldGold += this.config.treasures[code]?.priceGold ?? 0;
-    if (soldGold > 0) {
-      await this.commands.send({
-        name: 'economy.Grant', from: TreasureModule.NAME,
-        payload: { villageId, gain: { gold: soldGold } },
-      });
-    }
     for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
-    return { ok: true, payload: { stored: storedCodes, pending: pendingCodes, sold: soldCodes } };
+    return { ok: true, payload: { stored: storedCodes, pending: pendingCodes } };
   }
 
   /** 抵达另一个村庄：把携带宝物转为该村庄玩家的 deliver 待处理报告（sell/discard/take）。 */
@@ -800,6 +799,7 @@ export class TreasureModule {
         carried: Object.fromEntries(Object.entries(s.carried).map(([k, v]) => [k, [...v.codes]])),
         slots: this.getTreasureSlots(villageId),
         slotBreakdown: { town: TOWN_CENTER_BASE_SLOTS, treasury: s.extraSlots, total: this.getTreasureSlots(villageId) },
+        hasTradeCenter: s.hasTradeCenter,
         treasures: stored
           .map((code) => this.config.treasures[code])
           .filter((x): x is TreasureDef => !!x),
@@ -870,9 +870,11 @@ export class TreasureModule {
 
   /**
    * 确认领取待领取宝物：把 treasure_pending 中的记录按决策移出。
-   *  - kind='camp'（清理野营掉落）：默认收下（满/重复则自动卖）；可显式 decision=sell/discard/take。
-   *  - kind='deliver'（军队送达/宝库拆除）：必填 decision：
-   *      take=收下(优先宝库，无空位则替换入城镇中心)/sell=出售/discard=遗弃。
+   *  - kind='camp'（本村军队带回）：默认收下；可显式 decision=sell/discard/take。
+   *  - kind='deliver'（军队送达/宝库拆除）：必填 decision：take=收下/sell=出售/discard=遗弃。
+   *  - 收下(take)遇「已持有」或「宝物栏已满」一律拒绝（reason=already_have/no_room），
+   *    由玩家显式选择「出售/遗弃」处理，杜绝静默自动出售。
+   *  - 出售(sell)需本村拥有贸易中心（hasTradeCenter），否则拒绝 reason=no_trade_center。
    * 超时未处理由调度器自动遗弃（treasure.PendingExpired）。
    */
   private async claimPending(cmd: Command): Promise<CommandResult> {
@@ -898,38 +900,27 @@ export class TreasureModule {
     let gold = 0;
     let discarded = false;
     let stored = false;
-    let replaced = false;
 
     if (decision === 'sell') {
+      // 出售需贸易中心：无贸易中心则拒绝（玩家只能选择「丢弃」）
+      if (!s.hasTradeCenter) {
+        return { ok: false, payload: { hasTradeCenter: false }, reason: 'no_trade_center' };
+      }
       sold = true;
       gold = t ? t.priceGold : 0;
     } else if (decision === 'discard') {
       discarded = true;
     } else {
-      // 'take' 或 camp 默认：收下
+      // 'take' 或 camp 默认：收下（不再静默自动出售，满/重复时拒绝并提示玩家显式决策）
       if (this.storedCodes(s).includes(p.code)) {
-        // 已持有（重复宝物）→ 等价溢出，自动卖给 NPC 换金币（不重复入库）
-        sold = true;
-        gold = t ? t.priceGold : 0;
-      } else if (p.kind === 'camp') {
-        if (this.storeIfRoom(s, p.code)) {
-          stored = true;
-        } else {
-          // 栏满 → 自动卖给 NPC 换金币（等价溢出处理）
-          sold = true;
-          gold = t ? t.priceGold : 0;
-        }
+        // 已持有（重复宝物）→ 拒绝领取，由玩家改选「出售 / 遗弃」
+        return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'already_have' };
+      }
+      if (this.storeIfRoom(s, p.code)) {
+        stored = true;
       } else {
-        // deliver take：优先宝库、其次城镇中心、皆满则替换入城镇中心
-        const r = this.storeOne(s, p.code);
-        if (r === 'stored') {
-          stored = true;
-        } else if (r === 'replaced') {
-          replaced = true;
-        } else {
-          // 栏满且新宝物价值不高于已有 → 拒绝替换，保留报告让玩家改选 sell/discard
-          return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'no_room' };
-        }
+        // 宝物栏已满 → 拒绝领取并提示，由玩家明确决策（收下/出售/遗弃），不再自动出售
+        return { ok: false, payload: { codes: this.storedCodes(s), slots: this.getTreasureSlots(p.villageId) }, reason: 'no_room' };
       }
     }
 
@@ -939,7 +930,7 @@ export class TreasureModule {
         payload: { villageId: p.villageId, gain: { gold } },
       });
     }
-    if (stored || replaced) {
+    if (stored) {
       this.store.set(COLLECTION, p.villageId, s);
       await this.recomputeAndPush(p.villageId);
     }
@@ -951,7 +942,7 @@ export class TreasureModule {
       ok: true,
       payload: {
         treasure: t ?? { code: p.code, name: p.name }, kind: p.kind,
-        sold, gold, discarded, stored, replaced, codes: this.storedCodes(s),
+        sold, gold, discarded, stored, codes: this.storedCodes(s),
       },
     };
   }
@@ -973,6 +964,8 @@ export class TreasureModule {
 
   /** 列出本村当前所有待领取宝物（客户端渲染战报确认卡片用）。 */
   private listPending(villageId: string): PendingTreasureView[] {
+    const st = this.load(villageId);
+    const hasTradeCenter = st?.hasTradeCenter ?? false;
     return this.store.all<PendingTreasure>(COLLECTION_PENDING)
       .filter((p) => p.villageId === villageId)
       .map((p) => ({
@@ -980,6 +973,7 @@ export class TreasureModule {
         category: p.category, rarity: p.rarity, effectType: p.effectType,
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
         kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
+        hasTradeCenter,
       }));
   }
 
