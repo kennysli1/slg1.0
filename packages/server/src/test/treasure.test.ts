@@ -12,6 +12,7 @@ import { createGameApp, type GameApp } from '../app.js';
  */
 
 let clock = 1_000_000;
+const setClock = (t: number) => { clock = t; };
 async function freshApp(rng?: () => number): Promise<GameApp> {
   clock = 1_000_000;
   const app = createGameApp({ now: () => clock, manualScheduler: true, rng });
@@ -194,3 +195,80 @@ test('宝物出售：未持有的宝物返回 not_held', async () => {
   assert.equal(s.ok, false, '未持有应失败');
   assert.equal(s.reason, 'not_held', '应返回 not_held');
 });
+
+test('宝库：SetSlots 推高槽位后可储存更多宝物', async () => {
+  const app = await freshApp();
+  const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l0.slots, 1, '开局仅城镇中心 1 格');
+
+  // 占满唯一栏位
+  const g1 = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  assert.equal(g1.ok, true);
+  const g2 = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(g2.ok, false, '栏满应拒绝第二个');
+  assert.equal(g2.reason, 'treasure_slots_full');
+
+  // 建造宝库效果等价：building 推送额外 5 格
+  const set = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 5 });
+  assert.equal(set.ok, true, 'SetSlots 应成功');
+  const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l1.slots, 6, '总槽位应为 1+5=6');
+
+  const g3 = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(g3.ok, true, '槽位扩充后应可入库');
+  const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l2.codes.sort(), ['chainsaw', 'war_flag'], '两个宝物均应入库');
+});
+
+test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加', async () => {
+  const app = await freshApp();
+  // 给足资源以秒建
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+  const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l0.slots, 1, '开局仅 1 格');
+
+  // 城内建造宝库（requires 主城1级，开局已满足）
+  const b = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'treasury' });
+  assert.equal(b.ok, true, `建造宝库应成功: ${b.reason ?? ''}`);
+  // 完成（treasury L1 的 timeSec=2，推进 60s 一定落成）
+  await app.scheduler.advanceTo(clock + 60_000, (t) => { clock = t; });
+
+  const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  // treasury L1 每级 +1 槽位 ⇒ 总槽位 2
+  assert.equal(l1.slots, 2, '宝库 L1 落成后总槽位应为 2');
+
+  // 升级到 L2 ⇒ 总槽位 3
+  const up = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: (await layoutOf(app)).slotId, });
+  assert.equal(up.ok, true, `升级宝库应成功: ${up.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 60_000, (t) => { clock = t; });
+  const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l2.slots, 3, '宝库 L2 落成后总槽位应为 3');
+});
+
+test('宝库：拆除宝库后槽位回退到城镇中心基础 1 格（不强制挤出已持有）', async () => {
+  const app = await freshApp();
+  // 先塞两个宝物到栏（开局只有 1 格，先扩到 2）
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l0.slots, 2, '扩槽后应为 2');
+
+  // 槽位回退到 0（等价拆除宝库）
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 0 });
+  const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l1.slots, 1, '回退后槽位应为 1');
+  assert.equal(l1.codes.length, 2, '已持有宝物不被强制挤出（仅阻止后续新增）');
+  const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'blessing_of_gods' });
+  assert.equal(g.ok, false, '槽位不足时应拒绝新增');
+  assert.equal(g.reason, 'treasure_slots_full');
+});
+
+// 取本村宝库在布局中的 slotId（用于升级测试）
+async function layoutOf(app: GameApp): Promise<{ slotId: string }> {
+  const l = (await send(app, 'building.GetLayout', { villageId: 'v1' })).payload as any;
+  const t = l.zones.inner.placed.find((p: any) => p.kind === 'treasury');
+  if (!t) throw new Error('宝库未找到');
+  return { slotId: t.slotId };
+}
+

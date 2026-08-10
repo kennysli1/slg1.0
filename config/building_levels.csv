@@ -1,5 +1,5 @@
-code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod
-#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时
+code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod,treasureSlots
+#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时,treasureSlots=该级相对上一级的宝物栏槽位增量贡献(仅宝库treasury有值;非宝库留空;总槽位=城镇中心基础1+Σ1..当前等级treasureSlots)
 main,1,4,4,3,2,1,2,20,
 main,2,5,4,4,3,1,2,20,
 main,3,7,6,5,3,1,4,20,
@@ -180,3 +180,13 @@ tradecenter,7,350,390,270,210,1,1000,0,
 tradecenter,8,480,530,360,280,1,1400,0,
 tradecenter,9,650,720,490,380,1,2000,0,
 tradecenter,10,900,1000,680,520,1,2800,0,
+treasury,1,4,4,3,2,1,2,8,,1,
+treasury,2,5,4,4,3,1,2,8,,1,
+treasury,3,7,6,5,3,1,4,8,,1,
+treasury,4,8,7,6,4,1,6,8,,1,
+treasury,5,11,9,8,5,1,10,8,,1,
+treasury,6,14,12,10,7,1,16,8,,1,
+treasury,7,18,15,13,9,1,25,8,,1,
+treasury,8,23,20,17,11,1,40,8,,1,
+treasury,9,29,25,22,14,1,64,8,,1,
+treasury,10,37,32,28,18,1,103,8,,1,

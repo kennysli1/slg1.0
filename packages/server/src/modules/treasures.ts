@@ -18,7 +18,7 @@ import type { ModuleManifest } from '../gateway/manifest.js';
  *      · 经济产出倍率 → economy.SetRateModifier(source='treasure')
  *      · 人口增长倍率 → population.SetTreasureGrowthMult
  *      · 攻防倍率     → military.SetTreasureCombatMult（作用于防守快照）
- *  - 军队携带宝物（出征+抵达转移归属）与「宝库」建筑为独立后续任务，本期仅做城镇储存+效果。
+ *  - 军队携带宝物（出征+抵达转移归属）为独立后续任务；「宝库」建筑(treasury)已实装，按等级提供额外宝物栏槽位。
  */
 
 /** 资源键（与 economy.RESOURCE_TYPES 对齐，但此处不复用 economy 模块以避免跨模块 import）。 */
@@ -43,14 +43,16 @@ interface TreasureState {
   villageId: string;
   /** 已储存宝物 code 列表（被动与特殊宝物同存于此；特殊宝物 use 后移除）。 */
   codes: string[];
+  /** 宝库(treasury)建筑贡献的额外宝物栏槽位（由 building 模块经 treasure.SetSlots 推送）。总槽位 = 城镇中心基础 1 格 + 此值。持久化以避免重启丢失（铁律#4：数值由 building 拥有，此处只存镜像）。 */
+  extraSlots: number;
 }
 
 const COLLECTION = 'treasure';
 
 /**
  * 宝物栏槽位数：城镇中心自带 1 格基础栏。
- * 后续「宝库」建筑(treasury)按等级增加格子时，在此叠加其贡献
- * （查询 building.GetTreasureSlots 即可，本期宝库未实装，故恒为 1）。
+ * 「宝库」建筑(treasury)按等级提供额外格子，经 treasure.SetSlots 推送叠加到本模块
+ * （数值由 building 拥有，此处只存镜像，持久化避免重启丢失）。
  */
 const TOWN_CENTER_BASE_SLOTS = 1;
 
@@ -97,6 +99,8 @@ export class TreasureModule {
     // 玩家主动出售/丢弃（客户端宝物面板触发）
     this.commands.register('treasure.Sell', (c) => this.sell(c));
     this.commands.register('treasure.Discard', (c) => this.discard(c));
+    // 宝库建筑推送的额外槽位（由 building 模块在建造/升级/拆除时发送；铁律#4：building 拥有数值，此处只存镜像）
+    this.commands.register('treasure.SetSlots', (c) => this.setSlots(c));
   }
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
@@ -116,7 +120,7 @@ export class TreasureModule {
   }
 
   createVillage(villageId: string): void {
-    this.store.set(COLLECTION, villageId, { villageId, codes: [] } satisfies TreasureState);
+    this.store.set(COLLECTION, villageId, { villageId, codes: [], extraSlots: 0 } satisfies TreasureState);
     // 推送空效果（各层清零/置 1），保证其他模块的宝物修饰层存在且一致。
     void this.recomputeAndPush(villageId);
   }
@@ -129,15 +133,33 @@ export class TreasureModule {
   private ensureState(villageId: string): TreasureState {
     let s = this.load(villageId);
     if (!s) {
-      s = { villageId, codes: [] };
+      s = { villageId, codes: [], extraSlots: 0 };
       this.store.set(COLLECTION, villageId, s);
     }
+    // 兼容旧存档（宝物模块上线前的村庄文档缺 extraSlots 字段）
+    if (typeof s.extraSlots !== 'number') s.extraSlots = 0;
     return s;
   }
 
-  /** 当前宝物栏槽位数（城镇中心基础 1 格；宝库建筑实装后叠加）。 */
-  getTreasureSlots(_villageId: string): number {
-    return TOWN_CENTER_BASE_SLOTS;
+  /** 当前宝物栏总槽位数 = 城镇中心基础 1 格 + 宝库(treasury)建筑贡献的额外槽位（持久化镜像）。 */
+  getTreasureSlots(villageId: string): number {
+    return TOWN_CENTER_BASE_SLOTS + (this.load(villageId)?.extraSlots ?? 0);
+  }
+
+  /**
+   * 由 building 模块推送：设置本村宝库(treasury)贡献的额外宝物栏槽位（内部命令，非客户端动作）。
+   * 数值由 building 模块拥有（铁律#4），此处只存镜像并广播客户端刷新面板。
+   * 槽位变小（如拆除宝库）时本模块不强制挤出已持有宝物，仅阻止后续新增，直到玩家自行腾位。
+   */
+  private async setSlots(cmd: Command): Promise<CommandResult> {
+    const { villageId, extra } = cmd.payload as { villageId: string; extra: number };
+    const s = this.ensureState(villageId);
+    const next = Math.max(0, Math.floor(Number(extra) || 0));
+    if (s.extraSlots === next) return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };
+    s.extraSlots = next;
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };
   }
 
   /** 把已储存宝物 codes 聚合成统一效果。 */

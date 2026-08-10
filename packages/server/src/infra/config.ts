@@ -143,6 +143,8 @@ export interface BuildingLevelDef {
   timeSec: number;
   /** 该等级相对上一级的「增量」人口硬上限贡献。硬上限 = Σ 每栋已建建筑 levels[1..当前等级].popCap（增量求和，1:1 等价于旧 popCapPerLevel×level）。 */
   popCap: number;
+  /** 仅宝库(treasury)：该等级相对上一级的宝物栏槽位增量贡献。总槽位 = 城镇中心基础1 + Σ 1..当前等级 treasureSlots。其余建筑恒为 0。 */
+  treasureSlots?: number;
   /** 仅资源田：该等级产量/小时。 */
   prod?: number;
 }
@@ -167,6 +169,8 @@ export interface BuildingDef {
   levels: Record<number, BuildingLevelDef>;
   /** 前端展示用：第 1 级人口上限贡献（= levels[1]?.popCap ?? 0），卡片显示「+X/级」。 */
   popCapPerLevel: number;
+  /** 前端展示用：第 1 级宝物栏槽位增量贡献（仅宝库 treasury 有值；其余建筑为 0），卡片显示「+X 宝物栏/级」。 */
+  treasureSlotsPerLevel: number;
   /** 展示用简介：这栋建筑干嘛的/有什么用（点开建筑详情展示；纯文本，缺列回退空串）。 */
   desc: string;
   /** 展示用升级效果说明：每级提升什么（纯文本，缺列回退空串）。 */
@@ -512,7 +516,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','prod'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -525,6 +529,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       costGold: num(r.costGold, 0),
       timeSec: num(r.timeSec),
       popCap: num(r.popCap),
+      treasureSlots: r.treasureSlots ? num(r.treasureSlots) : 0,
       prod: r.prod ? num(r.prod) : undefined,
     };
   }
@@ -549,6 +554,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       popGrowthPerLevel: num(r.popGrowthPerLevel, 0),
       levels: lvl,
       popCapPerLevel: lvl[1]?.popCap ?? 0,
+      treasureSlotsPerLevel: lvl[1]?.treasureSlots ?? 0,
       desc: r.desc ?? '',
       effect: r.effect ?? '',
     };

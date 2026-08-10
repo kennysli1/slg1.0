@@ -198,6 +198,7 @@ export class BuildingModule {
     // 注意：建筑不再上报 crop 维护（人口耗粮模型 v3：只有人口会耗粮，建筑只提供人口上限）。
     this.reportCapacity(s);
     for (const r of ['wood', 'clay', 'iron', 'crop']) this.reportFieldRate(s, r);
+    this.reportTreasureSlots(s);
   }
 
   private load(villageId: string): BuildingState | undefined {
@@ -562,9 +563,10 @@ export class BuildingModule {
     s.queue.push({ slotId, kind: p.kind, toLevel: 0, isNew: false, demolish: true, startAt, finishAt, taskId });
     this.store.set(COLLECTION, villageId, s);
 
-    // 即时刷新下游派生（与完整落成/升级一致口径）：仓储容量 + 资源田产率
+    // 即时刷新下游派生（与完整落成/升级一致口径）：仓储容量 + 资源田产率 + 宝物栏槽位
     this.reportCapacity(s);
     if (def.resource) this.reportFieldRate(s, def.resource);
+    this.reportTreasureSlots(s);
     // 广播"开始拆除"：人口硬上限等缓存型派生据此从 building 重算（level 已为 0，加成即时消失）
     await this.emit('building.Demolishing', villageId, slotId, p.kind, 0);
 
@@ -596,9 +598,10 @@ export class BuildingModule {
       await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
     }
 
-    // 刷新派生：人口/容量始终；资源田刷该资源产率
+    // 刷新派生：人口/容量始终；资源田刷该资源产率；宝物栏槽位随宝库变动
     this.reportCapacity(s);
     if (def?.resource) this.reportFieldRate(s, def.resource);
+    this.reportTreasureSlots(s);
   }
 
   private getDefenseSnapshot(cmd: Command): CommandResult {
@@ -633,6 +636,28 @@ export class BuildingModule {
       name: 'economy.SetBaseRate',
       from: BuildingModule.NAME,
       payload: { villageId: s.villageId, resource, ratePerHour },
+    });
+  }
+
+  /**
+   * 宝库(treasury)建筑贡献的宝物栏额外槽位（Σ 1..当前等级 的 treasureSlots 增量）上报 Treasures 模块。
+   * 铁律#4：建筑只发命令（treasure.SetSlots），宝物状态与槽位数由 treasure 模块持有；本模块不回查。
+   * 拆除中(level=0)或尚未建成 ⇒ extra=0，宝物栏回退到城镇中心基础 1 格。
+   */
+  private reportTreasureSlots(s: BuildingState): void {
+    let extra = 0;
+    for (const p of s.placed) {
+      if (p.kind !== 'treasury') continue;
+      const def = this.config.buildings[p.kind];
+      if (!def) continue;
+      for (let lv = 1; lv <= p.level; lv++) {
+        extra += def.levels[lv]?.treasureSlots ?? 0;
+      }
+    }
+    void this.commands.send({
+      name: 'treasure.SetSlots',
+      from: BuildingModule.NAME,
+      payload: { villageId: s.villageId, extra },
     });
   }
 
