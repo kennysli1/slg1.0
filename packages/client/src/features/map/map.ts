@@ -420,20 +420,45 @@ function renderCarrySection(): string {
       }).join('')
     : '<small class="muted">暂无可携带的宝物（清理野营或购买获取）</small>';
   return `<div class="raidbox-title">携带宝物 <span class="carry-cap" id="carryCap">可携带 0 格</span>
-    <small class="hint-sm">军队携带时城镇失去其加成，军队获得加成</small></div>
+    <small class="hint-sm">军队携带时城镇失去其加成，军队获得加成</small>
+    <div class="carry-warn-line" id="carryWarn"></div></div>
     <div class="treasure-carry-list" id="carryList">${list}</div>`;
 }
 
-/** 重新计算携带上限（基于当前出征兵力）并刷新显示。 */
+/** 重新计算携带上限（基于当前出征兵力）并刷新显示。cap=0 时禁用勾选并显警告。 */
 function updateCarryCap(): void {
   const capEl = document.getElementById('carryCap');
   if (!capEl) return;
+  const warnEl = document.getElementById('carryWarn');
   let total = 0;
   document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
     total += Math.max(0, Number(inp.value) || 0);
   });
   const cap = treasureCarryCap(total);
-  capEl.textContent = `可携带 ${cap} 格（兵力 ${total}）`;
+  const perSlot = treasureCarryTroopsPerSlot();
+  const checkboxes = document.querySelectorAll<HTMLInputElement>('.carry-check');
+  const checked = document.querySelectorAll<HTMLInputElement>('.carry-check:checked').length;
+
+  // 重置类名
+  capEl.classList.remove('cap-zero', 'cap-over');
+
+  if (cap === 0) {
+    capEl.textContent = `不可携带 · 兵力不足（当前 ${total}，至少 ${perSlot} 才能携带 1 格）`;
+    capEl.classList.add('cap-zero');
+    if (warnEl) warnEl.innerHTML = `<span class="carry-warn">⚠️ 兵力不足，无法携带宝物。请增加出征兵力至 ≥ ${perSlot}，或在下方取消勾选。</span>`;
+    // 禁用所有勾选并强制取消（防止已勾选状态泄漏）
+    checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; });
+  } else {
+    capEl.textContent = `可携带 ${cap} 格（兵力 ${total}）`;
+    checkboxes.forEach((cb) => { cb.disabled = false; });
+    if (checked > cap) {
+      capEl.textContent += ` · 已选 ${checked} 超出上限（仅前 ${cap} 个生效）`;
+      capEl.classList.add('cap-over');
+      if (warnEl) warnEl.innerHTML = `<span class="carry-warn">⚠️ 已选 ${checked} 个超出上限 ${cap}，仅前 ${cap} 个会随军携带。</span>`;
+    } else if (warnEl) {
+      warnEl.innerHTML = '';
+    }
+  }
 }
 
 /** 收集勾选的携带宝物 code（按勾选顺序）；超出携带上限则截断到上限并提示。 */

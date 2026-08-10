@@ -542,12 +542,17 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 /* 出征面板：携带宝物选择区 */
 .treasure-carry-list { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-2); }
 .carry-cap { font-size: var(--f-xs); font-weight: 600; color: var(--c-brand); }
+.carry-cap.cap-zero { color: #c0392b; }
+.carry-cap.cap-over { color: #d97706; }
+.carry-warn-line { width: 100%; margin-top: 4px; }
+.carry-warn { display: block; font-size: var(--f-xs); color: #c0392b; background: rgba(192,57,43,.08); border: 1px solid rgba(192,57,43,.25); border-radius: var(--r-sm); padding: 4px 8px; line-height: 1.4; }
 .carry-chip {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
   background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: var(--r-sm);
   padding: 3px var(--s-2); font-size: var(--f-sm); line-height: 1.2;
 }
 .carry-chip:hover { border-color: var(--c-brand); }
+.carry-chip:has(.carry-check:disabled) { opacity: 0.55; cursor: not-allowed; border-color: var(--c-line); }
 .carry-chip .carry-check { margin: 0; }
 .carry-chip .carry-name { font-weight: 600; }
 .carry-chip .carry-rar { font-size: var(--f-xs); padding: 0 6px; border-radius: 999px; color: #fff; }

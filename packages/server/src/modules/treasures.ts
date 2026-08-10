@@ -293,9 +293,12 @@ export class TreasureModule {
     const next = Math.max(0, Math.floor(Number(extra) || 0));
     if (s.extraSlots === next) return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };
 
-    // 增大：直接接受，无需重分布
+    // 增大：宝库扩容 → 城镇中心宝物自动迁入宝库（宝物优先存宝库，城镇中心仅作兜底）
     if (next > s.extraSlots) {
       s.extraSlots = next;
+      while (s.treasury.length < s.extraSlots && s.town.length > 0) {
+        s.treasury.push(s.town.pop()!);
+      }
       this.store.set(COLLECTION, villageId, s);
       await this.emitChanged(villageId);
       return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };

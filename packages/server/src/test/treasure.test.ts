@@ -305,6 +305,25 @@ test('宝库：SetSlots 推高槽位后可储存更多宝物', async () => {
   assert.deepEqual(l2.codes.sort(), ['chainsaw', 'war_flag'], '两个宝物均应入库');
 });
 
+test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根因回归）', async () => {
+  const app = await freshApp();
+  // 起初只有城镇中心 1 格
+  const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l0.slots, 1, '开局仅 1 格');
+  assert.deepEqual(l0.treasury, [], '宝库初始为空');
+  // 宝库未建时拿到的宝物一定落城镇中心
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l1.town, ['chainsaw'], '宝物应在城镇中心');
+  assert.deepEqual(l1.treasury, [], '宝库仍为空');
+  // 建造宝库（等价 SetSlots extra=1）：城镇中心的宝物应自动迁入宝库
+  const set = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  assert.equal(set.ok, true);
+  const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l2.town, [], '城镇中心应清空');
+  assert.deepEqual(l2.treasury, ['chainsaw'], '原城镇中心宝物应迁入宝库');
+});
+
 test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加', async () => {
   const app = await freshApp();
   // 给足资源以秒建
