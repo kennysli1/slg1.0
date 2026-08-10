@@ -926,12 +926,16 @@ export class MovementModule {
 
   /** 出征到达：把兵力快照交给 Combat 开/并入战场，删除去程（兵力进入战斗，由 Combat 追踪）。 */
   private async arriveEngage(mv: Movement, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
+    // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
+    // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
+    const carried = mv.treasures && mv.treasures.length > 0 ? mv.treasures : [];
     await this.commands.send({
       name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
         targetKind, targetId, targetXY: mv.toXY,
         movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
         troops: mv.troops, attackerSnapshot: await this.attackerSnapshot(mv),
+        treasures: carried,
       },
     });
     this.store.delete(COLLECTION, mv.id);
