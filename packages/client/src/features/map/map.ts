@@ -275,7 +275,9 @@ export function renderMap(): string {
   const canDown  = inBounds(center.q, center.r + STEP);
   const canLeft  = inBounds(center.q - STEP, center.r);
   const canRight = inBounds(center.q + STEP, center.r);
-  const isHome = center.q === me.q && center.r === me.r;
+  const isHome = mapCenteredKey === ''
+    ? center.q === me.q && center.r === me.r
+    : isHomeVisuallyCentered();
 
   // 玩家看到的是 X,Y（X=q, Y=r，显示层映射）
   const nav = `<div class="map-nav">
@@ -530,6 +532,7 @@ function resetMapView(): void {
   // 双击空白：以当前视野中心、zoom=1 重新居中（而非归零，避免跳变）。
   mapZoom = 1;
   centerViewOn(viewCenter());
+  syncNavUI(viewCenter());
 }
 
 /** 进地图页时重置居中状态：下次 bindMap 会以本城为心、INITIAL_ZOOM 重新居中。 */
@@ -598,6 +601,28 @@ function centerViewOn(target: { q: number; r: number }): void {
   mapCenteredKey = `${target.q},${target.r}`;
 }
 
+/** 主城是否真的位于当前相机中心；需考虑环面地图的等价副本。 */
+function isHomeVisuallyCentered(): boolean {
+  if (!me || mapZoom <= 0 || mapCw <= 0 || mapCh <= 0) return true;
+  const home = hexToPixel({ q: me.q, r: me.r });
+  const hx = home.x + mapOx;
+  const hy = home.y + mapOy;
+  const cx = (mapCw / 2 - mapPanX) / mapZoom;
+  const cy = (mapCh / 2 - mapPanY) / mapZoom;
+  const vx = hexToPixel({ q: worldW(), r: 0 });
+  const vy = hexToPixel({ q: 0, r: worldH() });
+  if (Math.abs(vx.x) < 1e-6 || Math.abs(vy.y) < 1e-6) return true;
+
+  // 将视口中心与主城的差约化到最近的环面副本，再按屏幕像素判断。
+  const v = (cy - hy) / vy.y;
+  const u = (cx - hx - v * vy.x) / vx.x;
+  const ur = u - Math.round(u);
+  const vr = v - Math.round(v);
+  const dx = ur * vx.x + vr * vy.x;
+  const dy = vr * vy.y;
+  return Math.hypot(dx, dy) * mapZoom <= 2;
+}
+
 /** 双指手势：捏合缩放 + 双指拖拽平移。绑定标记避免同一元素重复绑定。 */
 function bindMapGestures(svg: SVGSVGElement): void {
   if ((svg as any)._gesturesBound) return;
@@ -643,7 +668,10 @@ function bindMapGestures(svg: SVGSVGElement): void {
   }, { passive: false });
 
   svg.addEventListener('touchend', (e) => {
-    if (e.touches.length < 2) startDist = 0;
+    if (e.touches.length < 2) {
+      startDist = 0;
+      syncNavUI(viewCenter()); // 手势结束后按真实相机位置更新回城键
+    }
   }, { passive: true });
 }
 
@@ -778,6 +806,7 @@ function bindMapMouse(): void {
     if (mapDragMoved) {
       mapSuppressClick = true; // 吞掉随后触发的 click，避免误选中地块
       renderVisibleTiles(); // 拖拽结束再确保一次：把松手瞬间视野内的格子都渲染出来
+      syncNavUI(viewCenter()); // 拖离主城后启用 D-pad 中央的回城键
     }
   });
 
@@ -797,6 +826,7 @@ function bindMapMouse(): void {
     reducePanToLattice();
     applyMapTransform(mapSvg);
     scheduleCull(); // 缩放后重算视野内格子（含副本份数随缩放变化）
+    syncNavUI(viewCenter());
   }, { passive: false });
 }
 
@@ -811,7 +841,8 @@ function syncNavUI(center: { q: number; r: number }): void {
   setDis('mapDirDown', !inBounds(center.q, center.r + STEP));
   setDis('mapDirLeft', !inBounds(center.q - STEP, center.r));
   setDis('mapDirRight', !inBounds(center.q + STEP, center.r));
-  setDis('mapDirHome', center.q === me!.q && center.r === me!.r);
+  const homeCentered = isHomeVisuallyCentered();
+  setDis('mapDirHome', homeCentered);
   const xEl = document.getElementById('mapJumpX') as HTMLInputElement | null;
   const yEl = document.getElementById('mapJumpY') as HTMLInputElement | null;
   if (xEl) xEl.value = String(center.q);
@@ -819,7 +850,9 @@ function syncNavUI(center: { q: number; r: number }): void {
   const label = document.getElementById('mapViewLabel');
   if (label) {
     const isViewing = center.q !== me!.q || center.r !== me!.r;
-    label.innerHTML = isViewing
+    label.innerHTML = !homeCentered && !isViewing
+      ? '全图模式 · 视角已偏离本城，<a href="#" id="mapReturnHome">回到本城</a>'
+      : isViewing
       ? `全图模式 · 正在查看 (X=${center.q}, Y=${center.r})，<a href="#" id="mapReturnHome">回到本城</a>`
       : `全图模式 · 你在 X=${center.q}, Y=${center.r}（已居中）`;
     const ret = document.getElementById('mapReturnHome');
@@ -860,6 +893,7 @@ export function bindMap(act: (p: Promise<any>) => void): void {
     } else {
       applyMapTransform(); // 跨 5s 重渲保留缩放/平移态
       renderVisibleTiles(); // 重渲后按当前相机重算视野内格子
+      syncNavUI(viewCenter()); // 恢复相机后同步回城键，避免重渲把它错误禁用
     }
   }
 
