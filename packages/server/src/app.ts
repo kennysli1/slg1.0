@@ -46,6 +46,7 @@ const PROGRESS_COLLECTIONS = [
   'merc',
   'trade',
   'treasure',
+  'treasure_pending',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -197,6 +198,7 @@ export function createGameApp(opts?: {
       scheduler.cancelByOwner(prefix);
     }
     trade.wipeSingleVillage(villageId);
+    treasure.wipeSingleVillage(villageId);
     for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
       if (mv.fromVillage === villageId && mv.id) scheduler.cancelByOwner(`movement:${mv.id}`);
     }
@@ -206,7 +208,7 @@ export function createGameApp(opts?: {
         Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
       if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
     }
-    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure'] as const) {
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending'] as const) {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
@@ -345,6 +347,7 @@ export function createGameApp(opts?: {
           scheduler.cancelByOwner(prefix);
         }
         trade.wipeSingleVillage(villageId);
+        treasure.wipeSingleVillage(villageId);
       }
       for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
         if (mv.fromVillage && villageSet.has(mv.fromVillage) && mv.id) {
@@ -362,7 +365,7 @@ export function createGameApp(opts?: {
       store.delete('player_byname', name);
       for (const villageId of villageIds) store.delete('player_byvillage', villageId);
 
-      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure'] as const;
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending'] as const;
       for (const villageId of villageIds) {
         for (const c of progressByVillage) store.delete(c, villageId);
       }

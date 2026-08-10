@@ -525,6 +525,14 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .treasure-card[data-open-treasure] { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
 .treasure-card[data-open-treasure]:hover { transform: translateY(-1px); box-shadow: var(--sh-2, 0 2px 8px rgba(0,0,0,.08)); border-left-color: var(--c-brand); }
 .treasure-jump-hint { font-size: var(--f-xs); color: var(--c-ink-soft); margin: -2px 0 var(--s-1); }
+/* 报告页：军队带回的待领取宝物区 */
+.pending-treasures {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  margin-bottom: var(--s-3); padding: var(--s-2);
+  background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: var(--r-md);
+}
+.pending-card { background: var(--c-surface); }
+.claim-cd { font-size: var(--f-xs); color: var(--c-ink-soft); margin-left: auto; align-self: center; }
 .treasure-empty {
   font-size: var(--f-sm); color: var(--c-ink-soft); background: var(--c-surface-2);
   border: 1px dashed var(--c-line); border-radius: var(--r-sm); padding: var(--s-3);

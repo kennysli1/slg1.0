@@ -37,6 +37,8 @@ const EVENT_MAP: Record<string, string> = {
   'movement.IncomingAttack':  'IncomingAttack',
   'movement.Intercepted':     'MarchIntercepted',
   'treasure.Dropped':         'TreasureDropped',
+  'treasure.PendingDropped':   'TreasurePendingDropped',
+  'treasure.PendingExpired':   'TreasurePendingExpired',
 };
 
 export class NotificationsModule {

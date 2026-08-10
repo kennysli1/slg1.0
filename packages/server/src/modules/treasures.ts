@@ -48,6 +48,40 @@ interface TreasureState {
 }
 
 const COLLECTION = 'treasure';
+/** 待领取宝物集合：军队带回、等待玩家确认领取的宝物（铁律#1：owner 仍是本模块）。键 = movementId。 */
+const COLLECTION_PENDING = 'treasure_pending';
+
+/** 待领取宝物（军队带回、待确认）。超时未确认由调度器自动遗弃。 */
+interface PendingTreasure {
+  movementId: string;
+  villageId: string;
+  code: string;
+  name: string;
+  icon: string;
+  category: string;
+  rarity: string;
+  effectType: string;
+  effectValue: number;
+  applyType: string;
+  priceGold: number;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
+interface PendingTreasureView {
+  movementId: string;
+  code: string;
+  name: string;
+  icon: string;
+  category: string;
+  rarity: string;
+  effectType: string;
+  effectValue: number;
+  applyType: string;
+  priceGold: number;
+  expiresAt: number;
+}
 
 /**
  * 宝物栏槽位数：城镇中心自带 1 格基础栏。
@@ -69,9 +103,13 @@ export class TreasureModule {
       SellTreasure: { command: 'treasure.Sell', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
       // 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。
       DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      // 确认领取待领取宝物（军队带回 → 战报确认；超时由服务端自动遗弃）
+      ClaimPendingTreasure: { command: 'treasure.ClaimPending', ownVillage: true, needAuth: true, schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } } },
     },
     eventPushMap: {
       'treasure.Changed': 'TreasureChanged',
+      'treasure.PendingDropped': 'TreasurePendingDropped',
+      'treasure.PendingExpired': 'TreasurePendingExpired',
     },
   };
 
@@ -99,6 +137,8 @@ export class TreasureModule {
     // 玩家主动出售/丢弃（客户端宝物面板触发）
     this.commands.register('treasure.Sell', (c) => this.sell(c));
     this.commands.register('treasure.Discard', (c) => this.discard(c));
+    // 确认领取待领取宝物（客户端战报「确认领取」按钮触发；公开动作）
+    this.commands.register('treasure.ClaimPending', (c) => this.claimPending(c));
     // 替换宝物：丢弃一个已持有的宝物并入新宝物（贸易中心「购买宝物-栏满替换」路径；内部命令）
     this.commands.register('treasure.Replace', (c) => this.replaceTreasure(c));
     // 宝库建筑推送的额外槽位（由 building 模块在建造/升级/拆除时发送；铁律#4：building 拥有数值，此处只存镜像）
@@ -125,6 +165,16 @@ export class TreasureModule {
     this.store.set(COLLECTION, villageId, { villageId, codes: [], extraSlots: 0 } satisfies TreasureState);
     // 推送空效果（各层清零/置 1），保证其他模块的宝物修饰层存在且一致。
     void this.recomputeAndPush(villageId);
+  }
+
+  /** 刷档/删村时清理本村待领取宝物并取消其超时任务（铁律#1：本模块拥有 treasure_pending 集合）。 */
+  wipeSingleVillage(villageId: string): void {
+    for (const p of this.store.all<PendingTreasure>(COLLECTION_PENDING)) {
+      if (p.villageId === villageId) {
+        this.scheduler.cancelByOwner(`treasure-pending:${p.movementId}`);
+        this.store.delete(COLLECTION_PENDING, p.movementId);
+      }
+    }
   }
 
   private load(villageId: string): TreasureState | undefined {
@@ -336,7 +386,7 @@ export class TreasureModule {
     return { ok: true, payload: { codes: [...s.codes], treasure: t } };
   }
 
-  /** 列出村庄已储存宝物 + 聚合效果（客户端渲染用）。 */
+  /** 列出村庄已储存宝物 + 聚合效果 + 待领取宝物（客户端渲染用）。 */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
@@ -351,6 +401,7 @@ export class TreasureModule {
           .map((code) => this.config.treasures[code])
           .filter((x): x is TreasureDef => !!x),
         effect: eff,
+        pending: this.listPending(villageId),
       },
     };
   }
@@ -359,18 +410,20 @@ export class TreasureModule {
    * 掉落结算：由 combat(清野营) 触发。
    *  - 先按总体概率门控（treasureCampDropChance）；
    *  - 命中后按各宝物 dropRate 加权抽选（轮盘赌）；
-   *  - 宝物栏未满且不重复 → 入栏（被动即生效、即时即占位）；
-   *  - 栏满或重复持有 → 自动卖给 NPC 换金币（等价于「溢出自动售卖」）。
-   * 无论结果如何都 emit treasure.Changed 让客户端刷新面板；命中则额外 emit treasure.Dropped 进战报。
+   *  - 抽中的宝物**不直接入栏**，而是生成一条「待领取」记录（treasure_pending），
+   *    经 treasure.PendingDropped 进战报；玩家需在 treasureClaimTimeoutSec 内
+   *    通过 ClaimPendingTreasure 确认领取，超时由调度器自动遗弃（treasure.PendingExpired）。
+   * 这是「军队带回宝物 → 战报确认 + 超时自动遗弃」机制的服务端实现。
    */
   private async rollDrop(cmd: Command): Promise<CommandResult> {
-    const { villageId, source, forceCode } = cmd.payload as {
+    const { villageId, source, movementId, forceCode } = cmd.payload as {
       villageId: string;
       source: 'camp';
+      /** 关联的行军 id（attack movement），用作待领取记录主键；缺省时自动生成。 */
+      movementId?: string;
       /** 测试/调试用：强制抽中指定 code（跳过概率门控与加权）。 */
       forceCode?: string;
     };
-    const s = this.ensureState(villageId);
     const c = this.config.constants;
     const baseChance = c.treasureCampDropChance;
 
@@ -384,31 +437,101 @@ export class TreasureModule {
     const t = this.config.treasures[code];
     if (!t) return { ok: true, payload: { dropped: null } };
 
-    const slots = this.getTreasureSlots(villageId);
+    // 生成待领取记录（不直接入栏）
+    const now = this.now();
+    const timeoutMs = Math.max(1, Math.floor(c.treasureClaimTimeoutSec)) * 1000;
+    const pid = movementId || `pend-${villageId}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const pending: PendingTreasure = {
+      movementId: pid, villageId, code,
+      name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
+      effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
+      priceGold: t.priceGold, createdAt: now, expiresAt: now + timeoutMs,
+    };
+    this.store.set(COLLECTION_PENDING, pid, pending);
+    // 注册超时自动遗弃（按 village 串行，避免写竞争）
+    this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
+
+    // 进战报（待确认领取）
+    await this.bus.emit({
+      name: 'treasure.PendingDropped', source: TreasureModule.NAME, ts: now,
+      payload: {
+        villageId, movementId: pid, code, name: t.name, icon: t.icon, category: t.category,
+        rarity: t.rarity, effectType: t.effectType, effectValue: t.effectValue,
+        applyType: t.applyType, priceGold: t.priceGold, expiresAt: pending.expiresAt,
+      },
+    } as DomainEvent);
+
+    const dropped = { code, name: t.name, rarity: t.rarity, category: t.category, pending: true, movementId: pid };
+    return { ok: true, payload: { dropped } };
+  }
+
+  /**
+   * 确认领取待领取宝物：把 treasure_pending 中的记录移入村庄宝物栏。
+   * 受槽位/重复约束；栏满或重复持有 → 自动卖给 NPC 换金币（等价溢出处理）。
+   * 成功后取消超时任务并移除待领取记录，再重算推送效果（铁律#4）。
+   */
+  private async claimPending(cmd: Command): Promise<CommandResult> {
+    const { movementId } = cmd.payload as { movementId: string };
+    const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
+    if (!p) return { ok: false, payload: {}, reason: 'pending_not_found' };
+    if (p.expiresAt < this.now()) {
+      // 已在服务端超时（调度器尚未触发或竞态）→ 视为已遗弃
+      this.store.delete(COLLECTION_PENDING, movementId);
+      this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
+      return { ok: false, payload: {}, reason: 'pending_expired' };
+    }
+    const t = this.config.treasures[p.code];
+    const s = this.ensureState(p.villageId);
+    const slots = this.getTreasureSlots(p.villageId);
     let sold = false;
     let gold = 0;
-    if (s.codes.length >= slots || s.codes.includes(code)) {
-      // 宝物栏满或重复持有 → 自动卖给 NPC 换金币（不占格）
+    if (!t || s.codes.length >= slots || s.codes.includes(p.code)) {
+      // 宝物失效/栏满/重复持有 → 自动卖给 NPC 换金币（不占格）
       sold = true;
-      gold = t.priceGold;
-      await this.commands.send({
-        name: 'economy.Grant', from: TreasureModule.NAME,
-        payload: { villageId, gain: { gold } },
-      });
+      gold = t ? t.priceGold : 0;
+      if (gold > 0) {
+        await this.commands.send({
+          name: 'economy.Grant', from: TreasureModule.NAME,
+          payload: { villageId: p.villageId, gain: { gold } },
+        });
+      }
     } else {
-      s.codes.push(code);
-      this.store.set(COLLECTION, villageId, s);
-      await this.recomputeAndPush(villageId);
+      s.codes.push(p.code);
+      this.store.set(COLLECTION, p.villageId, s);
+      await this.recomputeAndPush(p.villageId);
     }
-    await this.emitChanged(villageId);
+    // 移除待领取记录并取消超时任务
+    this.store.delete(COLLECTION_PENDING, movementId);
+    this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
+    await this.emitChanged(p.villageId);
+    return { ok: true, payload: { treasure: t ?? { code: p.code, name: p.name }, sold, gold, codes: s.codes } };
+  }
 
-    const dropped = { code, name: t.name, rarity: t.rarity, category: t.category, sold, gold };
-    // 进战报（客户端 notifications 模块记录）
+  /** 超时自动遗弃：调度器到点触发（treasureClaimTimeoutSec 后）。记录已不存在则安全跳过。 */
+  private async expirePending(movementId: string): Promise<void> {
+    const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
+    if (!p) return;
+    this.store.delete(COLLECTION_PENDING, movementId);
     await this.bus.emit({
-      name: 'treasure.Dropped', source: TreasureModule.NAME, ts: this.now(),
-      payload: { villageId, source, dropped },
+      name: 'treasure.PendingExpired', source: TreasureModule.NAME, ts: this.now(),
+      payload: {
+        villageId: p.villageId, movementId, code: p.code, name: p.name, icon: p.icon,
+        category: p.category, rarity: p.rarity, effectType: p.effectType,
+        effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
+      },
     } as DomainEvent);
-    return { ok: true, payload: { dropped } };
+  }
+
+  /** 列出本村当前所有待领取宝物（客户端渲染战报确认卡片用）。 */
+  private listPending(villageId: string): PendingTreasureView[] {
+    return this.store.all<PendingTreasure>(COLLECTION_PENDING)
+      .filter((p) => p.villageId === villageId)
+      .map((p) => ({
+        movementId: p.movementId, code: p.code, name: p.name, icon: p.icon,
+        category: p.category, rarity: p.rarity, effectType: p.effectType,
+        effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
+        expiresAt: p.expiresAt,
+      }));
   }
 
   /** 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。 */

@@ -8,6 +8,21 @@ export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
+/** 待领取宝物视图（军队带回、待玩家确认领取；含确认倒计时）。 */
+export interface PendingTreasureView {
+  movementId: string;
+  code: string;
+  name: string;
+  icon: string;
+  category: string;
+  rarity: string;
+  effectType: string;
+  effectValue: number;
+  applyType: string;
+  priceGold: number;
+  expiresAt: number;
+}
+
 /** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型 + 劳动→士兵原子转化。 */
 export interface PopSnapshot {
   /** 劳动人口（平民）。训练士兵即时转出，是可用于转化为士兵的池子。 */
@@ -84,6 +99,11 @@ export function seedReports(lines: string[]): void {
   // 历史条目是 old→new 顺序，unshift 逐条反序 → 最终 reports[0] 为最新
   for (let i = lines.length - 1; i >= 0; i--) reports.unshift(lines[i]);
 }
+
+/** 待领取宝物（军队带回、待确认）：来自 ListTreasures.pending，用于报告页交互卡片。 */
+let pendingTreasures: PendingTreasureView[] = [];
+export function getPendingTreasures(): PendingTreasureView[] { return pendingTreasures; }
+export function setPendingTreasures(list: PendingTreasureView[]): void { pendingTreasures = list ?? []; }
 
 /** 进行中战斗快照读写（战斗实时进度用）。 */
 export function getBattles(): Record<string, any> { return battles; }

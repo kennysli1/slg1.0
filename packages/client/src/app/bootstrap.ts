@@ -9,7 +9,7 @@ import { fmt } from '../shared/utils/format.js';
 import { syncTimers, installIconFallback } from '../shared/ui/widgets.js';
 import { showToast } from '../shared/ui/toast.js';
 import { resInfo, resourceKeys, loadGameConfig, worldW, worldH } from './config.js';
-import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop, liveResource, markResFetched } from './state.js';
+import { getCache, setCache, getTab, setTab, addReport, getMapCenter, setPopState, getPopState, interpolatePop, interpolateTotalPop, liveResource, markResFetched, setPendingTreasures } from './state.js';
 import { renderLogin } from '../features/login/login.js';
 import { renderVillage, bindVillage, refreshTrainingIfOpen, refreshTreasureDetailIfOpen } from '../features/village/village.js';
 import { syncPopDisplay } from '../features/village/population.js';
@@ -17,7 +17,7 @@ import { renderArmy, bindArmy, updateTrainCost } from '../features/army/army.js'
 import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
 import { refreshTradeIfOpen } from '../features/trade/tradecenter.js';
 import { renderMap, bindMap, resetMapCenter } from '../features/map/map.js';
-import { renderReports, handlePush, hydrateReports } from '../features/reports/reports.js';
+import { renderReports, handlePush, hydrateReports, bindReports } from '../features/reports/reports.js';
 
 const app = document.getElementById('app')!;
 
@@ -90,6 +90,7 @@ async function refreshAll() {
       return;
     }
     setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload, treasures: treasures.ok ? treasures.payload : null });
+    setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched(); // 资源快照时刻：之后 1s 定时器据此本地外插资源数字，无需再访问服务器
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
@@ -246,6 +247,7 @@ function bindPageEvents() {
   bindVillage(act);
   bindArmy(act);
   bindMap(act);
+  bindReports(act);
 }
 
 /** 统一"发请求并刷新"：失败转中文战报。可选的 onOk 在成功且刷新前回调（用于成功 toast）。 */

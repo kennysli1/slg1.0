@@ -1,21 +1,51 @@
 /** 报告页：战报列表 + 服务端推送事件 → 战报文案。 */
 import { secStr } from '../../shared/utils/format.js';
-import { fieldInfo, buildingInfo, resInfo, treasureRarityName } from '../../app/config.js';
-import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState } from '../../app/state.js';
+import { fieldInfo, buildingInfo, resInfo, treasureRarityName, treasureInfo, treasureEffectText, treasureCategoryName } from '../../app/config.js';
+import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState, getPendingTreasures, setPendingTreasures, type PendingTreasureView } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
-import { escapeHtml } from '../../shared/ui/widgets.js';
+import { escapeHtml, art } from '../../shared/ui/widgets.js';
 import { fmt } from '../../shared/utils/format.js';
+import { escapeAttr } from '../../shared/utils/escape.js';
+import { req } from '../../api.js';
+import { showToast } from '../../shared/ui/toast.js';
 import { rerenderPopPanel } from '../village/population.js';
 
 export function renderReports(): string {
   const reports = getReports();
-  if (!reports.length) return `<div class="empty empty-hero">
+  const pending = getPendingTreasures();
+  const pendingHtml = pending.length ? `
+    <div class="pending-treasures">
+      <div class="drawer-sec-title">⚔️ 军队带回的宝物（需确认领取）</div>
+      ${pending.map(renderPendingCard).join('')}
+      <div class="treasure-jump-hint">超时未确认将自动遗弃</div>
+    </div>` : '';
+  if (!reports.length && !pending.length) return `<div class="empty empty-hero">
     <div class="empty-icon">📜</div>
     <div class="empty-title">战报空空如也</div>
     <div class="empty-sub">去地图掠夺野怪或进攻其他玩家<br/>胜负、损失与战利品都会记录在这里</div>
   </div>`;
-  return reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
+  return pendingHtml + reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
+}
+
+/** 待领取宝物卡片（军队带回 → 战报内确认领取）。含倒计时与「确认领取」按钮。 */
+function renderPendingCard(p: PendingTreasureView): string {
+  const info = treasureInfo(p.code);
+  const eff = info ? treasureEffectText(info) : `${p.effectType}:${p.effectValue}`;
+  const rare = treasureRarityName(p.rarity) || p.rarity;
+  const cat = treasureCategoryName(p.category) || p.category;
+  const icon = info?.icon ? art(info.icon, p.name, 'sm') : '💎';
+  return `<div class="treasure-card pending-card rarity-${p.rarity}" data-expires-at="${p.expiresAt}">
+    <div class="icon">${icon}</div>
+    <div class="treasure-body">
+      <div class="treasure-title">${escapeHtml(p.name)} <span class="treasure-rar rar-${p.rarity}">${rare}</span> <span class="treasure-cat">${cat}</span></div>
+      <div class="treasure-effect">${escapeHtml(eff)}</div>
+      <div class="treasure-actions">
+        <button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>
+        <span class="claim-cd"></span>
+      </div>
+    </div>
+  </div>`;
 }
 
 /**
@@ -67,6 +97,12 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}💎 ${where}获得宝物「${d.name}」(${rare})，宝物栏已满自动售出 → +${fmt(d.gold)} 金币`;
     }
     return `${time}💎 ${where}获得宝物「${d.name}」(${rare})，已收入宝物栏`;
+  } else if (event === 'TreasurePendingDropped') {
+    const rare = treasureRarityName(payload.rarity) || payload.rarity || '';
+    return `${time}💎 军队带回宝物「${payload.name}」(${rare})，待你前往报告页确认领取`;
+  } else if (event === 'TreasurePendingExpired') {
+    const rare = treasureRarityName(payload.rarity) || payload.rarity || '';
+    return `${time}💎 宝物「${payload.name}」(${rare}) 确认超时，已自动遗弃`;
   } else if (event === 'CropDeficit') {
     return `${time}⚠️ 粮食告急！军队可能逃亡`;
   } else if (event === 'PopulationChanged') {
@@ -214,5 +250,46 @@ export function hydrateReports(notifications: StoredNotification[]): void {
     .map((n) => notificationText(n.event, n.payload, n.ts))
     .filter((t): t is string => t !== null);
   seedReports(texts);
+}
+
+/**
+ * 绑定报告页交互：待领取宝物的「确认领取」按钮。
+ * 确认成功 → 服务端把宝物移入栏并推送 TreasureChanged → onPush 触发 refreshAll 刷新（卡片消失）。
+ * @param act bootstrap 提供的「发请求并刷新」封装（成功回调仅用于 toast）。
+ */
+export function bindReports(act: (p: Promise<any>, onOk?: (payload: any) => void) => Promise<void>): void {
+  document.querySelectorAll<HTMLButtonElement>('[data-claim-treasure]').forEach((btn) => {
+    btn.onclick = () => {
+      const movementId = btn.dataset.claimTreasure!;
+      void act(req('ClaimPendingTreasure', { movementId }), (payload) => {
+        const t = payload?.treasure;
+        showToast(t ? `已领取宝物「${t.name}」` : '已领取');
+      });
+    };
+  });
+  ensureClaimTicker();
+}
+
+let claimTickerStarted = false;
+/** 每秒刷新待领取卡片上的倒计时（到期由服务端调度器自动遗弃并推送，这里只更新显示）。 */
+function ensureClaimTicker(): void {
+  if (claimTickerStarted) return;
+  claimTickerStarted = true;
+  setInterval(() => {
+    const nodes = document.querySelectorAll<HTMLElement>('[data-expires-at]');
+    if (!nodes.length) return;
+    const now = Date.now();
+    for (const n of nodes) {
+      const exp = Number(n.dataset.expiresAt || '0');
+      const cd = n.querySelector<HTMLElement>('.claim-cd');
+      if (!cd) continue;
+      const rem = exp - now;
+      if (rem <= 0) { cd.textContent = '已超时·等待回收'; continue; }
+      const s = Math.floor(rem / 1000);
+      const mm = Math.floor(s / 60);
+      const ss = s % 60;
+      cd.textContent = `⏳ ${mm}:${ss.toString().padStart(2, '0')} 后超时`;
+    }
+  }, 1000);
 }
 

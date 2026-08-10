@@ -446,11 +446,12 @@ export class CombatModule {
         });
       }
 
-      // 清野营掉落宝物：命中的村庄按概率抽宝物（入栏或溢出自动售卖），结果经 treasure.Dropped 进战报
+      // 清野营掉落宝物：命中的村庄按概率抽宝物，生成「待领取」记录（不直接入栏），
+      // 经 treasure.PendingDropped 进战报，玩家需确认领取，超时自动遗弃。
       if (campCleared && attackerWins) {
         void this.commands.send({
           name: 'treasure.RollDrop', from: CombatModule.NAME,
-          payload: { villageId: contrib.fromVillage, source: 'camp' },
+          payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId },
         });
       }
 

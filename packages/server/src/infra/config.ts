@@ -373,6 +373,8 @@ export interface GameConstants {
   treasureNpcOfferChance: number;
   /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
   treasureNpcBuyMarkup: number;
+  /** 宝物：军队带回的待领取宝物确认超时（秒）。超时未确认则由服务端自动遗弃。 */
+  treasureClaimTimeoutSec: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -787,6 +789,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
+    treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
     raw,
   };
 
@@ -1038,6 +1041,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
+  if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
   if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);

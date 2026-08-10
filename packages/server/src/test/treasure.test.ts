@@ -111,28 +111,41 @@ test('宝物：旧村庄缺 treasure 文档也能授予（懒创建 ensureState�
   assert.deepEqual(list.codes, ['chainsaw'], '懒创建后应有 chainsaw');
 });
 
-test('宝物掉落：门控命中(forceCode) → 直接入栏', async () => {
+test('宝物掉落：门控命中(forceCode) → 生成待领取记录（不直接入栏）', async () => {
   const app = await freshApp();
-  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', forceCode: 'chainsaw' });
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-1', forceCode: 'chainsaw' });
   assert.equal(drop.ok, true, 'RollDrop 应成功');
   assert.ok(drop.payload.dropped, '应掉落');
   assert.equal(drop.payload.dropped.code, 'chainsaw', '强制抽中 chainsaw');
-  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(list.codes, ['chainsaw'], 'chainsaw 应入栏');
+  assert.equal(drop.payload.dropped.pending, true, '应为待领取');
+  // 未确认前不应入栏
+  let list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, [], '确认前不应入栏');
+  assert.equal(list.pending.length, 1, '应有 1 条待领取');
+  assert.equal(list.pending[0].code, 'chainsaw', '待领取 code 应为 chainsaw');
+  // 确认领取 → 入栏
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-1' });
+  assert.equal(claim.ok, true, '确认应成功');
+  list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], '确认后 chainsaw 应入栏');
+  assert.equal(list.pending.length, 0, '确认后待领取应清空');
 });
 
-test('宝物掉落：栏满自动售卖换金', async () => {
+test('宝物掉落：栏满时确认 → 自动售卖换金', async () => {
   const app = await freshApp();
   const r0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   const gold0 = r0.resources.gold;
   // 先占满唯一栏位（城镇中心基础 1 格）
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
-  // 再掉落一个不同宝物 → 栏满 → 自动售卖（chainsaw 售价 60 金币）
-  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', forceCode: 'chainsaw' });
+  // 掉落一个不同宝物 → 待领取
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-2', forceCode: 'chainsaw' });
   assert.equal(drop.ok, true);
-  assert.ok(drop.payload.dropped, '应掉落（即便溢出）');
-  assert.equal(drop.payload.dropped.sold, true, '栏满应标记售出');
-  assert.equal(drop.payload.dropped.gold, 60, '售出价应=chainsaw 的 priceGold');
+  assert.ok(drop.payload.dropped, '应掉落（待领取）');
+  // 确认领取 → 栏满 → 自动售卖（chainsaw 售价 60 金币）
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-2' });
+  assert.equal(claim.ok, true, '确认应成功');
+  assert.equal(claim.payload.sold, true, '栏满应标记售出');
+  assert.equal(claim.payload.gold, 60, '售出价应=chainsaw 的 priceGold');
   const r1 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   assert.equal(r1.resources.gold, gold0 + 60, '金币应增加售出价');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
@@ -142,22 +155,54 @@ test('宝物掉落：栏满自动售卖换金', async () => {
 test('宝物掉落：门控未命中(高 RNG) → 无掉落', async () => {
   // rng 恒返回 0.99，远高于默认 camp 概率 0.15 → 不掉落
   const app = await freshApp(() => 0.99);
-  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp' });
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-3' });
   assert.equal(drop.ok, true);
   assert.equal(drop.payload.dropped, null, '应无掉落');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.deepEqual(list.codes, [], '不应有宝物');
+  assert.equal(list.pending.length, 0, '不应有待领取');
 });
 
-test('宝物掉落：门控命中(低 RNG) → 加权抽到某宝物并入栏', async () => {
+test('宝物掉落：门控命中(低 RNG) → 加权抽到某宝物并待领取', async () => {
   // rng 恒返回 0 → 命中门控(0<0.15)，且 weightedPick 取首个 dropRate>0 的宝物(chainsaw)
   const app = await freshApp(() => 0);
-  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp' });
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-4' });
   assert.equal(drop.ok, true);
   assert.ok(drop.payload.dropped, '应掉落');
   assert.equal(drop.payload.dropped.code, 'chainsaw', 'rng=0 应抽中首个宝物');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(list.codes.length, 1, '应入栏一个宝物');
+  assert.equal(list.pending.length, 1, '应生成 1 条待领取');
+  assert.equal(list.pending[0].code, 'chainsaw', '待领取 code 应为 chainsaw');
+});
+
+test('待领取：不存在的 movementId 确认 → pending_not_found', async () => {
+  const app = await freshApp();
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'nope' });
+  assert.equal(claim.ok, false, '应失败');
+  assert.equal(claim.reason, 'pending_not_found', '应返回 pending_not_found');
+});
+
+test('待领取：过期后确认 → pending_expired 且记录已清除', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-exp', forceCode: 'chainsaw' });
+  // 直接把待领取记录的 expiresAt 改成过去，模拟已超时
+  const p = app.store.get<any>('treasure_pending', 'mv-exp');
+  p.expiresAt = 1; // 远小于当前 clock(1_000_000)
+  app.store.set('treasure_pending', 'mv-exp', p);
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-exp' });
+  assert.equal(claim.ok, false, '应失败');
+  assert.equal(claim.reason, 'pending_expired', '应返回 pending_expired');
+  assert.equal(app.store.get('treasure_pending', 'mv-exp'), undefined, '过期记录应被清除');
+});
+
+test('待领取：超时由调度器自动遗弃（真实时钟推进）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-timeout', forceCode: 'chainsaw' });
+  const p = app.store.get<any>('treasure_pending', 'mv-timeout');
+  assert.ok(p, '应存在待领取记录');
+  // 推进时钟越过 expiresAt，并触发调度器到点任务
+  await app.scheduler.advanceTo(p.expiresAt + 1000, setClock);
+  assert.equal(app.store.get('treasure_pending', 'mv-timeout'), undefined, '超时后待领取记录应被自动遗弃');
 });
 
 test('宝物出售：被动宝物卖给 NPC 换金币并移除', async () => {
