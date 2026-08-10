@@ -48,13 +48,16 @@ function renderPendingCard(p: PendingTreasureView): string {
   const isFull = storedCodes.length >= slots;
   const hasTradeCenter = !!p.hasTradeCenter;
 
-  // 「收下 / 确认领取」按钮：未归村 / 已持有 / 宝物栏已满 → 禁用并说明原因（杜绝误点后静默自动卖出）
+  // 「收下 / 确认领取」按钮：未归村 → 禁用；其余按规则放开（杜绝误点后静默自动卖出）。
+  //  - 已持有且非军队带回（!fromCarry）→ 禁用（重复宝物需改选 出售/遗弃）。
+  //  - 已持有且为军队带回（fromCarry）→ 允许「收下」：集合语义下即「确认回家」，不占额外空位。
+  //  - 宝物栏已满且需要真正入库（非 fromCarry 重复）→ 禁用，请先腾位。
   let takeBtn: string;
   if (!p.arrivedAt) {
     takeBtn = `<button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>`;
-  } else if (isHeld) {
+  } else if (isHeld && !p.fromCarry) {
     takeBtn = `<button class="btn btn-primary" disabled title="已持有该宝物，无法重复收入宝物栏">已持有·不可收下</button>`;
-  } else if (isFull) {
+  } else if (isFull && !(isHeld && p.fromCarry)) {
     takeBtn = `<button class="btn btn-primary" disabled title="宝物栏已满（${storedCodes.length}/${slots}），请先「卖出 / 丢弃」腾出空位">宝物栏已满·不可收下</button>`;
   } else {
     const takeLabel = isDeliver ? '收下' : '确认领取';

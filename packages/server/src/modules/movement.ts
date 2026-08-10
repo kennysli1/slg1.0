@@ -1131,13 +1131,14 @@ export class MovementModule {
         payload: { villageId: mv.fromVillage, gain: mv.loot },
       });
     }
-    // 携带宝物随军返程到家 → 存回该村（优先宝库）；按出征 id 匹配，避免返程新 id 不匹配丢失宝物
-    if (mv.treasures && mv.treasures.length > 0) {
-      await this.commands.send({
-        name: 'treasure.StoreCarried', from: MovementModule.NAME,
-        payload: { movementId: outwardId, villageId: mv.fromVillage },
-      });
-    }
+    // 携带宝物随军返程到家 → 存回该村（优先宝库）。按出征 id 匹配，避免返程新 id 不匹配丢失宝物。
+    // 注意：此处不能用「返程 movement 是否带战利品」来门控——携带宝物与战利品是两套追踪，
+    // 军队只带回自己带出去的宝物、但没抢到任何战利品时（mv.treasures 为空），也必须把携带宝物存回，否则会静默丢失。
+    // treasure.StoreCarried 在「该出征 id 没有携带记录」时是安全的空操作，故无条件调用。
+    await this.commands.send({
+      name: 'treasure.StoreCarried', from: MovementModule.NAME,
+      payload: { movementId: outwardId, villageId: mv.fromVillage },
+    });
     // 标记本军队对应的 camp 掉落 pending 为已到达（无论是否有携带宝物都要发——清营掉落的 pending 单独存在）
     await this.commands.send({
       name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,

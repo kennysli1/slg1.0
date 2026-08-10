@@ -797,9 +797,9 @@ test('宝物：旧存档 town 与 treasury 含同一宝物 → ensureState 跨�
   assert.deepEqual(s.treasury, ['war_flag'], '存档宝库应被修复（无重复）');
 });
 
-test('宝物：StoreCarried 携带回村时若已持有 → 重复份转待处理报告（不静默自动售卖）', async () => {
+test('宝物：StoreCarried 携带回村时若已持有且宝物栏已满 → 重复份转待处理报告（不静默自动售卖）', async () => {
   const app = await freshApp();
-  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 宝库 1 格
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 0 }); // 仅城镇中心 1 格（满则无空位）
   // 城镇中心已持有 chainsaw；军队又携带 chainsaw 回村
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
   await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv-dup-carry', maxCarry: 2 });
@@ -818,6 +818,102 @@ test('宝物：StoreCarried 携带回村时若已持有 → 重复份转待处�
   assert.equal(list.pending.length, 1, '重复份应以待领取报告形式保留');
   assert.equal(list.pending[0].code, 'chainsaw', '待领取 code 应为 chainsaw');
   assert.equal(list.pending[0].kind, 'deliver', '重复携带回来应作 deliver 报告');
+  assert.equal(list.pending[0].fromCarry, true, '该报告应标记为 fromCarry（军队带回）');
+});
+
+test('宝物：StoreCarried 携带回村重复宝物 → 转 fromCarry 待处理报告（集合语义不存第二份）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 }); // 宝库 2 格 → 共 3 槽（有空位）
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 先持有 1 份
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv-dup-room', maxCarry: 2 });
+  // 期间又得一份同样的 → 军队携带 2 份回村
+  const st = app.store.get<any>('treasure', 'v1');
+  st.carried['mv-dup-room'].codes.push('chainsaw');
+  app.store.set('treasure', 'v1', st);
+  const gold0 = await goldOf(app);
+  const r = await send(app, 'treasure.StoreCarried', { movementId: 'mv-dup-room', villageId: 'v1' });
+  assert.equal(r.ok, true, 'StoreCarried 应成功');
+  assert.deepEqual(r.payload.stored, ['chainsaw'], '首份入栏（非重复）');
+  assert.deepEqual(r.payload.pending, ['chainsaw'], '重复份转 fromCarry 待处理（即便有空位，集合语义不存第二份）');
+  assert.equal(await goldOf(app), gold0, '金币不应变动（不静默售卖）');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], '栏内仍只有 1 个 chainsaw（集合语义）');
+  assert.equal(list.pending.length, 1, '重复份以待领取报告保留');
+  assert.equal(list.pending[0].fromCarry, true, '应为 fromCarry 报告');
+});
+
+test('待领取：fromCarry 重复宝物收下(take) → 确认回家（集合语义不存第二份，移除报告）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 }); // 共 3 槽（有空位）
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 已持有 1 份
+  // 直接构造一条 fromCarry 的 deliver 报告（模拟军队带回的重复宝物）
+  app.store.set('treasure_pending', 'pend-fc', {
+    movementId: 'pend-fc', villageId: 'v1', code: 'chainsaw',
+    name: '电锯', icon: '', category: '', rarity: '', effectType: '', effectValue: 0,
+    applyType: '', priceGold: 10, kind: 'deliver', createdAt: 100, expiresAt: 1_000_000, fromCarry: true,
+  } as any);
+  const gold0 = await goldOf(app);
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'pend-fc', decision: 'take' });
+  assert.equal(claim.ok, true, `fromCarry 重复收下应成功: ${claim.reason ?? ''}`);
+  assert.equal(claim.payload.stored, false, '集合语义下重复收下不存第二份（确认回家）');
+  assert.equal(await goldOf(app), gold0, '收下不应换金');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], '栏内仍只有 1 个 chainsaw');
+  assert.equal(list.pending.length, 0, '报告应清除');
+});
+
+test('待领取：非 fromCarry 的重复宝物收下仍被拒(already_have)', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 已持有
+  // 普通 deliver 报告（非军队带回），重复持有 → 收下应被拒
+  app.store.set('treasure_pending', 'pend-plain', {
+    movementId: 'pend-plain', villageId: 'v1', code: 'chainsaw',
+    name: '电锯', icon: '', category: '', rarity: '', effectType: '', effectValue: 0,
+    applyType: '', priceGold: 10, kind: 'deliver', createdAt: 100, expiresAt: 1_000_000, fromCarry: false,
+  } as any);
+  const claim = await send(app, 'treasure.ClaimPending', { movementId: 'pend-plain', decision: 'take' });
+  assert.equal(claim.ok, false, '普通重复收下应被拒');
+  assert.equal(claim.reason, 'already_have', '应返回 already_have');
+});
+
+test('待领取：MarkPendingArrived 重置 expiresAt 从归村时刻起算', async () => {
+  const app = await freshApp();
+  const createdAt = 1_000_000;
+  app.store.set('treasure_pending', 'mv-arr2', {
+    movementId: 'mv-arr2', villageId: 'v1', code: 'chainsaw',
+    name: '电锯', icon: '', category: '', rarity: '', effectType: '', effectValue: 0,
+    applyType: '', priceGold: 10, kind: 'camp', createdAt, expiresAt: createdAt + 3600_000,
+  } as any);
+  setClock(2_000_000); // 模拟军队在掉落 1 小时后才归村
+  const r = await send(app, 'treasure.MarkPendingArrived', { movementId: 'mv-arr2' });
+  assert.ok(r.ok && r.payload.marked, '应标记归村');
+  const p = app.store.get<any>('treasure_pending', 'mv-arr2');
+  assert.equal(p.arrivedAt, 2_000_000, 'arrivedAt 应为归村时刻');
+  // expiresAt 应从「归村时刻」重新起算，而非旧的 createdAt+timeout
+  assert.equal(p.expiresAt, 2_000_000 + 3600_000, 'expiresAt 应从归村时刻重新起算');
+  assert.ok(p.expiresAt > createdAt + 3600_000, '归村后倒计时应比原掉落时刻更晚');
+});
+
+test('movement：返程无战利品时仍把携带宝物存回（携带宝物不依赖战利品）', async () => {
+  // 复现「带出去的宝物没带回来」：军队只带回自己携带的宝物、但没抢到战利品（mv.treasures 为空）。
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 宝库 1 格
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv-out', maxCarry: 2 });
+  // 返程 movement：新 id=mv-ret，outwardId=mv-out，战利品为空（treasures: []）
+  app.store.set('movement', 'mv-ret', {
+    id: 'mv-ret', type: 'return', fromVillage: 'v1',
+    fromXY: { q: 0, r: 0 }, toXY: { q: 0, r: 0 },
+    troops: {}, treasures: [], outwardId: 'mv-out',
+    departAt: 1_000_000, arriveAt: 1_000_001,
+    path: [{ q: 0, r: 0 }, { q: 0, r: 0 }], stepIndex: 1, pos: { q: 0, r: 0 },
+    perStepMs: 1, nextStepAt: 0, status: 'marching', stepToken: 1,
+  } as any);
+  await (app.movement as any).arriveReturn('mv-ret');
+  const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.ok(l.codes.includes('chainsaw'), '无战利品时携带的 chainsaw 仍应随返程存回');
+  assert.equal(Object.keys(l.carried).length, 0, '携带记录应清除');
 });
 
 test('待领取：无贸易中心时「出售」被拒(no_trade_center)，「丢弃」仍可', async () => {

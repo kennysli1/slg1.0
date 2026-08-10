@@ -81,6 +81,8 @@ interface PendingTreasure {
   expiresAt: number;
   /** 军队到家时间戳（仅 kind='camp' 有效；deliver 在创建时已在场故无此字段）。claimPending 必须等军队归村后才允许领取 camp 掉落。 */
   arrivedAt?: number;
+  /** 该待领取宝物由「军队带出的宝物返程回家」产生（storeCarried 因重复/满栏转出的 deliver）。此类宝物是玩家自己的军队带回，收下时即使重复也允许放入宝物栏（见 claimPending）。 */
+  fromCarry?: boolean;
 }
 
 /** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
@@ -101,6 +103,8 @@ interface PendingTreasureView {
   arrivedAt?: number;
   /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。客户端据此决定显示「卖出」还是「丢弃」。 */
   hasTradeCenter: boolean;
+  /** 该待领取宝物由「军队带出的宝物返程回家」产生（收下时即使重复也允许放入宝物栏）。 */
+  fromCarry?: boolean;
 }
 
 /**
@@ -512,7 +516,7 @@ export class TreasureModule {
   /** 把宝物存进村庄：优先宝库格子，其次城镇中心；满则失败（返回 false）。不触发重分布。 */
   private storeIfRoom(s: TreasureState, code: string): boolean {
     if (!code) return false;
-    // 已持有（跨 town/treasury 去重）→ 不允许重复入库，由调用方转为自动出售
+    // 已持有（跨 town/treasury 去重）→ 不允许重复入库（宝物栏为集合语义，重复视为同一份）
     if (this.storedCodes(s).includes(code)) return false;
     if (this.storedCodes(s).length >= this.getTreasureSlots(s.villageId)) return false;
     if (s.treasury.length < s.extraSlots) s.treasury.push(code);
@@ -529,8 +533,8 @@ export class TreasureModule {
     return false;
   }
 
-  /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。 */
-  private createDeliverPending(villageId: string, code: string, movementId?: string): void {
+  /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
+  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false): void {
     const t = this.config.treasures[code];
     if (!t) return;
     const now = this.now();
@@ -541,6 +545,7 @@ export class TreasureModule {
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
       priceGold: t.priceGold, kind: 'deliver', createdAt: now, expiresAt: now + timeoutMs,
+      fromCarry,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
     this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
@@ -615,19 +620,20 @@ export class TreasureModule {
     const pendingCodes: string[] = [];
     for (const code of entry.codes) {
       if (this.storedCodes(s).includes(code)) {
-        // 已持有（重复宝物）→ 转为 deliver 待处理报告，由玩家明确决策（收下/出售/遗弃），不再静默自动出售
+        // 已持有（重复宝物，通常是军队带出去期间玩家又得了一份同码）→ 转 deliver 待处理报告，标记 fromCarry，
+        // 让玩家显式决策（收下=确认回家 / 出售 / 遗弃）。不再静默自动售卖，也不因「重复」被卡死。
         pendingCodes.push(code);
       } else if (this.storeIfRoom(s, code)) {
         // 宝物栏有空位 → 默认放回宝物栏
         storedCodes.push(code);
       } else {
-        // 宝物栏已满 → 转为 deliver 待处理报告，与「新获得的宝物」同等等待处理
+        // 宝物栏已满 → 转 deliver 待处理报告（与「新获得的宝物」同等等待处理），标记 fromCarry
         pendingCodes.push(code);
       }
     }
     delete s.carried[movementId];
     this.store.set(COLLECTION, villageId, s);
-    for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined);
+    for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined, true);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
     return { ok: true, payload: { stored: storedCodes, pending: pendingCodes } };
@@ -680,11 +686,17 @@ export class TreasureModule {
     if (!p) return { ok: true, payload: { movementId, marked: false } };
     if (p.kind !== 'camp') return { ok: true, payload: { movementId, marked: false } };
     if (p.arrivedAt) return { ok: true, payload: { movementId, marked: false } };
-    p.arrivedAt = this.now();
+    const now = this.now();
+    p.arrivedAt = now;
+    // 超时计时器从「军队返回村庄」开始算：重置 expiresAt 并重新注册超时任务（覆盖 rollDrop 时基于掉落时刻的旧超时）
+    const timeoutMs = Math.max(1, Math.floor(this.config.constants.treasureClaimTimeoutSec)) * 1000;
+    p.expiresAt = now + timeoutMs;
     this.store.set(COLLECTION_PENDING, movementId, p);
-    // 推动客户端 refreshAll → 重新拉取 pending（含 arrivedAt），让领取按钮从「等待归村」转为可点
+    this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
+    this.scheduler.schedule(timeoutMs, () => this.expirePending(movementId), `treasure-pending:${movementId}`, `village:${p.villageId}`);
+    // 推动客户端 refreshAll → 重新拉取 pending（含 arrivedAt / 新的 expiresAt），让领取按钮从「等待归村」转为可点、倒计时从头开始
     await this.emitChanged(p.villageId);
-    return { ok: true, payload: { movementId, marked: true } };
+    return { ok: true, payload: { movementId, marked: true, expiresAt: p.expiresAt } };
   }
 
   /** 取消指定 movementId 的 pending 记录（用于军队被全歼）；返回是否成功取消。 */
@@ -912,14 +924,19 @@ export class TreasureModule {
       discarded = true;
     } else {
       // 'take' 或 camp 默认：收下（不再静默自动出售，满/重复时拒绝并提示玩家显式决策）
-      if (this.storedCodes(s).includes(p.code)) {
-        // 已持有（重复宝物）→ 拒绝领取，由玩家改选「出售 / 遗弃」
+      // 军队带回的宝物（fromCarry）即使重复也允许「收下」：宝物栏为集合语义不存第二份，收下即「确认回家」移除报告。
+      const allowDuplicate = !!p.fromCarry;
+      if (!allowDuplicate && this.storedCodes(s).includes(p.code)) {
+        // 非军队带回的重复宝物 → 拒绝领取，由玩家改选「出售 / 遗弃」
         return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'already_have' };
       }
-      if (this.storeIfRoom(s, p.code)) {
+      if (this.storedCodes(s).includes(p.code)) {
+        // fromCarry 重复：宝物已在栏（集合语义不存第二份），收下即确认回家，移除报告即可（stored=false）
+        stored = false;
+      } else if (this.storeIfRoom(s, p.code)) {
         stored = true;
       } else {
-        // 宝物栏已满 → 拒绝领取并提示，由玩家明确决策（收下/出售/遗弃），不再自动出售
+        // 宝物栏已满 → 拒绝领取并提示，由玩家明确决策（出售/遗弃腾位），不再自动出售
         return { ok: false, payload: { codes: this.storedCodes(s), slots: this.getTreasureSlots(p.villageId) }, reason: 'no_room' };
       }
     }
@@ -973,7 +990,7 @@ export class TreasureModule {
         category: p.category, rarity: p.rarity, effectType: p.effectType,
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
         kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
-        hasTradeCenter,
+        hasTradeCenter, fromCarry: p.fromCarry,
       }));
   }
 
