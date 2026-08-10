@@ -49,6 +49,10 @@ interface ServerConfig {
     tradeRouteCapacity: number; tradeCaravanSpeed: number;
     tradeNpcGoldPerResource: number; tradeNpcSellMargin: number;
     tradeOrderMaxPerVillage: number; tradeOrderTtlSec: number;
+    /** 军队携带宝物：每多少总兵力 +1 携带格。 */
+    treasureCarryTroopsPerSlot: number;
+    /** 军队携带宝物：携带格数硬上限（实际上限 = min(此值, floor(总兵力/每格兵力数))）。 */
+    treasureCarryMaxSlots: number;
   };
 }
 
@@ -263,4 +267,20 @@ export function tradeOrderMaxPerVillage(): number {
 /** 玩家贸易订单未被人接受时的存活时长（秒）。 */
 export function tradeOrderTtlSec(): number {
   return cfg?.constants?.tradeOrderTtlSec ?? 86400;
+}
+
+// ---------- 军队携带宝物展示用常量（服务端白名单下发） ----------
+
+/** 携带上限换算：每多少总兵力 +1 携带格。 */
+export function treasureCarryTroopsPerSlot(): number {
+  return cfg?.constants?.treasureCarryTroopsPerSlot ?? 200;
+}
+/** 携带格数硬上限（实际上限 = min(此值, floor(总兵力 / 每格兵力数))）。 */
+export function treasureCarryMaxSlots(): number {
+  return cfg?.constants?.treasureCarryMaxSlots ?? 10;
+}
+/** 按总兵力计算实际携带上限：min(硬上限, floor(总兵力 / 每格兵力数))。 */
+export function treasureCarryCap(totalTroops: number): number {
+  const per = Math.max(1, treasureCarryTroopsPerSlot());
+  return Math.min(treasureCarryMaxSlots(), Math.floor((totalTroops || 0) / per));
 }

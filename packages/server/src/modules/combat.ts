@@ -37,6 +37,8 @@ interface Contribution {
   fromXY: { q: number; r: number }; // 六边形轴坐标（对 combat 为不透明透传，用于结束后返程）
   /** 原始出征兵力（code -> count），返程按幸存比例分配。 */
   troops: Record<string, number>;
+  /** 该军队携带的宝物 code（军队携带宝物机制）；全歼时按 pve/pvp 规则处理。 */
+  treasures: string[];
 }
 
 interface Battle {
@@ -173,14 +175,17 @@ export class CombatModule {
       fromXY: { q: number; r: number };
       troops: Record<string, number>;
       attackerSnapshot: Snapshot;
+      /** 该军队携带的宝物（军队携带宝物机制）。 */
+      treasures?: string[];
     };
 
     const contribId = p.movementId;
+    const treasures = p.treasures ?? [];
     const existing = this.findActive(p.targetId);
     if (existing) {
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops },
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         existing.attacker[`${contribId}#${code}`] = { ...u };
@@ -199,7 +204,7 @@ export class CombatModule {
       const raceCheck = this.findActive(p.targetId);
       if (raceCheck) {
         raceCheck.contributions[contribId] = {
-          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops },
+          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
           raceCheck.attacker[`${contribId}#${code}`] = { ...u };
@@ -224,7 +229,7 @@ export class CombatModule {
     if (raceExisting) {
       // 安全并入
       raceExisting.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops },
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         raceExisting.attacker[`${contribId}#${code}`] = { ...u };
@@ -253,7 +258,7 @@ export class CombatModule {
       attacker,
       defender,
       defenderOriginal,
-      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops } } },
+      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
       attackerPending: 0,
       defenderPending: 0,
       attackPower0: totalPower(attacker),
@@ -461,7 +466,7 @@ export class CombatModule {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
-          survivors, loot: share, looted: share, ...reportBase,
+          survivors, loot: share, looted: share, treasures: contrib.treasures, ...reportBase,
         },
       } as DomainEvent);
     }

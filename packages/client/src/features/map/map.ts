@@ -2,7 +2,7 @@
 import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../shared/ui/widgets.js';
 import { secStr, fmt } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
-import { worldW, worldH, pveInfoByType } from '../../app/config.js';
+import { worldW, worldH, pveInfoByType, treasureInfo, treasureRarityName, treasureCarryCap } from '../../app/config.js';
 import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
@@ -364,6 +364,7 @@ function renderTargetPanel(): string {
       <div class="raid-inputs">${inputs}</div>
       <div class="raidbox-title">运输货物</div>
       <div class="raid-inputs">${cargoInputs}</div>
+      ${renderCarrySection()}
       ${myTroops.length ? `<div class="target-actions"><button class="btn-sm btn-raid" id="doTransport">📦 运输</button></div>` : ''}
     </div>`;
   }
@@ -385,6 +386,7 @@ function renderTargetPanel(): string {
     </div>
     <div class="raidbox-title">出征兵力</div>
     <div class="raid-inputs">${inputs}</div>
+    ${renderCarrySection()}
     ${myTroops.length ? `<div class="target-actions">${action}</div>` : ''}
   </div>`;
 }
@@ -398,6 +400,56 @@ function collectTroops(): Record<string, number> {
     if (el && Number(el.value) > 0) troops[u] = Number(el.value);
   });
   return troops;
+}
+
+/** 携带宝物选择区：列出本村已储存宝物，玩家勾选随军携带的；携带上限随出征兵力动态显示。 */
+function renderCarrySection(): string {
+  const t = getCache().treasures;
+  const codes: string[] = (t && (t.codes as string[])) ?? [];
+  const list = codes.length
+    ? codes.map((code) => {
+        const info = treasureInfo(code);
+        const name = info?.name ?? code;
+        const icon = info?.icon ? art(info.icon, name, 'sm') : '💎';
+        const rar = info?.rarity ?? '';
+        const rare = treasureRarityName(rar);
+        return `<label class="carry-chip" data-carry-code="${escapeAttr(code)}">
+          <input type="checkbox" class="carry-check" value="${escapeAttr(code)}" />
+          ${icon}<span class="carry-name">${escapeHtml(name)}</span><span class="carry-rar rar-${escapeAttr(rar)}">${rare}</span>
+        </label>`;
+      }).join('')
+    : '<small class="muted">暂无可携带的宝物（清理野营或购买获取）</small>';
+  return `<div class="raidbox-title">携带宝物 <span class="carry-cap" id="carryCap">可携带 0 格</span>
+    <small class="hint-sm">军队携带时城镇失去其加成，军队获得加成</small></div>
+    <div class="treasure-carry-list" id="carryList">${list}</div>`;
+}
+
+/** 重新计算携带上限（基于当前出征兵力）并刷新显示。 */
+function updateCarryCap(): void {
+  const capEl = document.getElementById('carryCap');
+  if (!capEl) return;
+  let total = 0;
+  document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
+    total += Math.max(0, Number(inp.value) || 0);
+  });
+  const cap = treasureCarryCap(total);
+  capEl.textContent = `可携带 ${cap} 格（兵力 ${total}）`;
+}
+
+/** 收集勾选的携带宝物 code（按勾选顺序）；超出携带上限则截断到上限并提示。 */
+function collectTreasures(): string[] {
+  let total = 0;
+  document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
+    total += Math.max(0, Number(inp.value) || 0);
+  });
+  const cap = treasureCarryCap(total);
+  const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.carry-check:checked')).map((c) => c.value);
+  if (!checked.length) return [];
+  if (checked.length > cap) {
+    addReport(`携带宝物超出上限（上限 ${cap} 格），仅携带前 ${cap} 个`);
+    return checked.slice(0, cap);
+  }
+  return checked;
 }
 
 /** 部队沿路径的实时插值动画（每帧调，无需重渲染整张地图）。 */
@@ -804,6 +856,12 @@ export function bindMap(act: (p: Promise<any>) => void): void {
   }
   bindTargetEvents(act);
 
+  // 携带宝物上限随出征兵力实时更新（每次重渲后重新绑定到新节点）
+  document.querySelectorAll<HTMLInputElement>('input[id^="raid-"]').forEach((inp) => {
+    inp.addEventListener('input', updateCarryCap);
+  });
+  updateCarryCap();
+
   // 方向键（全图模式下 = 视觉平移到相邻区域中心，不重拉数据）
   const STEP = 4;
   const bindDir = (id: string, dir: string) => {
@@ -875,14 +933,14 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
   if (raid) raid.onclick = () => {
     const troops = collectTroops();
     if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
-    act(req('SendRaid', { targetId: getSelected()!.refId, troops }));
+    act(req('SendRaid', { targetId: getSelected()!.refId, troops, treasures: collectTreasures() }));
   };
   const atk = document.getElementById('doAttack');
   if (atk) atk.onclick = () => {
     const troops = collectTroops();
     if (!Object.keys(troops).length) { addReport('请先设置出征兵力'); return; }
     const sel = getSelected()!;
-    act(req('SendAttack', { targetVillage: sel.refId, troops }));
+    act(req('SendAttack', { targetVillage: sel.refId, troops, treasures: collectTreasures() }));
   };
   const found = document.getElementById('doFound');
   if (found) found.onclick = () => {
@@ -921,6 +979,6 @@ function bindTargetEvents(act: (p: Promise<any>) => void) {
       if (n > 0) cargo[t] = n;
     }
     if (!Object.keys(cargo).length) { addReport('请填写运输货物'); return; }
-    act(req('SendTransport', { targetVillage: getSelected()!.refId, troops, cargo }));
+    act(req('SendTransport', { targetVillage: getSelected()!.refId, troops, cargo, treasures: collectTreasures() }));
   };
 }

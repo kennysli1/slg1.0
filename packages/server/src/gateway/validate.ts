@@ -13,7 +13,7 @@
 /** 单个字段的校验规则。 */
 export interface FieldSchema {
   /** 期望的基础类型。 */
-  type: 'string' | 'integer' | 'number' | 'boolean' | 'enum' | 'record_int';
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'enum' | 'record_int' | 'string_array';
   /** true=字段可缺失；false/未填=必填。 */
   optional?: boolean;
   /** number / integer：下界（含）。 */
@@ -32,6 +32,10 @@ export interface FieldSchema {
   minVal?: number;
   /** record_int：每个值的上界（含）。 */
   maxVal?: number;
+  /** string_array：最多允许多少个元素。 */
+  maxItems?: number;
+  /** string_array：最少需要多少个元素。 */
+  minItems?: number;
 }
 
 /** action 的 payload 结构描述：key → 对应字段规则。 */
@@ -124,6 +128,26 @@ export function validatePayload(
           rec[k] = v;
         }
         cleaned[key] = rec;
+        break;
+      }
+      case 'string_array': {
+        if (!Array.isArray(val))
+          return { ok: false, code: 'bad_type', msg: `字段 ${key} 应为字符串数组` };
+        if (def.minItems !== undefined && val.length < def.minItems)
+          return { ok: false, code: 'too_few_items', msg: `字段 ${key} 元素过少（最少 ${def.minItems} 个）` };
+        if (def.maxItems !== undefined && val.length > def.maxItems)
+          return { ok: false, code: 'too_many_items', msg: `字段 ${key} 元素过多（最多 ${def.maxItems} 个）` };
+        const out: string[] = [];
+        for (const item of val) {
+          if (typeof item !== 'string')
+            return { ok: false, code: 'bad_type', msg: `字段 ${key} 的元素应为字符串` };
+          if (def.minLen !== undefined && item.length < def.minLen)
+            return { ok: false, code: 'too_short', msg: `字段 ${key} 的元素过短（最少 ${def.minLen} 字符）` };
+          if (def.maxLen !== undefined && item.length > def.maxLen)
+            return { ok: false, code: 'too_long', msg: `字段 ${key} 的元素过长（最多 ${def.maxLen} 字符）` };
+          out.push(item);
+        }
+        cleaned[key] = out;
         break;
       }
     }

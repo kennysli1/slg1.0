@@ -20,6 +20,8 @@ export interface PendingTreasureView {
   effectValue: number;
   applyType: string;
   priceGold: number;
+  /** 'camp'=本村军队带回（默认收下即可）；'deliver'=送达另一村/宝库拆除（需玩家选 收下/出售/遗弃）。 */
+  kind?: 'camp' | 'deliver';
   expiresAt: number;
 }
 

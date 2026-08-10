@@ -533,6 +533,28 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 }
 .pending-card { background: var(--c-surface); }
 .claim-cd { font-size: var(--f-xs); color: var(--c-ink-soft); margin-left: auto; align-self: center; }
+/* 送达类待决策卡片的「待决策」徽标 */
+.treasure-kind { font-size: var(--f-xs); padding: 0 var(--s-2); border-radius: 999px; line-height: 1.6; font-weight: 600; width: fit-content; }
+.treasure-kind-row { margin: -1px 0 1px; }
+.kind-deliver { background: rgba(155,89,182,.16); color: #8a4bb5; }
+.kind-camp { background: rgba(74,127,181,.16); color: #3f6fa0; }
+
+/* 出征面板：携带宝物选择区 */
+.treasure-carry-list { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-2); }
+.carry-cap { font-size: var(--f-xs); font-weight: 600; color: var(--c-brand); }
+.carry-chip {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  background: var(--c-surface-2); border: 1px solid var(--c-line); border-radius: var(--r-sm);
+  padding: 3px var(--s-2); font-size: var(--f-sm); line-height: 1.2;
+}
+.carry-chip:hover { border-color: var(--c-brand); }
+.carry-chip .carry-check { margin: 0; }
+.carry-chip .carry-name { font-weight: 600; }
+.carry-chip .carry-rar { font-size: var(--f-xs); padding: 0 6px; border-radius: 999px; color: #fff; }
+.carry-chip .rar-common { background: #8a8175; }
+.carry-chip .rar-rare { background: #4a7fb5; }
+.carry-chip .rar-epic { background: #9856c4; }
+.carry-chip .rar-legendary { background: linear-gradient(90deg, #d9a441, #c47a2c); }
 .treasure-empty {
   font-size: var(--f-sm); color: var(--c-ink-soft); background: var(--c-surface-2);
   border: 1px dashed var(--c-line); border-radius: var(--r-sm); padding: var(--s-3);

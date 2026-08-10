@@ -290,20 +290,48 @@ test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加
   assert.equal(l2.slots, 3, '宝库 L2 落成后总槽位应为 3');
 });
 
-test('宝库：拆除宝库后槽位回退到城镇中心基础 1 格（不强制挤出已持有）', async () => {
+test('宝库：拆除宝库后归属转移——价值最高宝物留城镇中心，其余转为送达报告', async () => {
   const app = await freshApp();
   // 先塞两个宝物到栏（开局只有 1 格，先扩到 2）
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
-  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
-  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });   // priceGold 60
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });     // priceGold 70
   const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.equal(l0.slots, 2, '扩槽后应为 2');
 
   // 槽位回退到 0（等价拆除宝库）
-  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 0 });
+  const dem = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 0 });
+  assert.equal(dem.ok, true, '拆除应成功');
+  assert.equal(dem.payload.slots, 1, '回退后槽位应为 1');
+  assert.deepEqual(dem.payload.kept, ['war_flag'], '价值最高(war_flag)应留城镇中心');
+  assert.deepEqual(dem.payload.pending, ['chainsaw'], '其余(chainsaw)应转送达报告');
+
   const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.equal(l1.slots, 1, '回退后槽位应为 1');
-  assert.equal(l1.codes.length, 2, '已持有宝物不被强制挤出（仅阻止后续新增）');
+  assert.equal(l1.codes.length, 1, '仅留最高价值宝物在栏');
+  assert.equal(l1.codes[0], 'war_flag', '留栏的应是价值最高的 war_flag');
+  assert.equal(l1.pending.length, 1, '应产生 1 条送达报告');
+  assert.equal(l1.pending[0].kind, 'deliver', '报告类型应为 deliver');
+  assert.equal(l1.pending[0].code, 'chainsaw', '报告里的应是被挤出的 chainsaw');
+
+  // 玩家决定「收下」但新宝物价值(60)不高于已留栏(70) → 拒绝降级，保留报告让玩家改选
+  const claim = await send(app, 'treasure.ClaimPending', { villageId: 'v1', movementId: l1.pending[0].movementId, decision: 'take' });
+  assert.equal(claim.ok, false, '价值较低时 take 应被拒');
+  assert.equal(claim.reason, 'no_room', '应返回 no_room');
+  const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l2.codes.length, 1, '拒收后留栏数不变');
+  assert.equal(l2.pending.length, 1, '报告仍保留待玩家处理');
+
+  // 改选「出售」：换回金币并移除报告
+  const sell = await send(app, 'treasure.ClaimPending', { villageId: 'v1', movementId: l1.pending[0].movementId, decision: 'sell' });
+  assert.equal(sell.ok, true, `出售应成功: ${sell.reason ?? ''}`);
+  assert.equal(sell.payload.sold, true, '应标记为已售');
+  assert.equal(sell.payload.gold, 60, '应换回 chainsaw 的 priceGold=60');
+  const l3 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l3.pending.length, 0, '出售后报告应清除');
+  assert.equal(l3.codes.length, 1, '留栏的 war_flag 不受影响');
+
+  // 栏已满时，新宝物应被拒绝
   const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'blessing_of_gods' });
   assert.equal(g.ok, false, '槽位不足时应拒绝新增');
   assert.equal(g.reason, 'treasure_slots_full');
@@ -446,5 +474,96 @@ test('宝物替换：旧宝物未持有 / 新宝物重复持有均被拒', async
   const r2 = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'chainsaw', newCode: 'war_flag' });
   assert.equal(r2.ok, false);
   assert.equal(r2.reason, 'already_have', 'newCode 重复应 already_have');
+});
+
+// ---------- 军队携带宝物（上限随兵力） ----------
+
+test('携带：AssignToArmy 把宝物移出城镇栏并记入军队携带，城镇加成随之消失', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // woodRate +5%
+  const before = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(before.codes.length, 1, '应先持有 1 件');
+  assert.ok((before.effect.resMult?.wood ?? 0) > 0, '持有时应有木产率加成');
+
+  const r = await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv1', maxCarry: 2 });
+  assert.equal(r.ok, true, `AssignToArmy 应成功: ${r.reason ?? ''}`);
+  assert.deepEqual(r.payload.codes, ['chainsaw'], '携带记录应含 chainsaw');
+
+  const after = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(after.codes.length, 0, '宝物应已移出城镇栏');
+  assert.equal((after.effect.resMult?.wood ?? 0), 0, '移出后城镇木产率加成应归零');
+  assert.deepEqual(after.carried.mv1, ['chainsaw'], 'list 应暴露 carried');
+
+  const eff = await send(app, 'treasure.GetCarriedEffects', { movementId: 'mv1' });
+  assert.ok((eff.payload.effects.resMult?.wood ?? 0) > 0, '军队携带时应提供木产率加成');
+});
+
+test('携带：超过携带上限被拒（carry_cap_exceeded）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 2 格
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const r = await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw', 'war_flag'], movementId: 'mv1', maxCarry: 1 });
+  assert.equal(r.ok, false, '超上限应失败');
+  assert.equal(r.reason, 'carry_cap_exceeded', '应返回 carry_cap_exceeded');
+  const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l.codes.length, 2, '宝物应仍留在城镇栏');
+});
+
+test('携带：StoreCarried 返程到家存回城镇栏（优先宝库格）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 宝库 1 格
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv3', maxCarry: 2 });
+  const r = await send(app, 'treasure.StoreCarried', { movementId: 'mv3', villageId: 'v1' });
+  assert.equal(r.ok, true, `StoreCarried 应成功: ${r.reason ?? ''}`);
+  assert.deepEqual(r.payload.stored, ['chainsaw'], '应存回 chainsaw');
+  const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(l.codes.length, 1, '宝物应回到城镇栏');
+  assert.equal(Object.keys(l.carried).length, 0, '携带记录应清除');
+});
+
+test('携带：OffloadForeign 军队抵达他村 → 转为该村民 deliver 报告', async () => {
+  const app = await freshApp();
+  await app.createVillage('v2', 1, 1, '测试村2');
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv4', maxCarry: 2 });
+  const r = await send(app, 'treasure.OffloadForeign', { villageId: 'v2', fromMovementId: 'mv4' });
+  assert.equal(r.ok, true, `OffloadForeign 应成功: ${r.reason ?? ''}`);
+  assert.deepEqual(r.payload.codes, ['chainsaw'], '应转出 chainsaw');
+
+  const pend = (await send(app, 'treasure.List', { villageId: 'v2' })).payload as any;
+  assert.equal(pend.pending.length, 1, 'v2 应产生 1 条报告');
+  assert.equal(pend.pending[0].kind, 'deliver', '报告类型应为 deliver');
+  assert.equal(pend.pending[0].code, 'chainsaw', '报告应为 chainsaw');
+
+  const src = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(Object.keys(src.carried).length, 0, '源村携带记录应清除');
+});
+
+test('携带：LoseCarried pve=回收到系统宝物池（携带记录与栏位均清除）', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv5', maxCarry: 2 });
+  const r = await send(app, 'treasure.LoseCarried', { movementId: 'mv5', mode: 'pve' });
+  assert.equal(r.ok, true, `LoseCarried(pve) 应成功: ${r.reason ?? ''}`);
+  const src = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(Object.keys(src.carried).length, 0, '携带记录应清除');
+  assert.equal(src.codes.length, 0, '宝物应已回收（不在城镇栏）');
+});
+
+test('携带：LoseCarried pvp=宝物归防守方村庄 deliver 报告', async () => {
+  const app = await freshApp();
+  await app.createVillage('v2', 1, 1, '测试村2');
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['war_flag'], movementId: 'mv6', maxCarry: 2 });
+  const r = await send(app, 'treasure.LoseCarried', { movementId: 'mv6', mode: 'pvp', defenderVillage: 'v2' });
+  assert.equal(r.ok, true, `LoseCarried(pvp) 应成功: ${r.reason ?? ''}`);
+  const def = (await send(app, 'treasure.List', { villageId: 'v2' })).payload as any;
+  assert.equal(def.pending.length, 1, '防守方 v2 应产生 1 条报告');
+  assert.equal(def.pending[0].code, 'war_flag', '报告应为 war_flag');
+  assert.equal(def.pending[0].kind, 'deliver', '报告类型应为 deliver');
+  const src = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(Object.keys(src.carried).length, 0, '源村携带记录应清除');
 });
 

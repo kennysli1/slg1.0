@@ -28,20 +28,30 @@ export function renderReports(): string {
   return pendingHtml + reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
 }
 
-/** 待领取宝物卡片（军队带回 → 战报内确认领取）。含倒计时与「确认领取」按钮。 */
+/** 待领取宝物卡片（军队带回 / 送达 → 战报内确认领取）。含倒计时与决策按钮。 */
 function renderPendingCard(p: PendingTreasureView): string {
   const info = treasureInfo(p.code);
   const eff = info ? treasureEffectText(info) : `${p.effectType}:${p.effectValue}`;
   const rare = treasureRarityName(p.rarity) || p.rarity;
   const cat = treasureCategoryName(p.category) || p.category;
   const icon = info?.icon ? art(info.icon, p.name, 'sm') : '💎';
-  return `<div class="treasure-card pending-card rarity-${p.rarity}" data-expires-at="${p.expiresAt}">
+  const isDeliver = p.kind === 'deliver';
+  const kindTag = isDeliver
+    ? `<span class="treasure-kind kind-deliver" title="军队把宝物送达本村，需你决定如何处理">送达·待决策</span>`
+    : `<span class="treasure-kind kind-camp" title="本村军队带回的宝物，确认即收入宝物栏">本村带回</span>`;
+  const actions = isDeliver
+    ? `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="take">收下</button>
+       <button class="btn" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="sell">出售 +${fmt(p.priceGold)}金</button>
+       <button class="btn btn-danger" data-claim-treasure="${escapeAttr(p.movementId)}" data-claim-decision="discard">遗弃</button>`
+    : `<button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>`;
+  return `<div class="treasure-card pending-card kind-${p.kind ?? 'camp'} rarity-${p.rarity}" data-expires-at="${p.expiresAt}">
     <div class="icon">${icon}</div>
     <div class="treasure-body">
       <div class="treasure-title">${escapeHtml(p.name)} <span class="treasure-rar rar-${p.rarity}">${rare}</span> <span class="treasure-cat">${cat}</span></div>
+      <div class="treasure-kind-row">${kindTag}</div>
       <div class="treasure-effect">${escapeHtml(eff)}</div>
       <div class="treasure-actions">
-        <button class="btn btn-primary" data-claim-treasure="${escapeAttr(p.movementId)}">确认领取</button>
+        ${actions}
         <span class="claim-cd"></span>
       </div>
     </div>
@@ -103,6 +113,19 @@ export function notificationText(event: string, payload: any, ts?: number): stri
   } else if (event === 'TreasurePendingExpired') {
     const rare = treasureRarityName(payload.rarity) || payload.rarity || '';
     return `${time}💎 宝物「${payload.name}」(${rare}) 确认超时，已自动遗弃`;
+  } else if (event === 'TreasureCarriedArrived') {
+    // 军队把宝物送达本村（跨村运输 / 被击败方缴获）
+    const codes = payload.codes ?? [];
+    const names = codes.map((c: string) => treasureInfo(c)?.name ?? c).join('、');
+    if (payload.captured) return `${time}💎 敌军部队被歼灭，其携带的宝物「${names}」被我方缴获，待你前往报告页处理`;
+    return `${time}💎 友军部队将宝物「${names}」送达本村，待你前往报告页决定（收下/出售/遗弃）`;
+  } else if (event === 'TreasureDemolishRedistributed') {
+    const kept = (payload.kept ?? []).map((c: string) => treasureInfo(c)?.name ?? c).join('、');
+    const count = payload.pendingCount ?? (payload.pending?.length ?? 0);
+    if (count > 0) {
+      return `${time}🏚️ 宝库被拆除：价值最高的宝物「${kept}」留于城镇中心，其余 ${count} 件转入报告页待你处理`;
+    }
+    return `${time}🏚️ 宝库被拆除：宝物「${kept}」已留于城镇中心`;
   } else if (event === 'CropDeficit') {
     return `${time}⚠️ 粮食告急！军队可能逃亡`;
   } else if (event === 'PopulationChanged') {
@@ -261,9 +284,13 @@ export function bindReports(act: (p: Promise<any>, onOk?: (payload: any) => void
   document.querySelectorAll<HTMLButtonElement>('[data-claim-treasure]').forEach((btn) => {
     btn.onclick = () => {
       const movementId = btn.dataset.claimTreasure!;
-      void act(req('ClaimPendingTreasure', { movementId }), (payload) => {
+      const decision = btn.dataset.claimDecision; // undefined=camp 默认收下；deliver 必传 take/sell/discard
+      const label = btn.textContent?.trim() ?? '领取';
+      void act(req('ClaimPendingTreasure', decision ? { movementId, decision } : { movementId }), (payload) => {
         const t = payload?.treasure;
-        showToast(t ? `已领取宝物「${t.name}」` : '已领取');
+        if (payload?.sold) showToast(`已出售宝物「${t?.name ?? ''}」 → +${fmt(payload.gold ?? 0)} 金币`);
+        else if (payload?.discarded) showToast(`已遗弃宝物「${t?.name ?? ''}」`);
+        else showToast(t ? `已${label}宝物「${t.name}」` : '已领取');
       });
     };
   });

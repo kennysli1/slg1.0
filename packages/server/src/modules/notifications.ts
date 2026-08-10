@@ -39,6 +39,8 @@ const EVENT_MAP: Record<string, string> = {
   'treasure.Dropped':         'TreasureDropped',
   'treasure.PendingDropped':   'TreasurePendingDropped',
   'treasure.PendingExpired':   'TreasurePendingExpired',
+  'treasure.CarriedArrived':   'TreasureCarriedArrived',
+  'treasure.DemolishRedistributed': 'TreasureDemolishRedistributed',
 };
 
 export class NotificationsModule {

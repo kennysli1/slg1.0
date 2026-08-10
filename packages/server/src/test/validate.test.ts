@@ -124,3 +124,36 @@ test('validatePayload：错误码正确区分', () => {
   assert.equal(outRange.ok, false);
   if (!outRange.ok) assert.equal(outRange.code, 'out_of_range');
 });
+
+test('validatePayload：string_array 类型校验', () => {
+  const schema: PayloadSchema = {
+    treasures: { type: 'string_array', minItems: 1, maxItems: 10, minLen: 1, maxLen: 64 },
+  };
+  // 正常通过
+  const ok = validatePayload({ treasures: ['chainsaw', 'war_flag'] }, schema);
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.deepEqual(ok.cleaned.treasures, ['chainsaw', 'war_flag']);
+
+  // 非数组
+  const notArr = validatePayload({ treasures: 'chainsaw' }, schema);
+  assert.equal(notArr.ok, false);
+
+  // 元素非字符串
+  const badItem = validatePayload({ treasures: [1, 2] }, schema);
+  assert.equal(badItem.ok, false);
+
+  // 超 maxItems
+  const tooMany = validatePayload({ treasures: new Array(11).fill('x') }, schema);
+  assert.equal(tooMany.ok, false);
+
+  // 元素超长
+  const tooLong = validatePayload({ treasures: ['x'.repeat(65)] }, schema);
+  assert.equal(tooLong.ok, false);
+});
+
+test('validatePayload：未声明的数组字段被剥离（攻击面收缩）', () => {
+  const schema: PayloadSchema = { a: { type: 'string', minLen: 1, maxLen: 10 } };
+  const r = validatePayload({ a: 'hello', treasures: ['hack', 'injected'] }, schema);
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal((r.cleaned as any).treasures, undefined);
+});

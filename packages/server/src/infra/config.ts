@@ -375,6 +375,10 @@ export interface GameConstants {
   treasureNpcBuyMarkup: number;
   /** 宝物：军队带回的待领取宝物确认超时（秒）。超时未确认则由服务端自动遗弃。 */
   treasureClaimTimeoutSec: number;
+  /** 宝物：军队携带宝物的容量换算——每多少兵力 +1 携带格（与 treasureCarryMaxSlots 取 min 得实际上限）。 */
+  treasureCarryTroopsPerSlot: number;
+  /** 宝物：军队携带宝物格数硬上限（实际携带上限 = min(此值, floor(总兵力 / treasureCarryTroopsPerSlot))）。 */
+  treasureCarryMaxSlots: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -790,6 +794,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
+    treasureCarryTroopsPerSlot: cn('treasure_carry_troops_per_slot', 200),
+    treasureCarryMaxSlots: cn('treasure_carry_max_slots', 10),
     raw,
   };
 
@@ -1042,6 +1048,8 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
   if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
+  if (c.treasureCarryTroopsPerSlot <= 0) errors.push(`game_constants.csv treasure_carry_troops_per_slot 必须>0（当前${c.treasureCarryTroopsPerSlot}）`);
+  if (c.treasureCarryMaxSlots <= 0) errors.push(`game_constants.csv treasure_carry_max_slots 必须>0（当前${c.treasureCarryMaxSlots}）`);
   if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);

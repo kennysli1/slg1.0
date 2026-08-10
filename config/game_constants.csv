@@ -53,3 +53,5 @@ treasure_camp_drop_chance,0.15,number,清理野外营地后掉落宝物的总体
 treasure_npc_offer_chance,0.18,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1,每条订单独立判定;≠掉落)
 treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值,向上取整;栏满转卖回收价=目录价)
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃
+treasure_carry_troops_per_slot,200,number,军队携带宝物容量换算:每多少兵力+1携带格
+treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值,floor(总兵力/每格兵力数)))
