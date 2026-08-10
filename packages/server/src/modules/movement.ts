@@ -42,6 +42,8 @@ interface Movement {
   toXY: Hex;
   targetId?: string; // PvE 目标 id
   targetVillage?: string; // PvP 被攻击村 / 运输目标村 id
+  /** 返程军队对应的「出征」军队 id（由 onBattleEnded 透传）；用于跨模块匹配携带宝物/掉落 pending（均按出征 id 索引）。 */
+  outwardId?: string;
   troops: Record<string, number>;
   /** 该军队携带的宝物 code 列表（军队携带宝物机制）；在途时城镇失去加成、军队获得加成。 */
   treasures?: string[];
@@ -1089,7 +1091,7 @@ export class MovementModule {
       }
       return; // 全灭无返程
     }
-    this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures);
+    this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures, p.movementId);
   }
 
   private scheduleReturn(
@@ -1099,10 +1101,11 @@ export class MovementModule {
     troops: Record<string, number>,
     loot: Record<string, number>,
     treasures?: string[],
+    outwardId?: string,
   ): void {
     this.launch({
       id: this.nextId(), type: 'return', fromVillage, fromXY, toXY,
-      troops, loot, treasures, departAt: this.now(),
+      troops, loot, treasures, departAt: this.now(), outwardId,
     });
   }
 
@@ -1111,6 +1114,9 @@ export class MovementModule {
     const mv = this.load(id);
     if (!mv) return;
     log('返程到达', { id: mv.id, from: mv.fromVillage, troops: mv.troops, loot: mv.loot });
+    // 出征军队 id：携带宝物与掉落 pending 均按「出征 id」索引；返程 movement 自身是新 id，
+    // 故优先用 outwardId（由 onBattleEnded 透传的出征 id）回链，缺失时退化为返程 id兼容旧档。
+    const outwardId = mv.outwardId ?? mv.id;
     // 兵归队
     await this.commands.send({
       name: 'military.AdjustTroops',
@@ -1125,17 +1131,17 @@ export class MovementModule {
         payload: { villageId: mv.fromVillage, gain: mv.loot },
       });
     }
-    // 携带宝物随军返程到家 → 存回该村（优先宝库）
+    // 携带宝物随军返程到家 → 存回该村（优先宝库）；按出征 id 匹配，避免返程新 id 不匹配丢失宝物
     if (mv.treasures && mv.treasures.length > 0) {
       await this.commands.send({
         name: 'treasure.StoreCarried', from: MovementModule.NAME,
-        payload: { movementId: mv.id, villageId: mv.fromVillage },
+        payload: { movementId: outwardId, villageId: mv.fromVillage },
       });
     }
     // 标记本军队对应的 camp 掉落 pending 为已到达（无论是否有携带宝物都要发——清营掉落的 pending 单独存在）
     await this.commands.send({
       name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,
-      payload: { movementId: mv.id },
+      payload: { movementId: outwardId },
     });
     this.store.delete(COLLECTION, id);
     // v2：通知 population 在途兵力减少（返程到家）

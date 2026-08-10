@@ -639,6 +639,42 @@ test('携带：StoreCarried 返程到家存回城镇栏（优先宝库格）', a
   assert.equal(Object.keys(l.carried).length, 0, '携带记录应清除');
 });
 
+test('携带/掉落回归：返程 movement 为新 id，须用 outwardId 回链出征 id', async () => {
+  // Bug：返程军队是 launch 出的新 id（与出征 id 不同），arriveReturn 曾误用返程 id 去匹配
+  // treasure.carried / treasure_pending（均按出征 id 索引）→ 携带宝物丢失、掉落 pending 卡死。
+  // 修复后 arriveReturn 优先用 mv.outwardId 回链。
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 宝库 1 格
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  // 出征 id = mv-out，把 chainsaw 装上该军队
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv-out', maxCarry: 2 });
+  // 清营掉落一条 pending，按出征 id 索引、尚未归村
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-out', forceCode: 'war_flag' });
+
+  // 模拟返程：新 id=mv-ret，但 outwardId 指向出征 id=mv-out
+  app.store.set('movement', 'mv-ret', {
+    id: 'mv-ret', type: 'return', fromVillage: 'v1',
+    fromXY: { q: 0, r: 0 }, toXY: { q: 0, r: 0 },
+    troops: {}, treasures: ['chainsaw'], outwardId: 'mv-out',
+    departAt: 1_000_000, arriveAt: 1_000_001,
+    path: [{ q: 0, r: 0 }, { q: 0, r: 0 }], stepIndex: 1, pos: { q: 0, r: 0 },
+    perStepMs: 1, nextStepAt: 0, status: 'marching', stepToken: 1,
+  } as any);
+
+  // 直接驱动返程到达（arriveReturn 为 private，运行时可访问）
+  await (app.movement as any).arriveReturn('mv-ret');
+
+  // 携带宝物应随返程存回城镇栏（按 outwardId=mv-out 匹配 carried）
+  const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.ok(l.codes.includes('chainsaw'), '携带的 chainsaw 应随返程存回城镇栏');
+  assert.equal(Object.keys(l.carried).length, 0, '携带记录应清除');
+
+  // 掉落 pending 应被标记为已归村（arrivedAt 被设置），可领取
+  const pend = app.store.get<any>('treasure_pending', 'mv-out');
+  assert.ok(pend, '掉落 pending 应仍存在');
+  assert.ok(pend.arrivedAt, 'pending.arrivedAt 应被 MarkPendingArrived 设置（不再卡死）');
+});
+
 test('携带：OffloadForeign 军队抵达他村 → 转为该村民 deliver 报告', async () => {
   const app = await freshApp();
   await app.createVillage('v2', 1, 1, '测试村2');
