@@ -1,0 +1,3 @@
+#!/bin/sh
+# G1 变更契约（R1–R6）。秒级。规矩见 docs/00_变更契约.md
+exec node scripts/guard/run.mjs

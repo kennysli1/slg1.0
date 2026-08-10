@@ -43,6 +43,11 @@
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙/铁匠加成、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
+| 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量或宝库槽位 |
+| 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
+| 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
+| 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
+| 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -84,6 +89,16 @@
 > **加建筑只需加一行并填 `zone`**：城内外分池 + 侧边栏可建清单全部由 zone 自动归位，前端无需改代码。
 > 资源田是 `zone=outer` 且填了 `resource/prodBase/prodGrowth` 的建筑，与普通建筑走同一套"点空槽建造/升级"逻辑。
 
+## building_levels.csv — 建筑逐等级独立参数
+| 列 | 含义 |
+|----|------|
+| code / level | 建筑代码 / 目标等级（须覆盖该建筑 `1..maxLevel`） |
+| costWood/costClay/costIron/costCrop/costGold | 建造或升级到该级的五资源成本 |
+| timeSec | 建造或升级到该级的耗时（秒） |
+| popCap | 该级相对上一级新增的人口硬上限 |
+| prod | 仅资源田填写：该级每小时产量 |
+| treasureSlots | 仅宝库填写：该级相对上一级新增的宝物栏槽位 |
+
 ## town_center_slots.csv — 城镇中心槽位曲线
 | 列 | 含义 |
 |----|------|
@@ -117,6 +132,30 @@
 | traits | 特性ID列表（逗号分隔，引用 **unit_traits.csv 的数字 id**，可空） |
 
 > 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。
+
+## mercenaries.csv — 雇佣兵目录
+| 列 | 含义 |
+|----|------|
+| id / code | 数字主键 / 稳定英文代码 |
+| tribe | 固定为 `merc`，表示全种族可用 |
+| name / icon | 显示名 / 图标基名 |
+| form | `melee` 或 `ranged` |
+| meleeAtk/rangedAtk | 近战/远程攻击 |
+| meleeDef/rangedDef | 近战/远程防御 |
+| speed / carry | 行军速度 / 单兵载货量 |
+| upkeep | 每小时耗粮；雇佣兵当前固定为 0 |
+| costWood/costClay/costIron/costCrop | 普通训练资源成本；雇佣兵固定为 0 |
+| trainSec / building / traits | 训练秒数 / 所需建筑 / 特性；当前均留空或为 0 |
+| popCost / popPermanent | 人口消耗 / 是否永久占人口；当前均为 0 |
+| goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
+
+## merc_camp.csv — 雇佣兵营地逐级参数
+| 列 | 含义 |
+|----|------|
+| level | 营地等级 |
+| refreshSec | 自动刷新候选名单的间隔（秒） |
+| mercCount | 每次刷新生成的可雇佣候选数量 |
+| maxStoredRefreshes | 最多可囤积的手动刷新次数 |
 
 ## unit_traits.csv — 兵种特性（攻防之上的额外倍率修正）
 | 列 | 含义 |
@@ -187,6 +226,27 @@
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
+
+## trade_center.csv — 贸易中心逐级参数
+| 列 | 含义 |
+|----|------|
+| level | 贸易中心等级 |
+| tradeRoutes | 本村可同时占用的贸易路线数 |
+| tradeViewRadius | 可查看和接受玩家订单的最大六边形距离 |
+| npcOrderCount | NPC订单池同时展示的订单数量 |
+| npcRefreshSec | NPC订单自动刷新间隔（秒） |
+| npcStoredRefreshes | 最多可囤积的手动刷新次数 |
+
+## treasures.csv — 宝物目录
+| 列 | 含义 |
+|----|------|
+| id / code | 数字主键 / 稳定英文代码 |
+| name / icon | 显示名 / 图标基名 |
+| category / rarity | 宝物类别 / 稀有度 |
+| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写） |
+| priceGold | NPC出售或回收时使用的金币基准价 |
+| dropRate | 掉落或进入NPC订单池的概率（0–1） |
+| applyType | `passive` 持续生效或即时消费类型 |
 
 ## village_templates.csv — 各部族开局布局
 | 列 | 含义 |

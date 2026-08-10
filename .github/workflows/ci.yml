@@ -1,0 +1,37 @@
+name: CI
+
+# G4 兜底闸门：本地钩子可以被 --no-verify 绕过，这里绕不过去。
+# 规矩见 docs/00_变更契约.md
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # guard 要和 HEAD 比对 CHANGELOG / 版本号
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 变更契约 R1–R6。CI 里不认逃生阀，且按提交范围比对，绕不过 --no-verify。
+      - name: 变更契约（guard）
+        env:
+          GUARD_SKIP: ''
+          GUARD_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: npm run guard
+
+      - name: 全量校验（lint / typecheck / 测试 / 架构守卫）
+        run: npm run verify:quick
+
+      - name: 依赖审计
+        run: npm audit --omit=dev --audit-level=high

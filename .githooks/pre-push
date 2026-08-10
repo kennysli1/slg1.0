@@ -1,0 +1,8 @@
+#!/bin/sh
+# G3 推送前全量：类型检查 + lint（守四铁律）+ 前后端测试（含 architecture.test.ts）
+# 太慢时可临时 SKIP_VERIFY=1 git push，但 CI 会兜底。
+if [ "$SKIP_VERIFY" = "1" ]; then
+  echo "⚠ SKIP_VERIFY=1，跳过 push 前全量校验（CI 仍会跑）"
+  exit 0
+fi
+exec npm run verify:quick

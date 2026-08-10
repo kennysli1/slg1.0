@@ -1,3 +1,10 @@
+---
+class: reference
+status: active
+updated: 2026-07-15
+owner: art
+summary: 各类美术资源的成品生成 prompt（中文）
+---
 # 美术生成 · 成品 Prompt（中文 · 可直接投喂）
 
 > 用法：一批 = 图像模型里开一个新会话，整段贴进去出图。建议先出③建筑或④兵种定调，
