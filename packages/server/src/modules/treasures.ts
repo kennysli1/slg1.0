@@ -61,6 +61,8 @@ export class TreasureModule {
     moduleName: 'treasure',
     publicActions: {
       ListTreasures: { command: 'treasure.List', ownVillage: true, needAuth: true, schema: {} },
+      // 使用宝物：仅对即时类(instantGold)有效，发放金币并移除；被动宝物返回 not_usable。
+      UseTreasure: { command: 'treasure.Use', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
     },
     eventPushMap: {
       'treasure.Changed': 'TreasureChanged',

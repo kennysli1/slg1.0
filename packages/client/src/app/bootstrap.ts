@@ -76,10 +76,11 @@ async function refreshAll() {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次性拉取整张地图的全部非空地块（full=true 忽略半径上限），
     // 后续拖拽/缩放/跳转均为纯视觉变换，不再按视野重拉数据。
-    const [res, vil, army, area, moves, pop] = await Promise.all([
+    const [res, vil, army, area, moves, pop, treasures] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
       req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }), req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
+      req('ListTreasures').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
     if (failed) {
@@ -88,7 +89,7 @@ async function refreshAll() {
       else addReport(`刷新失败：${errText(code)}`);
       return;
     }
-    setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
+    setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload, treasures: treasures.ok ? treasures.payload : null });
     markResFetched(); // 资源快照时刻：之后 1s 定时器据此本地外插资源数字，无需再访问服务器
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
@@ -247,8 +248,8 @@ function bindPageEvents() {
   bindMap(act);
 }
 
-/** 统一"发请求并刷新"：失败转中文战报。 */
-async function act(p: Promise<any>) {
+/** 统一"发请求并刷新"：失败转中文战报。可选的 onOk 在成功且刷新前回调（用于成功 toast）。 */
+async function act(p: Promise<any>, onOk?: (payload: any) => void) {
   try {
     const res = await p;
     if (!res.ok) {
@@ -256,6 +257,8 @@ async function act(p: Promise<any>) {
       // 队列相关的"当下拦截"用 toast 即时反馈；其余仍进报告流水
       if (code === 'queue_full' || code === 'queue_busy') showToast(errText(code));
       else addReport(`操作失败：${errText(code)}`);
+    } else if (onOk) {
+      onOk(res.payload);
     }
     await refreshAll();
   } catch {

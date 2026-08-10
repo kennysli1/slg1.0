@@ -3,7 +3,7 @@ import { art, canAfford, costPreview, progressBar, escapeHtml, escapeAttr, unitA
 import { showToast } from '../../shared/ui/toast.js';
 import { fmt } from '../../shared/utils/format.js';
 import { errText, formName } from '../../shared/ui/text.js';
-import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax, unitInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo, trainTimeReducePerLevel, trainTimeReduceCap, trainCostReducePerLevel, trainCostReduceCap } from '../../app/config.js';
+import { buildingInfo, gameConstants, storageBase, storageGrowthPerLevel, smithyBonusPerLevel, wallBonusPerLevel, popHospitalRecoveryBase, popHospitalRecoveryPerLevel, popHospitalRecoveryMax, unitInfo, resourceKeys, unitCropPerHour, popCropPerLabor, resInfo, trainTimeReducePerLevel, trainTimeReduceCap, trainCostReducePerLevel, trainCostReduceCap, treasureInfo, treasureCategoryName, treasureRarityName, treasureEffectText } from '../../app/config.js';
 import { getCache, setCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
 import { renderPopPanel } from './population.js';
@@ -15,8 +15,8 @@ import { openUnitDetail } from '../army/army.js';
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
 /** 仅"刚打开"这一帧带入场动画；后续 5s 全量刷新重建 DOM 时不再重放（否则每次都会滑进来"闪一下"）。 */
 let drawerJustOpened = false;
-/** 建造/升级动作回调（由 bindVillage 注入的 act）。 */
-let actFn: ((p: Promise<any>) => void) | null = null;
+/** 建造/升级动作回调（由 bindVillage 注入的 act）。允许可选的 onOk 成功回调。 */
+let actFn: ((p: Promise<any>, onOk?: (payload: any) => void) => void) | null = null;
 
 export function renderVillage(): string {
   const vil = getCache().vil;
@@ -24,16 +24,82 @@ export function renderVillage(): string {
 
   const queueBanner = renderQueue(vil.queue);
   const popPanel = renderPopPanel();
+  const treasurePanel = renderTreasurePanel();
   const center = renderCenter(vil.townCenter);
   const inner = renderZone('inner', '城内 · 民生研发', vil.zones.inner);
   const outer = renderZone('outer', '城外 · 生产量产', vil.zones.outer);
 
   return `${queueBanner}
     ${popPanel ? `<h3>人口 · 文明活力</h3>${popPanel}` : ''}
+    ${treasurePanel}
     ${center}
     ${outer}
     ${inner}
     ${drawer ? renderDrawer() : ''}`;
+}
+
+/**
+ * 宝物栏面板：展示本村已储存宝物 + 聚合效果。
+ * 数据来自 refreshAll 拉取的 ListTreasures 响应（getCache().treasures）。
+ * 被动宝物占格即生效（效果已在服务端并入经济/人口/军事）；即时类宝物(instantGold)提供「使用」按钮发放金币。
+ */
+function renderTreasurePanel(): string {
+  const data = getCache().treasures as
+    | { codes: string[]; slots: number; treasures: any[]; effect: any }
+    | null;
+  if (!data) return '';
+  const codes: string[] = data.codes ?? [];
+  const slots: number = data.slots ?? 1;
+  const list: any[] = data.treasures ?? [];
+  const eff = data.effect ?? {};
+
+  const cards = list.length
+    ? list.map((t: any) => {
+        const info = treasureInfo(t.code) ?? t;
+        const cat = treasureCategoryName(t.category ?? '');
+        const rar = treasureRarityName(t.rarity ?? '');
+        const effectTxt = treasureEffectText(info as any);
+        const isInstant = (t.applyType ?? '') === 'instant';
+        const useBtn = isInstant
+          ? `<button class="btn-sm treasure-use" data-use-treasure="${escapeAttr(t.code)}">使用</button>`
+          : '';
+        return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
+          ${art(t.icon, t.name, 'md')}
+          <div class="treasure-body">
+            <div class="treasure-title">${escapeHtml(t.name)}
+              <small class="treasure-cat cat-${escapeAttr(t.category ?? '')}">${escapeHtml(cat)}</small>
+              <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
+            </div>
+            <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
+            ${useBtn}
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="treasure-empty">暂无宝物。清理野外营地、贸易中心刷新或击败敌军有几率获得；亦可向 NPC 购买（宝库建筑建成后槽位随等级增加）。</div>`;
+
+  // 聚合效果摘要（服务端已按 (1+Σ) 算好的乘数；resMult 为加性分数）
+  const chips: string[] = [];
+  const resMult: Record<string, number> = eff.resMult ?? {};
+  for (const k of ['wood', 'clay', 'iron', 'crop']) {
+    if ((resMult[k] ?? 0) !== 0) chips.push(`<span class="eff-chip">${resInfo(k).name} ${fmt((resMult[k] * 100))}%</span>`);
+  }
+  const goldMult: number = eff.goldMult ?? 1;
+  if (goldMult !== 1) chips.push(`<span class="eff-chip">金币 ${fmt((goldMult - 1) * 100)}%</span>`);
+  const atkMult: number = eff.atkMult ?? 1;
+  if (atkMult !== 1) chips.push(`<span class="eff-chip">全军攻击 ${fmt((atkMult - 1) * 100)}%</span>`);
+  const defMult: number = eff.defMult ?? 1;
+  if (defMult !== 1) chips.push(`<span class="eff-chip">全军防御 ${fmt((defMult - 1) * 100)}%</span>`);
+  const popMult: number = eff.popGrowthMult ?? 1;
+  if (popMult !== 1) chips.push(`<span class="eff-chip">人口增长 ${fmt((popMult - 1) * 100)}%</span>`);
+  const summary = chips.length
+    ? `<div class="treasure-summary"><span class="treasure-summary-label">本村加成</span>${chips.join('')}</div>`
+    : `<div class="treasure-summary treasure-summary--none"><span class="treasure-summary-label">本村加成</span><span class="eff-chip eff-chip--none">暂无加成</span></div>`;
+
+  return `<h3>宝物栏 <small>（${codes.length}/${slots}）</small></h3>
+    <div class="treasure-panel">
+      <div class="treasure-grid">${cards}</div>
+      ${summary}
+    </div>`;
 }
 
 /** 多条建造队列进度。 */
@@ -648,6 +714,17 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   // 关闭抽屉
   document.querySelectorAll<HTMLElement>('[data-close-drawer]').forEach((el) =>
     el.onclick = () => { drawer = null; rerenderPage(); });
+
+  // 宝物「使用」：即时类宝物(instantGold)发放金币并移除（被动宝物不可用，服务端返回 not_usable）
+  document.querySelectorAll<HTMLButtonElement>('[data-use-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.useTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('UseTreasure', { code }), (payload) => {
+        const gold = (payload as any)?.gold ?? info?.effectValue ?? 0;
+        showToast(`已使用「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
+      });
+    });
 }
 
 /** 抽屉开合只影响村庄页局部，重渲染 #page 即可（不触发全量 refresh）。 */

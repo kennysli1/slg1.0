@@ -482,6 +482,56 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
   border-radius: var(--r-md); padding: var(--s-3) var(--s-4);
   box-shadow: var(--sh-1); margin-bottom: var(--s-2);
 }
+
+/* ---------- 宝物栏（Treasury）---------- */
+.treasure-panel {
+  background: var(--c-surface); border: 1px solid var(--c-line);
+  border-radius: var(--r-md); padding: var(--s-3);
+  box-shadow: var(--sh-1); margin-bottom: var(--s-2);
+}
+.treasure-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--s-3); align-items: stretch;
+}
+.treasure-card {
+  display: flex; gap: var(--s-3); align-items: center;
+  background: var(--c-surface-2); border: 1px solid var(--c-line);
+  border-left: 4px solid var(--c-line); border-radius: var(--r-md); padding: var(--s-2) var(--s-3);
+}
+.treasure-card .icon { flex: none; }
+.treasure-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.treasure-title { font-weight: 700; color: var(--c-ink); display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.treasure-cat, .treasure-rar {
+  font-size: var(--f-xs); padding: 0 var(--s-2); border-radius: 999px; line-height: 1.6; font-weight: 500;
+}
+.treasure-cat { background: rgba(138,109,77,.14); color: var(--c-brand); }
+.treasure-rar { color: #fff; }
+.rar-common { background: #8a8175; }
+.rar-rare { background: #4a7fb5; }
+.rar-epic { background: #9856c4; }
+.rar-legendary { background: linear-gradient(90deg, #d9a441, #c47a2c); }
+/* 稀有度左边框色（与徽标呼应） */
+.treasure-card.rarity-common { border-left-color: #8a8175; }
+.treasure-card.rarity-rare { border-left-color: #4a7fb5; }
+.treasure-card.rarity-epic { border-left-color: #9856c4; }
+.treasure-card.rarity-legendary { border-left-color: var(--c-gold); background: linear-gradient(180deg, #fff8e8, var(--c-surface-2)); }
+.treasure-effect { font-size: var(--f-sm); color: var(--c-ink-soft); }
+.treasure-use { margin-top: 2px; align-self: flex-start; }
+.treasure-empty {
+  font-size: var(--f-sm); color: var(--c-ink-soft); background: var(--c-surface-2);
+  border: 1px dashed var(--c-line); border-radius: var(--r-sm); padding: var(--s-3);
+}
+.treasure-summary {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-3);
+  padding-top: var(--s-2); border-top: 1px dashed var(--c-line);
+}
+.treasure-summary-label { font-size: var(--f-xs); color: var(--c-ink-soft); margin-right: var(--s-1); }
+.eff-chip {
+  font-size: var(--f-xs); padding: 2px var(--s-2); border-radius: 999px;
+  background: rgba(217,164,65,.16); color: #8a6a22; border: 1px solid rgba(217,164,65,.4);
+  font-family: var(--ff-num);
+}
+.eff-chip--none { background: var(--c-surface-2); color: var(--c-ink-soft); border-color: var(--c-line); }
+
 .pop-head {
   display: flex; align-items: baseline; gap: var(--s-2); margin-bottom: var(--s-2);
 }
