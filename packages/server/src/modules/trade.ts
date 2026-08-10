@@ -301,6 +301,11 @@ export class TradeModule {
     s.taskId = this.scheduleRefresh(villageId, expiresAt);
     this.store.set(COLLECTION, s.villageId, s);
     await this.emitUpdated(villageId);
+    // 刷新时按概率掉落宝物到本村宝物栏（溢出则自动售卖换金），结果经 treasure.Dropped 进战报
+    void this.commands.send({
+      name: 'treasure.RollDrop', from: TradeModule.NAME,
+      payload: { villageId, source: 'trade' },
+    });
     log('NPC 订单自动刷新', { village: villageId, level: s.level, stored: s.storedRefreshes });
   }
 
@@ -400,6 +405,11 @@ export class TradeModule {
     s.npcOrderPool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(s.level, tc.tradeViewRadius, expiresAt));
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
+    // 手动刷新时同样按概率掉落宝物（与自动刷新一致）
+    void this.commands.send({
+      name: 'treasure.RollDrop', from: TradeModule.NAME,
+      payload: { villageId, source: 'trade' },
+    });
     const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
     return { ok: true, payload: (base.payload as any) };
   }

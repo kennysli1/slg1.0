@@ -373,12 +373,14 @@ export class CombatModule {
 
     // 应用防守方损失 + 取战利品
     let looted: Record<string, number> = {};
+    let campCleared = false;
     if (b.targetKind === 'pve') {
       const apply = await this.commands.send({
         name: 'pve.ApplyResult', from: CombatModule.NAME,
         payload: { id: b.targetId, defenderLosses, attackerWins, looterCarry: totalCarry },
       });
       looted = (apply.payload as any)?.looted ?? {};
+      campCleared = !!((apply.payload as any)?.cleared);
     } else {
       // PvP：扣防守方兵力
       if (Object.keys(defenderLosses).length) {
@@ -441,6 +443,14 @@ export class CombatModule {
           name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
           payload: { villageId: contrib.fromVillage, losses: attackerLossesForVillage },
+        });
+      }
+
+      // 清野营掉落宝物：命中的村庄按概率抽宝物（入栏或溢出自动售卖），结果经 treasure.Dropped 进战报
+      if (campCleared && attackerWins) {
+        void this.commands.send({
+          name: 'treasure.RollDrop', from: CombatModule.NAME,
+          payload: { villageId: contrib.fromVillage, source: 'camp' },
         });
       }
 

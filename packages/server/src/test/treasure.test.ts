@@ -12,9 +12,9 @@ import { createGameApp, type GameApp } from '../app.js';
  */
 
 let clock = 1_000_000;
-async function freshApp(): Promise<GameApp> {
+async function freshApp(rng?: () => number): Promise<GameApp> {
   clock = 1_000_000;
-  const app = createGameApp({ now: () => clock, manualScheduler: true });
+  const app = createGameApp({ now: () => clock, manualScheduler: true, rng });
   app.setupWorld();
   // 必须 await —— treasure.createVillage 在 doCreateVillage 的首个 await 之后执行，
   // 不同步等待会导致宝物状态尚未写入，Grant 报 village_not_found。
@@ -108,4 +108,53 @@ test('宝物：旧村庄缺 treasure 文档也能授予（懒创建 ensureState�
   assert.equal(g.ok, true, '缺文档的旧村庄授予也应成功（懒创建）: ' + (g.reason ?? ''));
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.deepEqual(list.codes, ['chainsaw'], '懒创建后应有 chainsaw');
+});
+
+test('宝物掉落：门控命中(forceCode) → 直接入栏', async () => {
+  const app = await freshApp();
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', forceCode: 'chainsaw' });
+  assert.equal(drop.ok, true, 'RollDrop 应成功');
+  assert.ok(drop.payload.dropped, '应掉落');
+  assert.equal(drop.payload.dropped.code, 'chainsaw', '强制抽中 chainsaw');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw'], 'chainsaw 应入栏');
+});
+
+test('宝物掉落：栏满自动售卖换金', async () => {
+  const app = await freshApp();
+  const r0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  const gold0 = r0.resources.gold;
+  // 先占满唯一栏位（城镇中心基础 1 格）
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  // 再掉落一个不同宝物 → 栏满 → 自动售卖（chainsaw 售价 60 金币）
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', forceCode: 'chainsaw' });
+  assert.equal(drop.ok, true);
+  assert.ok(drop.payload.dropped, '应掉落（即便溢出）');
+  assert.equal(drop.payload.dropped.sold, true, '栏满应标记售出');
+  assert.equal(drop.payload.dropped.gold, 60, '售出价应=chainsaw 的 priceGold');
+  const r1 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.equal(r1.resources.gold, gold0 + 60, '金币应增加售出价');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['war_flag'], '栏位未被 chainsaw 占用');
+});
+
+test('宝物掉落：门控未命中(高 RNG) → 无掉落', async () => {
+  // rng 恒返回 0.99，远高于默认 camp 概率 0.15 → 不掉落
+  const app = await freshApp(() => 0.99);
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp' });
+  assert.equal(drop.ok, true);
+  assert.equal(drop.payload.dropped, null, '应无掉落');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, [], '不应有宝物');
+});
+
+test('宝物掉落：门控命中(低 RNG) → 加权抽到某宝物并入栏', async () => {
+  // rng 恒返回 0 → 命中门控(0<0.15)，且 weightedPick 取首个 dropRate>0 的宝物(chainsaw)
+  const app = await freshApp(() => 0);
+  const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp' });
+  assert.equal(drop.ok, true);
+  assert.ok(drop.payload.dropped, '应掉落');
+  assert.equal(drop.payload.dropped.code, 'chainsaw', 'rng=0 应抽中首个宝物');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(list.codes.length, 1, '应入栏一个宝物');
 });

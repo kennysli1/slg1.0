@@ -76,6 +76,7 @@ export class TreasureModule {
     private scheduler: Scheduler,
     private now: () => number,
     private config: GameConfig,
+    private rng: () => number = Math.random,
   ) {}
 
   /** 热重载配置（改 CSV 后调用）。 */
@@ -87,6 +88,8 @@ export class TreasureModule {
     this.commands.register('treasure.Grant', (c) => this.grant(c));
     this.commands.register('treasure.Use', (c) => this.use(c));
     this.commands.register('treasure.List', (c) => this.list(c));
+    // 掉落结算（由 combat/pve 清营、trade 刷新等触发；铁律#2：他模块只发命令，不回查）
+    this.commands.register('treasure.RollDrop', (c) => this.rollDrop(c));
   }
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
@@ -262,5 +265,74 @@ export class TreasureModule {
         effect: eff,
       },
     };
+  }
+
+  /**
+   * 掉落结算：由 combat(清营)/trade(刷新) 触发。
+   *  - 先按总体概率门控（treasureCampDropChance / treasureTradeDropChance）；
+   *  - 命中后按各宝物 dropRate 加权抽选（轮盘赌）；
+   *  - 宝物栏未满且不重复 → 入栏（被动即生效、即时即占位）；
+   *  - 栏满或重复持有 → 自动卖给 NPC 换金币（等价于「溢出自动售卖」）。
+   * 无论结果如何都 emit treasure.Changed 让客户端刷新面板；命中则额外 emit treasure.Dropped 进战报。
+   */
+  private async rollDrop(cmd: Command): Promise<CommandResult> {
+    const { villageId, source, forceCode } = cmd.payload as {
+      villageId: string;
+      source: 'camp' | 'trade';
+      /** 测试/调试用：强制抽中指定 code（跳过概率门控与加权）。 */
+      forceCode?: string;
+    };
+    const s = this.ensureState(villageId);
+    const c = this.config.constants;
+    const baseChance = source === 'trade' ? c.treasureTradeDropChance : c.treasureCampDropChance;
+
+    // 门控：未命中总体概率 → 无掉落
+    const hit = forceCode ? true : this.rng() < baseChance;
+    if (!hit) return { ok: true, payload: { dropped: null } };
+
+    // 加权抽选宝物（按 dropRate 轮盘赌）
+    const code = forceCode ?? this.weightedPick();
+    if (!code) return { ok: true, payload: { dropped: null } };
+    const t = this.config.treasures[code];
+    if (!t) return { ok: true, payload: { dropped: null } };
+
+    const slots = this.getTreasureSlots(villageId);
+    let sold = false;
+    let gold = 0;
+    if (s.codes.length >= slots || s.codes.includes(code)) {
+      // 宝物栏满或重复持有 → 自动卖给 NPC 换金币（不占格）
+      sold = true;
+      gold = t.priceGold;
+      await this.commands.send({
+        name: 'economy.Grant', from: TreasureModule.NAME,
+        payload: { villageId, gain: { gold } },
+      });
+    } else {
+      s.codes.push(code);
+      this.store.set(COLLECTION, villageId, s);
+      await this.recomputeAndPush(villageId);
+    }
+    await this.emitChanged(villageId);
+
+    const dropped = { code, name: t.name, rarity: t.rarity, category: t.category, sold, gold };
+    // 进战报（客户端 notifications 模块记录）
+    await this.bus.emit({
+      name: 'treasure.Dropped', source: TreasureModule.NAME, ts: this.now(),
+      payload: { villageId, source, dropped },
+    } as DomainEvent);
+    return { ok: true, payload: { dropped } };
+  }
+
+  /** 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。 */
+  private weightedPick(): string | undefined {
+    const entries = Object.values(this.config.treasures).filter((t) => (t.dropRate ?? 0) > 0);
+    if (entries.length === 0) return undefined;
+    const total = entries.reduce((a, t) => a + t.dropRate, 0);
+    let r = this.rng() * total;
+    for (const t of entries) {
+      r -= t.dropRate;
+      if (r <= 0) return t.code;
+    }
+    return entries[entries.length - 1].code;
   }
 }

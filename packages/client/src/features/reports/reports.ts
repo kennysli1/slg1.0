@@ -1,6 +1,6 @@
 /** 报告页：战报列表 + 服务端推送事件 → 战报文案。 */
 import { secStr } from '../../shared/utils/format.js';
-import { fieldInfo, buildingInfo, resInfo } from '../../app/config.js';
+import { fieldInfo, buildingInfo, resInfo, treasureRarityName } from '../../app/config.js';
 import { getReports, addReport, seedReports, setBattleSnapshot, clearBattleSnapshot, getPopState, setPopState } from '../../app/state.js';
 import { unitName } from '../army/army.js';
 import type { StoredNotification } from '@slg/shared';
@@ -59,6 +59,14 @@ export function notificationText(event: string, payload: any, ts?: number): stri
   } else if (event === 'MarchReturned') {
     const loot = Object.entries(payload.loot || {}).map(([t, n]: any) => `${resInfo(t).name}${n}`).join(' ');
     return `${time}🏠 部队返回，带回：${loot || '无'}`;
+  } else if (event === 'TreasureDropped') {
+    const d = payload.dropped || {};
+    const rare = treasureRarityName(d.rarity) || d.rarity || '';
+    const where = payload.source === 'camp' ? '清理野营' : '贸易刷新';
+    if (d.sold) {
+      return `${time}💎 ${where}获得宝物「${d.name}」(${rare})，宝物栏已满自动售出 → +${fmt(d.gold)} 金币`;
+    }
+    return `${time}💎 ${where}获得宝物「${d.name}」(${rare})，已收入宝物栏`;
   } else if (event === 'CropDeficit') {
     return `${time}⚠️ 粮食告急！军队可能逃亡`;
   } else if (event === 'PopulationChanged') {

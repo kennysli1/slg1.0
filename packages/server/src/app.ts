@@ -127,6 +127,8 @@ export function createGameApp(opts?: {
   storePath?: string;
   /** 平衡调参覆盖文件路径。默认 <storePath 目录>/balance_overrides.json。 */
   balanceOverridePath?: string;
+  /** 随机数生成器（默认 Math.random）。测试可注入确定性 RNG 以复现掉落/加权结果。 */
+  rng?: () => number;
 }): GameApp {
   const now = opts?.now ?? (() => Date.now());
   const configDir = opts?.configDir ?? defaultConfigDir();
@@ -181,7 +183,7 @@ export function createGameApp(opts?: {
   const notifications = new NotificationsModule(store, bus, commands, now, config);
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
-  const treasure = new TreasureModule(store, bus, commands, scheduler, now, config);
+  const treasure = new TreasureModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {

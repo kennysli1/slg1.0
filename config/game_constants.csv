@@ -49,3 +49,5 @@ trade_npc_gold_per_resource,0.5,number,NPC 订单中每个资源单位的金币�
 trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价 0.8=玩家拿到 80% 基准价值）
 trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易订单上限
 trade_order_ttl_sec,86400,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
+treasure_camp_drop_chance,0.15,number,清理野外营地后掉落宝物的总体概率(0-1,越低越稀有)
+treasure_trade_drop_chance,0.25,number,贸易中心刷新NPC订单时掉落宝物的总体概率(0-1)
