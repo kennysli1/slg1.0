@@ -567,3 +567,17 @@ test('携带：LoseCarried pvp=宝物归防守方村庄 deliver 报告', async (
   assert.equal(Object.keys(src.carried).length, 0, '源村携带记录应清除');
 });
 
+test('宝物：resume 兼容旧扁平 codes 格式（不崩溃且归一化）', async () => {
+  const app = await freshApp();
+  // 回归：线上某村庄宝物文档为旧扁平 codes 格式（缺 town/treasury 字段），
+  // 旧实现 resume() 在 recomputeAndPush 中 spread s.town 抛 "is not iterable" 导致崩溃循环。
+  app.store.set('treasure', 'v1', { villageId: 'v1', codes: ['chainsaw'] } as any);
+  // resume 遍历所有村庄宝物状态并重算——旧格式必须被归一化而非抛错
+  await app.resume();
+  const s = app.store.get('treasure', 'v1') as any;
+  assert.ok(Array.isArray(s.town), 'resume 后 town 应为数组');
+  assert.ok(s.town.includes('chainsaw'), '旧 codes 应被迁移到 town');
+  assert.ok(Array.isArray(s.treasury), 'treasury 应为数组');
+  assert.equal(typeof s.extraSlots, 'number', 'extraSlots 应为数字');
+});
+
