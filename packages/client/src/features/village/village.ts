@@ -63,6 +63,8 @@ function renderTreasurePanel(): string {
         const useBtn = isInstant
           ? `<button class="btn-sm treasure-use" data-use-treasure="${escapeAttr(t.code)}">使用</button>`
           : '';
+        const sellBtn = `<button class="btn-sm treasure-sell" data-sell-treasure="${escapeAttr(t.code)}">出售</button>`;
+        const discardBtn = `<button class="btn-sm treasure-discard" data-discard-treasure="${escapeAttr(t.code)}">丢弃</button>`;
         return `<div class="treasure-card rarity-${escapeAttr(t.rarity ?? 'common')}">
           ${art(t.icon, t.name, 'md')}
           <div class="treasure-body">
@@ -71,7 +73,9 @@ function renderTreasurePanel(): string {
               <small class="treasure-rar rar-${escapeAttr(t.rarity ?? '')}">${escapeHtml(rar)}</small>
             </div>
             <div class="treasure-effect">${escapeHtml(effectTxt)}</div>
-            ${useBtn}
+            <div class="treasure-actions">
+              ${useBtn}${sellBtn}${discardBtn}
+            </div>
           </div>
         </div>`;
       }).join('')
@@ -723,6 +727,27 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       if (actFn) actFn(req('UseTreasure', { code }), (payload) => {
         const gold = (payload as any)?.gold ?? info?.effectValue ?? 0;
         showToast(`已使用「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
+      });
+    });
+
+  // 宝物「出售」：卖给 NPC 换金币(priceGold)并移除
+  document.querySelectorAll<HTMLButtonElement>('[data-sell-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.sellTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('SellTreasure', { code }), (payload) => {
+        const gold = (payload as any)?.gold ?? 0;
+        showToast(`已出售「${info?.name ?? code}」，获得 ${fmt(gold)} 金币`);
+      });
+    });
+
+  // 宝物「丢弃」：直接移除（不给金币），用于腾出格子
+  document.querySelectorAll<HTMLButtonElement>('[data-discard-treasure]').forEach((b) =>
+    b.onclick = () => {
+      const code = b.dataset.discardTreasure!;
+      const info = treasureInfo(code);
+      if (actFn) actFn(req('DiscardTreasure', { code }), () => {
+        showToast(`已丢弃「${info?.name ?? code}」`);
       });
     });
 }

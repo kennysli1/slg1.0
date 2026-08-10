@@ -63,6 +63,10 @@ export class TreasureModule {
       ListTreasures: { command: 'treasure.List', ownVillage: true, needAuth: true, schema: {} },
       // 使用宝物：仅对即时类(instantGold)有效，发放金币并移除；被动宝物返回 not_usable。
       UseTreasure: { command: 'treasure.Use', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      // 出售宝物：卖给 NPC 换金币(priceGold)并移除；被动/即时皆可。
+      SellTreasure: { command: 'treasure.Sell', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      // 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。
+      DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
     },
     eventPushMap: {
       'treasure.Changed': 'TreasureChanged',
@@ -90,6 +94,9 @@ export class TreasureModule {
     this.commands.register('treasure.List', (c) => this.list(c));
     // 掉落结算（由 combat/pve 清营、trade 刷新等触发；铁律#2：他模块只发命令，不回查）
     this.commands.register('treasure.RollDrop', (c) => this.rollDrop(c));
+    // 玩家主动出售/丢弃（客户端宝物面板触发）
+    this.commands.register('treasure.Sell', (c) => this.sell(c));
+    this.commands.register('treasure.Discard', (c) => this.discard(c));
   }
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
@@ -246,6 +253,42 @@ export class TreasureModule {
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
     return { ok: true, payload: { gold, codes: [...s.codes] } };
+  }
+
+  /**
+   * 出售宝物：把已储存宝物卖给 NPC 换金币（priceGold），并从宝物栏移除、重算效果。
+   * 被动/即时宝物皆可出售；即时宝物选择出售而非使用，则拿 priceGold 而非 effectValue。
+   */
+  private async sell(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const s = this.ensureState(villageId);
+    const idx = s.codes.indexOf(code);
+    if (idx < 0) return { ok: false, payload: {}, reason: 'not_held' };
+    const t = this.config.treasures[code];
+    if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    const gold = t.priceGold;
+    s.codes.splice(idx, 1);
+    this.store.set(COLLECTION, villageId, s);
+    await this.commands.send({
+      name: 'economy.Grant', from: TreasureModule.NAME,
+      payload: { villageId, gain: { gold } },
+    });
+    await this.recomputeAndPush(villageId);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { gold, codes: [...s.codes] } };
+  }
+
+  /** 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。 */
+  private async discard(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const s = this.ensureState(villageId);
+    const idx = s.codes.indexOf(code);
+    if (idx < 0) return { ok: false, payload: {}, reason: 'not_held' };
+    s.codes.splice(idx, 1);
+    this.store.set(COLLECTION, villageId, s);
+    await this.recomputeAndPush(villageId);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { codes: [...s.codes] } };
   }
 
   /** 列出村庄已储存宝物 + 聚合效果（客户端渲染用）。 */

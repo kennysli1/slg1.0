@@ -158,3 +158,39 @@ test('宝物掉落：门控命中(低 RNG) → 加权抽到某宝物并入栏', 
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.equal(list.codes.length, 1, '应入栏一个宝物');
 });
+
+test('宝物出售：被动宝物卖给 NPC 换金币并移除', async () => {
+  const app = await freshApp();
+  const r0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  const gold0 = r0.resources.gold;
+  const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  assert.equal(g.ok, true, '授予 chainsaw 应成功');
+  // chainsaw priceGold=60
+  const s = await send(app, 'treasure.Sell', { villageId: 'v1', code: 'chainsaw' });
+  assert.equal(s.ok, true, '出售应成功');
+  assert.equal(s.payload.gold, 60, '应得 priceGold=60 金币');
+  const r1 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.equal(r1.resources.gold, gold0 + 60, '金币应 +60');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, [], 'chainsaw 应已移除');
+});
+
+test('宝物丢弃：直接移除不给金币', async () => {
+  const app = await freshApp();
+  const r0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  const gold0 = r0.resources.gold;
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const d = await send(app, 'treasure.Discard', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(d.ok, true, '丢弃应成功');
+  const r1 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.equal(r1.resources.gold, gold0, '丢弃不应给金币');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, [], 'war_flag 应已移除');
+});
+
+test('宝物出售：未持有的宝物返回 not_held', async () => {
+  const app = await freshApp();
+  const s = await send(app, 'treasure.Sell', { villageId: 'v1', code: 'chainsaw' });
+  assert.equal(s.ok, false, '未持有应失败');
+  assert.equal(s.reason, 'not_held', '应返回 not_held');
+});

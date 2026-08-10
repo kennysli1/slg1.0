@@ -515,7 +515,12 @@ input:focus { outline: 2px solid var(--c-gold); outline-offset: -1px; }
 .treasure-card.rarity-epic { border-left-color: #9856c4; }
 .treasure-card.rarity-legendary { border-left-color: var(--c-gold); background: linear-gradient(180deg, #fff8e8, var(--c-surface-2)); }
 .treasure-effect { font-size: var(--f-sm); color: var(--c-ink-soft); }
-.treasure-use { margin-top: 2px; align-self: flex-start; }
+.treasure-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: 4px; }
+.treasure-use { align-self: flex-start; }
+.treasure-sell { align-self: flex-start; background: linear-gradient(180deg, #f6c453, #e0a93c); color: #3a2a08; border-color: #d8a23a; }
+.treasure-sell:hover { background: linear-gradient(180deg, #ffd468, #eab544); }
+.treasure-discard { align-self: flex-start; background: var(--c-surface); border-color: var(--c-line); color: var(--c-ink-soft); }
+.treasure-discard:hover { color: var(--c-danger, #c0392b); border-color: var(--c-danger, #c0392b); }
 .treasure-empty {
   font-size: var(--f-sm); color: var(--c-ink-soft); background: var(--c-surface-2);
   border: 1px dashed var(--c-line); border-radius: var(--r-sm); padding: var(--s-3);
