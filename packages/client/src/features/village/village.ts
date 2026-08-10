@@ -257,7 +257,7 @@ function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx; slotId:
 export function openBuilding(slotId: string): void {
   const found = ctxFromSlot(slotId);
   if (found) {
-    if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!, found.slotId); return; }
     if (found.kind === 'tradecenter') { openTradeCenter(actFn!, found.slotId); return; }
     openBuildingDetail(found.kind, found.ctx, found.slotId);
     return;
@@ -265,7 +265,7 @@ export function openBuilding(slotId: string): void {
   // 降级：军队页等场景下 vil 可能未加载，用 army.slots 的 kind/level 打开（训练区会自行拉取最新 army）
   const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
   if (slot) {
-    if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
+    if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!, slot.slotId); return; }
     if (slot.kind === 'tradecenter') { openTradeCenter(actFn!, slot.slotId); return; }
     openBuildingDetail(slot.kind, { level: slot.level, isBuild: slot.level < 1 }, slotId);
     return;
@@ -838,8 +838,8 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       if ((e.target as HTMLElement)?.closest('button')) return; // 升级按钮：不展开详情
       const found = ctxFromSlot(el.dataset.bldSlot!);
       if (!found) return;
-      if (found.kind === 'mercenarycamp') { openMercenaryCamp(act); return; }
-      if (found.kind === 'tradecenter') { openTradeCenter(act); return; }
+      if (found.kind === 'mercenarycamp') { openMercenaryCamp(act, found.slotId); return; }
+      if (found.kind === 'tradecenter') { openTradeCenter(act, found.slotId); return; }
       openBuildingDetail(found.kind, found.ctx, found.slotId);
     });
 

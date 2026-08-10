@@ -13,6 +13,8 @@ import { fmt } from '../../shared/utils/format.js';
 let campWrap: HTMLElement | null = null;
 /** 统一的「发请求并刷新」回调（由 village.bindVillage 注入）。 */
 let actFn: ((p: Promise<any>) => void) | null = null;
+/** 雇佣兵营地建筑所在 slotId（用于抽屉底部「拆除」按钮发请求时携带）。undefined=未传入。 */
+let mercSlotId: string | undefined;
 
 export function closeMercenaryCamp(): void {
   campWrap?.remove();
@@ -24,9 +26,10 @@ export function refreshMercCampIfOpen(): void {
   if (campWrap) void renderCamp();
 }
 
-/** 打开雇佣兵营地抽屉。 */
-export function openMercenaryCamp(act: (p: Promise<any>) => void): void {
+/** 打开雇佣兵营地抽屉。slotId 用于抽屉底部「拆除」按钮（仿 village.ts 建筑详情的危险操作区）。 */
+export function openMercenaryCamp(act: (p: Promise<any>) => void, slotId?: string): void {
   actFn = act;
+  mercSlotId = slotId;
   closeMercenaryCamp();
   const wrap = document.createElement('div');
   wrap.id = 'merc-camp-modal';
@@ -87,7 +90,33 @@ async function renderCamp(): Promise<void> {
     <div class="merc-refresh-row">${refreshBtn}<small class="hint-sm">每 ${c.refreshSec}s 自动刷新一批（囤积上限 ${c.maxStored}）</small></div>
     <div class="merc-next">下次自动刷新：约 ${nextIn}s</div>
     <div class="drawer-sec-title">可雇佣 <small>（金币购买 · 永久持有 · 不耗粮不占人口）</small></div>
-    <div class="merc-offers">${offersHtml}</div>`;
+    <div class="merc-offers">${offersHtml}</div>
+    ${mercSlotId ? `
+    <div class="drawer-sec-title">危险操作</div>
+    <div id="merc-demolish-zone">
+      <button type="button" class="btn-sm btn-danger" data-merc-demolish="${escapeAttr(mercSlotId)}">拆除雇佣兵营地</button>
+    </div>` : ''}
+  `;
+
+  // 拆除雇佣兵营地：二级确认（与 village.ts 建筑详情一致）。
+  // 拆除后该营地的雇佣兵名额/刷新次数等模块状态全部释放，已雇佣的雇佣兵仍归城镇军队（不收回）。
+  const demolishBtn = campWrap.querySelector<HTMLButtonElement>('[data-merc-demolish]');
+  if (demolishBtn) {
+    demolishBtn.onclick = () => {
+      const slotId = demolishBtn.dataset.mercDemolish!;
+      const zone = campWrap!.querySelector<HTMLElement>('#merc-demolish-zone');
+      if (!zone) return;
+      zone.innerHTML = `<div class="confirm-warn">⚠️ 整个雇佣兵营地将被完全拆除，不消耗也不返还资源，且<b>不可取消</b>。已雇佣的雇佣兵仍归本村军队（不收回）；拆除后刷新次数/雇佣名额等营地状态全部释放，槽位回收。</div>
+        <button type="button" class="btn-sm btn-danger" data-merc-demolish-confirm="${escapeAttr(slotId)}">确认拆除</button>`;
+      const confirmBtn = zone.querySelector<HTMLButtonElement>('[data-merc-demolish-confirm]');
+      if (confirmBtn) {
+        confirmBtn.onclick = () => {
+          if (actFn) actFn(req('DemolishBuilding', { slotId: confirmBtn.dataset.mercDemolishConfirm! }));
+          closeMercenaryCamp();
+        };
+      }
+    };
+  }
 
   aside.querySelectorAll<HTMLElement>('[data-close-merc]').forEach((el) => el.onclick = () => closeMercenaryCamp());
 
