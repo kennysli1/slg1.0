@@ -474,42 +474,66 @@ function sectionGeneric(table){
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
 }
 
-// 建筑逐级参数：按 code 分组，默认折叠，点开看每级 7 个数值输入
-function sectionLevels(table){
-  var meta = DATA.meta[table];
-  var rows = DATA[table] || [];
-  var fields = meta.numeric;
+// ── 建筑参数统一视图 ── 把 buildings（maxLevel/繁荣度/人口增长）+ building_levels（逐级成本/耗时/popCap/产量）合并为每栋建筑一张折叠卡片。
+function sectionBuildings(){
+  var levelMeta = DATA.meta.building_levels;
+  var buildMeta = DATA.meta.buildings;
+  var levelRows = DATA.building_levels || [];
+  var buildRows = DATA.buildings || [];
+  // 按 code 查找建筑行
+  var buildByCode = {};
+  for (var i=0;i<buildRows.length;i++){ buildByCode[buildRows[i].code] = buildRows[i]; }
   var byCode = {};
-  for (var i=0;i<rows.length;i++){ (byCode[rows[i].code] = byCode[rows[i].code] || []).push(rows[i]); }
-  var h = '<div class="hint">主键 code|level · 可编辑: ' + esc(fields.join(', ')) + '（点建筑名展开每级数值）</div>';
+  for (var i=0;i<levelRows.length;i++){ (byCode[levelRows[i].code] = byCode[levelRows[i].code] || []).push(levelRows[i]); }
+  var lFields = levelMeta.numeric;
+  var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
+  var h = '<div class="hint">每栋建筑独立卡片：点开展开全部参数 —— 顶部一行=建筑自身属性（maxLevel·繁荣度·人口增长），下方表格=逐级成本·耗时·人口上限·产量</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
     var code = codes[c];
     var group = byCode[code].slice().sort(function(a,b){ return a.level - b.level; });
-    var name = group[0].name || code;
+    var bld = buildByCode[code];
+    var name = (bld ? bld.name : (group[0]||{}).name) || code;
+    var zoneInfo = bld ? (bld.zone || '') : '';
     var bid = 'bl-' + code, aid = 'ar-' + code;
     h += '<div class="bl-card">';
-    h += '<div class="bl-head" data-code="'+esc(code)+'" onclick="toggleBl(this.dataset.code)"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+group.length+'级</span></div>';
+    // 折叠头
+    h += '<div class="bl-head" data-code="'+esc(code)+'" onclick="toggleBl(this.dataset.code)"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+esc(zoneInfo)+' · '+group.length+'级</span></div>';
     h += '<div class="bl-body" id="'+bid+'" style="display:none">';
+    // ── 建筑自身属性（来自 buildings.csv）──
+    if (bld){
+      var bKey = bld[buildMeta.key]; // id
+      h += '<div style="background:#0d1117;padding:5px 8px;border-radius:3px;margin-bottom:8px;display:flex;align-items:center;flex-wrap:wrap;gap:4px">';
+      h += '<span style="color:#7a86a8;font-size:11px;white-space:nowrap">建筑属性</span>';
+      for (var bf=0;bf<bFields.length;bf++){
+        var f0 = bFields[bf];
+        var val0 = bld[f0]==null?'':bld[f0];
+        h += '<label style="font-size:11px;color:#7a86a8;margin-left:6px;white-space:nowrap">'+bLabels[bf]+':</label> ';
+        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:70px">';
+      }
+      h += '</div>';
+    }
+    // ── 逐级参数表（来自 building_levels.csv）──
     h += '<table class="bt"><thead><tr><th>level</th>';
-    for (var f2=0;f2<fields.length;f2++) h += '<th>'+esc(fields[f2])+'</th>';
+    for (var f1=0;f1<lFields.length;f1++) h += '<th>'+esc(lFields[f1])+'</th>';
     h += '</tr></thead><tbody>';
     for (var g=0;g<group.length;g++){
       var row = group[g];
       var key = code + '|' + row.level;
       h += '<tr><td class="lbl">'+esc(row.level)+'</td>';
-      for (var b2=0;b2<fields.length;b2++){
-        var f = fields[b2];
-        var val = row[f]==null?'':row[f];
-        h += '<td><input type="number" step="any" value="'+esc(val)+'" data-t="building_levels" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
+      for (var lf=0;lf<lFields.length;lf++){
+        var f2 = lFields[lf];
+        var val2 = row[f2]==null?'':row[f2];
+        h += '<td><input type="number" step="any" value="'+esc(val2)+'" data-t="building_levels" data-k="'+esc(key)+'" data-f="'+esc(f2)+'" oninput="onEdit(this)"></td>';
       }
       h += '</tr>';
     }
     h += '</tbody></table></div></div>';
   }
   h += '</div>';
-  return '<div class="sec"><h2>建筑逐级参数</h2>'+h+'</div>';
+  return '<div class="sec"><h2>建筑参数（合并视图·每栋建筑所有参数集中在一张卡片）</h2>'+h+'</div>';
 }
 
 function toggleBl(code){
@@ -521,10 +545,12 @@ function toggleBl(code){
 
 function render(){
   var html = '';
+  // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
+  html += sectionBuildings();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'building_levels') html += sectionLevels(t);
-    else html += sectionGeneric(t);
+    if (t === 'buildings' || t === 'building_levels') continue; // 已在 sectionBuildings 合并渲染
+    html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;
 }
