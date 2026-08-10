@@ -427,10 +427,9 @@ function renderCarrySection(): string {
 
 /**
  * 重新计算携带上限（基于当前出征兵力）并刷新显示。
- * 警告红框仅在「玩家正在尝试携带但带不动」时出现：
- *   - cap=0 且没勾选 → 只显示状态文字「不可携带 · 兵力不足...」（红字），不弹警告
- *   - cap=0 且勾选了 → 不可能（勾选已被禁用/取消），走不到这里
- *   - checked > cap → 超出上限警告（玩家已勾选超量）
+ * 规则：没勾选任何宝物时，整个上限状态（包括状态文字+红框）都不显示 —
+ *       避免「没选宝物也被提醒」的噪音。勾选后才显示真正的上限/警告。
+ * cap=0 时勾选会被禁用+强制取消，所以状态文字自然不会出现。
  */
 function updateCarryCap(): void {
   const capEl = document.getElementById('carryCap');
@@ -447,23 +446,34 @@ function updateCarryCap(): void {
 
   // 重置类名
   capEl.classList.remove('cap-zero', 'cap-over');
+  if (warnEl) warnEl.innerHTML = '';
 
+  // 没勾选任何宝物 → 不显示任何上限状态（包括状态文字 + 红框）
+  if (checked === 0) {
+    capEl.textContent = '';
+    // cap=0 时仍然禁用勾选（防止泄漏），但不显示任何「提醒」
+    if (cap === 0) {
+      checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; cb.title = '兵力不足，无法携带'; });
+    } else {
+      checkboxes.forEach((cb) => { cb.disabled = false; cb.title = ''; });
+    }
+    return;
+  }
+
+  // 有勾选 → 显示上限状态
   if (cap === 0) {
+    // 兜底：cap=0 但 checked>0（正常流程走不到，因勾选已被禁用）
     capEl.textContent = `不可携带 · 兵力不足（当前 ${total}，至少 ${perSlot} 才能携带 1 格）`;
     capEl.classList.add('cap-zero');
-    // 禁用所有勾选并强制取消（防止已勾选状态泄漏）
-    checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; });
-    // 没人勾选就不挂警告 — 状态文字（红色）已经说明问题，避免无意义噪音
-    if (warnEl) warnEl.innerHTML = '';
+    checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; cb.title = '兵力不足，无法携带'; });
+    if (warnEl) warnEl.innerHTML = `<span class="carry-warn">⚠️ 兵力不足，无法携带宝物。请增加出征兵力至 ≥ ${perSlot}，或在下方取消勾选。</span>`;
   } else {
     capEl.textContent = `可携带 ${cap} 格（兵力 ${total}）`;
-    checkboxes.forEach((cb) => { cb.disabled = false; });
+    checkboxes.forEach((cb) => { cb.disabled = false; cb.title = ''; });
     if (checked > cap) {
       capEl.textContent += ` · 已选 ${checked} 超出上限（仅前 ${cap} 个生效）`;
       capEl.classList.add('cap-over');
       if (warnEl) warnEl.innerHTML = `<span class="carry-warn">⚠️ 已选 ${checked} 个超出上限 ${cap}，仅前 ${cap} 个会随军携带。</span>`;
-    } else if (warnEl) {
-      warnEl.innerHTML = '';
     }
   }
 }
