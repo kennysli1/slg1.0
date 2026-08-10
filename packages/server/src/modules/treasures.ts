@@ -238,17 +238,17 @@ export class TreasureModule {
       this.store.set(COLLECTION, villageId, s);
       return s;
     }
-    // 兼容旧存档（宝物模块上线前的村庄文档用扁平 codes 字段）
+    // 兼容旧存档（宝物模块上线前的村庄文档用扁平 codes 字段 / 字段缺失 / 类型错误）
     const anyS = s as unknown as { codes?: string[] };
-    if (Array.isArray(anyS.codes)) {
-      s.town = [...anyS.codes];
-      delete anyS.codes;
-    }
-    if (!Array.isArray(s.town)) s.town = [];
-    if (!Array.isArray(s.treasury)) s.treasury = [];
-    if (!s.carried || typeof s.carried !== 'object') s.carried = {};
+    let dirty = false;
+    if (Array.isArray(anyS.codes)) { s.town = [...anyS.codes]; delete anyS.codes; dirty = true; }
+    if (!Array.isArray(s.town)) { s.town = []; dirty = true; }
+    if (!Array.isArray(s.treasury)) { s.treasury = []; dirty = true; }
+    if (!s.carried || typeof s.carried !== 'object') { s.carried = {}; dirty = true; }
     // 兼容旧存档（缺 extraSlots 字段）
-    if (typeof s.extraSlots !== 'number') s.extraSlots = 0;
+    if (typeof s.extraSlots !== 'number') { s.extraSlots = 0; dirty = true; }
+    // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
+    if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
   }
 
@@ -269,7 +269,7 @@ export class TreasureModule {
 
   /** 已储存（在村）宝物 code 列表 = 城镇中心 + 宝库（不含在途携带）。 */
   private storedCodes(s: TreasureState): string[] {
-    return [...s.town, ...s.treasury];
+    return [...(s.town ?? []), ...(s.treasury ?? [])];
   }
 
   /**
@@ -367,8 +367,9 @@ export class TreasureModule {
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入（城镇失去其加成）。 */
   async recomputeAndPush(villageId: string): Promise<void> {
-    const s = this.load(villageId);
-    if (!s) return;
+    // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
+    // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
+    const s = this.ensureState(villageId);
     const eff = this.aggregate(this.storedCodes(s));
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
@@ -388,8 +389,7 @@ export class TreasureModule {
   }
 
   private async emitChanged(villageId: string): Promise<void> {
-    const s = this.load(villageId);
-    if (!s) return;
+    const s = this.ensureState(villageId);
     const eff = this.aggregate(this.storedCodes(s));
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
