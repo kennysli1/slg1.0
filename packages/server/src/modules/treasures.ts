@@ -300,6 +300,23 @@ export class TreasureModule {
       s.treasury.push(s.town.pop()!);
       dirty = true;
     }
+    // 去重（修复历史损坏数据：同一宝物同时出现于 town/treasury 或栏内重复）
+    const norm = (arr: unknown[]): string[] =>
+      arr.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    const rawTown = norm(s.town);
+    const rawTreasury = norm(s.treasury);
+    const seen = new Set<string>();
+    const dtown: string[] = [];
+    for (const c of rawTown) { if (!seen.has(c)) { seen.add(c); dtown.push(c); } }
+    const dtreasury: string[] = [];
+    for (const c of rawTreasury) {
+      if (seen.has(c)) continue;                 // 跨栏去重：保留城镇中心那份
+      if (dtreasury.includes(c)) continue;        // 宝库内重复 → 去重
+      seen.add(c); dtreasury.push(c);
+    }
+    if (dtown.length !== rawTown.length || dtreasury.length !== rawTreasury.length) dirty = true;
+    s.town = dtown;
+    s.treasury = dtreasury;
     // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
     if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
@@ -323,6 +340,11 @@ export class TreasureModule {
   /** 已储存（在村）宝物 code 列表 = 城镇中心 + 宝库（不含在途携带）。 */
   private storedCodes(s: TreasureState): string[] {
     return [...(s.town ?? []), ...(s.treasury ?? [])];
+  }
+
+  /** 已储存 codes 的去重视图（防御性，避免任何残留重复被广播/聚合）。 */
+  private storedCodesUnique(s: TreasureState): string[] {
+    return Array.from(new Set(this.storedCodes(s)));
   }
 
   /**
@@ -426,7 +448,7 @@ export class TreasureModule {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
     // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.storedCodes(s));
+    const eff = this.aggregate(this.storedCodesUnique(s));
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
       name: 'economy.SetRateModifier', from: TreasureModule.NAME,
@@ -446,12 +468,13 @@ export class TreasureModule {
 
   private async emitChanged(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.storedCodes(s));
+    const codes = this.storedCodesUnique(s);
+    const eff = this.aggregate(codes);
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
       payload: {
         villageId,
-        codes: this.storedCodes(s),
+        codes,
         town: [...s.town],
         treasury: [...s.treasury],
         carried: Object.fromEntries(Object.entries(s.carried).map(([k, v]) => [k, [...v.codes]])),
@@ -463,6 +486,9 @@ export class TreasureModule {
 
   /** 把宝物存进村庄：优先宝库格子，其次城镇中心；满则失败（返回 false）。不触发重分布。 */
   private storeIfRoom(s: TreasureState, code: string): boolean {
+    if (!code) return false;
+    // 已持有（跨 town/treasury 去重）→ 不允许重复入库，由调用方转为自动出售
+    if (this.storedCodes(s).includes(code)) return false;
     if (this.storedCodes(s).length >= this.getTreasureSlots(s.villageId)) return false;
     if (s.treasury.length < s.extraSlots) s.treasury.push(code);
     else s.town.push(code);
@@ -581,16 +607,31 @@ export class TreasureModule {
     if (!entry || entry.codes.length === 0) return { ok: true, payload: { stored: [], pending: [] } };
     const storedCodes: string[] = [];
     const pendingCodes: string[] = [];
+    const soldCodes: string[] = [];
     for (const code of entry.codes) {
-      if (this.storeIfRoom(s, code)) storedCodes.push(code);
-      else pendingCodes.push(code);
+      if (this.storedCodes(s).includes(code)) {
+        // 已持有 → 等价溢出，直接卖给 NPC 换金币（避免重复入库）
+        soldCodes.push(code);
+      } else if (this.storeIfRoom(s, code)) {
+        storedCodes.push(code);
+      } else {
+        pendingCodes.push(code);
+      }
     }
     delete s.carried[movementId];
     this.store.set(COLLECTION, villageId, s);
+    let soldGold = 0;
+    for (const code of soldCodes) soldGold += this.config.treasures[code]?.priceGold ?? 0;
+    if (soldGold > 0) {
+      await this.commands.send({
+        name: 'economy.Grant', from: TreasureModule.NAME,
+        payload: { villageId, gain: { gold: soldGold } },
+      });
+    }
     for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
-    return { ok: true, payload: { stored: storedCodes, pending: pendingCodes } };
+    return { ok: true, payload: { stored: storedCodes, pending: pendingCodes, sold: soldCodes } };
   }
 
   /** 抵达另一个村庄：把携带宝物转为该村庄玩家的 deliver 待处理报告（sell/discard/take）。 */
@@ -747,7 +788,7 @@ export class TreasureModule {
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
-    const stored = this.storedCodes(s);
+    const stored = this.storedCodesUnique(s);
     const eff = this.aggregate(stored);
     return {
       ok: true,
@@ -866,11 +907,15 @@ export class TreasureModule {
       discarded = true;
     } else {
       // 'take' 或 camp 默认：收下
-      if (p.kind === 'camp') {
+      if (this.storedCodes(s).includes(p.code)) {
+        // 已持有（重复宝物）→ 等价溢出，自动卖给 NPC 换金币（不重复入库）
+        sold = true;
+        gold = t ? t.priceGold : 0;
+      } else if (p.kind === 'camp') {
         if (this.storeIfRoom(s, p.code)) {
           stored = true;
         } else {
-          // 栏满/重复持有 → 自动卖给 NPC 换金币（等价溢出处理）
+          // 栏满 → 自动卖给 NPC 换金币（等价溢出处理）
           sold = true;
           gold = t ? t.priceGold : 0;
         }

@@ -405,7 +405,7 @@ function collectTroops(): Record<string, number> {
 /** 携带宝物选择区：列出本村已储存宝物，玩家勾选随军携带的；携带上限随出征兵力动态显示。 */
 function renderCarrySection(): string {
   const t = getCache().treasures;
-  const codes: string[] = (t && (t.codes as string[])) ?? [];
+  const codes: string[] = Array.from(new Set((t && (t.codes as string[])) ?? []));
   const list = codes.length
     ? codes.map((code) => {
         const info = treasureInfo(code);

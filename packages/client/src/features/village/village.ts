@@ -528,10 +528,17 @@ function renderTreasureSectionInner(data: any): string {
   const slots: number = data.slots ?? 1;
   const eff = data.effect ?? {};
   const kind = currentTreasureDrawerKind;
-  const locCodes: string[] = kind === 'treasury'
-    ? (data.treasury ?? [])
-    : (data.town ?? []);
-  const list: any[] = (data.treasures ?? []).filter((t: any) => locCodes.includes(t.code));
+  const locCodes: string[] = Array.from(new Set(
+    kind === 'treasury' ? (data.treasury ?? []) : (data.town ?? []),
+  ));
+  // 防御性去重：同一 code 的宝物只渲染一张卡
+  const seen = new Set<string>();
+  const treasures: any[] = (data.treasures ?? []).filter((t: any) => {
+    if (seen.has(t.code)) return false;
+    seen.add(t.code);
+    return true;
+  });
+  const list: any[] = treasures.filter((t: any) => locCodes.includes(t.code));
   const totalCodes: number = data.codes?.length ?? 0;
   if (!list.length) {
     const locLabel = kind === 'treasury' ? '宝库' : '城镇中心';
