@@ -51,3 +51,5 @@ trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易�
 trade_order_ttl_sec,86400,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
 treasure_camp_drop_chance,0.15,number,清理野外营地后掉落宝物的总体概率(0-1,越低越稀有)
 treasure_trade_drop_chance,0.25,number,贸易中心刷新NPC订单时掉落宝物的总体概率(0-1)
+treasure_npc_offer_chance,0.18,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1,每条订单独立判定;≠掉落)
+treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值,向上取整;栏满转卖回收价=目录价)
