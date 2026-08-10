@@ -337,7 +337,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private launch(
     base: Pick<Movement, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<Movement, 'targetId' | 'targetVillage' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures'>>,
+      Partial<Pick<Movement, 'targetId' | 'targetVillage' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures' | 'outwardId'>>,
   ): Movement {
     const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
