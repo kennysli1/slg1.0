@@ -427,10 +427,9 @@ function renderCarrySection(): string {
 
 /**
  * 重新计算携带上限（基于当前出征兵力）并刷新显示。
- * - 始终展示「当前兵力 X · 可携带 N 件」，让玩家在点选前就知道能带几件（请求 #2）。
- * - 选满（已选 ≥ 上限）后，其余未选项直接禁用，杜绝「选了带不走」的情况（请求 #3）。
- * - 因禁用已防止超额，原先的红色「超出上限」提醒已无必要，移除（请求 #4）。
- * - cap=0（兵力不足）时禁用全部勾选，并提示兵力不足。
+ * - 没派任何兵（total=0）时彻底隐藏上限文字（避免「兵力 0 · 不可携带」的明显噪音），但仍按 cap=0 禁用全部勾选防误选。
+ * - 派出兵但不足 1 格（0 < total < perSlot）时显「当前兵力 X · 不可携带（兵力不足）」染色提醒，仍禁用勾选。
+ * - 正常时展示「当前兵力 X · 可携带 N 件」（请求 #2）；选满（已选 ≥ 上限）后其余未选项直接禁用（请求 #3）；红字超额提醒已移除（请求 #4）。
  */
 function updateCarryCap(): void {
   const capEl = document.getElementById('carryCap');
@@ -448,17 +447,23 @@ function updateCarryCap(): void {
   capEl.classList.remove('cap-zero', 'cap-over');
   if (warnEl) warnEl.innerHTML = '';
 
+  if (total === 0) {
+    // 没派任何兵：隐藏上限文字（显而易见的「兵力 0」不写出来），但仍禁用勾选防止误选
+    capEl.textContent = '';
+    checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; cb.title = '兵力不足，无法携带'; });
+    return;
+  }
+
   if (cap === 0) {
-    // 兵力不足：禁用全部勾选，提示而非红字告警
+    // 派了兵但不够 1 格（如 100 兵 < 每格 200）：显红色状态文字提醒
     capEl.textContent = `当前兵力 ${total} · 不可携带（兵力不足）`;
     capEl.classList.add('cap-zero');
     checkboxes.forEach((cb) => { cb.disabled = true; cb.checked = false; cb.title = '兵力不足，无法携带'; });
     return;
   }
 
-  // 正常：始终展示兵力与可携带件数
+  // 正常：展示兵力与可携带件数；选满后禁用其余未选项（已选的保持可选，方便取消）
   capEl.textContent = `当前兵力 ${total} · 可携带 ${cap} 件`;
-  // 选满后禁用其余未选项（已选的保持可选，方便取消）
   const full = checked >= cap;
   checkboxes.forEach((cb) => {
     if (cb.checked) { cb.disabled = false; cb.title = ''; }
