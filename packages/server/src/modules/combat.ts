@@ -309,7 +309,14 @@ export class CombatModule {
 
     const dt = this.tickMs() / 1000;
     const k = this.config.constants.combatStrength;
-    const wallMult = 1 + b.wallLevel * this.config.constants.wallBonusPerLevel;
+    const wallMult = (() => {
+      const wallDef = this.config.buildings['wall'];
+      let totalDef = 0;
+      for (let lv = 1; lv <= b.wallLevel; lv++) {
+        totalDef += wallDef.levels[lv]?.defensePerLevel ?? this.config.constants.wallBonusPerLevel;
+      }
+      return 1 + totalDef;
+    })();
 
     // 双方同时用 tick 开始时的兵力互算（避免先手偏差）
     const killsToDef = computeKills(b.attacker, b.defender, k, dt, wallMult);

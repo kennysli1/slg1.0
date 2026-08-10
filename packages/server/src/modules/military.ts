@@ -331,23 +331,33 @@ export class MilitaryModule {
     }
   }
 
-  /** 军事建筑每级训练提速系数：1 - min(cap, (lv-1)×perLevel)，下限保护避免归零。 */
-  private trainTimeFactor(level: number): number {
+  /** 军事建筑每级训练提速系数：Σ building_levels.trainTimeReducePerLevel，下限保护避免归零。 */
+  private trainTimeFactor(level: number, buildingKind: string): number {
     const c = this.config.constants;
-    const f = 1 - Math.min(c.trainTimeReduceCap, Math.max(0, level - 1) * c.trainTimeReducePerLevel);
+    const def = this.config.buildings[buildingKind];
+    let totalReduce = 0;
+    for (let lv = 1; lv <= level; lv++) {
+      totalReduce += def?.levels[lv]?.trainTimeReducePerLevel ?? (lv === 1 ? 0 : c.trainTimeReducePerLevel);
+    }
+    const f = 1 - Math.min(c.trainTimeReduceCap, totalReduce);
     return Math.max(0.05, f);
   }
 
-  /** 军事建筑每级训练降费系数：1 - min(cap, (lv-1)×perLevel)，下限保护避免归零。 */
-  private trainCostFactor(level: number): number {
+  /** 军事建筑每级训练降费系数：Σ building_levels.trainCostReducePerLevel，下限保护避免归零。 */
+  private trainCostFactor(level: number, buildingKind: string): number {
     const c = this.config.constants;
-    const f = 1 - Math.min(c.trainCostReduceCap, Math.max(0, level - 1) * c.trainCostReducePerLevel);
+    const def = this.config.buildings[buildingKind];
+    let totalReduce = 0;
+    for (let lv = 1; lv <= level; lv++) {
+      totalReduce += def?.levels[lv]?.trainCostReducePerLevel ?? (lv === 1 ? 0 : c.trainCostReducePerLevel);
+    }
+    const f = 1 - Math.min(c.trainCostReduceCap, totalReduce);
     return Math.max(0.05, f);
   }
 
   /** 按建筑等级计算某兵种的实际资源消耗（逐资源四舍五入，最低 1）。 */
-  private effectiveCost(base: Record<string, number>, level: number): Record<string, number> {
-    const f = this.trainCostFactor(level);
+  private effectiveCost(base: Record<string, number>, level: number, buildingKind: string): Record<string, number> {
+    const f = this.trainCostFactor(level, buildingKind);
     const out: Record<string, number> = {};
     for (const [k, v] of Object.entries(base)) out[k] = Math.max(1, Math.round(v * f));
     return out;
@@ -397,8 +407,8 @@ export class MilitaryModule {
             const unlocked = sl.level >= 1;
             return {
               key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-              cost: this.effectiveCost(u.cost, sl.level), // 已按建筑等级降费
-              trainSec: Math.round(u.trainSec * this.trainTimeFactor(sl.level)), // 已按建筑等级提速
+              cost: this.effectiveCost(u.cost, sl.level, sl.kind), // 已按建筑等级降费
+              trainSec: Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind)), // 已按建筑等级提速
               meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
               meleeDef: st.meleeDef, rangedDef: st.rangedDef,
               speed: st.speed, carry: st.carry, upkeep: st.upkeep,
@@ -483,7 +493,7 @@ export class MilitaryModule {
     if (!popResult.ok) return { ok: false, payload: {}, reason: popResult.reason ?? 'insufficient_population' };
 
     // 一次性预扣 count 份资源（已按建筑等级降费；人口已扣，资源失败需回滚人口）
-    const perUnit = this.effectiveCost(def.cost, slotInfo.level);
+    const perUnit = this.effectiveCost(def.cost, slotInfo.level, slotInfo.kind);
     const totalCost: Record<string, number> = {};
     for (const [r, v] of Object.entries(perUnit)) totalCost[r] = v * count;
 
@@ -511,7 +521,7 @@ export class MilitaryModule {
     });
     const laborMult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
     // 实际单兵耗时 = 基础耗时 × 建筑等级提速 ÷ 人口劳动力加速（人多练得快）
-    const effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level)) / Math.max(0.01, laborMult);
+    const effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level, slotInfo.kind)) / Math.max(0.01, laborMult);
 
     // 入该 slot 队列，登记第一个出兵
     const trainMsEach = Math.max(1, Math.round(effectiveTrainSec * 1000));

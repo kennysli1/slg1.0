@@ -294,7 +294,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel'],
     labels: ['code', 'level', 'name'],
   },
   units: {
@@ -474,21 +474,42 @@ function sectionGeneric(table){
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
 }
 
-// ── 建筑参数统一视图 ── 把 buildings（maxLevel/繁荣度/人口增长）+ building_levels（逐级成本/耗时/popCap/产量）合并为每栋建筑一张折叠卡片。
+// ── 建筑参数统一视图 ── 合并 buildings + building_levels + trade_center + merc_camp，每栋一张折叠卡片。
+// 根据建筑类型决定显示哪些奖励列（非该类型的列自动隐藏）。
 function sectionBuildings(){
   var levelMeta = DATA.meta.building_levels;
   var buildMeta = DATA.meta.buildings;
   var levelRows = DATA.building_levels || [];
   var buildRows = DATA.buildings || [];
-  // 按 code 查找建筑行
+  var tradeRows = DATA.trade_center || [];
+  var mercRows = DATA.merc_camp || [];
+  // 按 level 索引的贸易/雇佣兵数据
+  var tradeByLv = {};
+  for (var tr=0;tr<tradeRows.length;tr++){ tradeByLv[tradeRows[tr].level] = tradeRows[tr]; }
+  var mercByLv = {};
+  for (var mr=0;mr<mercRows.length;mr++){ mercByLv[mercRows[mr].level] = mercRows[mr]; }
   var buildByCode = {};
   for (var i=0;i<buildRows.length;i++){ buildByCode[buildRows[i].code] = buildRows[i]; }
   var byCode = {};
   for (var i=0;i<levelRows.length;i++){ (byCode[levelRows[i].code] = byCode[levelRows[i].code] || []).push(levelRows[i]); }
-  var lFields = levelMeta.numeric;
+  // 基础字段（所有建筑通用）
+  var baseCols = ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','prod'];
+  // 根据建筑类型决定额外奖励列
+  function bonusCols(code){
+    var c = [];
+    if (code === 'treasury') c.push({k:'treasureSlots',l:'+宝物格'});
+    if (code === 'warehouse' || code === 'granary') c.push({k:'storagePerLevel',l:'+容量'});
+    if (code === 'wall') c.push({k:'defensePerLevel',l:'+防御'});
+    if (code === 'main') c.push({k:'buildSpeedupPerLevel',l:'-建造耗时'});
+    if (code === 'barracks' || code === 'stable' || code === 'workshop') {
+      c.push({k:'trainTimeReducePerLevel',l:'-训练耗时'});
+      c.push({k:'trainCostReducePerLevel',l:'-训练花费'});
+    }
+    return c;
+  }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片：点开展开全部参数 —— 顶部一行=建筑自身属性（maxLevel·繁荣度·人口增长），下方表格=逐级成本·耗时·人口上限·产量</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地功能参数(如有)</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -497,43 +518,84 @@ function sectionBuildings(){
     var bld = buildByCode[code];
     var name = (bld ? bld.name : (group[0]||{}).name) || code;
     var zoneInfo = bld ? (bld.zone || '') : '';
+    var bCols = bonusCols(code);
     var bid = 'bl-' + code, aid = 'ar-' + code;
     h += '<div class="bl-card">';
-    // 折叠头
+    // 折叠头：名称 · code · zone · 级数
     h += '<div class="bl-head" data-code="'+esc(code)+'" onclick="toggleBl(this.dataset.code)"><span class="bl-arrow" id="'+aid+'">▶</span> '+esc(name)+' <span class="bl-sub">'+esc(code)+' · '+esc(zoneInfo)+' · '+group.length+'级</span></div>';
     h += '<div class="bl-body" id="'+bid+'" style="display:none">';
     // ── 建筑自身属性（来自 buildings.csv）──
     if (bld){
-      var bKey = bld[buildMeta.key]; // id
-      h += '<div style="background:#0d1117;padding:5px 8px;border-radius:3px;margin-bottom:8px;display:flex;align-items:center;flex-wrap:wrap;gap:4px">';
-      h += '<span style="color:#7a86a8;font-size:11px;white-space:nowrap">建筑属性</span>';
+      var bKey = bld[buildMeta.key];
+      h += '<div style="background:#0d1117;padding:4px 8px;border-radius:3px;margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:3px">';
+      h += '<span style="color:#7a86a8;font-size:11px;white-space:nowrap">属性</span>';
       for (var bf=0;bf<bFields.length;bf++){
         var f0 = bFields[bf];
         var val0 = bld[f0]==null?'':bld[f0];
-        h += '<label style="font-size:11px;color:#7a86a8;margin-left:6px;white-space:nowrap">'+bLabels[bf]+':</label> ';
-        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:70px">';
+        h += '<label style="font-size:10px;color:#7a86a8;margin-left:4px;white-space:nowrap">'+bLabels[bf]+':</label> ';
+        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:62px;font-size:11px">';
       }
       h += '</div>';
     }
-    // ── 逐级参数表（来自 building_levels.csv）──
-    h += '<table class="bt"><thead><tr><th>level</th>';
-    for (var f1=0;f1<lFields.length;f1++) h += '<th>'+esc(lFields[f1])+'</th>';
+    // ── 逐级参数表（通用 + 奖励列）──
+    h += '<table class="bt"><thead><tr><th>lv</th>';
+    for (var f1=0;f1<baseCols.length;f1++) h += '<th>'+esc(baseCols[f1])+'</th>';
+    for (var bc=0;bc<bCols.length;bc++) h += '<th style="color:#f0b070">'+esc(bCols[bc].l)+'</th>';
     h += '</tr></thead><tbody>';
     for (var g=0;g<group.length;g++){
       var row = group[g];
       var key = code + '|' + row.level;
       h += '<tr><td class="lbl">'+esc(row.level)+'</td>';
-      for (var lf=0;lf<lFields.length;lf++){
-        var f2 = lFields[lf];
+      for (var lf=0;lf<baseCols.length;lf++){
+        var f2 = baseCols[lf];
         var val2 = row[f2]==null?'':row[f2];
         h += '<td><input type="number" step="any" value="'+esc(val2)+'" data-t="building_levels" data-k="'+esc(key)+'" data-f="'+esc(f2)+'" oninput="onEdit(this)"></td>';
       }
+      for (var bc2=0;bc2<bCols.length;bc2++){
+        var bk = bCols[bc2].k;
+        var valbk = row[bk]==null?'':row[bk];
+        h += '<td><input type="number" step="any" value="'+esc(valbk)+'" data-t="building_levels" data-k="'+esc(key)+'" data-f="'+esc(bk)+'" oninput="onEdit(this)" style="border-color:#f0b070;background:#1a1500"></td>';
+      }
       h += '</tr>';
     }
-    h += '</tbody></table></div></div>';
+    h += '</tbody></table>';
+    // ── 贸易中心/雇佣兵营地功能参数（来自 trade_center.csv / merc_camp.csv）──
+    if (code === 'tradecenter' && Object.keys(tradeByLv).length){
+      h += '<div style="margin-top:8px"><span style="color:#f0b070;font-size:12px">贸易功能参数（trade_center.csv）</span>';
+      h += '<table class="bt"><thead><tr><th>lv</th><th>tradeRoutes</th><th>tradeViewRadius</th><th>npcOrderCount</th><th>npcRefreshSec</th><th>npcStoredRefreshes</th></tr></thead><tbody>';
+      var tLvs = Object.keys(tradeByLv).sort(function(a,b){ return a - b; });
+      for (var tl=0;tl<tLvs.length;tl++){
+        var tlKey = tLvs[tl]; var trRow = tradeByLv[tlKey];
+        h += '<tr><td class="lbl">'+esc(tlKey)+'</td>';
+        var tFields = ['tradeRoutes','tradeViewRadius','npcOrderCount','npcRefreshSec','npcStoredRefreshes'];
+        for (var tf=0;tf<tFields.length;tf++){
+          var tfv = trRow[tFields[tf]]==null?'':trRow[tFields[tf]];
+          h += '<td><input type="number" step="any" value="'+esc(tfv)+'" data-t="trade_center" data-k="'+esc(tlKey)+'" data-f="'+esc(tFields[tf])+'" oninput="onEdit(this)"></td>';
+        }
+        h += '</tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    if (code === 'mercenarycamp' && Object.keys(mercByLv).length){
+      h += '<div style="margin-top:8px"><span style="color:#f0b070;font-size:12px">雇佣兵营地功能参数（merc_camp.csv）</span>';
+      h += '<table class="bt"><thead><tr><th>lv</th><th>refreshSec</th><th>mercCount</th><th>maxStoredRefreshes</th></tr></thead><tbody>';
+      var mLvs = Object.keys(mercByLv).sort(function(a,b){ return a - b; });
+      for (var ml=0;ml<mLvs.length;ml++){
+        var mlKey = mLvs[ml]; var mrRow = mercByLv[mlKey];
+        h += '<tr><td class="lbl">'+esc(mlKey)+'</td>';
+        var mFields = ['refreshSec','mercCount','maxStoredRefreshes'];
+        for (var mf=0;mf<mFields.length;mf++){
+          var mfv = mrRow[mFields[mf]]==null?'':mrRow[mFields[mf]];
+          h += '<td><input type="number" step="any" value="'+esc(mfv)+'" data-t="merc_camp" data-k="'+esc(mlKey)+'" data-f="'+esc(mFields[mf])+'" oninput="onEdit(this)"></td>';
+        }
+        h += '</tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    h += '</div></div>';
   }
   h += '</div>';
-  return '<div class="sec"><h2>建筑参数（合并视图·每栋建筑所有参数集中在一张卡片）</h2>'+h+'</div>';
+  return '<div class="sec"><h2>建筑参数（合并视图·每栋建筑所有功能参数集中一张卡片）</h2>'+h+'</div>';
 }
 
 function toggleBl(code){
@@ -549,7 +611,7 @@ function render(){
   html += sectionBuildings();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels') continue; // 已在 sectionBuildings 合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp') continue; // 已在 sectionBuildings 合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;

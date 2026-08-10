@@ -147,6 +147,16 @@ export interface BuildingLevelDef {
   treasureSlots?: number;
   /** 仅资源田：该等级产量/小时。 */
   prod?: number;
+  /** 仅仓库/粮仓(warehouse/granary)：该等级提供的仓储容量增量。总容量 = Σ 已建等级 storagePerLevel。替代旧 storageBase/growth 公式。 */
+  storagePerLevel?: number;
+  /** 仅城墙(wall)：该等级提供的防御加成（倍率增量）。总防御 = 1 + Σ defensePerLevel。替代旧 wallBonusPerLevel 常量。 */
+  defensePerLevel?: number;
+  /** 仅城镇中心(main)：该等级提供的建造加速（减少耗时比例，Lv1=0, Lv2+=每级值）。总加速 = min(cap, Σ buildSpeedupPerLevel)。替代旧 mainBuildSpeedupPerLevel 常量。 */
+  buildSpeedupPerLevel?: number;
+  /** 仅兵营/马厩/兵工厂(barracks/stable/workshop)：该等级提供的训练加速（减少耗时比例，Lv1=0, Lv2+=每级值）。总加速 = min(cap, Σ trainTime…)。替代旧 trainTimeReducePerLevel 常量。 */
+  trainTimeReducePerLevel?: number;
+  /** 仅兵营/马厩/兵工厂(barracks/stable/workshop)：该等级提供的训练降费（减少资源消耗比例，Lv1=0, Lv2+=每级值）。总降费 = min(cap, Σ trainCost…)。替代旧 trainCostReducePerLevel 常量。 */
+  trainCostReducePerLevel?: number;
 }
 
 export interface BuildingDef {
@@ -524,7 +534,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -539,6 +549,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       popCap: num(r.popCap),
       treasureSlots: r.treasureSlots ? num(r.treasureSlots) : 0,
       prod: r.prod ? num(r.prod) : undefined,
+      storagePerLevel: r.storagePerLevel ? num(r.storagePerLevel) : undefined,
+      defensePerLevel: r.defensePerLevel ? num(r.defensePerLevel) : undefined,
+      buildSpeedupPerLevel: r.buildSpeedupPerLevel ? num(r.buildSpeedupPerLevel) : undefined,
+      trainTimeReducePerLevel: r.trainTimeReducePerLevel ? num(r.trainTimeReducePerLevel) : undefined,
+      trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
     };
   }
 

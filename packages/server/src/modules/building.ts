@@ -313,7 +313,13 @@ export class BuildingModule {
   private async buildTime(s: BuildingState, baseSec: number): Promise<number> {
     const mainLv = this.tcLevel(s);
     const c = this.config.constants;
-    const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+    // 从 building_levels 的 buildSpeedupPerLevel 求和（Lv1=0, Lv2+=每级值）；无值时回退旧常量
+    const mainDef = this.config.buildings['main'];
+    let totalSpeedup = 0;
+    for (let lv = 1; lv <= mainLv; lv++) {
+      totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
+    }
+    const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
     let timeSec = Math.max(1, Math.round(baseSec * speedup));
     // 人口建造加速：population.GetLaborMult('main') 返回 prosperityMult ∈ [popLaborFloor,1.0]，
     // 越高越快 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
@@ -363,7 +369,12 @@ export class BuildingModule {
     const buildTimeSyncEstimate = (baseSec: number) => {
       const mainLv = this.tcLevel(s);
       const c = this.config.constants;
-      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      const mainDef = this.config.buildings['main'];
+      let totalSpeedup = 0;
+      for (let lv = 1; lv <= mainLv; lv++) {
+        totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
+      }
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
       return Math.max(1, Math.round(baseSec * speedup));
     };
     return {
@@ -410,7 +421,12 @@ export class BuildingModule {
     const buildTimeSyncEstimate = (baseSec: number) => {
       const mainLv = this.tcLevel(s);
       const c = this.config.constants;
-      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      const mainDef = this.config.buildings['main'];
+      let totalSpeedup = 0;
+      for (let lv = 1; lv <= mainLv; lv++) {
+        totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
+      }
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
       return Math.max(1, Math.round(baseSec * speedup));
     };
         const placed = s.placed
@@ -452,7 +468,12 @@ export class BuildingModule {
     const buildTimeSyncEstimate = (baseSec: number) => {
       const mainLv = this.tcLevel(s);
       const c = this.config.constants;
-      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, (mainLv - 1) * c.mainBuildSpeedupPerLevel);
+      const mainDef = this.config.buildings['main'];
+      let totalSpeedup = 0;
+      for (let lv = 1; lv <= mainLv; lv++) {
+        totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
+      }
+      const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
       return Math.max(1, Math.round(baseSec * speedup));
     };
     const options = Object.values(this.config.buildings)
@@ -682,20 +703,26 @@ export class BuildingModule {
   /** 全村仓储容量上报 Economy（仓库→木/泥/铁，粮仓→粮；多座叠加等级）。 */
   private reportCapacity(s: BuildingState): void {
     const c = this.config.constants;
-    let warehouseLv = 0;
-    let granaryLv = 0;
-    for (const p of s.placed) {
-      if (p.kind === 'warehouse') warehouseLv += p.level;
-      else if (p.kind === 'granary') granaryLv += p.level;
-    }
-    const cap = (totalLv: number) => c.storageBase * (1 + totalLv * c.storageGrowthPerLevel);
-    const solid = cap(warehouseLv);
+    const sumStorage = (kind: string): number => {
+      const def = this.config.buildings[kind];
+      let total = c.storageBase; // 基础容量（无仓库时也有）
+      if (def) {
+        for (const p of s.placed) {
+          if (p.kind !== kind) continue;
+          for (let lv = 1; lv <= p.level; lv++) {
+            // building_levels.storagePerLevel：未定义时回退旧公式（向后兼容）
+            total += def.levels[lv]?.storagePerLevel ?? c.storageBase * c.storageGrowthPerLevel;
+          }
+        }
+      }
+      return total;
+    };
     void this.commands.send({
       name: 'economy.SetCapacity',
       from: BuildingModule.NAME,
       payload: {
         villageId: s.villageId,
-        capacity: { wood: solid, clay: solid, iron: solid, crop: cap(granaryLv) },
+        capacity: { wood: sumStorage('warehouse'), clay: sumStorage('warehouse'), iron: sumStorage('warehouse'), crop: sumStorage('granary') },
       },
     });
   }
