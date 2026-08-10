@@ -592,7 +592,7 @@ test('宝物替换：treasure.Replace 丢弃旧宝物入新宝物', async () => 
   assert.deepEqual(list.codes, ['war_flag'], 'chainsaw 应被 war_flag 替换');
 });
 
-test('宝物替换：旧宝物未持有 / 新宝物重复持有均被拒', async () => {
+test('宝物替换：旧宝物未持有被拒；multiset 下新宝物重复持有允许（再入一份）', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 扩到 2 格
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
@@ -600,9 +600,13 @@ test('宝物替换：旧宝物未持有 / 新宝物重复持有均被拒', async
   const r1 = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'money_bag', newCode: 'holy_water' });
   assert.equal(r1.ok, false);
   assert.equal(r1.reason, 'not_held', '未持有 oldCode 应 not_held');
+  // multiset：新宝物已持有也允许（再入一份）；旧 chainsaw 被替换掉
   const r2 = await send(app, 'treasure.Replace', { villageId: 'v1', oldCode: 'chainsaw', newCode: 'war_flag' });
-  assert.equal(r2.ok, false);
-  assert.equal(r2.reason, 'already_have', 'newCode 重复应 already_have');
+  assert.equal(r2.ok, true, `重复持有 newCode 应允许: ${r2.reason ?? ''}`);
+  const after = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(after.codes.length, 2, '替换后仍持有 2 件（war_flag x2）');
+  assert.ok(!after.codes.includes('chainsaw'), 'chainsaw 已被替换移除');
+  assert.equal(after.codes.filter((c: string) => c === 'war_flag').length, 2, 'war_flag 现在有 2 份');
 });
 
 // ---------- 军队携带宝物（上限随兵力） ----------
@@ -746,8 +750,10 @@ test('宝物：resume 兼容旧扁平 codes 格式（不崩溃且归一化）', 
   assert.equal(typeof s.extraSlots, 'number', 'extraSlots 应为数字');
 });
 
-test('宝物：已持有宝物重复掉落并领取 → 拒绝领取(already_have)，需显式出售/遗弃', async () => {
+test('宝物：multiset 下重复掉落并领取 → 直接再入一份（codes 含 2 份同名宝物）', async () => {
   const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 共 2 槽，可同时持有 2 份同名宝物
+  await send(app, 'treasure.SetTradeCenter', { villageId: 'v1', hasTradeCenter: true }); // 启用贸易中心以支持「出售」
   // 先持有 war_flag（priceGold=70）
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
   const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
@@ -757,29 +763,32 @@ test('宝物：已持有宝物重复掉落并领取 → 拒绝领取(already_hav
   const pend = app.store.get<any>('treasure_pending', 'mv-dup');
   pend.arrivedAt = 1_000_001;
   app.store.set('treasure_pending', 'mv-dup', pend);
-  // 确认领取（默认收下）→ 已持有 → 拒绝 already_have，绝不静默自动售卖
+  // multiset：确认领取（默认收下）→ 直接再入一份，绝不静默自动售卖
   const gold0 = await goldOf(app);
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'mv-dup' });
-  assert.equal(claim.ok, false, '重复持有确认应被拒');
-  assert.equal(claim.reason, 'already_have', '应返回 already_have');
-  assert.equal(await goldOf(app), gold0, '金币不应因误领而变动');
+  assert.equal(claim.ok, true, `重复收下 multiset 下应成功: ${claim.reason ?? ''}`);
+  assert.equal(claim.payload.stored, true, '应标记为已存入');
+  assert.equal(await goldOf(app), gold0, '金币不应因收下重复而变动');
   const list0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(list0.codes, ['war_flag'], '栏内仍只有 1 个 war_flag（无重复）');
-  assert.equal(list0.pending.length, 1, '待领取应保留');
-  // 显式「出售」(启用贸易中心) → 换金并移除报告
-  await send(app, 'treasure.SetTradeCenter', { villageId: 'v1', hasTradeCenter: true });
-  const sell = await send(app, 'treasure.ClaimPending', { movementId: 'mv-dup', decision: 'sell' });
+  assert.deepEqual(list0.codes, ['war_flag', 'war_flag'], '栏内应有 2 个 war_flag（multiset）');
+  assert.equal(list0.pending.length, 0, '收下后报告应清除');
+  // 显式「出售」(启用贸易中心) → 换金并移除一份
+  await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-dup2', forceCode: 'war_flag' });
+  const pend2 = app.store.get<any>('treasure_pending', 'mv-dup2');
+  pend2.arrivedAt = 1_000_002;
+  app.store.set('treasure_pending', 'mv-dup2', pend2);
+  const sell = await send(app, 'treasure.ClaimPending', { movementId: 'mv-dup2', decision: 'sell' });
   assert.equal(sell.ok, true, `出售应成功: ${sell.reason ?? ''}`);
   assert.equal(sell.payload.sold, true, '应标记为已售');
   assert.equal(sell.payload.gold, 70, '应换回 war_flag 的 priceGold=70');
   assert.equal(await goldOf(app), gold0 + 70, '金币应 +70');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(list.codes, ['war_flag'], '栏内仍只有 1 个 war_flag（无重复）');
+  assert.deepEqual(list.codes, ['war_flag', 'war_flag'], '出售后栏内仍有 2 个 war_flag（multiset 不动原有那份）');
   assert.equal(list.pending.length, 0, '出售后报告应清除');
 });
 
-test('宝物：旧存档 town 与 treasury 含同一宝物 → ensureState 跨栏去重（修复线上损坏数据）', async () => {
-  // 复现线上 v-p-1-1 损坏数据：iron_wall_medal 同时出现在 town 与 treasury
+test('宝物：multiset 下 town 与 treasury 可同时含同一宝物 → ensureState 不再跨栏去重', async () => {
+  // multiset 语义：同一宝物可同时出现在城镇中心与宝库（计为 2 份）。ensureState 仅做非字符串清理，不做去重。
   const app = await freshApp();
   app.store.set('treasure', 'v1', {
     villageId: 'v1',
@@ -788,13 +797,9 @@ test('宝物：旧存档 town 与 treasury 含同一宝物 → ensureState 跨�
     carried: {}, extraSlots: 2,
   } as any);
   const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(l.codes, ['iron_wall_medal', 'war_flag'], '去重后 codes 不应含重复 iron_wall_medal');
+  assert.deepEqual(l.codes, ['iron_wall_medal', 'war_flag', 'iron_wall_medal'], 'multiset 下 codes 保留跨栏重复（含 2 份 iron_wall_medal）');
   assert.deepEqual(l.town, ['iron_wall_medal'], '城镇中心保留 iron_wall_medal');
-  assert.deepEqual(l.treasury, ['war_flag'], '宝库中的重复副本应被移除');
-  // 归一化结果应已写回存档（避免下次加载仍损坏）
-  const s = app.store.get('treasure', 'v1') as any;
-  assert.deepEqual(s.town, ['iron_wall_medal'], '存档城镇中心应被修复');
-  assert.deepEqual(s.treasury, ['war_flag'], '存档宝库应被修复（无重复）');
+  assert.deepEqual(l.treasury, ['war_flag', 'iron_wall_medal'], '宝库的副本不再被移除');
 });
 
 test('宝物：StoreCarried 携带回村时若已持有且宝物栏已满 → 重复份转待处理报告（不静默自动售卖）', async () => {
@@ -821,7 +826,7 @@ test('宝物：StoreCarried 携带回村时若已持有且宝物栏已满 → �
   assert.equal(list.pending[0].fromCarry, true, '该报告应标记为 fromCarry（军队带回）');
 });
 
-test('宝物：StoreCarried 携带回村重复宝物 → 转 fromCarry 待处理报告（集合语义不存第二份）', async () => {
+test('宝物：StoreCarried 携带回村重复宝物 → multiset 直接再入一份（无需 pending）', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 }); // 宝库 2 格 → 共 3 槽（有空位）
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 先持有 1 份
@@ -833,20 +838,19 @@ test('宝物：StoreCarried 携带回村重复宝物 → 转 fromCarry 待处理
   const gold0 = await goldOf(app);
   const r = await send(app, 'treasure.StoreCarried', { movementId: 'mv-dup-room', villageId: 'v1' });
   assert.equal(r.ok, true, 'StoreCarried 应成功');
-  assert.deepEqual(r.payload.stored, ['chainsaw'], '首份入栏（非重复）');
-  assert.deepEqual(r.payload.pending, ['chainsaw'], '重复份转 fromCarry 待处理（即便有空位，集合语义不存第二份）');
+  assert.deepEqual(r.payload.stored, ['chainsaw', 'chainsaw'], 'multiset 下两份均直接入栏（无 pending）');
+  assert.deepEqual(r.payload.pending, [], 'multiset 下重复不再转 pending（仅满栏才转）');
   assert.equal(await goldOf(app), gold0, '金币不应变动（不静默售卖）');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(list.codes, ['chainsaw'], '栏内仍只有 1 个 chainsaw（集合语义）');
-  assert.equal(list.pending.length, 1, '重复份以待领取报告保留');
-  assert.equal(list.pending[0].fromCarry, true, '应为 fromCarry 报告');
+  assert.deepEqual(list.codes, ['chainsaw', 'chainsaw'], '栏内应有 2 个 chainsaw（原 1 份已被装上军队，回村带回 2 份直接入库）');
+  assert.equal(list.pending.length, 0, 'multiset 下无重复 pending');
 });
 
-test('待领取：fromCarry 重复宝物收下(take) → 确认回家（集合语义不存第二份，移除报告）', async () => {
+test('待领取：重复宝物收下(take) → multiset 直接再入一份（fromCarry 仅作 UI 标记）', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 }); // 共 3 槽（有空位）
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 已持有 1 份
-  // 直接构造一条 fromCarry 的 deliver 报告（模拟军队带回的重复宝物）
+  // 直接构造一条 fromCarry 的 deliver 报告（模拟军队带回的重复宝物）—— multiset 下无论 fromCarry 与否均再入一份
   app.store.set('treasure_pending', 'pend-fc', {
     movementId: 'pend-fc', villageId: 'v1', code: 'chainsaw',
     name: '电锯', icon: '', category: '', rarity: '', effectType: '', effectValue: 0,
@@ -854,27 +858,29 @@ test('待领取：fromCarry 重复宝物收下(take) → 确认回家（集合�
   } as any);
   const gold0 = await goldOf(app);
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'pend-fc', decision: 'take' });
-  assert.equal(claim.ok, true, `fromCarry 重复收下应成功: ${claim.reason ?? ''}`);
-  assert.equal(claim.payload.stored, false, '集合语义下重复收下不存第二份（确认回家）');
+  assert.equal(claim.ok, true, `重复收下 multiset 下应成功: ${claim.reason ?? ''}`);
+  assert.equal(claim.payload.stored, true, 'multiset 下重复收下应再入一份');
   assert.equal(await goldOf(app), gold0, '收下不应换金');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(list.codes, ['chainsaw'], '栏内仍只有 1 个 chainsaw');
+  assert.deepEqual(list.codes, ['chainsaw', 'chainsaw'], '栏内应有 2 个 chainsaw（multiset）');
   assert.equal(list.pending.length, 0, '报告应清除');
 });
 
-test('待领取：非 fromCarry 的重复宝物收下仍被拒(already_have)', async () => {
+test('待领取：multiset 下非 fromCarry 重复宝物收下 → 直接再入一份（不再拒 already_have）', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' }); // 已持有
-  // 普通 deliver 报告（非军队带回），重复持有 → 收下应被拒
+  // 普通 deliver 报告（非军队带回），multiset 下重复收下应再入一份
   app.store.set('treasure_pending', 'pend-plain', {
     movementId: 'pend-plain', villageId: 'v1', code: 'chainsaw',
     name: '电锯', icon: '', category: '', rarity: '', effectType: '', effectValue: 0,
     applyType: '', priceGold: 10, kind: 'deliver', createdAt: 100, expiresAt: 1_000_000, fromCarry: false,
   } as any);
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'pend-plain', decision: 'take' });
-  assert.equal(claim.ok, false, '普通重复收下应被拒');
-  assert.equal(claim.reason, 'already_have', '应返回 already_have');
+  assert.equal(claim.ok, true, `multiset 下普通重复收下应成功: ${claim.reason ?? ''}`);
+  assert.equal(claim.payload.stored, true, '应再入一份');
+  const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(list.codes, ['chainsaw', 'chainsaw'], '栏内应有 2 个 chainsaw');
 });
 
 test('待领取：MarkPendingArrived 重置 expiresAt 从归村时刻起算', async () => {

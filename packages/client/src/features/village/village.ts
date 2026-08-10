@@ -258,7 +258,7 @@ export function openBuilding(slotId: string): void {
   const found = ctxFromSlot(slotId);
   if (found) {
     if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
-    if (found.kind === 'tradecenter') { openTradeCenter(actFn!); return; }
+    if (found.kind === 'tradecenter') { openTradeCenter(actFn!, found.slotId); return; }
     openBuildingDetail(found.kind, found.ctx, found.slotId);
     return;
   }
@@ -266,7 +266,7 @@ export function openBuilding(slotId: string): void {
   const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
   if (slot) {
     if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!); return; }
-    if (slot.kind === 'tradecenter') { openTradeCenter(actFn!); return; }
+    if (slot.kind === 'tradecenter') { openTradeCenter(actFn!, slot.slotId); return; }
     openBuildingDetail(slot.kind, { level: slot.level, isBuild: slot.level < 1 }, slotId);
     return;
   }

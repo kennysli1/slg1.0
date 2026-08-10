@@ -28,8 +28,29 @@ export function renderReports(): string {
   return pendingHtml + reports.map((r) => `<div class="report">${escapeHtml(r)}</div>`).join('');
 }
 
-/** 待领取宝物卡片（军队带回 / 送达 → 战报内确认领取）。含倒计时与决策按钮。 */
+/** 待领取宝物卡片（军队带回 / 送达 → 战报内确认领取）。含倒计时与决策按钮。
+ *  camp 且未归村 → 渲染简化卡片（隐藏名称/效果/稀有度/价格，不显示过期倒计时，仅「军队带回宝物」+ 抵达 ETA）。
+ *  其余 → 渲染完整卡片（multiset：重复不再拦截「收下」，仅「宝物栏已满」才禁用）。
+ */
 function renderPendingCard(p: PendingTreasureView): string {
+  // ----- 简化卡片：camp 掉落且军队仍在返程 -----
+  if (p.kind === 'camp' && !p.arrivedAt) {
+    const eta = typeof p.expectedArrivalAt === 'number' ? p.expectedArrivalAt : 0;
+    return `<div class="treasure-card pending-card kind-camp rarity-${p.rarity}" data-arrives-at="${eta}">
+      <div class="icon">💎</div>
+      <div class="treasure-body">
+        <div class="treasure-title">军队带回的宝物 <span class="treasure-rar rar-common">待揭晓</span></div>
+        <div class="treasure-kind-row"><span class="treasure-kind kind-camp" title="宝物详情将在军队归村后揭晓">本村带回 · 返程中</span></div>
+        <div class="treasure-effect">归村后揭晓宝物详情，可选择「确认领取 / 出售 / 丢弃」。</div>
+        <div class="treasure-actions">
+          <button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>
+          <span class="claim-cd"></span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ----- 完整卡片：归村后 / deliver 类 -----
   const info = treasureInfo(p.code);
   const eff = info ? treasureEffectText(info) : `${p.effectType}:${p.effectValue}`;
   const rare = treasureRarityName(p.rarity) || p.rarity;
@@ -40,24 +61,16 @@ function renderPendingCard(p: PendingTreasureView): string {
     ? `<span class="treasure-kind kind-deliver" title="军队把宝物送达本村，需你决定如何处理">送达·待决策</span>`
     : `<span class="treasure-kind kind-camp" title="本村军队带回的宝物，确认即收入宝物栏">本村带回</span>`;
 
-  // 宝物栏状态：判定「收下」是否可用（满格 / 已持有 → 禁用并说明原因）
+  // multiset：「已持有」不再拦截「收下」（允许持有多个相同宝物），仅「宝物栏已满」才禁用
   const tre = getCache().treasures;
   const storedCodes: string[] = (tre && Array.isArray(tre.codes)) ? tre.codes : [];
   const slots: number = (tre && typeof tre.slots === 'number') ? tre.slots : 0;
-  const isHeld = storedCodes.includes(p.code);
   const isFull = storedCodes.length >= slots;
   const hasTradeCenter = !!p.hasTradeCenter;
 
-  // 「收下 / 确认领取」按钮：未归村 → 禁用；其余按规则放开（杜绝误点后静默自动卖出）。
-  //  - 已持有且非军队带回（!fromCarry）→ 禁用（重复宝物需改选 出售/遗弃）。
-  //  - 已持有且为军队带回（fromCarry）→ 允许「收下」：集合语义下即「确认回家」，不占额外空位。
-  //  - 宝物栏已满且需要真正入库（非 fromCarry 重复）→ 禁用，请先腾位。
+  // 「收下 / 确认领取」按钮：multiset 下仅按「是否满格」决定，未满即可收下（重复会再添一份）
   let takeBtn: string;
-  if (!p.arrivedAt) {
-    takeBtn = `<button class="btn btn-primary" disabled title="军队尚未归村，无法领取">等待归村…</button>`;
-  } else if (isHeld && !p.fromCarry) {
-    takeBtn = `<button class="btn btn-primary" disabled title="已持有该宝物，无法重复收入宝物栏">已持有·不可收下</button>`;
-  } else if (isFull && !(isHeld && p.fromCarry)) {
+  if (isFull) {
     takeBtn = `<button class="btn btn-primary" disabled title="宝物栏已满（${storedCodes.length}/${slots}），请先「卖出 / 丢弃」腾出空位">宝物栏已满·不可收下</button>`;
   } else {
     const takeLabel = isDeliver ? '收下' : '确认领取';
@@ -324,25 +337,40 @@ export function bindReports(act: (p: Promise<any>, onOk?: (payload: any) => void
 }
 
 let claimTickerStarted = false;
-/** 每秒刷新待领取卡片上的倒计时（到期由服务端调度器自动遗弃并推送，这里只更新显示）。 */
+/** 每秒刷新待领取卡片上的倒计时：
+ *  - 简化卡片[data-arrives-at]（camp 返程中）→「⏳ X:XX 抵达」（过期倒计时不显示）
+ *  - 完整卡片[data-expires-at]（已归村 / deliver）→「⏳ X:XX 后超时」
+ *  到期由服务端调度器自动遗弃并推送，这里只更新显示。
+ */
 function ensureClaimTicker(): void {
   if (claimTickerStarted) return;
   claimTickerStarted = true;
   setInterval(() => {
-    const nodes = document.querySelectorAll<HTMLElement>('[data-expires-at]');
-    if (!nodes.length) return;
     const now = Date.now();
-    for (const n of nodes) {
+    // 简化卡片（返程中）：显示抵达 ETA 倒计时
+    document.querySelectorAll<HTMLElement>('[data-arrives-at]').forEach((n) => {
+      const eta = Number(n.dataset.arrivesAt || '0');
+      const cd = n.querySelector<HTMLElement>('.claim-cd');
+      if (!cd) return;
+      const rem = eta - now;
+      if (rem <= 0) { cd.textContent = '即将抵达'; return; }
+      const s = Math.floor(rem / 1000);
+      const mm = Math.floor(s / 60);
+      const ss = s % 60;
+      cd.textContent = `⏳ ${mm}:${ss.toString().padStart(2, '0')} 抵达`;
+    });
+    // 完整卡片（归村后 / deliver）：显示过期倒计时
+    document.querySelectorAll<HTMLElement>('[data-expires-at]').forEach((n) => {
       const exp = Number(n.dataset.expiresAt || '0');
       const cd = n.querySelector<HTMLElement>('.claim-cd');
-      if (!cd) continue;
+      if (!cd) return;
       const rem = exp - now;
-      if (rem <= 0) { cd.textContent = '已超时·等待回收'; continue; }
+      if (rem <= 0) { cd.textContent = '已超时·等待回收'; return; }
       const s = Math.floor(rem / 1000);
       const mm = Math.floor(s / 60);
       const ss = s % 60;
       cd.textContent = `⏳ ${mm}:${ss.toString().padStart(2, '0')} 后超时`;
-    }
+    });
   }, 1000);
 }
 

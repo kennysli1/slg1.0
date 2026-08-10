@@ -21,6 +21,8 @@ const TRADE_RES = ['wood', 'clay', 'iron', 'crop', 'gold'] as const;
 let wrap: HTMLElement | null = null;
 /** 统一的「发请求并刷新」回调（由 village.bindVillage 注入）。 */
 let actFn: ((p: Promise<any>) => void) | null = null;
+/** 贸易中心建筑所在 slotId（用于抽屉内的「拆除」按钮发请求时携带）。undefined=未传入（极少数老路径）。 */
+let tradecenterSlotId: string | undefined;
 
 export function closeTradeCenter(): void {
   wrap?.remove();
@@ -32,9 +34,10 @@ export function refreshTradeIfOpen(): void {
   if (wrap) void render();
 }
 
-/** 打开贸易中心抽屉。 */
-export function openTradeCenter(act: (p: Promise<any>) => void): void {
+/** 打开贸易中心抽屉。slotId 用于抽屉底部「拆除」按钮（仿 village.ts 建筑详情的危险操作区）。 */
+export function openTradeCenter(act: (p: Promise<any>) => void, slotId?: string): void {
   actFn = act;
+  tradecenterSlotId = slotId;
   closeTradeCenter();
   const el = document.createElement('div');
   el.id = 'trade-center-modal';
@@ -178,7 +181,34 @@ async function render(): Promise<void> {
       }).join('')}
       <div class="trade-create-route">将占用路线：<b id="routeNeed">0</b> / 可用 ${c.availableRoutes}</div>
       <button class="btn-sm btn-primary" data-create-order id="createOrderBtn" ${orderLimit ? 'disabled' : ''}>${orderLimit ? '已达挂单上限' : '挂出订单'}</button>
-    </div>`;
+    </div>
+
+    ${tradecenterSlotId ? `
+    <div class="drawer-sec-title">危险操作</div>
+    <div id="trade-demolish-zone">
+      <button type="button" class="btn-sm btn-danger" data-trade-demolish="${escapeAttr(tradecenterSlotId)}">拆除贸易中心</button>
+    </div>` : ''}
+  `;
+
+  // 拆除贸易中心：二级确认（与 village.ts 建筑详情一致）。
+  // 拆除期间贸易中心不提供任何加成（NPC 刷新/挂单/路线），且不可取消；完成后整栋移除、槽位释放。
+  const demolishBtn = wrap.querySelector<HTMLButtonElement>('[data-trade-demolish]');
+  if (demolishBtn) {
+    demolishBtn.onclick = () => {
+      const slotId = demolishBtn.dataset.tradeDemolish!;
+      const zone = wrap!.querySelector<HTMLElement>('#trade-demolish-zone');
+      if (!zone) return;
+      zone.innerHTML = `<div class="confirm-warn">⚠️ 整个贸易中心将完全拆除，不消耗也不返还资源，且<b>不可取消</b>。拆除期间不提供任何加成（NPC 刷新/玩家挂单/贸易路线均失效），完成后槽位释放。</div>
+        <button type="button" class="btn-sm btn-danger" data-trade-demolish-confirm="${escapeAttr(slotId)}">确认拆除</button>`;
+      const confirmBtn = zone.querySelector<HTMLButtonElement>('[data-trade-demolish-confirm]');
+      if (confirmBtn) {
+        confirmBtn.onclick = () => {
+          if (actFn) actFn(req('DemolishBuilding', { slotId: confirmBtn.dataset.tradeDemolishConfirm! }));
+          closeTradeCenter();
+        };
+      }
+    };
+  }
 
   wrap.querySelectorAll<HTMLElement>('[data-close-trade]').forEach((e) => e.onclick = () => closeTradeCenter());
 

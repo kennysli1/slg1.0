@@ -81,7 +81,9 @@ interface PendingTreasure {
   expiresAt: number;
   /** 军队到家时间戳（仅 kind='camp' 有效；deliver 在创建时已在场故无此字段）。claimPending 必须等军队归村后才允许领取 camp 掉落。 */
   arrivedAt?: number;
-  /** 该待领取宝物由「军队带出的宝物返程回家」产生（storeCarried 因重复/满栏转出的 deliver）。此类宝物是玩家自己的军队带回，收下时即使重复也允许放入宝物栏（见 claimPending）。 */
+  /** 预计军队到家时间戳（仅 kind='camp' 有效）。rollDrop 时按运动常量估算占位，movement.onBattleEnded 创建返程后用真实 arrivesAt 精化。客户端在 !arrivedAt 时用此字段渲染「还有多久抵达」倒计时。 */
+  expectedArrivalAt?: number;
+  /** 该待领取宝物由「军队带出的宝物返程回家」产生（storeCarried 因满栏转出的 deliver）。仅为 UI 标记（显示「本村带回」badge），multiset 下重复不再特殊处理。 */
   fromCarry?: boolean;
 }
 
@@ -101,9 +103,11 @@ interface PendingTreasureView {
   expiresAt: number;
   /** 军队到家时间戳（kind='camp' 才有，deliver 创建时已在场故为 undefined）。客户端据此前端显示「军队未归」不可领取。 */
   arrivedAt?: number;
+  /** 预计军队到家时间戳（仅 camp 有效）。客户端在 arrivedAt 之前用它渲染「预计 X 抵达」倒计时。 */
+  expectedArrivalAt?: number;
   /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。客户端据此决定显示「卖出」还是「丢弃」。 */
   hasTradeCenter: boolean;
-  /** 该待领取宝物由「军队带出的宝物返程回家」产生（收下时即使重复也允许放入宝物栏）。 */
+  /** 该待领取宝物由「军队带出的宝物返程回家」产生（仅 UI 标记，显示「本村带回」badge）。 */
   fromCarry?: boolean;
 }
 
@@ -200,6 +204,8 @@ export class TreasureModule {
     this.commands.register('treasure.LoseCarried', (c) => this.loseCarried(c));
     // 军队到家：标记本军队对应的 camp 掉落 pending 为已到达（仅标记，不删记录；claimPending 据此放行）
     this.commands.register('treasure.MarkPendingArrived', (c) => this.markPendingArrived(c));
+    // 由 movement 模块调用：精化 camp pending 的预计归村时间为返程 movement 的真实 arrivesAt（覆盖 rollDrop 占位）。
+    this.commands.register('treasure.SetExpectedArrival', (c) => this.setExpectedArrival(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
   }
@@ -314,23 +320,15 @@ export class TreasureModule {
       s.treasury.push(s.town.pop()!);
       dirty = true;
     }
-    // 去重（修复历史损坏数据：同一宝物同时出现于 town/treasury 或栏内重复）
+    // multiset 语义：同一宝物可同时存在于城镇中心与宝库、或栏内重复出现（多个拷贝），不再去重；
+    // 此处仅做「非字符串/空串」类型清理，剔除历史损坏数据。
     const norm = (arr: unknown[]): string[] =>
       arr.filter((x): x is string => typeof x === 'string' && x.length > 0);
     const rawTown = norm(s.town);
     const rawTreasury = norm(s.treasury);
-    const seen = new Set<string>();
-    const dtown: string[] = [];
-    for (const c of rawTown) { if (!seen.has(c)) { seen.add(c); dtown.push(c); } }
-    const dtreasury: string[] = [];
-    for (const c of rawTreasury) {
-      if (seen.has(c)) continue;                 // 跨栏去重：保留城镇中心那份
-      if (dtreasury.includes(c)) continue;        // 宝库内重复 → 去重
-      seen.add(c); dtreasury.push(c);
-    }
-    if (dtown.length !== rawTown.length || dtreasury.length !== rawTreasury.length) dirty = true;
-    s.town = dtown;
-    s.treasury = dtreasury;
+    if (rawTown.length !== s.town.length || rawTreasury.length !== s.treasury.length) dirty = true;
+    s.town = rawTown;
+    s.treasury = rawTreasury;
     // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
     if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
@@ -472,12 +470,14 @@ export class TreasureModule {
     return { resMult, goldMult, atkMult, defMult, popGrowthMult };
   }
 
-  /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入（城镇失去其加成）。 */
+  /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入（城镇失去其加成）。
+   *  multiset：使用 storedCodes（不去重），多份相同宝物的效果在 aggregate 中累加（加性资源 +=、乘性攻防 *= 1+frac 累乘）。
+   */
   async recomputeAndPush(villageId: string): Promise<void> {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
     // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.storedCodesUnique(s));
+    const eff = this.aggregate(this.storedCodes(s));
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
       name: 'economy.SetRateModifier', from: TreasureModule.NAME,
@@ -497,7 +497,8 @@ export class TreasureModule {
 
   private async emitChanged(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
-    const codes = this.storedCodesUnique(s);
+    // multiset：广播 codes 保留重复，客户端按重复数量渲染多个持有图标
+    const codes = this.storedCodes(s);
     const eff = this.aggregate(codes);
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
@@ -513,11 +514,11 @@ export class TreasureModule {
     } as DomainEvent);
   }
 
-  /** 把宝物存进村庄：优先宝库格子，其次城镇中心；满则失败（返回 false）。不触发重分布。 */
+  /** 把宝物存进村庄：优先宝库格子，其次城镇中心；满则失败（返回 false）。不触发重分布。
+ *  multiset 语义：允许重复持有同一宝物（每份占 1 格，效果在 aggregate 中累加）。
+ */
   private storeIfRoom(s: TreasureState, code: string): boolean {
     if (!code) return false;
-    // 已持有（跨 town/treasury 去重）→ 不允许重复入库（宝物栏为集合语义，重复视为同一份）
-    if (this.storedCodes(s).includes(code)) return false;
     if (this.storedCodes(s).length >= this.getTreasureSlots(s.villageId)) return false;
     if (s.treasury.length < s.extraSlots) s.treasury.push(code);
     else s.town.push(code);
@@ -564,13 +565,12 @@ export class TreasureModule {
     return null;
   }
 
-  /** 授予宝物到村庄宝物栏（受槽位限制；优先宝库格子；重复持有被拒）。 */
+  /** 授予宝物到村庄宝物栏（multiset：允许重复持有同一宝物，每份占 1 格）。 */
   private async grant(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
-    if (this.storedCodes(s).includes(code)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'already_have' };
     if (!this.storeIfRoom(s, code)) {
       return { ok: false, payload: { slots: this.getTreasureSlots(villageId), have: this.storedCodes(s).length }, reason: 'treasure_slots_full' };
     }
@@ -583,6 +583,7 @@ export class TreasureModule {
   /**
    * 把已储存的宝物装上某支军队（出征/运输）。携带上限由调用方按兵力计算后传入 maxCarry。
    * 宝物离开 town/treasury → 不再计入城镇加成；转而随该军队生效（movement 在出征快照叠加其效果）。
+   * multiset：want 可含重复 code，按 want 出现次数精确移除 town/treasury 中的对应数量（优先城镇中心再宝库）。
    */
   private async assignToArmy(cmd: Command): Promise<CommandResult> {
     const { villageId, codes, movementId, maxCarry } = cmd.payload as {
@@ -590,16 +591,32 @@ export class TreasureModule {
     };
     const s = this.ensureState(villageId);
     const want = Array.isArray(codes) ? codes.filter(Boolean) : [];
-    const stored = new Set(this.storedCodes(s));
-    for (const c of want) if (!stored.has(c)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'not_held' };
+    // 统计 want 中各 code 的需求数量，并校验持有数量（multiset 下需按数量而非仅存在性判断）
+    const wantCounts = new Map<string, number>();
+    for (const c of want) wantCounts.set(c, (wantCounts.get(c) ?? 0) + 1);
+    const storedCounts = new Map<string, number>();
+    for (const c of this.storedCodes(s)) storedCounts.set(c, (storedCounts.get(c) ?? 0) + 1);
+    for (const [c, n] of wantCounts) {
+      if ((storedCounts.get(c) ?? 0) < n) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'not_held' };
+    }
     const cap = Math.max(0, Math.floor(maxCarry ?? 0));
     const existing = s.carried[movementId]?.codes ?? [];
     if (existing.length + want.length > cap) {
       return { ok: false, payload: { cap, have: existing.length, want: want.length }, reason: 'carry_cap_exceeded' };
     }
-    // 从 town/treasury 移除
-    s.town = s.town.filter((c) => !want.includes(c));
-    s.treasury = s.treasury.filter((c) => !want.includes(c));
+    // 精确移除：每个 code 移除 want 次数，优先城镇中心再宝库（不能 filter 掉所有同名，否则会把多份误删）
+    const remaining = new Map<string, number>(wantCounts);
+    const removeFrom = (arr: string[]): string[] => {
+      const out: string[] = [];
+      for (const c of arr) {
+        const r = remaining.get(c) ?? 0;
+        if (r > 0) remaining.set(c, r - 1);
+        else out.push(c);
+      }
+      return out;
+    };
+    s.town = removeFrom(s.town);
+    s.treasury = removeFrom(s.treasury);
     const entry = s.carried[movementId] ?? { villageId, codes: [] };
     entry.villageId = villageId;
     entry.codes = [...entry.codes, ...want];
@@ -610,7 +627,7 @@ export class TreasureModule {
     return { ok: true, payload: { movementId, codes: entry.codes, cap } };
   }
 
-  /** 返程到家：把携带宝物存回该村（优先宝库）；存不下的转为本村 deliver 报告。 */
+  /** 返程到家：把携带宝物存回该村（优先宝库）；multiset 下重复直接再入一份，满则转 deliver 报告。 */
   private async storeCarried(cmd: Command): Promise<CommandResult> {
     const { movementId, villageId } = cmd.payload as { movementId: string; villageId: string };
     const s = this.ensureState(villageId);
@@ -619,12 +636,8 @@ export class TreasureModule {
     const storedCodes: string[] = [];
     const pendingCodes: string[] = [];
     for (const code of entry.codes) {
-      if (this.storedCodes(s).includes(code)) {
-        // 已持有（重复宝物，通常是军队带出去期间玩家又得了一份同码）→ 转 deliver 待处理报告，标记 fromCarry，
-        // 让玩家显式决策（收下=确认回家 / 出售 / 遗弃）。不再静默自动售卖，也不因「重复」被卡死。
-        pendingCodes.push(code);
-      } else if (this.storeIfRoom(s, code)) {
-        // 宝物栏有空位 → 默认放回宝物栏
+      if (this.storeIfRoom(s, code)) {
+        // 宝物栏有空位（含已有同码 → multiset 再入一份）→ 直接放回宝物栏
         storedCodes.push(code);
       } else {
         // 宝物栏已满 → 转 deliver 待处理报告（与「新获得的宝物」同等等待处理），标记 fromCarry
@@ -697,6 +710,17 @@ export class TreasureModule {
     // 推动客户端 refreshAll → 重新拉取 pending（含 arrivedAt / 新的 expiresAt），让领取按钮从「等待归村」转为可点、倒计时从头开始
     await this.emitChanged(p.villageId);
     return { ok: true, payload: { movementId, marked: true, expiresAt: p.expiresAt } };
+  }
+
+  /** 由 movement.onBattleEnded 调用：用返程 movement 的真实 arrivesAt 精化 camp pending 的预计归村时间，覆盖 rollDrop 占位。 */
+  private async setExpectedArrival(cmd: Command): Promise<CommandResult> {
+    const { movementId, expectedArrivalAt } = cmd.payload as { movementId: string; expectedArrivalAt: number };
+    const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
+    if (!p) return { ok: true, payload: { movementId, updated: false } };
+    p.expectedArrivalAt = expectedArrivalAt;
+    this.store.set(COLLECTION_PENDING, movementId, p);
+    await this.emitChanged(p.villageId);
+    return { ok: true, payload: { movementId, updated: true, expectedArrivalAt } };
   }
 
   /** 取消指定 movementId 的 pending 记录（用于军队被全歼）；返回是否成功取消。 */
@@ -777,13 +801,12 @@ export class TreasureModule {
   /**
    * 替换宝物：丢弃一个已持有的宝物(oldCode)，并入新宝物(newCode)。
    * 用于贸易中心「购买宝物-宝物栏满时替换」路径：一次性腾出格子并储存新宝物。
-   * 不返还 oldCode 的金币（等价于「丢弃换新」）；新宝物重复持有或栏位不足时拒绝。
+   * 不返还 oldCode 的金币（等价于「丢弃换新」）；multiset 下 newCode 已持有也允许（再入一份）。
    */
   private async replaceTreasure(cmd: Command): Promise<CommandResult> {
     const { villageId, oldCode, newCode } = cmd.payload as { villageId: string; oldCode: string; newCode: string };
     const s = this.ensureState(villageId);
     if (!this.storedCodes(s).includes(oldCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'not_held' };
-    if (this.storedCodes(s).includes(newCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'already_have' };
     const t = this.config.treasures[newCode];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
     // 替换是「先移除 oldCode 再入 newCode」，净数量不变，原数量本就 ≤ 槽位，故无需再做槽位检查。
@@ -795,11 +818,13 @@ export class TreasureModule {
     return { ok: true, payload: { codes: this.storedCodes(s), treasure: t } };
   }
 
-  /** 列出村庄已储存宝物 + 聚合效果 + 待领取宝物（客户端渲染用）。 */
+  /** 列出村庄已储存宝物 + 聚合效果 + 待领取宝物（客户端渲染用）。
+   *  multiset：codes 保留重复，treasures 数组按数量重复展开。
+   */
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
-    const stored = this.storedCodesUnique(s);
+    const stored = this.storedCodes(s);
     const eff = this.aggregate(stored);
     return {
       ok: true,
@@ -856,11 +881,15 @@ export class TreasureModule {
     const now = this.now();
     const timeoutMs = Math.max(1, Math.floor(c.treasureClaimTimeoutSec)) * 1000;
     const pid = movementId || `pend-${villageId}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    // 占位预计归村时间：rollDrop 时返程 movement 尚未创建（onBattleEnded 后才创建），
+    // 此处先按 60s 占位，movement 模块在 scheduleReturn 后会通过 treasure.SetExpectedArrival 用真实 arrivesAt 精化。
+    const expectedArrivalAt = now + 60_000;
     const pending: PendingTreasure = {
       movementId: pid, villageId, code,
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
       priceGold: t.priceGold, kind: 'camp', createdAt: now, expiresAt: now + timeoutMs,
+      expectedArrivalAt,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
     // 注册超时自动遗弃（按 village 串行，避免写竞争）
@@ -923,17 +952,8 @@ export class TreasureModule {
     } else if (decision === 'discard') {
       discarded = true;
     } else {
-      // 'take' 或 camp 默认：收下（不再静默自动出售，满/重复时拒绝并提示玩家显式决策）
-      // 军队带回的宝物（fromCarry）即使重复也允许「收下」：宝物栏为集合语义不存第二份，收下即「确认回家」移除报告。
-      const allowDuplicate = !!p.fromCarry;
-      if (!allowDuplicate && this.storedCodes(s).includes(p.code)) {
-        // 非军队带回的重复宝物 → 拒绝领取，由玩家改选「出售 / 遗弃」
-        return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'already_have' };
-      }
-      if (this.storedCodes(s).includes(p.code)) {
-        // fromCarry 重复：宝物已在栏（集合语义不存第二份），收下即确认回家，移除报告即可（stored=false）
-        stored = false;
-      } else if (this.storeIfRoom(s, p.code)) {
+      // 'take' 或 camp 默认：收下（multiset 下「重复」不再特殊处理，直接入栏再添一份；满则拒绝由玩家显式决策）
+      if (this.storeIfRoom(s, p.code)) {
         stored = true;
       } else {
         // 宝物栏已满 → 拒绝领取并提示，由玩家明确决策（出售/遗弃腾位），不再自动出售
@@ -990,6 +1010,7 @@ export class TreasureModule {
         category: p.category, rarity: p.rarity, effectType: p.effectType,
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
         kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
+        expectedArrivalAt: p.expectedArrivalAt,
         hasTradeCenter, fromCarry: p.fromCarry,
       }));
   }

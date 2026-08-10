@@ -25,9 +25,11 @@ export interface PendingTreasureView {
   expiresAt: number;
   /** camp 类型专用：军队是否已归村。未归村时不可领取（Bug3 修复）。 */
   arrivedAt?: number;
+  /** camp 类型专用：预计军队到家时间戳。客户端在 arrivedAt 之前用它渲染「还有多久抵达」倒计时；归村后才显示「过期」倒计时。 */
+  expectedArrivalAt?: number;
   /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币；客户端据此显示「卖出」还是「丢弃」）。 */
   hasTradeCenter?: boolean;
-  /** 该待领取宝物由「军队带出的宝物返程回家」产生（收下时即使重复也允许放入宝物栏）。 */
+  /** 该待领取宝物由「军队带出的宝物返程回家」产生（仅 UI 标记，显示「本村带回」badge）。 */
   fromCarry?: boolean;
 }
 
