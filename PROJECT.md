@@ -107,7 +107,7 @@ slg1.0/
 | `trade.ts` | 每村贸易中心（NPC 订单池、玩家挂单、贸易路线） | 镜像 mercenary 模式：等级决定容量/视野/刷新；即时交付 NPC 订单 + 玩家挂单派双向商队 + **NPC 宝物订单栏满溢出三选一**（store/replace/sell/discard）；详见 [`docs/贸易模块.md`](./docs/贸易模块.md) |
 | `treasure.ts` | 每村宝物栏（城镇中心+宝库）+ 待领取 pending(treasure_pending 集合) | **MULTISET 语义**（同 code 可持有多份，每份占 1 槽，aggregate 累加；加性资源 / 乘性攻防复利）；pending 分 camp/deliver；**归途 ETA 精化**（rollDrop 占位 → movement 用真实 arriveAt 覆盖）；outwardId 索引（修复携带宝物返程丢失 + pending 卡死 bug）；详见 [`docs/宝物模块.md`](./docs/宝物模块.md) |
 | `mercenary.ts` | 每村雇佣兵营地（offers 名单 + 存储刷新） | 镜像 trade 模式：金币购买名单上的雇佣兵 → military.troops（popCost=0/upkeep=0，零副作用自动参战）；自动刷新 + 手动刷新 + 升级不重 roll；详见 [`docs/雇佣兵营地模块.md`](./docs/雇佣兵营地模块.md) |
-| `research.ts` | 每村科技进度 + 科研点(RP)余额 + 学院产出状态(research 集合) | 学院按间隔掷判定产 RP（连续失败累积概率保底，学院越多间隔越短）；科技树三分支研发（扣 RP + 计时，取消按剩余比例返还）；科技生效后推倍率给 military 等模块 |
+| `research.ts` | 每村科研进度(research 集合) + 学院 RP 生产 | 学院产科研点（保底概率 + 多学院加速 + 人口因子）→ 科技树消耗 RP 研发 → 双轨效果注入（数值配置驱动 + 机制注册表钩子）；科技依赖 AND/OR 语法 + 启动期无环校验；scope=player 的科技自动跨村注入；详见 [`docs/科研模块.md`](./docs/科研模块.md) |
 | `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
@@ -211,6 +211,7 @@ slg1.0/
 | `宝物模块.md` | treasure 模块（MULTISET 语义 + 待领取 pending + 归途 ETA 精化 + 与军队/建筑/贸易的交互） | 改宝物/掉落/携带/领取/出售时 |
 | `雇佣兵营地模块.md` | mercenary 模块（金币购买名单 + 自动囤积 + 升级不重 roll + 2026-08 新增「危险操作·拆除雇佣兵营地」） | 改雇佣兵/刷新/招募时 |
 | `经济与金币模块.md` | economy 模块（5 资源惰性结算 + 金币税收/自愈）+ 人口交税入账 | 改资源/金币/经济计算时 |
+| `科研模块.md` | research 模块（学院 RP 生产 + 科技树 + 双轨效果注入 + 跨村科技 + GM 面板） | 改科技/学院/科研点时 |
 | `服务器客户端同步与UI刷新.md` | 跨模块通用：事件→定向推送→onPush 刷新策略（含新增接线步骤与死循环坑） | 加事件/改推送时 |
 | **`项目约定与速查.md`** | 部署两条铁律 + 架构/数据迁移踩坑 + 模块与命令速查表 | **第一次改这个项目前** |
 
@@ -282,7 +283,7 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 
 ## 八、当前状态与下一步
 
-**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v3 硬上限模型（hardCap 由建筑累加/availableLabor 门控/五轴统一 prosperityMult/增长收敛/粮荒减员/医院即时回收战死/铁匠耗时/ConsumePop 腾空间/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）** + **金币经济（第 5 资源·人口交税·建造/升级 per-level costGold·雇佣兵营地+10 雇佣兵）** + **GM 平衡调参面板 `/gm/balance`（覆盖层热重载·跨部署/刷档存活·修复常量覆盖键名错配 bug）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
+**已完成**：架构 + 通信规范 + 11 大模块 + **高比例配置驱动**（含全局常量/开局模板 CSV 化 + 启动校验器）+ **服务端统一配置下发（`GetGameConfig`）** + **前端按 feature 拆分** + **gateway 声明式 manifest 路由** + 可玩前端 + 多人 + PvP + 账号密码 + 三种族 + JSON持久化（WAL + fsync 快照）+ 重启恢复 + 部署套件 + **六边形地图/逐格行军** + **有状态 tick 战斗（近战/远程 + 特性 + 实时推送）** + **人口系统 v3 硬上限模型（hardCap 由建筑累加/availableLabor 门控/五轴统一 prosperityMult/增长收敛/粮荒减员/医院即时回收战死/铁匠耗时/ConsumePop 腾空间/military 逃兵）** + **协议/频控/串行化加固** + **正式美术接入** + **地图交互（鼠标拖拽平移 / 滚轮缩放 / 悬停信息浮层 / 点击派兵）** + **真·环面世界（平行四边形 torus 无缝环绕）** + **视口剔除渲染（平移/缩放/跳转即时重绘）** + **全图数据一次拉取（GetArea full:true）** + **金币经济（第 5 资源·人口交税·建造/升级 per-level costGold·雇佣兵营地+10 雇佣兵）** + **GM 平衡调参面板 `/gm/balance`（覆盖层热重载·跨部署/刷档存活）** + **科研系统（学院 RP 生产·科技树三分支 AND/OR 依赖·双轨效果注入·跨村全局科技·GM 科研面板）** + **前端 Preact 重构（深色设计系统 + 村庄可视化场景 + 地图地形贴图 + 实时战斗面板 + 全套 123 张美术）**。提交前跑 `npm run verify`（lint + 类型检查 + 服务端/客户端测试）。
 
 **部署**：见 `docs/部署手册_腾讯云轻量服务器.md`（实操版，含 pm2 保活、数据备份）。本地生产模式 `npm run build && npm start`（与 pm2 `ecosystem.config.cjs` 同入口：`packages/server/dist/main.js`）。
 
