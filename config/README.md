@@ -48,6 +48,8 @@
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率 |
+| 表15 | `research.csv` | **科技树目录**（分支/层级/前置/效果/RP 造价） | 加科技、调研发耗时与效果数值 |
+| 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -247,6 +249,29 @@
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
 | applyType | `passive` 持续生效或即时消费类型 |
+
+## research.csv — 科技树目录
+| 列 | 含义 |
+|----|------|
+| id / code | 数字主键 / 稳定英文代码（前置引用用 code） |
+| name / desc / icon | 显示名 / 说明 / 图标基名 |
+| branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
+| tier | 层级，1 为最底层；界面按层分组显示 |
+| requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
+| effectType | 效果类型：`resource_rate` `combat_atk` `combat_def` `unit_unlock` `building_unlock` `pop_growth` `storage_cap` `train_speed` `build_speed` `march_speed` `carry_cap` `mechanism` |
+| effectKey / effectValue | 效果作用目标（资源/兵种/建筑 code）/ 数值（倍率类填小数，0.15=+15%） |
+| scope | `village` 仅本村生效 / `player` 全部村庄生效 |
+| durationSec / rpCost | 研发耗时（秒）/ 消耗科研点 |
+
+## academy.csv — 学院逐级出点参数
+| 列 | 含义 |
+|----|------|
+| level | 学院等级，每级一行 |
+| checkIntervalSec | 判定间隔（秒）；多座学院时实际间隔按数量缩短 |
+| baseProbability | 基础成功概率（0~1） |
+| probabilityGainPerFail | 每次失败累积的概率增量（保底机制，避免长期不出点） |
+| maxProbability | 概率上限 |
+| popFactor | 人口对概率的影响系数（0=不受影响，1=满人口时概率翻倍） |
 
 ## village_templates.csv — 各部族开局布局
 | 列 | 含义 |
