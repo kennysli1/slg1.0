@@ -307,8 +307,11 @@ export class ResearchModule {
       }
     }
     const s = this.ensureState(villageId);
+    const wasZero = s.academy.academyCount <= 0;
     s.academy.highestLevel = highestLevel;
     s.academy.academyCount = academyCount;
+    // 初次建造学院：重置 lastCheckTime，避免惰性回溯结算建院前的空 tick
+    if (wasZero && academyCount > 0) s.academy.lastCheckTime = this.now();
     this.store.set(COLLECTION, villageId, s);
     // 重调度 RP tick
     this.settleRp(villageId);
