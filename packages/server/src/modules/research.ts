@@ -284,14 +284,15 @@ export class ResearchModule {
 
   // ── RP 生产 ──
   private async onAcademyChanged(villageId: string): Promise<void> {
-    // 从 building 模块查询本村所有 academy
+    // 从 building 模块查询本村所有 academy（layout.zones.inner/outer 各有 placed 数组）
     const layoutRes = await this.commands.send({ name: 'building.GetLayout', from: ResearchModule.NAME, payload: { villageId } });
     if (!layoutRes.ok) return;
     const layout = layoutRes.payload as any;
-    const placed = layout.placed ?? [];
+    const zones = layout.zones ?? {};
+    const allPlaced = [...(zones.inner?.placed ?? []), ...(zones.outer?.placed ?? [])];
     let highestLevel = 0;
     let academyCount = 0;
-    for (const p of placed) {
+    for (const p of allPlaced) {
       if (p.kind === 'academy' && p.level >= 1) {
         academyCount++;
         if (p.level > highestLevel) highestLevel = p.level;
