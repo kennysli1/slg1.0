@@ -21,7 +21,7 @@ export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 
 /** 当前页签。 */
-export type TabKey = 'village' | 'army' | 'map' | 'reports';
+export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'reports';
 export const tab = signal<TabKey>('village');
 
 /** 村庄页视图模式：illustrated=可视化场景，list=列表管理视图。 */
@@ -96,6 +96,10 @@ export const selected = signal<SelectedTarget | null>(null);
 export const mercCamp = signal<any>(null);
 /** 贸易中心快照（GetTradeCenter）。 */
 export const tradeCenter = signal<any>(null);
+/** 科技树快照（research.GetTechTree）。 */
+export const techTree = signal<any>(null);
+/** 学院/科研状态快照（research.GetState）。 */
+export const researchState = signal<any>(null);
 /** 进行中战斗的实时快照：battleId → 双方兵力聚合（来自 BattleTick 推送）。 */
 export const battles = signal<Record<string, any>>({});
 

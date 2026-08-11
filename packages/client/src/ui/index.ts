@@ -7,4 +7,6 @@ export { Bar, TimerBar, Countdown } from './Bar.js';
 export { CostRow, ResChip, canAfford } from './Cost.js';
 export type { CostMap } from './Cost.js';
 export { Modal, ModalHost, ToastHost } from './Modal.js';
+export { confirmDanger } from './Confirm.js';
+export type { ConfirmOptions } from './Confirm.js';
 export { StatGrid, Stat } from './Stat.js';

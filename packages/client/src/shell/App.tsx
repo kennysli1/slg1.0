@@ -14,6 +14,7 @@ import { LoginScreen } from '../features/login/LoginScreen.js';
 import { VillageScreen } from '../features/village/VillageScreen.js';
 import { ArmyScreen } from '../features/army/ArmyScreen.js';
 import { MapScreen } from '../features/map/MapScreen.js';
+import { TechTreeScreen } from '../features/research/TechTreeScreen.js';
 import { ReportsScreen } from '../features/reports/ReportsScreen.js';
 
 type Phase = 'boot' | 'login' | 'game';
@@ -92,6 +93,7 @@ function Page() {
       {t === 'village' && <VillageScreen />}
       {t === 'army' && <ArmyScreen />}
       {t === 'map' && <MapScreen />}
+      {t === 'tech' && <TechTreeScreen />}
       {t === 'reports' && <ReportsScreen />}
     </main>
   );

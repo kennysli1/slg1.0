@@ -50,6 +50,8 @@ interface PopulationState {
   inFamine?: boolean;
   /** 宝物人口增长倍率（乘数，默认 1；由 treasure 模块推送，无环）。 */
   treasureGrowthMult?: number;
+  /** 科技人口增长倍率（乘数，默认 1；由 research 模块推送，无环）。 */
+  techGrowthMult?: number;
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
   treasureGoldMult?: number;
   lastTick: number;
@@ -102,6 +104,7 @@ export class PopulationModule {
     this.commands.register('population.SetEnRoutePop', (c) => this.setEnRoutePop(c));
     // 宝物模块推送的人口增长倍率（乘数），无环（treasure 只发命令，不回查）
     this.commands.register('population.SetTreasureGrowthMult', (c) => this.setTreasureGrowthMult(c));
+    this.commands.register('population.SetTechGrowthMult', (c) => this.setTechGrowthMult(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -133,6 +136,7 @@ export class PopulationModule {
       if (s.trainingPopCost === undefined) s.trainingPopCost = 0;
       if (s.inFamine === undefined) s.inFamine = false;
       if (s.treasureGrowthMult === undefined) s.treasureGrowthMult = 1;
+      if (s.techGrowthMult === undefined) s.techGrowthMult = 1;
       if (s.treasureGoldMult === undefined) s.treasureGoldMult = 1;
       if (s.tribe === undefined) s.tribe = 'romans';
       if (s.mainLevel === undefined) s.mainLevel = 1;
@@ -295,7 +299,7 @@ export class PopulationModule {
   /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。再乘宝物人口增长倍率。 */
   private growthRateRaw(s: PopulationState): number {
     const base = (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
-    return base * (s.treasureGrowthMult ?? 1);
+    return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1);
   }
 
   /** 每小时实际增长量（已 clamp 到 popCeiling 缺口）。粮荒期间不增长（否则会与减员相互抵消）。 */
@@ -744,6 +748,16 @@ export class PopulationModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.treasureGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
     if (goldMult !== undefined) s.treasureGoldMult = Number.isFinite(goldMult) && goldMult > 0 ? goldMult : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /** 科研模块推送的人口增长倍率（乘数，默认 1）。与 treasure 倍率独立叠乘。 */
+  private async setTechGrowthMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techGrowthMult = Number.isFinite(mult) && mult > 0 ? (1 + mult) : 1;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }

@@ -116,6 +116,10 @@ slg1.0/
 | `combat.ts` | **进行中的战斗**（`battle` 集合） | 有状态逐 tick 战斗：前后排承伤 + 近战/远程 + 特性；一地一场战、后到按阵营并入；结束发 Command 让 owner 扣兵/掠夺、发 Event 出战报（PvE/PvP 共用）；每 tick 推实时快照 |
 | `pve.ts` | PvE目标守军/战利品 | 提供守军快照、应用战果、重生 |
 | `population.ts` | 每村人口上限(hardCap,建筑累加)/劳动人口(currentPop)/士兵人口(soldierPop) | v3 硬上限模型：hardCap 由建筑 `popCapPerLevel×level` 累加；availableLabor=hardCap−soldierPop（兼容别名 softLimit）；laborRatio 驱动五轴统一的 `prosperityMult`∈[0.75,1]；**增长速率绑定城镇中心**（`main.popGrowthPerLevel × mainLevel`，GM 可改；旧全局 `pop_growth_per_hour` 已废弃）；开局人口=城镇中心当前等级贡献的 popCap；**金币税随结算累加**：`goldGained=currentPop×goldTaxPerCivilianPerHour×Δt`，经 `economy.Grant` 入账（不受繁荣度影响）；医院 `RecoverCasualties` 即时回收战死士兵人口（无伤兵池/无定时器）；铁匠升级耗时受繁荣加速；ConsumePop 只减 currentPop 腾空间；单向写 economy 口粮与劳动加成，只读 economy.nonCivilianUpkeep（无环）；**含周期结算 tick（每 30s 结算全部村庄）使金币税与人口增长持续累加、离线也生效** |
+| `trade.ts` | 每村贸易中心（NPC 订单池、玩家挂单、贸易路线） | 镜像 mercenary 模式：等级决定容量/视野/刷新；即时交付 NPC 订单 + 玩家挂单派双向商队 + **NPC 宝物订单栏满溢出三选一**（store/replace/sell/discard）；详见 [`docs/贸易模块.md`](./docs/贸易模块.md) |
+| `treasure.ts` | 每村宝物栏（城镇中心+宝库）+ 待领取 pending(treasure_pending 集合) | **MULTISET 语义**（同 code 可持有多份，每份占 1 槽，aggregate 累加；加性资源 / 乘性攻防复利）；pending 分 camp/deliver；**归途 ETA 精化**（rollDrop 占位 → movement 用真实 arriveAt 覆盖）；outwardId 索引（修复携带宝物返程丢失 + pending 卡死 bug）；详见 [`docs/宝物模块.md`](./docs/宝物模块.md) |
+| `mercenary.ts` | 每村雇佣兵营地（offers 名单 + 存储刷新） | 镜像 trade 模式：金币购买名单上的雇佣兵 → military.troops（popCost=0/upkeep=0，零副作用自动参战）；自动刷新 + 手动刷新 + 升级不重 roll；详见 [`docs/雇佣兵营地模块.md`](./docs/雇佣兵营地模块.md) |
+| `research.ts` | 每村科技进度 + 科研点(RP)余额 + 学院产出状态(research 集合) | 学院按间隔掷判定产 RP（连续失败累积概率保底，学院越多间隔越短）；科技树三分支研发（扣 RP + 计时，取消按剩余比例返还）；科技生效后推倍率给 military 等模块 |
 | `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
@@ -143,7 +147,7 @@ slg1.0/
 | `shell/` | `App`（连接生命周期/页签路由）+ `TopBar` + `ResourceBar` + `TabBar` |
 | `ui/` | UI 原子：`Icon`/`IconPlate`/`Panel`/`Btn`/`Bar`/`TimerBar`/`CostRow`/`Modal`/`Stat` |
 | `styles/` | `tokens.css`（唯一配色/间距来源）+ `base`/`frame`/`shell` + 各页私有样式 |
-| `features/{login,village,army,map,reports,trade}/` | 各页面组件与其弹窗；村庄页含可视化场景与列表双视图 |
+| `features/{login,village,army,map,research,reports,trade}/` | 各页面组件与其弹窗；村庄页含可视化场景与列表双视图，research 含科技树页与学院弹窗 |
 | `shared/ui/`、`shared/utils/` | 错误文案 / 转义 / 格式化 / 六边形数学 |
 
 ### 测试
@@ -193,6 +197,7 @@ slg1.0/
 | `2_2.0设计/11_建筑系统重做.md` | 三区结构 + 城镇中心解锁槽位设计 | 改建筑前（已实现） |
 | `2_2.0设计/13_人口系统设计.md` | 人口机制 A–H + 数值表 + 收敛演算 | 改人口前（已实现） |
 | **`2_2.0设计/14_前端设计系统.md`** | 前端视图层契约：Preact+signals、设计令牌、UI 原子、跨特性接口 | **写前端代码前** |
+| `2_2.0设计/15_科研系统设计.md` | 学院产 RP 的概率模型 + 三分支科技树 + 效果生效链路 | 改科研/学院前（已实现） |
 | `2_2.0设计/改进方向备选池.md` | 待选扩展点 | 想新功能时 |
 | `服务器客户端同步与UI刷新.md` | 服务端事件定向推送与客户端按需刷新机制 | 新增事件推送或调整页面刷新时 |
 | `经济与金币模块.md` | 五类资源惰性结算、金币税收与经济派生管线 | 改资源、金币或产率结算时 |
@@ -205,8 +210,20 @@ slg1.0/
 | `美术生成规范.md` | 洋红幕布抠像流水线 + 风格块 + 成套一致性自查 | 做美术时 |
 | `部署手册_腾讯云轻量服务器.md` | 部署步骤 + 需你提供的信息 | 上线时 |
 
-> `docs/archive/` 里是**已上线系统的一次性实现规划**（建筑重构、人口 v2）。它们的结论已并入上表的常青文档，
+> `docs/archive/` 里是**已上线系统的一次性实现规划**（建筑重构、人口 v2、旧版美术 prompt）。它们的结论已并入上表的常青文档，
 > **AI 默认不要读**，只在考古"当初为什么这么设计"时才翻。规划文档上线即归档，见变更契约 R4。
+
+### 已上线模块的实现参考文档（docs/ 根目录）
+
+按模块组织的"实现参考"，与上方"设计/规范"文档互补——这里讲"现在的状态"，设计文档讲"为什么这么设计"。
+
+| 文档 | 作用 | 何时看 |
+|------|------|--------|
+| `贸易模块.md` | trade 模块（NPC 订单 + 玩家挂单 + 路线回收 + NPC 宝物栏满溢出）+ 2026-08 新增「危险操作·拆除贸易中心」 | 改贸易/挂单/商队/栏满三选一时 |
+| `宝物模块.md` | treasure 模块（MULTISET 语义 + 待领取 pending + 归途 ETA 精化 + 与军队/建筑/贸易的交互） | 改宝物/掉落/携带/领取/出售时 |
+| `雇佣兵营地模块.md` | mercenary 模块（金币购买名单 + 自动囤积 + 升级不重 roll + 2026-08 新增「危险操作·拆除雇佣兵营地」） | 改雇佣兵/刷新/招募时 |
+| `经济与金币模块.md` | economy 模块（5 资源惰性结算 + 金币税收/自愈）+ 人口交税入账 | 改资源/金币/经济计算时 |
+| `服务器客户端同步与UI刷新.md` | 跨模块通用：事件→定向推送→onPush 刷新策略（含新增接线步骤与死循环坑） | 加事件/改推送时 |
 
 ---
 
@@ -294,3 +311,206 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 - 域名 + HTTPS（正式公开需要，可帮配 Nginx + 免费证书）
 - 种族特性差异化（专属建筑/加成）、英雄/工会等养成系统
 - 补齐 PvE tier4-8 正式美术（当前为占位图，见美术资源清单）
+
+---
+
+## 九、项目约定与坑（2026-08-10 汇总）
+
+> 这一节是历次部署/开发踩坑的总结。**新人/AI 第一次改这个项目前必读**。每条都附触发场景与正确做法。
+
+### 9.1 部署两条铁律
+
+#### ① `origin/main` 可能严重落后（2026-08-09 踩过）
+
+历史多走 `tools/deploy.sh` tar 部署、没 push GitHub。服务器 deploy 含 `git reset --hard origin/main`，**若不先 push 会把全部改动回滚到陈旧 origin**。曾因此把 v3/v4/v5/金币/人口/军事建筑迁入等全部改动整体回滚到 `21efab5`。
+
+**取权威 SHA 必须用 `git ls-remote origin refs/heads/main`**。本机 `.git/refs/remotes/origin/main` 跟踪引用是**沙箱假象**（曾卡在 `21efab5` 不动），`git status` 显示的「领先 N 个提交」纯属误导。**永远以 `git ls-remote` 的返回为准**。
+
+**正确流程**：
+```bash
+# 本机
+git commit ...
+git push origin main   # 确认本地 HEAD 是 origin/main 后代 = fast-forward
+git ls-remote origin refs/heads/main   # 推送后再次确认权威 SHA 已更新
+
+# 服务器
+ssh kow
+cd /home/ubuntu/kow
+git checkout main   # 防御性：避免在 feature 分支上 reset --hard
+git fetch origin
+git reset --hard origin/main
+npm run build        # 必须：客户端改 TS 必须 vite build，否则前端仍是旧 bundle
+pm2 reload kow
+```
+
+#### ② 全量刷档前必须先 `pm2 stop kow`（2026-08-08 v3 部署踩过）
+
+否则常驻进程持锁并按旧内存状态 flush，会把 wipe 结果覆盖回去。
+
+**正确流程**：
+```bash
+ssh kow
+cd /home/ubuntu/kow
+pm2 stop kow                          # 先停
+npm run wipe:all                      # 全量重置（自动备份到 data/backups/）
+pm2 start kow                         # 再起
+```
+
+**纯 UI/config/HTML/字段层改动无需 wipe**（reload + build 即可）。判断标准：若改动只影响 CSV 数值、UI 文本、客户端 TS、GM 覆盖层等，不会改存档 schema，直接 reload；若改了 schema（坐标格式、兵种字段、新集合），必须 wipe。
+
+### 9.2 架构与代码坑
+
+#### movement.ts 字段是 `arriveAt` 不是 `arrivesAt`（2026-08-10 部署踩过）
+
+`Movement` 接口字段名是 `arriveAt`（`packages/server/src/modules/movement.ts:56`）。本地 `npm run test:server` 跑 tsx 不做类型检查所以不会发现；部署时 `tsc` 报 `TS2551`。**写代码引用字段名要核对接口定义**。
+
+#### 客户端 forEach 回调内禁止 `continue`（2026-08-10 踩过）
+
+```ts
+// 错误：TS1107 Jump target cannot cross function boundary
+[].forEach((x) => {
+  if (...) continue;   // ❌ 箭头函数内非法
+});
+
+// 正确：forEach 只能用 return
+[].forEach((x) => {
+  if (...) return;     // ✅ return 等价于 forEach 的 continue
+});
+```
+
+#### 本机 `npm run build -w @slg/server` 退出码异常且无输出
+
+本机 node_modules 环境问题导致 `tsc -p tsconfig.json` 退出码 1 但**无任何输出**（也不报错）。**以服务器 `npm run build` 的 tsc 输出为准**——服务器 build 会输出全部类型错误，本机不可信。部署流程天然就经服务器 build，所以本机 tsc 异常不影响部署。
+
+#### 服务端 HTML 模板字符串的转义陷阱（2026-08-08 踩过）
+
+反引号模板字符串（`` `...` ``）中 `\'` **不会**转义引号（反引号是分隔符，`\` 原样保留为字符）。写 `onclick="toggleBl('${code}')"` 渲染出的 JS 是非法的，整段 `<script>` 解析失败 → 面板空白只剩「就绪」。
+
+**正确做法**：动态值用 `data-*` 属性携带，handler 内读 `this.dataset.*`：
+```ts
+onclick="toggleBl(this.dataset.code)"
+<div data-code="${esc(code)}">
+```
+
+彻底规避字符串转义。所有「服务端拼 HTML/JS 字符串」场景都优先 data-*。
+
+#### 客户端抽屉的 `slotId` 必须双路径都透传（2026-08-10 踩过）
+
+`village.ts` 打开建筑抽屉有**两条路径**，都要把 `slotId` 透传给抽屉函数，否则抽屉里「危险操作·拆除」等附加按钮整段消失：
+
+1. `openBuilding(slotId)` —— 来自建造区/军队页点击（已传 slotId）
+2. `bindVillage` 里的 `[data-bld-slot]` 卡片点击 handler —— **这条路径曾漏传 slotId**，导致从村庄卡片打开的贸易中心/雇佣兵营地没有拆除按钮
+
+**规则**：任何新增的「建筑详情抽屉附加按钮」（拆除、升级卡等）都要确保 `openXxxCenter(act, slotId?)` 在两条打开路径上都收到 `slotId`；抽屉函数内用 `if (slotId)` 决定要不要渲染该段。本次根因是 `mercenary.ts` 的 `openMercenaryCamp` 根本没有 slotId 形参、且 `village.ts` 第二条路径没传，已一并修复（`bcb4dbf`）。
+
+### 9.3 数据与迁移坑
+
+#### treasure 模块 ensureState 是 resume 能否成功的关键（2026-08-09 踩过）
+
+旧档可能 `town`/`treasury` 缺失、非数组、含 `null`/非字符串等损坏。`resume()` → `recomputeAndPush` → `aggregate` 直接 spread 会抛 `is not iterable` 导致**崩溃循环**（每个村庄都崩）。`ensureState` 必须把非数组归一为 `[]`、非字符串过滤、缺字段补默认值，并写回存档。
+
+类似 self-healing 在 `economy.settle()` 也有（旧金币 `null` → 自愈为 `startGoldAmount`）。详见 [`docs/经济与金币模块.md`](./docs/经济与金币模块.md)。
+
+#### pm2 `err.log` 可能含**历史进程**的陈旧报错（2026-08-10 踩过）
+
+`pm2 logs` / `err.log` 是**追加**的，旧进程崩溃的栈也会留在文件里。诊断 `X is not iterable` 这类崩溃时：
+
+- **先确认报错行号对不对得上当前源码**：若行号与当前 `grep` 到的代码行不匹配，多半是旧进程的
+- **用当前 pm2 pid 过滤**：`grep $(pm2 pid kow) err.log` 看该 pid 名下是否真有新增报错
+- 本次「`s.town is not iterable`」就是历史进程留的——当前源码 `storedCodes` 已有 `?? []` 保护、`grep` 当前 pid 为 0 行，重启后 err.log delta = 0。确认无新报错即可，不必为历史行号改代码。
+
+#### GM 平衡覆盖层长期生效
+
+GM 在 `/gm/balance` 手动调参写在 `data/balance_overrides.json`（与 `game.json` 同目录、`gitignore`）。
+- `git reset --hard`（部署）只清 git 跟踪的 `config/*.csv`，**不动 data/**
+- `wipe:all` 只重置 `game.json`，**不删覆盖文件**
+
+故 GM 调参**跨部署/刷档存活**。详细机制见 §七（Gold Economy §5）。
+
+### 9.4 授权与流程约定
+
+- **非破坏式改动部署直接执行**：用户已明确「非破坏式（客户端 UI / 平衡 CSV / GM 覆盖层等）部署=push + reset + build + reload，**不 wipe**，不必每步再问」
+- **破坏式 / delete 操作全面授权**：含 `npm run wipe:all`、任何删除/清理，**直接执行**，仍保留 wipe 自动备份到 `data/backups/`（自动执行、不询问）
+- **本机个人目录（Desktop/Downloads/Documents 等）的删除不在此授权内**，仍须走 trash/备份流程且不可批量 rm
+
+---
+
+## 十、项目速查表
+
+### 10.1 核心模块清单（按 owner 集合）
+
+| 模块 | 拥有的集合 | 主要客户端动作 |
+|------|-----------|---------------|
+| `player.ts` | `players` | `Register` / `Login` |
+| `economy.ts` | `economy`（每村资源/容量/产率） | `GetResources` / `TrySpend` / `Grant` / `settle` |
+| `building.ts` | `buildings`（三区+队列） | `Build` / `Upgrade` / `Demolish` |
+| `military.ts` | `military`（troops + 训练队列 + 铁匠） | `Train` / `AddMercenaries` |
+| `world.ts` | `world`（地块） | `GetArea` |
+| `movement.ts` | `movements`（在途） | `Raid` / `Attack` / `Transport` / `SendCaravan` |
+| `combat.ts` | `battle`（进行中战斗） | （无对外动作，订阅 `BattleEnded`） |
+| `pve.ts` | `pve_targets` / `pve_defenders` | （订阅 `PveBattle`） |
+| `population.ts` | `population`（hardCap / currentPop / soldierPop） | `ConsumePop` / `RecoverCasualties` |
+| `trade.ts` | `trade`（NPC 订单 + 玩家挂单） | `GetTradeCenter` / `AcceptNpcOrder` / `AcceptNpcTreasure` / `CreateTradeOrder` / `AcceptPlayerOrder` / `CancelTradeOrder` / `RefreshTrade` |
+| `treasures.ts` | `treasure`（每村宝物）+ `treasure_pending` | `ListTreasures` / `UseTreasure` / `SellTreasure` / `DiscardTreasure` / `ClaimPendingTreasure` / `AssignToArmy` |
+| `mercenary.ts` | `merc`（每村营地） | `GetMercCamp` / `RefreshMercCamp` / `HireMerc` |
+| `notifications.ts` | `notifications`（每村战报历史） | `GetNotifications` |
+| `meta.ts` | 无（只读 config） | `GetGameConfig` |
+
+### 10.2 关键客户端命令（按"用户高频"分类）
+
+| 场景 | 命令 | 入口 |
+|------|------|------|
+| 注册/登录 | `Register` / `Login` | `features/login/` |
+| 村庄主页 | `GetVillage` / `GetResources` / `GetBuildings` / `GetArmy` | `features/village/` |
+| 建造/升级/拆除 | `Build` / `UpgradeBuilding` / `DemolishBuilding` | 村庄页 |
+| 训练 | `Train` | 兵营/靶场/马厩详情 |
+| 出征/攻占 | `Raid` / `Attack` | 地图 |
+| 雇佣 | `HireMerc` | 雇佣兵营地抽屉 |
+| 贸易 | `CreateTradeOrder` / `AcceptNpcOrder` / `AcceptNpcTreasure` / `AcceptPlayerOrder` | 贸易中心抽屉 |
+| 宝物 | `UseTreasure` / `SellTreasure` / `DiscardTreasure` / `ClaimPendingTreasure` / `AssignToArmy` | 宝物面板 + 战报 |
+| GM | `GM.*` / `/gm/balance` 覆盖层 | `/gm` |
+
+### 10.3 关键文件速查（按"读这个就能改那块"）
+
+| 想改什么 | 看这个 |
+|---------|--------|
+| 资源产出/金币 | `packages/server/src/modules/economy.ts` + `config/resources.csv` / `config/game_constants.csv` |
+| 建筑/槽位/队列 | `packages/server/src/modules/building.ts` + `config/buildings.csv` / `config/building_levels.csv` / `config/town_center_slots.csv` |
+| 兵种/雇佣兵/特性 | `packages/server/src/modules/military.ts` + `config/units.csv` / `config/unit_traits.csv` |
+| 行军/战斗/携带 | `packages/server/src/modules/movement.ts` + `combat.ts` + `treasure.ts` |
+| 人口/金币税/繁荣度 | `packages/server/src/modules/population.ts` |
+| 贸易/挂单/路线 | `packages/server/src/modules/trade.ts` + `config/trade_center.csv` |
+| 宝物/MULTISET/掉落/携带 | `packages/server/src/modules/treasures.ts` + `config/treasures.csv` |
+| 雇佣兵营地 | `packages/server/src/modules/mercenary.ts` + `config/merc_camp.csv` |
+| 跨模块推送/UI 刷新 | `packages/client/src/features/reports/reports.ts` + `docs/服务器客户端同步与UI刷新.md` |
+| 客户端抽屉/建筑详情 | `packages/client/src/features/village/village.ts` |
+| 拆建筑按钮 | `village.ts` 的 `openBuildingDetail` + `features/trade/tradecenter.ts` + `features/army/mercenary.ts` |
+| 启动/刷档/备份 | `packages/server/src/admin.ts` + `docs/服务器/02_数据库操作手册.md` |
+| GM 调参 UI | `packages/server/src/gateway/gm.ts` + `http://host:8080/gm` |
+
+### 10.4 跨模块事件/命令流向
+
+```
+building.Built/Upgraded → trade/treasure/mercenary 懒建 + 刷新参数
+movement.BattleEnded → combat → treasure.RollDrop → camp pending
+movement.scheduleReturn → treasure.SetExpectedArrival（精化 ETA）
+movement.arriveReturn → treasure.StoreCarried + treasure.MarkPendingArrived
+movement.Sent → treasure.GetCarriedEffects（出战快照叠加）
+treasure.Changed → economy.SetRateModifier + population.SetTreasureGrowthMult + military.SetTreasureCombatMult
+trade.AcceptNpcTreasure → treasure.List/Grant/Replace
+building.Demolish → trade/treasure/mercenary 清理 + 重分布
+```
+
+### 10.5 测试速查（按"改完这块该跑哪个"）
+
+| 改动模块 | 跑这个 |
+|---------|--------|
+| 经济/资源/金币 | `test/economy.test.ts` |
+| 建筑/队列 | `test/building.test.ts` |
+| 兵种/训练 | `test/military.test.ts` |
+| 行军/战斗/携带 | `test/combat.test.ts` + `test/movement-path.test.ts` + `test/treasure.test.ts` |
+| 人口 | `test/population.test.ts` + `test/population-v2.test.ts` |
+| 贸易 | `test/trade.test.ts` |
+| 宝物 | `test/treasure.test.ts`（含 6 例 MULTISET 回归） |
+| 雇佣兵 | `test/mercenary.test.ts` |
+| 全局 | `npm run test:server`（汇总） + `npm run verify`（提交前） |

@@ -147,6 +147,16 @@ export interface BuildingLevelDef {
   treasureSlots?: number;
   /** 仅资源田：该等级产量/小时。 */
   prod?: number;
+  /** 仅仓库/粮仓(warehouse/granary)：该等级提供的仓储容量增量。总容量 = Σ 已建等级 storagePerLevel。替代旧 storageBase/growth 公式。 */
+  storagePerLevel?: number;
+  /** 仅城墙(wall)：该等级提供的防御加成（倍率增量）。总防御 = 1 + Σ defensePerLevel。替代旧 wallBonusPerLevel 常量。 */
+  defensePerLevel?: number;
+  /** 仅城镇中心(main)：该等级提供的建造加速（减少耗时比例，Lv1=0, Lv2+=每级值）。总加速 = min(cap, Σ buildSpeedupPerLevel)。替代旧 mainBuildSpeedupPerLevel 常量。 */
+  buildSpeedupPerLevel?: number;
+  /** 仅兵营/马厩/兵工厂(barracks/stable/workshop)：该等级提供的训练加速（减少耗时比例，Lv1=0, Lv2+=每级值）。总加速 = min(cap, Σ trainTime…)。替代旧 trainTimeReducePerLevel 常量。 */
+  trainTimeReducePerLevel?: number;
+  /** 仅兵营/马厩/兵工厂(barracks/stable/workshop)：该等级提供的训练降费（减少资源消耗比例，Lv1=0, Lv2+=每级值）。总降费 = min(cap, Σ trainCost…)。替代旧 trainCostReducePerLevel 常量。 */
+  trainCostReducePerLevel?: number;
 }
 
 export interface BuildingDef {
@@ -407,6 +417,46 @@ export interface TradeCenterLevel {
   npcStoredRefreshes: number;
 }
 
+// ── 科研系统 ──
+
+export type TechBranch = 'military' | 'production' | 'social';
+export type TechEffectType = 'resource_rate' | 'unit_unlock' | 'building_unlock' | 'pop_growth' | 'storage_cap' | 'combat_atk' | 'combat_def' | 'train_speed' | 'build_speed' | 'march_speed' | 'carry_cap' | 'mechanism';
+export type TechScope = 'village' | 'player';
+
+export interface ResearchDef {
+  id: number;
+  code: string;
+  name: string;
+  branch: TechBranch;
+  tier: number;
+  /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
+  requires: string[];
+  desc: string;
+  effectType: TechEffectType;
+  effectKey: string;
+  effectValue: number;
+  scope: TechScope;
+  /** 研发耗时（秒）。 */
+  durationSec: number;
+  /** 消耗科研点数。 */
+  rpCost: number;
+  icon: string;
+}
+
+export interface AcademyDef {
+  level: number;
+  /** 判定间隔（秒），多学院时除以数量。 */
+  checkIntervalSec: number;
+  /** 基础产出概率（0-1）。 */
+  baseProbability: number;
+  /** 每次失败累加的概率。 */
+  probabilityGainPerFail: number;
+  /** 概率上限 (= 保底线)。 */
+  maxProbability: number;
+  /** 人口对概率的影响系数：实际概率 *= (1 + popFactor × currentPop/hardCap) */
+  popFactor: number;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -425,6 +475,10 @@ export interface GameConfig {
   villageTemplates: Record<string, VillageTemplate>;
   /** 宝物目录（treasures.csv）：code → TreasureDef。 */
   treasures: Record<string, TreasureDef>;
+  /** 科技目录（research.csv）：code → ResearchDef。 */
+  research: Record<string, ResearchDef>;
+  /** 学院 RP 生产参数（academy.csv）：level → AcademyDef。 */
+  academy: Record<number, AcademyDef>;
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -524,7 +578,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -539,6 +593,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       popCap: num(r.popCap),
       treasureSlots: r.treasureSlots ? num(r.treasureSlots) : 0,
       prod: r.prod ? num(r.prod) : undefined,
+      storagePerLevel: r.storagePerLevel ? num(r.storagePerLevel) : undefined,
+      defensePerLevel: r.defensePerLevel ? num(r.defensePerLevel) : undefined,
+      buildSpeedupPerLevel: r.buildSpeedupPerLevel ? num(r.buildSpeedupPerLevel) : undefined,
+      trainTimeReducePerLevel: r.trainTimeReducePerLevel ? num(r.trainTimeReducePerLevel) : undefined,
+      trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
     };
   }
 
@@ -840,6 +899,68 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // 科技目录（research.csv）：code → ResearchDef。覆盖层 key='id'，numeric=tier/effectValue/durationSec/rpCost。
+  let researchRows = loadCsv(p('research.csv'));
+  if (overrides?.research) {
+    researchRows = mergeOverridesIntoRows(researchRows, {
+      file: 'research.csv', key: 'id',
+      numeric: ['tier', 'effectValue', 'durationSec', 'rpCost'],
+    }, overrides.research);
+  }
+  assertUniqueRows(researchRows, 'research.csv');
+  const research: Record<string, ResearchDef> = {};
+  for (const r of researchRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    research[code] = {
+      id: num(r.id),
+      code,
+      name: r.name ?? code,
+      branch: (r.branch as TechBranch) || 'production',
+      tier: num(r.tier, 1),
+      requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+      desc: r.desc ?? '',
+      effectType: (r.effectType as TechEffectType) || 'resource_rate',
+      effectKey: r.effectKey ?? '',
+      effectValue: num(r.effectValue, 0),
+      scope: (r.scope as TechScope) || 'village',
+      durationSec: num(r.durationSec, 3600),
+      rpCost: num(r.rpCost, 1),
+      icon: r.icon ?? 'tech_generic',
+    };
+  }
+
+  // 学院参数（academy.csv）：level → AcademyDef。覆盖层 key='level'。
+  let academyRows = loadCsv(p('academy.csv'));
+  if (overrides?.academy) {
+    academyRows = mergeOverridesIntoRows(academyRows, {
+      file: 'academy.csv', key: 'level',
+      numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'],
+    }, overrides.academy);
+  }
+  const academy: Record<number, AcademyDef> = {};
+  for (const r of academyRows) {
+    const lv = num(r.level);
+    if (lv <= 0) continue;
+    academy[lv] = {
+      level: lv,
+      checkIntervalSec: num(r.checkIntervalSec, 3600),
+      baseProbability: num(r.baseProbability, 0.1),
+      probabilityGainPerFail: num(r.probabilityGainPerFail, 0.02),
+      maxProbability: num(r.maxProbability, 0.3),
+      popFactor: num(r.popFactor, 0),
+    };
+  }
+  // academy 缺级回退：向下复制，保证任意等级都能取到参数。
+  const maxAcLv = Object.keys(academy).map(Number).sort((a, b) => a - b);
+  if (maxAcLv.length) {
+    let last = academy[maxAcLv[0]];
+    for (let lv = 1; lv <= maxAcLv[maxAcLv.length - 1]; lv++) {
+      if (academy[lv]) last = academy[lv];
+      else academy[lv] = { ...last };
+    }
+  }
+
   // mercCamp 缺级回退：从已解析的最高有效级向下复制，保证任意营地等级都能取到参数。
   const maxMercLv = Object.keys(mercCamp).map(Number).sort((a, b) => a - b);
   if (maxMercLv.length) {
@@ -861,7 +982,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   }
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy,
   };
   validateGameConfig(config);
   return config;
@@ -1088,6 +1209,39 @@ export function validateGameConfig(config: GameConfig): void {
     }
   }
 
+  // 科研系统校验
+  const RESEARCH_BRANCHES = new Set(['military', 'production', 'social']);
+  const RESEARCH_EFFECTS = new Set(['resource_rate', 'unit_unlock', 'building_unlock', 'pop_growth', 'storage_cap', 'combat_atk', 'combat_def', 'train_speed', 'build_speed', 'march_speed', 'carry_cap', 'mechanism']);
+  const RESEARCH_SCOPES = new Set(['village', 'player']);
+  const researchCodes = new Set(Object.keys(config.research));
+  for (const t of Object.values(config.research)) {
+    if (!t.code) errors.push('research.csv 存在空 code');
+    if (!RESEARCH_BRANCHES.has(t.branch)) errors.push(`research.csv[${t.code}] branch=${t.branch} 必须是 military/production/social`);
+    if (!RESEARCH_EFFECTS.has(t.effectType)) errors.push(`research.csv[${t.code}] effectType=${t.effectType} 未知效果类型`);
+    if (!RESEARCH_SCOPES.has(t.scope)) errors.push(`research.csv[${t.code}] scope=${t.scope} 必须是 village/player`);
+    if (t.tier < 1) errors.push(`research.csv[${t.code}] tier=${t.tier} 必须≥1`);
+    if (t.durationSec < 1) errors.push(`research.csv[${t.code}] durationSec=${t.durationSec} 必须>0`);
+    if (t.rpCost < 1) errors.push(`research.csv[${t.code}] rpCost=${t.rpCost} 必须>0`);
+    for (const req of t.requires) {
+      const orParts = req.split(' OR ');
+      let anyValid = false;
+      for (const part of orParts) {
+        if (researchCodes.has(part.trim())) { anyValid = true; break; }
+      }
+      if (!anyValid) errors.push(`research.csv[${t.code}] requires 引用不存在的科技: ${req}`);
+    }
+  }
+  // 科技依赖无环检测
+  const researchCycle = findResearchCycle(config.research);
+  if (researchCycle) errors.push(`research.csv 存在依赖环: ${researchCycle.join(' → ')}`);
+
+  // academy 参数校验
+  for (const a of Object.values(config.academy)) {
+    if (a.checkIntervalSec < 1) errors.push(`academy.csv[Lv${a.level}] checkIntervalSec=${a.checkIntervalSec} 必须>0`);
+    if (a.baseProbability < 0 || a.baseProbability > 1) errors.push(`academy.csv[Lv${a.level}] baseProbability 必须在[0,1]`);
+    if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
+  }
+
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);
   }
@@ -1119,6 +1273,44 @@ function findRequiresCycle(buildings: Record<string, BuildingDef>): string[] | n
   };
 
   for (const node of Object.keys(buildings)) {
+    if ((color[node] ?? WHITE) === WHITE) visit(node);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** DFS 检测科研依赖环。科技 requires 支持 OR 语法（OR 分隔），任一条路径成环即报错。 */
+function findResearchCycle(research: Record<string, ResearchDef>): string[] | null {
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color: Record<string, number> = {};
+  const stack: string[] = [];
+  let found: string[] | null = null;
+
+  const visit = (node: string): void => {
+    if (found) return;
+    if (!research[node]) return;
+    color[node] = GRAY;
+    stack.push(node);
+    for (const req of research[node].requires) {
+      // requires 中可能包含 OR，拆开检查每个备选
+      const orParts = req.split(' OR ');
+      for (const part of orParts) {
+        const dep = part.trim();
+        if (!research[dep]) continue;
+        if (color[dep] === GRAY) {
+          const i = stack.indexOf(dep);
+          found = stack.slice(i).concat(dep);
+          return;
+        }
+        if ((color[dep] ?? WHITE) === WHITE) visit(dep);
+        if (found) return;
+      }
+    }
+    stack.pop();
+    color[node] = BLACK;
+  };
+
+  for (const node of Object.keys(research)) {
     if ((color[node] ?? WHITE) === WHITE) visit(node);
     if (found) return found;
   }

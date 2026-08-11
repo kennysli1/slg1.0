@@ -926,12 +926,16 @@ export class MovementModule {
 
   /** 出征到达：把兵力快照交给 Combat 开/并入战场，删除去程（兵力进入战斗，由 Combat 追踪）。 */
   private async arriveEngage(mv: Movement, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
+    // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
+    // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
+    const carried = mv.treasures && mv.treasures.length > 0 ? mv.treasures : [];
     await this.commands.send({
       name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
         targetKind, targetId, targetXY: mv.toXY,
         movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
         troops: mv.troops, attackerSnapshot: await this.attackerSnapshot(mv),
+        treasures: carried,
       },
     });
     this.store.delete(COLLECTION, mv.id);
@@ -1091,7 +1095,16 @@ export class MovementModule {
       }
       return; // 全灭无返程
     }
-    this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures, p.movementId);
+    const returnId = this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures, p.movementId);
+    // 精化 camp pending 的预计归村时间为返程 movement 的真实 arriveAt（覆盖 rollDrop 的 60s 占位），
+    // 让客户端「还有多久抵达」倒计时精确。pending 按出征 id 索引，故用 p.movementId（非 returnId）。
+    const returnMv = returnId ? this.load(returnId) : undefined;
+    if (returnMv && typeof returnMv.arriveAt === 'number') {
+      void this.commands.send({
+        name: 'treasure.SetExpectedArrival', from: MovementModule.NAME,
+        payload: { movementId: p.movementId, expectedArrivalAt: returnMv.arriveAt },
+      });
+    }
   }
 
   private scheduleReturn(
@@ -1102,11 +1115,13 @@ export class MovementModule {
     loot: Record<string, number>,
     treasures?: string[],
     outwardId?: string,
-  ): void {
+  ): string | undefined {
+    const id = this.nextId();
     this.launch({
-      id: this.nextId(), type: 'return', fromVillage, fromXY, toXY,
+      id, type: 'return', fromVillage, fromXY, toXY,
       troops, loot, treasures, departAt: this.now(), outwardId,
     });
+    return id;
   }
 
   /** 返程到达：兵力归队 + 战利品入库。 */
@@ -1131,13 +1146,14 @@ export class MovementModule {
         payload: { villageId: mv.fromVillage, gain: mv.loot },
       });
     }
-    // 携带宝物随军返程到家 → 存回该村（优先宝库）；按出征 id 匹配，避免返程新 id 不匹配丢失宝物
-    if (mv.treasures && mv.treasures.length > 0) {
-      await this.commands.send({
-        name: 'treasure.StoreCarried', from: MovementModule.NAME,
-        payload: { movementId: outwardId, villageId: mv.fromVillage },
-      });
-    }
+    // 携带宝物随军返程到家 → 存回该村（优先宝库）。按出征 id 匹配，避免返程新 id 不匹配丢失宝物。
+    // 注意：此处不能用「返程 movement 是否带战利品」来门控——携带宝物与战利品是两套追踪，
+    // 军队只带回自己带出去的宝物、但没抢到任何战利品时（mv.treasures 为空），也必须把携带宝物存回，否则会静默丢失。
+    // treasure.StoreCarried 在「该出征 id 没有携带记录」时是安全的空操作，故无条件调用。
+    await this.commands.send({
+      name: 'treasure.StoreCarried', from: MovementModule.NAME,
+      payload: { movementId: outwardId, villageId: mv.fromVillage },
+    });
     // 标记本军队对应的 camp 掉落 pending 为已到达（无论是否有携带宝物都要发——清营掉落的 pending 单独存在）
     await this.commands.send({
       name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,

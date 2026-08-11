@@ -24,6 +24,7 @@ const FILTERS: Array<{ key: FilterKind; label: string; icon: string }> = [
   { key: 'treasure', label: '宝物',   icon: '💎' },
   { key: 'alarm',    label: '警报',   icon: '🚨' },
   { key: 'pop',      label: '人口',   icon: '👥' },
+  { key: 'research', label: '科研',   icon: '📚' },
 ];
 
 const KIND_ICON: Record<ReportKind, string> = {
@@ -35,6 +36,7 @@ const KIND_ICON: Record<ReportKind, string> = {
   treasure: '💎',
   pop:      '👥',
   trade:    '🏪',
+  research: '📚',
   info:     '📌',
 };
 

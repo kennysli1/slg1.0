@@ -20,6 +20,7 @@ import { NotificationsModule } from './modules/notifications.js';
 import { MercenaryModule } from './modules/mercenary.js';
 import { TradeModule } from './modules/trade.js';
 import { TreasureModule } from './modules/treasures.js';
+import { ResearchModule } from './modules/research.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -47,6 +48,7 @@ const PROGRESS_COLLECTIONS = [
   'trade',
   'treasure',
   'treasure_pending',
+  'research',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -185,6 +187,20 @@ export function createGameApp(opts?: {
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
   const treasure = new TreasureModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  // playerVillages: 轻量跨村查询（research/academy 需要知道某玩家所有村庄，用于 scope=player 科技）
+  const playerVillages = (playerId: string): string[] => {
+    const ids: string[] = [];
+    for (const v of store.all<{ playerId?: string }>('player')) {
+      if ((v as any).playerId === playerId && (v as any).villageId) ids.push((v as any).villageId);
+    }
+    return ids;
+  };
+  const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {
+    for (const v of store.all<{ playerId?: string; villageId?: string }>('player')) {
+      if ((v as any).villageId === vid) return (v as any).playerId ?? null;
+    }
+    return null;
+  });
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {
@@ -194,6 +210,7 @@ export function createGameApp(opts?: {
       `population:starve:${villageId}`,
       `mercenary:${villageId}`,
       `trade:${villageId}`,
+      `research:${villageId}`,
     ]) {
       scheduler.cancelByOwner(prefix);
     }
@@ -244,6 +261,7 @@ export function createGameApp(opts?: {
   mercenary.init();
   trade.init();
   treasure.init();
+  research.init();
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
@@ -266,6 +284,7 @@ export function createGameApp(opts?: {
       mercenary.resume();
       trade.resume();
       treasure.resume();
+      research.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效

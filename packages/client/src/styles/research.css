@@ -1,0 +1,109 @@
+/* ============================================================
+   科研页 / 学院弹窗
+   私有样式只引用 tokens 变量，禁止写死颜色。
+   ============================================================ */
+
+/* ---------- 科研点总览 ---------- */
+.rp-panel { margin-bottom: var(--s-4); }
+.rp-main { display: flex; align-items: center; gap: var(--s-5); flex-wrap: wrap; }
+
+.rp-num { display: flex; align-items: baseline; gap: var(--s-2); flex: none; }
+.rp-num .num {
+  font-family: var(--ff-num); font-size: var(--f-3xl); font-weight: 700; line-height: 1;
+  background: linear-gradient(180deg, var(--c-gold-hi), var(--c-gold) 60%, var(--c-gold-dim));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .5));
+}
+.rp-num small { font-size: var(--f-sm); color: var(--c-ink-soft); }
+
+.rp-prob { flex: 1 1 240px; min-width: 220px; display: flex; flex-direction: column; gap: 5px; }
+.rp-prob-head { display: flex; justify-content: space-between; font-size: var(--f-xs); color: var(--c-ink-soft); }
+.rp-prob-head .num { color: var(--c-steel); font-family: var(--ff-num); }
+.rp-prob-foot { font-size: var(--f-2xs); color: var(--c-ink-dim); }
+
+.rp-researching {
+  display: flex; align-items: flex-end; gap: var(--s-3);
+  margin-top: var(--s-4); padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+.rp-researching > .progress { flex: 1; }
+.rp-next { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+
+.tech-hint { margin-bottom: var(--s-4); font-size: var(--f-sm); color: var(--c-ink-soft); line-height: 1.6; }
+.tech-hint b { color: var(--c-gold); }
+
+/* ---------- 分支切换 ---------- */
+.tech-branch-tabs {
+  display: inline-flex; gap: var(--s-1); padding: 3px;
+  background: rgba(0, 0, 0, .30); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.tech-branch-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 32px; padding: 0 var(--s-3); cursor: pointer;
+  background: none; border: 0; border-radius: calc(var(--r-md) - 2px);
+  color: var(--c-ink-soft); font-family: var(--ff-han); font-size: var(--f-xs); font-weight: 700;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.tech-branch-btn:hover { color: var(--c-ink); }
+.tech-branch-btn.active {
+  color: var(--c-ink-on-gold);
+  background: linear-gradient(180deg, var(--c-gold-hi), var(--c-gold));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+
+/* ---------- 科技树 ---------- */
+.tech-tiers { display: flex; flex-direction: column; gap: var(--s-5); }
+.tech-tier-label {
+  display: flex; align-items: center; gap: var(--s-2);
+  font-family: var(--ff-han); font-size: var(--f-xs); color: var(--c-ink-dim);
+  letter-spacing: 2px; margin-bottom: var(--s-2);
+}
+.tech-tier-label::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, var(--line-strong), transparent);
+}
+.tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: var(--s-3); }
+
+.tech-card {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: var(--s-3);
+  transition: transform var(--t-fast), border-color var(--t-fast);
+}
+.tech-card:hover { transform: translateY(-2px); }
+.tech-card--ready { border-color: var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), var(--glow-gold); }
+.tech-card--done { border-color: rgba(95, 156, 98, .45); }
+.tech-card--doing { border-color: rgba(224, 138, 60, .55); }
+.tech-card--locked { opacity: .62; }
+
+.tech-card-head { display: flex; align-items: center; gap: var(--s-2); }
+.tech-name { font-family: var(--ff-han); font-size: var(--f-md); font-weight: 700; flex: 1; }
+.tech-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tech-dot--military { background: var(--c-crimson-hi); box-shadow: 0 0 6px rgba(212, 84, 76, .6); }
+.tech-dot--production { background: var(--c-jade); box-shadow: 0 0 6px rgba(95, 156, 98, .6); }
+.tech-dot--social { background: var(--c-violet); box-shadow: 0 0 6px rgba(138, 107, 168, .6); }
+
+.tech-effect { font-size: var(--f-sm); color: var(--c-ink); line-height: 1.45; }
+.tech-meta { display: flex; align-items: center; gap: var(--s-2); font-size: var(--f-xs); color: var(--c-ink-soft); }
+.tech-meta .num { font-family: var(--ff-num); color: var(--c-gold); }
+.tech-requires { font-size: var(--f-2xs); color: var(--c-ink-dim); }
+.tech-action { margin-top: auto; padding-top: var(--s-1); }
+
+/* ---------- 学院弹窗 ---------- */
+.acad-rp { display: flex; align-items: baseline; gap: var(--s-2); justify-content: center; margin-bottom: var(--s-3); }
+.acad-rp .num {
+  font-family: var(--ff-num); font-size: var(--f-3xl); font-weight: 700; line-height: 1;
+  background: linear-gradient(180deg, var(--c-gold-hi), var(--c-gold) 60%, var(--c-gold-dim));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.acad-rp small { font-size: var(--f-sm); color: var(--c-ink-soft); }
+.acad-prob-bar { margin-top: var(--s-2); }
+.acad-note { margin-top: var(--s-3); font-size: var(--f-xs); color: var(--c-ink-dim); line-height: 1.6; }
+
+/* 危险操作确认弹窗的正文 */
+.confirm-body { font-size: var(--f-sm); color: var(--c-ink-soft); line-height: 1.7; }
+
+@media (max-width: 720px) {
+  .tech-grid { grid-template-columns: 1fr; }
+  .rp-num .num, .acad-rp .num { font-size: var(--f-2xl); }
+  .tech-branch-btn { min-height: 40px; }
+}

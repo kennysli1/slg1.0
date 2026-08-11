@@ -44,6 +44,7 @@ import {
 import { TrainPanel } from '../army/TrainPanel.js';
 import { openMercCamp } from '../army/MercCampModal.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
+import { openAcademy } from '../research/AcademyModal.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -539,6 +540,7 @@ export function openBuilding(slotId: string): void {
   // Route special buildings
   if (kind === 'mercenarycamp') { openMercCamp(); return; }
   if (kind === 'tradecenter') { openTradeCenter(); return; }
+  if (kind === 'academy') { openAcademy(slotId); return; }
 
   // Open generic detail modal
   openModal(

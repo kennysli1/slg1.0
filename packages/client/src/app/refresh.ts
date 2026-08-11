@@ -18,7 +18,7 @@ import {
 } from './state.js';
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
-  putBattle, dropBattle, modals, tab,
+  techTree, researchState, putBattle, dropBattle, modals, tab,
 } from './store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
@@ -164,6 +164,16 @@ export async function reloadTrade(): Promise<void> {
   if (r.ok) tradeCenter.value = r.payload;
 }
 
+/** 重拉科研快照（科技树 + 学院状态）。科技页与学院弹窗都订阅这两个信号。 */
+export async function reloadResearch(): Promise<void> {
+  const [tree, state] = await Promise.all([
+    req('GetTechTree').catch(() => ({ ok: false } as any)),
+    req('GetState').catch(() => ({ ok: false } as any)),
+  ]);
+  if (tree.ok) techTree.value = tree.payload;
+  if (state.ok) researchState.value = state.payload;
+}
+
 /** 登录后拉一次历史通知，播种战报列表。 */
 export async function hydrateReports(): Promise<void> {
   try {
@@ -206,6 +216,9 @@ export function handlePush(event: string, payload: any): void {
 
   if (event === 'MercenaryCampUpdated') { void reloadMercCamp(); return; }
   if (event === 'TradeCenterUpdated') { void reloadTrade(); return; }
+  // 科研点每次判定都会推 RpChanged，频率高：只重拉科研快照，不做整体刷新
+  if (event === 'RpChanged') { void reloadResearch(); return; }
+  if (event === 'TechCompleted') { void reloadResearch(); }
 
   void refreshAll();
 }

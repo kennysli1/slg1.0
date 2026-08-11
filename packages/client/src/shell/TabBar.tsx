@@ -7,6 +7,7 @@ const TABS: { key: TabKey; name: string; icon: string }[] = [
   { key: 'village', name: '村庄', icon: 'ui_tab_village' },
   { key: 'army', name: '军队', icon: 'ui_tab_army' },
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
+  { key: 'tech', name: '科技', icon: 'bld_academy' },
   { key: 'reports', name: '报告', icon: 'ui_tab_reports' },
 ];
 

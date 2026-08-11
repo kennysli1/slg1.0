@@ -24,6 +24,7 @@ export function notificationKind(event: string, payload?: any): ReportKind {
   if (event.startsWith('Treasure')) return 'treasure';
   if (event === 'PopulationChanged') return payload?.event === 'famine' || payload?.event === 'starved' ? 'alarm' : 'pop';
   if (event === 'TradeCenterUpdated') return 'trade';
+  if (event === 'TechCompleted' || event === 'RpChanged') return 'research';
   return 'info';
 }
 
@@ -95,6 +96,12 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}宝库被拆除：价值最高的宝物「${kept}」留于城镇中心，其余 ${count} 件转入报告页待你处理`;
     }
     return `${time}宝库被拆除：宝物「${kept}」已留于城镇中心`;
+  } else if (event === 'TechCompleted') {
+    return `${time}科技研发完成：${payload?.name ?? payload?.techCode ?? ''}`;
+  } else if (event === 'RpChanged') {
+    // 科研点每小时判定一次，成功才值得进战报；失败是静默的
+    if (!payload?.gained) return null;
+    return `${time}学院取得突破，科研点 +${fmt(payload.gained)}（当前 ${fmt(payload.rp ?? 0)}）`;
   } else if (event === 'CropDeficit') {
     return `${time}粮食告急！军队可能逃亡`;
   } else if (event === 'PopulationChanged') {
