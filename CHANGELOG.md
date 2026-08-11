@@ -11,6 +11,16 @@
 
 ### 新增
 
+- 新增测试入口登记、推送映射一致性与 GM HTTP 路由闸口，避免测试静默漏跑、推送契约漂移及危险路由绕过鉴权。
+- 补齐贸易资源守恒与路线生命周期、雇佣兵招募与刷新、科研完整研发与拆除边界的端到端覆盖。
+
+### 变更
+
+- `PROJECT.md` 测试索引改以 `all.test.ts` 为唯一清单，并压缩回行数预算；`README.md` 同步当前技术栈、功能与验证命令。
+- 导出网关 `MODULE_MANIFESTS` 与通知 `EVENT_MAP` 供契约测试读取唯一真相，并移除从未发射的陈旧 `treasure.Dropped` 映射。
+
+### 新增
+
 - **前端视图层改为 Preact + @preact/signals**：组件化渲染取代模板字符串 `innerHTML` 拼接；`app/store.ts` 提供 1 秒心跳 `tick`、数据版本 `dataVersion`、弹层栈与 Toast，数据刷新只做局部重渲，不再整页重建 DOM（顺带消灭了「刷新打断输入/丢焦点」和地图拖拽被打断的老毛病，`isInteracting()` 兜底逻辑随之删除）
 - **全新设计系统**（`src/styles/tokens.css` + `frame.css`）：深色石质面板 + 鎏金浮雕描边的视觉基调，配色/间距/字号/层级全部收敛为 CSS 变量；配套 UI 原子 `src/ui/`（`Icon`/`IconPlate`/`Panel`/`Btn`/`Bar`/`TimerBar`/`CostRow`/`Modal`/`Stat`）
 - **村庄可视化场景**：主界面新增手绘俯视村庄底图，建筑按固定坐标坐在垫台上、点击弹面板，保留「列表管理视图」一键切换（偏好存 localStorage）

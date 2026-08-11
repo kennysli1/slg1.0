@@ -1,0 +1,196 @@
+/**
+ * GM HTTP 路由测试（Fastify inject）：
+ *  1. 未设 GM_TOKEN 时所有路由开放（保持现有默认行为不变）
+ *  2. 设置 GM_TOKEN 时，缺少 X-GM-Token header → 401
+ *  3. 设置 GM_TOKEN 时，携带正确 X-GM-Token header → 200
+ *  4. 危险路由（DELETE /gm/:collection）不带 ?confirm=yes → 400
+ *  5. /gm/balance/data GET → 返回 ok:true + meta 字段
+ *  6. /gm/balance/save POST round-trip（需 balanceOverridePath 配置；无 storePath 时跳过）
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import Fastify from 'fastify';
+import { registerGmRoutes } from '../gateway/gm.js';
+import { createGameApp } from '../app.js';
+
+const SECRET = 'test-gm-token-xyz';
+
+function buildFastify(storePath?: string) {
+  const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath });
+  const fastify = Fastify({ logger: false });
+  registerGmRoutes(fastify, app.store, app);
+  return { fastify, app };
+}
+
+// ─── 1. 未设 GM_TOKEN → 开放 ─────────────────────────────────────────
+test('GM_TOKEN 未设时 /gm/collections 无需鉴权', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'GET', url: '/gm/collections' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { ok: boolean };
+    assert.equal(body.ok, true);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 2. 设 GM_TOKEN + 无 header → 401 ────────────────────────────────
+test('GM_TOKEN 设置后无 X-GM-Token header → 401', async () => {
+  const prev = process.env.GM_TOKEN;
+  process.env.GM_TOKEN = SECRET;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'GET', url: '/gm/collections' });
+    assert.equal(res.statusCode, 401, '缺少 token 应返回 401');
+    const body = JSON.parse(res.body) as { ok: boolean };
+    assert.equal(body.ok, false);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 3. 设 GM_TOKEN + 正确 header → 200 ─────────────────────────────
+test('GM_TOKEN 设置后携带正确 X-GM-Token header → 200', async () => {
+  const prev = process.env.GM_TOKEN;
+  process.env.GM_TOKEN = SECRET;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const res = await fastify.inject({
+      method: 'GET',
+      url: '/gm/collections',
+      headers: { 'x-gm-token': SECRET },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { ok: boolean };
+    assert.equal(body.ok, true);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 4. 危险路由不带 ?confirm=yes → 400 ─────────────────────────────
+test('DELETE /gm/:collection 不带 confirm=yes → 400', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify, app } = buildFastify();
+    // 写入一条数据以确保集合存在
+    app.store.set('test_col', 'k1', { v: 1 });
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'DELETE', url: '/gm/test_col' });
+    assert.equal(res.statusCode, 400, '危险路由无 confirm 应返回 400');
+    const body = JSON.parse(res.body) as { ok: boolean; reason?: string };
+    assert.equal(body.ok, false);
+    assert.ok(body.reason?.includes('confirm'), `reason 应提及 confirm，实际: ${body.reason}`);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 4b. 危险路由带 ?confirm=yes → 成功 ────────────────────────────
+test('DELETE /gm/:collection 带 confirm=yes → 清空集合', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify, app } = buildFastify();
+    app.store.set('test_col', 'k1', { v: 1 });
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'DELETE', url: '/gm/test_col?confirm=yes' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { ok: boolean };
+    assert.equal(body.ok, true);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 5. /gm/balance/data 返回正确结构 ───────────────────────────────
+test('/gm/balance/data 返回 ok:true + meta 字段', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'GET', url: '/gm/balance/data' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body) as { ok: boolean; meta?: unknown; buildings?: unknown };
+    assert.equal(body.ok, true, 'balance/data 应成功');
+    assert.ok(body.meta, 'balance/data 应包含 meta 字段');
+    assert.ok(body.buildings, 'balance/data 应包含 buildings 数据');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+// ─── 6. balance save/get round-trip ──────────────────────────────────
+test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const dataDir = mkdtempSync(join(tmpdir(), 'kow-gm-'));
+  const storePath = join(dataDir, 'game.json');
+  try {
+    const { fastify, app } = buildFastify(storePath);
+    await fastify.ready();
+
+    // 取 main 建筑 id 以作主键
+    const mainId = String(app.config.buildings['main'].id);
+    const origGrowth = app.config.buildings['main'].popGrowthPerLevel;
+
+    // 保存覆盖：把 main 的 popGrowthPerLevel 改成 999
+    const saveRes = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ buildings: { [mainId]: { popGrowthPerLevel: '999' } } }),
+    });
+    assert.equal(saveRes.statusCode, 200, `save 应成功：${saveRes.body}`);
+    const saveBody = JSON.parse(saveRes.body) as { ok: boolean };
+    assert.equal(saveBody.ok, true);
+
+    // 热重载后 config 应已更新
+    assert.equal(
+      app.config.buildings['main'].popGrowthPerLevel,
+      999,
+      `热重载后 popGrowthPerLevel 应为 999，原值=${origGrowth}`,
+    );
+
+    // balance/data 返回值也应反映覆盖
+    const dataRes = await fastify.inject({ method: 'GET', url: '/gm/balance/data' });
+    const dataBody = JSON.parse(dataRes.body) as { ok: boolean; buildings?: Array<Record<string, unknown>> };
+    assert.equal(dataBody.ok, true);
+    const mainRow = (dataBody.buildings ?? []).find((r) => String(r['id']) === mainId);
+    assert.ok(mainRow, 'balance/data 中应包含 main 行');
+    assert.equal(
+      Number(mainRow['popGrowthPerLevel']),
+      999,
+      'balance/data 中 main.popGrowthPerLevel 应为 999',
+    );
+
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});

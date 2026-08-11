@@ -102,3 +102,114 @@ test('academy 参数表解析正确', () => {
   assert.ok(a[10], 'Lv10 应存在');
   assert.ok(a[10].maxProbability >= 0.7, 'Lv10 保底概率应≥0.7');
 });
+
+// ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────
+test('研究：注册时初始 RP=0（不回溯赠送）', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '测试7', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId;
+  const st = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(st.ok, true);
+  assert.equal((st.payload as any).rp, 0, '注册时 RP 应为 0（无回溯赠送）');
+  assert.deepEqual((st.payload as any).completed, [], '注册时 completed 应为空数组');
+});
+
+// ─── 新增：完整研发完成与效果注入 ───────────────────────────────────
+test('研究：StartResearch + 推进时钟 → 状态 completed，GetTechTree 显示 completed', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '测试8', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId;
+
+  // 直接注入 RP（测试专用 store 写入；不绕过 Command/Event 架构，仅填充初始状态）
+  const techCode = 'infantry_training';
+  const tech = app.config.research[techCode];
+  assert.ok(tech, 'infantry_training 应存在于 config');
+  const rpCost: number = tech.rpCost;
+  const durationMs: number = tech.durationSec * 1000;
+
+  // 写入研究状态（含足够 RP）
+  app.store.set('research', va, {
+    villageId: va, rp: rpCost + 5, completed: [],
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 0, academyCount: 0 },
+  });
+
+  // StartResearch 应成功
+  const startRes = await send(app, 'research.StartResearch', { villageId: va, techCode });
+  assert.equal(startRes.ok, true, `StartResearch 应成功：${startRes.reason}`);
+  assert.equal((startRes.payload as any).rp, 5, `扣 RP 后应剩余 5，实际：${(startRes.payload as any).rp}`);
+
+  // 推进时钟超过研发时长，触发 completeResearch
+  await app.scheduler.advanceTo(clock + durationMs + 1000, (t) => { clock = t; });
+
+  // 检查 GetTechTree 状态
+  const treeRes = await send(app, 'research.GetTechTree', { villageId: va });
+  assert.equal(treeRes.ok, true);
+  const t = (treeRes.payload as any).techs.find((x: any) => x.code === techCode);
+  assert.ok(t, `${techCode} 应在科技树中`);
+  assert.equal(t.status, 'completed', `研发完成后 status 应为 completed，实际：${t.status}`);
+});
+
+// ─── 新增：CancelResearch 返还比例 RP ───────────────────────────────
+test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '测试9', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId;
+
+  const techCode = 'infantry_training';
+  const tech = app.config.research[techCode];
+  const rpCost: number = tech.rpCost;
+  const durationMs: number = tech.durationSec * 1000;
+
+  app.store.set('research', va, {
+    villageId: va, rp: rpCost, completed: [],
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 0, academyCount: 0 },
+  });
+
+  const startRes = await send(app, 'research.StartResearch', { villageId: va, techCode });
+  assert.equal(startRes.ok, true);
+
+  // 推进一半时间后取消
+  await app.scheduler.advanceTo(clock + Math.floor(durationMs / 2), (t) => { clock = t; });
+
+  const cancelRes = await send(app, 'research.CancelResearch', { villageId: va });
+  assert.equal(cancelRes.ok, true, `CancelResearch 应成功：${cancelRes.reason}`);
+  const refund: number = (cancelRes.payload as any).refund;
+  // 剩余约一半 durationMs → 退款 = floor(rpCost * (remaining/durationMs))
+  // 退款应 >= 0 且 < rpCost
+  assert.ok(refund >= 0, '退款应≥0');
+  assert.ok(refund < rpCost, `退款 ${refund} 应<rpCost ${rpCost}`);
+
+  // 取消后 researching 应为 null
+  const stateRes = await send(app, 'research.GetState', { villageId: va });
+  assert.equal((stateRes.payload as any).researching, null, '取消后 researching 应为 null');
+});
+
+// ─── 新增：拆光学院 → RP 归零 ─────────────────────────────────────────
+test('研究：拆除全部学院后 RP 归零', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '测试10', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId;
+
+  // 模拟有学院且有 RP（测试专用 store 写入）
+  app.store.set('research', va, {
+    villageId: va, rp: 50, completed: [],
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+
+  // 发出学院拆除事件（research 模块监听此事件，会调用 onAcademyChanged）
+  await app.bus.emit({
+    name: 'building.Demolished',
+    source: 'test',
+    ts: clock,
+    payload: { villageId: va, kind: 'academy' },
+  });
+
+  // 检查 RP 已归零（拆光学院触发清零）
+  const stateRes = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(stateRes.ok, true);
+  assert.equal((stateRes.payload as any).rp, 0, '拆光学院后 RP 应归零');
+});

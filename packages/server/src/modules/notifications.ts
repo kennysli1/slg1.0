@@ -26,7 +26,7 @@ interface VillageNotifications {
 }
 
 /** 内部事件名 → 对外推送名的映射（与各模块 MANIFEST.eventPushMap 保持一致）。 */
-const EVENT_MAP: Record<string, string> = {
+export const EVENT_MAP: Record<string, string> = {
   'combat.BattleEnded':       'BattleEnded',
   'combat.BattleStarted':     'BattleStarted',
   'building.Built':           'BuildingBuilt',
@@ -36,7 +36,6 @@ const EVENT_MAP: Record<string, string> = {
   'movement.Returned':        'MarchReturned',
   'movement.IncomingAttack':  'IncomingAttack',
   'movement.Intercepted':     'MarchIntercepted',
-  'treasure.Dropped':         'TreasureDropped',
   'treasure.PendingDropped':   'TreasurePendingDropped',
   'treasure.PendingExpired':   'TreasurePendingExpired',
   'treasure.CarriedArrived':   'TreasureCarriedArrived',

@@ -139,26 +139,17 @@ slg1.0/
 | `shared/ui/`、`shared/utils/` | 错误文案 / 转义 / 格式化 / 六边形数学 |
 
 ### 测试
-| 文件 | 内容 |
-|------|------|
-| `server/src/test/all.test.ts` | **测试入口 barrel**（跨平台；`npm run test:server` 跑它，汇总导入下列各文件） |
-| `server/src/test/full-loop.test.ts` | 单人全循环：经济→训练→打PvE→掠夺→返程 |
-| `server/src/test/building.test.ts` | 建筑三区布局、建造/升级、槽位/队列、前置门控 |
-| `server/src/test/multiplayer-pvp.test.ts` | 多人+PvP：注册/归属/A打B/双方战报/掠夺/返程/禁止自攻 |
-| `server/src/test/combat.test.ts` | 有状态战斗 tick、胜负、损失与战报 |
-| `server/src/test/hex.test.ts` | 六边形距离与路径 |
-| `server/src/test/movement-path.test.ts` | 逐格行军、到达接战、途中相遇 |
-| `server/src/test/persistence.test.ts` | 重启恢复：账号/资源/建筑/在途任务 |
-| `server/src/test/population.test.ts` | 人口系统 v3：硬上限/availableLabor、繁荣度五轴加成、增长收敛、粮荒减员、医院即时回收、ConsumePop 腾空间、扣人口发 `population.Changed` |
-| `server/src/test/population-v2.test.ts` | 人口系统 v3 回归：硬上限累加/availableLabor 门控/繁荣度联动/粮荒状态机/growthPerHour 粮荒为0/settle 永不 emit/RecoverCasualties 即时回收/resume 重算 hardCap/`population.Changed` 含 softLimit |
-| `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
-| `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
-| `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
-| `server/src/test/smithy.test.ts` | 铁匠养成：造价公式、`GetArmy` 下发 `pendingSmithy`（起止时刻，不外泄 taskId）、并发互斥、资源不足 |
-| `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
-| `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
-| `server/src/test/notifications.test.ts` | 服务端通知/战报持久化与上限裁剪 |
-| `server/src/test/concurrency.test.ts` 等 | 并发串行化 / Scheduler / CropDeficit 边沿 / RecoverCasualties 即时回收（无伤兵池）/ Gateway 边界 / WAL 恢复 |
+`npm run test:server` 运行 `test/all.test.ts` barrel；`barrel.test.ts` 自动守卫每个新 `*.test.ts` 都已登记。
+
+| 文件 | 覆盖重点 |
+|------|---------|
+| `test/all.test.ts` | **测试 barrel**（汇总导入所有 `*.test.ts`，跨平台） |
+| `test/barrel.test.ts` | 守卫：所有 `*.test.ts` 均已在 `all.test.ts` 登记 |
+| `test/architecture.test.ts` | 静态扫四铁律（跨模块 import / 定时器 / store 归属唯一） |
+| `test/push-contract.test.ts` | 推送契约：`EVENT_MAP` 与 gateway manifests 一致性 |
+| `test/gm-routes.test.ts` | GM 鉴权 / 危险路由拒绝 / balance round-trip |
+| `test/{trade,mercenary,research}.test.ts` | 贸易守恒/路线生命周期；雇佣兵；科研完整路径 |
+| 其余 `*.test.ts` | 全循环 / 人口 / 建筑 / 战斗 / 并发 / 网络安全 / 持久化等（见 `all.test.ts`） |
 | `client/src/test/unit.test.ts` | 前端转义、错误文案、协议版本兼容性 |
 
 ---

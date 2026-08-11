@@ -42,4 +42,10 @@ import './balance-override.test.js';
 import './treasure.test.js';
 import './pvp-treasure.test.js';
 import './research.test.js';
+// ---- 新增测试 ----
+import './barrel.test.js';
+import './push-contract.test.js';
+import './gm-routes.test.js';
+import './trade.test.js';
+import './mercenary.test.js';
 

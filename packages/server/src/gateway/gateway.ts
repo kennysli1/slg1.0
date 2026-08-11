@@ -53,7 +53,7 @@ interface Session {
 }
 
 /** 所有领域模块的 manifest（新增模块在此登记即可被网关汇总）。 */
-const MODULE_MANIFESTS: ModuleManifest[] = [
+export const MODULE_MANIFESTS: ModuleManifest[] = [
   PlayerModule.MANIFEST,
   MetaModule.MANIFEST,
   EconomyModule.MANIFEST,
