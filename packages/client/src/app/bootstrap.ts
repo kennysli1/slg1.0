@@ -328,9 +328,8 @@ async function loadResearchData(): Promise<any> {
   ]);
   const vil = getCache().vil as any;
   let hasAcademy = false;
-  if (vil) {
-    const zones = [vil.center, vil.inner, vil.outer];
-    for (const z of zones) {
+  if (vil?.zones) {
+    for (const z of [vil.zones.inner, vil.zones.outer]) {
       if (z?.placed?.some((p: any) => p.kind === 'academy' && p.level >= 1)) { hasAcademy = true; break; }
     }
   }
@@ -343,9 +342,8 @@ function updateResearchTabVisibility(): void {
   if (!researchTab) return;
   const vil = getCache().vil as any;
   let hasAcademy = false;
-  if (vil) {
-    const zones = [vil.center, vil.inner, vil.outer];
-    for (const z of zones) {
+  if (vil?.zones) {
+    for (const z of [vil.zones.inner, vil.zones.outer]) {
       if (z?.placed?.some((p: any) => p.kind === 'academy' && p.level >= 1)) { hasAcademy = true; break; }
     }
   }
