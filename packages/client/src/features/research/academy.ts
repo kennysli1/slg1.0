@@ -47,7 +47,10 @@ async function buildAcademyDrawer(slotId: string): Promise<void> {
       </div>
       <div class="drawer-body">
         <div class="drawer-sec-title">科研点</div>
-        <div style="font-size:24px;color:#fbbf24;margin:8px 0" id="acad-rp">0</div>
+        <div style="display:flex;align-items:center;gap:12px;margin:8px 0">
+          <span style="font-size:24px;color:#fbbf24" id="acad-rp">0</span>
+          <button type="button" class="btn-sm" style="padding:8px 18px;font-size:14px;border-color:#fbbf24;color:#fbbf24" onclick="window._gotoTechTree()">进入科技树</button>
+        </div>
         <div id="acad-researching"></div>
         <div class="drawer-sec-title">生产状态</div>
         <div class="bld-detail-row"><span class="bld-detail-k">当前概率</span><span class="bld-detail-v" id="acad-prob">-</span></div>
@@ -55,7 +58,6 @@ async function buildAcademyDrawer(slotId: string): Promise<void> {
         <div class="bld-detail-row"><span class="bld-detail-k">下次判定</span><span class="bld-detail-v" id="acad-next">-</span></div>
         <div class="bld-detail-row"><span class="bld-detail-k">学院数量</span><span class="bld-detail-v" id="acad-count">-</span></div>
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn-sm" onclick="window._gotoTechTree()">进入科技树</button>
           <button type="button" class="btn-sm btn-danger" id="acad-demolish" data-slot="${slotId}">拆除学院</button>
         </div>
       </div>

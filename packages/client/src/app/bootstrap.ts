@@ -235,10 +235,13 @@ function renderPage() {
   if (tab === 'village') page.innerHTML = renderVillage();
   else if (tab === 'army') page.innerHTML = renderArmy();
   else if (tab === 'map') page.innerHTML = renderMap();
-  else if (tab === 'research') page.innerHTML = '<div class="loading">加载中…</div>';
+  else if (tab === 'research') {
+    if (entering) { page.innerHTML = '<div class="loading">加载中…</div>'; }
+    else { void refreshTechTree(); } // 已在科技页：增量刷新，不重建 DOM
+  }
   else page.innerHTML = renderReports();
-  // 科技 tab：异步加载数据后渲染（需要 API 调用，不能同步）
-  if (tab === 'research') {
+  // 科技 tab：仅初次进入时异步加载数据渲染
+  if (tab === 'research' && entering) {
     void loadResearchData().then((data) => {
       const rpPage = document.getElementById('research-page');
       if (rpPage) return; // already rendered
