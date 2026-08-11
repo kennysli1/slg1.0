@@ -65,8 +65,8 @@ export class ResearchModule {
       CancelResearch: { command: 'research.CancelResearch', ownVillage: true, needAuth: true, schema: {} },
     },
     eventPushMap: {
-      TechCompleted: 'research.TechCompleted',
-      RpChanged: 'research.RpChanged',
+      'research.TechCompleted': 'research.TechCompleted',
+      'research.RpChanged': 'research.RpChanged',
     },
   };
 
@@ -405,6 +405,6 @@ export class ResearchModule {
   }
 
   private async pushRp(villageId: string, rp: number): Promise<void> {
-    await this.commands.send({ name: 'gateway.PushEvent', from: ResearchModule.NAME, payload: { villageId, event: 'research.RpChanged', data: { rp } } });
+    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp } });
   }
 }

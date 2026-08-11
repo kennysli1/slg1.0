@@ -315,6 +315,11 @@ onPush((event, payload) => {
     else if (event === 'TradeCenterUpdated') refreshTradeIfOpen();
     else if (event === 'TreasureChanged') { void refreshAll(); refreshTreasureDetailIfOpen(); }
     else void refreshAll();
+    // 科研事件：增量刷新科研相关 UI
+    if (event === 'research.TechCompleted' || event === 'research.RpChanged') {
+      void refreshAcademyIfOpen();
+      void refreshTechTree();
+    }
   } else {
     // 人口变化频繁：不整页刷新（避免抢焦点）；训练抽屉打开时仅刷新其人口提示
     refreshTrainingIfOpen();
