@@ -310,8 +310,10 @@ export class ResearchModule {
     const wasZero = s.academy.academyCount <= 0;
     s.academy.highestLevel = highestLevel;
     s.academy.academyCount = academyCount;
-    // 初次建造学院：重置 lastCheckTime，避免惰性回溯结算建院前的空 tick
+    // 初次建造学院：重置 lastCheckTime，避免回溯结算建院前的空 tick
     if (wasZero && academyCount > 0) s.academy.lastCheckTime = this.now();
+    // 全部拆除：科研点归零；部分拆除（还有学院）则不影响
+    if (!wasZero && academyCount <= 0) s.rp = 0;
     this.store.set(COLLECTION, villageId, s);
     // 重调度 RP tick
     this.settleRp(villageId);
