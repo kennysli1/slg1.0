@@ -641,7 +641,7 @@ function render(){
   html += sectionBuildings();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp') continue; // 已在 sectionBuildings 合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;
