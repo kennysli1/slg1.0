@@ -123,6 +123,8 @@ export class ResearchModule {
 
   async resume(): Promise<void> {
     for (const s of this.store.all<ResearchState>(COLLECTION)) {
+      // 恢复学院参数（已有存档可能缺 academyCount/highestLevel）
+      void this.onAcademyChanged(s.villageId);
       // 恢复在途研发计时器
       if (s.researching) {
         const now = this.now();
@@ -136,8 +138,7 @@ export class ResearchModule {
           this.store.set(COLLECTION, s.villageId, s);
         }
       }
-      // 惰性回溯 RP 生产
-      this.settleRp(s.villageId);
+      // 惰性回溯 RP 生产（onAcademyChanged 已包含 settleRp 调用）
     }
   }
 
