@@ -40,4 +40,5 @@ import './balance-roundtrip.test.js';
 import './balance-override.test.js';
 import './treasure.test.js';
 import './pvp-treasure.test.js';
+import './research.test.js';
 

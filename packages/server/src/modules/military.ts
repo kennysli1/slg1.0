@@ -48,6 +48,10 @@ interface MilitaryState {
   /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
   treasureAtkMult?: number;
   treasureDefMult?: number;
+  /** 科研攻击倍率（由 research 模块推送，叠加在宝物之上）。 */
+  techAtkMult?: number;
+  /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
+  techDefMult?: number;
 }
 
 const COLLECTION = 'military';
@@ -107,6 +111,17 @@ export class MilitaryModule {
     return { ok: true, payload: { atkMult: s.treasureAtkMult, defMult: s.treasureDefMult } };
   }
 
+  /** 科研攻击/防御倍率（research 模块推送，独立叠加在宝物倍率之上）。 */
+  private async setTechCombatMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, atkMult, defMult } = cmd.payload as { villageId: string; atkMult: number; defMult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    if (atkMult > 0) s.techAtkMult = 1 + atkMult;
+    if (defMult > 0) s.techDefMult = 1 + defMult;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
   private units(): Record<string, UnitDef> {
     return this.config.units;
   }
@@ -124,6 +139,7 @@ export class MilitaryModule {
     this.commands.register('military.AddMercenaries', (c) => this.addMercenaries(c));
     // 宝物军事倍率（攻/防分别作用），由 treasure 模块推送，无环。
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
+    this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -148,6 +164,8 @@ export class MilitaryModule {
     // 宝物军事倍率迁移默认值（旧存档缺省置 1，无倍率）。
     if (s.treasureAtkMult === undefined) s.treasureAtkMult = 1;
     if (s.treasureDefMult === undefined) s.treasureDefMult = 1;
+    if (s.techAtkMult === undefined) s.techAtkMult = 1;
+    if (s.techDefMult === undefined) s.techDefMult = 1;
     // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
     const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
       if (!order) return;
@@ -379,7 +397,7 @@ export class MilitaryModule {
     // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
-      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
+      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
       const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
       const unlocked = haveLv >= 1;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
@@ -403,7 +421,7 @@ export class MilitaryModule {
         const trainableHere = tribeUnits
           .filter((u) => u.building === sl.kind)
           .map((u) => {
-            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
+            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
             const unlocked = sl.level >= 1;
             return {
               key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
@@ -691,7 +709,7 @@ export class MilitaryModule {
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
       if (!this.config.units[unit] || n <= 0) continue;
-      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, s.treasureAtkMult ?? 1, s.treasureDefMult ?? 1);
+      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
       snapshot[unit] = { count: n, ...stats };
     }
     return { ok: true, payload: { snapshot } };

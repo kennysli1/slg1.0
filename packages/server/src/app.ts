@@ -195,7 +195,12 @@ export function createGameApp(opts?: {
     }
     return ids;
   };
-  const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages);
+  const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {
+    for (const v of store.all<{ playerId?: string; villageId?: string }>('player')) {
+      if ((v as any).villageId === vid) return (v as any).playerId ?? null;
+    }
+    return null;
+  });
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {
