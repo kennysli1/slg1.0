@@ -36,6 +36,9 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   assert.equal(p.constants.storageBase, app.config.constants.storageBase);
   assert.equal(p.constants.storageGrowthPerLevel, app.config.constants.storageGrowthPerLevel);
   assert.equal(p.constants.smithyBonusPerLevel, app.config.constants.smithyBonusPerLevel);
+  // 铁匠升级造价基数与基础时长：客户端据此显示精确消耗与耗时
+  assert.equal(p.constants.smithyCostBase, app.config.constants.smithyCostBase);
+  assert.equal(p.constants.smithyUpgradeSec, app.config.constants.smithyUpgradeSec);
   assert.equal(p.constants.wallBonusPerLevel, app.config.constants.wallBonusPerLevel);
   assert.equal(p.constants.popHospitalRecoveryBase, app.config.constants.popHospitalRecoveryBase);
   assert.equal(p.constants.popHospitalRecoveryPerLevel, app.config.constants.popHospitalRecoveryPerLevel);

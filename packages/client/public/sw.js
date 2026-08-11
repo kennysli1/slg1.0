@@ -5,7 +5,8 @@
  * - 同源静态资源(JS/CSS/字体/美术)：stale-while-revalidate，秒开且后台静默更新
  * - WebSocket / 非 GET / 跨域：完全不拦截，直接放行（游戏实时通信不受影响）
  */
-const CACHE = 'kow-v1';
+/* 视觉重构换了全套美术与样式，必须升 CACHE 名把旧壳与旧图整体作废 */
+const CACHE = 'kow-v2';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {

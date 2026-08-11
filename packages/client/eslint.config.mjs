@@ -1,8 +1,7 @@
 // @ts-check
 /**
  * 客户端 ESLint 扁平配置。
- * 专注 TypeScript 质量规则；客户端无服务端的跨模块 import 架构约束，
- * 但仍须防范 XSS（innerHTML 插值须经 escapeHtml/escapeAttr）。
+ * 视图层是 Preact + TSX，渲染由 JSX 自动转义，不再手写 innerHTML 插值。
  */
 import tseslint from 'typescript-eslint';
 
@@ -10,7 +9,7 @@ export default tseslint.config(
   { ignores: ['dist/**', 'node_modules/**'] },
 
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {

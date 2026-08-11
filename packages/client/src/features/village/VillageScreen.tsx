@@ -1,0 +1,184 @@
+/**
+ * 村庄页。自上而下：建造队列 → 村庄视图（场景/列表可切） → 人口 → 宝物栏。
+ *
+ * 村庄视图放在最上面：它是这个游戏的门面，玩家进来第一眼该看见自己的城，
+ * 而不是先读两屏数据面板。视图偏好存 localStorage（见 store 的 villageView）。
+ */
+import { dataVersion, tick, villageView, setVillageView } from '../../app/store.js';
+import { getCache } from '../../app/state.js';
+import { buildingInfo } from '../../app/config.js';
+import { Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { VillageScene } from './VillageScene.js';
+import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
+import { PopPanel } from './PopPanel.js';
+import { TreasurePanel } from './TreasurePanel.js';
+
+import '../../styles/village.css';
+
+// ── Build queue strip ─────────────────────────────────────────────────────────
+
+function QueueStrip({ queue }: { queue: any }) {
+  tick.value; // for TimerBar
+
+  if (!queue?.items?.length) return null;
+
+  const items: any[] = queue.items;
+  const cap: number = queue.capacity ?? 0;
+  const free = Math.max(0, cap - items.length);
+
+  return (
+    <div class="vil-queue">
+      <SectionHead sub={`${items.length}/${cap} · 空余 ${free}`}>建造队列</SectionHead>
+
+      {/* Queue slot dots */}
+      <div class="vil-queue-free" aria-hidden="true">
+        {Array.from({ length: cap }, (_, i) => (
+          <div key={i} class={`vil-queue-slot-dot${i < items.length ? ' used' : ''}`} />
+        ))}
+      </div>
+
+      <div class="vil-queue-slots">
+        {items.map((q: any, idx: number) => {
+          const info = buildingInfo(q.kind);
+          const verb = q.isNew ? '建造' : '升级';
+          return (
+            <Panel key={idx} variant="flat" class="vil-queue-item">
+              <Icon icon={info.icon} label={info.name} size="sm" />
+              <div class="vil-queue-body">
+                <div class="vil-queue-name">
+                  {info.name} → Lv{q.toLevel}
+                </div>
+                <div class="vil-queue-verb">{verb}</div>
+                <TimerBar startAt={q.startAt} finishAt={q.finishAt} />
+              </div>
+            </Panel>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── List-view layout ──────────────────────────────────────────────────────────
+
+function VillageListView({ vil }: { vil: any }) {
+  const tc = vil.townCenter;
+  const inner = vil.zones?.inner;
+  const outer = vil.zones?.outer;
+  const innerPlaced: any[] = inner?.placed ?? [];
+  const outerPlaced: any[] = outer?.placed ?? [];
+  const innerFree: number = inner?.freeSlots ?? 0;
+  const outerFree: number = outer?.freeSlots ?? 0;
+
+  return (
+    <div class="vil-list">
+      {/* Town centre */}
+      {tc && (
+        <div>
+          <SectionHead>城镇中心</SectionHead>
+          <div class="vil-zone-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <BuildingCard building={tc} isCenter />
+          </div>
+        </div>
+      )}
+
+      {/* Outer zone: resource fields */}
+      <div>
+        <SectionHead sub={`${outerPlaced.length}/${outer?.slots ?? 0}`}>
+          城外 · 生产量产
+        </SectionHead>
+        <div class="vil-zone-grid">
+          {outerPlaced.map((b: any) => <BuildingCard key={b.slotId} building={b} />)}
+          {Array.from({ length: outerFree }, (_, i) => (
+            <EmptySlotCard key={`outer-empty-${i}`} zone="outer" />
+          ))}
+        </div>
+      </div>
+
+      {/* Inner zone: civic / research */}
+      <div>
+        <SectionHead sub={`${innerPlaced.length}/${inner?.slots ?? 0}`}>
+          城内 · 民生研发
+        </SectionHead>
+        <div class="vil-zone-grid">
+          {innerPlaced.map((b: any) => <BuildingCard key={b.slotId} building={b} />)}
+          {Array.from({ length: innerFree }, (_, i) => (
+            <EmptySlotCard key={`inner-empty-${i}`} zone="inner" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── View toggle button group ──────────────────────────────────────────────────
+
+function ViewToggle() {
+  const view = villageView.value;
+  return (
+    <div class="vil-view-toggle" role="group" aria-label="视图切换">
+      <button
+        class={`vil-view-btn${view === 'scene' ? ' active' : ''}`}
+        aria-pressed={view === 'scene'}
+        onClick={() => setVillageView('scene')}
+      >
+        🗺 场景
+      </button>
+      <button
+        class={`vil-view-btn${view === 'list' ? ' active' : ''}`}
+        aria-pressed={view === 'list'}
+        onClick={() => setVillageView('list')}
+      >
+        📋 列表
+      </button>
+    </div>
+  );
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
+
+export function VillageScreen() {
+  dataVersion.value; // subscribe — re-renders when server data updates
+
+  const vil = getCache().vil;
+  if (!vil || !vil.zones) return <div class="loading">村庄数据加载中…</div>;
+
+  const view = villageView.value;
+  const hasQueue = !!(vil.queue?.items?.length);
+  const hasTreasures = !!(getCache().treasures);
+
+  return (
+    <>
+      {/* 建造队列：时间敏感，放最上面 */}
+      {hasQueue && (
+        <Panel pad style={{ marginBottom: 'var(--s-4)' }}>
+          <QueueStrip queue={vil.queue} />
+        </Panel>
+      )}
+
+      {/* 村庄视图：本页主角 */}
+      <SectionHead actions={<ViewToggle />}>
+        {view === 'scene' ? '村庄全景' : '村庄管理'}
+      </SectionHead>
+      {view === 'scene' ? <VillageScene vil={vil} /> : <VillageListView vil={vil} />}
+
+      {/* 人口 */}
+      <SectionHead>人口 · 文明活力</SectionHead>
+      <Panel pad>
+        <PopPanel />
+      </Panel>
+
+      {/* 宝物栏 */}
+      {hasTreasures && (
+        <>
+          <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
+            宝物栏
+          </SectionHead>
+          <Panel variant="flat" pad>
+            <TreasurePanel />
+          </Panel>
+        </>
+      )}
+    </>
+  );
+}

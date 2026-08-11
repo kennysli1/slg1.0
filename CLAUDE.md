@@ -45,6 +45,8 @@
 | 加全局常量 / 平衡参数 | `config/README.md` | `config/game_constants.csv` + `infra/config.ts` 的 `GameConstants` 加字段 |
 | 加新系统（工会 / 邮件） | `docs/2_2.0设计/07_扩展与代码规范.md`、`03_架构总览.md` | 照 `modules/` 模板加模块 + `static MANIFEST` + `gateway.ts` 登记 + 挂 `app.ts` |
 | 改某个系统的逻辑 | PROJECT.md §四 找 owner 模块 | 只改该模块的私有方法，要别人的数据就发 Command |
+| 改前端界面 / 加页面·弹窗 | `docs/2_2.0设计/14_前端设计系统.md` | Preact+TSX 组件；样式只用 `styles/tokens.css` 的变量；动作走 `act()` |
+| 加·换美术资源 | `docs/美术生成规范.md` | `tools/art_manifest.json` 加一条 → 出洋红幕布图 → `python tools/art_pipeline.py` |
 | 改通信接口 / 加 action | `docs/2_2.0设计/04_通信格式规范.md` | `packages/shared` 信封 + gateway；破坏性改动升 `WIRE_VERSION` |
 | 改战斗 / 地图行军 / 建筑 / 人口 | 对应 `docs/2_2.0设计/` 的 08 / 09 / 11 / 13 | 对应 owner 模块 |
 | 改存档结构 / 排查存档 | `docs/服务器/01_数据存储结构.md` | 升 `SAVE_SCHEMA_VERSION`，部署带刷档 |

@@ -1,0 +1,257 @@
+﻿/* ============================================================
+   贸易中心 & 雇佣兵营地 私有样式
+   —— 仅引用 tokens 变量，禁止写死颜色/字号/间距
+   ============================================================ */
+
+/* ---- 金币 + 路线信息行 ---- */
+.trade-header {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  background: rgba(0, 0, 0, .20);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.trade-header-row {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+}
+.trade-gold-label { font-size: var(--f-sm); color: var(--c-ink-dim); }
+.trade-gold-num {
+  font-family: var(--ff-num); font-size: var(--f-xl);
+  font-weight: 700; color: var(--c-gold-hi);
+  margin-right: auto;
+}
+.trade-route-info {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+  font-size: var(--f-xs); color: var(--c-ink-dim);
+}
+.trade-route-num {
+  font-family: var(--ff-num); font-size: var(--f-md);
+  font-weight: 700; color: var(--c-gold);
+}
+.trade-route-bar { flex: 1 1 160px; min-width: 100px; }
+
+/* ---- Refresh / timer row ---- */
+.trade-refresh-row {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  font-size: var(--f-xs); color: var(--c-ink-dim);
+}
+.trade-refresh-row .btn { flex: none; }
+
+/* ---- Trade offer card ---- */
+.trade-offer-list {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden;
+}
+.trade-offer {
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  transition: background var(--t-fast);
+}
+.trade-offer:last-child { border-bottom: 0; }
+.trade-offer:hover { background: rgba(255, 255, 255, .025); }
+
+.trade-offer-head {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+  margin-bottom: var(--s-2);
+}
+.trade-offer-meta { font-size: var(--f-xs); color: var(--c-ink-dim); margin-left: auto; }
+.trade-offer-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-2); flex-wrap: wrap;
+  margin-top: var(--s-2);
+}
+.trade-offer-foot .btn { flex: none; }
+.trade-disable-reason { font-size: var(--f-xs); color: var(--c-ink-dim); }
+
+/* Give → Get two-column exchange layout */
+.trade-exchange {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-2) 0;
+}
+.trade-exchange-side { display: flex; flex-direction: column; gap: var(--s-1); }
+.trade-exchange-label { font-size: var(--f-2xs); color: var(--c-ink-dim); letter-spacing: .3px; }
+.trade-exchange-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; }
+.trade-exchange-arrow {
+  font-size: var(--f-lg); color: var(--c-gold-dim); text-align: center;
+}
+
+/* ---- Treasure card (inside NPC orders) ---- */
+.trade-treasure-card {
+  display: flex; gap: var(--s-3);
+  padding: var(--s-3); border-radius: var(--r-md);
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid var(--line);
+}
+.trade-treasure-card.rarity-rare { border-color: rgba(91, 143, 192, .50); }
+.trade-treasure-card.rarity-epic {
+  border-color: rgba(164, 121, 200, .55);
+  box-shadow: 0 0 10px rgba(164, 121, 200, .15);
+}
+.trade-treasure-card.rarity-legend {
+  border-color: rgba(224, 165, 63, .60);
+  box-shadow: var(--glow-gold);
+}
+.trade-treasure-body { display: flex; flex-direction: column; gap: var(--s-1); flex: 1; min-width: 0; }
+.trade-treasure-name {
+  font-family: var(--ff-han); font-weight: 700; font-size: var(--f-md);
+  color: var(--c-ink);
+}
+.trade-treasure-tags { display: flex; gap: var(--s-1); flex-wrap: wrap; }
+.trade-treasure-effect { font-size: var(--f-sm); color: var(--c-jade); }
+.trade-treasure-footer {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+  margin-top: var(--s-2);
+}
+
+/* Rarity color tokens for tags */
+.tag--rarity-common { color: var(--rarity-common); }
+.tag--rarity-rare { color: var(--rarity-rare); }
+.tag--rarity-epic { color: var(--rarity-epic); }
+.tag--rarity-legend { color: var(--rarity-legend); }
+
+/* ---- Create-order form ---- */
+.trade-create { display: flex; flex-direction: column; gap: var(--s-3); }
+.trade-create-grid {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: var(--s-2);
+  align-items: center;
+}
+.trade-create-grid-header {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: var(--s-2);
+  padding: 0 0 var(--s-1);
+  font-size: var(--f-xs); color: var(--c-ink-dim);
+  border-bottom: 1px solid var(--line);
+}
+.trade-create-grid-header span:first-child { visibility: hidden; }
+.trade-res-label {
+  display: flex; align-items: center; gap: var(--s-2);
+  font-size: var(--f-sm); color: var(--c-ink);
+}
+.trade-create-input {
+  width: 100%; padding: var(--s-2) var(--s-3);
+  background: var(--c-panel-3); border: 1px solid var(--line);
+  border-radius: var(--r-md); color: var(--c-ink);
+  font-family: var(--ff-num); font-size: var(--f-sm);
+  min-height: 44px;
+  transition: border-color var(--t-fast), outline var(--t-fast);
+}
+.trade-create-input:focus {
+  outline: 2px solid var(--c-gold); outline-offset: 1px;
+  border-color: var(--line-strong);
+}
+.trade-create-input::-webkit-outer-spin-button,
+.trade-create-input::-webkit-inner-spin-button { opacity: .35; }
+.trade-route-feedback {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--f-sm); color: var(--c-ink-soft);
+  background: rgba(0, 0, 0, .15); border-radius: var(--r-md);
+  border: 1px solid var(--line);
+}
+.trade-route-feedback.over {
+  color: var(--c-crimson-hi);
+  border-color: rgba(212, 84, 76, .45);
+  background: rgba(212, 84, 76, .08);
+}
+.trade-route-feedback-num { font-family: var(--ff-num); font-weight: 700; }
+
+/* ---- Treasure overflow sub-dialog ---- */
+.trade-overflow-wrap {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 9, .75);
+  border-radius: var(--r-lg);
+}
+.trade-overflow-card {
+  width: min(480px, 90%);
+  padding: var(--s-4);
+  display: flex; flex-direction: column; gap: var(--s-3);
+}
+.trade-overflow-title {
+  font-family: var(--ff-han); font-size: var(--f-md); font-weight: 700;
+  color: var(--c-gold-hi);
+}
+.trade-overflow-hint { font-size: var(--f-sm); color: var(--c-ink-dim); }
+.trade-overflow-actions { display: flex; flex-direction: column; gap: var(--s-2); }
+.trade-overflow-row { display: flex; align-items: center; gap: var(--s-2); }
+.trade-overflow-select {
+  flex: 1; padding: var(--s-2) var(--s-3);
+  background: var(--c-panel-3); border: 1px solid var(--line);
+  border-radius: var(--r-md); color: var(--c-ink); font-size: var(--f-sm);
+  min-height: 44px;
+}
+.trade-overflow-select:focus { outline: 2px solid var(--c-gold); outline-offset: 1px; }
+
+/* ---- Mercenary camp ---- */
+.merc-header {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  padding: var(--s-3) var(--s-4);
+  background: rgba(0, 0, 0, .20);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.merc-gold-num {
+  font-family: var(--ff-num); font-size: var(--f-xl);
+  font-weight: 700; color: var(--c-gold-hi);
+}
+.merc-selling-points {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-left: auto; font-size: var(--f-xs); color: var(--c-jade);
+  text-align: right;
+}
+.merc-refresh-row {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  font-size: var(--f-xs); color: var(--c-ink-dim);
+}
+.merc-refresh-timer { flex: 1; display: flex; flex-direction: column; gap: var(--s-1); }
+.merc-offer-list {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden;
+}
+.merc-card {
+  display: flex; gap: var(--s-3); padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  transition: background var(--t-fast);
+}
+.merc-card:last-child { border-bottom: 0; }
+.merc-card:hover { background: rgba(255, 255, 255, .025); }
+.merc-card-body { flex: 1; display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+.merc-card-name {
+  font-family: var(--ff-han); font-size: var(--f-md); font-weight: 700;
+  display: flex; align-items: center; gap: var(--s-2);
+}
+.merc-card-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-2); flex-wrap: wrap;
+  margin-top: var(--s-1);
+}
+.merc-price {
+  display: flex; align-items: center; gap: var(--s-1);
+  font-family: var(--ff-num); font-size: var(--f-md); font-weight: 700; color: var(--c-gold);
+}
+.merc-lack-reason { font-size: var(--f-xs); color: var(--c-crimson-hi); }
+
+/* ---- Mobile overrides ---- */
+@media (max-width: 720px) {
+  .trade-exchange {
+    grid-template-columns: 1fr;
+  }
+  .trade-exchange-arrow {
+    display: block;
+    transform: rotate(90deg);
+    text-align: center;
+  }
+  .trade-create-grid,
+  .trade-create-grid-header {
+    grid-template-columns: auto 1fr 1fr;
+  }
+  .trade-overflow-card { width: 100%; }
+  .merc-selling-points { margin-left: 0; text-align: left; }
+  .merc-card-footer { flex-direction: column; align-items: flex-start; }
+}

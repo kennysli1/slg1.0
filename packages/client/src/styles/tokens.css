@@ -1,0 +1,99 @@
+/* ============================================================
+   KOW 设计令牌（唯一配色/间距/字号/层级来源）
+   主题：深色石质战争议事厅 —— 暗石面板 + 鎏金描边 + 厚涂插画
+   改主题只改这一份；组件样式一律引用变量，禁止写死颜色。
+   ============================================================ */
+
+/* 展示字体：Cinzel（罗马石刻衬线，仅拉丁/数字，自托管） */
+@font-face {
+  font-family: "Cinzel"; font-style: normal; font-weight: 400;
+  font-display: swap; src: url("/fonts/cinzel-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cinzel"; font-style: normal; font-weight: 700;
+  font-display: swap; src: url("/fonts/cinzel-700.woff2") format("woff2");
+}
+
+:root {
+  /* ---------- 字族 ---------- */
+  --ff-display: "Cinzel", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
+  --ff-han: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;
+  --ff-body: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ff-num: "Cinzel", system-ui, "Microsoft YaHei", sans-serif;
+
+  /* ---------- 底色（由深到浅的五层石面） ---------- */
+  --c-void: #080b10;      /* 最深：页面外底、遮罩 */
+  --c-bg: #10151c;        /* 页面底 */
+  --c-panel: #1a2029;     /* 一级面板 */
+  --c-panel-2: #222a35;   /* 二级面板 / 卡片 */
+  --c-panel-3: #2b3441;   /* 三级：hover / 输入框 */
+  --c-raise: #36414f;     /* 凸起：按钮面、滑块 */
+
+  /* ---------- 文字 ---------- */
+  --c-ink: #ece3d2;       /* 主文字（暖白羊皮纸） */
+  --c-ink-soft: #a79c88;  /* 次文字 */
+  --c-ink-dim: #77705f;   /* 三级文字 / 占位 */
+  --c-ink-on-gold: #241b0c;
+
+  /* ---------- 强调色 ---------- */
+  --c-gold: #d8b168;      /* 主强调：描边/标题/数值 */
+  --c-gold-hi: #f6e0aa;   /* 高光 */
+  --c-gold-dim: #8d6f37;  /* 暗金 */
+  --c-crimson: #a63530;   /* 进攻 / 危险 */
+  --c-crimson-hi: #d4544c;
+  --c-ember: #e08a3c;     /* 掠夺 / 警告 / 建造中 */
+  --c-jade: #5f9c62;      /* 正向 / 返程 / 充足 */
+  --c-steel: #6f8ba8;     /* 中性信息 / 侦察 */
+  --c-violet: #8a6ba8;    /* 稀有度：史诗 */
+
+  /* ---------- 描边与分隔 ---------- */
+  --line: rgba(216, 177, 104, .18);
+  --line-strong: rgba(216, 177, 104, .40);
+  --line-dark: rgba(0, 0, 0, .45);
+
+  /* ---------- 间距刻度（4 的倍数） ---------- */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+
+  /* ---------- 字号刻度 ---------- */
+  --f-2xs: 10px; --f-xs: 11px; --f-sm: 13px; --f-md: 15px;
+  --f-lg: 18px; --f-xl: 24px; --f-2xl: 32px; --f-3xl: 44px;
+
+  /* ---------- 圆角 ---------- */
+  --r-sm: 4px; --r-md: 8px; --r-lg: 14px; --r-pill: 999px;
+
+  /* ---------- 阴影与发光 ---------- */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .40);
+  --sh-2: 0 4px 14px rgba(0, 0, 0, .45);
+  --sh-3: 0 14px 40px rgba(0, 0, 0, .60);
+  --glow-gold: 0 0 14px rgba(216, 177, 104, .35);
+  --glow-crimson: 0 0 14px rgba(212, 84, 76, .40);
+
+  /* ---------- 层级 ---------- */
+  --z-map-ui: 20;
+  --z-topbar: 60;
+  --z-tabbar: 60;
+  --z-scrim: 100;
+  --z-modal: 110;
+  --z-toast: 200;
+  --z-tooltip: 300;
+
+  /* ---------- 布局 ---------- */
+  --topbar-h: 64px;
+  --tabbar-h: 52px;
+  --page-max: 1180px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+
+  /* ---------- 动效 ---------- */
+  --ease-out: cubic-bezier(.22, .8, .3, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --t-fast: 120ms; --t-med: 220ms; --t-slow: 380ms;
+}
+
+/* 稀有度色（宝物/雇佣兵共用） */
+:root {
+  --rarity-common: #8e8877;
+  --rarity-rare: #5b8fc0;
+  --rarity-epic: #a479c8;
+  --rarity-legend: #e0a53f;
+}

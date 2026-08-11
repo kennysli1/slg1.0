@@ -1,0 +1,986 @@
+[
+  {
+    "base": "res_wood",
+    "zh": "木材",
+    "category": "res",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a bundle of freshly cut oak logs bound with coarse rope, rough bark and pale sawn end-grain, one split log with an axe notch leaning against the stack, a scatter of wood chips at the base"
+  },
+  {
+    "base": "res_clay",
+    "zh": "泥土",
+    "category": "res",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a mound of wet reddish-brown clay dug from a pit, a wooden pail half full of watery slip beside it, two hand-shaped clay bricks drying in front, an iron trowel stuck upright in the mound"
+  },
+  {
+    "base": "res_iron",
+    "zh": "铁矿",
+    "category": "res",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a cluster of raw iron ore chunks with rust-red and grey mineral veins across broken rock faces, two smelted iron ingots stacked neatly in front, small metallic flecks glinting in the stone"
+  },
+  {
+    "base": "res_crop",
+    "zh": "粮食",
+    "category": "res",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a bound sheaf of golden wheat with heavy drooping grain heads, a small burlap sack of loose grain tipped open beside it, a curved iron sickle leaning against the sheaf"
+  },
+  {
+    "base": "res_gold",
+    "zh": "金币",
+    "category": "res",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a heap of gold coins stamped with a crowned profile, three neat stacks of coins standing at the front of the pile, a small leather pouch tipped over spilling more coins"
+  },
+  {
+    "base": "field_woodcutter",
+    "zh": "伐木场",
+    "category": "field",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a woodcutter's camp at a three-quarter top-down angle: felled pine trunks stacked on timber skids, a chopping block with a two-handed axe buried in it, sawdust heaps, a low plank shed, fresh stumps in cleared soil"
+  },
+  {
+    "base": "field_claypit",
+    "zh": "采泥场",
+    "category": "field",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a clay quarry at a three-quarter top-down angle: a terraced reddish-brown pit with murky water pooled at the bottom, wooden ramps and ladders, filled clay buckets, a handcart of wet clay bricks at the rim"
+  },
+  {
+    "base": "field_ironmine",
+    "zh": "铁矿",
+    "category": "field",
+    "mode": "icon",
+    "size": 512,
+    "subject": "an iron mine at a three-quarter top-down angle: a timber-braced tunnel mouth cut into a grey rocky hillside, ore carts on plank rails, heaps of rust-red ore, pickaxes and a rope hoist frame"
+  },
+  {
+    "base": "field_cropland",
+    "zh": "农田",
+    "category": "field",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a farm plot at a three-quarter top-down angle: neat furrowed rows of ripe golden wheat, a low fieldstone boundary wall, a straw scarecrow in a tattered shirt, stacked hay bales and a wooden hand plough"
+  },
+  {
+    "base": "bld_main",
+    "zh": "城镇中心",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a village keep and town hall at a three-quarter top-down angle: a square stone tower joined to a timber-framed hall with tiled roofs, a cobbled forecourt with a stone well, crimson-and-gold banners on poles, a broad gated entry"
+  },
+  {
+    "base": "bld_warehouse",
+    "zh": "仓库",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a storage warehouse at a three-quarter top-down angle: a long timber barn with wide plank doors and a shingled roof, stacked crates and banded barrels under a canvas awning, coiled rope, a loading ramp with a handcart"
+  },
+  {
+    "base": "bld_granary",
+    "zh": "粮仓",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a granary at a three-quarter top-down angle: a round stone-and-timber silo with a conical thatched roof raised on mushroom staddle stones, a short wooden stair, bulging grain sacks and wheat sheaves piled at the door"
+  },
+  {
+    "base": "bld_barracks",
+    "zh": "兵营",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a soldiers' barracks at a three-quarter top-down angle: a long timber-and-stone hall with a fenced training yard of packed dirt, weapon racks of spears and shields, a straw drill dummy, a crimson pennant over the door"
+  },
+  {
+    "base": "bld_stable",
+    "zh": "马厩",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a cavalry stable at a three-quarter top-down angle: a timber stable block with split half-doors, two horses drinking at a stone trough, hay bales and saddles on rails, a fenced paddock of trodden dirt"
+  },
+  {
+    "base": "bld_workshop",
+    "zh": "兵工厂",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a siege workshop at a three-quarter top-down angle: an open-sided timber shed housing a half-built battering ram and a catapult frame, sawhorses and cut beams, coiled rope, iron fittings, a windlass and a forge anvil"
+  },
+  {
+    "base": "bld_academy",
+    "zh": "学院",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a scholars' academy at a three-quarter top-down angle: a pale stone hall with a columned porch and a low domed roof, a brass astrolabe on the terrace, open books and scrolls on a lectern, ivy climbing the walls"
+  },
+  {
+    "base": "bld_smithy",
+    "zh": "铁匠铺",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a blacksmith's forge at a three-quarter top-down angle: a squat stone smithy with a smoking chimney, a glowing coal hearth and bellows, an anvil with hammers and tongs, a quenching barrel, finished swords and helms on a rack"
+  },
+  {
+    "base": "bld_wall",
+    "zh": "城墙",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a defensive village wall at a three-quarter top-down angle: a curved stretch of mortared stone rampart with crenellations and a timber walkway, an iron-studded double gate, one flanking guard tower with a crimson pennant"
+  },
+  {
+    "base": "bld_rallypoint",
+    "zh": "集结点",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a troop rally point at a three-quarter top-down angle: a trodden dirt muster ground ringed by banner poles, a raised wooden command platform with a war drum and a bronze horn, spears stacked in tripods, a fire pit"
+  },
+  {
+    "base": "bld_hospital",
+    "zh": "医院",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a field infirmary at a three-quarter top-down angle: a whitewashed stone building with a stretched canvas awning, cots with linen sheets, a table of rolled bandages and clay jars, herb bundles hanging to dry, a water basin"
+  },
+  {
+    "base": "bld_residence",
+    "zh": "居民楼",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a residential block at a three-quarter top-down angle: two joined timber-framed houses with tiled roofs and shuttered windows, a shared courtyard with a laundry line, flower boxes, chimney smoke, a small kitchen garden"
+  },
+  {
+    "base": "bld_mercenarycamp",
+    "zh": "雇佣兵营地",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a mercenary camp at a three-quarter top-down angle: patched tan canvas tents around a campfire with a cooking pot, mismatched weapons in a crude rack, a coin scale on a barrel table, a tethered pack mule, no banners"
+  },
+  {
+    "base": "bld_tradecenter",
+    "zh": "贸易中心",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a trade center at a three-quarter top-down angle: an open stone-arcaded market hall with striped awnings, a loaded ox wagon at the gate, crates, clay amphorae and bolts of cloth, a weighing scale and a ledger table"
+  },
+  {
+    "base": "bld_treasury",
+    "zh": "宝库",
+    "category": "bld",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a treasury vault at a three-quarter top-down angle: a squat fortified stone building with an iron-banded door and a heavy padlock, barred windows, a short flight of steps, open chests glinting with coins and gems inside the entry"
+  },
+  {
+    "base": "unit_legionnaire",
+    "zh": "军团兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman legionnaire in polished segmented steel plate and a crested helmet with a crimson horsehair plume, a large rectangular shield bearing a gold laurel emblem braced forward, a short stabbing sword drawn, disciplined upright stance"
+  },
+  {
+    "base": "unit_praetorian",
+    "zh": "禁卫兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an imperial praetorian guard in heavy polished steel plate with gilded chest relief and a tall crimson horsehair crest, a broad rectangular tower shield planted on the ground, a spear held upright, immovable defensive stance"
+  },
+  {
+    "base": "unit_imperian",
+    "zh": "帝国兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an elite imperial soldier in burnished steel plate with gold trim and a short crimson shoulder cape, a kite shield on the left arm, a long straight sword raised mid-swing, aggressive forward lunge on one bent knee"
+  },
+  {
+    "base": "unit_equlegati",
+    "zh": "侦察骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a light Roman scout rider on a lean bay horse, a minimal steel cuirass over a crimson tunic, a crestless helmet, no shield, a short javelin in hand and a leather map case at the saddle, leaning low at a gallop"
+  },
+  {
+    "base": "unit_equimperatoris",
+    "zh": "近卫骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman imperial cavalryman on a white horse in crimson-and-gold caparison, polished steel plate and a crested helm, a kite shield with a gold eagle device, a lance lowered level for the charge"
+  },
+  {
+    "base": "unit_equcaesaris",
+    "zh": "凯撒骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an elite Caesar's cavalryman on a heavily barded black warhorse in crimson and gold, ornate steel plate with gilded laurel filigree, a tall crested helm, a rectangular shield and a long lance, horse rearing into a charge"
+  },
+  {
+    "base": "unit_ram",
+    "zh": "攻城锤",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman battering ram: a heavy oak beam capped with an iron ram's-head head, slung on chains inside a squared timber frame under a pitched roof of crimson-painted planks, riding on four solid wooden wheels"
+  },
+  {
+    "base": "unit_catapult",
+    "zh": "投石机",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman stone-throwing catapult: a tensioned timber torsion frame with iron-bound rope skeins, a loaded sling arm cocked back, a stack of round stone shot beside the wheels, crimson-and-gold trim on the beams"
+  },
+  {
+    "base": "unit_senator",
+    "zh": "元老",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman senator in a white toga with a broad crimson-and-gold border, a gold laurel wreath on grey hair, a sealed scroll of decree in one hand, an ornate gilded staff in the other, imposing oratorial pose"
+  },
+  {
+    "base": "unit_settler",
+    "zh": "拓荒者",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Roman settler pioneer in a crimson tunic and leather apron with a plain steel cap, pushing a handcart loaded with tools, seed sacks, surveying rods and a rolled tent, walking forward purposefully"
+  },
+  {
+    "base": "unit_phalanx",
+    "zh": "方阵兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish phalanx spearman in green wool and bronze-studded leather with chainmail sleeves, a round wooden shield painted with swirling knotwork, a long spear angled forward, braced low defensive crouch, light agile build"
+  },
+  {
+    "base": "unit_swordsman",
+    "zh": "剑士",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish swordsman in a green hooded cloak over bronze-scaled leather, a round knotwork shield slung on his back, a long bronze-hilted slashing sword held in a two-handed ready guard, light-footed agile stance"
+  },
+  {
+    "base": "unit_pathfinder",
+    "zh": "探路者",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish pathfinder on a swift dappled horse, a green hooded cloak with feather and antler charms over soft leather armor, a short bow across his back and a carved walking staff in hand, riding low and fast"
+  },
+  {
+    "base": "unit_theutates",
+    "zh": "雷神骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish thunder rider on a fast chestnut horse with a green saddle blanket, a chainmail shirt with bronze arm rings and an antlered helm, a round knotwork shield and a raised javelin, standing in the stirrups mid-charge"
+  },
+  {
+    "base": "unit_druidrider",
+    "zh": "德鲁伊骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish druid rider on a broad grey horse, deep green robes over bronze-trimmed chainmail, an oak-leaf circlet, a heavy dark wooden shield with swirling knotwork, a rune-carved staff held high, calm poised seat"
+  },
+  {
+    "base": "unit_haeduan",
+    "zh": "海杜安骑兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an elite Haeduan cavalier on an armored roan horse in green and bronze, chainmail with bronze scale pauldrons and a feather-winged helm, a large round knotwork shield, a long lance leveled in a controlled charge"
+  },
+  {
+    "base": "unit_gaulram",
+    "zh": "攻城锤",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish battering ram: a lashed oak beam capped with a bronze boar's head, hung by braided ropes in a rough timber frame roofed with green-dyed hides, antler trophies on the corners, wide spoked wooden wheels"
+  },
+  {
+    "base": "unit_gcaultrebuchet",
+    "zh": "投石机",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish trebuchet: a tall rough-hewn timber throwing arm with a rope sling and a stone-filled counterweight basket, bronze fittings and knotwork carvings, green cloth ties, stone shot stacked on the wheeled base"
+  },
+  {
+    "base": "unit_gaulchief",
+    "zh": "首领",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish tribal chieftain in a green plaid cloak pinned with a bronze brooch, chainmail and an antlered bronze helm, a twisted torc at the neck, a round knotwork shield and a raised bronze-hilted longsword, commanding stance"
+  },
+  {
+    "base": "unit_gaulsettler",
+    "zh": "拓荒者",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Gaulish settler pioneer in green homespun and a leather jerkin, leading a laden pack pony carrying tent hides, saplings, a wood axe and grain baskets, a knotwork charm on the harness, striding ahead"
+  },
+  {
+    "base": "unit_clubswinger",
+    "zh": "棍棒兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic clubman in wolf furs over rust-red cloth, a blackened iron cap and bracers, bare tattooed arms, a huge iron-studded wooden club swung overhead, bellowing charge, heavy bulky silhouette"
+  },
+  {
+    "base": "unit_spearman",
+    "zh": "长矛兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic spearman in a bear-fur mantle over heavy blackened iron mail and a horned helm, a tall rough plank shield painted blue-grey with rust-red bands, a long broad-headed spear braced low, wide heavy stance"
+  },
+  {
+    "base": "unit_axeman",
+    "zh": "斧兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic axeman in blackened iron plates strapped over furs, a winged iron helm, rust-red wraps on his forearms, a great bearded battle axe hauled back for a downward chop, hunched aggressive posture"
+  },
+  {
+    "base": "unit_teuscout",
+    "zh": "侦察兵",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic scout on a shaggy dark pony, a wolf-pelt hood over light blackened mail and blue-grey wool, a hand axe at the belt and a curved drinking horn slung across the chest, crouched low while riding"
+  },
+  {
+    "base": "unit_paladin",
+    "zh": "圣骑士",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic paladin on a heavy draft warhorse in blue-grey barding, thick blackened iron plate worn over furs, a horned great helm, a broad iron shield with a rust-red cross, a war hammer held ready at the shoulder"
+  },
+  {
+    "base": "unit_teutonknight",
+    "zh": "条顿骑士",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an elite Teutonic knight on a massive armored black destrier, full blackened iron plate with fur-trimmed pauldrons, a horned and winged great helm, a rust-red surcoat, a heavy lance and a large iron shield, thunderous charge"
+  },
+  {
+    "base": "unit_teuram",
+    "zh": "攻城锤",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic battering ram: a massive rough log capped with a blackened iron wolf's head, chained beneath a crude heavy timber frame draped in shaggy furs and rust-red rags, iron-banded wheels, brutal construction"
+  },
+  {
+    "base": "unit_teucatapult",
+    "zh": "投石机",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic catapult: a squat brutal engine of thick blackened beams and iron bands, a throwing arm cocked by a windlass, a bucket of jagged broken stones, fur pelts and rust-red rags lashed to the frame"
+  },
+  {
+    "base": "unit_teuchief",
+    "zh": "首领",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic warchief in a bear-pelt cloak over heavy blackened iron plate, a great horned helm, rust-red and blue-grey wrappings, a two-handed bearded axe resting on his shoulder, broad intimidating stance"
+  },
+  {
+    "base": "unit_teusettler",
+    "zh": "拓荒者",
+    "category": "unit",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a Teutonic settler pioneer in furs and blue-grey wool with a plain iron cap, hauling a wooden sledge of hewn logs, iron tools, salted stores and rolled hides, a bearded axe at his belt, leaning into the pull"
+  },
+  {
+    "base": "unit_merc_slinger",
+    "zh": "佣兵投石手",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a hired slinger in dusty tan rags with one mismatched leather pauldron, a cloth wrap on his head, whirling a leather sling overhead, a pouch of river stones and a jingling coin purse at his belt, no heraldry"
+  },
+  {
+    "base": "unit_merc_spearman",
+    "zh": "佣兵长矛兵",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary spearman in scavenged mismatched gear: one rusty pauldron, a tan quilted gambeson, boiled leather greaves, a scuffed shield with its old crest painted over, a worn spear braced forward, coin pouch at the hip"
+  },
+  {
+    "base": "unit_merc_archer",
+    "zh": "佣兵弓手",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary archer in a dusty tan hood and patched leather vest with fingerless gloves, a plain recurve bow drawn to the cheek, a half-empty quiver of mismatched arrows, a coin pouch at the belt, no insignia"
+  },
+  {
+    "base": "unit_merc_sword",
+    "zh": "佣兵剑士",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary swordsman in a tan tunic with mismatched steel and leather plates and one scarred bracer, a notched broadsword in hand and a battered small shield, cocky ready stance, a fat coin pouch at his belt"
+  },
+  {
+    "base": "unit_merc_cavalry",
+    "zh": "佣兵骑兵",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary horseman on a wiry tan horse with a threadbare saddle blanket, a mismatched cuirass over dusty cloth, a dented open-faced helm, a curved saber raised, coin pouches tied to the saddle, no banner"
+  },
+  {
+    "base": "unit_merc_axe",
+    "zh": "佣兵斧兵",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary axeman in a sleeveless tan gambeson with a single scavenged iron shoulder plate, a rope belt with a coin pouch, a heavy single-headed axe hefted across the body, scarred forearms, brawler's stance"
+  },
+  {
+    "base": "unit_merc_crossbow",
+    "zh": "佣兵弩手",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary crossbowman in a dusty tan cloak and patched brigandine under a wide-brimmed leather hat, a cranked crossbow aimed level, a bolt quiver and coin pouch on the hip, mismatched greaves, no heraldry"
+  },
+  {
+    "base": "unit_merc_knight",
+    "zh": "佣兵骑士",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a sellsword knight on an unbarded brown horse, mismatched plate of several different steels over tan cloth, a shield with its old crest scraped away, a plain lance and a fat coin purse tied to the saddle"
+  },
+  {
+    "base": "unit_merc_berserker",
+    "zh": "狂战士",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a berserker for hire, bare-chested with tan cloth wraps and scavenged iron bracers, wild braided hair and smeared war paint, twin notched hand axes spread wide in a frenzied roar, coin pouches on a rope belt"
+  },
+  {
+    "base": "unit_merc_champion",
+    "zh": "精锐卫队",
+    "category": "merc",
+    "mode": "icon",
+    "size": 320,
+    "subject": "an elite hired guardsman in well-kept but mismatched plate of several origins over a crestless tan surcoat, a closed visored helm, a large plain shield and a longsword held at guard, a heavy coin pouch at the belt"
+  },
+  {
+    "base": "trs_chainsaw",
+    "zh": "电锯",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single crank-driven chain saw contraption: a serrated iron chain loop running around a wooden frame with brass gears and a hand crank, oiled hardwood grips, fresh wood shavings clinging to the teeth"
+  },
+  {
+    "base": "trs_fineaxe",
+    "zh": "精工斧",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single masterwork felling axe: a mirror-polished steel head etched with fine scrollwork, a brass collar, a lacquered ash haft wrapped in dark leather cord, a small blue gem set in the butt cap"
+  },
+  {
+    "base": "trs_totem",
+    "zh": "丰收图腾",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single harvest totem: a carved oak pillar with a stylized stacked face, wound with wheat sheaves, dried corn cobs and grapevines bound by braided cord, small copper bells hanging from the side arms"
+  },
+  {
+    "base": "trs_hammer",
+    "zh": "神匠之锤",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single divine smith's hammer: a massive rune-etched steel head with gold inlay, an oak haft bound in bronze rings and deep blue leather, a faceted gem set in the pommel, standing upright"
+  },
+  {
+    "base": "trs_warflag",
+    "zh": "军旗",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single war standard: a square crimson banner with a gold sunburst device on a spear-tipped pole, gold fringe and two hanging tassels, a small bronze crossbar with medallions, cloth caught mid-flutter"
+  },
+  {
+    "base": "trs_medal",
+    "zh": "铁壁勋章",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single iron wall medal: a thick round blackened iron medallion embossed with a crenellated fortress wall, a gilded milled rim, hanging from a short blue-grey ribbon with a gold pin bar"
+  },
+  {
+    "base": "trs_spear",
+    "zh": "战神之矛",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single god-of-war spear: a long leaf-shaped steel blade etched with flame patterns and gold filigree at the socket, a dark hardwood shaft bound in crimson cord, a bronze butt spike, standing upright"
+  },
+  {
+    "base": "trs_banner",
+    "zh": "巨龙战旗",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single dragon war banner: a tall crimson and black pennant embroidered with a coiling gold dragon, a dragon-claw finial on the pole, scaled leather straps and gold tassels, cloth billowing dramatically"
+  },
+  {
+    "base": "trs_holywater",
+    "zh": "圣水",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single vial of holy water: a faceted crystal flask held in a silver filigree cradle, a cork stopper sealed with white wax, clear water inside, a fine silver chain looped around the neck"
+  },
+  {
+    "base": "trs_staff",
+    "zh": "族长权杖",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single elder's scepter: a gnarled dark wood staff topped with a carved ram's head in polished bronze, the shaft wrapped in braided leather and hung with bone beads, feathers and a small amber stone"
+  },
+  {
+    "base": "trs_tree",
+    "zh": "生命之树",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single tree of life sapling in an ornate carved stone urn: a slender silver-barked trunk with translucent jade-green leaves and tiny golden fruit, fine roots curling over the vessel's rim"
+  },
+  {
+    "base": "trs_blessing",
+    "zh": "众神祝福",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single blessing relic: an open golden reliquary shaped like laurel-wreathed hands cupping a clear crystal orb, engraved prayer bands around the base, small enamel medallions of gods set into the rim"
+  },
+  {
+    "base": "trs_moneybag",
+    "zh": "钱袋子",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single money bag: a plump tan leather pouch cinched with a gold drawstring and embossed with a coin motif, its mouth slightly open with a few gold coins spilling out beside it"
+  },
+  {
+    "base": "trs_chest",
+    "zh": "神秘宝箱",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single mystery chest: a small domed oak coffer with blackened iron bands and brass corner caps, an ornate keyhole plate, faded painted sigils on the lid, the lid cracked open a finger's width"
+  },
+  {
+    "base": "trs_stone",
+    "zh": "贤者之石",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single philosopher's stone: a large faceted deep-red crystal held in a gold claw setting mounted on a carved obsidian base, alchemical symbols engraved around the rim of the base"
+  },
+  {
+    "base": "trs_idol",
+    "zh": "黄金神像",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single golden idol: a small solid gold statuette of a seated crowned figure with folded arms and ruby eyes, standing on a stepped square gold plinth engraved with fine patterns"
+  },
+  {
+    "base": "pve_rats",
+    "zh": "老鼠窝",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a rats' nest lair: a mound of chewed straw, gnawed planks and small bones heaped around a burrow hole, three large mangy grey rats with pink tails baring their teeth, a broken crate on its side"
+  },
+  {
+    "base": "pve_wolves",
+    "zh": "野狼群",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a wolf pack den: three lean grey wolves snarling with raised hackles in front of a rocky cave mouth, one crouched over a picked-clean deer carcass, trampled grass and scattered bones"
+  },
+  {
+    "base": "pve_bandits",
+    "zh": "强盗营地",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a bandit camp: two ragged brigands in hoods with cudgels guarding a patched tent, a campfire with a spit, a plundered wagon and looted sacks behind a crude barricade of sharpened stakes"
+  },
+  {
+    "base": "pve_mercenaries",
+    "zh": "雇佣兵营",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a mercenary encampment: three hired soldiers in mismatched armor standing watch among tan canvas tents, a rack of spears and crossbows, a coin chest open on a stool, a blank pennant on a pole"
+  },
+  {
+    "base": "pve_barbarians",
+    "zh": "蛮族村寨",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a barbarian stockade village: fur-clad warriors with axes standing before a spiked log palisade, conical hide huts, a bonfire, a totem pole strung with skulls and painted animal hides on drying frames"
+  },
+  {
+    "base": "pve_fortress",
+    "zh": "边境要塞",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a border fortress: a squat grey stone keep with corner towers and an iron portcullis on a rocky rise, crenellated curtain walls with spearmen on the battlements, a dry moat crossed by a drawbridge"
+  },
+  {
+    "base": "pve_dark_legion",
+    "zh": "黑暗军团",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a dark legion warband: three warriors in blackened spiked plate with narrow glowing red visor slits and tattered black cloaks, a jagged greatsword and a halberd, a black banner with a broken-crown sigil"
+  },
+  {
+    "base": "pve_bone_king",
+    "zh": "骷髅王营地",
+    "category": "pve",
+    "mode": "icon",
+    "size": 320,
+    "subject": "a bone king's camp: a towering crowned skeleton warlord seated on a throne of stacked skulls and ribs, a rusted bone-hilted sword across his knees, two skeletal guards with spears, bone-spike totems"
+  },
+  {
+    "base": "ui_frame_corner",
+    "zh": "边框转角",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "an ornate gilded metal corner bracket ornament for a panel frame, viewed flat-on: acanthus leaf scrollwork curling inward, beveled edges, a small round faceted gem rivet at the elbow, only the top-left corner piece"
+  },
+  {
+    "base": "ui_divider",
+    "zh": "分隔花纹",
+    "category": "ui",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a slim horizontal gilded filigree divider ornament, viewed flat-on: symmetrical scrolling vine tendrils tapering to fine points at both ends, a central diamond-cut gem in a small claw setting"
+  },
+  {
+    "base": "ui_banner_ribbon",
+    "zh": "标题横幅",
+    "category": "ui",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a hanging crimson cloth banner ribbon for a section header, viewed flat-on: a wide rectangular panel with notched swallowtail ends, braided gold trim along the edges, two gold tassels below, soft fabric folds"
+  },
+  {
+    "base": "ui_seal_gold",
+    "zh": "金印",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a round gold seal medallion, viewed flat-on: a thick milled rim, an embossed crowned laurel wreath device in the center, slightly irregular pressed edges, a short stub of crimson ribbon behind it"
+  },
+  {
+    "base": "ui_seal_crimson",
+    "zh": "朱印",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a round crimson wax seal medallion, viewed flat-on: an irregular pressed wax edge with a thin gold rim, an embossed crossed-swords device in the center, a short gold ribbon stub behind it"
+  },
+  {
+    "base": "ui_btn_plate",
+    "zh": "按钮底板",
+    "category": "ui",
+    "mode": "icon",
+    "size": 512,
+    "subject": "a rounded rectangular dark iron button plate, viewed flat-on: a brushed gunmetal face with a subtly beveled inner panel, a riveted gilded rim of small dome-head studs, a blank center with no text"
+  },
+  {
+    "base": "ui_slot_empty",
+    "zh": "空建筑槽",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "an empty dark stone building socket plate, viewed flat-on: a round-cornered slab of dark grey granite with a dashed gilded inner rim, a faint incised plus mark centered, chiseled worn outer edges"
+  },
+  {
+    "base": "ui_lvl_badge",
+    "zh": "等级徽章",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded shield-shaped level badge, viewed flat-on: a heater shield outline with a beaded gold border and a slightly recessed blank dark center field, two tiny rivets at the upper corners"
+  },
+  {
+    "base": "ui_tab_village",
+    "zh": "村庄页签",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a flat gilded glyph icon of a village keep: a simple gabled house joined to a square tower with a small pennant on top, a solid gold silhouette with clean incised detail lines, viewed straight on"
+  },
+  {
+    "base": "ui_tab_army",
+    "zh": "军队页签",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a flat gilded glyph icon of a crossed sword and shield: a straight sword laid diagonally behind a heater shield with a single central boss, a solid gold silhouette with clean incised lines"
+  },
+  {
+    "base": "ui_tab_map",
+    "zh": "地图页签",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a flat gilded glyph icon of a folded map: a rectangular sheet with two fold creases and a dashed route line crossing it to a small X marker, a solid gold silhouette with incised detail"
+  },
+  {
+    "base": "ui_tab_reports",
+    "zh": "报告页签",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a flat gilded glyph icon of a scroll: a partly unrolled parchment sheet with curled ends and a round wax seal at the lower edge, a solid gold silhouette with clean incised lines"
+  },
+  {
+    "base": "ui_logo",
+    "zh": "游戏徽标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a heraldic game emblem: a crowned heater shield with a crimson field, two crossed swords behind it, laurel branches flanking the base, a blank ribbon scroll beneath, ornate gilded relief with no text or letters"
+  },
+  {
+    "base": "ui_icon_time",
+    "zh": "时间图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of an hourglass: two glass bulbs held in a slim gold frame with turned finials, a thin stream of sand falling to a small mound below, viewed straight on"
+  },
+  {
+    "base": "ui_icon_pop",
+    "zh": "人口图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a group of people: three overlapping simplified head-and-shoulder silhouettes with the center one slightly taller, solid gold relief with clean separating outlines"
+  },
+  {
+    "base": "ui_icon_atk",
+    "zh": "攻击图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a sword: a straight double-edged blade pointing upward with a plain crossguard, a wrapped grip and a round pommel, solid gold relief, viewed straight on"
+  },
+  {
+    "base": "ui_icon_def",
+    "zh": "防御图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a shield: a heater-shaped shield with a raised central boss and a vertical reinforcing band, a riveted rim, solid gold relief, viewed straight on"
+  },
+  {
+    "base": "ui_icon_speed",
+    "zh": "速度图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a winged boot: a laced leather ankle boot in profile with a small feathered wing sprouting from the heel, solid gold relief with incised feather lines"
+  },
+  {
+    "base": "ui_icon_carry",
+    "zh": "负重图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a sack: a plump burlap carrying sack tied at the neck with a cord, a bulging rounded body with two fold creases, solid gold relief, viewed straight on"
+  },
+  {
+    "base": "ui_icon_upkeep",
+    "zh": "粮耗图标",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a small gilded glyph icon of a wheat ear with a downward arrow: a single grain-headed wheat stalk beside a bold arrow pointing down, solid gold relief with clean incised lines"
+  },
+  {
+    "base": "ui_bg_stone",
+    "zh": "石墙底纹",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a seamless dark granite wall surface viewed straight on: tightly fitted rough-hewn blocks with fine mortar seams, faint carved geometric patterning across the faces, chipped edges and mineral speckle, fully opaque and tileable"
+  },
+  {
+    "base": "ui_bg_leather",
+    "zh": "皮革底纹",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a seamless dark tooled leather surface viewed straight on: fine pebbled grain with hand-tooled scrollwork impressions, subtle creases and worn scuffs on the ridges, faint stitch marks, fully opaque and tileable"
+  },
+  {
+    "base": "ui_bg_parchment",
+    "zh": "羊皮纸底纹",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a seamless aged parchment surface viewed straight on: fibrous vellum with mottled tea-stained blotches, faint horizontal fiber grain, small foxing spots and softly darkened patches, fully opaque and tileable"
+  },
+  {
+    "base": "map_tile_empty",
+    "zh": "草原地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of lush grassland: dense green turf with varied blade clumps, small wildflowers, a few low shrubs and thin bare-earth patches, evenly filling a square tile with seamless edges"
+  },
+  {
+    "base": "map_tile_grass2",
+    "zh": "干草原地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of dry grassland: sun-bleached yellow-green grass with straw-colored patches, cracked pale soil showing through, sparse thistles and dry seed heads, evenly filling a square tile with seamless edges"
+  },
+  {
+    "base": "map_tile_grass3",
+    "zh": "碎石草原地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of rocky grassland: green turf broken by scattered grey fieldstones and pebble drifts of assorted sizes, moss on the larger rocks, thin dirt patches, evenly filling a square tile"
+  },
+  {
+    "base": "map_tile_forest",
+    "zh": "森林地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of dense forest canopy: overlapping rounded crowns of broadleaf and conifer trees in layered greens, narrow dark gaps between crowns, a hint of undergrowth, evenly filling a square tile"
+  },
+  {
+    "base": "map_tile_hills",
+    "zh": "丘陵地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of rocky hills: humped grey stone outcrops with scree slopes and boulder clusters, patchy dry grass in the hollows, winding bare-earth paths, evenly filling a square tile"
+  },
+  {
+    "base": "map_tile_water",
+    "zh": "水域地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of open water: a rippled blue-green surface with gentle wave crests, lighter shallows and darker deep patches, scattered foam streaks and a few reed tips at one edge, filling a square tile"
+  },
+  {
+    "base": "map_tile_oasis",
+    "zh": "绿洲地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of an oasis: a small round pond of clear blue water ringed by palms and leafy trees, a damp sandy shore with reeds and grass tufts, filling a square tile"
+  },
+  {
+    "base": "map_tile_village",
+    "zh": "村落地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of a small village cluster: six or seven tiled and thatched rooftops set around a dirt crossroad on green grass, tiny garden plots, a stone well and a low fence, filling a square tile"
+  },
+  {
+    "base": "map_tile_ruins",
+    "zh": "废墟地块",
+    "category": "tile",
+    "mode": "tile",
+    "size": 512,
+    "subject": "a top-down view of crumbling stone ruins: broken wall footings and toppled columns in a rough rectangular plan, rubble heaps, grass and creeping vines overgrowing the stones, filling a square tile"
+  },
+  {
+    "base": "bg_login",
+    "zh": "登录背景",
+    "category": "scene",
+    "mode": "panel",
+    "size": 1024,
+    "subject": "a wide dramatic landscape at dusk: a fortified medieval city of stone walls, towers and tiled roofs crowning a hill, long columns of armies with spears and banners marching up the winding road below, a heavy clouded sky"
+  },
+  {
+    "base": "scene_village_ground",
+    "zh": "村庄空地",
+    "category": "scene",
+    "mode": "panel",
+    "size": 1024,
+    "subject": "a three-quarter top-down view of an empty village ground: rolling grass and dirt paths forming a rough ring of flat bare building pads around a central cobbled plaza, farmland and trees at the edges, a wooden palisade around the outer rim, no buildings on the pads"
+  },
+  {
+    "base": "scene_village_ground_night",
+    "zh": "村庄空地(夜)",
+    "category": "scene",
+    "mode": "panel",
+    "size": 1024,
+    "subject": "the same empty village ground at night: a three-quarter top-down view of grass and dirt paths ringing flat bare building pads around a central cobbled plaza, burning torches on posts along the paths and palisade, farmland and trees at the edges, no buildings on the pads"
+  }
+]

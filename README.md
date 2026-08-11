@@ -87,7 +87,7 @@ slg1.0/
 │   └── client/               前端
 │
 ├── data/                 ← 运行时存档（git 忽略）
-├── tools/                ← 部署/工具脚本（deploy.sh、annotate_csv.py、gen_art.py）
+├── tools/                ← 部署/工具脚本（deploy.sh、annotate_csv.py、art_pipeline.py 等美术流水线）
 └── docs/                 ← 设计文档、规范、部署手册
 ```
 

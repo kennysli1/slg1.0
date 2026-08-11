@@ -1,7 +1,8 @@
 /**
  * 客户端单元测试（node:test + tsx）
  * 覆盖：escapeHtml/escapeAttr 转义函数 + errText 错误码翻译 + isCompatibleVersion 版本守卫
- *       + 人口系统 v3 硬上限：PopSnapshot 新字段 + PopulationChanged 事件文案。
+ *       + 人口系统 v3 硬上限：PopSnapshot 新字段 + PopulationChanged 事件文案
+ *       + 战报分类 notificationKind（驱动报告页的图标与色带）。
  * 纯逻辑，无浏览器依赖，可在 Node 环境直接运行。
  */
 import { describe, it } from 'node:test';
@@ -12,7 +13,8 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
-import { notificationText } from '../features/reports/reports.js';
+import { notificationText, notificationKind } from '../features/reports/notification-text.js';
+import { fmtDur, secLeft } from '../shared/utils/format.js';
 
 // ─── escapeHtml ────────────────────────────────────────────────
 
@@ -276,5 +278,96 @@ describe('notificationText - PopulationChanged v3 硬上限', () => {
     const result = notificationText('PopulationChanged', { event: 'returned', returned: 50, currentPop: 150 });
     assert.ok(result != null, '返回事件应有文案');
     assert.ok(result?.includes('50') || result?.includes('150'), `应含数量，实际：${result}`);
+  });
+});
+
+// ─── notificationKind：战报语义分类 ────────────────────────────────
+
+describe('notificationKind', () => {
+  it('建造类事件归 build', () => {
+    assert.equal(notificationKind('BuildingBuilt'), 'build');
+    assert.equal(notificationKind('BuildingUpgraded'), 'build');
+    assert.equal(notificationKind('BuildingDemolished'), 'build');
+  });
+
+  it('训练与锻造归 train', () => {
+    assert.equal(notificationKind('TroopTrained'), 'train');
+    assert.equal(notificationKind('SmithyUpgraded'), 'train');
+  });
+
+  it('战斗与遭遇战归 battle', () => {
+    assert.equal(notificationKind('BattleStarted'), 'battle');
+    assert.equal(notificationKind('BattleEnded'), 'battle');
+    assert.equal(notificationKind('MarchIntercepted'), 'battle');
+  });
+
+  it('行军与拓荒归 march', () => {
+    assert.equal(notificationKind('MarchSent'), 'march');
+    assert.equal(notificationKind('MarchReturned'), 'march');
+    assert.equal(notificationKind('VillageFounded'), 'march');
+  });
+
+  it('来袭与粮荒归 alarm（需要最高优先级提示）', () => {
+    assert.equal(notificationKind('IncomingAttack'), 'alarm');
+    assert.equal(notificationKind('CropDeficit'), 'alarm');
+  });
+
+  it('全部 Treasure* 事件归 treasure', () => {
+    assert.equal(notificationKind('TreasureDropped'), 'treasure');
+    assert.equal(notificationKind('TreasurePendingDropped'), 'treasure');
+    assert.equal(notificationKind('TreasureCarriedArrived'), 'treasure');
+  });
+
+  it('人口变化默认归 pop，但饥荒减员升级为 alarm', () => {
+    assert.equal(notificationKind('PopulationChanged', { event: 'capChanged' }), 'pop');
+    assert.equal(notificationKind('PopulationChanged', { event: 'starved' }), 'alarm');
+    assert.equal(notificationKind('PopulationChanged', { event: 'famine' }), 'alarm');
+  });
+
+  it('未知事件归 info（不抛错）', () => {
+    assert.equal(notificationKind('SomethingBrandNew'), 'info');
+  });
+});
+
+// ─── 时长 / 剩余时间格式化 ─────────────────────────────────────────
+//
+// 回归测试：这里曾经只有一个收「目标时刻」的 secStr，调用方（消耗预览的耗时芯片、
+// 建造进度条）普遍误传**时长**，导致 ms - Date.now() 变成大负数被夹到 0，
+// 界面上所有耗时一律显示「0秒」。fmtDur 收时长、secLeft 收时刻，二者不可混用。
+
+describe('fmtDur（收时长）', () => {
+  it('不足一分钟只给秒', () => {
+    assert.equal(fmtDur(0), '0秒');
+    assert.equal(fmtDur(1_000), '1秒');
+    assert.equal(fmtDur(59_000), '59秒');
+  });
+
+  it('超过一分钟给分+秒', () => {
+    assert.equal(fmtDur(60_000), '1分0秒');
+    assert.equal(fmtDur(95_000), '1分35秒');
+  });
+
+  it('超过一小时给时+分', () => {
+    assert.equal(fmtDur(3_600_000), '1时0分');
+    assert.equal(fmtDur(3_600_000 + 25 * 60_000), '1时25分');
+  });
+
+  it('负时长夹到 0（已完成的任务不显示负数）', () => {
+    assert.equal(fmtDur(-5_000), '0秒');
+  });
+
+  it('传入时长不会被当成时刻而塌成 0（这就是那个 bug）', () => {
+    assert.notEqual(fmtDur(120_000), '0秒');
+    assert.equal(fmtDur(120_000), '2分0秒');
+  });
+});
+
+describe('secLeft（收目标时刻）', () => {
+  it('未来时刻算出正的剩余时长', () => {
+    assert.equal(secLeft(Date.now() + 30_000), '30秒');
+  });
+
+  it('已过去的时刻返回 0秒', () => {
+    assert.equal(secLeft(Date.now() - 10_000), '0秒');
   });
 });

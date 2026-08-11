@@ -80,8 +80,22 @@ export interface PopSnapshot {
   fetchedAt: number;
 }
 
+/**
+ * 战报语义分类。定义在这里（而非 features/reports）是为了守住依赖方向：
+ * features 可以依赖 app，app 不能反过来依赖 features。
+ */
+export type ReportKind =
+  | 'build' | 'train' | 'battle' | 'march' | 'alarm' | 'treasure' | 'pop' | 'trade' | 'info';
+
+/** 一条战报：渲染好的文案 + 语义分类 + 发生时刻。 */
+export interface StoredReport {
+  text: string;
+  kind: ReportKind;
+  ts: number;
+}
+
 let cache: any = {};
-const reports: string[] = [];
+const reports: StoredReport[] = [];
 let currentTab = 'village';
 let selected: SelectedTarget | null = null;
 /** 进行中战斗的实时快照：battleId -> 双方兵力聚合（来自 BattleTick 推送）。 */
@@ -92,16 +106,23 @@ let popState: PopSnapshot | null = null;
 export function getCache(): any { return cache; }
 export function setCache(c: any): void { cache = c; }
 
-export function getReports(): string[] { return reports; }
-export function addReport(line: string): void {
-  reports.unshift(line.startsWith('[') ? line : `[${new Date().toLocaleTimeString()}] ${line}`);
+export function getReports(): StoredReport[] { return reports; }
+
+/**
+ * 追加一条战报。`kind` 由 `notificationKind(event, payload)` 算好后传进来 ——
+ * 分类必须来自事件名，**不能**回头去猜已渲染的中文文案（宝物名里带「人口」之类
+ * 就会误判）。`ts` 缺省为现在。
+ */
+export function addReport(text: string, kind: ReportKind = 'info', ts: number = Date.now()): void {
+  reports.unshift({ text, kind, ts });
   if (reports.length > 60) reports.pop();
 }
+
 /** 用服务端历史通知初始化战报列表（登录后调用一次，替换当前内存内容）。 */
-export function seedReports(lines: string[]): void {
+export function seedReports(list: StoredReport[]): void {
   reports.length = 0;
   // 历史条目是 old→new 顺序，unshift 逐条反序 → 最终 reports[0] 为最新
-  for (let i = lines.length - 1; i >= 0; i--) reports.unshift(lines[i]);
+  for (let i = list.length - 1; i >= 0; i--) reports.unshift(list[i]);
 }
 
 /** 待领取宝物（军队带回、待确认）：来自 ListTreasures.pending，用于报告页交互卡片。 */

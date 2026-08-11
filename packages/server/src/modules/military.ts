@@ -43,8 +43,12 @@ interface MilitaryState {
   training: TrainOrder | null;
   /** 逐建筑实例训练队列：slotId -> 该建筑的独立训练队列（多实例并行训练）。 */
   trainingBySlot: Record<string, TrainOrder>;
-  /** 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。 */
-  pendingSmithy?: { unit: string; taskId: string; doneAt: number };
+  /**
+   * 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。
+   * `startAt` 是可选的**新增**字段（客户端画进度条要有个起点）：老存档里没有，
+   * 读取方一律按 `?? null` 兜底，因此不构成不兼容的落盘结构变更、无需刷档。
+   */
+  pendingSmithy?: { unit: string; taskId: string; startAt?: number; doneAt: number };
   /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
   treasureAtkMult?: number;
   treasureDefMult?: number;
@@ -434,6 +438,11 @@ export class MilitaryModule {
         tribe: s.tribe,
         troops: { ...s.troops },
         smithyLevel: { ...s.smithyLevel },
+        // 进行中的铁匠升级（客户端画进度条用）。只给 unit/起止时刻，
+        // taskId 是调度器内部句柄，不外泄。
+        pendingSmithy: s.pendingSmithy
+          ? { unit: s.pendingSmithy.unit, startAt: s.pendingSmithy.startAt ?? null, doneAt: s.pendingSmithy.doneAt }
+          : null,
         trainable,
         training,
         slots: slotsOut,
@@ -608,9 +617,10 @@ export class MilitaryModule {
     const mult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
     const durMs = Math.max(1, Math.round((this.config.constants.smithyUpgradeSec * 1000) / Math.max(0.01, mult)));
 
-    const doneAt = this.now() + durMs;
+    const startAt = this.now();
+    const doneAt = startAt + durMs;
     const taskId = this.scheduler.schedule(durMs, () => this.onSmithyDone(villageId), `military:${villageId}`, `village:${villageId}`);
-    s.pendingSmithy = { unit, taskId, doneAt };
+    s.pendingSmithy = { unit, taskId, startAt, doneAt };
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { unit, nextLevel: nextLv, doneAt, durationMs: durMs } };
   }

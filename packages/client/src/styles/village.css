@@ -1,0 +1,726 @@
+﻿/* ============================================================
+   Village screen — private styles.
+   Only uses tokens from tokens.css. No hardcoded colours, px spacing, or font sizes.
+   ============================================================ */
+
+/* ---- View toggle ---- */
+.vil-view-toggle {
+  display: inline-flex;
+  gap: var(--s-1);
+  background: rgba(0, 0, 0, .28);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 3px;
+}
+.vil-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  min-height: 34px;
+  min-width: 64px;
+  padding: 4px var(--s-3);
+  border-radius: calc(var(--r-md) - 2px);
+  font-size: var(--f-xs);
+  font-family: var(--ff-han);
+  font-weight: 700;
+  color: var(--c-ink-soft);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+  min-height: 28px;
+}
+.vil-view-btn.active {
+  color: var(--c-gold);
+  background: rgba(216, 177, 104, .15);
+  box-shadow: 0 0 8px rgba(216, 177, 104, .2);
+}
+.vil-view-btn:not(.active):hover {
+  color: var(--c-ink);
+}
+
+/* ---- Build Queue ---- */
+.vil-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+.vil-queue-slots {
+  display: flex;
+  gap: var(--s-2);
+  overflow-x: auto;
+  padding-bottom: var(--s-1);
+  -webkit-overflow-scrolling: touch;
+}
+.vil-queue-item {
+  flex: none;
+  min-width: 180px;
+  max-width: 240px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+}
+.vil-queue-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.vil-queue-name {
+  font-size: var(--f-xs);
+  font-weight: 700;
+  color: var(--c-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vil-queue-verb {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-dim);
+}
+
+/* Free queue slots indicator */
+.vil-queue-free {
+  display: flex;
+  gap: var(--s-1);
+  align-items: center;
+}
+.vil-queue-slot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: rgba(216, 177, 104, .12);
+}
+.vil-queue-slot-dot.used {
+  background: var(--c-ember);
+  border-color: var(--c-ember);
+}
+
+/* ---- Scene View Container ---- */
+/* 场景的横向滚动容器：桌面用不到，手机端场景比屏幕宽，靠它左右拖看 */
+.vil-scene-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-radius: var(--r-lg);
+}
+.vil-scene-scroll::-webkit-scrollbar { display: none; }
+
+/* 宽高比跟底图一致（1024×683 ≈ 3:2），否则 cover 会把外圈垫台裁掉。
+   同时用宽度反向限高（62vh × 1.5），避免场景高到把下面的面板全推出屏幕。 */
+.vil-scene-wrap {
+  position: relative;
+  width: min(100%, calc(62vh * 1.5));
+  margin-inline: auto;
+  aspect-ratio: 3 / 2;
+  scroll-margin-top: calc(var(--tabbar-h) + var(--s-5));
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  /* 底图缺失时的兜底渐变，保证不至于开天窗 */
+  background: linear-gradient(165deg, #182516, #243520 45%, #14201a);
+  box-shadow: var(--sh-3);
+  border: 1px solid var(--line-strong);
+  cursor: default;
+}
+
+.vil-scene-bg {
+  position: absolute;
+  inset: 0;
+  background-image: url('/art/scene_village_ground.webp');
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+/* 四周轻微压暗：把注意力收到村庄本体，同时不吃掉外圈垫台 */
+.vil-scene-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 78% 74% at 50% 46%, transparent 55%, rgba(8, 11, 16, .42) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---- Building pads (absolute % position) ---- */
+.vil-pad {
+  position: absolute;
+  /* translate(-50%,-50%) centres the pad on the anchor point; scale added inline */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  z-index: 2; /* overridden per-pad via inline style */
+  /* Increase effective tap target without changing visual */
+  padding: var(--s-2);
+}
+.vil-pad-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* --pad-mult 由容器给：手机端整体缩一档，桌面为 1 */
+  transform: scale(var(--pad-mult, 1));
+  transition: filter var(--t-fast);
+}
+.vil-pad:hover .vil-pad-inner,
+.vil-pad:focus-visible .vil-pad-inner {
+  filter: brightness(1.25) drop-shadow(0 0 8px rgba(216, 177, 104, .5));
+}
+.vil-pad:focus-visible { outline: 2px solid var(--c-gold); outline-offset: 2px; border-radius: var(--r-sm); }
+.vil-pad-icon {
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .65));
+  display: block;
+}
+
+/* Level badge — overlaid on building icon top-right */
+.vil-lvl {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ff-num);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--c-gold-hi);
+  background: linear-gradient(180deg, rgba(216, 177, 104, .32), rgba(141, 111, 55, .22));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .6);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.vil-lvl.max {
+  color: var(--c-ink-on-gold);
+  background: linear-gradient(180deg, var(--c-gold-hi), var(--c-gold));
+}
+.vil-lvl--demo { color: var(--c-crimson-hi); border-color: rgba(212, 84, 76, .5); }
+/* 场景里的等级牌垫一层暗底，压在插画上也读得清 */
+.vil-lvl { backdrop-filter: blur(2px); background-color: rgba(8, 11, 16, .55); }
+
+/* Status ring — animating glow around the icon when building/upgrading */
+.vil-status-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--c-ember);
+  box-shadow: 0 0 14px rgba(224, 138, 60, .65), inset 0 0 8px rgba(224, 138, 60, .3);
+  animation: vil-ring-pulse 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes vil-ring-pulse {
+  0%, 100% { opacity: .85; transform: scale(1); }
+  50% { opacity: .4; transform: scale(1.1); }
+}
+
+/* 空垫台：底图是明亮的裸土，所以要用暗底 + 鎏金虚线描边才看得见 */
+.vil-pad-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px dashed rgba(246, 224, 170, .55);
+  background: rgba(8, 11, 16, .42);
+  color: var(--c-gold-hi);
+  font-size: var(--f-lg);
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .45);
+  transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
+  animation: vil-empty-pulse 2.6s ease-in-out infinite;
+  width: 46px;
+  height: 46px;
+}
+@keyframes vil-empty-pulse {
+  0%, 100% { border-color: rgba(246, 224, 170, .35); box-shadow: inset 0 0 12px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .45); }
+  50% { border-color: rgba(246, 224, 170, .85); box-shadow: inset 0 0 12px rgba(0, 0, 0, .5), 0 0 14px rgba(216, 177, 104, .45); }
+}
+.vil-pad:hover .vil-pad-empty {
+  color: var(--c-gold);
+  background: rgba(216, 177, 104, .09);
+  border-color: rgba(216, 177, 104, .6);
+  animation: none;
+  opacity: 1;
+}
+
+/* Tooltip — shown on CSS :hover */
+.vil-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-tooltip);
+  pointer-events: none;
+  white-space: nowrap;
+  padding: var(--s-2) var(--s-3);
+  background: rgba(8, 11, 16, .96);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  font-size: var(--f-xs);
+  color: var(--c-ink);
+  box-shadow: var(--sh-3);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+  line-height: 1.5;
+}
+/* Don't show tooltip on mobile (touch) — too noisy */
+@media (hover: hover) {
+  .vil-pad:hover .vil-tooltip { opacity: 1; }
+}
+.vil-tooltip b { color: var(--c-gold); }
+.vil-tooltip small { color: var(--c-ink-dim); }
+
+/* Town-center pad gets a richer gold glow */
+.vil-pad--center .vil-pad-inner {
+  filter: drop-shadow(0 0 12px rgba(216, 177, 104, .3));
+}
+.vil-pad--center:hover .vil-pad-inner {
+  filter: brightness(1.2) drop-shadow(0 0 16px rgba(216, 177, 104, .55));
+}
+
+/* ---- List View ---- */
+.vil-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.vil-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--s-3);
+}
+
+/* Building card (list view) */
+.vil-card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-3);
+  gap: var(--s-2);
+  cursor: pointer;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  position: relative;
+  min-height: 130px;
+}
+.vil-card:hover {
+  border-color: var(--line-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .07),
+    var(--sh-2),
+    0 0 10px rgba(216, 177, 104, .12);
+}
+.vil-card:focus-visible { outline: 2px solid var(--c-gold); outline-offset: 2px; }
+.vil-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  flex: 1;
+}
+.vil-card-info { flex: 1; min-width: 0; }
+.vil-card-title {
+  font-size: var(--f-sm);
+  font-weight: 700;
+  color: var(--c-ink);
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+}
+.vil-card-meta {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  margin-top: 2px;
+}
+.vil-card-prod {
+  font-size: var(--f-xs);
+  color: var(--c-jade);
+  margin-top: 2px;
+}
+.vil-card-progress { margin-top: var(--s-1); }
+.vil-card-foot {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: var(--s-1);
+}
+
+/* Empty slot card */
+.vil-card-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  padding: var(--s-5) var(--s-3);
+  opacity: .55;
+  cursor: pointer;
+  transition: opacity var(--t-fast), border-color var(--t-fast);
+  min-height: 130px;
+  border-style: dashed !important;
+}
+.vil-card-empty:hover {
+  opacity: .85;
+  border-color: var(--line-strong) !important;
+}
+.vil-card-empty-icon {
+  font-size: var(--f-2xl);
+  color: var(--c-gold-dim);
+}
+.vil-card-empty-label {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+}
+
+/* Town centre special styling */
+.vil-card--center {
+  border-color: var(--line-strong) !important;
+  background:
+    linear-gradient(180deg, rgba(216, 177, 104, .07), transparent),
+    linear-gradient(180deg, var(--c-panel-2), var(--c-panel)) !important;
+}
+
+/* ---- Population Panel ---- */
+.pop-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.pop-big {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.pop-big-num {
+  font-family: var(--ff-num);
+  font-size: var(--f-2xl);
+  font-weight: 700;
+  color: var(--c-ink);
+  line-height: 1;
+}
+.pop-big-sep {
+  color: var(--c-ink-dim);
+  font-size: var(--f-xl);
+}
+.pop-big-cap {
+  font-family: var(--ff-num);
+  font-size: var(--f-xl);
+  color: var(--c-ink-soft);
+}
+.pop-big-pct {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  align-self: center;
+}
+
+.pop-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.pop-statuses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.pop-status {
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  font-size: var(--f-xs);
+  font-weight: 700;
+  border: 1px solid;
+  line-height: 1.45;
+}
+.pop-status--famine {
+  color: var(--c-crimson-hi);
+  background: rgba(212, 84, 76, .12);
+  border-color: rgba(212, 84, 76, .4);
+  box-shadow: var(--glow-crimson);
+  animation: pop-famine-pulse 1.5s ease-in-out infinite;
+}
+@keyframes pop-famine-pulse {
+  0%, 100% { box-shadow: var(--glow-crimson); }
+  50% { box-shadow: 0 0 28px rgba(212, 84, 76, .7); }
+}
+.pop-status--near {
+  color: var(--c-ember);
+  background: rgba(224, 138, 60, .10);
+  border-color: rgba(224, 138, 60, .35);
+}
+.pop-status--full {
+  color: var(--c-jade);
+  background: rgba(95, 156, 98, .08);
+  border-color: rgba(95, 156, 98, .35);
+}
+
+.pop-mults-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--s-2);
+}
+.pop-mult-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: var(--s-2);
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.pop-mult-label {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-dim);
+  text-align: center;
+  line-height: 1.3;
+}
+.pop-mult-val {
+  font-family: var(--ff-num);
+  font-size: var(--f-sm);
+  font-weight: 700;
+  color: var(--c-jade);
+}
+.pop-mult-val.dim { color: var(--c-ink-soft); }
+
+/* ---- Treasure Panel ---- */
+.trs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.trs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--s-3);
+}
+.trs-card {
+  display: flex;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  cursor: pointer;
+  border-left: 3px solid var(--line);
+  transition: filter var(--t-fast), border-color var(--t-fast);
+  min-height: 44px;
+}
+.trs-card:hover { filter: brightness(1.12); }
+.trs-card:focus-visible { outline: 2px solid var(--c-gold); outline-offset: 2px; }
+.trs-card.rarity-common   { border-color: var(--rarity-common); }
+.trs-card.rarity-rare     { border-color: var(--rarity-rare); }
+.trs-card.rarity-epic     { border-color: var(--rarity-epic); }
+.trs-card.rarity-legendary {
+  border-color: var(--rarity-legend);
+  box-shadow: inset 0 0 0 0 transparent, 0 0 14px rgba(224, 165, 63, .22);
+}
+.trs-body { flex: 1; min-width: 0; }
+.trs-name {
+  font-size: var(--f-sm);
+  font-weight: 700;
+  color: var(--c-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trs-meta {
+  display: flex;
+  gap: var(--s-1);
+  flex-wrap: wrap;
+  margin: 3px 0;
+}
+.trs-effect {
+  font-size: var(--f-xs);
+  color: var(--c-jade);
+  line-height: 1.4;
+}
+.trs-effects-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.trs-empty-hint {
+  font-size: var(--f-sm);
+  color: var(--c-ink-dim);
+  padding: var(--s-4) 0;
+  line-height: 1.6;
+}
+.trs-jump-hint {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  font-style: italic;
+}
+
+/* Treasure management section (inside BuildingModal) */
+.trs-mgmt-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.trs-mgmt-card {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+  padding: var(--s-3);
+  background: rgba(0, 0, 0, .18);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  border-left-width: 3px;
+}
+.trs-mgmt-card.rarity-common   { border-left-color: var(--rarity-common); }
+.trs-mgmt-card.rarity-rare     { border-left-color: var(--rarity-rare); }
+.trs-mgmt-card.rarity-epic     { border-left-color: var(--rarity-epic); }
+.trs-mgmt-card.rarity-legendary { border-left-color: var(--rarity-legend); }
+.trs-mgmt-body { flex: 1; min-width: 0; }
+.trs-mgmt-actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin-top: var(--s-2);
+}
+
+/* ---- Building Modal (detail) ---- */
+.bld-desc {
+  font-size: var(--f-sm);
+  color: var(--c-ink-soft);
+  line-height: 1.65;
+}
+.bld-provides {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.bld-provides-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.bld-provides-k {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+}
+.bld-provides-v {
+  font-family: var(--ff-num);
+  font-size: var(--f-sm);
+  font-weight: 700;
+  color: var(--c-gold);
+}
+
+.bld-upgrade-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.bld-upgrade-label {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+
+.bld-demolish-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.bld-demolish-confirm {
+  padding: var(--s-3);
+  background: rgba(166, 53, 48, .10);
+  border: 1px solid rgba(212, 84, 76, .35);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.bld-demolish-warn {
+  font-size: var(--f-xs);
+  color: var(--c-crimson-hi);
+  font-weight: 700;
+  line-height: 1.5;
+}
+.bld-demolish-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+/* ---- Build Options Modal ---- */
+.build-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.build-opt {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, .15);
+  border: 1px solid var(--line);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.build-opt:hover:not(.locked) {
+  border-color: var(--line-strong);
+  background: rgba(0, 0, 0, .25);
+}
+.build-opt.locked {
+  opacity: .5;
+}
+.build-opt-body { flex: 1; min-width: 0; }
+.build-opt-name {
+  font-size: var(--f-sm);
+  font-weight: 700;
+  color: var(--c-ink);
+}
+.build-opt-desc {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  margin: var(--s-1) 0;
+  line-height: 1.5;
+}
+.build-opt-prod {
+  font-size: var(--f-xs);
+  color: var(--c-jade);
+  margin-bottom: var(--s-2);
+}
+.build-opt-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin-top: var(--s-2);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 720px) {
+  /* 手机屏放不下整张场景又要看清建筑：固定一个比屏幕宽的画布，靠左右拖动浏览，
+     同时把垫台整体缩小一档，避免建筑互相压住。 */
+  .vil-scene-wrap {
+    width: 640px;
+    min-width: 640px;
+    aspect-ratio: 3 / 2;
+    --pad-mult: .72;
+  }
+  .vil-zone-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .trs-grid { grid-template-columns: 1fr; }
+  .pop-mults-grid { grid-template-columns: repeat(3, 1fr); }
+  .vil-queue-item { min-width: 160px; }
+  .vil-view-btn { min-height: 40px; }
+}

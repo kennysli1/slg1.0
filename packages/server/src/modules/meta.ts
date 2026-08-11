@@ -98,6 +98,8 @@ export class MetaModule {
           storageBase: c.constants.storageBase,
           storageGrowthPerLevel: c.constants.storageGrowthPerLevel,
           smithyBonusPerLevel: c.constants.smithyBonusPerLevel,
+          // 铁匠升级造价基数：客户端据此算出「木/泥各 base×目标等级」并显示精确消耗
+          smithyCostBase: c.constants.smithyCostBase,
           wallBonusPerLevel: c.constants.wallBonusPerLevel,
           // 军事建筑训练提速/降费（建筑等级带来的收益，前端按等级展示固定减幅用）
           trainTimeReducePerLevel: c.constants.trainTimeReducePerLevel,

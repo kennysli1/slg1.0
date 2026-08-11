@@ -128,17 +128,23 @@ slg1.0/
 | `main.ts` | 入口：Fastify + WebSocket，挂 Gateway，托管前端 |
 | `admin.ts` | **运维 CLI**（一次性进程）：`reset:season`/`reset:respawn`/`wipe:all` 刷档，执行前自动备份 |
 
-### 前端 `packages/client/src`（按 feature 拆分）
+### 前端 `packages/client/src`（Preact + signals，按 feature 拆分）
+> 视图层契约、设计令牌、UI 原子与跨特性接口见 **`docs/2_2.0设计/14_前端设计系统.md`**（写前端代码前必读）。
+
 | 路径 | 职责 |
 |------|------|
-| `main.ts` | 仅入口：`import bootstrap()` |
+| `main.tsx` | 入口：`render(<App/>)` + 生产环境注册 Service Worker |
 | `api.ts` | WebSocket 通信 + 登录（记住自己身份 `me`） |
 | `info.ts` | 显示映射**回退表**（fallback）；正常走服务端 `GetGameConfig` |
-| `app/bootstrap.ts` | 启动编排：shell/资源条/页签路由/刷新循环/推送分发 |
-| `app/state.ts` | 应用级共享状态（缓存/战报/当前页签/地图选中） |
-| `app/config.ts` | 服务端配置缓存层（消费 `GetGameConfig`，提供 `resInfo`/`unitInfo`… 取值，缺失回退 `info.ts`） |
-| `features/{login,village,army,map,reports}/` | 各页面独立 render + bind 事件处理 |
-| `shared/ui/`、`shared/utils/` | 图标/消耗预览/进度条/格式化/错误文案等共享原子 |
+| `app/store.ts` | 响应式仓库（signals）：1 秒心跳 `tick`、数据版本 `dataVersion`、页签、弹层栈、Toast、地图选中、次级数据源 |
+| `app/refresh.ts` | 数据层：`refreshAll` 统一拉取、`act()` 动作提交、推送分发（事件驱动，无盲轮询） |
+| `app/state.ts` | 纯数据与插值逻辑（快照缓存、人口/资源本地外插），无框架依赖，可单测 |
+| `app/config.ts` | 服务端配置缓存层（消费 `GetGameConfig`，提供 `resInfo`/`unitInfo`…，缺失回退 `info.ts`） |
+| `shell/` | `App`（连接生命周期/页签路由）+ `TopBar` + `ResourceBar` + `TabBar` |
+| `ui/` | UI 原子：`Icon`/`IconPlate`/`Panel`/`Btn`/`Bar`/`TimerBar`/`CostRow`/`Modal`/`Stat` |
+| `styles/` | `tokens.css`（唯一配色/间距来源）+ `base`/`frame`/`shell` + 各页私有样式 |
+| `features/{login,village,army,map,reports,trade}/` | 各页面组件与其弹窗；村庄页含可视化场景与列表双视图 |
+| `shared/ui/`、`shared/utils/` | 错误文案 / 转义 / 格式化 / 六边形数学 |
 
 ### 测试
 | 文件 | 内容 |
@@ -156,6 +162,7 @@ slg1.0/
 | `server/src/test/reset.test.ts` | 刷档三模式：season(留账号+位置)/respawn(重排位置)/wipe(全清) |
 | `server/src/test/config.test.ts` | 配置中心：常量/模板解析 + 校验器（非法引用/循环依赖抛错） |
 | `server/src/test/meta.test.ts` | `GetGameConfig` 下发最小集 + 不泄漏平衡参数 |
+| `server/src/test/smithy.test.ts` | 铁匠养成：造价公式、`GetArmy` 下发 `pendingSmithy`（起止时刻，不外泄 taskId）、并发互斥、资源不足 |
 | `server/src/test/manifest.test.ts` | manifest 汇总 + 动作/事件名冲突检测 |
 | `server/src/test/architecture.test.ts` | **架构守卫**：静态扫 `modules/*.ts` 兜底四铁律（跨模块 import / 模块内定时器 / store 集合归属唯一） |
 | `server/src/test/notifications.test.ts` | 服务端通知/战报持久化与上限裁剪 |
@@ -185,6 +192,7 @@ slg1.0/
 | `2_2.0设计/10_兵种特性效果表.md` | TraitEffect 枚举参考 + 加新特性怎么改 | 加兵种特性时 |
 | `2_2.0设计/11_建筑系统重做.md` | 三区结构 + 城镇中心解锁槽位设计 | 改建筑前（已实现） |
 | `2_2.0设计/13_人口系统设计.md` | 人口机制 A–H + 数值表 + 收敛演算 | 改人口前（已实现） |
+| **`2_2.0设计/14_前端设计系统.md`** | 前端视图层契约：Preact+signals、设计令牌、UI 原子、跨特性接口 | **写前端代码前** |
 | `2_2.0设计/改进方向备选池.md` | 待选扩展点 | 想新功能时 |
 | `服务器客户端同步与UI刷新.md` | 服务端事件定向推送与客户端按需刷新机制 | 新增事件推送或调整页面刷新时 |
 | `经济与金币模块.md` | 五类资源惰性结算、金币税收与经济派生管线 | 改资源、金币或产率结算时 |
@@ -193,9 +201,8 @@ slg1.0/
 | **`服务器/01_数据存储结构.md`** | 存档格式、每个集合的 schema、主键规则 | 改数据 / 排查存档问题前 |
 | **`服务器/02_数据库操作手册.md`** | 查看/备份/手改/刷档/删档/换DB | 运维数据 / 刷档时 |
 | `服务器/03_GM调试手册.md` | GM 调试命令 / 手动改档技巧 | 联调 / 排障时 |
-| `美术资源清单.md` | 美术替换清单（40 张已接入，PvE tier4-8 待补） | 做美术时 |
-| `美术生成规范.md` | 美术资源的生成规范与风格约束 | 做美术时 |
-| `美术生成-成品prompt-中文.md` | 各类美术资源的成品生成 prompt | 做美术时 |
+| `美术资源清单.md` | 命名/引用约定 + 清单概览（事实源是 `tools/art_manifest.json`） | 做美术时 |
+| `美术生成规范.md` | 洋红幕布抠像流水线 + 风格块 + 成套一致性自查 | 做美术时 |
 | `部署手册_腾讯云轻量服务器.md` | 部署步骤 + 需你提供的信息 | 上线时 |
 
 > `docs/archive/` 里是**已上线系统的一次性实现规划**（建筑重构、人口 v2）。它们的结论已并入上表的常青文档，
