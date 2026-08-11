@@ -304,6 +304,7 @@ export function createGameApp(opts?: {
       mercenary.setConfig(newConfig);
       trade.setConfig(newConfig);
       treasure.setConfig(newConfig);
+      research.setConfig(newConfig);
       this.config = newConfig;
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {

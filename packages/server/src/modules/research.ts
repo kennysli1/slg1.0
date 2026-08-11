@@ -64,9 +64,12 @@ export class ResearchModule {
       StartResearch: { command: 'research.StartResearch', ownVillage: true, needAuth: true, schema: { techCode: { type: 'string', minLen: 1, maxLen: 32 } } },
       CancelResearch: { command: 'research.CancelResearch', ownVillage: true, needAuth: true, schema: {} },
     },
+    // 左=内部事件名，右=推给客户端的事件名。右侧一律用**不带模块前缀**的裸名，
+    // 与其它模块保持一致（military 推 SmithyUpgraded、building 推 BuildingBuilt…），
+    // 客户端的 notificationText / notificationKind 也是按裸名分派的。
     eventPushMap: {
-      TechCompleted: 'research.TechCompleted',
-      RpChanged: 'research.RpChanged',
+      'research.TechCompleted': 'TechCompleted',
+      'research.RpChanged': 'RpChanged',
     },
   };
 
@@ -93,6 +96,11 @@ export class ResearchModule {
     this.now = now;
     this.playerVillages = playerVillages;
     this.playerByVillage = playerByVillage;
+  }
+
+  /** GM 热重载时更新配置（含 balance_overrides.json 覆盖后的新值）。 */
+  setConfig(config: GameConfig): void {
+    this.config = config;
   }
 
   async init(): Promise<void> {
@@ -302,8 +310,13 @@ export class ResearchModule {
       }
     }
     const s = this.ensureState(villageId);
+    const wasZero = s.academy.academyCount <= 0;
     s.academy.highestLevel = highestLevel;
     s.academy.academyCount = academyCount;
+    // 初次建造学院：重置 lastCheckTime，避免回溯结算建院前的空 tick
+    if (wasZero && academyCount > 0) s.academy.lastCheckTime = this.now();
+    // 全部拆除：科研点归零；部分拆除（还有学院）则不影响
+    if (!wasZero && academyCount <= 0) s.rp = 0;
     this.store.set(COLLECTION, villageId, s);
     // 重调度 RP tick
     this.settleRp(villageId);
@@ -400,6 +413,6 @@ export class ResearchModule {
   }
 
   private async pushRp(villageId: string, rp: number): Promise<void> {
-    await this.commands.send({ name: 'gateway.PushEvent', from: ResearchModule.NAME, payload: { villageId, event: 'research.RpChanged', data: { rp } } });
+    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp } });
   }
 }
