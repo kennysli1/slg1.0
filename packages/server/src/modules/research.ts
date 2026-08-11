@@ -168,7 +168,9 @@ export class ResearchModule {
   private getState(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
-    return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy } };
+    const params = s.academy.highestLevel > 0 ? this.config.academy[s.academy.highestLevel] : null;
+    const intervalSec = s.academy.academyCount > 0 && params ? Math.max(1, Math.round(params.checkIntervalSec / s.academy.academyCount)) : 0;
+    return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
   }
 
   private getTechTree(cmd: Command): CommandResult {
