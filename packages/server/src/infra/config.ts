@@ -453,6 +453,8 @@ export interface AcademyDef {
   probabilityGainPerFail: number;
   /** 概率上限 (= 保底线)。 */
   maxProbability: number;
+  /** 人口对概率的影响系数：实际概率 *= (1 + popFactor × currentPop/hardCap) */
+  popFactor: number;
 }
 
 export interface GameConfig {
@@ -933,7 +935,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.academy) {
     academyRows = mergeOverridesIntoRows(academyRows, {
       file: 'academy.csv', key: 'level',
-      numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability'],
+      numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'],
     }, overrides.academy);
   }
   const academy: Record<number, AcademyDef> = {};
@@ -946,6 +948,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       baseProbability: num(r.baseProbability, 0.1),
       probabilityGainPerFail: num(r.probabilityGainPerFail, 0.02),
       maxProbability: num(r.maxProbability, 0.3),
+      popFactor: num(r.popFactor, 0),
     };
   }
   // academy 缺级回退：向下复制，保证任意等级都能取到参数。

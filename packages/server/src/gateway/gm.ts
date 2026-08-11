@@ -339,7 +339,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   academy: {
     file: 'academy.csv', key: 'level',
-    numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability'],
+    numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'],
     labels: ['level'],
   },
 };
@@ -494,11 +494,14 @@ function sectionBuildings(){
   var buildRows = DATA.buildings || [];
   var tradeRows = DATA.trade_center || [];
   var mercRows = DATA.merc_camp || [];
-  // 按 level 索引的贸易/雇佣兵数据
+  var academyRows = DATA.academy || [];
+  // 按 level 索引
   var tradeByLv = {};
   for (var tr=0;tr<tradeRows.length;tr++){ tradeByLv[tradeRows[tr].level] = tradeRows[tr]; }
   var mercByLv = {};
   for (var mr=0;mr<mercRows.length;mr++){ mercByLv[mercRows[mr].level] = mercRows[mr]; }
+  var academyByLv = {};
+  for (var ar=0;ar<academyRows.length;ar++){ academyByLv[academyRows[ar].level] = academyRows[ar]; }
   var buildByCode = {};
   for (var i=0;i<buildRows.length;i++){ buildByCode[buildRows[i].code] = buildRows[i]; }
   var byCode = {};
@@ -598,6 +601,22 @@ function sectionBuildings(){
         for (var mf=0;mf<mFields.length;mf++){
           var mfv = mrRow[mFields[mf]]==null?'':mrRow[mFields[mf]];
           h += '<td><input type="number" step="any" value="'+esc(mfv)+'" data-t="merc_camp" data-k="'+esc(mlKey)+'" data-f="'+esc(mFields[mf])+'" oninput="onEdit(this)"></td>';
+        }
+        h += '</tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    if (code === 'academy' && Object.keys(academyByLv).length){
+      h += '<div style="margin-top:8px"><span style="color:#f0b070;font-size:12px">学院RP参数（academy.csv）</span>';
+      h += '<table class="bt"><thead><tr><th>lv</th><th>checkIntervalSec</th><th>baseProbability</th><th>probabilityGainPerFail</th><th>maxProbability</th><th>popFactor</th></tr></thead><tbody>';
+      var aLvs = Object.keys(academyByLv).sort(function(a,b){ return a - b; });
+      for (var al=0;al<aLvs.length;al++){
+        var alKey = aLvs[al]; var acRow = academyByLv[alKey];
+        h += '<tr><td class="lbl">'+esc(alKey)+'</td>';
+        var aFields = ['checkIntervalSec','baseProbability','probabilityGainPerFail','maxProbability','popFactor'];
+        for (var af=0;af<aFields.length;af++){
+          var afv = acRow[aFields[af]]==null?'':acRow[aFields[af]];
+          h += '<td><input type="number" step="any" value="'+esc(afv)+'" data-t="academy" data-k="'+esc(alKey)+'" data-f="'+esc(aFields[af])+'" oninput="onEdit(this)"></td>';
         }
         h += '</tr>';
       }

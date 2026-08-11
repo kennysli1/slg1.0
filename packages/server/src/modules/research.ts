@@ -310,7 +310,7 @@ export class ResearchModule {
   }
 
   /** RP 周期结算：惰性回溯未结算的 tick，然后调度下一次。 */
-  private settleRp(villageId: string): void {
+  private async settleRp(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
     const { highestLevel, academyCount } = s.academy;
     if (academyCount < 1 || highestLevel < 1) {
@@ -319,6 +319,8 @@ export class ResearchModule {
     }
     const params = this.config.academy[highestLevel];
     if (!params) return;
+
+    const popMult = await this.getPopFactor(villageId);
 
     // 惰性回溯：计算从上一次判定到现在的 tick 数
     const now = this.now();
@@ -329,7 +331,7 @@ export class ResearchModule {
 
     while (lastCheck + intervalMs <= now) {
       lastCheck += intervalMs;
-      const prob = Math.min(params.maxProbability, params.baseProbability + failStreak * params.probabilityGainPerFail);
+      const prob = Math.min(params.maxProbability, (params.baseProbability + failStreak * params.probabilityGainPerFail) * popMult);
       if (Math.random() < prob) {
         s.rp += 1;
         failStreak = 0;
@@ -348,14 +350,15 @@ export class ResearchModule {
   }
 
   /** 单次 RP tick：roll 一次判定，失败则递增 failStreak，成功则 rp+1 并重置。调度下一次。 */
-  private tickRp(villageId: string): void {
+  private async tickRp(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
     const { highestLevel, academyCount } = s.academy;
     if (academyCount < 1 || highestLevel < 1) return;
     const params = this.config.academy[highestLevel];
     if (!params) return;
 
-    const prob = Math.min(params.maxProbability, params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail);
+    const popMult = await this.getPopFactor(villageId);
+    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult);
     if (Math.random() < prob) {
       s.rp += 1;
       s.academy.failStreak = 0;
@@ -371,6 +374,20 @@ export class ResearchModule {
   }
 
   // ── 辅助 ──
+
+  /** 查询人口模块获取人口因子：popMult = 1 + popFactor × (currentPop / hardCap)。异常时返回 1（不影响概率）。 */
+  private async getPopFactor(villageId: string): Promise<number> {
+    try {
+      const res = await this.commands.send({ name: 'population.GetSnapshot', from: ResearchModule.NAME, payload: { villageId } });
+      if (!res.ok) return 1;
+      const p = res.payload as any;
+      const ratio = p.hardCap > 0 ? (p.currentPop ?? 0) / Math.max(1, p.hardCap) : 0;
+      const params = this.config.academy[this.ensureState(villageId).academy.highestLevel];
+      const popFactor = params?.popFactor ?? 0;
+      return 1 + popFactor * ratio;
+    } catch { return 1; }
+  }
+
   private prereqsMet(villageId: string, requires: string[]): boolean {
     if (!requires.length) return true;
     const s = this.ensureState(villageId);
