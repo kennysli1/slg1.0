@@ -18,6 +18,8 @@ import { refreshMercCampIfOpen } from '../features/army/mercenary.js';
 import { refreshTradeIfOpen } from '../features/trade/tradecenter.js';
 import { renderMap, bindMap, resetMapCenter } from '../features/map/map.js';
 import { renderReports, handlePush, hydrateReports, bindReports } from '../features/reports/reports.js';
+import { renderTechTree, bindTechTree, refreshTechTree } from '../features/research/tech-tree.js';
+import { closeAcademy, refreshAcademyIfOpen } from '../features/research/academy.js';
 
 const app = document.getElementById('app')!;
 
@@ -26,11 +28,12 @@ const TABS = [
   { key: 'army', name: '军队', icon: 'ui_tab_army' },
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
   { key: 'reports', name: '报告', icon: 'ui_tab_reports' },
+  { key: 'research', name: '科技', icon: 'ui_tab_village', hide: true },
 ];
 
 function renderShell() {
   const tabBtns = TABS.map((t) =>
-    `<button data-tab="${t.key}">${art(t.icon, t.name, 'sm')}<span>${t.name}</span></button>`).join('');
+    `<button data-tab="${t.key}"${(t as any).hide ? ' style="display:none"' : ''}>${art(t.icon, t.name, 'sm')}<span>${t.name}</span></button>`).join('');
   const villages = me?.villages ?? [];
   const villageSwitch = villages.length > 1
     ? `<select id="villageSwitch" class="village-switch" title="切换当前操作村">
@@ -76,11 +79,12 @@ async function refreshAll() {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次性拉取整张地图的全部非空地块（full=true 忽略半径上限），
     // 后续拖拽/缩放/跳转均为纯视觉变换，不再按视野重拉数据。
-    const [res, vil, army, area, moves, pop, treasures] = await Promise.all([
+    const [res, vil, army, area, moves, pop, treasures, techState] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
       req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }), req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
       req('ListTreasures').catch(() => ({ ok: false } as any)),
+      req('GetState').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
     if (failed) {
@@ -231,7 +235,19 @@ function renderPage() {
   if (tab === 'village') page.innerHTML = renderVillage();
   else if (tab === 'army') page.innerHTML = renderArmy();
   else if (tab === 'map') page.innerHTML = renderMap();
+  else if (tab === 'research') page.innerHTML = '<div class="loading">加载中…</div>';
   else page.innerHTML = renderReports();
+  // 科技 tab：异步加载数据后渲染（需要 API 调用，不能同步）
+  if (tab === 'research') {
+    void loadResearchData().then((data) => {
+      const rpPage = document.getElementById('research-page');
+      if (rpPage) return; // already rendered
+      page.innerHTML = renderTechTree(data);
+      bindTechTree(act);
+    });
+  }
+  // 根据是否有学院显示/隐藏科技 tab
+  updateResearchTabVisibility();
   if (entering) {
     void page.offsetWidth; // 强制回流，确保重加 class 能重新触发动画
     page.classList.add('page--enter');
@@ -305,6 +321,44 @@ onPush((event, payload) => {
 });
 
 /** 应用入口：先拉配置 → 连接 WS → 据登录态进入登录页或游戏。 */
+/** 异步加载科研数据（GetTechTree + GetVillage）。 */
+async function loadResearchData(): Promise<any> {
+  const [rRes] = await Promise.all([
+    req('GetTechTree'),
+  ]);
+  const vil = getCache().vil as any;
+  let hasAcademy = false;
+  if (vil) {
+    const zones = [vil.center, vil.inner, vil.outer];
+    for (const z of zones) {
+      if (z?.placed?.some((p: any) => p.kind === 'academy' && p.level >= 1)) { hasAcademy = true; break; }
+    }
+  }
+  return { ...(rRes.ok ? rRes.payload : { rp: 0, techs: [], researching: null }), hasAcademy };
+}
+
+/** 根据 academy 存在与否切换科技 tab 可见性。 */
+function updateResearchTabVisibility(): void {
+  const researchTab = document.querySelector<HTMLButtonElement>('.tabs button[data-tab="research"]');
+  if (!researchTab) return;
+  const vil = getCache().vil as any;
+  let hasAcademy = false;
+  if (vil) {
+    const zones = [vil.center, vil.inner, vil.outer];
+    for (const z of zones) {
+      if (z?.placed?.some((p: any) => p.kind === 'academy' && p.level >= 1)) { hasAcademy = true; break; }
+    }
+  }
+  researchTab.style.display = hasAcademy ? '' : 'none';
+}
+
+// 全局函数：学院详情页进入科技树
+(window as any)._gotoTechTree = () => {
+  closeAcademy();
+  setTab('research');
+  renderPage();
+};
+
 export async function bootstrap() {
   installIconFallback(); // 图标加载失败 → 文字徽标（覆盖未就位的美术占位）
   connect(

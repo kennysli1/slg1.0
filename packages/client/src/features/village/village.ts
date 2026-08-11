@@ -10,6 +10,7 @@ import { renderPopPanel } from './population.js';
 import { openMercenaryCamp } from '../army/mercenary.js';
 import { openTradeCenter } from '../trade/tradecenter.js';
 import { openUnitDetail } from '../army/army.js';
+import { openAcademy } from '../research/academy.js';
 
 /** 侧边栏建造抽屉的当前状态（点空槽时打开；null=关闭）。 */
 let drawer: { zone: 'inner' | 'outer'; options: any[]; freeSlots: number } | null = null;
@@ -259,6 +260,7 @@ export function openBuilding(slotId: string): void {
   if (found) {
     if (found.kind === 'mercenarycamp') { openMercenaryCamp(actFn!, found.slotId); return; }
     if (found.kind === 'tradecenter') { openTradeCenter(actFn!, found.slotId); return; }
+    if (found.kind === 'academy') { openAcademy(actFn!, found.slotId); return; }
     openBuildingDetail(found.kind, found.ctx, found.slotId);
     return;
   }
@@ -267,6 +269,7 @@ export function openBuilding(slotId: string): void {
   if (slot) {
     if (slot.kind === 'mercenarycamp') { openMercenaryCamp(actFn!, slot.slotId); return; }
     if (slot.kind === 'tradecenter') { openTradeCenter(actFn!, slot.slotId); return; }
+    if (slot.kind === 'academy') { openAcademy(actFn!, slot.slotId); return; }
     openBuildingDetail(slot.kind, { level: slot.level, isBuild: slot.level < 1 }, slotId);
     return;
   }
@@ -839,6 +842,7 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
       const found = ctxFromSlot(el.dataset.bldSlot!);
       if (!found) return;
       if (found.kind === 'mercenarycamp') { openMercenaryCamp(act, found.slotId); return; }
+      if (found.kind === 'academy') { openAcademy(act, found.slotId); return; }
       if (found.kind === 'tradecenter') { openTradeCenter(act, found.slotId); return; }
       openBuildingDetail(found.kind, found.ctx, found.slotId);
     });
