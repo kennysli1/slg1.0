@@ -49,3 +49,5 @@ import './gm-routes.test.js';
 import './trade.test.js';
 import './mercenary.test.js';
 
+import './task.test.js';
+import './modifier-coverage.test.js';

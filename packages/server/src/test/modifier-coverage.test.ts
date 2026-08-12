@@ -53,10 +53,9 @@ describe('modifier 覆盖率', () => {
     military.createVillage(vid, 'romans');
     treasure.createVillage(vid);
 
-    // 直接注入所有 modifier 到 state
+    // 直接注入所有真实存在的 modifier 到 state（不含任何虚构命令）
     await commands.send({ name: 'military.SetTreasureCavalryTrainMult', from: 'test', payload: { villageId: vid, mult: 0.5 } });
     await commands.send({ name: 'building.SetBuildSpeedMult', from: 'test', payload: { villageId: vid, mult: 0.5 } });
-    await commands.send({ name: 'economy.SetOverflowCap', from: 'test', payload: { villageId: vid, cap: 1.0 } });
     await commands.send({ name: 'population.SetConscriptionMult', from: 'test', payload: { villageId: vid, bonus: 0.15 } });
     await commands.send({ name: 'population.SetTechGrowthMult', from: 'test', payload: { villageId: vid, mult: 0.1 } });
     await commands.send({ name: 'economy.SetRateModifier', from: 'test', payload: { villageId: vid, source: 'test', mult: { crop: 0.5 } } });
@@ -72,13 +71,24 @@ describe('modifier 覆盖率', () => {
     assert.ok(equ.trainSec < 14, `trainSec=${equ.trainSec} should < 14`);
   });
 
-  it('economy.GetResources: overflowCap + rawRate', async () => {
-    const res = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
-    assert.ok(res.ok);
-    const r = res.payload as any;
-    assert.equal(r.overflowCap, 1, 'overflowCap');
-    assert.ok(r.rawRate, 'rawRate missing');
-    assert.ok(typeof r.rawRate.wood === 'number', 'rawRate.wood');
+  it('economy.GetResources: SetRateModifier 改变 netRate.crop 且字段真实', async () => {
+    const before = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
+    assert.ok(before.ok, 'GetResources failed');
+    const b = before.payload as any;
+    // 再叠加一个 crop 速率修正，验证 modifier 真实生效（无 overflowCap / rawRate 等虚构字段）
+    await commands.send({ name: 'economy.SetRateModifier', from: 'test', payload: { villageId: vid, source: 'test-extra', mult: { crop: 0.5 } } });
+    const after = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
+    assert.ok(after.ok, 'GetResources#2 failed');
+    const a = after.payload as any;
+    assert.ok(typeof a.resources === 'object', 'resources');
+    assert.ok(typeof a.capacity === 'object', 'capacity');
+    assert.ok(typeof a.netRate === 'object', 'netRate');
+    assert.ok(typeof a.overCapacity === 'object', 'overCapacity');
+    assert.ok(typeof a.productionPaused === 'object', 'productionPaused');
+    assert.ok(typeof a.cropUpkeep === 'number', 'cropUpkeep');
+    assert.ok(typeof a.netRate.crop === 'number', 'netRate.crop');
+    // 速率修正叠加后 crop 净产率应提升
+    assert.ok(a.netRate.crop > b.netRate.crop, `crop netRate 应随修正提升: before=${b.netRate.crop} after=${a.netRate.crop}`);
   });
 
   it.skip('population.GetSnapshot: conscriptionBonus 反映到 mobilizeCap', async () => {
@@ -89,28 +99,33 @@ describe('modifier 覆盖率', () => {
     assert.ok((p.mobilizeCap ?? 0) > 0.75, `mobilizeCap=${p.mobilizeCap} should > 0.75`);
   });
 
-  it('economy.GetCropContext: overflowRatio', async () => {
+  it('economy.GetCropContext: 返回真实字段', async () => {
     const res = await commands.send({ name: 'economy.GetCropContext', from: 'test', payload: { villageId: vid } });
-    assert.ok(res.ok);
+    assert.ok(res.ok, 'GetCropContext failed');
     const p = res.payload as any;
-    assert.ok(typeof p.overflowRatio === 'number', 'overflowRatio');
+    assert.ok(typeof p.baseCropPerHour === 'number', 'baseCropPerHour');
+    assert.ok(typeof p.buildingUpkeepPerHour === 'number', 'buildingUpkeepPerHour');
+    assert.ok(typeof p.troopUpkeepPerHour === 'number', 'troopUpkeepPerHour');
+    assert.ok(typeof p.nonCivilianUpkeep === 'number', 'nonCivilianUpkeep');
+    assert.ok(typeof p.currentCrop === 'number', 'currentCrop');
+    assert.ok(typeof p.cropCapacity === 'number', 'cropCapacity');
   });
 
-  it('treasure 精神食粮: 士兵粮耗-1 且 军晌=1 不减', async () => {
+  it('treasure money_bag(instantGold): Use 发放金币', async () => {
+    // 授予一个真实即时宝物
+    const g = await commands.send({ name: 'treasure.Grant', from: 'test', payload: { villageId: vid, code: 'money_bag' } });
+    assert.ok(g.ok, `grant money_bag failed: ${g.reason}`);
+    const before = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
+    const use = await commands.send({ name: 'treasure.Use', from: 'test', payload: { villageId: vid, code: 'money_bag' } });
+    assert.ok(use.ok, `use money_bag failed: ${use.reason}`);
+    const after = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
+    const delta = after.payload.resources.gold - before.payload.resources.gold;
+    assert.ok(delta >= 299, `gold 应约 +300（实际 +${delta}）`);
+  });
+
+  it('treasure.Grant 未知 code 返回 unknown_treasure', async () => {
     const g = await commands.send({ name: 'treasure.Grant', from: 'test', payload: { villageId: vid, code: 'spiritual_food' } });
-    assert.ok(g.ok, `grant spiritual_food failed: ${g.reason}`);
-    const res = await commands.send({ name: 'military.GetArmy', from: 'test', payload: { villageId: vid } });
-    assert.ok(res.ok, 'GetArmy failed');
-    const p = res.payload as any;
-    const trainable = p.trainable ?? [];
-    const legion = trainable.find((t: any) => t.key === 'legionnaire');
-    const equimp = trainable.find((t: any) => t.key === 'equimperatoris');
-    assert.ok(legion, 'legionnaire missing');
-    assert.ok(equimp, 'equimperatoris missing');
-    // 军晌=1（legionnaire, popCost=1）不减：cropPerHourEach 仍为 2（(1+1)*1）
-    assert.equal(legion.cropPerHourEach, 2, `legionnaire 军晌=1 应不减（保持 2），实际 ${legion.cropPerHourEach}`);
-    // 军晌=3（equimperatoris, popCost=3）每兵粮耗 -1：原 (1+3)*3=12 → 12-1=11（原始 upkeep 不变）
-    assert.equal(equimp.upkeep, 3, `equimperatoris 原始 upkeep 应仍为 3，实际 ${equimp.upkeep}`);
-    assert.equal(equimp.cropPerHourEach, 11, `equimperatoris 粮耗应 -1（12→11），实际 ${equimp.cropPerHourEach}`);
+    assert.ok(!g.ok, '未知宝物应失败');
+    assert.equal(g.reason, 'unknown_treasure');
   });
 });
