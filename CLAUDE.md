@@ -83,4 +83,4 @@ npm run verify               # 提交前一键全量（guard + build + lint + ty
 
 **索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
 
-**部署**：`bash .claude/deploy/deploy.sh`；数据结构变更必须带刷档 `--reset respawn`。细节见 `.claude/deploy/README.md`。
+**部署**：见 [`docs/部署手册_腾讯云轻量服务器.md`](./docs/部署手册_腾讯云轻量服务器.md)（含刷档 `--reset respawn` 流程）。

@@ -108,6 +108,7 @@ slg1.0/
 | `treasure.ts` | 每村宝物栏（城镇中心+宝库）+ 待领取 pending(treasure_pending 集合) | **MULTISET 语义**（同 code 可持有多份，每份占 1 槽，aggregate 累加；加性资源 / 乘性攻防复利）；pending 分 camp/deliver；**归途 ETA 精化**（rollDrop 占位 → movement 用真实 arriveAt 覆盖）；outwardId 索引（修复携带宝物返程丢失 + pending 卡死 bug）；详见 [`docs/宝物模块.md`](./docs/宝物模块.md) |
 | `mercenary.ts` | 每村雇佣兵营地（offers 名单 + 存储刷新） | 镜像 trade 模式：金币购买名单上的雇佣兵 → military.troops（popCost=0/upkeep=0，零副作用自动参战）；自动刷新 + 手动刷新 + 升级不重 roll；详见 [`docs/雇佣兵营地模块.md`](./docs/雇佣兵营地模块.md) |
 | `research.ts` | 每村科研进度(research 集合) + 学院 RP 生产 | 学院产科研点（保底概率 + 多学院加速 + 人口因子）→ 科技树消耗 RP 研发 → 双轨效果注入（数值配置驱动 + 机制注册表钩子）；科技依赖 AND/OR 语法 + 启动期无环校验；scope=player 的科技自动跨村注入；详见 [`docs/科研模块.md`](./docs/科研模块.md) |
+| `tasks.ts` | 每村任务进度(active/offered/completedMain/completedRandom) + 酒馆随机任务刷新调度 + 任务营地(pve)生成/移除 | 主线/随机任务接取·放弃·上交资源推进；酒馆建造触发随机任务刷新；`clear_camp` 任务经 `pve.Spawn` 在地图生成营地、完成后移除；接取/放弃/完成经 `TaskListChanged`/`TaskMapUpdated` 推送 |
 | `notifications.ts` | 每村通知/战报历史(notifications 集合) | 订阅各模块领域事件按 villageId 落盘，每村留最新 N 条；登录拉一次历史，不产生新 Push |
 | `meta.ts` | 无（**只读 config**） | `GetGameConfig`：向客户端下发渲染最小集（资源/建筑含zone/兵种/PvE 名称+图标+分类 + 白名单常量），客户端不再硬编码映射 |
 
