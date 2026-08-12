@@ -15,6 +15,8 @@
 - 新增测试入口登记、推送映射一致性与 GM HTTP 路由闸口，避免测试静默漏跑、推送契约漂移及危险路由绕过鉴权。
 - 补齐贸易资源守恒与路线生命周期、雇佣兵招募与刷新、科研完整研发与拆除边界的端到端覆盖。
 - 新增任务系统（服务端 `tasks` 模块 + 客户端任务栏/地图营地标记）：主线/随机任务接取·放弃·上交资源推进，酒馆建造触发随机任务刷新，`clear_camp` 任务在地图生成营地、清掉后移除；接取/放弃/完成经 `TaskListChanged`/`TaskMapUpdated` 推送刷新。
+- 任务模块接入 GM 面板：新增 `/gm/tasks` 实时任务管理（完成/放弃/接取/上交资源/刷新随机/重置本村）与 `/gm/quests` 可视化编辑器（编辑 `quests.csv` 任务目录并热重载生效），配套 GM 运维命令 `task.GmComplete`/`task.GmRefreshRandom`/`task.GmReset`；修复 `serializeCsv` 写回时丢失 UTF-8 BOM 与末尾多余空行的 fidelity 问题。
+
 
 ### 变更
 

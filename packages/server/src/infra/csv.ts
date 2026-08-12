@@ -63,12 +63,14 @@ export interface CsvDoc {
   rows: CsvRow[];
   /** 每条数据行在 raw 中的原行索引。 */
   rowIndices: number[];
+  /** 原文件是否带 UTF-8 BOM（写回时原样保留，兼容 Excel 打开不乱码）。 */
+  bom?: boolean;
 }
 
 export function parseCsvStructured(text: string): CsvDoc {
   const clean = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const raw = clean.split(/\r?\n/);
-  const doc: CsvDoc = { raw: [...raw], header: [], headerIndex: -1, rows: [], rowIndices: [] };
+  const doc: CsvDoc = { raw: [...raw], header: [], headerIndex: -1, rows: [], rowIndices: [], bom: text.charCodeAt(0) === 0xfeff };
   for (let i = 0; i < raw.length; i++) {
     const line = raw[i];
     if (line.trim().length === 0) continue;             // 空行：原样保留（不进 rows）
@@ -102,7 +104,11 @@ export function serializeCsv(doc: CsvDoc): string {
     }
     out.push(doc.raw[i]); // 注释行 / 空行：原样保留
   }
-  // 保留原文件的末尾换行（配置表通常以 \n 结尾）
+  // 末尾换行：原文件以 \n 结尾时 out 末尾已带空串（join 后即单个 \n），
+  // 不再额外追加，避免「EOF 换行符 + 额外 \n」叠加成多余空行。
+  // 原文件无末尾换行时补一个，保持 POSIX 规范。BOM（如有）原样还原到文件开头。
+  let body = out.join('\n');
+  if (doc.bom) body = '\ufeff' + body;
   const hadTrailingNewline = doc.raw.length > 0 && doc.raw[doc.raw.length - 1] === '';
-  return hadTrailingNewline ? out.join('\n') + '\n' : out.join('\n');
+  return hadTrailingNewline ? body : body + '\n';
 }

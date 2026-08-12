@@ -132,6 +132,10 @@ export class TasksModule {
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
+    // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
+    this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
+    this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
+    this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
 
     // 酒馆建造/升级/拆除 → 重排随机刷新节奏 + 接取上限
     const onTavern = (evt: DomainEvent) => {
@@ -379,6 +383,37 @@ export class TasksModule {
 
     // 主线完成 → 解锁下游主线
     if (q.type === 'main') await this.unlockMainQuests(villageId);
+  }
+
+  // ── GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用）──
+
+  /** 强制完成某任务：移除营地、发放奖励、解锁下游（与正常完成一致）。 */
+  private async gmComplete(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const s = this.ensureState(villageId);
+    if (!s.active[code]) return { ok: false, payload: {}, reason: 'not_active' };
+    await this.completeQuest(villageId, code);
+    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+  }
+
+  /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
+  private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
+    const { villageId } = cmd.payload as { villageId: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const info = await this.tavernInfo(villageId);
+    if (info.level <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
+    await this.refreshOffered(villageId, info);
+    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+  }
+
+  /** 重置本村全部任务进度（删状态+营地、重激活 m1）。 */
+  private async gmReset(cmd: Command): Promise<CommandResult> {
+    const { villageId } = cmd.payload as { villageId: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    this.wipeSingleVillage(villageId);
+    this.createVillage(villageId);
+    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
   // ── 主线自动解锁（科技树式前置）──

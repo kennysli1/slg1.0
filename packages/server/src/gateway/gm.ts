@@ -78,6 +78,8 @@ button.sm{padding:3px 7px;font-size:11px}
     <h3>运维操作</h3>
     <div class="ops-row">
       <button class="warn sm" onclick="window.open('/gm/balance','_blank')">平衡调参</button>
+      <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务管理</button>
+      <button class="warn sm" onclick="window.open('/gm/quests','_blank')">任务目录</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -866,6 +868,84 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.send(res);
   });
 
+  // ── 任务模块 GM 运维端点（body 取 villageId，必要时取 code/resources）──
+  const taskOp = async (
+    req: FastifyRequest, reply: FastifyReply, name: string,
+    pick: (b: Record<string, any>) => Record<string, unknown>,
+  ) => {
+    if (!auth(req, reply)) return;
+    const b = (req.body ?? {}) as Record<string, any>;
+    const res: any = await gameApp.commands.send({ name, from: 'gm', payload: pick(b) });
+    if (!res.ok) {
+      void reply.code(400).send({ ok: false, reason: res.reason ?? 'failed', payload: res.payload });
+      return;
+    }
+    store.flush();
+    void reply.send(res);
+  };
+  fastify.post('/gm/ops/task/state', (req, reply) => taskOp(req, reply, 'task.GetState', (b) => ({ villageId: b.villageId })));
+  fastify.post('/gm/ops/task/accept', (req, reply) => taskOp(req, reply, 'task.Accept', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/abandon', (req, reply) => taskOp(req, reply, 'task.Abandon', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/submit', (req, reply) => taskOp(req, reply, 'task.SubmitResources', (b) => ({ villageId: b.villageId, code: b.code, resources: b.resources ?? {} })));
+  fastify.post('/gm/ops/task/complete', (req, reply) => taskOp(req, reply, 'task.GmComplete', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/refresh', (req, reply) => taskOp(req, reply, 'task.GmRefreshRandom', (b) => ({ villageId: b.villageId })));
+  fastify.post('/gm/ops/task/reset', (req, reply) => taskOp(req, reply, 'task.GmReset', (b) => ({ villageId: b.villageId })));
+
+  // GET /gm/tasks — 任务管理 Web 面板
+  fastify.get('/gm/tasks', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_TASKS_HTML);
+  });
+
+  // GET /gm/quests — 任务目录(quests.csv) Web 编辑器
+  fastify.get('/gm/quests', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_QUESTS_HTML);
+  });
+
+  // GET /gm/quests/data — 返回 quests.csv 解析后的行 + 表头（供编辑器渲染）
+  fastify.get('/gm/quests/data', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const dir = gameApp.configDir;
+    const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
+    const doc = parseCsvStructured(text);
+    void reply.send({ ok: true, rows: doc.rows, header: doc.header });
+  });
+
+  // POST /gm/quests/save — 写回 quests.csv 并热重载（body: { rows: CsvRow[] }）
+  fastify.post('/gm/quests/save', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const body = (req.body ?? {}) as { rows?: Record<string, string>[] };
+    const rows = body.rows;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      void reply.code(400).send({ ok: false, reason: 'rows 必填且非空' });
+      return;
+    }
+    const dir = gameApp.configDir;
+    const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
+    try {
+      const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
+      const doc = parseCsvStructured(text);
+      const header = doc.header;
+      // 按表头列序重排，确保每行列齐全
+      doc.rows = rows.map((r) => {
+        const o: Record<string, string> = {};
+        for (const h of header) o[h] = r[h] ?? '';
+        return o;
+      });
+      const csv = serializeCsv(doc);
+      cpSync(dir, tmp, { recursive: true });
+      writeFileSync(join(tmp, 'quests.csv'), csv, 'utf-8');
+      loadGameConfig(tmp); // 校验：失败在此抛出（不落盘）
+      writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
+      gameApp.reloadConfig();
+      void reply.send({ ok: true, count: rows.length });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      void reply.code(400).send({ ok: false, reason: msg });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   // GET /gm/balance — 平衡调参 Web 面板
   fastify.get('/gm/balance', (_req, reply) => {
     void reply.type('text/html; charset=utf-8').send(GM_BALANCE_HTML);
@@ -941,4 +1021,167 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
   });
 }
+
+const GM_TASKS_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>任务管理</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;font-size:13px;background:#1a1a2e;color:#e0e0e0;padding:12px}
+h1{font-size:15px;color:#4cc9f0;margin-bottom:8px}
+h2{font-size:13px;color:#a0a8c0;margin:14px 0 6px;border-bottom:1px solid #0f3460;padding-bottom:3px}
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+input{padding:4px 8px;background:#0f3460;border:1px solid #4cc9f0;color:#e0e0e0;border-radius:4px;font-family:monospace}
+button{background:#0f3460;border:1px solid #4cc9f0;color:#4cc9f0;padding:4px 10px;cursor:pointer;border-radius:3px;font-family:monospace;font-size:12px;margin:2px}
+button:hover{background:#4cc9f0;color:#16213e}
+.card{background:#16213e;border:1px solid #0f3460;border-radius:4px;padding:8px;margin:4px 0}
+#status{padding:4px 0;font-size:12px;color:#70f070}
+#status.bad{color:#f07070}
+</style></head>
+<body>
+<h1>任务管理（GM · 线上村庄）</h1>
+<div id="status" class="ok">就绪</div>
+<div class="toolbar">
+  村庄ID：<input id="vid" placeholder="villageId">
+  <button onclick="loadTasks()">加载</button>
+  <button onclick="refreshRandom()">刷新随机任务</button>
+  <button onclick="resetTasks()">重置进度</button>
+</div>
+<div id="content"></div>
+<script>
+let token = sessionStorage.getItem('gmToken') ?? '';
+function esc(s){s=String(s==null?'':s);return s.replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function statusMsg(m,bad){var e=document.getElementById('status');e.textContent=m;e.className=bad?'bad':'';}
+async function api(method,path,body,retryAuth){
+  retryAuth=retryAuth!==false;
+  var headers={'Content-Type':'application/json'};
+  if(token)headers['X-GM-Token']=token;
+  var r=await fetch('/gm'+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined});
+  var text=await r.text();var data;try{data=text?JSON.parse(text):{};}catch(e){data={ok:false,reason:'HTTP '+r.status};}
+  if(r.status===401&&retryAuth){var next=prompt('GM Token:');if(next!==null){token=next.trim();if(token)sessionStorage.setItem('gmToken',token);else sessionStorage.removeItem('gmToken');return api(method,path,body,false);}}
+  if(!r.ok&&data.ok===undefined)data.ok=false;
+  return data;
+}
+function vid(){return document.getElementById('vid').value.trim();}
+async function loadTasks(){
+  var v=vid();if(!v){statusMsg('请填写村庄ID',true);return;}
+  var r=await api('POST','/ops/task/state',{villageId:v});
+  if(!r.ok){statusMsg('加载失败: '+(r.reason||''),true);return;}
+  render(r.payload);statusMsg('已加载');
+}
+function render(s){
+  var h='';
+  h+='<h2>进行中 ('+Object.keys(s.active||{}).length+')</h2>';
+  for(var c in (s.active||{})){var t=s.active[c];
+    h+='<div class="card" data-code="'+esc(c)+'"><b>'+esc(t.name)+'</b> ['+esc(t.type)+'] code='+esc(c);
+    if(t.objective&&t.objective.kind==='submit_resources')h+=' 已交:'+esc(JSON.stringify(t.submitted))+' / 需'+esc(JSON.stringify(t.required));
+    if(t.objective&&t.objective.kind==='clear_camp')h+=' 营地'+esc(t.campCleared)+'/'+esc(t.campTotal);
+    h+=' <button class="act" data-act="complete" data-code="'+esc(c)+'">完成</button>';
+    if(t.canAbandon)h+=' <button class="act" data-act="abandon" data-code="'+esc(c)+'">放弃</button>';
+    if(t.objective&&t.objective.kind==='submit_resources')h+=' 资源<input class="res" data-code="'+esc(c)+'" placeholder="wood:100,clay:100" style="width:160px"> <button class="act" data-act="submit" data-code="'+esc(c)+'">上交</button>';
+    h+='</div>';
+  }
+  h+='<h2>酒馆展示（可接取 '+((s.offered||[]).length)+'）</h2>';
+  for(var i=0;i<(s.offered||[]).length;i++){var o=s.offered[i];
+    h+='<div class="card" data-code="'+esc(o.code)+'">'+esc(o.name)+' ['+esc(o.type)+'] <button class="act" data-act="accept" data-code="'+esc(o.code)+'">接取</button></div>';
+  }
+  h+='<h2>已完成主线</h2><div class="card">'+(s.completedMain||[]).join(', ')+'</div>';
+  h+='<h2>已完成随机</h2><div class="card">'+(s.completedRandom||[]).join(', ')+'</div>';
+  document.getElementById('content').innerHTML=h;
+}
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('.act');if(!btn)return;
+  var act=btn.getAttribute('data-act');var code=btn.getAttribute('data-code');
+  if(act==='complete')doComplete(code);
+  else if(act==='abandon')doAbandon(code);
+  else if(act==='accept')doAccept(code);
+  else if(act==='submit')doSubmit(code);
+});
+async function doComplete(code){var r=await api('POST','/ops/task/complete',{villageId:vid(),code:code});after(r,'完成');}
+async function doAbandon(code){var r=await api('POST','/ops/task/abandon',{villageId:vid(),code:code});after(r,'放弃');}
+async function doAccept(code){var r=await api('POST','/ops/task/accept',{villageId:vid(),code:code});after(r,'接取');}
+async function doSubmit(code){var raw=document.querySelector('input.res[data-code="'+code+'"]').value.trim();var res={};raw.split(',').forEach(function(p){var kv=p.split(':');if(kv.length===2)res[kv[0].trim()]=Number(kv[1].trim());});var r=await api('POST','/ops/task/submit',{villageId:vid(),code:code,resources:res});after(r,'上交');}
+async function refreshRandom(){var r=await api('POST','/ops/task/refresh',{villageId:vid()});after(r,'刷新随机');}
+async function resetTasks(){if(!confirm('确认重置该村全部任务进度（重激活主线 m1）？'))return;var r=await api('POST','/ops/task/reset',{villageId:vid()});after(r,'重置');}
+async function after(r,act){if(!r.ok){statusMsg(act+'失败: '+(r.reason||''),true);return;}statusMsg(act+'成功');loadTasks();}
+loadTasks();
+</script>
+</body></html>`;
+
+const GM_QUESTS_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>任务目录编辑</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;font-size:13px;background:#1a1a2e;color:#e0e0e0;padding:12px}
+h1{font-size:15px;color:#4cc9f0;margin-bottom:8px}
+.toolbar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+input{padding:3px 6px;background:#0f3460;border:1px solid #4cc9f0;color:#e0e0e0;border-radius:3px;font-family:monospace;font-size:12px;width:110px}
+button{background:#0f3460;border:1px solid #4cc9f0;color:#4cc9f0;padding:4px 10px;cursor:pointer;border-radius:3px;font-family:monospace;font-size:12px;margin:2px}
+button:hover{background:#4cc9f0;color:#16213e}
+button.save{border-color:#70f070;color:#70f070}
+button.save:hover{background:#70f070;color:#16213e}
+#grid{overflow:auto;border:1px solid #0f3460;border-radius:4px}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #0f3460;padding:3px 5px;font-size:12px;white-space:nowrap}
+th{background:#16213e;color:#a0a8c0;text-align:left}
+#status{margin-top:8px;font-size:12px;color:#70f070}
+#status.bad{color:#f07070}
+</style></head>
+<body>
+<h1>任务目录（quests.csv）· 保存后即时热重载</h1>
+<div id="status" class="ok">就绪</div>
+<div class="toolbar">
+  <button onclick="load()">重新加载</button>
+  <button onclick="addRow()">新增一行</button>
+  <button class="save" onclick="save()">保存并热重载</button>
+</div>
+<div id="grid"></div>
+<script>
+let token=sessionStorage.getItem('gmToken')??'';
+var COLS=['id','code','name','desc','type','requires','objKind','objParam','rewardRes','rewardTreasure','weight'];
+var NUM=['id','weight'];
+var ROWS=[];
+function esc(s){s=String(s==null?'':s);return s.replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function statusMsg(m,bad){var e=document.getElementById('status');e.textContent=m;e.className=bad?'bad':'';}
+async function api(method,path,body,retryAuth){
+  retryAuth=retryAuth!==false;
+  var headers={'Content-Type':'application/json'};
+  if(token)headers['X-GM-Token']=token;
+  var r=await fetch('/gm'+path,{method:method,headers:headers,body:body?JSON.stringify(body):undefined});
+  var text=await r.text();var data;try{data=text?JSON.parse(text):{};}catch(e){data={ok:false,reason:'HTTP '+r.status};}
+  if(r.status===401&&retryAuth){var next=prompt('GM Token:');if(next!==null){token=next.trim();if(token)sessionStorage.setItem('gmToken',token);else sessionStorage.removeItem('gmToken');return api(method,path,body,false);}}
+  if(!r.ok&&data.ok===undefined)data.ok=false;
+  return data;
+}
+async function load(){
+  var r=await api('GET','/quests/data');
+  if(!r.ok){statusMsg('加载失败',true);return;}
+  if(Array.isArray(r.header)&&r.header.length)COLS=r.header;
+  ROWS=r.rows||[];
+  render();statusMsg('已加载 '+ROWS.length+' 条');
+}
+function render(){
+  var h='<table><thead><tr>';
+  for(var i=0;i<COLS.length;i++)h+='<th>'+esc(COLS[i])+'</th>';
+  h+='<th></th></tr></thead><tbody>';
+  for(var k=0;k<ROWS.length;k++){var row=ROWS[k];
+    h+='<tr data-i="'+k+'">';
+    for(var j=0;j<COLS.length;j++){var f=COLS[j];var val=row[f]==null?'':row[f];var tp=NUM.indexOf(f)>=0?'number':'text';
+      h+='<td><input type="'+tp+'" data-i="'+k+'" data-f="'+f+'" value="'+esc(val)+'" oninput="onEdit(this)"></td>';
+    }
+    h+='<td><button onclick="delRow('+k+')">删除</button></td></tr>';
+  }
+  h+='</tbody></table>';
+  document.getElementById('grid').innerHTML=h;
+}
+function onEdit(el){var i=+el.getAttribute('data-i');var f=el.getAttribute('data-f');ROWS[i][f]=el.value;}
+function delRow(i){ROWS.splice(i,1);render();}
+function addRow(){var o={};for(var i=0;i<COLS.length;i++)o[COLS[i]]='';ROWS.push(o);render();}
+async function save(){
+  var r=await api('POST','/quests/save',{rows:ROWS});
+  if(!r.ok){statusMsg('保存失败: '+(r.reason||''),true);return;}
+  statusMsg('已保存 '+r.count+' 条并热重载');load();
+}
+load();
+</script>
+</body></html>`;
 
