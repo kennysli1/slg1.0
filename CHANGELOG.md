@@ -16,6 +16,7 @@
 - 补齐贸易资源守恒与路线生命周期、雇佣兵招募与刷新、科研完整研发与拆除边界的端到端覆盖。
 - 新增任务系统（服务端 `tasks` 模块 + 客户端任务栏/地图营地标记）：主线/随机任务接取·放弃·上交资源推进，酒馆建造触发随机任务刷新，`clear_camp` 任务在地图生成营地、清掉后移除；接取/放弃/完成经 `TaskListChanged`/`TaskMapUpdated` 推送刷新。
 - 任务模块接入 GM 面板：新增 `/gm/tasks` 实时任务管理（完成/放弃/接取/上交资源/刷新随机/重置本村）与 `/gm/quests` 可视化编辑器（编辑 `quests.csv` 任务目录并热重载生效），配套 GM 运维命令 `task.GmComplete`/`task.GmRefreshRandom`/`task.GmReset`；修复 `serializeCsv` 写回时丢失 UTF-8 BOM 与末尾多余空行的 fidelity 问题。
+- 任务卡片显示奖励：服务端 tasks 模块在 serializeInstance 与酒馆 offered 序列化中补下 rewards（资源含金币 + 任务专属宝物 code），客户端任务卡与酒馆委托卡新增 RewardRow 渲染奖励（资源用 resInfo + CostRow，宝物用 treasureInfo 解析名称/图标 + treasureEffectText 悬停说明），并在 village.css 增加奖励区样式。
 
 
 ### 变更

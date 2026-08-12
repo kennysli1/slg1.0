@@ -1076,6 +1076,46 @@
   font-size: var(--f-2xs);
   color: var(--c-ink-soft);
 }
+/* 奖励展示区 */
+.task-card-reward {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.task-reward-label {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-soft);
+  font-weight: 600;
+}
+.task-reward-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.task-reward-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--f-2xs);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-gold) 16%, transparent);
+  color: var(--c-gold);
+  border: 1px solid color-mix(in srgb, var(--c-gold) 36%, transparent);
+}
+.task-reward-chip--tre {
+  background: color-mix(in srgb, var(--c-jade) 16%, transparent);
+  color: var(--c-jade);
+  border-color: color-mix(in srgb, var(--c-jade) 36%, transparent);
+}
+.task-reward-ico {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  vertical-align: middle;
+}
 .task-card-actions {
   display: flex;
   gap: var(--s-2);

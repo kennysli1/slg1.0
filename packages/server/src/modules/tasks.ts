@@ -617,6 +617,7 @@ export class TasksModule {
         desc: q.desc,
         type: q.type,
         objective: this.serializeObjective(q),
+        rewards: this.serializeRewards(q),
       }));
     return {
       villageId,
@@ -645,6 +646,7 @@ export class TasksModule {
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',
       objective,
+      rewards: q ? this.serializeRewards(q) : null,
       submitted: { ...inst.submitted },
       required: q?.objective.resources ?? {},
       campCleared: inst.campCleared,
@@ -652,6 +654,14 @@ export class TasksModule {
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
       canAbandon: inst.type === 'random',
       acceptedAt: inst.acceptedAt,
+    };
+  }
+
+  /** 任务奖励：资源(含金币)与任务专属宝物 code 列表，供客户端卡片展示。 */
+  private serializeRewards(q: QuestDef): Record<string, unknown> {
+    return {
+      resources: q.rewards?.resources ?? null,
+      treasures: q.rewards?.treasures ?? [],
     };
   }
 

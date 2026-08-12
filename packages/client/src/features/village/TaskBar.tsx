@@ -12,7 +12,7 @@ import { act } from '../../app/refresh.js';
 import { Panel, SectionHead, Btn, Tag, CostRow } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
-import { resInfo } from '../../app/config.js';
+import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -23,6 +23,40 @@ function objText(task: any): string {
   if (o.kind === 'submit_resources') return '上交资源';
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   return o.kind;
+}
+
+// ── 奖励展示（资源 + 任务专属宝物）────────────────────────────────────────────
+function RewardRow({ rewards }: { rewards: any }) {
+  if (!rewards) return null;
+  const res: Record<string, number> = rewards.resources ?? {};
+  const tres: string[] = rewards.treasures ?? [];
+  const resEntries = Object.entries(res);
+  if (resEntries.length === 0 && tres.length === 0) return null;
+  return (
+    <div class="task-card-reward">
+      <span class="task-reward-label">奖励</span>
+      <div class="task-reward-list">
+        {resEntries.map(([k, v]: any) => {
+          const info = resInfo(k);
+          return (
+            <span class="task-reward-chip" key={k}>
+              {info.icon ? <img class="task-reward-ico" src={info.icon} alt="" /> : null}
+              {info.name} {fmt(v)}
+            </span>
+          );
+        })}
+        {tres.map((code: string) => {
+          const t = treasureInfo(code);
+          return (
+            <span class="task-reward-chip task-reward-chip--tre" key={code} title={t ? treasureEffectText(t) : code}>
+              {t?.icon ? <img class="task-reward-ico" src={t.icon} alt="" /> : null}
+              {t?.name ?? code}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ── 上交资源弹窗 ───────────────────────────────────────────────────────────────
@@ -130,6 +164,8 @@ function TaskCard({ task }: { task: any }) {
         </div>
       )}
 
+      <RewardRow rewards={task.rewards} />
+
       <div class="task-card-actions">
         {o.kind === 'submit_resources' && (
           <Btn size="sm" variant="primary" onClick={onSubmit}>上交资源</Btn>
@@ -161,6 +197,7 @@ export function TaskOffers({ offered }: { offered: any[] }) {
               <span class="task-offer-name">{q.name}</span>
               <span class="task-offer-desc">{q.desc}</span>
               <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
+              <RewardRow rewards={q.rewards} />
             </div>
             <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
           </div>
