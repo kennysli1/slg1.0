@@ -386,6 +386,7 @@ export class CombatModule {
     // 应用防守方损失 + 取战利品
     let looted: Record<string, number> = {};
     let campCleared = false;
+    let isTaskCamp = false;
     if (b.targetKind === 'pve') {
       const apply = await this.commands.send({
         name: 'pve.ApplyResult', from: CombatModule.NAME,
@@ -393,6 +394,7 @@ export class CombatModule {
       });
       looted = (apply.payload as any)?.looted ?? {};
       campCleared = !!((apply.payload as any)?.cleared);
+      isTaskCamp = !!((apply.payload as any)?.task);
     } else {
       // PvP：扣防守方兵力
       if (Object.keys(defenderLosses).length) {
@@ -460,7 +462,8 @@ export class CombatModule {
 
       // 清野营掉落宝物：命中的村庄按概率抽宝物，生成「待领取」记录（不直接入栏），
       // 经 treasure.PendingDropped 进战报，玩家需确认领取，超时自动遗弃。
-      if (campCleared && attackerWins) {
+      // 任务营地（isTaskCamp）清空不触发普通掉落——其奖励由任务模块另行发放。
+      if (campCleared && attackerWins && !isTaskCamp) {
         void this.commands.send({
           name: 'treasure.RollDrop', from: CombatModule.NAME,
           payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId },

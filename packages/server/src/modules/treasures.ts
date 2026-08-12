@@ -56,6 +56,8 @@ interface TreasureState {
   extraSlots: number;
   /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。由 building 模块经 treasure.SetTradeCenter 推送镜像（铁律#4：建筑拥有，此处只存镜像）。 */
   hasTradeCenter: boolean;
+  /** 任务专属宝物（锁定）：完成任务获得，存于此独立桶，不受出售/遗弃/宝库拆除重分布/随军携带影响，也绝不进入待领取 Pending。仍占面板展示并贡献效果（aggregate 包含）。 */
+  locked: string[];
 }
 
 const COLLECTION = 'treasure';
@@ -269,7 +271,7 @@ export class TreasureModule {
   }
 
   createVillage(villageId: string): void {
-    this.store.set(COLLECTION, villageId, { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false } satisfies TreasureState);
+    this.store.set(COLLECTION, villageId, { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false, locked: [] } satisfies TreasureState);
     // 推送空效果（各层清零/置 1），保证其他模块的宝物修饰层存在且一致。
     void this.recomputeAndPush(villageId);
   }
@@ -300,7 +302,7 @@ export class TreasureModule {
   private ensureState(villageId: string): TreasureState {
     let s = this.load(villageId);
     if (!s) {
-      s = { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false };
+      s = { villageId, town: [], treasury: [], carried: {}, extraSlots: 0, hasTradeCenter: false, locked: [] };
       this.store.set(COLLECTION, villageId, s);
       return s;
     }
@@ -315,6 +317,8 @@ export class TreasureModule {
     if (typeof s.extraSlots !== 'number') { s.extraSlots = 0; dirty = true; }
     // 兼容旧存档（缺 hasTradeCenter 字段）
     if (typeof s.hasTradeCenter !== 'boolean') { s.hasTradeCenter = false; dirty = true; }
+    // 兼容旧存档（缺 locked 字段）
+    if (!Array.isArray(s.locked)) { s.locked = []; dirty = true; }
     // 兼容旧存档：宝库已扩容但城镇中心仍有宝物的历史数据，自动迁移到宝库（宝物优先存宝库）
     while (s.treasury.length < s.extraSlots && s.town.length > 0) {
       s.treasury.push(s.town.pop()!);
@@ -329,6 +333,10 @@ export class TreasureModule {
     if (rawTown.length !== s.town.length || rawTreasury.length !== s.treasury.length) dirty = true;
     s.town = rawTown;
     s.treasury = rawTreasury;
+    // locked 桶同样做类型清理
+    const rawLocked = norm(s.locked ?? []);
+    if (rawLocked.length !== (s.locked ?? []).length) dirty = true;
+    s.locked = rawLocked;
     // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
     if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
@@ -357,6 +365,16 @@ export class TreasureModule {
   /** 已储存 codes 的去重视图（防御性，避免任何残留重复被广播/聚合）。 */
   private storedCodesUnique(s: TreasureState): string[] {
     return Array.from(new Set(this.storedCodes(s)));
+  }
+
+  /** 已储存 + 锁定宝物 code 列表：锁定宝物也贡献效果、占面板，但不走 sell/discard/lost 生命周期。 */
+  private allStoredCodes(s: TreasureState): string[] {
+    return [...(s.town ?? []), ...(s.treasury ?? []), ...(s.locked ?? [])];
+  }
+
+  /** 是否锁定宝物（完成任务获得，不可出售/遗弃/丢失）。 */
+  private isLocked(s: TreasureState, code: string): boolean {
+    return (s.locked ?? []).includes(code);
   }
 
   /**
@@ -477,7 +495,7 @@ export class TreasureModule {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
     // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.storedCodes(s));
+    const eff = this.aggregate(this.allStoredCodes(s));
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
       name: 'economy.SetRateModifier', from: TreasureModule.NAME,
@@ -497,8 +515,8 @@ export class TreasureModule {
 
   private async emitChanged(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
-    // multiset：广播 codes 保留重复，客户端按重复数量渲染多个持有图标
-    const codes = this.storedCodes(s);
+    // multiset：广播 codes 保留重复，客户端按重复数量渲染多个持有图标（含锁定宝物）
+    const codes = this.allStoredCodes(s);
     const eff = this.aggregate(codes);
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
@@ -507,6 +525,7 @@ export class TreasureModule {
         codes,
         town: [...s.town],
         treasury: [...s.treasury],
+        locked: [...s.locked],
         carried: Object.fromEntries(Object.entries(s.carried).map(([k, v]) => [k, [...v.codes]])),
         slots: this.getTreasureSlots(villageId),
         effect: eff,
@@ -565,12 +584,20 @@ export class TreasureModule {
     return null;
   }
 
-  /** 授予宝物到村庄宝物栏（multiset：允许重复持有同一宝物，每份占 1 格）。 */
+  /** 授予宝物到村庄宝物栏（multiset：允许重复持有同一宝物，每份占 1 格）。locked=true 时存入锁定桶（任务专属：绕过槽位上限、不可出售/遗弃/丢失，仍贡献效果）。 */
   private async grant(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, locked } = cmd.payload as { villageId: string; code: string; locked?: boolean };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    // 任务专属宝物：锁定入村，绕过槽位上限，绝不丢失/出售/遗弃。
+    if (locked) {
+      if (!s.locked.includes(code)) s.locked.push(code);
+      this.store.set(COLLECTION, villageId, s);
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { codes: this.allStoredCodes(s), treasure: t, locked: true } };
+    }
     if (!this.storeIfRoom(s, code)) {
       return { ok: false, payload: { slots: this.getTreasureSlots(villageId), have: this.storedCodes(s).length }, reason: 'treasure_slots_full' };
     }
@@ -591,6 +618,8 @@ export class TreasureModule {
     };
     const s = this.ensureState(villageId);
     const want = Array.isArray(codes) ? codes.filter(Boolean) : [];
+    // 锁定宝物不可随军携带
+    for (const c of want) if (this.isLocked(s, c)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'locked_treasure' };
     // 统计 want 中各 code 的需求数量，并校验持有数量（multiset 下需按数量而非仅存在性判断）
     const wantCounts = new Map<string, number>();
     for (const c of want) wantCounts.set(c, (wantCounts.get(c) ?? 0) + 1);
@@ -749,6 +778,7 @@ export class TreasureModule {
   private async use(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
+    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     const t = this.config.treasures[code];
     if (!t || t.applyType !== 'instant' || t.effectType !== 'instantGold') {
@@ -773,6 +803,7 @@ export class TreasureModule {
   private async sell(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
+    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
@@ -791,6 +822,7 @@ export class TreasureModule {
   private async discard(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
+    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
@@ -806,6 +838,7 @@ export class TreasureModule {
   private async replaceTreasure(cmd: Command): Promise<CommandResult> {
     const { villageId, oldCode, newCode } = cmd.payload as { villageId: string; oldCode: string; newCode: string };
     const s = this.ensureState(villageId);
+    if (this.isLocked(s, oldCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'locked_treasure' };
     if (!this.storedCodes(s).includes(oldCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'not_held' };
     const t = this.config.treasures[newCode];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
@@ -824,7 +857,7 @@ export class TreasureModule {
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
-    const stored = this.storedCodes(s);
+    const stored = this.allStoredCodes(s);
     const eff = this.aggregate(stored);
     return {
       ok: true,
@@ -833,6 +866,7 @@ export class TreasureModule {
         codes: stored,
         town: [...s.town],
         treasury: [...s.treasury],
+        locked: [...s.locked],
         carried: Object.fromEntries(Object.entries(s.carried).map(([k, v]) => [k, [...v.codes]])),
         slots: this.getTreasureSlots(villageId),
         slotBreakdown: { town: TOWN_CENTER_BASE_SLOTS, treasury: s.extraSlots, total: this.getTreasureSlots(villageId) },

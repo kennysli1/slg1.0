@@ -15,3 +15,5 @@ targetId,unitCode,name,count,form,meleeAtk,rangedAtk,meleeDef,rangedDef,carry
 8,boneChampion,骷髅武士,450,melee,200,0,180,160,0
 8,boneArcher,骷髅弓手,180,ranged,30,150,80,140,0
 8,boneGiant,骷髅巨人,60,melee,280,0,300,250,0
+99,campGuard,营地卫兵,15,melee,30,0,30,30,10
+99,campArcher,营地弓手,8,ranged,10,25,15,30,0

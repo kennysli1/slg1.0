@@ -71,6 +71,14 @@ export interface PopSnapshot {
   goldPerHour?: number;
   /** 平民耗粮 /h。 */
   civilianCropPerHour: number;
+  /** 实际驻军人口（含在途），旧面板展示与总人数重算用；服务端权威为 soldierPop。GetPopulation 快照不携带，由 bootstrap 用 soldierPop 兜底。 */
+  garrisonPop: number;
+  /** 充裕比（住房余量 / 总人口），旧面板展示用。 */
+  lambdaRatio: number;
+  /** 伤兵池：总数 + 各伤兵治愈倒计时列表。 */
+  wounded: { total: number; entries: any[] };
+  /** 每小时粮食赤字速率（饥荒减员速率），由 famine_reduction push 校正。 */
+  cropDeficitRate: number;
   /** 五轴繁荣度乘数（全 = prosperityMult）。 */
   laborMults: {
     production: number;

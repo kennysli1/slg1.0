@@ -101,6 +101,31 @@
   stroke: var(--c-crimson-hi);
   stroke-width: 2;
 }
+/* 任务营地：鎏金描边 + 脉冲，和 PvE 的红色区分开 */
+.hex-ring--task {
+  stroke: var(--c-gold);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px rgba(216, 177, 104, .6));
+  animation: ring-pulse-gold 2.2s ease-in-out infinite;
+}
+.task-camp-marker {
+  pointer-events: none;
+}
+.task-camp-marker.cleared .hex-ring--task {
+  stroke: var(--c-jade);
+  filter: drop-shadow(0 0 5px rgba(95, 156, 98, .5));
+  animation: none;
+  stroke-opacity: .7;
+}
+.task-camp-emoji {
+  font-size: 13px;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.task-camp-marker.cleared .task-camp-emoji {
+  opacity: .55;
+}
 
 @keyframes ring-pulse-gold {
   0%, 100% { filter: drop-shadow(0 0 4px rgba(216,177,104,.55)); stroke-opacity: 1; }

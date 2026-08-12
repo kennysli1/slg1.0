@@ -23,3 +23,9 @@ export function fmtDur(ms: number): string {
 export function secLeft(untilMs: number): string {
   return fmtDur(untilMs - Date.now());
 }
+
+/**
+ * 同 `secLeft`（语义上偏"战场/事件倒计时"，如 IncomingAttack 的预计抵达）。
+ * 单独导出一份，方便旧调用点 `import { secStr } from '../shared/utils/format.js'` 继续可用。
+ */
+export const secStr = secLeft;

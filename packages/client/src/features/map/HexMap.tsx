@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers } from '../../app/store.js';
 import { getMapCenter, setMapCenter } from '../../app/refresh.js';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath } from '../../ui/index.js';
@@ -370,6 +370,26 @@ export function HexMap() {
     return markers;
   }
 
+  // ─── task camp markers（任务营地：真实 pve 地块 + 🎯 高亮）──────────────
+  function buildTaskMarkers() {
+    const camps: any[] = taskMarkers.value[me?.villageId ?? ''] ?? [];
+    const markers: preact.VNode[] = [];
+    camps.forEach((c, i) => {
+      const p = hexToPixel({ q: c.q, r: c.r });
+      markers.push(
+        <g
+          key={`taskcamp-${i}`}
+          class={`task-camp-marker${c.cleared ? ' cleared' : ''}`}
+          transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
+        >
+          <polygon class="hex-ring hex-ring--task" points={HEX_CORNER_STR} />
+          <text class="task-camp-emoji" textAnchor="middle" dy={HEX_SIZE * 0.32}>🎯</text>
+        </g>,
+      );
+    });
+    return markers;
+  }
+
   // ─── rAF march animation ───────────────────────────────────────────────────
   function startMarchAnimation() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
@@ -626,6 +646,7 @@ export function HexMap() {
   const visibleCells = buildVisibleHexes();
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
+  const taskMarkersEls = buildTaskMarkers();
 
   // Jump input refs
   const jumpQRef = useRef<HTMLInputElement>(null);
@@ -714,6 +735,9 @@ export function HexMap() {
 
           {/* ── March markers (animated via rAF) ── */}
           <g ref={markerEl} class="layer-markers">{marchMarkers}</g>
+
+          {/* ── Task camp markers (static) ── */}
+          <g class="layer-taskmarkers">{taskMarkersEls}</g>
         </g>
       </svg>
 

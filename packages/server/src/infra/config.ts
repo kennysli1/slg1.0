@@ -157,6 +157,10 @@ export interface BuildingLevelDef {
   trainTimeReducePerLevel?: number;
   /** 仅兵营/马厩/兵工厂(barracks/stable/workshop)：该等级提供的训练降费（减少资源消耗比例，Lv1=0, Lv2+=每级值）。总降费 = min(cap, Σ trainCost…)。替代旧 trainCostReducePerLevel 常量。 */
   trainCostReducePerLevel?: number;
+  /** 仅酒馆(tavern)：该等级随机任务刷新间隔(秒)，越小越频繁。 */
+  taskRefreshSec?: number;
+  /** 仅酒馆(tavern)：该等级酒馆同时可展示的随机任务数上限。 */
+  taskMaxTasks?: number;
 }
 
 export interface BuildingDef {
@@ -214,6 +218,42 @@ export interface TreasureDef {
   dropRate: number;
   /** 应用方式：passive(持续加成，储存在宝物栏)/instant(获得即结算一次，如钱袋子)。 */
   applyType: string;
+}
+
+/** 任务目标种类。v1 仅两种简单目标；多段流程任务后续扩展。 */
+export type QuestObjectiveKind = 'submit_resources' | 'clear_camp';
+
+/** 单个任务目标。v1 每任务恰好一个目标。 */
+export interface QuestObjective {
+  kind: QuestObjectiveKind;
+  /** submit_resources：需上交的资源与数量（key ∈ resources.csv）。 */
+  resources?: Record<string, number>;
+  /** clear_camp：PvE 营地模板 code（pve_targets.csv）+ 需清理的数量。完全真实化——会在地图上生成真实营地。 */
+  campTemplate?: string;
+  count?: number;
+}
+
+/** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
+export type QuestType = 'main' | 'random';
+
+/** 任务定义（来自 quests.csv）。 */
+export interface QuestDef {
+  id: number;
+  code: string;
+  name: string;
+  desc: string;
+  type: QuestType;
+  /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
+  requires: string[];
+  /** 目标（v1 单目标）。 */
+  objective: QuestObjective;
+  /** 奖励：资源(含金币)与/或任务专属宝物(强制 locked，不可出售/遗弃/丢失/超时)。 */
+  rewards: {
+    resources?: Record<string, number>;
+    treasures?: string[];
+  };
+  /** 随机任务刷新权重（越大越常出现）；主线忽略。 */
+  weight: number;
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -479,6 +519,8 @@ export interface GameConfig {
   research: Record<string, ResearchDef>;
   /** 学院 RP 生产参数（academy.csv）：level → AcademyDef。 */
   academy: Record<number, AcademyDef>;
+  /** 任务目录（quests.csv）：code → QuestDef。 */
+  quests: Record<string, QuestDef>;
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -578,7 +620,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -598,6 +640,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       buildSpeedupPerLevel: r.buildSpeedupPerLevel ? num(r.buildSpeedupPerLevel) : undefined,
       trainTimeReducePerLevel: r.trainTimeReducePerLevel ? num(r.trainTimeReducePerLevel) : undefined,
       trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
+      taskRefreshSec: r.taskRefreshSec ? num(r.taskRefreshSec) : undefined,
+      taskMaxTasks: r.taskMaxTasks ? num(r.taskMaxTasks) : undefined,
     };
   }
 
@@ -981,8 +1025,39 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     }
   }
 
+  // 任务目录（quests.csv）：code → QuestDef。覆盖层暂不支持（任务为固定设计内容）。
+  const questRows = loadCsv(p('quests.csv'));
+  assertUniqueRows(questRows, 'quests.csv');
+  const quests: Record<string, QuestDef> = {};
+  for (const r of questRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    const objKind = (r.objKind as QuestObjectiveKind) || 'submit_resources';
+    let objective: QuestObjective;
+    if (objKind === 'clear_camp') {
+      const [tmpl, cnt] = (r.objParam || '').split(':');
+      objective = { kind: 'clear_camp', campTemplate: tmpl?.trim(), count: Math.max(1, num(cnt, 1)) };
+    } else {
+      objective = { kind: 'submit_resources', resources: parseResourceList(r.objParam) ?? {} };
+    }
+    quests[code] = {
+      id: num(r.id),
+      code,
+      name: r.name ?? code,
+      desc: r.desc ?? '',
+      type: (r.type as QuestType) || 'random',
+      requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
+      objective,
+      rewards: {
+        resources: parseResourceList(r.rewardRes) ?? undefined,
+        treasures: r.rewardTreasure ? r.rewardTreasure.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
+      },
+      weight: num(r.weight, 1),
+    };
+  }
+
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests,
   };
   validateGameConfig(config);
   return config;
@@ -1242,6 +1317,34 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
   }
 
+  // 任务系统校验
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp']);
+  const questCodes = new Set(Object.keys(config.quests));
+  for (const q of Object.values(config.quests)) {
+    if (!q.code) errors.push('quests.csv 存在空 code');
+    if (q.type !== 'main' && q.type !== 'random') errors.push(`quests.csv[${q.code}] type 必须是 main/random`);
+    if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
+      errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
+    } else if (q.objective.kind === 'submit_resources') {
+      if (!q.objective.resources || Object.keys(q.objective.resources).length === 0) {
+        errors.push(`quests.csv[${q.code}] submit_resources 必须指定资源(objParam)`);
+      }
+    } else {
+      const tmpl = q.objective.campTemplate;
+      if (!tmpl || !config.pveTemplates[tmpl]) errors.push(`quests.csv[${q.code}] clear_camp 模板 ${tmpl} 不在 pve_targets.csv`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] clear_camp 数量必须≥1`);
+    }
+    if (q.rewards.treasures) {
+      for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
+    }
+    if (q.rewards.resources) {
+      for (const k of Object.keys(q.rewards.resources)) if (!resourceKeys.has(k)) errors.push(`quests.csv[${q.code}] 奖励资源 ${k} 不在 resources.csv`);
+    }
+    for (const req of q.requires) if (!questCodes.has(req)) errors.push(`quests.csv[${q.code}] requires 引用不存在的任务: ${req}`);
+  }
+  const questCycle = findQuestCycle(config.quests);
+  if (questCycle) errors.push(`quests.csv 主线前置存在循环依赖: ${questCycle.join(' → ')}`);
+
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);
   }
@@ -1273,6 +1376,37 @@ function findRequiresCycle(buildings: Record<string, BuildingDef>): string[] | n
   };
 
   for (const node of Object.keys(buildings)) {
+    if ((color[node] ?? WHITE) === WHITE) visit(node);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** DFS 检测任务前置环（主线 requires 为普通依赖，成环即报错）。 */
+function findQuestCycle(quests: Record<string, QuestDef>): string[] | null {
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color: Record<string, number> = {};
+  const stack: string[] = [];
+  let found: string[] | null = null;
+  const visit = (node: string): void => {
+    if (found) return;
+    if (!quests[node]) return;
+    color[node] = GRAY;
+    stack.push(node);
+    for (const req of quests[node].requires) {
+      if (!quests[req]) continue;
+      if (color[req] === GRAY) {
+        const i = stack.indexOf(req);
+        found = stack.slice(i).concat(req);
+        return;
+      }
+      if ((color[req] ?? WHITE) === WHITE) visit(req);
+      if (found) return;
+    }
+    stack.pop();
+    color[node] = BLACK;
+  };
+  for (const node of Object.keys(quests)) {
     if ((color[node] ?? WHITE) === WHITE) visit(node);
     if (found) return found;
   }

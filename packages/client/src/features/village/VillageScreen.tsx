@@ -11,6 +11,7 @@ import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
+import { TaskBar } from './TaskBar.js';
 
 import '../../styles/village.css';
 
@@ -185,6 +186,10 @@ export function VillageScreen() {
                 </Panel>
               </section>
             )}
+
+            <section class="vil-detail-section">
+              <TaskBar />
+            </section>
           </div>
         </div>
       </div>

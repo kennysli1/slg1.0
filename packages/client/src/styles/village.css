@@ -1005,3 +1005,158 @@
   .vil-queue-item { min-width: 160px; }
   .vil-view-btn { min-height: 40px; }
 }
+
+/* ---------- 任务条（村庄页常驻） ---------- */
+.task-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.task-empty {
+  color: var(--c-ink-soft);
+  font-size: var(--f-sm);
+}
+.task-active-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.task-card {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: var(--s-2) var(--s-3);
+  background: var(--c-panel-2);
+}
+.task-card--main {
+  border-left: 3px solid var(--c-gold);
+}
+.task-card--random {
+  border-left: 3px solid var(--c-jade);
+}
+.task-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  justify-content: space-between;
+}
+.task-card-name {
+  font-weight: 700;
+  font-size: var(--f-md);
+}
+.task-card-desc {
+  font-size: var(--f-sm);
+  color: var(--c-ink-soft);
+  margin: 2px 0 6px;
+  line-height: 1.5;
+}
+.task-card-obj {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.task-card-prog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.task-prog-chip {
+  font-size: var(--f-2xs);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--c-ink-10);
+  color: var(--c-ink-soft);
+  border: 1px solid transparent;
+}
+.task-prog-chip.done {
+  background: color-mix(in srgb, var(--c-jade) 22%, transparent);
+  color: var(--c-jade);
+}
+.task-prog-hint {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-soft);
+}
+.task-card-actions {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  flex-wrap: wrap;
+}
+
+/* 酒馆里的可接取任务 */
+.task-offers {
+  margin-top: var(--s-2);
+}
+.task-offer-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.task-offer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  justify-content: space-between;
+  padding: var(--s-1) var(--s-2);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--r-sm);
+  background: var(--c-panel-2);
+}
+.task-offer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.task-offer-name {
+  font-weight: 600;
+  font-size: var(--f-sm);
+}
+.task-offer-desc {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-soft);
+}
+.task-offer-obj {
+  font-size: var(--f-2xs);
+  color: var(--c-gold);
+}
+
+/* 上交资源弹窗 */
+.task-submit-hint {
+  font-size: var(--f-sm);
+  color: var(--c-ink-soft);
+  margin-bottom: var(--s-2);
+}
+.task-submit-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.task-submit-row {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+}
+.task-submit-res {
+  font-size: var(--f-sm);
+}
+.task-submit-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-border);
+  background: var(--c-input);
+  color: var(--c-ink);
+  font-family: var(--ff-num);
+  text-align: right;
+}
+.task-submit-input:focus {
+  outline: 1px solid var(--c-gold-dim);
+  border-color: var(--c-gold-dim);
+}
+.task-submit-prog {
+  font-size: var(--f-2xs);
+  color: var(--c-ink-soft);
+  white-space: nowrap;
+}

@@ -1,0 +1,194 @@
+/**
+ * 任务条（常驻村庄页）：
+ *  - 进行中任务（主线不可放弃 / 随机可放弃）
+ *  - 上交资源类任务 → 弹窗提交
+ *  - 清理营地类任务 → 提示前往地图清除标记营地
+ *  - 酒馆可接取的随机任务 → 直接接取
+ */
+import { useState } from 'preact/hooks';
+import { dataVersion, taskStates, tab, openModal } from '../../app/store.js';
+import { me, req } from '../../api.js';
+import { act } from '../../app/refresh.js';
+import { Panel, SectionHead, Btn, Tag, CostRow } from '../../ui/index.js';
+import { Modal } from '../../ui/Modal.js';
+import { fmt } from '../../shared/utils/format.js';
+import { resInfo } from '../../app/config.js';
+
+function vid(): string {
+  return me?.villageId ?? '';
+}
+
+function objText(task: any): string {
+  const o = task.objective;
+  if (o.kind === 'submit_resources') return '上交资源';
+  if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
+  return o.kind;
+}
+
+// ── 上交资源弹窗 ───────────────────────────────────────────────────────────────
+function SubmitModal({ task, close }: { task: any; close: () => void }) {
+  const o = task.objective;
+  const reqRes: Record<string, number> = o.resources ?? {};
+  const submitted: Record<string, number> = task.submitted ?? {};
+  const [vals, setVals] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    for (const [k, need] of Object.entries(reqRes)) {
+      init[k] = Math.max(0, need - (submitted[k] ?? 0));
+    }
+    return init;
+  });
+
+  const onInput = (k: string, v: string) => {
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    setVals((p) => ({ ...p, [k]: n }));
+  };
+
+  const confirm = async () => {
+    const resources: Record<string, number> = {};
+    for (const [k, v] of Object.entries(vals)) if (v > 0) resources[k] = v;
+    await act(req('task.SubmitResources', { code: task.code, resources }), {
+      okToast: '已上交资源',
+      onOk: () => close(),
+    });
+  };
+
+  return (
+    <Modal title={`上交资源 · ${task.name}`} sub={task.desc} onClose={close}>
+      <p class="task-submit-hint">仅需补齐剩余需求，不会超额扣除。</p>
+      <div class="task-submit-grid">
+        {Object.entries(reqRes).map(([k, need]) => {
+          const info = resInfo(k);
+          const done = submitted[k] ?? 0;
+          return (
+            <div class="task-submit-row" key={k}>
+              <span class="task-submit-res">{info.name}</span>
+              <input
+                class="task-submit-input"
+                type="number" min="0" value={vals[k] ?? 0}
+                data-modal-initial-focus={k === Object.keys(reqRes)[0] ? 'true' : undefined}
+                onInput={(e) => onInput(k, (e.target as HTMLInputElement).value)}
+              />
+              <span class="task-submit-prog">已交 {fmt(done)}/{fmt(need)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div class="modal-foot">
+        <Btn variant="ghost" onClick={close}>取消</Btn>
+        <Btn variant="primary" onClick={confirm}>确认上交</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── 单个进行中任务卡片 ────────────────────────────────────────────────────────
+function TaskCard({ task }: { task: any }) {
+  const o = task.objective;
+  const isMain = task.type === 'main';
+
+  const onAbandon = async () => {
+    await act(req('task.Abandon', { code: task.code }), { okToast: '已放弃任务' });
+  };
+  const onSubmit = () => {
+    openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
+  };
+  const onGoMap = () => { tab.value = 'map'; };
+
+  return (
+    <div class={`task-card task-card--${task.type}`}>
+      <div class="task-card-head">
+        <span class="task-card-name">{task.name}</span>
+        {isMain
+          ? <Tag kind="gold">主线</Tag>
+          : <Tag kind="jade">随机</Tag>}
+      </div>
+      <div class="task-card-desc">{task.desc}</div>
+
+      {o.kind === 'submit_resources' && (
+        <div class="task-card-obj">
+          <CostRow cost={o.resources} />
+          <div class="task-card-prog">
+            {Object.entries(o.resources ?? {}).map(([k, need]: any) => {
+              const done = task.submitted?.[k] ?? 0;
+              return (
+                <span key={k} class={`task-prog-chip${done >= need ? ' done' : ''}`}>
+                  {resInfo(k).name} {fmt(done)}/{fmt(need)}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {o.kind === 'clear_camp' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${task.campCleared >= task.campTotal ? ' done' : ''}`}>
+              已清营地 {task.campCleared}/{task.campTotal}
+            </span>
+            {task.campTotal > 0 && <span class="task-prog-hint">地图上带 🎯 标记的营地</span>}
+          </div>
+        </div>
+      )}
+
+      <div class="task-card-actions">
+        {o.kind === 'submit_resources' && (
+          <Btn size="sm" variant="primary" onClick={onSubmit}>上交资源</Btn>
+        )}
+        {o.kind === 'clear_camp' && (
+          <Btn size="sm" variant="ghost" onClick={onGoMap}>前往地图</Btn>
+        )}
+        {!isMain && (
+          <Btn size="sm" variant="danger" onClick={onAbandon}>放弃</Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 酒馆可接取的随机任务 ──────────────────────────────────────────────────────
+export function TaskOffers({ offered }: { offered: any[] }) {
+  if (!offered?.length) return null;
+  const onAccept = async (code: string) => {
+    await act(req('task.Accept', { code }), { okToast: '已接取任务' });
+  };
+  return (
+    <div class="task-offers">
+      <SectionHead sub={`${offered.length} 个委托`}>酒馆可接取</SectionHead>
+      <div class="task-offer-list">
+        {offered.map((q) => (
+          <div class="task-offer" key={q.code}>
+            <div class="task-offer-info">
+              <span class="task-offer-name">{q.name}</span>
+              <span class="task-offer-desc">{q.desc}</span>
+              <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
+            </div>
+            <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── 任务条主体 ────────────────────────────────────────────────────────────────
+export function TaskBar() {
+  dataVersion.value; // 资源/任务数据刷新时重渲
+  taskStates.value;  // 任务推送时重渲
+  const ts = taskStates.value[vid()] ?? null;
+  const active: any[] = ts?.active ?? [];
+  const offered: any[] = ts?.offered ?? [];
+
+  return (
+    <section class="task-bar">
+      <SectionHead>任务</SectionHead>
+      {active.length === 0 && offered.length === 0 ? (
+        <Panel variant="flat" pad class="task-empty">暂无可进行的任务。建造酒馆可接取随机委托。</Panel>
+      ) : (
+        <div class="task-active-list">
+          {active.map((t) => <TaskCard task={t} key={t.code} />)}
+        </div>
+      )}
+      <TaskOffers offered={offered} />
+    </section>
+  );
+}

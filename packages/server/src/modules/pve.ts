@@ -29,6 +29,9 @@ interface PveState {
   cleared: boolean;
   /** 累计被清空次数（战利品浮动的确定性 LCG 种子，保证可复现） */
   clearCount: number;
+  /** 任务营地标记：由任务模块运行时生成（pve.Spawn task=true）。任务营地清空后不触发普通掉落、
+   *  不自动重生（由任务模块在目标达成后显式 pve.Remove 清除），resume 也不自动重生。 */
+  task?: boolean;
 }
 
 const COLLECTION = 'pve';
@@ -65,6 +68,33 @@ export class PveModule {
     this.commands.register('pve.GetTarget', (c) => this.getTarget(c));
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
+    // 任务模块运行时生成/移除任务营地（内部命令）
+    this.commands.register('pve.Spawn', (c) => this.spawn(c));
+    this.commands.register('pve.Remove', (c) => this.remove(c));
+  }
+
+  /** 运行时创建一个 PvE 目标（任务营地）。返回 ok:false 若 id 已存在或模板不存在。 */
+  private spawn(cmd: Command): CommandResult {
+    const { id, type, q, r, task } = cmd.payload as { id: string; type: string; q: number; r: number; task?: boolean };
+    if (this.load(id)) return { ok: false, payload: {}, reason: 'already_exists' };
+    const tpl = this.config.pveTemplates[type];
+    if (!tpl) return { ok: false, payload: {}, reason: 'unknown_template' };
+    this.create(id, type, q, r, !!task);
+    return { ok: true, payload: { id, type, q, r } };
+  }
+
+  /** 移除一个 PvE 目标：取消重生调度、删状态、清除地图地块（幂等）。 */
+  private async remove(cmd: Command): Promise<CommandResult> {
+    const { id } = cmd.payload as { id: string };
+    const s = this.load(id);
+    if (!s) return { ok: true, payload: {} }; // 已不存在，幂等成功
+    this.scheduler.cancelByOwner(`pve:${id}`);
+    this.store.delete(COLLECTION, id);
+    await this.commands.send({
+      name: 'world.RemoveTile', from: PveModule.NAME,
+      payload: { q: s.q, r: s.r, refId: id },
+    });
+    return { ok: true, payload: { id } };
   }
 
   /** 归一 PvE 坐标进环面（幂等，兼容旧档）。 */
@@ -78,15 +108,16 @@ export class PveModule {
     }
   }
 
-  /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。 */
+  /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。任务营地不在此重生。 */
   resume(): void {
     for (const s of this.store.all<PveState>(COLLECTION)) {
-      if (s.cleared) this.respawn(s.id);
+      // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
+      if (s.cleared && !s.task) this.respawn(s.id);
     }
   }
 
-  /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。 */
-  create(id: string, type: string, q: number, r: number): void {
+  /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。task=true 时登记为任务营地。 */
+  create(id: string, type: string, q: number, r: number, task = false): void {
     const tpl = this.config.pveTemplates[type];
     const s: PveState = {
       id,
@@ -97,6 +128,7 @@ export class PveModule {
       loot: { ...tpl.loot },
       cleared: false,
       clearCount: 0,
+      task: task || undefined,
     };
     this.store.set(COLLECTION, id, s);
     void this.commands.send({
@@ -149,12 +181,14 @@ export class PveModule {
       s.clearCount = (s.clearCount ?? 0) + 1;
       looted = this.takeLoot(s, looterCarry);
       s.cleared = true;
-      // 登记重生
-      const tpl = this.config.pveTemplates[s.type];
-      this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id), `pve:${id}`, `pve:${id}`);
+      // 任务营地不自动重生（由任务模块在目标达成后显式 pve.Remove 清除）
+      if (!s.task) {
+        const tpl = this.config.pveTemplates[s.type];
+        this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id), `pve:${id}`, `pve:${id}`);
+      }
     }
     this.store.set(COLLECTION, id, s);
-    return { ok: true, payload: { looted, cleared: s.cleared } };
+    return { ok: true, payload: { looted, cleared: s.cleared, task: !!s.task } };
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {

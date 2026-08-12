@@ -21,6 +21,7 @@ import { MercenaryModule } from './modules/mercenary.js';
 import { TradeModule } from './modules/trade.js';
 import { TreasureModule } from './modules/treasures.js';
 import { ResearchModule } from './modules/research.js';
+import { TasksModule } from './modules/tasks.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -49,6 +50,7 @@ const PROGRESS_COLLECTIONS = [
   'treasure',
   'treasure_pending',
   'research',
+  'task',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -89,6 +91,7 @@ export interface GameApp {
   mercenary: MercenaryModule;
   trade: TradeModule;
   treasure: TreasureModule;
+  task: TasksModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -166,6 +169,7 @@ export function createGameApp(opts?: {
       // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
       await population.createVillage(villageId, tribe);
       treasure.createVillage(villageId);
+      task.createVillage(villageId);
       const placeRes = await commands.send({
         name: 'world.PlaceVillage', from: 'app',
         payload: { q, r, refId: villageId, name },
@@ -178,6 +182,7 @@ export function createGameApp(opts?: {
       store.delete('military', villageId);
       store.delete('population', villageId);
       store.delete('treasure', villageId);
+      store.delete('task', villageId);
       throw err;
     }
   };
@@ -187,6 +192,7 @@ export function createGameApp(opts?: {
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
   const treasure = new TreasureModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   // playerVillages: 轻量跨村查询（research/academy 需要知道某玩家所有村庄，用于 scope=player 科技）
   const playerVillages = (playerId: string): string[] => {
     const ids: string[] = [];
@@ -211,11 +217,13 @@ export function createGameApp(opts?: {
       `mercenary:${villageId}`,
       `trade:${villageId}`,
       `research:${villageId}`,
+      `task-refresh:${villageId}`,
     ]) {
       scheduler.cancelByOwner(prefix);
     }
     trade.wipeSingleVillage(villageId);
     treasure.wipeSingleVillage(villageId);
+    task.wipeSingleVillage(villageId);
     for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
       if (mv.fromVillage === villageId && mv.id) scheduler.cancelByOwner(`movement:${mv.id}`);
     }
@@ -225,7 +233,7 @@ export function createGameApp(opts?: {
         Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
       if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
     }
-    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending'] as const) {
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task'] as const) {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
@@ -262,10 +270,11 @@ export function createGameApp(opts?: {
   trade.init();
   treasure.init();
   research.init();
+  task.init();
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, now,
+    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },
@@ -285,6 +294,7 @@ export function createGameApp(opts?: {
       trade.resume();
       treasure.resume();
       research.resume();
+      task.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
@@ -305,6 +315,7 @@ export function createGameApp(opts?: {
       trade.setConfig(newConfig);
       treasure.setConfig(newConfig);
       research.setConfig(newConfig);
+      task.setConfig(newConfig);
       this.config = newConfig;
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {
@@ -368,6 +379,7 @@ export function createGameApp(opts?: {
         }
         trade.wipeSingleVillage(villageId);
         treasure.wipeSingleVillage(villageId);
+        task.wipeSingleVillage(villageId);
       }
       for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
         if (mv.fromVillage && villageSet.has(mv.fromVillage) && mv.id) {
@@ -385,7 +397,7 @@ export function createGameApp(opts?: {
       store.delete('player_byname', name);
       for (const villageId of villageIds) store.delete('player_byvillage', villageId);
 
-      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending'] as const;
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task'] as const;
       for (const villageId of villageIds) {
         for (const c of progressByVillage) store.delete(c, villageId);
       }

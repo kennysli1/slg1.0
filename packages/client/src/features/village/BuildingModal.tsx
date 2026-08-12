@@ -17,10 +17,11 @@
  *  - Treasure management section for 'main' and 'treasury'
  */
 import { useState } from 'preact/hooks';
-import { dataVersion, openModal, showToast } from '../../app/store.js';
+import { dataVersion, openModal, showToast, taskStates } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { req } from '../../api.js';
+import { req, me } from '../../api.js';
 import { act } from '../../app/refresh.js';
+import { TaskOffers } from './TaskBar.js';
 import {
   buildingInfo,
   gameConstants,
@@ -326,6 +327,9 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
 
   const afford = canAfford(nextCost);
 
+  // 酒馆专属：展示可接取的随机任务委托
+  const tavernOffered = kind === 'tavern' ? (taskStates.value[me?.villageId ?? '']?.offered ?? []) : [];
+
   // ── Upgrade button state ──
   let upgradeBtn: preact.JSX.Element | null = null;
   if (demolishing) {
@@ -457,6 +461,13 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       )}
 
       {/* Demolish */}
+      {kind === 'tavern' && tavernOffered.length > 0 && (
+        <>
+          <Divider />
+          <TaskOffers offered={tavernOffered} />
+        </>
+      )}
+
       {!demolishing && !isMain && (
         <>
           <Divider />

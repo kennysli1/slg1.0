@@ -93,6 +93,8 @@ export class WorldModule {
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
+    this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
+    this.commands.register('world.FindFreeTile', (c) => this.findFreeTile(c));
   }
 
   /** 归一已有 tile 坐标进环面 [0,W)×[0,H)（幂等，兼容旧六边形存档；W=H=41 时旧坐标∈[-20,20] 单射→零碰撞）。 */
@@ -199,5 +201,36 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
     this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'pve', refId, name, icon });
     return { ok: true, payload: { q: w.q, r: w.r } };
+  }
+
+  /** 移除指定坐标上的 PvE 地块（任务营地清除用）：仅当该格确为对应 refId 的 pve 时才清空，避免误清村庄/其它目标。幂等。 */
+  private removeTile(cmd: Command): CommandResult {
+    const { q, r, refId } = cmd.payload as { q: number; r: number; refId: string };
+    const w = wrapHex({ q, r }, this.worldW, this.worldH);
+    const key = hexKey(w.q, w.r);
+    const t = this.store.get<Tile>(COLLECTION_TILE, key);
+    if (!t) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
+    if (t.kind !== 'pve' || t.refId !== refId) return { ok: false, payload: {}, reason: 'tile_mismatch' };
+    this.store.set<Tile>(COLLECTION_TILE, key, { q: w.q, r: w.r, kind: 'empty' });
+    return { ok: true, payload: { q: w.q, r: w.r } };
+  }
+
+  /** 在以 (centerQ,centerR) 为中心、radius 半径内找一块空地块，返回其坐标（用于运行时生成任务营地）。环式由内向外扫描，命中即返回。 */
+  private findFreeTile(cmd: Command): CommandResult {
+    const { centerQ, centerR, radius } = cmd.payload as { centerQ: number; centerR: number; radius?: number };
+    const R = Math.max(1, Math.min(Math.floor(radius ?? 6), 30));
+    const cq = Number(centerQ) || 0, cr = Number(centerR) || 0;
+    for (let d = 1; d <= R; d++) {
+      for (let dq = -R; dq <= R; dq++) {
+        for (let dr = -R; dr <= R; dr++) {
+          const rawQ = cq + dq, rawR = cr + dr;
+          if (hexDistanceWrapped({ q: cq, r: cr }, { q: rawQ, r: rawR }, this.worldW, this.worldH) !== d) continue;
+          const w = wrapHex({ q: rawQ, r: rawR }, this.worldW, this.worldH);
+          const t = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
+          if (!t || t.kind === 'empty') return { ok: true, payload: { q: w.q, r: w.r } };
+        }
+      }
+    }
+    return { ok: false, payload: {}, reason: 'no_free_tile' };
   }
 }

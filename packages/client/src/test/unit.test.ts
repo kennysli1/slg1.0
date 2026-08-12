@@ -190,6 +190,10 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     mainLevel: 1,
     inFamine: false,
     civilianCropPerHour: 100,
+    garrisonPop: 0,
+    lambdaRatio: 0.5,
+    wounded: { total: 0, entries: [] },
+    cropDeficitRate: 0,
     laborMults: {
       production: 0.875, build: 0.875, train: 0.875, research: 0.875, smithy: 0.875,
     },

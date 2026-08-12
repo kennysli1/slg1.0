@@ -8,6 +8,7 @@
  */
 import { signal } from '@preact/signals';
 import type { VNode } from 'preact';
+import { me } from '../api.js';
 
 /** 每秒心跳。读取本地外插值（资源/人口/倒计时）的组件订阅它即可每秒刷新。 */
 export const tick = signal(0);
@@ -102,6 +103,35 @@ export const techTree = signal<any>(null);
 export const researchState = signal<any>(null);
 /** 进行中战斗的实时快照：battleId → 双方兵力聚合（来自 BattleTick 推送）。 */
 export const battles = signal<Record<string, any>>({});
+
+// ---------- 任务数据（服务端快照 + 推送，按 villageId 分桶） ----------
+
+/** 任务完整快照：villageId → task.GetState 的 payload（active/offered/completed）。 */
+export const taskStates = signal<Record<string, any>>({});
+/** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
+export const taskMarkers = signal<Record<string, any[]>>({});
+
+/** 写入/更新某村的完整任务快照（同时派生地图标记）。 */
+export function setTaskState(payload: any): void {
+  if (!payload?.villageId) return;
+  const vid = payload.villageId as string;
+  taskStates.value = { ...taskStates.value, [vid]: payload };
+  const camps: any[] = (payload.active ?? []).flatMap((a: any) => (a.camps ?? []));
+  taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
+}
+
+/** 单独推送的地图标记更新（TaskMapUpdated）。 */
+export function setTaskMarkers(payload: any): void {
+  if (!payload?.villageId) return;
+  taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: payload.camps ?? [] };
+}
+
+/** 读取当前村庄的任务快照（无则返回 null）。 */
+export function currentTaskState(): any | null {
+  const vid = (typeof me !== 'undefined' && me?.villageId) || null;
+  if (!vid) return null;
+  return taskStates.value[vid] ?? null;
+}
 
 /**
  * 写入战斗快照。**必须是合并而非覆盖**：

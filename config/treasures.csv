@@ -16,3 +16,4 @@
 14,mystery_chest,神秘宝箱,trs_chest,special,rare,instantGold,900,150,0.05,instant
 15,philosophers_stone,贤者之石,trs_stone,special,epic,instantGold,2500,600,0.015,instant
 16,golden_idol,黄金神像,trs_idol,special,legendary,instantGold,8000,2000,0.004,instant
+17,warrior_token,勇士之证,trs_medal,special,epic,atkMult,5,0,0,passive

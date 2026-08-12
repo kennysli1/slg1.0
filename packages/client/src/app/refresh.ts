@@ -19,6 +19,7 @@ import {
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
+  setTaskState, setTaskMarkers,
 } from './store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
@@ -63,6 +64,10 @@ export async function refreshAll(): Promise<void> {
     markResFetched();
     if (pop.ok) applyPopPayload(pop.payload);
     bumpData();
+
+    // 任务快照（任务条常驻村庄页，登录/刷新即拉取）
+    const taskRes = await req('task.GetState').catch(() => null);
+    if (taskRes?.ok) setTaskState(taskRes.payload);
   } catch {
     pushReport('刷新失败：网络连接异常');
   }
@@ -109,6 +114,15 @@ function applyPopPayload(p: any, merge = false): void {
     inFamine,
     goldPerHour: Number(pick(p.goldPerHour, prev?.goldPerHour ?? 0)),
     civilianCropPerHour: Number(pick(p.civilianCropPerHour, prev?.civilianCropPerHour ?? 0)),
+    // 以下 4 个字段服务端快照不携带（GetPopulation 无 wounded/garrisonPop/lambdaRatio/cropDeficitRate），
+    // 由客户端用 soldierPop / 旧快照兜底；PopulationChanged merge 时沿用 prev 旧值。
+    garrisonPop: Number(pick(p.garrisonPop, prev?.garrisonPop ?? soldierPop)),
+    lambdaRatio: Number(pick(p.lambdaRatio, prev?.lambdaRatio ?? 0)),
+    wounded: {
+      total: Number(pick(p.wounded?.total, prev?.wounded?.total ?? 0)),
+      entries: (p.wounded?.entries ?? prev?.wounded?.entries ?? []) as any[],
+    },
+    cropDeficitRate: Number(pick(p.cropDeficitRate, prev?.cropDeficitRate ?? 0)),
     laborMults: pick(p.laborMults, prev?.laborMults) ?? {
       production: prosperityMult, build: prosperityMult, train: prosperityMult,
       research: prosperityMult, smithy: prosperityMult,
@@ -219,6 +233,10 @@ export function handlePush(event: string, payload: any): void {
   // 科研点每次判定都会推 RpChanged，频率高：只重拉科研快照，不做整体刷新
   if (event === 'RpChanged') { void reloadResearch(); return; }
   if (event === 'TechCompleted') { void reloadResearch(); }
+
+  // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
+  if (event === 'TaskListChanged') { setTaskState(payload); return; }
+  if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
 
   void refreshAll();
 }
