@@ -32,6 +32,8 @@ interface PveState {
   /** 任务营地标记：由任务模块运行时生成（pve.Spawn task=true）。任务营地清空后不触发普通掉落、
    *  不自动重生（由任务模块在目标达成后显式 pve.Remove 清除），resume 也不自动重生。 */
   task?: boolean;
+  /** 任务营地的拥有村庄 id（仅该村可攻击该营地，防止其它玩家越权攻打）。非任务营地为空。 */
+  ownerVillageId?: string;
 }
 
 const COLLECTION = 'pve';
@@ -75,11 +77,11 @@ export class PveModule {
 
   /** 运行时创建一个 PvE 目标（任务营地）。返回 ok:false 若 id 已存在或模板不存在。 */
   private spawn(cmd: Command): CommandResult {
-    const { id, type, q, r, task } = cmd.payload as { id: string; type: string; q: number; r: number; task?: boolean };
+    const { id, type, q, r, task, ownerVillageId } = cmd.payload as { id: string; type: string; q: number; r: number; task?: boolean; ownerVillageId?: string };
     if (this.load(id)) return { ok: false, payload: {}, reason: 'already_exists' };
     const tpl = this.config.pveTemplates[type];
     if (!tpl) return { ok: false, payload: {}, reason: 'unknown_template' };
-    this.create(id, type, q, r, !!task);
+    this.create(id, type, q, r, !!task, ownerVillageId);
     return { ok: true, payload: { id, type, q, r } };
   }
 
@@ -116,8 +118,8 @@ export class PveModule {
     }
   }
 
-  /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。task=true 时登记为任务营地。 */
-  create(id: string, type: string, q: number, r: number, task = false): void {
+  /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。task=true 时登记为任务营地，ownerVillageId 标记所属村庄。 */
+  create(id: string, type: string, q: number, r: number, task = false, ownerVillageId?: string): void {
     const tpl = this.config.pveTemplates[type];
     const s: PveState = {
       id,
@@ -129,12 +131,13 @@ export class PveModule {
       cleared: false,
       clearCount: 0,
       task: task || undefined,
+      ownerVillageId: ownerVillageId || undefined,
     };
     this.store.set(COLLECTION, id, s);
     void this.commands.send({
       name: 'world.PlacePve',
       from: PveModule.NAME,
-      payload: { q, r, refId: id, name: tpl.name, icon: tpl.icon },
+      payload: { q, r, refId: id, name: tpl.name, icon: tpl.icon, task: !!task },
     });
   }
 

@@ -332,7 +332,7 @@ export class TasksModule {
       if (!free.ok) break; // 无空地则少放（避免卡死）
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
       const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
-      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true } });
+      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true, ownerVillageId: villageId } });
       if (spawn.ok) {
         inst.camps.push({ id: campId, q: cq, r: cr, cleared: false });
         placed++;

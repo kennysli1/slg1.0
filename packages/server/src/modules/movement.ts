@@ -381,6 +381,10 @@ export class MovementModule {
     const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
     if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
     const tp = target.payload as any;
+    // 任务营地：仅拥有者本村可攻击（防止其它玩家越权攻打 / 误伤他人任务），其余情况静默拒绝
+    if (tp.task && tp.ownerVillageId && tp.ownerVillageId !== villageId) {
+      return { ok: false, payload: {}, reason: 'not_task_owner' };
+    }
     const toXY: Hex = { q: tp.q, r: tp.r };
 
     // 从源村扣出兵力（负 delta）

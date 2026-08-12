@@ -18,7 +18,7 @@ import { makeLogger } from '../infra/logger.js';
  * 扩展点：地图尺寸（半径，环数）、PvE 点密度可配置。
  */
 
-export type TileKind = 'empty' | 'village' | 'pve';
+export type TileKind = 'empty' | 'village' | 'pve' | 'taskcamp';
 
 export interface Tile {
   q: number;
@@ -137,7 +137,8 @@ export class WorldModule {
   }
 
   /** 返回以 (cq,cr) 为中心、六边形半径 r 内的所有非空地块。
-   *  full=true 时忽略半径上限，返回整张地图的全部非空地块（用于全图渲染）。 */
+   *  full=true 时忽略半径上限，返回整张地图的全部非空地块（用于全图渲染）。
+   *  注：任务营地（kind==='taskcamp'）不进入全局视野——仅任务拥有者经 taskMarkers 可见，避免泄露给其他玩家。 */
   private getArea(cmd: Command): CommandResult {
     const { cq, cr, r, full } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean };
     const center = { q: cq, r: cr };
@@ -146,6 +147,7 @@ export class WorldModule {
       : Math.min(Math.max(0, r), this.config.constants.mapViewRadius + 6);
     const tiles: Tile[] = [];
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
+      if (t.kind === 'taskcamp') continue; // 任务营地仅任务拥有者可见，不泄露给其它玩家
       if (full || hexDistanceWrapped(center, t, this.worldW, this.worldH) <= radius) tiles.push(t);
     }
     return { ok: true, payload: { tiles } };
@@ -195,22 +197,23 @@ export class WorldModule {
   }
 
   private placePve(cmd: Command): CommandResult {
-    const { q, r, refId, name, icon } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string };
+    const { q, r, refId, name, icon, task } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const exist = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
     if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'pve', refId, name, icon });
+    // 任务营地写入独立 kind='taskcamp'：与全局视野隔离（getArea 过滤），但仍占用该格避免与其它营地/建筑冲突
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: task ? 'taskcamp' : 'pve', refId, name, icon });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
-  /** 移除指定坐标上的 PvE 地块（任务营地清除用）：仅当该格确为对应 refId 的 pve 时才清空，避免误清村庄/其它目标。幂等。 */
+  /** 移除指定坐标上的 PvE/任务营地地块（任务营地清除用）：仅当该格确为对应 refId 的 pve/taskcamp 时才清空，避免误清村庄/其它目标。幂等。 */
   private removeTile(cmd: Command): CommandResult {
     const { q, r, refId } = cmd.payload as { q: number; r: number; refId: string };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const key = hexKey(w.q, w.r);
     const t = this.store.get<Tile>(COLLECTION_TILE, key);
     if (!t) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
-    if (t.kind !== 'pve' || t.refId !== refId) return { ok: false, payload: {}, reason: 'tile_mismatch' };
+    if ((t.kind !== 'pve' && t.kind !== 'taskcamp') || t.refId !== refId) return { ok: false, payload: {}, reason: 'tile_mismatch' };
     this.store.set<Tile>(COLLECTION_TILE, key, { q: w.q, r: w.r, kind: 'empty' });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
