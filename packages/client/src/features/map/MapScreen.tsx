@@ -1,8 +1,7 @@
 /**
  * MapScreen — 地图页顶层容器。
- * 布局：全屏 SVG 地图（HexMap）+ 目标动作面板（TargetPanel，浮层）+ 行军列表（MarchList）。
- * 当无选中目标时，MarchList 占据右下角；有选中时，目标面板占据右侧，MarchList 随之向下移动。
- * 手机端：目标面板变贴底抽屉，MarchList 隐藏（行军信息集成在目标面板或 overlay 中）。
+ * 布局：全屏 SVG 地图 + 桌面右侧战术栏（目标工作流与行军态势）。
+ * 手机上目标工作流变为贴底抽屉，避免把表单和地图控件挤在同一视野内。
  */
 import { selected } from '../../app/store.js';
 import { HexMap } from './HexMap.js';
@@ -16,11 +15,10 @@ export function MapScreen() {
       {/* 全屏 SVG 地图（含浮层导航控件和图例） */}
       <HexMap />
 
-      {/* 目标动作面板：右侧浮层（桌面）/ 贴底抽屉（手机） */}
-      {hasSel && <TargetPanel />}
-
-      {/* 行军中列表：右下角浮层（桌面），有目标时在目标面板下方 */}
-      {!hasSel && <MarchList />}
+      <aside class="map-tactical-stack" aria-label="地图战术面板">
+        {hasSel && <TargetPanel />}
+        <MarchList />
+      </aside>
     </div>
   );
 }

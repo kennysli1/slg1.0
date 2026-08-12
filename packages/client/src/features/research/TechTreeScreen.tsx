@@ -10,7 +10,7 @@ import { reloadResearch, act } from '../../app/refresh.js';
 import { req } from '../../api.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import {
-  Panel, SectionHead, Btn, Tag, Bar, Empty, Icon, TimerBar,
+  Panel, SectionHead, Btn, Tag, Bar, Empty, Icon, IconPlate, TimerBar,
 } from '../../ui/index.js';
 import '../../styles/research.css';
 
@@ -171,7 +171,7 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
   );
 }
 
-/** 一个分支的科技卡片，按 tier 分层。 */
+/** 一个分支的科技节点路径，按 tier 由上而下推进。 */
 function TechBranch({ branch, techs, rp, researchingCode }: {
   branch: Branch;
   techs: any[];
@@ -184,34 +184,56 @@ function TechBranch({ branch, techs, rp, researchingCode }: {
   }
 
   const tiers = [...new Set(list.map((t) => t.tier))].sort((a, b) => Number(a) - Number(b));
+  const names = new Map(techs.map((t) => [t.code, t.name]));
 
   return (
-    <div class="tech-tiers">
-      {tiers.map((tier) => (
-        <div key={tier} class="tech-tier">
-          <div class="tech-tier-label">第 {tier} 层</div>
-          <div class="tech-grid">
+    <div class={`tech-path tech-path--${branch}`}>
+      <div class="tech-path-legend" aria-label="科技树状态说明">
+        <span><i class="tech-legend-dot tech-legend-dot--done" />已掌握</span>
+        <span><i class="tech-legend-dot tech-legend-dot--ready" />可研发</span>
+        <span><i class="tech-legend-dot tech-legend-dot--locked" />等待前置</span>
+      </div>
+      {tiers.map((tier, index) => (
+        <div key={tier} class="tech-stage">
+          <div class="tech-tier-label">
+            <span>阶段 {tier}</span>
+            <small>{index === 0 ? '奠定学派根基' : index === tiers.length - 1 ? '分支终极成果' : '承接前序研究'}</small>
+          </div>
+          <div class="tech-stage-nodes">
             {list.filter((t) => t.tier === tier).map((t) => (
-              <TechCard key={t.code} t={t} rp={rp} researchingCode={researchingCode} />
+              <TechNode
+                key={t.code}
+                t={t}
+                rp={rp}
+                researchingCode={researchingCode}
+                names={names}
+              />
             ))}
           </div>
+          {index < tiers.length - 1 && <div class="tech-path-link" aria-hidden="true"><span /></div>}
         </div>
       ))}
     </div>
   );
 }
 
-function TechCard({ t, rp, researchingCode }: { t: any; rp: number; researchingCode: string | null }) {
+function TechNode({ t, rp, researchingCode, names }: {
+  t: any;
+  rp: number;
+  researchingCode: string | null;
+  names: Map<string, string>;
+}) {
   const completed = t.status === 'completed';
   const researching = t.status === 'researching' || researchingCode === t.code;
   const locked = t.status === 'locked';
   const poor = t.status === 'available' && rp < t.rpCost;
   const canStart = t.status === 'available' && rp >= t.rpCost && !researchingCode;
 
-  const stateCls = completed ? ' tech-card--done'
-    : researching ? ' tech-card--doing'
-      : locked ? ' tech-card--locked'
-        : canStart ? ' tech-card--ready' : '';
+  const state = completed ? 'done'
+    : researching ? 'doing'
+      : locked ? 'locked'
+        : canStart ? 'ready' : 'poor';
+  const requires: string[] = t.requires ?? [];
 
   async function start() {
     await act(req('StartResearch', { techCode: t.code }), { okToast: `开始研发「${t.name}」` });
@@ -219,26 +241,45 @@ function TechCard({ t, rp, researchingCode }: { t: any; rp: number; researchingC
   }
 
   return (
-    <Panel variant="flat" class={`tech-card${stateCls}`}>
-      <div class="tech-card-head">
-        <span class={`tech-dot tech-dot--${t.branch}`} aria-hidden="true" />
-        <span class="tech-name">{t.name}</span>
+    <Panel variant="flat" class={`tech-node tech-node--${state}`}>
+      <div class="tech-node-top">
+        <IconPlate
+          icon={t.icon}
+          fallbackIcon="bld_academy"
+          label={t.name}
+          size="sm"
+          plate={completed ? 'gold' : 'stone'}
+        />
+        <div class="tech-node-title">
+          <div class="tech-node-name">{t.name}</div>
+          <div class="tech-node-state">
+            <span class={`tech-state-orb tech-state-orb--${state}`} aria-hidden="true" />
+            {completed ? '已掌握' : researching ? '正在推演' : locked ? '等待前置' : poor ? '科研点不足' : '可投入研发'}
+          </div>
+        </div>
         {t.scope === 'player' && <Tag kind="gold" title="对全部村庄生效">全局</Tag>}
       </div>
 
-      <div class="tech-effect">{effectText(t)}</div>
+      <div class="tech-node-effect">{t.desc || effectText(t)}</div>
 
-      <div class="tech-meta">
-        <span class="num">{fmt(t.rpCost)} 科研点</span>
-        <span class="dim">·</span>
-        <span class="num">{fmtDur((t.durationSec ?? 0) * 1000)}</span>
+      <div class="tech-node-outcome">
+        <Icon icon="ui_seal_gold" label="研究效果" size="2xs" />
+        <span>{effectText(t)}</span>
       </div>
 
-      {locked && t.requires?.length > 0 && (
-        <div class="tech-requires">前置：{t.requires.join('、')}</div>
+      <div class="tech-node-meta">
+        <span><Icon icon="bld_academy" label="科研点" size="2xs" /> <b>{fmt(t.rpCost)}</b> RP</span>
+        <span><Icon icon="ui_icon_time" label="研发时长" size="2xs" /> {fmtDur((t.durationSec ?? 0) * 1000)}</span>
+      </div>
+
+      {requires.length > 0 && (
+        <div class="tech-requires" aria-label="前置科技">
+          <span>前置</span>
+          {requires.map((code) => <em key={code}>{names.get(code) ?? code}</em>)}
+        </div>
       )}
 
-      <div class="tech-action">
+      <div class="tech-node-action">
         {completed ? <Tag kind="jade">已完成</Tag>
           : researching ? <Tag kind="ember">研发中…</Tag>
             : locked ? <Tag>前置未满足</Tag>

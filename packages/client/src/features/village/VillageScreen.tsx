@@ -1,8 +1,6 @@
 /**
- * 村庄页。自上而下：建造队列 → 村庄视图（场景/列表可切） → 人口 → 宝物栏。
- *
- * 村庄视图放在最上面：它是这个游戏的门面，玩家进来第一眼该看见自己的城，
- * 而不是先读两屏数据面板。视图偏好存 localStorage（见 store 的 villageView）。
+ * 村庄页：以场景为主的城市经营驾驶舱。
+ * 列表视图保留为完整、可键盘访问的建筑管理入口。
  */
 import { dataVersion, tick, villageView, setVillageView } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
@@ -12,6 +10,7 @@ import { VillageScene } from './VillageScene.js';
 import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
+import { VillageCommandDeck } from './VillageCommandDeck.js';
 
 import '../../styles/village.css';
 
@@ -148,37 +147,49 @@ export function VillageScreen() {
   const hasTreasures = !!(getCache().treasures);
 
   return (
-    <>
-      {/* 建造队列：时间敏感，放最上面 */}
-      {hasQueue && (
-        <Panel pad style={{ marginBottom: 'var(--s-4)' }}>
-          <QueueStrip queue={vil.queue} />
-        </Panel>
-      )}
+    <div class="vil-dashboard">
+      <div class="vil-dashboard-main">
+        <div class="vil-dashboard-head">
+          <div>
+            <span class="vil-eyebrow">VILLAGE OPERATIONS</span>
+            <SectionHead actions={<ViewToggle />}>
+              {view === 'scene' ? '村庄全景' : '村庄管理'}
+            </SectionHead>
+          </div>
+        </div>
 
-      {/* 村庄视图：本页主角 */}
-      <SectionHead actions={<ViewToggle />}>
-        {view === 'scene' ? '村庄全景' : '村庄管理'}
-      </SectionHead>
-      {view === 'scene' ? <VillageScene vil={vil} /> : <VillageListView vil={vil} />}
+        {view === 'scene' ? <VillageScene vil={vil} /> : <VillageListView vil={vil} />}
 
-      {/* 人口 */}
-      <SectionHead>人口 · 文明活力</SectionHead>
-      <Panel pad>
-        <PopPanel />
-      </Panel>
+        <div class="vil-dashboard-details">
+          {hasQueue && (
+            <Panel pad class="vil-queue-panel">
+              <QueueStrip queue={vil.queue} />
+            </Panel>
+          )}
 
-      {/* 宝物栏 */}
-      {hasTreasures && (
-        <>
-          <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
-            宝物栏
-          </SectionHead>
-          <Panel variant="flat" pad>
-            <TreasurePanel />
-          </Panel>
-        </>
-      )}
-    </>
+          <div class="vil-detail-grid">
+            <section class="vil-detail-section">
+              <SectionHead>人口 · 文明活力</SectionHead>
+              <Panel pad>
+                <PopPanel />
+              </Panel>
+            </section>
+
+            {hasTreasures && (
+              <section class="vil-detail-section">
+                <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
+                  宝物栏
+                </SectionHead>
+                <Panel variant="flat" pad>
+                  <TreasurePanel />
+                </Panel>
+              </section>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <VillageCommandDeck vil={vil} />
+    </div>
   );
 }

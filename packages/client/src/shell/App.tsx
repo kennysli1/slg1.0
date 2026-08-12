@@ -1,7 +1,4 @@
-/**
- * 应用根组件：连接生命周期、登录/游戏分流、1 秒心跳、页签路由。
- * 这里只做装配，不含任何业务渲染——各页面在 features/* 内自成一体。
- */
+/** 应用装配与生命周期；具体页面渲染留在各 feature 内。 */
 import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
@@ -23,16 +20,19 @@ export function App() {
   const [phase, setPhase] = useState<Phase>('boot');
   const [notice, setNotice] = useState('连接服务器中…');
 
-  // ---- 启动：连 WS → 拉配置 → 分流 ----
   useEffect(() => {
-    setSessionLostHandler((msg) => { setNotice(msg); setPhase('login'); });
+    setSessionLostHandler((message) => { setNotice(message); setPhase('login'); });
     onPush(handlePush);
-
     connect(
       () => {
         void (async () => {
           await loadGameConfig();
-          if (!me) { setNotice(''); setPhase('login'); } else { startGame(); }
+          if (!me) {
+            setNotice('');
+            setPhase('login');
+          } else {
+            startGame();
+          }
         })();
       },
       () => {
@@ -40,20 +40,17 @@ export function App() {
         setPhase('login');
       },
     );
-    // connect/onPush 是模块级单例，只装一次
   }, []);
 
-  // ---- 1 秒心跳：驱动资源外插、倒计时、进度条 ----
   useEffect(() => {
     const id = window.setInterval(() => { tick.value++; }, 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  // ---- 标签页从后台切回：补一次刷新（WS 可能重连过、定时器被节流） ----
   useEffect(() => {
-    const onVis = () => { if (document.visibilityState === 'visible' && me) void refreshAll(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    const onVisible = () => { if (document.visibilityState === 'visible' && me) void refreshAll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   function startGame() {
@@ -71,7 +68,6 @@ export function App() {
       </>
     );
   }
-
   return (
     <>
       <div class="shell">
@@ -86,15 +82,19 @@ export function App() {
 }
 
 function Page() {
-  const t = tab.value;
-  // key 让切页时整块重挂载 → 触发入场动效，同时丢弃上一页的局部状态
+  const currentTab = tab.value;
   return (
-    <main class={`page${t === 'map' ? ' page--full' : ''} page-enter`} key={t}>
-      {t === 'village' && <VillageScreen />}
-      {t === 'army' && <ArmyScreen />}
-      {t === 'map' && <MapScreen />}
-      {t === 'tech' && <TechTreeScreen />}
-      {t === 'reports' && <ReportsScreen />}
+    <main
+      id="main-content"
+      class={`page${currentTab === 'map' ? ' page--full' : ''} page-enter`}
+      key={currentTab}
+      tabIndex={-1}
+    >
+      {currentTab === 'village' && <VillageScreen />}
+      {currentTab === 'army' && <ArmyScreen />}
+      {currentTab === 'map' && <MapScreen />}
+      {currentTab === 'tech' && <TechTreeScreen />}
+      {currentTab === 'reports' && <ReportsScreen />}
     </main>
   );
 }

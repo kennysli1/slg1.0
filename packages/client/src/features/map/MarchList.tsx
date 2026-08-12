@@ -18,9 +18,6 @@ function secUntil(ts: number): string {
   return `${s}秒`;
 }
 
-const MARCH_EMOJI: Record<string, string> = {
-  attack: '⚔', raid: '⚡', return: '🏠', found: '🚩', transport: '📦', caravan: '💰',
-};
 const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   attack: (d) => d ? '来袭' : '进攻',
   raid: (_) => '掠夺',
@@ -47,7 +44,6 @@ export function MarchList() {
       {moves.map((m, i) => {
         const inDir = m.dir === 'in';
         const type: string = m.type ?? 'return';
-        const emoji = MARCH_EMOJI[type] ?? '🏠';
         const label = (MARCH_LABEL[type] ?? (() => type))(inDir);
         const dest = inDir
           ? `来自 (${m.from?.q ?? '?'},${m.from?.r ?? '?'})`
@@ -60,8 +56,8 @@ export function MarchList() {
           : '';
 
         return (
-          <div key={i} class={`march-item${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}`}>
-            <span class="march-item-icon">{emoji}</span>
+          <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}`}>
+            <span class="march-item-icon" aria-hidden="true" />
             <div class="march-item-body">
               <div class="march-item-kind">{label}{paused ? ' · 交战中' : ''}</div>
               <div class="march-item-dest">{dest}{troops ? ` · ${troops}` : ''}</div>

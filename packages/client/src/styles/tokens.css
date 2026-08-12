@@ -1,75 +1,110 @@
-/* ============================================================
-   KOW 设计令牌（唯一配色/间距/字号/层级来源）
-   主题：深色石质战争议事厅 —— 暗石面板 + 鎏金描边 + 厚涂插画
-   改主题只改这一份；组件样式一律引用变量，禁止写死颜色。
-   ============================================================ */
-
-/* 展示字体：Cinzel（罗马石刻衬线，仅拉丁/数字，自托管） */
+/* Design tokens: the only source for color, typography, elevation, spacing, and layout. */
 @font-face {
-  font-family: "Cinzel"; font-style: normal; font-weight: 400;
-  font-display: swap; src: url("/fonts/cinzel-400.woff2") format("woff2");
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/cinzel-400.woff2") format("woff2");
 }
 @font-face {
-  font-family: "Cinzel"; font-style: normal; font-weight: 700;
-  font-display: swap; src: url("/fonts/cinzel-700.woff2") format("woff2");
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/cinzel-700.woff2") format("woff2");
 }
 
 :root {
-  /* ---------- 字族 ---------- */
-  --ff-display: "Cinzel", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
-  --ff-han: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "SimSun", serif;
-  --ff-body: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --ff-num: "Cinzel", system-ui, "Microsoft YaHei", sans-serif;
+  --ff-display: "Cinzel", "Songti SC", "Noto Serif SC", serif;
+  --ff-han: "Noto Serif SC", "Songti SC", "Source Han Serif SC", serif;
+  --ff-body: system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ff-num: "Cinzel", system-ui, sans-serif;
 
-  /* ---------- 底色（由深到浅的五层石面） ---------- */
-  --c-void: #080b10;      /* 最深：页面外底、遮罩 */
-  --c-bg: #10151c;        /* 页面底 */
-  --c-panel: #1a2029;     /* 一级面板 */
-  --c-panel-2: #222a35;   /* 二级面板 / 卡片 */
-  --c-panel-3: #2b3441;   /* 三级：hover / 输入框 */
-  --c-raise: #36414f;     /* 凸起：按钮面、滑块 */
+  /* Semantic surfaces: cool, readable battlefield slate rather than ornamental stone. */
+  --surface-canvas: #111821;
+  --surface-raised: #18232e;
+  --surface-panel: #1d2a36;
+  --surface-subtle: #263646;
+  --surface-interactive: #304457;
+  --surface-sunken: #0c1219;
+  --surface-scrim: rgb(5 10 15 / 72%);
 
-  /* ---------- 文字 ---------- */
-  --c-ink: #ece3d2;       /* 主文字（暖白羊皮纸） */
-  --c-ink-soft: #a79c88;  /* 次文字 */
-  --c-ink-dim: #77705f;   /* 三级文字 / 占位 */
-  --c-ink-on-gold: #241b0c;
+  --text-strong: #f2f6f8;
+  --text-default: #d7e0e6;
+  --text-muted: #aab8c4;
+  --text-subtle: #718291;
+  --text-on-accent: #10212a;
+  --text-on-danger: #fff7f6;
+  --accent-hover: #b5e2ef;
 
-  /* ---------- 强调色 ---------- */
-  --c-gold: #d8b168;      /* 主强调：描边/标题/数值 */
-  --c-gold-hi: #f6e0aa;   /* 高光 */
-  --c-gold-dim: #8d6f37;  /* 暗金 */
-  --c-crimson: #a63530;   /* 进攻 / 危险 */
-  --c-crimson-hi: #d4544c;
-  --c-ember: #e08a3c;     /* 掠夺 / 警告 / 建造中 */
-  --c-jade: #5f9c62;      /* 正向 / 返程 / 充足 */
-  --c-steel: #6f8ba8;     /* 中性信息 / 侦察 */
-  --c-violet: #8a6ba8;    /* 稀有度：史诗 */
+  --accent: #6faec4;
+  --accent-strong: #9bd2e5;
+  --accent-soft: #386b80;
+  --status-success: #73ba8a;
+  --status-warning: #df9a58;
+  --status-danger: #d56d68;
+  --status-danger-strong: #ef8d86;
+  --status-info: #7fa8d1;
+  --status-rare: #a58ad0;
 
-  /* ---------- 描边与分隔 ---------- */
-  --line: rgba(216, 177, 104, .18);
-  --line-strong: rgba(216, 177, 104, .40);
-  --line-dark: rgba(0, 0, 0, .45);
+  --border-subtle: rgb(180 205 220 / 17%);
+  --border-default: rgb(180 205 220 / 29%);
+  --border-strong: rgb(155 210 229 / 55%);
+  --focus-ring: rgb(155 210 229 / 88%);
 
-  /* ---------- 间距刻度（4 的倍数） ---------- */
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
-  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+  /* Backwards-compatible aliases for feature-owned styles. */
+  --c-void: var(--surface-sunken);
+  --c-bg: var(--surface-canvas);
+  --c-panel: var(--surface-raised);
+  --c-panel-2: var(--surface-panel);
+  --c-panel-3: var(--surface-subtle);
+  --c-raise: var(--surface-interactive);
+  --c-ink: var(--text-default);
+  --c-ink-soft: var(--text-muted);
+  --c-ink-dim: var(--text-subtle);
+  --c-ink-on-gold: var(--text-on-accent);
+  --c-gold: var(--accent);
+  --c-gold-hi: var(--accent-strong);
+  --c-gold-dim: var(--accent-soft);
+  --c-crimson: var(--status-danger);
+  --c-crimson-hi: var(--status-danger-strong);
+  --c-ember: var(--status-warning);
+  --c-jade: var(--status-success);
+  --c-steel: var(--status-info);
+  --c-violet: var(--status-rare);
+  --line: var(--border-subtle);
+  --line-strong: var(--border-default);
+  --line-dark: rgb(0 0 0 / 32%);
 
-  /* ---------- 字号刻度 ---------- */
-  --f-2xs: 10px; --f-xs: 11px; --f-sm: 13px; --f-md: 15px;
-  --f-lg: 18px; --f-xl: 24px; --f-2xl: 32px; --f-3xl: 44px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
 
-  /* ---------- 圆角 ---------- */
-  --r-sm: 4px; --r-md: 8px; --r-lg: 14px; --r-pill: 999px;
+  /* 13px is the smallest body text allowed by the mobile design contract. */
+  --f-2xs: 11px;
+  --f-xs: 12px;
+  --f-sm: 13px;
+  --f-md: 15px;
+  --f-lg: 18px;
+  --f-xl: 24px;
+  --f-2xl: 32px;
+  --f-3xl: 44px;
 
-  /* ---------- 阴影与发光 ---------- */
-  --sh-1: 0 1px 2px rgba(0, 0, 0, .40);
-  --sh-2: 0 4px 14px rgba(0, 0, 0, .45);
-  --sh-3: 0 14px 40px rgba(0, 0, 0, .60);
-  --glow-gold: 0 0 14px rgba(216, 177, 104, .35);
-  --glow-crimson: 0 0 14px rgba(212, 84, 76, .40);
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-pill: 999px;
 
-  /* ---------- 层级 ---------- */
+  --sh-1: 0 1px 2px rgb(0 0 0 / 18%);
+  --sh-2: 0 8px 22px rgb(0 0 0 / 20%);
+  --sh-3: 0 18px 40px rgb(0 0 0 / 30%);
+  --glow-gold: 0 0 0 3px rgb(111 174 196 / 14%);
+  --glow-crimson: 0 0 0 3px rgb(213 109 104 / 14%);
+
   --z-map-ui: 20;
   --z-topbar: 60;
   --z-tabbar: 60;
@@ -78,22 +113,20 @@
   --z-toast: 200;
   --z-tooltip: 300;
 
-  /* ---------- 布局 ---------- */
-  --topbar-h: 64px;
-  --tabbar-h: 52px;
+  --topbar-h: 68px;
+  --tabbar-h: 56px;
   --page-max: 1180px;
   --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
 
-  /* ---------- 动效 ---------- */
   --ease-out: cubic-bezier(.22, .8, .3, 1);
   --ease-in-out: cubic-bezier(.4, 0, .2, 1);
-  --t-fast: 120ms; --t-med: 220ms; --t-slow: 380ms;
-}
+  --t-fast: 120ms;
+  --t-med: 200ms;
+  --t-slow: 320ms;
 
-/* 稀有度色（宝物/雇佣兵共用） */
-:root {
-  --rarity-common: #8e8877;
-  --rarity-rare: #5b8fc0;
-  --rarity-epic: #a479c8;
-  --rarity-legend: #e0a53f;
+  --rarity-common: #aab8c4;
+  --rarity-rare: #7fa8d1;
+  --rarity-epic: #a58ad0;
+  --rarity-legend: #dfb66c;
 }

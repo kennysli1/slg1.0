@@ -3,6 +3,208 @@
    Only uses tokens from tokens.css. No hardcoded colours, px spacing, or font sizes.
    ============================================================ */
 
+/* ---- Village command dashboard ---- */
+.vil-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: var(--s-4);
+  align-items: start;
+}
+.vil-dashboard-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.vil-dashboard-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.vil-eyebrow,
+.vil-deck-kicker {
+  display: block;
+  color: var(--c-gold-dim);
+  font-family: var(--ff-display);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+.vil-dashboard-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.vil-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+  align-items: start;
+}
+.vil-detail-section {
+  min-width: 0;
+}
+.vil-detail-grid .pop-mults-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+.vil-queue-panel .vil-queue {
+  margin-bottom: 0;
+}
+
+/* ---- Command deck ---- */
+.vil-deck {
+  position: sticky;
+  top: calc(var(--tabbar-h) + var(--s-4));
+}
+.vil-deck-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(216, 177, 104, .12), transparent 42%),
+    linear-gradient(180deg, var(--c-panel-2), var(--c-panel));
+}
+.vil-deck-title-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.vil-deck-title-row h2 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--ff-han);
+  font-size: var(--f-lg);
+}
+.vil-deck-title-row p {
+  margin: var(--s-1) 0 0;
+  color: var(--c-ink-dim);
+  font-size: var(--f-xs);
+}
+.vil-deck-signal {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c-jade);
+  box-shadow: 0 0 0 4px rgba(95, 156, 98, .14);
+}
+.vil-deck-signal.is-busy {
+  background: var(--c-ember);
+  box-shadow: 0 0 0 4px rgba(224, 138, 60, .14), 0 0 10px rgba(224, 138, 60, .5);
+  animation: vil-deck-signal 1.8s ease-in-out infinite;
+}
+@keyframes vil-deck-signal {
+  50% { transform: scale(1.18); }
+}
+.vil-deck-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-1);
+  padding: var(--s-2) 0;
+  border-block: 1px solid var(--line);
+}
+.vil-deck-summary div {
+  min-width: 0;
+}
+.vil-deck-summary span,
+.vil-deck-focus span {
+  display: block;
+  color: var(--c-ink-dim);
+  font-size: var(--f-2xs);
+}
+.vil-deck-summary strong {
+  display: block;
+  margin-top: var(--s-1);
+  color: var(--c-gold-hi);
+  font-family: var(--ff-num);
+  font-size: var(--f-lg);
+  line-height: 1;
+}
+.vil-deck-summary small {
+  color: var(--c-ink-soft);
+  font-family: var(--ff-body);
+  font-size: var(--f-2xs);
+}
+.vil-deck-focus {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, .18);
+}
+.vil-deck-focus-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.vil-deck-focus strong {
+  color: var(--c-ink);
+  font-size: var(--f-sm);
+}
+.vil-deck-focus > small {
+  color: var(--c-ink-dim);
+  font-size: var(--f-xs);
+  line-height: 1.45;
+}
+.vil-deck-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.vil-deck-action {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  color: var(--c-ink);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+.vil-deck-action:hover,
+.vil-deck-action:focus-visible {
+  border-color: var(--line-strong);
+  background: rgba(216, 177, 104, .08);
+}
+.vil-deck-action:active {
+  transform: translateY(1px);
+}
+.vil-deck-action:focus-visible {
+  outline: 2px solid var(--c-gold);
+  outline-offset: 2px;
+}
+.vil-deck-action-copy {
+  flex: 1;
+  min-width: 0;
+}
+.vil-deck-action-copy strong,
+.vil-deck-action-copy small {
+  display: block;
+}
+.vil-deck-action-copy strong {
+  font-size: var(--f-xs);
+}
+.vil-deck-action-copy small {
+  margin-top: 2px;
+  color: var(--c-ink-dim);
+  font-size: var(--f-2xs);
+}
+.vil-deck-action-arrow {
+  color: var(--c-gold);
+  font-size: var(--f-xl);
+  line-height: 1;
+}
+
 /* ---- View toggle ---- */
 .vil-view-toggle {
   display: inline-flex;
@@ -102,21 +304,35 @@
 }
 
 /* ---- Scene View Container ---- */
-/* 场景的横向滚动容器：桌面用不到，手机端场景比屏幕宽，靠它左右拖看 */
-.vil-scene-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  border-radius: var(--r-lg);
+.vil-scene-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
 }
-.vil-scene-scroll::-webkit-scrollbar { display: none; }
-
-/* 宽高比跟底图一致（1024×683 ≈ 3:2），否则 cover 会把外圈垫台裁掉。
-   同时用宽度反向限高（62vh × 1.5），避免场景高到把下面的面板全推出屏幕。 */
+.vil-scene-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding-inline: var(--s-1);
+}
+.vil-scene-caption span {
+  color: var(--c-gold-dim);
+  font-family: var(--ff-display);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+.vil-scene-caption strong {
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+  font-weight: 700;
+}
+/* 宽高比跟底图一致（1024×683 ≈ 3:2），否则 cover 会把外圈垫台裁掉。 */
 .vil-scene-wrap {
   position: relative;
-  width: min(100%, calc(62vh * 1.5));
+  width: min(100%, calc(68vh * 1.5));
   margin-inline: auto;
   aspect-ratio: 3 / 2;
   scroll-margin-top: calc(var(--tabbar-h) + var(--s-5));
@@ -127,6 +343,34 @@
   box-shadow: var(--sh-3);
   border: 1px solid var(--line-strong);
   cursor: default;
+}
+.vil-scene-status {
+  position: absolute;
+  right: var(--s-3);
+  bottom: var(--s-3);
+  z-index: var(--z-map-ui);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: var(--s-1);
+  max-width: calc(100% - var(--s-6));
+  pointer-events: none;
+}
+.vil-scene-status span {
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: rgba(8, 11, 16, .72);
+  color: var(--c-ink-soft);
+  font-size: var(--f-2xs);
+  backdrop-filter: blur(4px);
+}
+.vil-scene-status b {
+  color: var(--c-gold-hi);
+}
+.vil-scene-status .is-active {
+  border-color: rgba(224, 138, 60, .5);
+  color: var(--c-ember);
 }
 
 .vil-scene-bg {
@@ -710,14 +954,51 @@
 
 /* ---- Responsive ---- */
 @media (max-width: 720px) {
-  /* 手机屏放不下整张场景又要看清建筑：固定一个比屏幕宽的画布，靠左右拖动浏览，
-     同时把垫台整体缩小一档，避免建筑互相压住。 */
-  .vil-scene-wrap {
-    width: 640px;
-    min-width: 640px;
-    aspect-ratio: 3 / 2;
-    --pad-mult: .72;
+  .vil-dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-3);
   }
+  .vil-dashboard-main {
+    width: 100%;
+  }
+  .vil-dashboard-head {
+    align-items: start;
+  }
+  .vil-deck {
+    position: static;
+    width: 100%;
+    order: -1;
+  }
+  .vil-deck-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .vil-deck-action:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .vil-detail-grid {
+    grid-template-columns: 1fr;
+    gap: var(--s-3);
+  }
+  .vil-detail-grid .pop-mults-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* 手机不再强制横向滚动：完整场景以响应式画布收进视口，并缩小建筑层。 */
+  .vil-scene-wrap {
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: 3 / 2;
+    --pad-mult: .64;
+  }
+  .vil-scene-caption { align-items: start; }
+  .vil-scene-caption strong { text-align: right; }
+  .vil-scene-status {
+    right: var(--s-2);
+    bottom: var(--s-2);
+    max-width: calc(100% - var(--s-4));
+  }
+  .vil-scene-status span { padding: 3px var(--s-1); }
   .vil-zone-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .trs-grid { grid-template-columns: 1fr; }
   .pop-mults-grid { grid-template-columns: repeat(3, 1fr); }

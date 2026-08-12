@@ -3,8 +3,8 @@
  *
  * 坐标模型在 `scene-layout.ts`（椭圆环 + 远近缩放），换底图只改那一份。
  * 交互：点建筑开详情弹窗、点空垫台开建造选择；键盘可 Tab 聚焦并回车触发。
+ * 场景内只呈现即时城务反馈，完整可访问的建筑入口由列表视图保留。
  */
-import { useEffect, useRef } from 'preact/hooks';
 import { tick } from '../../app/store.js';
 import { buildingInfo } from '../../app/config.js';
 import { Icon } from '../../ui/index.js';
@@ -107,51 +107,49 @@ interface VillageSceneProps {
 }
 
 export function VillageScene({ vil }: VillageSceneProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // 手机端画布比屏幕宽，进场时把横向滚动摆到正中，让玩家先看见城镇中心。
-  // 只在挂载时做一次，之后不再干预玩家自己的拖动。
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const id = requestAnimationFrame(() => {
-      el.scrollLeft = Math.max(0, (el.scrollWidth - el.clientWidth) / 2);
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
-
   const zones = [
     { key: 'outer' as const, label: '城外', z: vil.zones.outer },
     { key: 'inner' as const, label: '城内', z: vil.zones.inner },
   ];
+  const queueItems: any[] = (vil as any).queue?.items ?? [];
+  const totalFree = zones.reduce((sum, zone) => sum + (zone.z?.freeSlots ?? 0), 0);
 
   return (
-    <div class="vil-scene-scroll" ref={scrollRef}>
+    <div class="vil-scene-shell">
+      <div class="vil-scene-caption">
+        <span>城务态势</span>
+        <strong>{queueItems.length ? `${queueItems.length} 项工程推进中` : totalFree ? `${totalFree} 块空地待规划` : '城建布局已满'}</strong>
+      </div>
       <div class="vil-scene-wrap" aria-label="村庄全景">
         <div class="vil-scene-bg" aria-hidden="true" />
         <div class="vil-scene-vignette" aria-hidden="true" />
+        <div class="vil-scene-status" aria-hidden="true">
+          <span><b>{vil.zones.outer?.placed?.length ?? 0}</b> 生产设施</span>
+          <span><b>{vil.zones.inner?.placed?.length ?? 0}</b> 城内设施</span>
+          {queueItems.length > 0 && <span class="is-active"><b>{queueItems.length}</b> 建设中</span>}
+        </div>
 
-      {zones.map(({ key, label, z }) => {
-        const placed = z?.placed ?? [];
-        const free = z?.freeSlots ?? 0;
-        const total = Math.max(z?.slots ?? 0, placed.length + free);
-        return (
-          <>
-            {placed.map((b, i) => (
-              <OccupiedPad key={b.slotId} building={b} pos={padPos(key, i, total)} />
-            ))}
-            {Array.from({ length: free }, (_, i) => (
-              <EmptyPad
-                key={`${key}-empty-${i}`}
-                zone={key}
-                pos={padPos(key, placed.length + i, total)}
-                freeSlots={free}
-                label={label}
-              />
-            ))}
-          </>
-        );
-      })}
+        {zones.map(({ key, label, z }) => {
+          const placed = z?.placed ?? [];
+          const free = z?.freeSlots ?? 0;
+          const total = Math.max(z?.slots ?? 0, placed.length + free);
+          return (
+            <>
+              {placed.map((b, i) => (
+                <OccupiedPad key={b.slotId} building={b} pos={padPos(key, i, total)} />
+              ))}
+              {Array.from({ length: free }, (_, i) => (
+                <EmptyPad
+                  key={`${key}-empty-${i}`}
+                  zone={key}
+                  pos={padPos(key, placed.length + i, total)}
+                  freeSlots={free}
+                  label={label}
+                />
+              ))}
+            </>
+          );
+        })}
 
         {/* 城镇中心画在最后：它在广场正中，要压在所有垫台之上 */}
         {vil.townCenter && (

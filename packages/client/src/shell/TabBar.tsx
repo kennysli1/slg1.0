@@ -1,9 +1,9 @@
-/** 页签栏：桌面在顶部、手机贴底。报告页有未读时显示红点计数。 */
+/** 主导航：桌面顶部战术栏，移动端底部导航栏。 */
 import { tab, dataVersion, reportsVersion, type TabKey } from '../app/store.js';
 import { getCache, getPendingTreasures } from '../app/state.js';
 import { Icon } from '../ui/index.js';
 
-const TABS: { key: TabKey; name: string; icon: string }[] = [
+const tabs: { key: TabKey; name: string; icon: string }[] = [
   { key: 'village', name: '村庄', icon: 'ui_tab_village' },
   { key: 'army', name: '军队', icon: 'ui_tab_army' },
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
@@ -13,27 +13,25 @@ const TABS: { key: TabKey; name: string; icon: string }[] = [
 
 export function TabBar() {
   const active = tab.value;
-  dataVersion.value; reportsVersion.value;
-
-  // 徽标：报告页=待领取宝物数；军队页=在途部队数
+  dataVersion.value;
+  reportsVersion.value;
   const pending = getPendingTreasures().length;
   const marching = (getCache().moves?.movements ?? []).length;
-
   return (
-    <nav class="tabbar" role="tablist">
-      {TABS.map((t) => {
-        const badge = t.key === 'reports' ? pending : t.key === 'map' ? marching : 0;
+    <nav class="tabbar" aria-label="主要功能">
+      {tabs.map((item) => {
+        const badge = item.key === 'reports' ? pending : item.key === 'map' ? marching : 0;
         return (
           <button
-            key={t.key}
-            role="tab"
-            aria-selected={active === t.key}
-            class={active === t.key ? 'active' : ''}
-            onClick={() => { tab.value = t.key; }}
+            key={item.key}
+            type="button"
+            aria-current={active === item.key ? 'page' : undefined}
+            class={active === item.key ? 'active' : ''}
+            onClick={() => { tab.value = item.key; }}
           >
-            <Icon icon={t.icon} label={t.name} size="sm" />
-            <span>{t.name}</span>
-            {badge > 0 && <span class="tab-badge">{badge}</span>}
+            <Icon icon={item.icon} label="" decorative size="sm" />
+            <span>{item.name}</span>
+            {badge > 0 && <span class="tab-badge" aria-label={`${badge} 条待处理信息`}>{badge}</span>}
           </button>
         );
       })}

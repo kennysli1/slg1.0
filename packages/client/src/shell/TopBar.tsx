@@ -1,4 +1,4 @@
-/** 顶栏：徽标 + 玩家/村庄切换 + 资源条。 */
+/** 常驻战场 HUD：玩家身份、当前村庄与资源概况。 */
 import { me, selectVillage } from '../api.js';
 import { sessionVersion, showToast } from '../app/store.js';
 import { refreshAll } from '../app/refresh.js';
@@ -7,44 +7,41 @@ import { Icon } from '../ui/index.js';
 import { ResourceBar } from './ResourceBar.js';
 
 export function TopBar() {
-  sessionVersion.value; // 切村/登录后重渲
+  sessionVersion.value;
   const villages = me?.villages ?? [];
+  const current = villages.find((v) => v.id === me?.villageId);
 
   async function onPick(e: Event) {
-    const sel = e.currentTarget as HTMLSelectElement;
-    const id = sel.value;
+    const select = e.currentTarget as HTMLSelectElement;
+    const id = select.value;
     if (!id || id === me?.villageId) return;
-    const r = await selectVillage(id);
-    if (!r.ok) {
-      showToast(`切换村庄失败：${errText(r.error)}`, 'bad');
-      sel.value = me?.villageId ?? '';
+    const result = await selectVillage(id);
+    if (!result.ok) {
+      showToast(`切换村庄失败：${errText(result.error)}`, 'bad');
+      select.value = me?.villageId ?? '';
       return;
     }
     sessionVersion.value++;
     await refreshAll();
   }
 
-  const current = villages.find((v) => v.id === me?.villageId);
-
   return (
     <header class="topbar">
       <div class="brand">
-        <Icon icon="ui_logo" label="世界之王" size="md" />
-        <div>
+        <span class="brand-mark" aria-hidden="true"><Icon icon="ui_logo" label="" decorative size="md" /></span>
+        <div class="brand-copy">
           <div class="brand-title">世界之王</div>
           <div class="brand-sub">
-            <span>{me?.name}</span>
+            <span title={me?.name}>{me?.name}</span>
             {villages.length > 1 ? (
-              <select class="village-pick" value={me?.villageId} onChange={onPick} title="切换当前操作的村庄">
-                {villages.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}{v.isCapital ? '（主城）' : ''} ({v.q},{v.r})
+              <select class="village-pick" value={me?.villageId} onChange={onPick} aria-label="切换当前村庄">
+                {villages.map((village) => (
+                  <option key={village.id} value={village.id}>
+                    {village.name}{village.isCapital ? '（主城）' : ''} ({village.q},{village.r})
                   </option>
                 ))}
               </select>
-            ) : (
-              <span>{current?.name ?? `(${me?.q},${me?.r})`}</span>
-            )}
+            ) : <span title={current?.name}>{current?.name ?? `(${me?.q},${me?.r})`}</span>}
           </div>
         </div>
       </div>

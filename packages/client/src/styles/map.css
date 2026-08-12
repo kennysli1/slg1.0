@@ -375,13 +375,26 @@
 }
 .map-tooltip-hint { font-size: var(--f-2xs); color: var(--c-ink-dim); margin-top: var(--s-1); }
 
-/* ---------- 目标面板（桌面：右侧悬浮卡；手机：贴底抽屉） ---------- */
-.map-target-panel {
+/* ---------- 目标工作流与战术栏 ---------- */
+.map-tactical-stack {
   position: absolute;
-  right: var(--s-4);
   top: var(--s-4);
-  width: 310px;
+  right: var(--s-4);
+  width: 340px;
   max-height: calc(100% - var(--s-7));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  z-index: var(--z-map-ui);
+  pointer-events: none;
+}
+.map-tactical-stack > * { pointer-events: auto; }
+
+/* 桌面：右侧悬浮战术栏；手机：贴底工作流。 */
+.map-target-panel {
+  position: relative;
+  width: 100%;
+  max-height: min(680px, calc(100% - var(--s-7)));
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: var(--z-map-ui);
@@ -398,7 +411,7 @@
 }
 .target-close {
   margin-left: auto; flex: none;
-  width: 30px; height: 30px;
+  width: 44px; height: 44px;
   display: grid; place-items: center;
   background: rgba(255,255,255,.05);
   border: 1px solid var(--line);
@@ -436,6 +449,108 @@
   gap: var(--s-2);
 }
 .target-foot .btn { flex: 1; }
+
+.target-heading-copy { min-width: 0; }
+.expedition-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-1);
+  margin: 0;
+  padding: var(--s-2) var(--s-4);
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+}
+.expedition-steps li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--s-1);
+  color: var(--c-ink-dim);
+  font-size: var(--f-2xs);
+}
+.expedition-steps li span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font-family: var(--ff-num);
+}
+.expedition-steps li b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.expedition-steps li.is-current { color: var(--c-gold-hi); }
+.expedition-steps li.is-current span { border-color: var(--c-gold); background: var(--c-gold-dim); color: var(--c-ink-on-gold); }
+.expedition-steps li.is-done { color: var(--c-jade); }
+.expedition-steps li.is-done span { border-color: var(--c-jade); }
+.expedition-body { gap: var(--s-4); }
+.expedition-kicker {
+  color: var(--c-gold);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.expedition-assessment,
+.expedition-confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--c-panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.expedition-assessment-title,
+.expedition-confirm-card h3 {
+  margin: 0;
+  color: var(--c-ink);
+  font-size: var(--f-md);
+}
+.expedition-assessment p,
+.expedition-confirm-card p,
+.expedition-modal-copy {
+  margin: 0;
+  color: var(--c-ink-soft);
+  font-size: var(--f-sm);
+  line-height: 1.6;
+}
+.expedition-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+.expedition-facts span {
+  color: var(--c-ink-dim);
+  font-size: var(--f-xs);
+}
+.expedition-facts b { color: var(--c-ink-soft); font-family: var(--ff-num); }
+.expedition-facts span:last-child { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; }
+.target-actions--management { padding: 0 var(--s-1); }
+.target-section-head small { color: var(--c-ink-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.expedition-validation {
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid var(--c-gold-dim);
+  color: var(--c-ink-soft);
+  background: var(--c-panel-2);
+  font-size: var(--f-xs);
+  line-height: 1.5;
+}
+.expedition-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-sm); }
+.expedition-confirm-card dl { display: flex; flex-direction: column; gap: var(--s-2); margin: 0; }
+.expedition-confirm-card dl div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: var(--s-2); }
+.expedition-confirm-card dt { color: var(--c-ink-dim); font-size: var(--f-xs); }
+.expedition-confirm-card dd { margin: 0; color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.5; }
+.expedition-warning { margin: 0; color: var(--c-ember); font-size: var(--f-xs); line-height: 1.5; }
+.expedition-foot { padding: 0; border-top: 0; }
+.expedition-foot--split .btn { flex: 1 1 0; }
 
 /* ---------- 兵力/货物输入格 ---------- */
 .troop-inputs {
@@ -552,11 +667,9 @@
 
 /* ---------- 行军列表面板 ---------- */
 .map-march-list {
-  position: absolute;
-  right: var(--s-4);
-  bottom: var(--s-5);
-  width: 280px;
-  max-height: 260px;
+  position: relative;
+  width: 100%;
+  max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: var(--z-map-ui);
@@ -577,11 +690,18 @@
 }
 .march-item:last-child { border-bottom: none; }
 .march-item-icon {
-  font-size: var(--f-md);
   flex: none;
-  width: 22px;
-  text-align: center;
+  width: var(--s-2);
+  height: var(--s-2);
+  border-radius: var(--r-pill);
+  background: var(--c-jade);
+  box-shadow: 0 0 0 3px var(--c-panel-2);
 }
+.march-item--attack .march-item-icon { background: var(--c-crimson-hi); }
+.march-item--raid .march-item-icon { background: var(--c-ember); }
+.march-item--transport .march-item-icon,
+.march-item--caravan .march-item-icon { background: var(--c-steel); }
+.march-item--found .march-item-icon { background: var(--c-gold); }
 .march-item-body { flex: 1; min-width: 0; }
 .march-item-kind { font-weight: 700; color: var(--c-ink); }
 .march-item-dest { color: var(--c-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -591,6 +711,14 @@
 
 /* ---------- 手机端响应式 ---------- */
 @media (max-width: 720px) {
+  .map-tactical-stack {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    max-height: none;
+    display: block;
+    pointer-events: none;
+  }
   .map-nav {
     bottom: var(--s-3);
     left: var(--s-3);
@@ -619,18 +747,29 @@
     top: auto;
     bottom: 0;
     width: 100%;
-    max-height: 62vh;
+    max-height: min(76vh, 680px);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     animation: sheet-up var(--t-med) var(--ease-out) both;
     padding-bottom: var(--safe-b);
   }
 
-  /* 手机行军列表：收进目标面板或隐藏 */
+  /* 手机行军列表：保留为地图顶部可滚动状态条，避免失去 ETA 与来袭信息。 */
   .map-march-list {
-    display: none;
+    position: absolute;
+    top: max(var(--s-3), var(--safe-t));
+    right: var(--s-3);
+    left: var(--s-3);
+    width: auto;
+    max-height: 152px;
+    pointer-events: auto;
   }
 
   .troop-inputs { grid-template-columns: repeat(2, 1fr); }
+  .target-head { padding: var(--s-2) var(--s-3); }
+  .expedition-steps { padding: var(--s-2) var(--s-3); }
+  .expedition-steps li { font-size: var(--f-2xs); }
+  .target-foot .btn,
+  .target-actions .btn { min-height: 44px; }
 }
 
 /* ---------- 动效 ---------- */

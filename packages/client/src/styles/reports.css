@@ -32,30 +32,57 @@
 .rfilter-chip:hover { color: var(--c-ink); border-color: var(--line-strong); }
 .rfilter-chip.active {
   color: var(--c-gold-hi);
-  background: rgba(216, 177, 104, .12);
+  background: var(--c-panel-3);
   border-color: var(--line-strong);
+  box-shadow: var(--glow-gold);
 }
-.rfilter-chip .rfc-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  flex: none;
+.rfilter-chip .icon,
+.rfilter-chip .icon-fallback {
+  opacity: .9;
 }
 
-/* ── 战报卡片 ───────────────────────────────────────────── */
+/* ── 分类概览与时间线 ───────────────────────────────────── */
+.report-overview {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  margin-bottom: var(--s-4);
+  border-color: var(--line);
+}
+.report-overview > div { display: flex; flex-direction: column; gap: var(--s-1); }
+.report-overview strong { font-family: var(--ff-han); color: var(--c-ink); font-size: var(--f-sm); }
+.report-overview span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+.report-timeline { position: relative; }
+.report-day-group { position: relative; }
+.report-day-group + .report-day-group { margin-top: var(--s-5); }
+
+/* ── 战报卡片 / 时间线节点 ───────────────────────────────── */
 .report-list {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  gap: var(--s-3);
+  padding-left: var(--s-5);
+}
+.report-list::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--s-2) + 1px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-strong);
 }
 
 .report-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: var(--s-3);
+  gap: var(--s-2);
   padding: var(--s-3) var(--s-4);
   border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .035), rgba(0, 0, 0, .08)), var(--c-panel-2);
+  background: linear-gradient(180deg, var(--c-panel-3), var(--c-panel-2));
   border: 1px solid var(--line);
   border-left: 3px solid var(--rcard-accent, var(--c-steel));
   box-shadow: var(--sh-1);
@@ -72,16 +99,45 @@
 .report-card--pop     { --rcard-accent: var(--c-steel); }
 .report-card--trade   { --rcard-accent: var(--c-violet); }
 .report-card--info    { --rcard-accent: var(--c-ink-dim); }
+.report-card--research { --rcard-accent: var(--c-gold); }
 
+.rcard-marker {
+  position: absolute;
+  right: calc(100% + var(--s-3));
+  top: var(--s-4);
+  width: var(--s-2);
+  height: var(--s-2);
+  padding: 2px;
+  border: 1px solid var(--rcard-accent, var(--c-steel));
+  border-radius: var(--r-pill);
+  background: var(--c-panel);
+  box-shadow: var(--sh-1);
+}
+.rcard-marker-dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--rcard-accent, var(--c-steel));
+}
 .rcard-icon {
-  font-size: 16px;
-  line-height: 1;
+  display: grid;
+  place-items: center;
+  width: var(--s-6);
+  height: var(--s-6);
   flex: none;
-  margin-top: 2px;
-  opacity: .85;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--c-panel);
+}
+.rcard-icon .icon,
+.rcard-icon .icon-fallback {
+  flex: none;
 }
 
 .rcard-body { flex: 1; min-width: 0; }
+.rcard-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-1); }
+.rcard-kind { color: var(--rcard-accent, var(--c-steel)); font-family: var(--ff-han); font-size: var(--f-xs); font-weight: 700; }
 .rcard-text {
   font-size: var(--f-sm);
   color: var(--c-ink);
@@ -90,9 +146,9 @@
 }
 .rcard-time {
   font-family: var(--ff-num);
-  font-size: var(--f-xs);
+  font-size: var(--f-2xs);
   color: var(--c-ink-dim);
-  margin-top: 2px;
+  white-space: nowrap;
 }
 
 /* ── 日期分隔符 ─────────────────────────────────────────── */
@@ -100,17 +156,29 @@
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  margin: var(--s-4) 0 var(--s-2);
+  margin: 0 0 var(--s-3);
   font-family: var(--ff-han);
   font-size: var(--f-xs);
-  color: var(--c-ink-dim);
+  color: var(--c-ink-soft);
 }
+.report-day span { color: var(--c-gold); }
+.report-day small { color: var(--c-ink-dim); font-family: var(--ff-body); font-size: var(--f-2xs); }
 .report-day::before,
 .report-day::after {
   content: '';
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+}
+
+@media (max-width: 720px) {
+  .report-filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: var(--s-1); }
+  .rfilter-chip { flex: 0 0 auto; }
+  .report-list { padding-left: var(--s-4); }
+  .rcard-marker { right: calc(100% + var(--s-2)); }
+  .report-card { padding: var(--s-3); }
+  .rcard-icon { width: var(--s-5); height: var(--s-5); }
+  .rcard-head { align-items: flex-start; }
 }
 
 /* ── 待领取宝物区 ────────────────────────────────────────── */

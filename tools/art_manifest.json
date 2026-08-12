@@ -982,5 +982,125 @@
     "mode": "panel",
     "size": 1024,
     "subject": "the same empty village ground at night: a three-quarter top-down view of grass and dirt paths ringing flat bare building pads around a central cobbled plaza, burning torches on posts along the paths and palisade, farmland and trees at the edges, no buildings on the pads"
+  },
+  {
+    "base": "tech_infantry",
+    "zh": "步兵训练",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "stacked shield and disciplined spear formation insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_cavalry",
+    "zh": "骑术",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "stylized warhorse head and forward motion insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_formation",
+    "zh": "进阶阵型",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "three interlocked tactical shields in formation; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_siege",
+    "zh": "攻城术",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "fortified gate and siege tower insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_elite",
+    "zh": "精锐卫队",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "ten-point elite command star insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_plow",
+    "zh": "改良犁",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "heavy frontier plow blade and timber beam insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_mining",
+    "zh": "采矿技术",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "crossed mining picks insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_architecture",
+    "zh": "建筑学",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "stone colonnade and pediment insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_logistics",
+    "zh": "后勤学",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "stacked supply crates and route arrow insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_storage",
+    "zh": "高级仓储",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "reinforced warehouse facade insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_laws",
+    "zh": "法典",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "balanced scales of law insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_culture",
+    "zh": "文化交流",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "paired open codices insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_diplomacy",
+    "zh": "外交学",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "two clasped gauntlets and treaty seal insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_urban",
+    "zh": "城市规划",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "ordered city block grid insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "tech_imperial",
+    "zh": "帝国权威",
+    "category": "tech",
+    "mode": "icon",
+    "size": 256,
+    "subject": "restrained bronze frontier crown insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
   }
 ]
