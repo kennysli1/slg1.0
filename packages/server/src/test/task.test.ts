@@ -75,9 +75,9 @@ test('clear_camp 主线 m3 自动生成真实营地；战斗清空营地后完�
   assert.ok(camp && camp.id, '营地应有 id 与坐标');
   const campId = camp.id;
 
-  // 营地应是真实 pve 地块
-  const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'pve' });
-  assert.equal(tile.ok, true, '营地应在地图上有 pve 地块');
+  // 任务营地使用独立 taskcamp 地块，既真实占格又不进入其他玩家的全局视野。
+  const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
+  assert.equal(tile.ok, true, '营地应在地图上有 taskcamp 地块');
 
   // 模拟战斗结束：玩家清空该营地
   await app.bus.emit({
@@ -95,7 +95,7 @@ test('clear_camp 主线 m3 自动生成真实营地；战斗清空营地后完�
   assert.ok(p2.active.find((a: any) => a.code === 'm4'), 'm4 应解锁');
 
   // 营地地块应被移除
-  const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'pve' });
+  const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tileAfter.ok, false, '营地地块应已被清除');
 
   // 任务专属宝物 warrior_token 应进入 locked 桶（不可出售/遗弃）
