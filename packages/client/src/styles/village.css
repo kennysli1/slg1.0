@@ -334,14 +334,16 @@
   position: relative;
   width: min(100%, calc(68vh * 1.5));
   margin-inline: auto;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 1.75 / 1;
   scroll-margin-top: calc(var(--tabbar-h) + var(--s-5));
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   overflow: hidden;
   /* 底图缺失时的兜底渐变，保证不至于开天窗 */
   background: linear-gradient(165deg, #182516, #243520 45%, #14201a);
   box-shadow: var(--sh-3);
   border: 1px solid var(--line-strong);
+  outline: 1px solid rgb(0 0 0 / 46%);
+  outline-offset: -5px;
   cursor: default;
 }
 .vil-scene-status {
@@ -385,7 +387,7 @@
 .vil-scene-vignette {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 78% 74% at 50% 46%, transparent 55%, rgba(8, 11, 16, .42) 100%);
+  background: linear-gradient(180deg, rgb(8 14 16 / 6%), transparent 48%, rgb(8 14 16 / 36%)), radial-gradient(ellipse 88% 82% at 50% 46%, transparent 58%, rgb(8 14 16 / 40%) 100%);
   pointer-events: none;
   z-index: 1;
 }
@@ -409,15 +411,16 @@
   align-items: center;
   /* --pad-mult 由容器给：手机端整体缩一档，桌面为 1 */
   transform: scale(var(--pad-mult, 1));
-  transition: filter var(--t-fast);
+  transition: filter var(--t-fast), transform var(--t-med) var(--ease-out);
 }
 .vil-pad:hover .vil-pad-inner,
 .vil-pad:focus-visible .vil-pad-inner {
-  filter: brightness(1.25) drop-shadow(0 0 8px rgba(216, 177, 104, .5));
+  filter: brightness(1.12) drop-shadow(0 7px 10px rgb(0 0 0 / 72%)) drop-shadow(0 0 2px var(--c-gold-hi));
+  transform: scale(calc(var(--pad-mult, 1) * 1.06)) translateY(-2px);
 }
 .vil-pad:focus-visible { outline: 2px solid var(--c-gold); outline-offset: 2px; border-radius: var(--r-sm); }
 .vil-pad-icon {
-  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .65));
+  filter: saturate(.82) contrast(1.08) drop-shadow(0 5px 8px rgb(0 0 0 / 76%));
   display: block;
 }
 
@@ -471,9 +474,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  border: 2px dashed rgba(246, 224, 170, .55);
-  background: rgba(8, 11, 16, .42);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-gold-dim);
+  background: rgb(8 11 16 / 64%);
   color: var(--c-gold-hi);
   font-size: var(--f-lg);
   line-height: 1;

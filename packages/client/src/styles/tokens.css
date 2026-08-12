@@ -21,12 +21,12 @@
   --ff-num: "Cinzel", system-ui, sans-serif;
 
   /* Semantic surfaces: cool, readable battlefield slate rather than ornamental stone. */
-  --surface-canvas: #111821;
-  --surface-raised: #18232e;
-  --surface-panel: #1d2a36;
-  --surface-subtle: #263646;
-  --surface-interactive: #304457;
-  --surface-sunken: #0c1219;
+  --surface-canvas: #101619;
+  --surface-raised: #182126;
+  --surface-panel: #1d282d;
+  --surface-subtle: #26343a;
+  --surface-interactive: #33464b;
+  --surface-sunken: #090e10;
   --surface-scrim: rgb(5 10 15 / 72%);
 
   --text-strong: #f2f6f8;
@@ -37,20 +37,20 @@
   --text-on-danger: #fff7f6;
   --accent-hover: #b5e2ef;
 
-  --accent: #6faec4;
-  --accent-strong: #9bd2e5;
-  --accent-soft: #386b80;
-  --status-success: #73ba8a;
-  --status-warning: #df9a58;
+  --accent: #c3a56d;
+  --accent-strong: #ead6a4;
+  --accent-soft: #755f38;
+  --status-success: #7da38a;
+  --status-warning: #d28c56;
   --status-danger: #d56d68;
   --status-danger-strong: #ef8d86;
   --status-info: #7fa8d1;
   --status-rare: #a58ad0;
 
-  --border-subtle: rgb(180 205 220 / 17%);
-  --border-default: rgb(180 205 220 / 29%);
-  --border-strong: rgb(155 210 229 / 55%);
-  --focus-ring: rgb(155 210 229 / 88%);
+  --border-subtle: rgb(224 211 175 / 13%);
+  --border-default: rgb(224 211 175 / 24%);
+  --border-strong: rgb(234 214 164 / 52%);
+  --focus-ring: rgb(234 214 164 / 88%);
 
   /* Backwards-compatible aliases for feature-owned styles. */
   --c-void: var(--surface-sunken);
@@ -94,9 +94,9 @@
   --f-2xl: 32px;
   --f-3xl: 44px;
 
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 16px;
+  --r-sm: 3px;
+  --r-md: 6px;
+  --r-lg: 10px;
   --r-pill: 999px;
 
   --sh-1: 0 1px 2px rgb(0 0 0 / 18%);

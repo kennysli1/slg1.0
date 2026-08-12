@@ -19,10 +19,10 @@
 
 /** 广场中心（归一化 0~1）。城镇中心摆这里。 */
 export const CX = 0.50;
-export const CY = 0.43;
+export const CY = 0.49;
 /** 垫台环的椭圆半轴。俯视透视把纵轴压扁了，所以 RY < RX。 */
-export const RX = 0.42;
-export const RY = 0.30;
+export const RX = 0.37;
+export const RY = 0.25;
 
 /** 每个区的半径系数区间（从最外圈往里排）。 */
 const ZONE_RINGS = {

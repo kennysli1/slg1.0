@@ -1,7 +1,7 @@
 /* Global reset, typography, native controls, and accessibility foundations. */
 *, *::before, *::after { box-sizing: border-box; }
 html { min-height: 100%; background: var(--surface-canvas); -webkit-text-size-adjust: 100%; }
-body { min-height: 100%; margin: 0; overflow-x: hidden; font-family: var(--ff-body); font-size: var(--f-md); line-height: 1.5; color: var(--text-default); background: var(--surface-canvas); background-image: radial-gradient(100% 60% at 50% -10%, rgb(111 174 196 / 11%), transparent 68%), linear-gradient(180deg, var(--surface-canvas), var(--surface-sunken)); background-attachment: fixed; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { min-height: 100%; margin: 0; overflow-x: hidden; font-family: var(--ff-body); font-size: var(--f-md); line-height: 1.5; color: var(--text-default); background: var(--surface-canvas); background-image: radial-gradient(80% 55% at 50% -10%, rgb(195 165 109 / 10%), transparent 70%), repeating-linear-gradient(105deg, rgb(255 255 255 / 1.2%) 0 1px, transparent 1px 7px), linear-gradient(180deg, var(--surface-canvas), var(--surface-sunken)); background-attachment: fixed; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 body.modal-open { overflow: hidden; }
 #app { min-height: 100%; }
 
