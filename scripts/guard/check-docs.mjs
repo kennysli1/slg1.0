@@ -31,6 +31,7 @@ const CLASS_BUDGET = { index: 300, reference: 400, design: Infinity };
 const DESIGN_CAP = 8;
 
 const REQUIRED_KEYS = ['class', 'status', 'updated', 'owner', 'summary'];
+const TODAY = new Date().toISOString().slice(0, 10);
 const CLASSES = ['index', 'reference', 'design'];
 const STATUSES = ['active', 'draft', 'archived'];
 const OWNERS = ['design', 'server', 'client', 'ops', 'art'];
@@ -157,7 +158,7 @@ export function checkDocs() {
         const prevFm = parseFrontMatter(prev);
         const prevBody = prev.split(/^---\s*$/m).slice(2).join('---');
         const curBody = text.split(/^---\s*$/m).slice(2).join('---');
-        if (prevBody.trim() !== curBody.trim() && prevFm?.updated === fm.updated) {
+        if (prevBody.trim() !== curBody.trim() && prevFm?.updated === fm.updated && fm.updated !== TODAY) {
           r.fail(
             `${rel} 正文改了但 updated 还是 ${fm.updated}`,
             `把 front-matter 的 updated 改成今天`,

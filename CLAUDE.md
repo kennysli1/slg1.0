@@ -19,10 +19,11 @@
 
 自动兜底：ESLint 实时红线（跨模块 import / 模块内定时器）+ `architecture.test.ts` 静态扫描（含 store 集合归属唯一）。原理与案例见 `docs/2_2.0设计/03_架构总览.md`。
 
-## 红线二：变更契约七条（不满足就提交不了）
+## 红线二：变更契约八条（不满足就提交不了）
 
 | | 规矩 | 一句话 |
 |---|------|--------|
+| R0 | 功能分支开发 | 禁止在 `main`/`master` 修改、提交或直接推送；只通过 PR/MR 合并 |
 | R1 | 文档分层与行数预算 | CLAUDE.md ≤120 行、PROJECT.md ≤300 行、docs 参考类 ≤400 行 |
 | R2 | 每篇 docs 必须有 front-matter | `class/status/updated/owner/summary`，改正文就改 `updated` |
 | R3 | **索引即真相** | 加模块 → 写进 PROJECT.md §四；加文档 → 写进 §五；加 CSV → 写进 `config/README.md` |
@@ -87,12 +88,13 @@ npm run verify               # 提交前一键全量（guard + build + lint + ty
 
 ## 提交前（强制）
 
-1. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
-2. 写 `CHANGELOG.md` 的 `## [未发布]` 条目
-3. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
-4. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保部署快照就是提交快照）
-5. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
-6. 正常执行 `git commit`：钩子会依次完整验证、本地生产冒烟、真实部署、公网验收，通过后才创建提交
+1. 确认当前位于功能分支；禁止在 `main`/`master` 上修改、提交或直接推送，主分支只通过 PR/MR 合并
+2. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
+3. 写 `CHANGELOG.md` 的 `## [未发布]` 条目
+4. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
+5. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保部署快照就是提交快照）
+6. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
+7. 正常执行 `git commit`：钩子会依次完整验证、本地生产冒烟、真实部署、公网验收，通过后才创建提交
 
 **索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
 

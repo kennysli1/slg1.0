@@ -19,17 +19,11 @@
 - 重排村庄驾驶舱的决策层级：桌面端保留“领地全景 + 右侧决策台”，手机端改为“领地全景 → 紧凑决策台 → 深层数据”，并统一中文界面语言、移除视图切换中的 emoji。
 - 重构客户端视觉为现代大战略战术 HUD：启用全新主城场景、去除地图 Travian 式重复贴图表现，并统一页面底色、字体层级、建筑悬停与低遮挡地图交互。
 - 伯乐「翻倍骑兵」取消 5% 安全边距（原 `ratio×0.95`），改为按资源/劳动人口全额翻倍。
-- 满仓净产率语义：`economy.netRate` 满仓(≥容量)时由「生产归零 + 仍减消耗」改为「生产先抵消耗、多余丢弃（净变化 ≤0）」。满仓时若生产>消耗则资源稳定停在容量不再被消耗拖出锯齿（如粮食 1200↔1199 来回震荡）；仅当消耗>生产才减少。非 crop 资源无消耗，行为不变。
 
 ### 新增
 
 - 新增提交前部署总闸门：`git commit` 强制完整构建/静态检查/全部测试，隔离启动真实生产产物并验证 HTTP、前端静态资源、WebSocket 注册与主界面快照，再部署同一候选快照到腾讯云并从公网只读验收；失败自动恢复部署前代码并重载 PM2。CI 同步执行本地生产冒烟，正式存档始终排除在测试和回滚之外。
 - 恢复批量被部署 reset 丢失的科技与配套功能（从 `_auth` 副本 git 历史重建）：**全民皆兵**（`universal_conscription`）+ **露天仓库**（`open_warehouse`，`storage_overflow` 机制，无该科技时 `economy.Grant` 超额资源被丢弃、有科技可溢出至 `capacity×(1+overflowCap)`，`productionPaused` 满仓即停产，客户端人口面板溢出警告）。同时恢复 `build_speed` 科技注入、`research` 重启重新 apply、科技/宝物效果白名单校验、`trade` 热重载重排刷新/宝物出现改 dropRate 权重、打野宝物未归村隐藏信息、客户端科技页无学院锁屏。同步更新相关测试对齐超额语义。
-- 恢复宝物「精神食粮」（`spiritual_food`，`soldierFoodReduce`，id 20，economic/rare，被动）：每兵粮耗 −1（绝对值），军晌≤1 的兵不减（下限），多份累加。`military` 新增 `foodPerSoldier`（减在「已乘完 popCost 的总量」上、下限 (base+1)×popCost，避免被 popCost 放大——修复当初「减 22 而非 8」的 popCost>1 爆雷）；`treasures.aggregate` 累加 `soldierFoodReduce` + `recomputeAndPush` 总是下发 `military.SetTreasureFoodReduce`（移除自动归零）。此宝物曾在 8/11 部署后 8/12 移除、从未入 git，本次按日志完整重建。
-- 修复 满仓时仍显示产量但不产出：`productionPaused` 已改满仓即停产，但 `netRate` 的超额判断仍是严格 `>`（恰好顶到容量时仍返回正产率）。已把 `netRate` 的超额判断改为 `>=`，满仓/超额时毛产=0，与 `productionPaused` 一致。
-- 资源条显示溢出容量与原始产率：`ResourceBar` 用 `overflowCap` 计算有效容量（容量×(1+溢出系数)）填充进度条、超额库存金色高亮；停产时显示「本可 +X/时」原始产率；`liveResource` 外插上限改为有效容量；人口格溢出时橙色警示 + hover 显示均溢率和增速扣减。
-- 修复 粮食外插超过上限（如显示到 1210 又跳回 1199）：`liveResource` 之前把自然产出也按有效容量（容量×2）外插，导致未满仓时数字被顶过容量。改为：自然产出只顶到容量，仅当快照值本身已溢出（掠夺/购买/转交入库）才允许显示到有效容量。
-- 修复 伯乐翻倍可突破动员上限：`military.DuplicateCavalry` 之前只查资源和劳动人口，未查动员上限（`mobilizeCap × totalPop - 士兵足迹`），导致翻倍后士兵超上限（如 118/113）。新增动员上限约束，翻倍比例受剩余动员空间限制。
 
 - 新增宝物「伯乐」（`bole`，`cavalryTrainSpeed`，id 19）：被动=骑兵训练时间减半（`military.treasureCavalryTrainMult`，`treasures.aggregate` 按 `1-effectValue/100` 累乘、`recomputeAndPush` **总是下发**避免移除后残留）；使用=按现有骑兵等比例翻倍（`military.DuplicateCavalry`：查资源/劳动人口算 95% 安全 ratio → `economy.TrySpend` 扣资源 → `population.ConvertPopToGarrison` 直接转劳动人口为驻军，不走训练预留通道），客户端「使用」按钮按 `effectType` 分派并展示翻倍明细 toast。此宝物曾在 8/11 以未提交改动被部署 reset 回滚丢失，本次从 `_auth` 副本 git 历史完整恢复并以新 id 重建。
 - 任务系统新增「触发条件」：`quests.csv` 增加 `trigger` 列，随机任务可设 `building_built:<建筑code>`（建造完成该建筑后才进酒馆）；服务端 `tasks` 监听 `building.Built` 标记触发并立即 offer，`TaskState.firedTriggers` 持久化，GM 任务目录编辑器展示 trigger 列与说明。新增任务目标 `sell_discard_treasure`（累计出售/丢弃 N 个稀有及以上品质宝物）：`treasure.Sell/Discard` 广播 `treasure.SoldDiscarded`，`tasks` 计数推进并完成后发奖；客户端任务卡显示目标与进度。
@@ -91,10 +85,6 @@
 - 历史战报的时间戳取错字段（`notification.at`，实际是 `ts`），导致登录后拉回的战报时间全是 Invalid Date
 - `PopulationChanged` 推送是增量载荷，此前按全量字段套用会把上限、繁荣度等一片数值误清成 0；现在缺字段一律沿用旧快照
 - 地图拖拽、双指移动或缩放导致主城偏离中心后，方向键中央的回城键会立即启用并可一键重新居中
-- 伯乐翻倍改兵力后未重新核算驻军人口足迹（只靠 `ConvertPopToGarrison` 手动累加 `garrisonPopCost`），导致与解散/训练的 `reportGarrisonPop` 重算口径不一致、账目漂移，解散骑兵时人口返还偏多/偏少。现伯乐翻倍后补 `reportGarrisonPop`，按 troops 重新核算足迹，与其它改兵力路径对齐。
-- 解散返还人口钳制口径错误：`population.ReturnPop` 之前把 `currentPop` 钳到 `hardCap`（总上限），有驻军时会超出「硬上限−士兵足迹」的实际平民上限（popCeiling），导致解散后 totalPop 超上限。改为钳到 `popCeiling`（`hardCap − soldierFootprint`）。
-- 资源栏人口悬浮框的「人口增长受露天仓库溢出扣减」提示未生效：客户端 `applyPopPayload`（refresh.ts）逐字段 pick 时漏了 `overflowRatio`，导致服务端下发的溢出系数永远到不了 `PopSnapshot`。补上 `overflowRatio` 的 pick，人口格/人口面板的溢出警告与增速扣减得以正常显示。
-- 资源栏人口格的红框（`res--alarm`）只在负面效果时出现：去掉「近满员（nearCap）」触发红框，仅保留饥荒、露天仓库溢出扣减这两个负面效果触发红框；近满员时进度条也保持中性绿色（不再橙色 ember 提示）。
 
 ### 移除
 
