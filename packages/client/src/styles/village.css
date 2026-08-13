@@ -59,8 +59,6 @@
 /* ---- Command deck ---- */
 .vil-deck {
   grid-area: deck;
-  position: sticky;
-  top: calc(var(--topbar-h) + var(--tabbar-h) + var(--s-4));
 }
 .vil-deck-panel {
   display: flex;
@@ -410,30 +408,47 @@
   padding: var(--s-2);
 }
 .vil-pad-inner {
+  --vil-art-size: 96px;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* --pad-mult 由容器给：手机端整体缩一档，桌面为 1 */
-  transform: scale(var(--pad-mult, 1));
-  transition: filter var(--t-fast), transform var(--t-med) var(--ease-out);
+  width: calc(var(--vil-art-size) * var(--pad-mult, 1));
+  height: calc(var(--vil-art-size) * var(--pad-mult, 1));
+  transition: filter var(--t-fast);
 }
 .vil-pad:hover .vil-pad-inner,
 .vil-pad:focus-visible .vil-pad-inner {
   filter: brightness(1.12) drop-shadow(0 7px 10px rgb(0 0 0 / 72%)) drop-shadow(0 0 2px var(--c-gold-hi));
-  transform: scale(calc(var(--pad-mult, 1) * 1.06)) translateY(-2px);
 }
 .vil-pad:focus-visible { outline: 2px solid var(--c-gold); outline-offset: 2px; border-radius: var(--r-sm); }
 .vil-pad-icon {
   filter: saturate(.82) contrast(1.08) drop-shadow(0 5px 8px rgb(0 0 0 / 76%));
   display: block;
 }
+.vil-pad-art {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 96px;
+  height: 96px;
+  transform: scale(var(--pad-mult, 1));
+  transform-origin: top left;
+  transition: transform var(--t-med) var(--ease-out);
+}
+.vil-pad:hover .vil-pad-art,
+.vil-pad:focus-visible .vil-pad-art {
+  transform: scale(calc(var(--pad-mult, 1) * 1.06)) translateY(-2px);
+}
+.vil-pad-art--center {
+  width: 132px;
+  height: 132px;
+}
 
-/* Level badge — overlaid on building icon top-right */
+/* Level badge — every asset anchors to the same building-foot baseline. */
 .vil-lvl {
   position: absolute;
-  top: -6px;
-  right: -8px;
+  right: 50%;
+  bottom: -4px;
+  transform: translateX(50%);
   min-width: 22px;
   height: 18px;
   padding: 0 5px;
@@ -533,6 +548,7 @@
 
 /* Town-center pad gets a richer gold glow */
 .vil-pad--center .vil-pad-inner {
+  --vil-art-size: 132px;
   filter: drop-shadow(0 0 12px rgba(216, 177, 104, .3));
 }
 .vil-pad--center:hover .vil-pad-inner {
@@ -887,31 +903,6 @@
   letter-spacing: .5px;
 }
 
-.bld-demolish-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-.bld-demolish-confirm {
-  padding: var(--s-3);
-  background: rgba(166, 53, 48, .10);
-  border: 1px solid rgba(212, 84, 76, .35);
-  border-radius: var(--r-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-}
-.bld-demolish-warn {
-  font-size: var(--f-xs);
-  color: var(--c-crimson-hi);
-  font-weight: 700;
-  line-height: 1.5;
-}
-.bld-demolish-actions {
-  display: flex;
-  gap: var(--s-2);
-}
-
 /* ---- Build Options Modal ---- */
 .build-options {
   display: flex;
@@ -1008,6 +999,7 @@
     aspect-ratio: 3 / 2;
     --pad-mult: .64;
   }
+  .vil-pad { padding: var(--s-1); }
   .vil-scene-caption { align-items: start; }
   .vil-scene-caption strong { text-align: right; }
   .vil-scene-status {

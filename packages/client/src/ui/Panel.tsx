@@ -57,3 +57,21 @@ export function Empty({ icon, title, children }: { icon?: string; title: string;
     </div>
   );
 }
+
+/** Collapsed home for infrequent or destructive management actions. */
+export function SecondaryActions({ label, hint, children }: {
+  label: ComponentChildren;
+  hint?: ComponentChildren;
+  children: ComponentChildren;
+}) {
+  return (
+    <details class="secondary-actions">
+      <summary>
+        <span>{label}</span>
+        {hint != null && <small>{hint}</small>}
+        <i aria-hidden="true">›</i>
+      </summary>
+      <div class="secondary-actions__body">{children}</div>
+    </details>
+  );
+}

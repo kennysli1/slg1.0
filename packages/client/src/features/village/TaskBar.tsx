@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks';
 import { dataVersion, taskStates, tab, openModal } from '../../app/store.js';
 import { me, req } from '../../api.js';
 import { act } from '../../app/refresh.js';
-import { Panel, SectionHead, Btn, Tag, CostRow } from '../../ui/index.js';
+import { Panel, SectionHead, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
@@ -122,6 +122,12 @@ function TaskCard({ task }: { task: any }) {
   const isMain = task.type === 'main';
 
   const onAbandon = async () => {
+    const ok = await confirmDanger({
+      title: `放弃任务 · ${task.name}`,
+      body: '当前任务进度会被清除；如果任务再次出现，需要从头开始。',
+      confirmText: '确认放弃',
+    });
+    if (!ok) return;
     await act(req('task.Abandon', { code: task.code }), { okToast: '已放弃任务' });
   };
   const onSubmit = () => {

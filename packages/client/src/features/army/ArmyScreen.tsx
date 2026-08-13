@@ -32,7 +32,7 @@ import { openUnitDetail } from './UnitDetail.js';
 import { SmithyPanel } from './SmithyPanel.js';
 import {
   Panel, SectionHead, Divider, Empty, Btn, Tag,
-  Icon, IconPlate, TimerBar, Stat, Modal,
+  Icon, IconPlate, TimerBar, Stat, Modal, SecondaryActions,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 
@@ -314,8 +314,8 @@ function DisbandSection({ army }: { army: any }) {
   if (entries.length === 0) return null;
 
   return (
-    <Panel pad variant="danger">
-      <SectionHead sub="解散即时返还人口，但资源不返还；出征中的部队无法解散">解散部队</SectionHead>
+    <Panel class="army-management-panel">
+      <SecondaryActions label="部队管理" hint="解散驻军">
       <div class="disband-section">
         <div class="disband-hint">
           解散后人口立即返还（可重新用于训练），但训练耗费的木/泥/铁/粮均不退回。
@@ -325,6 +325,7 @@ function DisbandSection({ army }: { army: any }) {
           <DisbandRow key={key} unitKey={key} totalCount={count as number} army={army} />
         ))}
       </div>
+      </SecondaryActions>
     </Panel>
   );
 }

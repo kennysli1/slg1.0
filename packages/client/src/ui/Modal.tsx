@@ -2,6 +2,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { modals, closeModal, toasts } from '../app/store.js';
+import { modalLayerZ } from './modal-layer.js';
 
 interface ModalProps {
   title: ComponentChildren;
@@ -83,6 +84,7 @@ export function ModalHost() {
           key={modal.id}
           class="modal-layer"
           style={{
+            zIndex: modalLayerZ(index),
             '--modal-scrim-z': `calc(var(--z-scrim) + ${index * 20})`,
             '--modal-dialog-z': `calc(var(--z-modal) + ${index * 20})`,
           }}

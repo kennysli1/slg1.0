@@ -15,6 +15,15 @@ import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
+import { modalLayerZ } from '../ui/modal-layer.js';
+
+describe('modalLayerZ', () => {
+  it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
+    assert.equal(modalLayerZ(0), 'calc(var(--z-scrim) + 0)');
+    assert.equal(modalLayerZ(1), 'calc(var(--z-scrim) + 20)');
+    assert.equal(modalLayerZ(-1), 'calc(var(--z-scrim) + 0)');
+  });
+});
 
 // ─── escapeHtml ────────────────────────────────────────────────
 
