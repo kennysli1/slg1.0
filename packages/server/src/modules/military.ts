@@ -447,6 +447,14 @@ export class MilitaryModule {
     if (popRes.ok) {
       const labor = (popRes.payload as any)?.currentPop ?? 0;
       if (totalPopCost > 0) ratio = Math.min(ratio, labor / totalPopCost);
+      // 动员上限：新增骑兵人口不得超过 mobilizeCap × totalPop - 当前士兵足迹
+      const cap = (popRes.payload as any)?.mobilizeCap;
+      const tp = (popRes.payload as any)?.totalPop;
+      const sp = (popRes.payload as any)?.soldierPop;
+      if (typeof cap === 'number' && typeof tp === 'number' && typeof sp === 'number' && totalPopCost > 0) {
+        const maxAdd = Math.max(0, cap * tp - sp);
+        ratio = Math.min(ratio, maxAdd / totalPopCost);
+      }
     }
     ratio = Math.min(1, Math.max(0, ratio)); // 全额翻倍，不设安全边距
 
