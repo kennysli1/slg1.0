@@ -48,11 +48,33 @@ async function claimTreasure(
 }
 
 function TreasureCard({ p }: { p: PendingTreasureView }) {
+  const isDeliver = p.kind === 'deliver';
+  const isCamp = !isDeliver;
+  const isArrived = !!p.arrivedAt;
+
+  // camp 未归村：仅显示占位卡片（不泄露宝物信息）
+  if (isCamp && !isArrived) {
+    return (
+      <div class="tcard tcard--pending">
+        <div class="tcard-art">
+          <IconPlate icon="trs_unknown" label="未知宝物" size="lg" plate="stone" />
+        </div>
+        <div class="tcard-body">
+          <div class="tcard-name">军队带回的宝物</div>
+          <div class="tcard-effect">军队返程后才能知道是什么宝物</div>
+          <div class="tcard-expiry">
+            <span>预计抵达：</span>
+            <Countdown until={p.expectedArrivalAt!} done="即将抵达…" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const info = treasureInfo(p.code);
   const effectText = info ? treasureEffectText(info) : `${p.effectType}:${p.effectValue}`;
   const rareName = treasureRarityName(p.rarity) || p.rarity;
   const catName = treasureCategoryName(p.category) || p.category;
-  const isDeliver = p.kind === 'deliver';
   const iconBase = info?.icon ?? 'trs_unknown';
 
   return (

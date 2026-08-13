@@ -158,6 +158,16 @@ export class TradeModule {
   setConfig(config: GameConfig): void {
     this.config = config;
     this.refreshTradeable();
+    // GM 热重载后重定刷新间隔：取消旧定时器，用新参数立即重排
+    for (const s of this.store.all<TradeCenterState>(COLLECTION)) {
+      if (s.level > 0 && s.taskId) {
+        this.scheduler.cancelByOwner(`trade:${s.villageId}`);
+        const tc = this.config.tradeCenter[s.level] ?? { npcRefreshSec: 3600, npcStoredRefreshes: 1, tradeViewRadius: 5, npcOrderCount: 3, tradeRoutes: 2 };
+        s.nextRefreshAt = this.now() + tc.npcRefreshSec * 1000;
+        s.taskId = this.scheduleRefresh(s.villageId, s.nextRefreshAt);
+        this.store.set(COLLECTION, s.villageId, s);
+      }
+    }
   }
 
   /** 重算可交易宝物清单（priceGold>0 才有 NPC 出售意义）。 */
@@ -200,7 +210,11 @@ export class TradeModule {
       const before = s.createdOrders.length;
       s.createdOrders = s.createdOrders.filter((o) => o.ttlAt > this.now());
       if (s.createdOrders.length !== before) this.store.set(COLLECTION, s.villageId, s);
-      // 重排自动刷新
+      // 重排自动刷新：用当前配置间隔重算 nextRefreshAt（覆盖旧存档遗留的过期时间戳）
+      if (s.level > 0) {
+        const tc = this.config.tradeCenter[s.level] ?? { npcRefreshSec: 3600, npcStoredRefreshes: 1, tradeViewRadius: 5, npcOrderCount: 3, tradeRoutes: 2 };
+        s.nextRefreshAt = this.now() + tc.npcRefreshSec * 1000;
+      }
       const delay = Math.max(0, s.nextRefreshAt - this.now());
       s.taskId = this.scheduler.schedule(
         delay,
@@ -284,14 +298,14 @@ export class TradeModule {
     return { id: this.nextId(), give, want, distance, expiresAt };
   }
 
-  /** 生成一条「NPC 出售宝物」订单：按稀有度加权选宝物（普通多、传说少），买价=目录价×加价倍率，卖出回收价=目录价。 */
+  /** 生成一条「NPC 出售宝物」订单：用 dropRate 统一控制野外掉落与贸易中心出现概率，买价=目录价×加价倍率，卖出回收价=目录价。 */
   private rollTreasureOffer(expiresAt: number): NpcOrder {
     const c = this.config.constants;
-    // 稀有度权重：越稀有价值越高、越罕见
-    const weightByRarity: Record<string, number> = { common: 8, rare: 4, epic: 2, legendary: 1 };
+    // 用 dropRate 统一控制野外掉落和贸易中心出现概率
     const pool = this.tradeableTreasures;
-    const weights = pool.map((t) => weightByRarity[t.rarity] ?? 1);
+    const weights = pool.map((t) => this.config.treasures[t.code]?.dropRate ?? 0);
     const total = weights.reduce((a, b) => a + b, 0);
+    if (total <= 0) return this.rollNpcOrder(1, 5, expiresAt);
     let r = Math.random() * total;
     let chosen = pool[0];
     for (let i = 0; i < pool.length; i++) {

@@ -60,6 +60,43 @@ export function PopPanel() {
         <Bar pct={ratio * 100} kind={barKind} tall />
       </div>
 
+      {/* 溢出警告——大数字正下方，最显眼 */}
+      {(ps.overflowRatio ?? 0) > 0 && (
+        <>
+          <style>{`
+            .pop-overflow-alert {
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
+              margin: 12px 0;
+              padding: 14px 16px;
+              border-radius: 8px;
+              background: rgba(255,140,0,.12);
+              border: 2px solid rgba(255,140,0,.45);
+              box-shadow: 0 0 18px rgba(255,140,0,.25);
+              animation: pop-overflow-pulse 1.8s ease-in-out infinite;
+            }
+            @keyframes pop-overflow-pulse {
+              0%,100% { box-shadow: 0 0 18px rgba(255,140,0,.25); }
+              50% { box-shadow: 0 0 32px rgba(255,140,0,.5); }
+            }
+            .pop-overflow-alert-icon { font-size: 28px; flex-shrink: 0; }
+            .pop-overflow-alert-title { font-weight: 700; font-size: 14px; color: #ffb347; margin-bottom: 4px; }
+            .pop-overflow-alert-desc { font-size: 12px; color: #e0c486; line-height: 1.5; }
+          `}</style>
+          <div class="pop-overflow-alert">
+            <div class="pop-overflow-alert-icon">📦</div>
+            <div class="pop-overflow-alert-body">
+              <div class="pop-overflow-alert-title">仓库溢出 — 人口增长受阻</div>
+              <div class="pop-overflow-alert-desc">
+                四种资源平均溢出 <b>{(ps.overflowRatio! * 100).toFixed(0)}%</b>，
+                人口增速降至 <b>{((1 - ps.overflowRatio!) * 100).toFixed(0)}%</b>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Status alerts */}
       {ps.inFamine && (
         <div class="pop-statuses">
@@ -95,9 +132,13 @@ export function PopPanel() {
         )}
         <Stat
           icon="ui_icon_pop"
-          label="增长速率"
+          label={`增长速率${(ps.overflowRatio ?? 0) > 0 ? ' ⚠️' : ''}`}
           value={`${growthDisplay >= 0 ? '+' : ''}${Math.round(growthDisplay)}/h${atCap ? ' (满)' : ''}`}
-          title={atCap ? '已达上限，展示的是原始潜力增长速率' : '每小时净增长（朝上限收敛）'}
+          title={
+            (ps.overflowRatio ?? 0) > 0
+              ? `仓库溢出导致人口增长扣减 ${(ps.overflowRatio! * 100).toFixed(0)}%（四资源均溢率）。种田消耗或提升仓储以恢复增长。`
+              : atCap ? '已达上限，展示的是原始潜力增长速率' : '每小时净增长（朝上限收敛）'
+          }
         />
         <Stat icon="ui_icon_pop" label="平民占比" value={`${laborRatioPct}%`} title="平民 / 总人口，驱动繁荣度" />
         <Stat icon="ui_icon_pop" label="繁荣系数" value={`${prosperityPct}%`} title={`平民占比 ≥ ${fullThreshPct}% 时满值 100%，影响五轴生产速率`} />

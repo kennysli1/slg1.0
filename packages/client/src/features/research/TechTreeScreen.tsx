@@ -67,12 +67,13 @@ export function TechTreeScreen() {
       <RpPanel rp={rp} state={state} researching={researching} />
 
       {academyCount === 0 && (
-        <Panel variant="flat" pad class="tech-hint">
-          学院是科研点的唯一来源。把城镇中心升到 Lv3，再在<b>城内空槽</b>建造学院，
-          之后每隔一段时间就有概率产出科研点；学院越多，判定越频繁。
-        </Panel>
+        <Empty icon="🏛️" title="尚未建造学院">
+          <p>把<b>城镇中心</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
+        </Empty>
       )}
 
+      {academyCount > 0 && (
+        <>
       <SectionHead actions={
         <div class="tech-branch-tabs" role="tablist">
           {BRANCHES.map((b) => (
@@ -98,6 +99,8 @@ export function TechTreeScreen() {
         rp={rp}
         researchingCode={researching?.code ?? null}
       />
+        </>
+      )}
     </>
   );
 }
