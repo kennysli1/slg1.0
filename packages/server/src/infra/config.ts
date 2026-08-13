@@ -238,7 +238,7 @@ export interface QuestObjective {
 }
 
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
-export type QuestType = 'main' | 'random';
+export type QuestType = 'main' | 'daily' | 'side';
 
 /** 任务定义（来自 quests.csv）。 */
 export interface QuestDef {
@@ -247,7 +247,7 @@ export interface QuestDef {
   name: string;
   desc: string;
   type: QuestType;
-  /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
+  /** 前置任务：必须完成这些 code 才能解锁（科技树式）。主线/支线用；日常任务为空。 */
   requires: string[];
   /** 目标（v1 单目标）。 */
   objective: QuestObjective;
@@ -256,9 +256,9 @@ export interface QuestDef {
     resources?: Record<string, number>;
     treasures?: string[];
   };
-  /** 随机任务刷新权重（越大越常出现）；主线忽略。 */
+  /** 日常任务刷新权重（越大越常出现）；主线/支线忽略。 */
   weight: number;
-  /** 触发条件（仅随机任务）：如 `building_built:treasury`=建造完成宝库后出现在酒馆；空=无触发（常驻可刷）。 */
+  /** 触发条件（仅支线任务）：如 `building_built:treasury`=建造完成宝库后出现；空=无触发。 */
   trigger?: string;
 }
 
@@ -1061,7 +1061,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       code,
       name: r.name ?? code,
       desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'random',
+      type: (r.type as QuestType) || 'daily',
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       objective,
       rewards: {
@@ -1352,7 +1352,7 @@ export function validateGameConfig(config: GameConfig): void {
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
-    if (q.type !== 'main' && q.type !== 'random') errors.push(`quests.csv[${q.code}] type 必须是 main/random`);
+    if (q.type !== 'main' && q.type !== 'daily' && q.type !== 'side') errors.push(`quests.csv[${q.code}] type 必须是 main/daily/side`);
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {
@@ -1369,9 +1369,9 @@ export function validateGameConfig(config: GameConfig): void {
       }
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] sell_discard_treasure 数量必须≥1`);
     }
-    // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
+    // 触发条件校验：仅支线任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'random') errors.push(`quests.csv[${q.code}] 仅随机任务可设触发条件 trigger`);
+      if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
       if (tk !== 'building_built') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code>）`);
     }

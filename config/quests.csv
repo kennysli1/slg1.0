@@ -4,7 +4,7 @@
 3,m3,清剿野兽,清理一处骚扰村落的营地,main,m1,clear_camp,task_camp:1,gold:200,warrior_token,0,
 4,m4,稳固边疆,持续清剿营地保障村落安全,main,m3,clear_camp,task_camp:2,gold:400|crop:500,,0,
 5,m5,繁荣村落,向王国证明你的实力,main,m2,submit_resources,wood:1000|clay:1000|iron:1000|crop:1000,gold:600,,0,
-6,r1,临时征收,酒馆临时委托上缴部分资源,random,,submit_resources,wood:150|clay:150,gold:40,,3,
-7,r2,讨伐游匪,酒馆悬赏清掉一支游匪营地,random,,clear_camp,task_camp:1,gold:80,,2,
-8,r3,紧急补给,酒馆急令调拨粮食应急,random,,submit_resources,crop:300,gold:60,,3,
-9,r4,献祭筹备,累计出售或丢弃2个稀有及以上品质的宝物,random,,sell_discard_treasure,rare:2,,ritual_altar,3,building_built:treasury
+6,r1,临时征收,酒馆临时委托上缴部分资源,daily,,submit_resources,wood:150|clay:150,gold:40,,3,
+7,r2,讨伐游匪,酒馆悬赏清掉一支游匪营地,daily,,clear_camp,task_camp:1,gold:80,,2,
+8,r3,紧急补给,酒馆急令调拨粮食应急,daily,,submit_resources,crop:300,gold:60,,3,
+9,r4,献祭筹备,累计出售或丢弃2个稀有及以上品质的宝物,side,,sell_discard_treasure,rare:2,,ritual_altar,3,building_built:treasury

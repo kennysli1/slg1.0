@@ -18,6 +18,8 @@
 ### 新增
 
 - 恢复批量被部署 reset 丢失的科技与配套功能（从 `_auth` 副本 git 历史重建）：**全民皆兵**（`universal_conscription`）+ **露天仓库**（`open_warehouse`，`storage_overflow` 机制，无该科技时 `economy.Grant` 超额资源被丢弃、有科技可溢出至 `capacity×(1+overflowCap)`，`productionPaused` 满仓即停产，客户端人口面板溢出警告）。同时恢复 `build_speed` 科技注入、`research` 重启重新 apply、科技/宝物效果白名单校验、`trade` 热重载重排刷新/宝物出现改 dropRate 权重、打野宝物未归村隐藏信息、客户端科技页无学院锁屏。同步更新相关测试对齐超额语义。
+- 任务系统拆分「随机任务」为**日常任务**（`daily`）与**支线任务**（`side`）：日常任务经酒馆刷出、完成后可反复出现；支线任务满足触发条件(trigger)+前置(requires)后出现在任务栏、一次性、有任务线，放弃后永久不再出现（客户端弹警告确认）。主线任务不可放弃、m1-m4 无需酒馆自动解锁。`quests.csv` 的 r1/r2/r3 改 daily、r4(献祭筹备)改 side；`TaskState` 拆分 completedSide/abandonedSide/offeredSide 并迁移旧 completedRandom；酒馆刷新池只抽 daily（不过滤已完成）。
+
 - 恢复宝物「精神食粮」（`spiritual_food`，`soldierFoodReduce`，id 20，economic/rare，被动）：每兵粮耗 −1（绝对值），军晌≤1 的兵不减（下限），多份累加。`military` 新增 `foodPerSoldier`（减在「已乘完 popCost 的总量」上、下限 (base+1)×popCost，避免被 popCost 放大——修复当初「减 22 而非 8」的 popCost>1 爆雷）；`treasures.aggregate` 累加 `soldierFoodReduce` + `recomputeAndPush` 总是下发 `military.SetTreasureFoodReduce`（移除自动归零）。此宝物曾在 8/11 部署后 8/12 移除、从未入 git，本次按日志完整重建。
 - 修复 满仓时仍显示产量但不产出：`productionPaused` 已改满仓即停产，但 `netRate` 的超额判断仍是严格 `>`（恰好顶到容量时仍返回正产率）。已把 `netRate` 的超额判断改为 `>=`，满仓/超额时毛产=0，与 `productionPaused` 一致。
 - 资源条显示溢出容量与原始产率：`ResourceBar` 用 `overflowCap` 计算有效容量（容量×(1+溢出系数)）填充进度条、超额库存金色高亮；停产时显示「本可 +X/时」原始产率；`liveResource` 外插上限改为有效容量；人口格溢出时橙色警示 + hover 显示均溢率和增速扣减。
