@@ -124,8 +124,25 @@ describe('modifier 覆盖率', () => {
   });
 
   it('treasure.Grant 未知 code 返回 unknown_treasure', async () => {
-    const g = await commands.send({ name: 'treasure.Grant', from: 'test', payload: { villageId: vid, code: 'spiritual_food' } });
+    const g = await commands.send({ name: 'treasure.Grant', from: 'test', payload: { villageId: vid, code: 'nonexistent_treasure' } });
     assert.ok(!g.ok, '未知宝物应失败');
     assert.equal(g.reason, 'unknown_treasure');
+  });
+
+  it('treasure spiritual_food(soldierFoodReduce): 每兵减粮绝对值，popCost>1 不减多', async () => {
+    // 授予精神食粮（减粮 1）
+    const g = await commands.send({ name: 'treasure.Grant', from: 'test', payload: { villageId: vid, code: 'spiritual_food' } });
+    assert.ok(g.ok, `grant spiritual_food failed: ${g.reason}`);
+    const res = await commands.send({ name: 'military.GetArmy', from: 'test', payload: { villageId: vid } });
+    assert.ok(res.ok, 'GetArmy failed');
+    const trainable = (res.payload as any).trainable ?? [];
+    const legion = trainable.find((t: any) => t.key === 'legionnaire');
+    const imper = trainable.find((t: any) => t.key === 'equimperatoris');
+    assert.ok(legion, 'legionnaire not in trainable');
+    assert.ok(imper, 'equimperatoris not in trainable');
+    // legionnaire：base(1)+upkeep(1)=2，军晌≤1 不减 → 仍 2
+    assert.equal(legion.cropPerHourEach, 2, `legionnaire cropPerHourEach=${legion.cropPerHourEach} 应=2（军晌1不减）`);
+    // equimperatoris：popCost=3，原始 (1+3)*3=12，减 1 → 11（不是减 popCost×1=3）
+    assert.equal(imper.cropPerHourEach, 11, `equimperatoris cropPerHourEach=${imper.cropPerHourEach} 应=11（减绝对值1，非popCost×1）`);
   });
 });
