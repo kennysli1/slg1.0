@@ -18,3 +18,4 @@
 16,golden_idol,黄金神像,trs_idol,special,legendary,instantGold,8000,2000,0.004,instant
 17,warrior_token,勇士之证,trs_medal,special,epic,atkMult,5,0,0,passive
 18,ritual_altar,祭祀台,trs_altar,special,epic,ritualBuff,25,0,0,instant
+19,bole,伯乐,trs_bole,military,legendary,cavalryTrainSpeed,50,3000,0.004,instant

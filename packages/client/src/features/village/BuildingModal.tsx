@@ -208,6 +208,29 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
                 {isInstant && (
                   <Btn size="sm" variant="primary" onClick={async () => {
                     const effectType = (info as any)?.effectType ?? '';
+                    if (effectType === 'cavalryTrainSpeed') {
+                      // 伯乐：翻倍骑兵，toast 展示实际增加/消耗
+                      const res = await req('UseTreasure', { code: t.code });
+                      if (!res.ok) { showToast('使用失败', 'bad'); return; }
+                      const p = res.payload as any;
+                      const count = p.count ?? 0;
+                      const ratio = p.ratio ?? 1;
+                      const spent = p.spent ?? {};
+                      const popCost = p.popCost ?? 0;
+                      const added = p.added ?? {};
+                      const parts: string[] = [`已使用「${t.name}」`];
+                      if (count > 0) {
+                        const unitStrs = Object.entries(added).map(([c, n]) => `${c} +${n}`);
+                        if (unitStrs.length) parts.push(unitStrs.join('、'));
+                        parts.push(`共 ${count} 骑兵`);
+                      }
+                      if (ratio < 1) parts.push(`(仅 ${(ratio * 100).toFixed(0)}% 翻倍)`);
+                      const resStrs = Object.entries(spent).filter(([, v]) => (v as number) > 0).map(([r, v]) => `${r}=${v}`);
+                      if (resStrs.length) parts.push(`消耗资源: ${resStrs.join('、')}`);
+                      if (popCost > 0) parts.push(`劳动人口 -${popCost}`);
+                      showToast(parts.join(' · '), 'ok');
+                      return;
+                    }
                     const useToast = effectType === 'ritualBuff'
                       ? `已使用「${t.name}」，全资源产出 +${fmt(info?.effectValue ?? 0)}%（持续2小时）`
                       : `已使用「${t.name}」，获得 ${fmt(info?.effectValue ?? 0)} 金币`;

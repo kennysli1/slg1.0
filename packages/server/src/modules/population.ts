@@ -98,6 +98,7 @@ export class PopulationModule {
     this.commands.register('population.GetLaborMult', (c) => this.getLaborMult(c));
     this.commands.register('population.ConsumePop', (c) => this.consumePop(c));
     this.commands.register('population.ConsumeLabor', (c) => this.consumeLabor(c));
+    this.commands.register('population.ConvertPopToGarrison', (c) => this.convertPopToGarrison(c));
     this.commands.register('population.ReturnPop', (c) => this.returnPop(c));
     this.commands.register('population.RecoverCasualties', (c) => this.recoverCasualties(c));
     this.commands.register('population.ReleaseTrainingPop', (c) => this.releaseTrainingPop(c));
@@ -642,6 +643,20 @@ export class PopulationModule {
       payload: { ...this.publicPayload(s), event: 'consumed_labor', consumed: Math.round(consumed) },
     } as DomainEvent);
     return { ok: true, payload: { consumed: Math.round(consumed), remaining: Math.max(0, want - consumed) } };
+  }
+
+  /** 伯乐翻倍：劳动人口直接转为驻军（不走训练预留通道，即时生效）。 */
+  private async convertPopToGarrison(cmd: Command): Promise<CommandResult> {
+    const { villageId, amount } = cmd.payload as { villageId: string; amount: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    await this.settle(s);
+    const amt = Math.max(0, Math.floor(amount));
+    if (amt > s.currentPop) return { ok: false, payload: {}, reason: 'insufficient_population' };
+    s.currentPop -= amt;
+    s.garrisonPopCost = (s.garrisonPopCost ?? 0) + amt;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { currentPop: s.currentPop, garrisonPopCost: s.garrisonPopCost } };
   }
 
   /**

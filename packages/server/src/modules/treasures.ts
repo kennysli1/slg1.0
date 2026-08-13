@@ -42,6 +42,8 @@ export interface TreasureEffects {
   defMult: number;
   /** 人口增长倍率（乘数）。 */
   popGrowthMult: number;
+  /** 骑兵训练速率倍率（乘数，默认 1；伯乐提供，training time 乘此值）。 */
+  cavalryTrainMult: number;
 }
 
 interface TreasureState {
@@ -456,6 +458,7 @@ export class TreasureModule {
     let atkMult = 1;
     let defMult = 1;
     let popGrowthMult = 1;
+    let cavalryTrainMult = 1;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -478,6 +481,7 @@ export class TreasureModule {
         case 'atkMult': atkMult *= 1 + frac; break;
         case 'defMult': defMult *= 1 + frac; break;
         case 'popGrowth': popGrowthMult *= 1 + frac; break;
+        case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -485,7 +489,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入（城镇失去其加成）。
@@ -510,6 +514,11 @@ export class TreasureModule {
     await this.commands.send({
       name: 'military.SetTreasureCombatMult', from: TreasureModule.NAME,
       payload: { villageId, atkMult: eff.atkMult, defMult: eff.defMult },
+    });
+    // 骑兵训练加速（伯乐）：总是下发（mult=1 即归零），避免移除宝物后加速永久残留
+    await this.commands.send({
+      name: 'military.SetTreasureCavalryTrainMult', from: TreasureModule.NAME,
+      payload: { villageId, mult: eff.cavalryTrainMult },
     });
   }
 
@@ -828,6 +837,27 @@ export class TreasureModule {
       return {
         ok: true,
         payload: { buffPct, durationSec, laborConsumed, sacrificed, codes: this.storedCodes(s) },
+      };
+    }
+
+    if (t.effectType === 'cavalryTrainSpeed') {
+      // 伯乐：使用后按现有骑兵等比例翻倍（消耗资源 + 劳动人口）
+      const res = await this.commands.send({
+        name: 'military.DuplicateCavalry', from: TreasureModule.NAME,
+        payload: { villageId },
+      });
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return {
+        ok: true,
+        payload: {
+          count: (res.payload as any)?.count ?? 0,
+          ratio: (res.payload as any)?.ratio ?? 0,
+          spent: (res.payload as any)?.spent ?? {},
+          popCost: (res.payload as any)?.popCost ?? 0,
+          added: (res.payload as any)?.added ?? {},
+          codes: this.storedCodes(s),
+        },
       };
     }
 

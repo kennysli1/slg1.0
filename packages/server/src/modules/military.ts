@@ -56,9 +56,14 @@ interface MilitaryState {
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
   techDefMult?: number;
+  /** 宝物骑兵训练加速倍率（默认 1；伯乐提供，training time 乘此值）。 */
+  treasureCavalryTrainMult?: number;
 }
 
 const COLLECTION = 'military';
+
+/** 骑兵兵种 code（伯乐翻倍/加速作用范围）。 */
+const CAVALRY_CODES = ['equlegati', 'equimperatoris', 'equcaesaris', 'theutates', 'druidrider', 'haeduan', 'paladin', 'teutonknight'];
 
 export class MilitaryModule {
   static readonly NAME = 'military';
@@ -146,6 +151,9 @@ export class MilitaryModule {
     // 宝物军事倍率（攻/防分别作用），由 treasure 模块推送，无环。
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
     this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
+    // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
+    this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
+    this.commands.register('military.DuplicateCavalry', (c) => this.duplicateCavalry(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -392,6 +400,95 @@ export class MilitaryModule {
     return this.config.units[unit]?.building === kind;
   }
 
+  /** 某兵种是否为骑兵（伯乐效果作用范围）。 */
+  private isCavalry(unitCode: string): boolean {
+    return CAVALRY_CODES.includes(unitCode);
+  }
+
+  /** 宝物骑兵训练加速（伯乐）：training time 乘此倍率。 */
+  private setTreasureCavalryTrainMult(cmd: Command): CommandResult {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.treasureCavalryTrainMult = Number.isFinite(mult) ? mult : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /** 伯乐使用效果：消耗资源和劳动人口，以当前骑兵为限等比例翻倍。不足则按比例缩减。 */
+  private async duplicateCavalry(cmd: Command): Promise<CommandResult> {
+    const { villageId } = cmd.payload as { villageId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    // 计算翻倍总成本（资源 + 人口）
+    const totalCost: Record<string, number> = {};
+    let totalPopCost = 0;
+    const current: Record<string, number> = {};
+    for (const code of CAVALRY_CODES) {
+      const def = this.config.units[code];
+      const cnt = s.troops[code] ?? 0;
+      if (cnt <= 0 || !def) continue;
+      current[code] = cnt;
+      for (const [r, amt] of Object.entries(def.cost)) totalCost[r] = (totalCost[r] ?? 0) + amt * cnt;
+      totalPopCost += (def.popCost ?? 0) * cnt;
+    }
+    if (Object.keys(current).length === 0) return { ok: true, payload: { count: 0, ratio: 0, spent: {}, popCost: 0, added: {} } };
+
+    // 查可用资源与劳动人口 → 翻倍比例（资源/人口取最紧张的一方）
+    const ecoRes = await this.commands.send({ name: 'economy.GetResources', from: MilitaryModule.NAME, payload: { villageId } });
+    const haveRes = ecoRes.ok ? (ecoRes.payload as any)?.resources ?? {} : {};
+    let ratio = 1;
+    for (const [r, need] of Object.entries(totalCost)) {
+      const have = haveRes[r] ?? 0;
+      if (need > 0) ratio = Math.min(ratio, have / need);
+    }
+    const popRes = await this.commands.send({ name: 'population.GetSnapshot', from: MilitaryModule.NAME, payload: { villageId } });
+    if (popRes.ok) {
+      const labor = (popRes.payload as any)?.currentPop ?? 0;
+      if (totalPopCost > 0) ratio = Math.min(ratio, labor / totalPopCost);
+    }
+    ratio = Math.min(1, Math.max(0, ratio * 0.95)); // 5% 安全边距，防 settle 漂移
+
+    // 实际增加量
+    let duplicated = 0;
+    for (const code of Object.keys(current)) {
+      const add = Math.floor(ratio * current[code]);
+      if (add <= 0) continue;
+      s.troops[code] = (s.troops[code] ?? 0) + add;
+      duplicated += add;
+    }
+    if (duplicated === 0) return { ok: true, payload: { count: 0, ratio: 0, spent: {}, popCost: 0, added: {} } };
+
+    // 扣资源（失败回滚兵力）
+    const spent: Record<string, number> = {};
+    for (const [r, need] of Object.entries(totalCost)) spent[r] = Math.floor(ratio * need);
+    const spendRes = await this.commands.send({ name: 'economy.TrySpend', from: MilitaryModule.NAME, payload: { villageId, cost: spent } });
+    if (!spendRes.ok) {
+      for (const code of Object.keys(current)) s.troops[code] = current[code];
+      return { ok: false, payload: {}, reason: spendRes.reason ?? 'spend_failed' };
+    }
+
+    // 扣劳动人口（直接转驻军，不走训练预留通道）
+    let popCost = 0;
+    for (const code of Object.keys(current)) {
+      const add = Math.floor(ratio * current[code]);
+      if (add > 0) popCost += (this.config.units[code]?.popCost ?? 0) * add;
+    }
+    if (popCost > 0) {
+      await this.commands.send({ name: 'population.ConvertPopToGarrison', from: MilitaryModule.NAME, payload: { villageId, amount: popCost } });
+    }
+
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+    const added: Record<string, number> = {};
+    for (const code of Object.keys(current)) {
+      const gain = (s.troops[code] ?? 0) - current[code];
+      if (gain > 0) added[code] = gain;
+    }
+    return { ok: true, payload: { count: duplicated, ratio: Math.round(ratio * 100) / 100, spent, popCost, added } };
+  }
+
   private async getArmy(cmd: Command): Promise<CommandResult> {
     const s = this.load((cmd.payload as any).villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
@@ -409,7 +506,7 @@ export class MilitaryModule {
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
       return {
         key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-        cost: u.cost, trainSec: u.trainSec,
+        cost: u.cost, trainSec: Math.max(1, Math.round(u.trainSec * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
@@ -432,7 +529,7 @@ export class MilitaryModule {
             return {
               key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
               cost: this.effectiveCost(u.cost, sl.level, sl.kind), // 已按建筑等级降费
-              trainSec: Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind)), // 已按建筑等级提速
+              trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))), // 已按建筑等级提速 + 伯乐骑兵加速
               meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
               meleeDef: st.meleeDef, rangedDef: st.rangedDef,
               speed: st.speed, carry: st.carry, upkeep: st.upkeep,
@@ -549,8 +646,9 @@ export class MilitaryModule {
       payload: { villageId, buildingKind: def.building },
     });
     const laborMult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
-    // 实际单兵耗时 = 基础耗时 × 建筑等级提速 ÷ 人口劳动力加速（人多练得快）
-    const effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level, slotInfo.kind)) / Math.max(0.01, laborMult);
+    // 实际单兵耗时 = 基础耗时 × 建筑等级提速 ÷ 人口劳动力加速 × 骑兵训练加速（伯乐）
+    let effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level, slotInfo.kind)) / Math.max(0.01, laborMult);
+    if (this.isCavalry(unit)) effectiveTrainSec *= (s.treasureCavalryTrainMult ?? 1);
 
     // 入该 slot 队列，登记第一个出兵
     const trainMsEach = Math.max(1, Math.round(effectiveTrainSec * 1000));
