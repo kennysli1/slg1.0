@@ -56,7 +56,7 @@ export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
   return (
     <aside class="vil-deck" aria-label="村庄指挥区">
       <Panel variant="gold" corners pad class="vil-deck-panel">
-        <div class="vil-deck-kicker">CITY COMMAND</div>
+        <div class="vil-deck-kicker">当前决策</div>
         <div class="vil-deck-title-row">
           <div>
             <h2>村庄指挥台</h2>

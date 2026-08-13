@@ -122,14 +122,14 @@ function ViewToggle() {
         aria-pressed={view === 'scene'}
         onClick={() => setVillageView('scene')}
       >
-        🗺 场景
+        全景
       </button>
       <button
         class={`vil-view-btn${view === 'list' ? ' active' : ''}`}
         aria-pressed={view === 'list'}
         onClick={() => setVillageView('list')}
       >
-        📋 列表
+        清单
       </button>
     </div>
   );
@@ -149,52 +149,52 @@ export function VillageScreen() {
 
   return (
     <div class="vil-dashboard">
-      <div class="vil-dashboard-main">
-        <div class="vil-dashboard-head">
-          <div>
-            <span class="vil-eyebrow">VILLAGE OPERATIONS</span>
-            <SectionHead actions={<ViewToggle />}>
-              {view === 'scene' ? '村庄全景' : '村庄管理'}
-            </SectionHead>
-          </div>
-        </div>
-
-        {view === 'scene' ? <VillageScene vil={vil} /> : <VillageListView vil={vil} />}
-
-        <div class="vil-dashboard-details">
-          {hasQueue && (
-            <Panel pad class="vil-queue-panel">
-              <QueueStrip queue={vil.queue} />
-            </Panel>
-          )}
-
-          <div class="vil-detail-grid">
-            <section class="vil-detail-section">
-              <SectionHead>人口 · 文明活力</SectionHead>
-              <Panel pad>
-                <PopPanel />
-              </Panel>
-            </section>
-
-            {hasTreasures && (
-              <section class="vil-detail-section">
-                <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
-                  宝物栏
-                </SectionHead>
-                <Panel variant="flat" pad>
-                  <TreasurePanel />
-                </Panel>
-              </section>
-            )}
-
-            <section class="vil-detail-section">
-              <TaskBar />
-            </section>
-          </div>
+      <div class="vil-dashboard-head">
+        <div>
+          <span class="vil-eyebrow">城务总览</span>
+          <SectionHead actions={<ViewToggle />}>
+            {view === 'scene' ? '我的领地' : '建筑管理'}
+          </SectionHead>
         </div>
       </div>
 
+      <div class="vil-dashboard-stage">
+        {view === 'scene' ? <VillageScene vil={vil} /> : <VillageListView vil={vil} />}
+      </div>
+
       <VillageCommandDeck vil={vil} />
+
+      <div class="vil-dashboard-details">
+        {hasQueue && (
+          <Panel pad class="vil-queue-panel">
+            <QueueStrip queue={vil.queue} />
+          </Panel>
+        )}
+
+        <div class="vil-detail-grid">
+          <section class="vil-detail-section">
+            <SectionHead>人口 · 文明活力</SectionHead>
+            <Panel pad>
+              <PopPanel />
+            </Panel>
+          </section>
+
+          {hasTreasures && (
+            <section class="vil-detail-section">
+              <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
+                宝物栏
+              </SectionHead>
+              <Panel variant="flat" pad>
+                <TreasurePanel />
+              </Panel>
+            </section>
+          )}
+
+          <section class="vil-detail-section">
+            <TaskBar />
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

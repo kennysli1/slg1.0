@@ -6,21 +6,24 @@
 /* ---- Village command dashboard ---- */
 .vil-dashboard {
   display: grid;
+  grid-template-areas:
+    "head deck"
+    "stage deck"
+    "details details";
   grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
   gap: var(--s-4);
   align-items: start;
 }
-.vil-dashboard-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-4);
-}
 .vil-dashboard-head {
+  grid-area: head;
   display: flex;
   align-items: end;
   justify-content: space-between;
   gap: var(--s-3);
+}
+.vil-dashboard-stage {
+  grid-area: stage;
+  min-width: 0;
 }
 .vil-eyebrow,
 .vil-deck-kicker {
@@ -32,6 +35,7 @@
   letter-spacing: .16em;
 }
 .vil-dashboard-details {
+  grid-area: details;
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -54,8 +58,9 @@
 
 /* ---- Command deck ---- */
 .vil-deck {
+  grid-area: deck;
   position: sticky;
-  top: calc(var(--tabbar-h) + var(--s-4));
+  top: calc(var(--topbar-h) + var(--tabbar-h) + var(--s-4));
 }
 .vil-deck-panel {
   display: flex;
@@ -958,12 +963,14 @@
 /* ---- Responsive ---- */
 @media (max-width: 720px) {
   .vil-dashboard {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-areas:
+      "head"
+      "stage"
+      "deck"
+      "details";
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s-3);
-  }
-  .vil-dashboard-main {
-    width: 100%;
   }
   .vil-dashboard-head {
     align-items: start;
@@ -971,8 +978,15 @@
   .vil-deck {
     position: static;
     width: 100%;
-    order: -1;
   }
+  .vil-deck-panel { gap: var(--s-2); }
+  .vil-deck-kicker,
+  .vil-deck-title-row p { display: none; }
+  .vil-deck-title-row h2 { font-size: var(--f-md); }
+  .vil-deck-summary { padding: var(--s-1) 0; }
+  .vil-deck-summary strong { font-size: var(--f-md); }
+  .vil-deck-focus { padding: var(--s-2); }
+  .vil-deck-focus > small { display: none; }
   .vil-deck-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
