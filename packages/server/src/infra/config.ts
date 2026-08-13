@@ -219,6 +219,10 @@ export interface TreasureDef {
   dropRate: number;
   /** 应用方式：passive(持续加成，储存在宝物栏)/instant(获得即结算一次，如钱袋子)。 */
   applyType: string;
+  equipCategory: string;
+  stackGroup: string;
+  effectCap: number;
+  uniqueEffect: boolean;
 }
 
 /** 任务目标种类。 */
@@ -238,7 +242,7 @@ export interface QuestObjective {
 }
 
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
-export type QuestType = 'main' | 'random';
+export type QuestType = 'main' | 'daily' | 'side';
 
 /** 任务定义（来自 quests.csv）。 */
 export interface QuestDef {
@@ -260,6 +264,14 @@ export interface QuestDef {
   weight: number;
   /** 触发条件（仅随机任务）：如 `building_built:treasury`=建造完成宝库后出现在酒馆；空=无触发（常驻可刷）。 */
   trigger?: string;
+  repeatable: boolean;
+  cooldownSec: number;
+  abandonCooldownSec: number;
+  dailyRewardGroup?: string;
+  dailyRewardValue: number;
+  campSearchRadius: number;
+  campRetrySec: number;
+  campMaxRadius: number;
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -297,6 +309,9 @@ export interface UnitDef {
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
   goldCost?: number;
+  commandCost?: number;
+  contractSec?: number;
+  mercTier?: number;
 }
 
 export interface PveTemplate {
@@ -451,6 +466,7 @@ export interface MercCampLevel {
   mercCount: number;
   /** 可存储的刷新次数上限（玩家手动点刷新消耗，营地自动刷新累积）。 */
   maxStoredRefreshes: number;
+  capacity: number;
 }
 
 /** 贸易中心某等级的参数（来自 trade_center.csv）。 */
@@ -491,6 +507,16 @@ export interface ResearchDef {
   /** 消耗科研点数。 */
   rpCost: number;
   icon: string;
+  effects: ResearchEffectDef[];
+}
+
+export interface ResearchEffectDef {
+  techCode: string;
+  order: number;
+  effectType: TechEffectType;
+  effectKey: string;
+  effectValue: number;
+  cap: number;
 }
 
 export interface AcademyDef {
@@ -531,6 +557,7 @@ export interface GameConfig {
   academy: Record<number, AcademyDef>;
   /** 任务目录（quests.csv）：code → QuestDef。 */
   quests: Record<string, QuestDef>;
+  pvpPowerCurve: { maxRatio: number; lootMult: number }[];
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -740,7 +767,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.mercenaries) {
     mercRows = mergeOverridesIntoRows(mercRows, {
       file: 'mercenaries.csv', key: 'id',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','carry','upkeep','goldCost','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','carry','upkeep','goldCost','commandCost','contractSec','tier','costWood','costClay','costIron','costCrop','trainSec','popCost'],
     }, overrides.mercenaries);
   }
   for (const r of mercRows) {
@@ -760,6 +787,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       popPermanent: false,
       isMercenary: true,
       goldCost: num(r.goldCost, 0),
+      commandCost: Math.max(1, num(r.commandCost, 1)),
+      contractSec: Math.max(1, num(r.contractSec, 259200)),
+      mercTier: Math.max(1, num(r.tier, 1)),
     };
   }
 
@@ -769,7 +799,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.merc_camp) {
     mercCampRows = mergeOverridesIntoRows(mercCampRows, {
       file: 'merc_camp.csv', key: 'level',
-      numeric: ['refreshSec','mercCount','maxStoredRefreshes'],
+      numeric: ['refreshSec','mercCount','maxStoredRefreshes','capacity'],
     }, overrides.merc_camp);
   }
   for (const r of mercCampRows) {
@@ -779,6 +809,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       refreshSec: num(r.refreshSec, 3600),
       mercCount: num(r.mercCount, 3),
       maxStoredRefreshes: num(r.maxStoredRefreshes, 1),
+      capacity: Math.max(0, num(r.capacity, lv)),
     };
   }
 
@@ -952,15 +983,19 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       priceGold: num(r.priceGold, 0),
       dropRate: num(r.dropRate, 0),
       applyType: r.applyType ?? 'passive',
+      equipCategory: r.equipCategory || r.category || 'special',
+      stackGroup: r.stackGroup || r.effectType || code,
+      effectCap: Math.max(0, num(r.effectCap, 50)),
+      uniqueEffect: num(r.uniqueEffect, 1) !== 0,
     };
   }
 
-  // 科技目录（research.csv）：code → ResearchDef。覆盖层 key='id'，numeric=tier/effectValue/durationSec/rpCost。
+  // 科技目录（research.csv）只放目录字段；research_effects.csv 一项科技可配置多个真实效果。
   let researchRows = loadCsv(p('research.csv'));
   if (overrides?.research) {
     researchRows = mergeOverridesIntoRows(researchRows, {
       file: 'research.csv', key: 'id',
-      numeric: ['tier', 'effectValue', 'durationSec', 'rpCost'],
+      numeric: ['tier', 'durationSec', 'rpCost'],
     }, overrides.research);
   }
   assertUniqueRows(researchRows, 'research.csv');
@@ -976,14 +1011,38 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       tier: num(r.tier, 1),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
-      effectType: (r.effectType as TechEffectType) || 'resource_rate',
-      effectKey: r.effectKey ?? '',
-      effectValue: num(r.effectValue, 0),
+      effectType: 'resource_rate',
+      effectKey: '',
+      effectValue: 0,
       scope: (r.scope as TechScope) || 'village',
       durationSec: num(r.durationSec, 3600),
       rpCost: num(r.rpCost, 1),
       icon: r.icon ?? 'tech_generic',
+      effects: [],
     };
+  }
+  const researchEffectRows = loadCsv(p('research_effects.csv'));
+  for (const r of researchEffectRows) {
+    const techCode = r.techCode?.trim();
+    const tech = research[techCode];
+    if (!tech) continue;
+    tech.effects.push({
+      techCode,
+      order: Math.max(1, num(r.order, tech.effects.length + 1)),
+      effectType: (r.effectType as TechEffectType) || 'resource_rate',
+      effectKey: r.effectKey ?? '',
+      effectValue: num(r.effectValue, 0),
+      cap: Math.max(0, num(r.cap, 0.5)),
+    });
+  }
+  for (const tech of Object.values(research)) {
+    tech.effects.sort((a, b) => a.order - b.order);
+    const first = tech.effects[0];
+    if (first) {
+      tech.effectType = first.effectType;
+      tech.effectKey = first.effectKey;
+      tech.effectValue = first.effectValue;
+    }
   }
 
   // 学院参数（academy.csv）：level → AcademyDef。覆盖层 key='level'。
@@ -1061,7 +1120,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       code,
       name: r.name ?? code,
       desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'random',
+      type: (r.type as QuestType) || 'daily',
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       objective,
       rewards: {
@@ -1070,11 +1129,22 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       },
       weight: num(r.weight, 1),
       trigger: r.trigger ? String(r.trigger).trim() : undefined,
+      repeatable: num(r.repeatable, 0) === 1,
+      cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
+      abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
+      dailyRewardGroup: r.dailyRewardGroup?.trim() || undefined,
+      dailyRewardValue: Math.max(0, num(r.dailyRewardValue, 0)),
+      campSearchRadius: Math.max(1, num(r.campSearchRadius, 8)),
+      campRetrySec: Math.max(1, num(r.campRetrySec, 60)),
+      campMaxRadius: Math.max(1, num(r.campMaxRadius, 40)),
     };
   }
+  const pvpPowerCurve = loadCsv(p('pvp_power_curve.csv'))
+    .map((r) => ({ maxRatio: Math.max(0, num(r.maxRatio, Number.MAX_SAFE_INTEGER)), lootMult: Math.max(0, Math.min(1, num(r.lootMult, 1))) }))
+    .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;
@@ -1309,7 +1379,11 @@ export function validateGameConfig(config: GameConfig): void {
   for (const t of Object.values(config.research)) {
     if (!t.code) errors.push('research.csv 存在空 code');
     if (!RESEARCH_BRANCHES.has(t.branch)) errors.push(`research.csv[${t.code}] branch=${t.branch} 必须是 military/production/social`);
-    if (!RESEARCH_EFFECTS.has(t.effectType)) errors.push(`research.csv[${t.code}] effectType=${t.effectType} 未知效果类型`);
+    if (!t.effects.length) errors.push(`research_effects.csv 缺少 techCode=${t.code} 的效果`);
+    for (const e of t.effects) {
+      if (!RESEARCH_EFFECTS.has(e.effectType)) errors.push(`research_effects.csv[${t.code}] effectType=${e.effectType} 未知效果类型`);
+      if (e.cap < 0) errors.push(`research_effects.csv[${t.code}] cap 不能为负`);
+    }
     if (!RESEARCH_SCOPES.has(t.scope)) errors.push(`research.csv[${t.code}] scope=${t.scope} 必须是 village/player`);
     if (t.tier < 1) errors.push(`research.csv[${t.code}] tier=${t.tier} 必须≥1`);
     if (t.durationSec < 1) errors.push(`research.csv[${t.code}] durationSec=${t.durationSec} 必须>0`);
@@ -1341,8 +1415,8 @@ export function validateGameConfig(config: GameConfig): void {
     'carry_cap', 'mechanism',
   ]);
   for (const t of Object.values(config.research)) {
-    if (!KNOWN_TECH_EFFECT_TYPES.has(t.effectType)) {
-      errors.push(`research.csv[${t.code}] effectType=${t.effectType} 不在白名单中——请先在 research.ts applyTech 或相关模块中添加处理逻辑`);
+    for (const e of t.effects) if (!KNOWN_TECH_EFFECT_TYPES.has(e.effectType)) {
+      errors.push(`research_effects.csv[${t.code}] effectType=${e.effectType} 不在白名单中——请先在 research.ts 接线`);
     }
   }
 
@@ -1352,7 +1426,7 @@ export function validateGameConfig(config: GameConfig): void {
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
-    if (q.type !== 'main' && q.type !== 'random') errors.push(`quests.csv[${q.code}] type 必须是 main/random`);
+    if (q.type !== 'main' && q.type !== 'daily' && q.type !== 'side') errors.push(`quests.csv[${q.code}] type 必须是 main/daily/side`);
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {
@@ -1371,7 +1445,7 @@ export function validateGameConfig(config: GameConfig): void {
     }
     // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'random') errors.push(`quests.csv[${q.code}] 仅随机任务可设触发条件 trigger`);
+      if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
       if (tk !== 'building_built') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code>）`);
     }

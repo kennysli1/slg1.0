@@ -5,15 +5,16 @@
  *
  * 设计要点（来自策划）：
  *  - 任务会给接了该任务的玩家在地图上显示专属内容；任务专属宝物不可出售/遗弃/丢失/超时。
- *  - 城内建筑「酒馆」用于接取任务：酒馆升级使随机任务刷新更频繁，且可同时接取的任务数变多。
- *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃，自动解锁。
- *  - 随机任务：酒馆随机刷新，可放弃。
+ *  - 城内建筑「酒馆」用于接取日常任务：酒馆升级使日常任务刷新更频繁，且可同时接取的任务数变多。
+ *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃，自动解锁（m1-m4 无需酒馆）。
+ *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
+ *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
  *  - v1 目标种类：submit_resources（上交资源）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
- *   task.GetState       → 完整快照（active / offered / completed / camps）
- *   task.Accept        → 从酒馆接取随机任务
- *   task.Abandon       → 放弃随机任务（主线不可放弃）
+ *   task.GetState       → 完整快照（active / offered / offeredSide / completed*）
+ *   task.Accept        → 接取日常(酒馆)/支线(任务栏)任务
+ *   task.Abandon       → 放弃日常/支线任务（主线不可放弃）
  *   task.SubmitResources → 上交资源推进 submit_resources 类任务
  *
  * 内部订阅：
@@ -49,7 +50,7 @@ interface TaskCamp {
 /** 一个进行中的任务实例。 */
 interface TaskInstance {
   code: string;
-  type: 'main' | 'random';
+  type: 'main' | 'daily' | 'side';
   acceptedAt: number;
   /** submit_resources：已上交的资源累计。 */
   submitted: Record<string, number>;
@@ -59,20 +60,27 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
+  spawnAttempts?: number;
 }
 
 interface TaskState {
   villageId: string;
   /** 已完成的主线任务 code。 */
   completedMain: string[];
-  /** 已完成的随机任务 code（避免酒馆重复刷出）。 */
-  completedRandom: string[];
-  /** 进行中任务：code → 实例（主线自动激活 + 接取的随机）。 */
+  /** 已完成的支线任务 code（一次性，不再出现）。 */
+  completedSide: string[];
+  /** 已放弃的支线任务 code（一次性，永久不再出现）。 */
+  abandonedSide: string[];
+  /** 进行中任务：code → 实例（主线自动激活 + 接取的日常/支线）。 */
   active: Record<string, TaskInstance>;
-  /** 酒馆当前展示、未接取的随机任务 code。 */
+  /** 酒馆当前展示、未接取的日常任务 code。 */
   offered: string[];
-  /** 已触发的随机任务触发条件 key（如 `building_built:treasury`）；触发后该任务进入酒馆可刷池。 */
+  /** 已触发、可接取的支线任务 code（不占酒馆，直接在任务栏展示）。 */
+  offeredSide: string[];
+  /** 已触发的支线任务触发条件 key（如 `building_built:treasury`）；触发后对应支线进入可接取。 */
   firedTriggers: string[];
+  cooldownUntil?: Record<string, number>;
+  dailyRewards?: { day: string; groups: Record<string, number> };
 }
 
 interface TavernInfo {
@@ -172,6 +180,7 @@ export class TasksModule {
       // 任务营地(pve.task=true)持久化在 pve 集合，重启后仍在地图；无需重新生成。
       // 仅重排酒馆刷新节奏（若存在酒馆）。
       void this.resumeVillage(s.villageId).catch(() => {});
+      for (const inst of Object.values(s.active)) if (this.quest(inst.code)?.objective.kind === 'clear_camp' && inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
     }
   }
 
@@ -191,7 +200,7 @@ export class TasksModule {
 
   // ── 建村：初始化 + 自动解锁主线 ──
   createVillage(villageId: string): void {
-    const s: TaskState = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [], firedTriggers: [] };
+    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [] };
     this.store.set(COLLECTION, villageId, s);
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
@@ -201,14 +210,34 @@ export class TasksModule {
   private ensureState(villageId: string): TaskState {
     let s = this.store.get<TaskState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [], firedTriggers: [] };
+      s = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [] };
       this.store.set(COLLECTION, villageId, s);
     }
     if (!Array.isArray(s.completedMain)) s.completedMain = [];
-    if (!Array.isArray(s.completedRandom)) s.completedRandom = [];
+    if (!Array.isArray(s.completedSide)) s.completedSide = [];
+    if (!Array.isArray(s.abandonedSide)) s.abandonedSide = [];
     if (!s.active || typeof s.active !== 'object') s.active = {};
     if (!Array.isArray(s.offered)) s.offered = [];
+    if (!Array.isArray(s.offeredSide)) s.offeredSide = [];
     if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
+    // 迁移旧字段 completedRandom → completedSide（支线）/ 丢弃（日常可反复）；旧 offered 中的支线 → offeredSide
+    const legacy = s as unknown as { completedRandom?: string[] };
+    if (Array.isArray(legacy.completedRandom)) {
+      for (const code of legacy.completedRandom) {
+        if (this.config.quests[code]?.type === 'side' && !s.completedSide.includes(code)) s.completedSide.push(code);
+      }
+      delete legacy.completedRandom;
+    }
+    if (s.offered.some((c) => this.config.quests[c]?.type === 'side')) {
+      const remaining: string[] = [];
+      for (const code of s.offered) {
+        if (this.config.quests[code]?.type === 'side') { if (!s.offeredSide.includes(code)) s.offeredSide.push(code); }
+        else remaining.push(code);
+      }
+      s.offered = remaining;
+    }
+    s.cooldownUntil ??= {};
+    s.dailyRewards ??= { day: this.dayKey(), groups: {} };
     return s;
   }
 
@@ -227,43 +256,62 @@ export class TasksModule {
     return { ok: true, payload: this.snapshot(villageId, s) };
   }
 
-  // ── 命令：Accept（接取随机任务）──
+  // ── 命令：Accept（接取日常/支线任务）──
   private async accept(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
-    if (!s.offered.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
     const q = this.quest(code);
-    if (!q || q.type !== 'random') return { ok: false, payload: {}, reason: 'not_random' };
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
     if (s.active[code]) return { ok: false, payload: {}, reason: 'already_active' };
+    if ((s.cooldownUntil?.[code] ?? 0) > this.now()) return { ok: false, payload: { cooldownUntil: s.cooldownUntil?.[code] }, reason: 'quest_cooldown' };
 
-    const info = await this.tavernInfo(villageId);
-    const activeCount = Object.keys(s.active).length;
-    if (info.maxTasks <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
-    if (activeCount >= info.maxTasks) return { ok: false, payload: {}, reason: 'too_many_active' };
+    if (q.type === 'daily') {
+      if (!s.offered.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
+      const info = await this.tavernInfo(villageId);
+      if (info.maxTasks <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
+      const dailyActive = Object.values(s.active).filter((i) => i.type === 'daily').length;
+      if (dailyActive >= info.maxTasks) return { ok: false, payload: {}, reason: 'too_many_active' };
+      s.offered = s.offered.filter((c) => c !== code);
+    } else if (q.type === 'side') {
+      if (!s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
+      s.offeredSide = s.offeredSide.filter((c) => c !== code);
+    } else {
+      // 主线自动激活，不走接取
+      return { ok: false, payload: {}, reason: 'main_auto_activated' };
+    }
 
-    s.offered = s.offered.filter((c) => c !== code);
+    this.store.set(COLLECTION, villageId, s);
     await this.activateQuest(villageId, code);
     return { ok: true, payload: { code } };
   }
 
-  // ── 命令：Abandon（放弃随机任务）──
+  // ── 命令：Abandon（放弃日常/支线任务；主线不可放弃）──
   private async abandon(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
     const inst = s.active[code];
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
     const q = this.quest(code);
-    if (!q || q.type !== 'random') return { ok: false, payload: {}, reason: 'main_cannot_abandon' };
-
+    if (!q || q.type === 'main') return { ok: false, payload: {}, reason: 'main_cannot_abandon' };
     // 移除生成的营地
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
+    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
     delete s.active[code];
+    // 支线任务：放弃后永久不再出现（记入 abandonedSide，并从可接取移除）
+    if (q.type === 'side') {
+      if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
+      s.offeredSide = s.offeredSide.filter((c) => c !== code);
+    } else {
+      // 日常任务：放弃冷却后仍可再次刷出
+      s.cooldownUntil ??= {};
+      s.cooldownUntil[code] = this.now() + q.abandonCooldownSec * 1000;
+    }
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
-    return { ok: true, payload: { code } };
+    return { ok: true, payload: { code, type: q.type } };
   }
 
   // ── 命令：SubmitResources（上交资源）──
@@ -345,10 +393,14 @@ export class TasksModule {
     const xy = await this.getVillageXY(villageId);
     if (!xy) return; // 村庄尚未落位（极端时序），交由后续解锁重试
 
-    let placed = 0;
-    for (let i = 0; i < want; i++) {
-      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius: 8 } });
-      if (!free.ok) break; // 无空地则少放（避免卡死）
+    let placed = inst.camps.length;
+    for (let i = inst.camps.length; i < want; i++) {
+      const attempts = inst.spawnAttempts ?? 0;
+      const radius = attempts >= 3
+        ? this.config.constants.mapSize
+        : Math.min(q.campMaxRadius, q.campSearchRadius + attempts * q.campSearchRadius);
+      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius } });
+      if (!free.ok) break;
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
       const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
       const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true } });
@@ -359,12 +411,20 @@ export class TasksModule {
         break;
       }
     }
-    // 实际放置数即完成所需数（防软锁）
-    if (placed === 0) {
-      // 连一块空地都找不到：放弃营地生成，任务无法以清理方式完成——记录但不卡死界面
-      inst.camps = [];
-    }
+    inst.spawnAttempts = (inst.spawnAttempts ?? 0) + 1;
     this.store.set(COLLECTION, villageId, this.ensureState(villageId));
+    if (placed < want) this.scheduleCampRetry(villageId, inst);
+  }
+
+  private scheduleCampRetry(villageId: string, inst: TaskInstance): void {
+    const q = this.quest(inst.code);
+    if (!q) return;
+    const owner = `task-camp:${villageId}:${inst.code}`;
+    this.scheduler.cancelByOwner(owner);
+    this.scheduler.schedule(q.campRetrySec * 1000, () => {
+      const current = this.ensureState(villageId).active[inst.code];
+      if (current) void this.spawnCamps(villageId, current);
+    }, owner, `village:${villageId}`);
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线 ──
@@ -379,13 +439,15 @@ export class TasksModule {
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
+    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
 
     // 资源奖励
-    if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
+    const allowed = await this.consumeDailyBudget(villageId, s, q);
+    if (allowed && q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
-    for (const t of q.rewards.treasures ?? []) {
+    for (const t of allowed ? (q.rewards.treasures ?? []) : []) {
       const def = this.config.treasures[t];
       const locked = !def || def.applyType !== 'instant';
       await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
@@ -394,16 +456,21 @@ export class TasksModule {
     delete s.active[code];
     if (q.type === 'main') {
       if (!s.completedMain.includes(code)) s.completedMain.push(code);
+    } else if (q.type === 'side') {
+      if (!s.completedSide.includes(code)) s.completedSide.push(code);
     } else {
-      if (!s.completedRandom.includes(code)) s.completedRandom.push(code);
+      // 日常任务：不记完成历史（可反复），只设完成冷却
+      s.cooldownUntil ??= {};
+      s.cooldownUntil[code] = this.now() + q.cooldownSec * 1000;
     }
     this.store.set(COLLECTION, villageId, s);
 
     await this.pushList(villageId);
     await this.pushMap(villageId);
 
-    // 主线完成 → 解锁下游主线
+    // 主线完成 → 解锁下游主线；支线完成 → 解锁下游支线（任务线）
     if (q.type === 'main') await this.unlockMainQuests(villageId);
+    else if (q.type === 'side') await this.unlockSideQuests(villageId);
   }
 
   // ── GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用）──
@@ -452,9 +519,30 @@ export class TasksModule {
     }
   }
 
+  /** 支线任务解锁（一次性 + 触发条件 + 前置链）：满足条件的支线进入可接取列表。 */
+  private async unlockSideQuests(villageId: string): Promise<void> {
+    const s = this.ensureState(villageId);
+    let changed = false;
+    for (const q of Object.values(this.config.quests)) {
+      if (q.type !== 'side') continue;
+      if (s.completedSide.includes(q.code)) continue;
+      if (s.abandonedSide.includes(q.code)) continue; // 放弃过 → 永久不再出现
+      if (s.active[q.code]) continue;
+      if (s.offeredSide.includes(q.code)) continue;
+      if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(s, q.requires)) {
+        s.offeredSide.push(q.code);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.store.set(COLLECTION, villageId, s);
+      await this.pushList(villageId);
+    }
+  }
+
   private prereqsMet(s: TaskState, requires: string[]): boolean {
     if (!requires.length) return true;
-    const done = new Set(s.completedMain);
+    const done = new Set([...s.completedMain, ...s.completedSide]);
     for (const req of requires) {
       // 每个 require 是「OR 组」：以 ' OR ' 分隔，组内任一完成即满足
       const orParts = req.split(' OR ');
@@ -491,7 +579,7 @@ export class TasksModule {
     }
   }
 
-  /** 建筑建成 → 标记已触发的随机任务触发条件，并把对应任务立即放进酒馆。 */
+  /** 建筑建成 → 标记已触发的支线任务触发条件，并解锁满足条件的支线任务。 */
   private async onBuildingBuilt(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId: string; kind: string };
     const villageId = p.villageId;
@@ -504,15 +592,9 @@ export class TasksModule {
     const s = this.ensureState(villageId);
     if (s.firedTriggers.includes(triggerKey)) return; // 已触发过，不重复
     s.firedTriggers.push(triggerKey);
-    // 把带此触发条件的随机任务直接 offer（若未完成/未进行/未展示）
-    for (const q of Object.values(this.config.quests)) {
-      if (q.trigger !== triggerKey) continue;
-      if (q.type !== 'random') continue;
-      if (s.completedRandom.includes(q.code) || s.active[q.code] || s.offered.includes(q.code)) continue;
-      s.offered.push(q.code);
-    }
     this.store.set(COLLECTION, villageId, s);
-    await this.pushList(villageId);
+    // 触发条件满足 → 解锁对应支线任务（进入可接取）
+    await this.unlockSideQuests(villageId);
   }
 
   /** 出售/丢弃宝物 → 推进 sell_discard_treasure 任务的累计计数。 */
@@ -585,16 +667,15 @@ export class TasksModule {
     this.scheduleRefresh(villageId, info);
   }
 
-  /** 加权随机抽取随机任务填满酒馆（不超过 maxTasks）。 */
+  /** 加权随机抽取日常任务填满酒馆（不超过 maxTasks）。日常任务可反复，不过滤完成历史，仅受冷却约束。 */
   private async refreshOffered(villageId: string, info: TavernInfo): Promise<void> {
     const s = this.ensureState(villageId);
     const need = info.maxTasks - s.offered.length;
     if (need <= 0) return;
 
     const pool = Object.values(this.config.quests).filter((q) =>
-      q.type === 'random' &&
-      (!q.trigger || s.firedTriggers.includes(q.trigger)) &&
-      !s.completedRandom.includes(q.code) &&
+      q.type === 'daily' &&
+      (s.cooldownUntil?.[q.code] ?? 0) <= this.now() &&
       !s.active[q.code] &&
       !s.offered.includes(q.code),
     );
@@ -604,6 +685,23 @@ export class TasksModule {
     for (const c of picked) s.offered.push(c);
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
+  }
+
+  private dayKey(): string { return new Date(this.now()).toISOString().slice(0, 10); }
+
+  private async consumeDailyBudget(villageId: string, s: TaskState, q: QuestDef): Promise<boolean> {
+    if (!q.dailyRewardGroup || q.dailyRewardValue <= 0) return true;
+    const day = this.dayKey();
+    if (!s.dailyRewards || s.dailyRewards.day !== day) s.dailyRewards = { day, groups: {} };
+    const tavern = await this.tavernInfo(villageId);
+    const raw = this.config.constants.raw;
+    const cap = q.dailyRewardGroup === 'gold'
+      ? (Number(raw.task_daily_gold_base) || 200) + (Number(raw.task_daily_gold_per_tavern_level) || 100) * tavern.level
+      : (Number(raw.task_daily_treasure_limit) || 1);
+    const used = s.dailyRewards.groups[q.dailyRewardGroup] ?? 0;
+    if (used + q.dailyRewardValue > cap) return false;
+    s.dailyRewards.groups[q.dailyRewardGroup] = used + q.dailyRewardValue;
+    return true;
   }
 
   private weightedPick(pool: QuestDef[], n: number): string[] {
@@ -681,21 +779,31 @@ export class TasksModule {
     const offered = s.offered
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
-      .map((q) => ({
-        code: q.code,
-        name: q.name,
-        desc: q.desc,
-        type: q.type,
-        objective: this.serializeObjective(q),
-        rewards: this.serializeRewards(q),
-        trigger: q.trigger ?? null,
-      }));
+      .map((q) => this.serializeOffer(q));
+    const offeredSide = s.offeredSide
+      .map((code) => this.quest(code))
+      .filter((q): q is QuestDef => !!q)
+      .map((q) => this.serializeOffer(q));
     return {
       villageId,
       active,
       offered,
+      offeredSide,
       completedMain: [...s.completedMain],
-      completedRandom: [...s.completedRandom],
+      completedSide: [...s.completedSide],
+      abandonedSide: [...s.abandonedSide],
+    };
+  }
+
+  private serializeOffer(q: QuestDef): Record<string, unknown> {
+    return {
+      code: q.code,
+      name: q.name,
+      desc: q.desc,
+      type: q.type,
+      objective: this.serializeObjective(q),
+      rewards: this.serializeRewards(q),
+      trigger: q.trigger ?? null,
     };
   }
 
@@ -725,7 +833,7 @@ export class TasksModule {
       campTotal: inst.camps.length,
       progress: inst.progress ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
-      canAbandon: inst.type === 'random',
+      canAbandon: inst.type !== 'main',
       acceptedAt: inst.acceptedAt,
     };
   }
