@@ -217,9 +217,10 @@ export function liveResource(t: string): number {
   let v = base + ratePerSec * elapsedSec;
   if (t !== 'gold') {
     const baseCap = r.capacity?.[t] ?? Infinity;
-    const overflow = r.overflowCap ?? 0;
-    const cap = baseCap * (1 + overflow); // 露天仓库科技：有效容量 = 容量 × (1+溢出系数)
-    v = Math.min(cap, Math.max(0, v));
+    const effCap = baseCap * (1 + (r.overflowCap ?? 0)); // 有效容量（露天仓库科技）
+    // 自然产出只能顶到 capacity；仅当 base 本身已溢出（掠夺/购买/转交入库）时，才允许显示到 effCap
+    const limit = base > baseCap ? effCap : baseCap;
+    v = Math.min(limit, Math.max(0, v));
   }
   return v;
 }
