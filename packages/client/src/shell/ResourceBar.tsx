@@ -30,13 +30,14 @@ function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapsho
   const have = liveResource(type);
   const capacity = res.capacity?.[type] ?? 0;
   const rate = (res.netRate?.[type] ?? 0) * 3600;
+  const rawRate = res.rawRate?.[type] ?? rate; // 原始产率（停产时用于显示本可产出多少）
   const paused = Boolean(res.productionPaused?.[type] || (res.overCapacity?.[type] ?? 0) > 0);
   const low = type === 'crop' && rate < 0;
   const percent = capacity > 0 ? have / capacity * 100 : 0;
   const nearFull = percent >= 92;
   const state = [low ? 'res--low' : '', paused ? 'res--over' : ''].filter(Boolean).join(' ');
   const title = `${info.name}：${fmt(have)} / ${fmt(capacity)}；`
-    + (paused ? '仓储已满，生产暂停' : `每小时 ${rate >= 0 ? '+' : ''}${rate.toFixed(0)}`)
+    + (paused ? `仓储已满，生产暂停（原产量 ${rawRate >= 0 ? '+' : ''}${rawRate.toFixed(0)}/时）` : `每小时 ${rate >= 0 ? '+' : ''}${rate.toFixed(0)}`)
     + (low ? '；净消耗为负，粮食正在减少' : '');
   return (
     <div class={`res ${state}`} title={title}>
@@ -46,7 +47,7 @@ function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapsho
         <span class="res-num">{fmt(have)}<small>/{fmt(capacity)}</small></span>
       </div>
       <div class="res-meta">
-        <span class="res-rate">{paused ? '停产' : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/时`}</span>
+        <span class="res-rate">{paused ? <span style="opacity:0.55">停产（本可 {rawRate >= 0 ? '+' : ''}{rawRate.toFixed(0)}/时）</span> : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/时`}</span>
         <span class="res-cap">
           <Bar pct={percent} thin kind={paused || nearFull ? 'ember' : low ? 'crimson' : 'steel'} />
         </span>
