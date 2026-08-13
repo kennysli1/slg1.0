@@ -83,6 +83,7 @@
 - `PopulationChanged` 推送是增量载荷，此前按全量字段套用会把上限、繁荣度等一片数值误清成 0；现在缺字段一律沿用旧快照
 - 地图拖拽、双指移动或缩放导致主城偏离中心后，方向键中央的回城键会立即启用并可一键重新居中
 - 伯乐翻倍改兵力后未重新核算驻军人口足迹（只靠 `ConvertPopToGarrison` 手动累加 `garrisonPopCost`），导致与解散/训练的 `reportGarrisonPop` 重算口径不一致、账目漂移，解散骑兵时人口返还偏多/偏少。现伯乐翻倍后补 `reportGarrisonPop`，按 troops 重新核算足迹，与其它改兵力路径对齐。
+- 解散返还人口钳制口径错误：`population.ReturnPop` 之前把 `currentPop` 钳到 `hardCap`（总上限），有驻军时会超出「硬上限−士兵足迹」的实际平民上限（popCeiling），导致解散后 totalPop 超上限。改为钳到 `popCeiling`（`hardCap − soldierFootprint`）。
 
 ### 移除
 
