@@ -186,7 +186,7 @@ export function createGameApp(opts?: {
       throw err;
     }
   };
-  const player = new PlayerModule(store, bus, commands, now, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue);
+  const player = new PlayerModule(store, bus, commands, now, config, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue);
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
@@ -195,17 +195,14 @@ export function createGameApp(opts?: {
   const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   // playerVillages: 轻量跨村查询（research/academy 需要知道某玩家所有村庄，用于 scope=player 科技）
   const playerVillages = (playerId: string): string[] => {
-    const ids: string[] = [];
-    for (const v of store.all<{ playerId?: string }>('player')) {
-      if ((v as any).playerId === playerId && (v as any).villageId) ids.push((v as any).villageId);
-    }
-    return ids;
+    const owner = store.all<{ id?: string; ownedVillages?: string[] }>('player')
+      .find((p) => p.id === playerId);
+    return owner?.ownedVillages?.filter((id): id is string => typeof id === 'string') ?? [];
   };
   const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {
-    for (const v of store.all<{ playerId?: string; villageId?: string }>('player')) {
-      if ((v as any).villageId === vid) return (v as any).playerId ?? null;
-    }
-    return null;
+    const owner = store.all<{ id?: string; ownedVillages?: string[] }>('player')
+      .find((p) => p.ownedVillages?.includes(vid));
+    return owner?.id ?? null;
   });
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -302,6 +299,7 @@ export function createGameApp(opts?: {
       const newConfig = loadGameConfig(configDir, overrides);
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
       economy.setConfig(newConfig);
+      player.setConfig(newConfig);
       building.setConfig(newConfig);
       military.setConfig(newConfig);
       population.setConfig(newConfig);

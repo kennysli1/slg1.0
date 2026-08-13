@@ -157,6 +157,8 @@ export class Scheduler {
     if (!head) return;
     const delay = Math.max(0, head.triggerAt - this.now());
     this.timer = setTimeout(() => void this.fireDue(), delay);
+    // 调度任务不应单独阻止进程退出（测试、管理命令与优雅停服都依赖这一点）。
+    this.timer.unref?.();
   }
 
   /**

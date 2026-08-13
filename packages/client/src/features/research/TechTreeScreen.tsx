@@ -19,13 +19,14 @@ type Branch = 'military' | 'production' | 'social';
 const BRANCHES: { key: Branch; name: string; icon: string; desc: string }[] = [
   { key: 'military', name: '军事', icon: 'ui_icon_atk', desc: '攻防倍率与兵种解锁' },
   { key: 'production', name: '生产', icon: 'res_wood', desc: '产量、仓储与建造效率' },
-  { key: 'social', name: '社会', icon: 'ui_icon_pop', desc: '人口、行军与运载' },
+  { key: 'social', name: '社会', icon: 'ui_icon_pop', desc: '人口、贸易与治理' },
 ];
 
 /** 科技效果 → 中文一句话。 */
 function effectText(t: any): string {
-  const pct = Math.round((t.effectValue ?? 0) * 100);
-  const key = t.effectKey ?? '';
+  const value = t.value ?? t.effectValue ?? 0;
+  const pct = Math.round(value * 100);
+  const key = t.target ?? t.effectKey ?? '';
   switch (t.effectType) {
     case 'resource_rate': return `${key} 产量 +${pct}%`;
     case 'combat_atk': return `${key} 攻击 +${pct}%`;
@@ -39,8 +40,17 @@ function effectText(t: any): string {
     case 'march_speed': return `行军加速 ${pct}%`;
     case 'carry_cap': return `运载上限 +${pct}%`;
     case 'mechanism': return `特殊机制：${key}`;
-    default: return `${t.effectType}：+${t.effectValue}`;
+    case 'trade_routes': return `贸易路线 +${value}`;
+    case 'caravan_speed': return `商队速度 +${pct}%`;
+    case 'pop_cap': return `人口上限 +${pct}%`;
+    case 'mobilize_cap': return `动员比例上限 +${pct} 个百分点`;
+    default: return `${t.effectType}：+${value}`;
   }
+}
+
+function effectTexts(t: any): string[] {
+  const effects = Array.isArray(t.effects) && t.effects.length > 0 ? t.effects : [t];
+  return effects.map(effectText);
 }
 
 export function TechTreeScreen() {
@@ -72,8 +82,7 @@ export function TechTreeScreen() {
         </Empty>
       )}
 
-      {academyCount > 0 && (
-        <>
+      <>
       <SectionHead actions={
         <div class="tech-branch-tabs" role="tablist">
           {BRANCHES.map((b) => (
@@ -98,9 +107,9 @@ export function TechTreeScreen() {
         techs={techs}
         rp={rp}
         researchingCode={researching?.code ?? null}
+        academyAvailable={academyCount > 0}
       />
-        </>
-      )}
+      </>
     </>
   );
 }
@@ -122,7 +131,7 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
   const curProb = count > 0 ? Math.min(maxProb, baseProb + failStreak * 0.02) : 0;
 
   async function cancel() {
-    await act(req('CancelResearch', {}), { okToast: '已取消研发，按剩余比例返还科研点' });
+    await act(req('CancelResearch', {}), { okToast: '已取消研发，按剩余进度的 90% 返还科研点' });
     await reloadResearch();
   }
 
@@ -175,11 +184,12 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
 }
 
 /** 一个分支的科技节点路径，按 tier 由上而下推进。 */
-function TechBranch({ branch, techs, rp, researchingCode }: {
+function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   branch: Branch;
   techs: any[];
   rp: number;
   researchingCode: string | null;
+  academyAvailable: boolean;
 }) {
   const list = techs.filter((t) => t.branch === branch);
   if (!list.length) {
@@ -210,6 +220,7 @@ function TechBranch({ branch, techs, rp, researchingCode }: {
                 rp={rp}
                 researchingCode={researchingCode}
                 names={names}
+                academyAvailable={academyAvailable}
               />
             ))}
           </div>
@@ -220,17 +231,18 @@ function TechBranch({ branch, techs, rp, researchingCode }: {
   );
 }
 
-function TechNode({ t, rp, researchingCode, names }: {
+function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
   t: any;
   rp: number;
   researchingCode: string | null;
   names: Map<string, string>;
+  academyAvailable: boolean;
 }) {
   const completed = t.status === 'completed';
   const researching = t.status === 'researching' || researchingCode === t.code;
   const locked = t.status === 'locked';
   const poor = t.status === 'available' && rp < t.rpCost;
-  const canStart = t.status === 'available' && rp >= t.rpCost && !researchingCode;
+  const canStart = academyAvailable && t.status === 'available' && rp >= t.rpCost && !researchingCode;
 
   const state = completed ? 'done'
     : researching ? 'doing'
@@ -257,7 +269,7 @@ function TechNode({ t, rp, researchingCode, names }: {
           <div class="tech-node-name">{t.name}</div>
           <div class="tech-node-state">
             <span class={`tech-state-orb tech-state-orb--${state}`} aria-hidden="true" />
-            {completed ? '已掌握' : researching ? '正在推演' : locked ? '等待前置' : poor ? '科研点不足' : '可投入研发'}
+            {completed ? '已掌握' : researching ? '正在推演' : !academyAvailable ? '需要学院' : locked ? '等待前置' : poor ? '科研点不足' : '可投入研发'}
           </div>
         </div>
         {t.scope === 'player' && <Tag kind="gold" title="对全部村庄生效">全局</Tag>}
@@ -267,7 +279,7 @@ function TechNode({ t, rp, researchingCode, names }: {
 
       <div class="tech-node-outcome">
         <Icon icon="ui_seal_gold" label="研究效果" size="2xs" />
-        <span>{effectText(t)}</span>
+        <span>{effectTexts(t).join(' · ')}</span>
       </div>
 
       <div class="tech-node-meta">
@@ -285,7 +297,8 @@ function TechNode({ t, rp, researchingCode, names }: {
       <div class="tech-node-action">
         {completed ? <Tag kind="jade">已完成</Tag>
           : researching ? <Tag kind="ember">研发中…</Tag>
-            : locked ? <Tag>前置未满足</Tag>
+            : !academyAvailable ? <Tag>需要学院</Tag>
+              : locked ? <Tag>前置未满足</Tag>
               : poor ? <Tag kind="crimson">科研点不足</Tag>
                 : (
                   <Btn size="sm" variant="primary" disabled={!canStart} onClick={start}

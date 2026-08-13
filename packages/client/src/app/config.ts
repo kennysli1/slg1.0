@@ -13,13 +13,14 @@ export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[] }
 export interface UnitInfo { name: string; icon: string; form: string; popCost: number; upkeep?: number; isMercenary?: boolean }
-export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }
+export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }
 export interface PveInfo { name?: string; icon: string }
 export interface TreasureInfo {
   name: string; icon: string;
   category: string; rarity: string;
   effectType: string; effectValue: number;
   priceGold: number; dropRate: number; applyType: string;
+  equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean;
 }
 
 interface ServerConfig {
@@ -27,10 +28,10 @@ interface ServerConfig {
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[] }[];
   units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number; upkeep?: number; isMercenary?: boolean }[];
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
-  mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number }[];
+  mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   /** 宝物目录（服务端下发）：code → 展示与数值信息。 */
-  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; priceGold: number; dropRate: number; applyType: string }[];
+  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; priceGold: number; dropRate: number; applyType: string; equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean }[];
   constants: {
     mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
@@ -82,7 +83,7 @@ export async function loadGameConfig(): Promise<void> {
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
     for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, form: x.form, popCost: x.popCost ?? 1, upkeep: x.upkeep ?? 0, isMercenary: !!x.isMercenary };
-    for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, form: x.form, meleeAtk: x.meleeAtk, rangedAtk: x.rangedAtk, meleeDef: x.meleeDef, rangedDef: x.rangedDef, speed: x.speed, carry: x.carry, goldCost: x.goldCost };
+    for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, form: x.form, meleeAtk: x.meleeAtk, rangedAtk: x.rangedAtk, meleeDef: x.meleeDef, rangedDef: x.rangedDef, speed: x.speed, carry: x.carry, goldCost: x.goldCost, commandCost: x.commandCost, contractSec: x.contractSec, tier: x.tier };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
     for (const x of (cfg.treasures ?? [])) treasures[x.code] = x;
   } catch {

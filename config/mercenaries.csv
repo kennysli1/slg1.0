@@ -1,12 +1,12 @@
-id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building,traits,popCost,popPermanent,goldCost
-#雇佣兵（全种族共用 tribe=merc）：不耗粮 不占人口 金币购买 永久拥有。popCost/upkeep/cost*/trainSec 一律 0（不经过 military.TrainTroops，直接经 mercenary.Hire 用金币购买并永久写入 troops）。traits 留空。goldCost=雇佣单价。
-1,merc_slinger,merc,佣兵投石手,unit_merc_slinger,ranged,10,35,5,15,6,10,0,0,0,0,0,0,,,0,0,20
-2,merc_spearman,merc,佣兵长矛兵,unit_merc_spearman,melee,30,0,25,20,5,30,0,0,0,0,0,0,,,0,0,25
-3,merc_archer,merc,佣兵弓手,unit_merc_archer,ranged,0,45,8,25,6,15,0,0,0,0,0,0,,,0,0,40
-4,merc_sword,merc,佣兵剑士,unit_merc_sword,melee,50,0,35,30,6,30,0,0,0,0,0,0,,,0,0,45
-5,merc_cavalry,merc,佣兵骑兵,unit_merc_cavalry,melee,55,0,40,45,12,50,0,0,0,0,0,0,,,0,0,60
-6,merc_axe,merc,佣兵斧兵,unit_merc_axe,melee,70,0,40,25,5,40,0,0,0,0,0,0,,,0,0,80
-7,merc_crossbow,merc,佣兵弩手,unit_merc_crossbow,ranged,0,65,10,35,5,20,0,0,0,0,0,0,,,0,0,90
-8,merc_knight,merc,佣兵骑士,unit_merc_knight,melee,90,0,70,70,11,70,0,0,0,0,0,0,,,0,0,120
-9,merc_berserker,merc,狂战士,unit_merc_berserker,melee,120,0,60,30,7,50,0,0,0,0,0,0,,,0,0,160
-10,merc_champion,merc,精锐卫队,unit_merc_champion,melee,150,0,120,120,8,90,0,0,0,0,0,0,,,0,0,220
+id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building,traits,popCost,popPermanent,goldCost,commandCost,contractSec,tier
+#数字ID,代码,部族,显示名,图标,形态,近攻,远攻,近防,远防,速度,负重,耗粮,木,泥,铁,粮,训练秒,建筑,特性,人口,永久人口,金币价,统御占用,合同秒数,档位
+1,merc_slinger,merc,佣兵投石手,unit_merc_slinger,ranged,10,35,5,15,6,10,0,0,0,0,0,0,,,0,0,60,1,259200,1
+2,merc_spearman,merc,佣兵长矛兵,unit_merc_spearman,melee,30,0,25,20,5,30,0,0,0,0,0,0,,,0,0,75,1,259200,1
+3,merc_archer,merc,佣兵弓手,unit_merc_archer,ranged,0,45,8,25,6,15,0,0,0,0,0,0,,,0,0,120,2,259200,2
+4,merc_sword,merc,佣兵剑士,unit_merc_sword,melee,50,0,35,30,6,30,0,0,0,0,0,0,,,0,0,135,2,259200,2
+5,merc_cavalry,merc,佣兵骑兵,unit_merc_cavalry,melee,55,0,40,45,12,50,0,0,0,0,0,0,,,0,0,180,2,259200,2
+6,merc_axe,merc,佣兵斧兵,unit_merc_axe,melee,70,0,40,25,5,40,0,0,0,0,0,0,,,0,0,240,3,259200,3
+7,merc_crossbow,merc,佣兵弩手,unit_merc_crossbow,ranged,0,65,10,35,5,20,0,0,0,0,0,0,,,0,0,270,3,259200,3
+8,merc_knight,merc,佣兵骑士,unit_merc_knight,melee,90,0,70,70,11,70,0,0,0,0,0,0,,,0,0,360,3,259200,3
+9,merc_berserker,merc,狂战士,unit_merc_berserker,melee,120,0,60,30,7,50,0,0,0,0,0,0,,,0,0,480,4,259200,4
+10,merc_champion,merc,精锐卫队,unit_merc_champion,melee,150,0,120,120,8,90,0,0,0,0,0,0,,,0,0,660,5,259200,5

@@ -34,6 +34,17 @@ interface MercenaryCampState {
   /** 下次自动刷新时刻（ms）。 */
   nextRefreshAt: number;
   taskId?: string;
+  contracts?: MercenaryContract[];
+}
+
+interface MercenaryContract {
+  id: string;
+  code: string;
+  hiredAt: number;
+  expiresAt: number;
+  commandCost: number;
+  tier: number;
+  remaining: number;
 }
 
 const COLLECTION = 'merc';
@@ -83,10 +94,15 @@ export class MercenaryModule {
       const { villageId, kind } = evt.payload as { villageId: string; kind: string };
       if (kind === 'mercenarycamp') void this.ensureCamp(villageId);
     });
+    this.bus.on('movement.Returned', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      void this.expireDueContracts(villageId);
+    });
   }
 
   resume(): void {
     for (const s of this.store.all<MercenaryCampState>(COLLECTION)) {
+      s.contracts ??= [];
       const delay = Math.max(0, s.nextRefreshAt - this.now());
       s.taskId = this.scheduler.schedule(
         delay,
@@ -95,6 +111,7 @@ export class MercenaryModule {
         `village:${s.villageId}`,
       );
       this.store.set(COLLECTION, s.villageId, s);
+      for (const contract of s.contracts) this.scheduleContract(s.villageId, contract);
     }
   }
 
@@ -137,6 +154,7 @@ export class MercenaryModule {
         meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
         meleeDef: u.meleeDef, rangedDef: u.rangedDef,
         speed: u.speed, carry: u.carry, goldCost: u.goldCost ?? 0,
+        commandCost: u.commandCost ?? 1, contractSec: u.contractSec ?? 259200, tier: u.mercTier ?? 1,
       };
     }).filter(Boolean);
   }
@@ -164,7 +182,7 @@ export class MercenaryModule {
     if (!existing) {
       const offers = this.rollOffers(level);
       const nextRefreshAt = this.now() + (this.config.mercCamp[level]?.refreshSec ?? 3600) * 1000;
-      const s: MercenaryCampState = { villageId, level, offers, storedRefreshes: 0, nextRefreshAt };
+      const s: MercenaryCampState = { villageId, level, offers, storedRefreshes: 0, nextRefreshAt, contracts: [] };
       s.taskId = this.scheduleRefresh(villageId, nextRefreshAt);
       this.store.set(COLLECTION, villageId, s);
       await this.emitUpdated(villageId);
@@ -182,7 +200,7 @@ export class MercenaryModule {
   private async refreshTick(villageId: string): Promise<void> {
     const s = this.load(villageId);
     if (!s) return;
-    const mc = this.config.mercCamp[s.level] ?? { refreshSec: 3600, mercCount: 3, maxStoredRefreshes: 1 };
+    const mc = this.config.mercCamp[s.level] ?? { refreshSec: 3600, mercCount: 3, maxStoredRefreshes: 1, capacity: 1 };
     s.offers = this.rollOffers(s.level);
     s.storedRefreshes = Math.min(mc.maxStoredRefreshes, s.storedRefreshes + 1);
     s.nextRefreshAt = this.now() + mc.refreshSec * 1000;
@@ -208,7 +226,8 @@ export class MercenaryModule {
     if (!s || level <= 0) {
       return { ok: true, payload: { built: false, offers: [], storedRefreshes: 0, maxStored: 0, refreshSec: 0, nextRefreshAt: 0, gold: 0, level: 0 } };
     }
-    const mc = this.config.mercCamp[level] ?? { refreshSec: 3600, mercCount: 3, maxStoredRefreshes: 1 };
+    const mc = this.config.mercCamp[level] ?? { refreshSec: 3600, mercCount: 3, maxStoredRefreshes: 1, capacity: 1 };
+    s.contracts ??= [];
     const goldRes = await this.commands.send({ name: 'economy.GetResources', from: MercenaryModule.NAME, payload: { villageId } });
     const gold = (goldRes.payload as any)?.resources?.gold ?? 0;
     return {
@@ -222,6 +241,9 @@ export class MercenaryModule {
         refreshSec: mc.refreshSec,
         nextRefreshAt: s.nextRefreshAt,
         gold,
+        capacity: mc.capacity ?? 0,
+        usedCapacity: s.contracts.filter((c) => c.expiresAt > this.now()).reduce((n, c) => n + c.commandCost * c.remaining, 0),
+        contracts: s.contracts.map((c) => ({ code: c.code, expiresAt: c.expiresAt, commandCost: c.commandCost, tier: c.tier, remaining: c.remaining })),
       },
     };
   }
@@ -246,6 +268,10 @@ export class MercenaryModule {
     const def = this.config.units[code];
     if (!def || !def.isMercenary) return { ok: false, payload: {}, reason: 'bad_unit' };
     if (!s.offers.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
+    s.contracts ??= [];
+    const mc = this.config.mercCamp[s.level] ?? { capacity: 0 } as any;
+    const used = s.contracts.filter((c) => c.expiresAt > this.now()).reduce((n, c) => n + c.commandCost * c.remaining, 0);
+    if (used + (def.commandCost ?? 1) > (mc.capacity ?? 0)) return { ok: false, payload: { capacity: mc.capacity ?? 0, usedCapacity: used }, reason: 'merc_capacity_exceeded' };
 
     // 扣金币
     const spend = await this.commands.send({
@@ -260,6 +286,18 @@ export class MercenaryModule {
       payload: { villageId, units: { [code]: 1 } },
     });
 
+    const hiredAt = this.now();
+    const contract: MercenaryContract = {
+      id: `${hiredAt}-${code}-${s.contracts.length}`,
+      code, hiredAt,
+      expiresAt: hiredAt + (def.contractSec ?? 259200) * 1000,
+      commandCost: def.commandCost ?? 1,
+      tier: def.mercTier ?? 1,
+      remaining: 1,
+    };
+    s.contracts.push(contract);
+    this.scheduleContract(villageId, contract);
+
     // 消费该 offer（同一名额不可重复雇）
     s.offers = s.offers.filter((c) => c !== code);
     this.store.set(COLLECTION, villageId, s);
@@ -267,5 +305,26 @@ export class MercenaryModule {
 
     const base = await this.getCamp({ name: 'mercenary.GetCamp', from: 'mercenary', payload: { villageId } });
     return { ok: true, payload: (base.payload as any) };
+  }
+
+  private scheduleContract(villageId: string, contract: MercenaryContract): void {
+    const owner = `merc-contract:${villageId}:${contract.id}`;
+    this.scheduler.cancelByOwner(owner);
+    this.scheduler.schedule(Math.max(0, contract.expiresAt - this.now()), () => this.expireDueContracts(villageId), owner, `village:${villageId}`);
+  }
+
+  private async expireDueContracts(villageId: string): Promise<void> {
+    const s = this.load(villageId);
+    if (!s) return;
+    s.contracts ??= [];
+    for (const c of [...s.contracts]) {
+      if (c.expiresAt > this.now() || c.remaining <= 0) continue;
+      const result = await this.commands.send({ name: 'military.RemoveMercenaries', from: MercenaryModule.NAME, payload: { villageId, units: { [c.code]: c.remaining } } });
+      const removed = Number((result.payload as any)?.removed?.[c.code] ?? 0);
+      c.remaining = Math.max(0, c.remaining - removed);
+    }
+    s.contracts = s.contracts.filter((c) => c.remaining > 0);
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
   }
 }

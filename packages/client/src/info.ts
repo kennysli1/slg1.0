@@ -67,7 +67,7 @@ export const UNIT_INFO: Record<string, { name: string; icon: string; form: strin
   teucatapult: { name: '投石机', icon: 'unit_teucatapult', form: 'ranged' },
   teuchief: { name: '首领', icon: 'unit_teuchief', form: 'melee' },
   teusettler: { name: '拓荒者', icon: 'unit_teusettler', form: 'melee' },
-  // 雇佣兵（tribe=merc）：金币购买、永久持有、不耗粮不占人口
+  // 雇佣兵（tribe=merc）：金币购买、限时服役、不耗粮不占人口，但占佣兵统御容量
   merc_slinger: { name: '投石雇佣兵', icon: 'unit_merc_slinger', form: 'ranged' },
   merc_spearman: { name: '长矛雇佣兵', icon: 'unit_merc_spearman', form: 'melee' },
   merc_archer: { name: '弓箭雇佣兵', icon: 'unit_merc_archer', form: 'ranged' },

@@ -109,6 +109,28 @@ test('Mercenary: HireMerc 成功后兵力+1，currentPop 不变', async () => {
   assert.equal(currentPopAfter, currentPopBefore, '雇佣兵不消耗人口（currentPop 不变）');
 });
 
+test('Mercenary: 合同到期后佣兵退役并释放统御容量', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'merc-expire');
+  const va = (regRes.payload as any).player.villageId as string;
+  await buildMercCamp(app, va);
+  const before = await send(app, 'mercenary.GetCamp', { villageId: va });
+  const offer = (before.payload as any).offers[0];
+  await send(app, 'economy.Grant', { villageId: va, gain: { gold: offer.goldCost + 10_000 } });
+  const hired = await send(app, 'mercenary.Hire', { villageId: va, code: offer.code });
+  assert.equal(hired.ok, true);
+  const contract = (hired.payload as any).contracts[0];
+  assert.ok(contract.expiresAt > clock);
+  assert.ok((hired.payload as any).usedCapacity > 0);
+
+  await app.scheduler.advanceTo(contract.expiresAt, setClock);
+  const after = await send(app, 'mercenary.GetCamp', { villageId: va });
+  assert.equal((after.payload as any).contracts.length, 0);
+  assert.equal((after.payload as any).usedCapacity, 0);
+  const army = await send(app, 'military.GetArmy', { villageId: va });
+  assert.equal(((army.payload as any).troops[offer.code] ?? 0), 0);
+});
+
 // ─── 4. HireMerc 失败场景 ─────────────────────────────────────────────
 test('Mercenary: HireMerc 错误兵种代码 → bad_unit', async () => {
   const app = freshApp();

@@ -101,6 +101,7 @@ export class EconomyModule {
     this.commands.register('economy.ApplyTimedBuff', (c) => this.applyTimedBuff(c));
     this.commands.register('economy.SetOverflowCap', (c) => this.setOverflowCap(c));
     this.commands.register('economy.GetCropContext', (c) => this.getCropContext(c));
+    this.commands.register('economy.ApplyPvpRecovery', (c) => this.applyPvpRecovery(c));
   }
 
   createVillage(villageId: string): void {
@@ -301,7 +302,16 @@ export class EconomyModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s);
     this.store.set(COLLECTION, s.villageId, s);
-    return { ok: true, payload: { lootable: { ...s.resources } } };
+    const mainLevel = Math.max(0, Number((cmd.payload as any).mainLevel) || 0);
+    const lootable = zero();
+    for (const t of RESOURCE_TYPES) {
+      const safeRatio = Number(this.config.constants.raw.pvp_safe_resource_capacity_ratio) || 0.2;
+      const safeGoldBase = Number(this.config.constants.raw.pvp_safe_gold_base) || 200;
+      const safeGoldPerLevel = Number(this.config.constants.raw.pvp_safe_gold_per_main_level) || 50;
+      const safe = t === 'gold' ? safeGoldBase + mainLevel * safeGoldPerLevel : s.capacity[t] * safeRatio;
+      lootable[t] = Math.max(0, s.resources[t] - safe);
+    }
+    return { ok: true, payload: { lootable } };
   }
 
   /** 实际扣走战利品。 */
@@ -321,6 +331,30 @@ export class EconomyModule {
     this.store.set(COLLECTION, villageId, s);
     log('掠夺', { village: villageId, before, want: amount, taken, after: { ...s.resources } });
     return { ok: true, payload: { taken } };
+  }
+
+  private applyPvpRecovery(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s);
+    const granted = zero();
+    const baseResources = ['wood', 'clay', 'iron', 'crop'] as const;
+    const currentTotal = baseResources.reduce((sum, t) => sum + s.resources[t], 0);
+    const capacityTotal = baseResources.reduce((sum, t) => sum + s.capacity[t], 0);
+    const triggerRatio = Number(this.config.constants.raw.pvp_recovery_trigger_total_ratio) || 0.2;
+    if (currentTotal >= capacityTotal * triggerRatio) return { ok: true, payload: { granted, triggered: false } };
+    const resourceRatio = Number(this.config.constants.raw.pvp_recovery_resource_ratio) || 0.1;
+    const goldFloor = Number(this.config.constants.raw.pvp_recovery_gold_floor) || 100;
+    for (const t of RESOURCE_TYPES) {
+      const floor = t === 'gold' ? goldFloor : s.capacity[t] * resourceRatio;
+      if (s.resources[t] < floor) {
+        granted[t] = floor - s.resources[t];
+        s.resources[t] = floor;
+      }
+    }
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { granted, triggered: true } };
   }
 
   /**

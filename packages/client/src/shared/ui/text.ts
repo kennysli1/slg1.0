@@ -67,6 +67,10 @@ const ERR_MSG: Record<string, string> = {
   pending_not_found: '该战报已不存在或已被处理',
   pending_expired: '该战报已超时遗弃',
   no_room: '宝物栏已满，无法替换入栏',
+  merc_capacity_exceeded: '佣兵统御容量不足',
+  quest_cooldown: '该任务仍在冷却中',
+  abandon_cooldown: '任务刚被放弃，请等待冷却结束',
+  recovery_cooldown: '战败恢复仍在冷却中',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */

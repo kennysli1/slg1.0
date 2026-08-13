@@ -3,6 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { ModuleManifest } from '../gateway/manifest.js';
+import type { GameConfig } from '../infra/config.js';
 import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
 import { hexKey, hexDistanceWrapped, wrapHex } from '../infra/hex.js';
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -49,6 +50,10 @@ interface PlayerState {
   q: number;
   r: number;
   createdAt: number;
+  pvpHits?: number[];
+  lastRecoveryAt?: number;
+  pvpHitsByVillage?: Record<string, number[]>;
+  lastRecoveryAtByVillage?: Record<string, number>;
 }
 
 /** 读档时可能只有旧单村字段。 */
@@ -133,6 +138,7 @@ export class PlayerModule {
     private _bus: EventBus,
     private commands: CommandBus,
     private now: () => number,
+    private config: GameConfig,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military/population + 放地图）。 */
     private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
     /** 环绕平行四边形世界尺寸（axial q 周期 W、r 周期 H），用于随机分配出生坐标。 */
@@ -144,6 +150,8 @@ export class PlayerModule {
      */
     private serialQueue?: KeyedSerialQueue,
   ) {}
+
+  setConfig(config: GameConfig): void { this.config = config; }
 
   /** app 在组装后注入：清理单村进度与地图。 */
   setVillageWiper(fn: (villageId: string) => void, abandonLockSec?: number): void {
@@ -163,6 +171,8 @@ export class PlayerModule {
     this.commands.register('player.DetachVillage', (c) => this.detachVillage(c));
     this.commands.register('player.AllocVillageId', (c) => this.allocVillageId(c));
     this.commands.register('player.CreateOwnedVillage', (c) => this.createOwnedVillage(c));
+    this.commands.register('player.GetPvpContext', (c) => this.getPvpContext(c));
+    this.commands.register('player.RecordPvpHit', (c) => this.recordPvpHit(c));
   }
 
   /** 规范化旧档 → 完整 PlayerState；若发生迁移则写回。 */
@@ -210,6 +220,10 @@ export class PlayerModule {
       q,
       r,
       createdAt: raw.createdAt,
+      pvpHits: raw.pvpHits,
+      lastRecoveryAt: raw.lastRecoveryAt,
+      pvpHitsByVillage: raw.pvpHitsByVillage,
+      lastRecoveryAtByVillage: raw.lastRecoveryAtByVillage,
     };
     if (changed) this.store.set(COLLECTION, p.id, p);
     return p;
@@ -328,7 +342,42 @@ export class PlayerModule {
     p.ownedVillages.push({ id: villageId, q, r, name, foundedAt: this.now() });
     this.store.set(COLLECTION, p.id, p);
     this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
+    void this._bus.emit({ name: 'player.VillageAttached', source: PlayerModule.NAME, ts: this.now(), payload: { playerId: p.id, villageId } });
     return { ok: true, payload: { player: this.publicPlayer(p) } };
+  }
+
+  private getPvpContext(cmd: Command): CommandResult {
+    const villageId = String((cmd.payload as any).villageId ?? '');
+    const pid = this.store.get<string>(COLLECTION_BYVILLAGE, villageId);
+    const p = pid ? this.load(pid) : undefined;
+    if (!p) return { ok: false, payload: {}, reason: 'owner_not_found' };
+    if (!p.ownedVillages.some((v) => v.id === villageId)) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    const lossShieldSec = Number(this.config.constants.raw.pvp_loss_shield_sec) || 14400;
+    const cutoff = this.now() - lossShieldSec * 1000;
+    p.pvpHitsByVillage ??= {};
+    p.pvpHitsByVillage[villageId] = (p.pvpHitsByVillage[villageId] ?? []).filter((t) => t >= cutoff);
+    this.store.set(COLLECTION, p.id, p);
+    const hitMults = String(this.config.constants.raw.pvp_loss_shield_multipliers ?? '1|0.5|0.25|0').split('|').map(Number);
+    const hitMult = hitMults[Math.min(hitMults.length - 1, p.pvpHitsByVillage[villageId].length)] ?? 0;
+    const recoverySec = Number(this.config.constants.raw.pvp_recovery_cooldown_sec) || 86400;
+    const lastRecoveryAt = p.lastRecoveryAtByVillage?.[villageId] ?? 0;
+    return { ok: true, payload: { playerId: p.id, capitalVillageId: p.capitalVillageId, hitMult, recoveryAvailable: this.now() - lastRecoveryAt >= recoverySec * 1000 } };
+  }
+
+  private recordPvpHit(cmd: Command): CommandResult {
+    const villageId = String((cmd.payload as any).villageId ?? '');
+    const pid = this.store.get<string>(COLLECTION_BYVILLAGE, villageId);
+    const p = pid ? this.load(pid) : undefined;
+    if (!p) return { ok: false, payload: {}, reason: 'owner_not_found' };
+    const cutoff = this.now() - (Number(this.config.constants.raw.pvp_loss_shield_sec) || 14400) * 1000;
+    p.pvpHitsByVillage ??= {};
+    p.pvpHitsByVillage[villageId] = (p.pvpHitsByVillage[villageId] ?? []).filter((t) => t >= cutoff);
+    if ((cmd.payload as any).recordHit !== false) p.pvpHitsByVillage[villageId].push(this.now());
+    p.lastRecoveryAtByVillage ??= {};
+    const canRecover = this.now() - (p.lastRecoveryAtByVillage[villageId] ?? 0) >= (Number(this.config.constants.raw.pvp_recovery_cooldown_sec) || 86400) * 1000;
+    if (canRecover && Boolean((cmd.payload as any).recovered)) p.lastRecoveryAtByVillage[villageId] = this.now();
+    this.store.set(COLLECTION, p.id, p);
+    return { ok: true, payload: { canRecover } };
   }
 
   /**
