@@ -230,19 +230,19 @@ test('支线任务：触发出现(offeredSide) → 接取 → 放弃后永久不
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok((p.offeredSide ?? []).some((o: any) => o.code === 'r4'), '宝库建成后 r4 支线应进入 offeredSide');
-  assert.ok(!(p.offered ?? []).some((o: any) => o.code === 'r4'), 'r4 支线不应出现在酒馆(offered)');
+  assert.ok((p.offeredSide ?? []).some((o: any) => o.code === 's1'), '宝库建成后 r4 支线应进入 offeredSide');
+  assert.ok(!(p.offered ?? []).some((o: any) => o.code === 's1'), 'r4 支线不应出现在酒馆(offered)');
 
-  const acc = await send(app, 'task.Accept', { villageId: va, code: 'r4' });
+  const acc = await send(app, 'task.Accept', { villageId: va, code: 's1' });
   assert.equal(acc.ok, true, '接取支线应成功');
 
-  const ab = await send(app, 'task.Abandon', { villageId: va, code: 'r4' });
+  const ab = await send(app, 'task.Abandon', { villageId: va, code: 's1' });
   assert.equal(ab.ok, true, '支线放弃应成功');
   const st2 = await send(app, 'task.GetState', { villageId: va });
   const p2 = st2.payload as any;
-  assert.ok((p2.abandonedSide ?? []).includes('r4'), '放弃后 r4 应记入 abandonedSide');
-  assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 'r4'), '放弃后 r4 不应再在可接取');
-  assert.ok(!(p2.active ?? []).some((a: any) => a.code === 'r4'), '放弃后 r4 不应再 active');
+  assert.ok((p2.abandonedSide ?? []).includes('s1'), '放弃后 r4 应记入 abandonedSide');
+  assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 's1'), '放弃后 r4 不应再在可接取');
+  assert.ok(!(p2.active ?? []).some((a: any) => a.code === 's1'), '放弃后 r4 不应再 active');
 });
 
 test('日常任务可反复：完成后刷新可再次刷出', async () => {
