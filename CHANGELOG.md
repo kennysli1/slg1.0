@@ -17,6 +17,7 @@
 
 ### 新增
 
+- 新增提交前部署总闸门：`git commit` 强制完整构建/静态检查/全部测试，隔离启动真实生产产物并验证 HTTP、前端静态资源、WebSocket 注册与主界面快照，再部署同一候选快照到腾讯云并从公网只读验收；失败自动恢复部署前代码并重载 PM2。CI 同步执行本地生产冒烟，正式存档始终排除在测试和回滚之外。
 - 恢复批量被部署 reset 丢失的科技与配套功能（从 `_auth` 副本 git 历史重建）：**全民皆兵**（`universal_conscription`）+ **露天仓库**（`open_warehouse`，`storage_overflow` 机制，无该科技时 `economy.Grant` 超额资源被丢弃、有科技可溢出至 `capacity×(1+overflowCap)`，`productionPaused` 满仓即停产，客户端人口面板溢出警告）。同时恢复 `build_speed` 科技注入、`research` 重启重新 apply、科技/宝物效果白名单校验、`trade` 热重载重排刷新/宝物出现改 dropRate 权重、打野宝物未归村隐藏信息、客户端科技页无学院锁屏。同步更新相关测试对齐超额语义。
 
 - 新增宝物「伯乐」（`bole`，`cavalryTrainSpeed`，id 19）：被动=骑兵训练时间减半（`military.treasureCavalryTrainMult`，`treasures.aggregate` 按 `1-effectValue/100` 累乘、`recomputeAndPush` **总是下发**避免移除后残留）；使用=按现有骑兵等比例翻倍（`military.DuplicateCavalry`：查资源/劳动人口算 95% 安全 ratio → `economy.TrySpend` 扣资源 → `population.ConvertPopToGarrison` 直接转劳动人口为驻军，不走训练预留通道），客户端「使用」按钮按 `effectType` 分派并展示翻倍明细 toast。此宝物曾在 8/11 以未提交改动被部署 reset 回滚丢失，本次从 `_auth` 副本 git 历史完整恢复并以新 id 重建。

@@ -33,5 +33,8 @@ jobs:
       - name: 全量校验（lint / typecheck / 测试 / 架构守卫）
         run: npm run verify:quick
 
+      - name: 生产产物端到端冒烟（HTTP / 静态前端 / WebSocket）
+        run: npm run verify:deploy
+
       - name: 依赖审计
         run: npm audit --omit=dev --audit-level=high

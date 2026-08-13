@@ -19,7 +19,7 @@
 
 自动兜底：ESLint 实时红线（跨模块 import / 模块内定时器）+ `architecture.test.ts` 静态扫描（含 store 集合归属唯一）。原理与案例见 `docs/2_2.0设计/03_架构总览.md`。
 
-## 红线二：变更契约六条（不满足就提交不了）
+## 红线二：变更契约七条（不满足就提交不了）
 
 | | 规矩 | 一句话 |
 |---|------|--------|
@@ -29,6 +29,7 @@
 | R4 | 规划文档用完即归档 | 功能上线后把结论并入常青文档，原文 `git mv` 到 `docs/archive/` |
 | R5 | CHANGELOG 记账 | 改了 `packages/**/src/` 或 `config/*.csv` → 写 `## [未发布]` 条目 |
 | R6 | 三个版本号同步 | 协议改了升 `WIRE_VERSION`；落盘结构改了升 `SAVE_SCHEMA_VERSION` 且条目带 `[需刷档]` |
+| R7 | 部署验收后提交 | `git commit` 前必须完整测试、启动生产产物冒烟、真实部署并从公网验收；失败自动回滚且拒绝提交 |
 
 全文（含逃生阀用法）：`docs/00_变更契约.md`。
 
@@ -78,8 +79,9 @@ npm run verify               # 提交前一键全量（guard + build + lint + ty
 1. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
 2. 写 `CHANGELOG.md` 的 `## [未发布]` 条目
 3. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
-4. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
-5. `npm run guard` 绿了再提交；`git push` 会自动跑 `verify:quick`
+4. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保部署快照就是提交快照）
+5. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
+6. 正常执行 `git commit`：钩子会依次完整验证、本地生产冒烟、真实部署、公网验收，通过后才创建提交
 
 **索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
 

@@ -20,14 +20,20 @@
     "lint:all": "npm run lint -w @slg/server && npm run lint -w @slg/client",
     "typecheck": "npm run typecheck -w @slg/client",
     "test:all": "npm run test:server && npm run test -w @slg/client",
+    "test:deploy": "node scripts/deploy-smoke.mjs",
     "guard": "node scripts/guard/run.mjs",
     "hooks:install": "node scripts/setup-hooks.mjs",
     "prepare": "node scripts/setup-hooks.mjs",
     "release": "node scripts/release.mjs",
     "verify:quick": "npm run build:shared && npm run lint:all && npm run typecheck && npm run test:all",
+    "verify:deploy": "npm run build && npm run test:deploy",
+    "verify:commit": "node scripts/commit-gate.mjs",
     "verify": "npm run guard && npm run verify:quick && npm audit --omit=dev --audit-level=high",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",
     "reset:respawn": "node --import tsx packages/server/src/admin.ts --mode=respawn",
     "wipe:all": "node --import tsx packages/server/src/admin.ts --mode=wipe"
+  },
+  "devDependencies": {
+    "ws": "^8.18.0"
   }
 }

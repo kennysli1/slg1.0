@@ -1,3 +1,4 @@
 #!/bin/sh
-# G1 变更契约（R1–R6）。秒级。规矩见 docs/00_变更契约.md
-exec node scripts/guard/run.mjs
+# 提交总闸门：当前暂存快照必须完整测试、生产冒烟、真实部署并从公网验收。
+# 不提供跳过开关；紧急回滚请用正常 revert 提交，同样走完整闸门。
+exec node scripts/commit-gate.mjs
