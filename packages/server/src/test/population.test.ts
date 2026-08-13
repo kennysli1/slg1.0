@@ -180,6 +180,31 @@ test('人口：v5 ReturnPop——普通兵返还平民、settler(popPermanent)�
   assert.equal((returnR.payload as any).returned, 0, 'v5 settler(popPermanent) ReturnPop 应返还0人口');
 });
 
+test('人口：解散返还人口钳到 popCeiling，totalPop 不超 hardCap（满员时解散）', async () => {
+  const app = freshApp();
+  await flushMicrotasks();
+
+  // 加 5 个军团兵（士兵足迹 5）
+  await send(app, 'military.AdjustTroops', { villageId: 'v1', delta: { legionnaire: 5 } });
+  await flushMicrotasks();
+
+  const snap0 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  // 直接把 currentPop 抬到「满硬上限」（totalPop = hardCap，currentPop = popCeiling）
+  const popDoc = app.store.get('population', 'v1') as any;
+  popDoc.currentPop = Math.max(0, snap0.hardCap - snap0.soldierPop);
+  app.store.set('population', 'v1', popDoc);
+
+  // 解散 3 个军团兵：footprint 降 3、popCeiling 升 3，返还 3 平民
+  const disbandR = await send(app, 'military.DisbandTroops', { villageId: 'v1', units: { legionnaire: 3 } });
+  assert.equal(disbandR.ok, true, `解散应成功: ${disbandR.reason ?? ''}`);
+
+  const after = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  const totalPop = after.currentPop + after.soldierPop;
+  const ceiling = after.hardCap - after.soldierPop;
+  assert.ok(totalPop <= after.hardCap + 1e-6, `解散后 totalPop=${totalPop} 应≤ hardCap=${after.hardCap}`);
+  assert.ok(after.currentPop <= ceiling + 1e-6, `解散后 currentPop=${after.currentPop} 应≤ popCeiling=${ceiling}`);
+});
+
 test('人口：v5 RecoverCasualties 按医院等级回收平民（其余计永久损失）', async () => {
   const app = freshApp();
   await flushMicrotasks();
