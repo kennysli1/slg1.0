@@ -23,6 +23,7 @@
 - 修复 满仓时仍显示产量但不产出：`productionPaused` 已改满仓即停产，但 `netRate` 的超额判断仍是严格 `>`（恰好顶到容量时仍返回正产率）。已把 `netRate` 的超额判断改为 `>=`，满仓/超额时毛产=0，与 `productionPaused` 一致。
 - 资源条显示溢出容量与原始产率：`ResourceBar` 用 `overflowCap` 计算有效容量（容量×(1+溢出系数)）填充进度条、超额库存金色高亮；停产时显示「本可 +X/时」原始产率；`liveResource` 外插上限改为有效容量；人口格溢出时橙色警示 + hover 显示均溢率和增速扣减。
 - 修复 粮食外插超过上限（如显示到 1210 又跳回 1199）：`liveResource` 之前把自然产出也按有效容量（容量×2）外插，导致未满仓时数字被顶过容量。改为：自然产出只顶到容量，仅当快照值本身已溢出（掠夺/购买/转交入库）才允许显示到有效容量。
+- 修复 伯乐翻倍可突破动员上限：`military.DuplicateCavalry` 之前只查资源和劳动人口，未查动员上限（`mobilizeCap × totalPop - 士兵足迹`），导致翻倍后士兵超上限（如 118/113）。新增动员上限约束，翻倍比例受剩余动员空间限制。
 
 - 新增宝物「伯乐」（`bole`，`cavalryTrainSpeed`，id 19）：被动=骑兵训练时间减半（`military.treasureCavalryTrainMult`，`treasures.aggregate` 按 `1-effectValue/100` 累乘、`recomputeAndPush` **总是下发**避免移除后残留）；使用=按现有骑兵等比例翻倍（`military.DuplicateCavalry`：查资源/劳动人口算 95% 安全 ratio → `economy.TrySpend` 扣资源 → `population.ConvertPopToGarrison` 直接转劳动人口为驻军，不走训练预留通道），客户端「使用」按钮按 `effectType` 分派并展示翻倍明细 toast。此宝物曾在 8/11 以未提交改动被部署 reset 回滚丢失，本次从 `_auth` 副本 git 历史完整恢复并以新 id 重建。
 - 任务系统新增「触发条件」：`quests.csv` 增加 `trigger` 列，随机任务可设 `building_built:<建筑code>`（建造完成该建筑后才进酒馆）；服务端 `tasks` 监听 `building.Built` 标记触发并立即 offer，`TaskState.firedTriggers` 持久化，GM 任务目录编辑器展示 trigger 列与说明。新增任务目标 `sell_discard_treasure`（累计出售/丢弃 N 个稀有及以上品质宝物）：`treasure.Sell/Discard` 广播 `treasure.SoldDiscarded`，`tasks` 计数推进并完成后发奖；客户端任务卡显示目标与进度。
