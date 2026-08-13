@@ -96,7 +96,7 @@ function PopCell() {
     : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(Math.round(interpolatePop()))}；`
       + `军队 ${fmt(state.soldierPop)}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
   return (
-    <div class={`res res--pop${state.inFamine || nearCap ? ' res--alarm' : ''}`} title={title}>
+    <div class={`res res--pop${state.inFamine || (state.overflowRatio ?? 0) > 0 ? ' res--alarm' : ''}`} title={title}>
       <Icon icon="ui_icon_pop" label="" decorative size="sm" />
       <div class="res-value">
         <span class="res-label">人口</span>
