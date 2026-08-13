@@ -14,7 +14,7 @@ import {
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt } from '../../shared/utils/format.js';
-import { Btn, IconPlate, Countdown, SectionHead } from '../../ui/index.js';
+import { Btn, IconPlate, Countdown, SectionHead, confirmDanger } from '../../ui/index.js';
 
 function rarityClass(rarity: string): string {
   if (rarity === 'rare') return 'tcard--rare';
@@ -77,6 +77,16 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
   const catName = treasureCategoryName(p.category) || p.category;
   const iconBase = info?.icon ?? 'trs_unknown';
 
+  const confirmDiscard = async () => {
+    const ok = await confirmDanger({
+      title: `遗弃${p.name}`,
+      body: '遗弃后宝物会永久消失，也不会获得出售金币。',
+      confirmText: '确认遗弃',
+    });
+    if (!ok) return;
+    await claimTreasure(p.movementId, 'discard', p.name);
+  };
+
   return (
     <div class={`tcard ${rarityClass(p.rarity)}`}>
       <div class="tcard-art">
@@ -129,7 +139,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
               <Btn
                 variant="danger"
                 size="sm"
-                onClick={() => void claimTreasure(p.movementId, 'discard', p.name)}
+                onClick={() => void confirmDiscard()}
               >
                 遗弃
               </Btn>

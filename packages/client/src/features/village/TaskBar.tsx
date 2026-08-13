@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks';
 import { dataVersion, taskStates, tab, openModal } from '../../app/store.js';
 import { me, req } from '../../api.js';
 import { act } from '../../app/refresh.js';
-import { Panel, SectionHead, Btn, Tag, CostRow } from '../../ui/index.js';
+import { Panel, SectionHead, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
@@ -24,13 +24,6 @@ function objText(task: any): string {
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   return o.kind;
-}
-
-/** 任务类型标签：主线=金、支线=橙、日常=绿。 */
-function typeTag(type: string) {
-  if (type === 'main') return <Tag kind="gold">主线</Tag>;
-  if (type === 'side') return <Tag kind="ember">支线</Tag>;
-  return <Tag kind="jade">日常</Tag>;
 }
 
 // ── 奖励展示（资源 + 任务专属宝物）────────────────────────────────────────────
@@ -128,21 +121,14 @@ function TaskCard({ task }: { task: any }) {
   const o = task.objective;
   const isMain = task.type === 'main';
 
-  const doAbandon = async () => {
+  const onAbandon = async () => {
+    const ok = await confirmDanger({
+      title: `放弃任务 · ${task.name}`,
+      body: '当前任务进度会被清除；如果任务再次出现，需要从头开始。',
+      confirmText: '确认放弃',
+    });
+    if (!ok) return;
     await act(req('task.Abandon', { code: task.code }), { okToast: '已放弃任务' });
-  };
-  const onAbandon = () => {
-    if (task.type !== 'side') { void doAbandon(); return; }
-    // 支线任务：放弃后永久不再出现，弹警告确认
-    openModal((close) => (
-      <Modal title="放弃支线任务" sub={task.name} onClose={close}>
-        <p class="task-abandon-warn">支线任务放弃后将<strong>永久无法再次接取</strong>，确定要放弃吗？</p>
-        <div class="modal-foot">
-          <Btn variant="ghost" onClick={close}>取消</Btn>
-          <Btn variant="danger" onClick={() => { close(); void doAbandon(); }}>确认放弃</Btn>
-        </div>
-      </Modal>
-    ), `task-abandon-${task.code}`);
   };
   const onSubmit = () => {
     openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
@@ -153,7 +139,9 @@ function TaskCard({ task }: { task: any }) {
     <div class={`task-card task-card--${task.type}`}>
       <div class="task-card-head">
         <span class="task-card-name">{task.name}</span>
-        {typeTag(task.type)}
+        {isMain
+          ? <Tag kind="gold">主线</Tag>
+          : <Tag kind="jade">随机</Tag>}
       </div>
       <div class="task-card-desc">{task.desc}</div>
 
@@ -209,45 +197,28 @@ function TaskCard({ task }: { task: any }) {
   );
 }
 
-// ── 可接取任务（支线 + 酒馆日常委托）─────────────────────────────────────────
-function OfferCard({ q, onAccept }: { q: any; onAccept: (code: string) => void }) {
-  return (
-    <div class="task-offer" key={q.code}>
-      <div class="task-offer-info">
-        <span class="task-offer-name">{q.name}</span>
-        <span class="task-offer-desc">{q.desc}</span>
-        <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
-        <RewardRow rewards={q.rewards} />
-      </div>
-      <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
-    </div>
-  );
-}
-
-export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
-  const side = offeredSide ?? [];
+// ── 酒馆可接取的随机任务 ──────────────────────────────────────────────────────
+export function TaskOffers({ offered }: { offered: any[] }) {
+  if (!offered?.length) return null;
   const onAccept = async (code: string) => {
     await act(req('task.Accept', { code }), { okToast: '已接取任务' });
   };
-  if (!offered?.length && !side.length) return null;
   return (
     <div class="task-offers">
-      {side.length > 0 && (
-        <>
-          <SectionHead sub={`${side.length} 个任务`}>支线任务</SectionHead>
-          <div class="task-offer-list">
-            {side.map((q) => <OfferCard q={q} onAccept={onAccept} />)}
+      <SectionHead sub={`${offered.length} 个委托`}>酒馆可接取</SectionHead>
+      <div class="task-offer-list">
+        {offered.map((q) => (
+          <div class="task-offer" key={q.code}>
+            <div class="task-offer-info">
+              <span class="task-offer-name">{q.name}</span>
+              <span class="task-offer-desc">{q.desc}</span>
+              <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
+              <RewardRow rewards={q.rewards} />
+            </div>
+            <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
           </div>
-        </>
-      )}
-      {offered?.length > 0 && (
-        <>
-          <SectionHead sub={`${offered.length} 个委托`}>酒馆日常委托</SectionHead>
-          <div class="task-offer-list">
-            {offered.map((q) => <OfferCard q={q} onAccept={onAccept} />)}
-          </div>
-        </>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
@@ -259,19 +230,18 @@ export function TaskBar() {
   const ts = taskStates.value[vid()] ?? null;
   const active: any[] = ts?.active ?? [];
   const offered: any[] = ts?.offered ?? [];
-  const offeredSide: any[] = ts?.offeredSide ?? [];
 
   return (
     <section class="task-bar">
       <SectionHead>任务</SectionHead>
-      {active.length === 0 && offered.length === 0 && offeredSide.length === 0 ? (
-        <Panel variant="flat" pad class="task-empty">暂无可进行的任务。</Panel>
+      {active.length === 0 && offered.length === 0 ? (
+        <Panel variant="flat" pad class="task-empty">暂无可进行的任务。建造酒馆可接取随机委托。</Panel>
       ) : (
         <div class="task-active-list">
           {active.map((t) => <TaskCard task={t} key={t.code} />)}
         </div>
       )}
-      <TaskOffers offered={offered} offeredSide={offeredSide} />
+      <TaskOffers offered={offered} />
     </section>
   );
 }

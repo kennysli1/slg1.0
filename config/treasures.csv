@@ -19,4 +19,3 @@
 17,warrior_token,勇士之证,trs_medal,special,epic,atkMult,5,0,0,passive
 18,ritual_altar,祭祀台,trs_altar,special,epic,ritualBuff,25,0,0,instant
 19,bole,伯乐,trs_bole,military,legendary,cavalryTrainSpeed,50,3000,0.004,instant
-20,spiritual_food,精神食粮,trs_food,economic,rare,soldierFoodReduce,1,250,0.04,passive

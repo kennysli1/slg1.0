@@ -58,6 +58,8 @@ npm start                # 生产模式启动后端（托管已构建的前端�
 npm run test:server      # 跑后端测试（all.test.ts barrel 汇总全部 *.test.ts）
 npm run lint:all         # 前后端 ESLint 与架构红线
 npm run guard            # 变更契约检查
+npm run test:deploy      # 隔离启动生产产物，验证 HTTP/静态前端/真实 WebSocket
+npm run verify:commit    # 提交总闸门：完整测试 + 真实部署 + 公网验收
 npm run verify           # 提交前全量验证
 
 npm run reset:season     # 刷档：留账号+地图位置，进度归零（新赛季）
@@ -65,7 +67,7 @@ npm run reset:respawn    # 刷档：留登录凭据，重新分配地图位置
 npm run wipe:all         # 删档：连账号一起清空（均自动备份到 data/backups/）
 ```
 
-环境变量（生产）：`PORT`（默认 8080）、`HOST`（默认 0.0.0.0）、`DATA_PATH`（默认 `./data/game.json`）、`GM_TOKEN`（设置后 `/gm/*` 路由需 `X-GM-Token` header 鉴权）。
+环境变量（生产）：`PORT`（默认 8080）、`HOST`（默认 0.0.0.0）、`DATA_PATH`（默认 `./data/game.json`）、`LOG_DIR`（默认 `./data/logs`）、`GM_TOKEN`（设置后 `/gm/*` 路由需 `X-GM-Token` header 鉴权）。
 
 ---
 
@@ -96,4 +98,5 @@ slg1.0/
 ## 部署
 
 生产部署请按 **`docs/部署手册_腾讯云轻量服务器.md`**（含 pm2 保活、数据备份）。
-`tools/deploy.sh` 提供 scp 一键部署（绕过服务器连不上 GitHub 的情况）。
+正常 `git commit` 会强制执行完整测试、本地生产冒烟、腾讯云真实部署与公网验收；失败自动回滚且拒绝提交。
+`tools/deploy.sh` 也可手动执行同一部署流程。

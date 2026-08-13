@@ -168,7 +168,6 @@ export function treasureEffectText(info: TreasureInfo): string {
     popGrowth: `人口增长 +${v}%`, instantGold: `立即获得 ${v} 金币`,
     ritualBuff: `使用后扣除劳动人口，全资源产出 +${v}%（持续2小时）`,
     cavalryTrainSpeed: `骑兵训练时间 -${v}%（使用后翻倍骑兵）`,
-    soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
   };
   return map[info.effectType] ?? info.effectType;
 }

@@ -58,8 +58,6 @@ interface MilitaryState {
   techDefMult?: number;
   /** 宝物骑兵训练加速倍率（默认 1；伯乐提供，training time 乘此值）。 */
   treasureCavalryTrainMult?: number;
-  /** 精神食粮减粮（每兵每小时减免的绝对 crop 值，加性；默认 0）。 */
-  treasureFoodReduce?: number;
 }
 
 const COLLECTION = 'military';
@@ -156,8 +154,6 @@ export class MilitaryModule {
     // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
     this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
     this.commands.register('military.DuplicateCavalry', (c) => this.duplicateCavalry(c));
-    // 精神食粮：每兵粮耗减免
-    this.commands.register('military.SetTreasureFoodReduce', (c) => this.setTreasureFoodReduce(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -184,8 +180,6 @@ export class MilitaryModule {
     if (s.treasureDefMult === undefined) s.treasureDefMult = 1;
     if (s.techAtkMult === undefined) s.techAtkMult = 1;
     if (s.techDefMult === undefined) s.techDefMult = 1;
-    if (s.treasureCavalryTrainMult === undefined) s.treasureCavalryTrainMult = 1;
-    if (s.treasureFoodReduce === undefined) s.treasureFoodReduce = 0;
     // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
     const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
       if (!order) return;
@@ -248,16 +242,22 @@ export class MilitaryModule {
     // 旧模型只算 upkeep、训练时平民那份口粮被"释放"；新模型士兵保留平民口粮再叠加 upkeep，
     // 即"每个兵默认1耗粮 + 1军晌"（popCost=1 的标准兵）。佣兵 popCost=0 自动零副作用。
     const base = this.config.constants.popCropPerLabor;
-    let ration = 0; // 军晌（默认口粮 + upkeep，含精神食粮减免）
+    let ration = 0; // 军晌（默认口粮 + upkeep）
     for (const [unit, n] of Object.entries(s.troops)) {
-      ration += this.foodPerSoldier(unit, s, base) * n;
+      const def = this.config.units[unit];
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * n;
     }
-    // 训练队列：每个未产出的兵也按 foodPerSoldier 计入（即便尚未入 troops）。
+    // 训练队列：每个未产出的兵也按 (默认口粮 + upkeep) × popCost 计入（即便尚未入 troops）。
     if (s.training) {
-      ration += this.foodPerSoldier(s.training.unit, s, base) * s.training.remaining;
+      const def = this.config.units[s.training.unit];
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * s.training.remaining;
     }
     for (const order of Object.values(s.trainingBySlot || {})) {
-      ration += this.foodPerSoldier(order.unit, s, base) * order.remaining;
+      const def = this.config.units[order.unit];
+      const popCost = def?.popCost ?? 1;
+      ration += (base + (def?.upkeep ?? 0)) * popCost * order.remaining;
     }
     void this.commands.send({
       name: 'economy.SetUpkeep',
@@ -415,32 +415,6 @@ export class MilitaryModule {
     return { ok: true, payload: {} };
   }
 
-  /** 精神食粮：每兵粮耗减免绝对值（加性，remove 时 reduce=0 自动归零）。 */
-  private setTreasureFoodReduce(cmd: Command): CommandResult {
-    const { villageId, reduce } = cmd.payload as { villageId: string; reduce: number };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    s.treasureFoodReduce = Number.isFinite(reduce) ? Math.max(0, reduce) : 0;
-    this.store.set(COLLECTION, villageId, s);
-    this.reportUpkeep(s);
-    return { ok: true, payload: {} };
-  }
-
-  /**
-   * 每兵每小时口粮消耗（含精神食粮减免）。
-   * 关键：减免是「绝对值」——减在「已乘完 popCost 的总量」上，绝不动被乘数 upkeep（否则会被 popCost 放大，popCost>1 立刻爆雷）。
-   * 下限 = (base+1)*popCost（军晌降到 1 的水平；upkeep≤1 的兵不再减）。
-   */
-  private foodPerSoldier(unitCode: string, s: MilitaryState, base: number): number {
-    const def = this.config.units[unitCode];
-    const popCost = def?.popCost ?? 1;
-    const upkeep = def?.upkeep ?? 0;
-    const raw = (base + upkeep) * popCost;
-    const floor = (base + 1) * popCost;
-    const reduce = s.treasureFoodReduce ?? 0;
-    return Math.max(floor, raw - reduce);
-  }
-
   /** 伯乐使用效果：消耗资源和劳动人口，以当前骑兵为限等比例翻倍。不足则按比例缩减。 */
   private async duplicateCavalry(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
@@ -473,14 +447,6 @@ export class MilitaryModule {
     if (popRes.ok) {
       const labor = (popRes.payload as any)?.currentPop ?? 0;
       if (totalPopCost > 0) ratio = Math.min(ratio, labor / totalPopCost);
-      // 动员上限：新增骑兵人口不得超过 mobilizeCap × totalPop - 当前士兵足迹
-      const cap = (popRes.payload as any)?.mobilizeCap;
-      const tp = (popRes.payload as any)?.totalPop;
-      const sp = (popRes.payload as any)?.soldierPop;
-      if (typeof cap === 'number' && typeof tp === 'number' && typeof sp === 'number' && totalPopCost > 0) {
-        const maxAdd = Math.max(0, cap * tp - sp);
-        ratio = Math.min(ratio, maxAdd / totalPopCost);
-      }
     }
     ratio = Math.min(1, Math.max(0, ratio)); // 全额翻倍，不设安全边距
 
@@ -515,9 +481,6 @@ export class MilitaryModule {
 
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
-    // 重新按 troops 核算驻军人口足迹（铁律：任何改兵力的路径都要 reportGarrisonPop，
-    // 不能只靠 ConvertPopToGarrison 手动累加 garrisonPopCost，否则与解散/训练的重算口径不一致会漂移）
-    this.reportGarrisonPop(s);
     const added: Record<string, number> = {};
     for (const code of Object.keys(current)) {
       const gain = (s.troops[code] ?? 0) - current[code];
@@ -547,8 +510,8 @@ export class MilitaryModule {
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
-        // 每兵每小时口粮（含精神食粮减免）
-        cropPerHourEach: this.foodPerSoldier(u.key, s, this.config.constants.popCropPerLabor),
+        // v3：士兵直接以 upkeep 计入 troops 口粮（人口硬上限模型已无 soldier_pool 额外口粮）
+        cropPerHourEach: st.upkeep,
         unlocked,
         lockReason: unlocked ? undefined : `需${bldName} 1 级`,
       };
@@ -570,7 +533,7 @@ export class MilitaryModule {
               meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
               meleeDef: st.meleeDef, rangedDef: st.rangedDef,
               speed: st.speed, carry: st.carry, upkeep: st.upkeep,
-              cropPerHourEach: this.foodPerSoldier(u.key, s, this.config.constants.popCropPerLabor),
+              cropPerHourEach: st.upkeep,
               unlocked,
               lockReason: unlocked ? undefined : '建筑建造中',
               level: sl.level,

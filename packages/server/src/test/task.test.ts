@@ -137,10 +137,9 @@ test('酒馆建造触发随机任务刷新；接取 → 上交 → 完成', asyn
     await grant(app, va, res); // 确保有足够资源
     const sub = await send(app, 'task.SubmitResources', { villageId: va, code, resources: res });
     assert.equal(sub.ok, true, `上交应成功: ${sub.reason ?? ''}`);
-    assert.equal((sub.payload as any).completed, true, '日常 submit 任务应完成');
+    assert.equal((sub.payload as any).completed, true, '随机 submit 任务应完成');
     const st3 = await send(app, 'task.GetState', { villageId: va });
-    assert.ok(!(st3.payload as any).active.find((a: any) => a.code === code), '完成后应移出 active');
-    assert.ok(!((st3.payload as any).completedSide ?? []).includes(code), '日常任务不记入已完成支线（可反复）');
+    assert.ok((st3.payload as any).completedRandom.includes(code), '随机任务应记完成');
   }
 });
 
@@ -213,73 +212,4 @@ test('上交资源只扣到「剩余需求」，不超额扣资源', async () =>
   const after = await send(app, 'economy.GetResources', { villageId: va });
   const a = after.payload as any;
   assert.equal(b.resources.clay - a.resources.clay, 150, 'clay 只应扣 150（剩余需求）');
-});
-
-test('支线任务：触发出现(offeredSide) → 接取 → 放弃后永久不再出现', async () => {
-  const app = freshApp();
-  const regRes = await reg(app, '任务测试7');
-  const va = (regRes.payload as any).player.villageId;
-  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
-  await tick();
-
-  // 建宝库 treasury → 触发 r4（献祭筹备，side）
-  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'treasury' });
-  assert.equal(build.ok, true, '建宝库应成功');
-  await app.scheduler.advanceTo(clock + 120_000, setClock);
-  await tick();
-  await tick();
-
-  const st = await send(app, 'task.GetState', { villageId: va });
-  const p = st.payload as any;
-  assert.ok((p.offeredSide ?? []).some((o: any) => o.code === 'r4'), '宝库建成后 r4 支线应进入 offeredSide');
-  assert.ok(!(p.offered ?? []).some((o: any) => o.code === 'r4'), 'r4 支线不应出现在酒馆(offered)');
-
-  // 接取 r4
-  const acc = await send(app, 'task.Accept', { villageId: va, code: 'r4' });
-  assert.equal(acc.ok, true, '接取支线应成功');
-
-  // 放弃 r4 → 永久不再出现
-  const ab = await send(app, 'task.Abandon', { villageId: va, code: 'r4' });
-  assert.equal(ab.ok, true, '支线放弃应成功');
-  const st2 = await send(app, 'task.GetState', { villageId: va });
-  const p2 = st2.payload as any;
-  assert.ok((p2.abandonedSide ?? []).includes('r4'), '放弃后 r4 应记入 abandonedSide');
-  assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 'r4'), '放弃后 r4 不应再在可接取');
-  assert.ok(!(p2.active ?? []).some((a: any) => a.code === 'r4'), '放弃后 r4 不应再 active');
-});
-
-test('日常任务可反复：完成后刷新可再次刷出', async () => {
-  const app = freshApp();
-  const regRes = await reg(app, '任务测试8');
-  const va = (regRes.payload as any).player.villageId;
-  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
-  await tick();
-
-  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
-  assert.equal(build.ok, true, '建酒馆应成功');
-  await app.scheduler.advanceTo(clock + 120_000, setClock);
-  await tick();
-  await tick();
-
-  // 接取并完成一个 submit 类日常任务
-  const st = await send(app, 'task.GetState', { villageId: va });
-  const offer = (st.payload as any).offered.find((o: any) => o.objective.kind === 'submit_resources');
-  assert.ok(offer, '酒馆应刷出 submit 类日常任务');
-  const code = offer.code;
-  const acc = await send(app, 'task.Accept', { villageId: va, code });
-  assert.equal(acc.ok, true, '接取应成功');
-  const st2 = await send(app, 'task.GetState', { villageId: va });
-  const inst = st2.payload.active.find((a: any) => a.code === code);
-  const res = inst.objective.resources ?? {};
-  await grant(app, va, res);
-  await send(app, 'task.SubmitResources', { villageId: va, code, resources: res });
-  const st3 = await send(app, 'task.GetState', { villageId: va });
-  assert.ok(!(st3.payload as any).active.find((a: any) => a.code === code), '完成后应移出 active');
-  assert.ok(!((st3.payload as any).completedSide ?? []).includes(code), '日常任务完成不记入支线完成');
-
-  // 触发一次刷新（时间推进），日常任务应可再次刷出（不被 completed 过滤）
-  await app.scheduler.advanceTo(clock + 7200_000, setClock);
-  await tick();
-  const st4 = await send(app, 'task.GetState', { villageId: va });
-  assert.ok((st4.payload as any).offered.length > 0, '刷新后酒馆仍应有日常任务可刷');
 });

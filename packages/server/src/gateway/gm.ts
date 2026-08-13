@@ -1099,17 +1099,12 @@ function render(s){
     if(t.objective&&t.objective.kind==='submit_resources')h+=' 资源<input class="res" data-code="'+esc(c)+'" placeholder="wood:100,clay:100" style="width:160px"> <button class="act" data-act="submit" data-code="'+esc(c)+'">上交</button>';
     h+='</div>';
   }
-  h+='<h2>酒馆展示（日常可接取 '+((s.offered||[]).length)+'）</h2>';
+  h+='<h2>酒馆展示（可接取 '+((s.offered||[]).length)+'）</h2>';
   for(var i=0;i<(s.offered||[]).length;i++){var o=s.offered[i];
     h+='<div class="card" data-code="'+esc(o.code)+'">'+esc(o.name)+' ['+esc(o.type)+'] <button class="act" data-act="accept" data-code="'+esc(o.code)+'">接取</button></div>';
   }
-  h+='<h2>支线可接取（'+((s.offeredSide||[]).length)+'）</h2>';
-  for(var j=0;j<(s.offeredSide||[]).length;j++){var so=s.offeredSide[j];
-    h+='<div class="card" data-code="'+esc(so.code)+'">'+esc(so.name)+' ['+esc(so.type)+'] <button class="act" data-act="accept" data-code="'+esc(so.code)+'">接取</button></div>';
-  }
   h+='<h2>已完成主线</h2><div class="card">'+(s.completedMain||[]).join(', ')+'</div>';
-  h+='<h2>已完成支线</h2><div class="card">'+(s.completedSide||[]).join(', ')+'</div>';
-  h+='<h2>已放弃支线</h2><div class="card">'+(s.abandonedSide||[]).join(', ')+'</div>';
+  h+='<h2>已完成随机</h2><div class="card">'+(s.completedRandom||[]).join(', ')+'</div>';
   document.getElementById('content').innerHTML=h;
 }
 document.addEventListener('click',function(e){

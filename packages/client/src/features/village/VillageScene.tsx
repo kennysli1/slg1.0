@@ -45,16 +45,18 @@ function OccupiedPad({ building: b, pos, isCenter }: {
       <div class="vil-pad-inner">
         {isBusy && <div class={`vil-status-ring${isDemolishing ? ' vil-status-ring--demo' : ''}`} />}
 
-        <Icon
-          icon={b.icon ?? info.icon}
-          label={b.name}
-          size={isCenter ? '2xl' : 'xl'}
-          class="vil-pad-icon"
-        />
+        <span class={`vil-pad-art${isCenter ? ' vil-pad-art--center' : ''}`}>
+          <Icon
+            icon={b.icon ?? info.icon}
+            label={b.name}
+            size={isCenter ? '2xl' : 'xl'}
+            class="vil-pad-icon"
+          />
 
-        {isNew ? <span class="vil-lvl">建造中</span>
-          : isDemolishing ? <span class="vil-lvl vil-lvl--demo">拆除中</span>
-            : <span class={`vil-lvl${isMax ? ' max' : ''}`}>Lv{b.level}</span>}
+          {isNew ? <span class="vil-lvl">建造中</span>
+            : isDemolishing ? <span class="vil-lvl vil-lvl--demo">拆除中</span>
+              : <span class={`vil-lvl${isMax ? ' max' : ''}`}>Lv{b.level}</span>}
+        </span>
 
         <div class="vil-tooltip">
           <b>{b.name}</b>

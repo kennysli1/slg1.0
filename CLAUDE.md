@@ -19,7 +19,7 @@
 
 自动兜底：ESLint 实时红线（跨模块 import / 模块内定时器）+ `architecture.test.ts` 静态扫描（含 store 集合归属唯一）。原理与案例见 `docs/2_2.0设计/03_架构总览.md`。
 
-## 红线二：变更契约六条（不满足就提交不了）
+## 红线二：变更契约七条（不满足就提交不了）
 
 | | 规矩 | 一句话 |
 |---|------|--------|
@@ -29,6 +29,7 @@
 | R4 | 规划文档用完即归档 | 功能上线后把结论并入常青文档，原文 `git mv` 到 `docs/archive/` |
 | R5 | CHANGELOG 记账 | 改了 `packages/**/src/` 或 `config/*.csv` → 写 `## [未发布]` 条目 |
 | R6 | 三个版本号同步 | 协议改了升 `WIRE_VERSION`；落盘结构改了升 `SAVE_SCHEMA_VERSION` 且条目带 `[需刷档]` |
+| R7 | 部署验收后提交 | `git commit` 前必须完整测试、启动生产产物冒烟、真实部署并从公网验收；失败自动回滚且拒绝提交 |
 
 全文（含逃生阀用法）：`docs/00_变更契约.md`。
 
@@ -73,13 +74,25 @@ npm run test:server          # 改完逻辑必跑：全循环 + 并发/协议/WA
 npm run verify               # 提交前一键全量（guard + build + lint + typecheck + test + audit）
 ```
 
+## 多 Agent 协作路由
+
+项目角色定义在 `.codex/agents/*.toml`。复杂需求由主 agent 负责拆解、裁决和汇总；只有任务可独立、文件边界不重叠时才并行委派。
+
+1. `game_designer` 先给玩法目标、规则、数值假设与验收条件，不写代码。
+2. 涉及界面时由 `ui_ux_designer` 给信息架构、状态流和交互验收；涉及资源时由 `art_designer` 给资产清单并按美术流水线执行。
+3. `game_architect` 把已确认需求映射到状态 owner、Command/Event、协议、存档与前后端任务；只做技术方案，不写业务代码。
+4. 方案批准后，`frontend_implementer` / `backend_implementer` 按文件边界执行；不得自行改变玩法或架构，遇到契约缺口返回主 agent。
+5. `qa_integrator` 独立核对验收条件、跨端链路、回归风险和提交闸门；只报告问题，不直接修复。
+6. 写代码阶段默认串行；只读调研、设计评审和测试可并行。任何 agent 都必须先遵守本文件路由与四条架构铁律。
+
 ## 提交前（强制）
 
 1. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
 2. 写 `CHANGELOG.md` 的 `## [未发布]` 条目
 3. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
-4. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
-5. `npm run guard` 绿了再提交；`git push` 会自动跑 `verify:quick`
+4. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保部署快照就是提交快照）
+5. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
+6. 正常执行 `git commit`：钩子会依次完整验证、本地生产冒烟、真实部署、公网验收，通过后才创建提交
 
 **索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
 

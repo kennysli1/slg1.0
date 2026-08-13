@@ -9,7 +9,7 @@ import { req } from '../../api.js';
 import { buildingInfo } from '../../app/config.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import {
-  Modal, IconPlate, Btn, Bar, TimerBar, StatGrid, Stat, Divider, confirmDanger,
+  Modal, IconPlate, Btn, Bar, TimerBar, StatGrid, Stat, Divider, SecondaryActions, confirmDanger,
 } from '../../ui/index.js';
 import '../../styles/research.css';
 
@@ -64,7 +64,6 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
       onClose={onClose}
       foot={<>
         <Btn variant="primary" onClick={gotoTechTree}>进入科技树</Btn>
-        <Btn variant="danger" onClick={demolish}>拆除</Btn>
       </>}
     >
       <div class="acad-rp">
@@ -110,6 +109,11 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
         学院按固定间隔掷一次判定，成功则产出科研点。连续失败会逐次提高下一次的概率，
         所以长期期望是稳定的；多建学院会缩短判定间隔。
       </p>
+
+      <SecondaryActions label="学院管理" hint="拆除学院">
+        <p class="secondary-actions__hint">拆除会降低本村科研点判定效率，已完成的科技不会丢失。</p>
+        <Btn variant="danger" size="sm" onClick={demolish}>拆除学院</Btn>
+      </SecondaryActions>
     </Modal>
   );
 }

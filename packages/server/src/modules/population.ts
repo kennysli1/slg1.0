@@ -695,7 +695,7 @@ export class PopulationModule {
       if (udef.popPermanent) continue; // 拓荒者等永久人口：解散/返程不返还平民
       returned += udef.popCost * cnt;
     }
-    s.currentPop = Math.min(this.popCeiling(s), s.currentPop + returned);
+    s.currentPop = Math.min(s.hardCap, s.currentPop + returned);
     await this.reportToEconomy(s);
     this.store.set(COLLECTION, villageId, s);
 

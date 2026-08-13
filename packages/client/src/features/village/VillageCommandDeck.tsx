@@ -2,7 +2,7 @@
  * 村庄驾驶舱的上下文指挥区。
  * 它只汇总既有快照，不拥有状态；建造和建筑详情仍走既有弹窗契约。
  */
-import { dataVersion, tick, setVillageView } from '../../app/store.js';
+import { dataVersion, tick } from '../../app/store.js';
 import { getCache, getPopState, interpolateTotalPop } from '../../app/state.js';
 import { buildingInfo } from '../../app/config.js';
 import { Icon, Panel, TimerBar } from '../../ui/index.js';
@@ -13,22 +13,25 @@ interface VillageCommandDeckProps {
   vil: any;
 }
 
-function DeckAction({ icon, label, detail, onClick }: {
+function DeckAction({ icon, label, detail, onClick, href }: {
   icon: string;
   label: string;
   detail: string;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
 }) {
-  return (
-    <button class="vil-deck-action" type="button" onClick={onClick}>
+  const content = (
+    <>
       <Icon icon={icon} label="" size="sm" />
       <span class="vil-deck-action-copy">
         <strong>{label}</strong>
         <small>{detail}</small>
       </span>
       <span class="vil-deck-action-arrow" aria-hidden="true">›</span>
-    </button>
+    </>
   );
+  if (href) return <a class="vil-deck-action" href={href}>{content}</a>;
+  return <button class="vil-deck-action" type="button" onClick={onClick}>{content}</button>;
 }
 
 export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
@@ -56,7 +59,7 @@ export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
   return (
     <aside class="vil-deck" aria-label="村庄指挥区">
       <Panel variant="gold" corners pad class="vil-deck-panel">
-        <div class="vil-deck-kicker">CITY COMMAND</div>
+        <div class="vil-deck-kicker">当前决策</div>
         <div class="vil-deck-title-row">
           <div>
             <h2>村庄指挥台</h2>
@@ -127,8 +130,8 @@ export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
           <DeckAction
             icon="ui_icon_time"
             label="建筑清单"
-            detail={`${queueItems.length}/${queueCap} 项工程 · 键盘可访问`}
-            onClick={() => setVillageView('list')}
+            detail={`${queueItems.length}/${queueCap} 项工程 · 右侧集中管理`}
+            href="#village-building-management"
           />
         </div>
       </Panel>

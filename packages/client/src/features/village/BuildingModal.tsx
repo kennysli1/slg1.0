@@ -16,7 +16,6 @@
  *  - TrainPanel embed for military buildings (detected via army.slots)
  *  - Treasure management section for 'main' and 'treasury'
  */
-import { useState } from 'preact/hooks';
 import { dataVersion, openModal, showToast, taskStates } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { req, me } from '../../api.js';
@@ -40,7 +39,7 @@ import {
 import { fmt } from '../../shared/utils/format.js';
 import {
   Modal, IconPlate, Btn, Tag, CostRow, canAfford,
-  TimerBar, SectionHead, Divider, StatGrid, Stat,
+  TimerBar, SectionHead, Divider, StatGrid, Stat, SecondaryActions, confirmDanger,
 } from '../../ui/index.js';
 import { TrainPanel } from '../army/TrainPanel.js';
 import { openMercCamp } from '../army/MercCampModal.js';
@@ -248,6 +247,12 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
                   出售
                 </Btn>
                 <Btn size="sm" variant="danger" onClick={async () => {
+                  const ok = await confirmDanger({
+                    title: `丢弃${t.name}`,
+                    body: '丢弃后宝物会永久消失，且不会获得金币。',
+                    confirmText: '确认丢弃',
+                  });
+                  if (!ok) return;
                   await act(req('DiscardTreasure', { code: t.code }), {
                     okToast: `已丢弃「${t.name}」`,
                   });
@@ -272,8 +277,6 @@ interface BuildingDetailModalProps {
 
 function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   dataVersion.value; // subscribe — refreshes automatically when server data updates
-
-  const [confirmDemolish, setConfirmDemolish] = useState(false);
 
   // ── Find building data from cache ──
   const vil = getCache().vil;
@@ -496,42 +499,25 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       {!demolishing && !isMain && (
         <>
           <Divider />
-          <SectionHead>危险操作</SectionHead>
-          <div class="bld-demolish-block">
-            {!confirmDemolish ? (
-              <Btn
-                variant="danger"
-                size="sm"
-                onClick={() => setConfirmDemolish(true)}
-              >
-                拆除建筑
-              </Btn>
-            ) : (
-              <div class="bld-demolish-confirm">
-                <p class="bld-demolish-warn">
-                  ⚠️ 整个建筑将完全拆除，不消耗也不返还资源，且不可取消。
-                  拆除期间不提供任何加成。
-                </p>
-                <div class="bld-demolish-actions">
-                  <Btn
-                    variant="danger"
-                    size="sm"
-                    onClick={async () => {
-                      await act(req('DemolishBuilding', { slotId }), {
-                        okToast: '拆除已开始',
-                      });
-                      close();
-                    }}
-                  >
-                    确认拆除
-                  </Btn>
-                  <Btn size="sm" onClick={() => setConfirmDemolish(false)}>
-                    取消
-                  </Btn>
-                </div>
-              </div>
-            )}
-          </div>
+          <SecondaryActions label="建筑管理" hint="拆除与移除">
+            <p class="secondary-actions__hint">仅在确定不再需要这栋建筑时操作；拆除期间建筑不会提供加成。</p>
+            <Btn
+              variant="danger"
+              size="sm"
+              onClick={async () => {
+                const ok = await confirmDanger({
+                  title: `拆除${info.name}`,
+                  body: '整栋建筑会被完全拆除，不消耗也不返还资源；拆除开始后不可取消，期间不提供任何加成。',
+                  confirmText: '确认拆除',
+                });
+                if (!ok) return;
+                await act(req('DemolishBuilding', { slotId }), { okToast: '拆除已开始' });
+                close();
+              }}
+            >
+              拆除建筑
+            </Btn>
+          </SecondaryActions>
         </>
       )}
     </Modal>

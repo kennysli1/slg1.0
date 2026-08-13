@@ -349,6 +349,7 @@
 }
 
 /* ---------- 解散面板 ---------- */
+.army-management-panel { overflow: hidden; }
 .disband-section {
   display: flex;
   flex-direction: column;

@@ -38,7 +38,7 @@ function rejectMsg(id: string, code: string, msg: string): WireResponse {
 async function main() {
   // 1. 组装游戏内核（数据落盘到 data/game.json）
   const dataPath = process.env.DATA_PATH ?? join(__dirname, '../../../data/game.json');
-  const logDir = join(__dirname, '../../../data/logs');
+  const logDir = process.env.LOG_DIR ?? join(__dirname, '../../../data/logs');
   initLogger(logDir);
   const app = createGameApp({ storePath: dataPath });
   const gateway = new Gateway(app);
