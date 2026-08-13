@@ -996,8 +996,11 @@
 .task-card--main {
   border-left: 3px solid var(--c-gold);
 }
-.task-card--random {
+.task-card--daily {
   border-left: 3px solid var(--c-jade);
+}
+.task-card--side {
+  border-left: 3px solid var(--c-ember);
 }
 .task-card-head {
   display: flex;

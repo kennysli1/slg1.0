@@ -11,3 +11,4 @@ Thumbs.db
 .claude/
 vite.config.ts.timestamp*.mjs
 vite.config.ts.timestamp*.mjs
+._*

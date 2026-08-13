@@ -242,7 +242,7 @@ export interface QuestObjective {
 }
 
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
-export type QuestType = 'main' | 'random';
+export type QuestType = 'main' | 'daily' | 'side';
 
 /** 任务定义（来自 quests.csv）。 */
 export interface QuestDef {
@@ -1120,7 +1120,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       code,
       name: r.name ?? code,
       desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'random',
+      type: (r.type as QuestType) || 'daily',
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       objective,
       rewards: {
@@ -1279,7 +1279,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1426,7 +1426,7 @@ export function validateGameConfig(config: GameConfig): void {
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
-    if (q.type !== 'main' && q.type !== 'random') errors.push(`quests.csv[${q.code}] type 必须是 main/random`);
+    if (q.type !== 'main' && q.type !== 'daily' && q.type !== 'side') errors.push(`quests.csv[${q.code}] type 必须是 main/daily/side`);
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {
@@ -1445,7 +1445,7 @@ export function validateGameConfig(config: GameConfig): void {
     }
     // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'random') errors.push(`quests.csv[${q.code}] 仅随机任务可设触发条件 trigger`);
+      if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
       if (tk !== 'building_built') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code>）`);
     }

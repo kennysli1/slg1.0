@@ -44,6 +44,8 @@ export interface TreasureEffects {
   popGrowthMult: number;
   /** 骑兵训练速率倍率（乘数，默认 1；伯乐提供，training time 乘此值）。 */
   cavalryTrainMult: number;
+  /** 精神食粮：每兵粮耗减免绝对值（加性累加，effectValue 直接累加，非百分比）。 */
+  soldierFoodReduce: number;
 }
 
 interface TreasureState {
@@ -460,6 +462,7 @@ export class TreasureModule {
     let defMult = 1;
     let popGrowthMult = 1;
     let cavalryTrainMult = 1;
+    let soldierFoodReduce = 0;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -483,6 +486,7 @@ export class TreasureModule {
         case 'defMult': defMult = 1 + Math.min(t.effectCap / 100, (defMult - 1) + frac); break;
         case 'popGrowth': popGrowthMult = 1 + Math.min(t.effectCap / 100, (popGrowthMult - 1) + frac); break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
+        case 'soldierFoodReduce': soldierFoodReduce += t.effectValue; break; // 精神食粮：每兵减粮绝对值（非百分比，直接累加）
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -490,7 +494,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult, soldierFoodReduce };
   }
 
   private activeCodes(codes: string[]): string[] {
@@ -547,6 +551,11 @@ export class TreasureModule {
     await this.commands.send({
       name: 'military.SetTreasureCavalryTrainMult', from: TreasureModule.NAME,
       payload: { villageId, mult: eff.cavalryTrainMult },
+    });
+    // 精神食粮减粮：总是下发（reduce=0 即归零），避免移除宝物后减粮残留
+    await this.commands.send({
+      name: 'military.SetTreasureFoodReduce', from: TreasureModule.NAME,
+      payload: { villageId, reduce: eff.soldierFoodReduce },
     });
   }
 
