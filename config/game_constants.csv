@@ -55,3 +55,5 @@ treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录�
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃
 treasure_carry_troops_per_slot,200,number,军队携带宝物容量换算:每多少兵力+1携带格
 treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值,floor(总兵力/每格兵力数)))
+ritual_buff_duration_sec,7200,number,祭祀台(ritualBuff)buff持续时长(秒;7200=2小时)
+ritual_buff_pop_cost,5,number,祭祀台(ritualBuff)使用时扣除的劳动人口数(不足则扣除士兵人口)

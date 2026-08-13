@@ -868,6 +868,25 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.send(res);
   });
 
+  // POST /gm/ops/sell-treasure / discard-treasure — GM 测试：出售/丢弃村庄宝物（body: {villageId, code}）
+  const treasureDispose = (name: string) => async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!auth(req, reply)) return;
+    const { villageId, code } = (req.body ?? {}) as { villageId?: string; code?: string };
+    if (!villageId || !code) {
+      void reply.code(400).send({ ok: false, reason: 'villageId 与 code 必填' });
+      return;
+    }
+    const res: any = await gameApp.commands.send({ name, from: 'gm', payload: { villageId, code } });
+    if (!res.ok) {
+      void reply.code(400).send({ ok: false, reason: res.reason ?? 'failed', payload: res.payload });
+      return;
+    }
+    store.flush();
+    void reply.send(res);
+  };
+  fastify.post('/gm/ops/sell-treasure', treasureDispose('treasure.Sell'));
+  fastify.post('/gm/ops/discard-treasure', treasureDispose('treasure.Discard'));
+
   // ── 任务模块 GM 运维端点（body 取 villageId，必要时取 code/resources）──
   const taskOp = async (
     req: FastifyRequest, reply: FastifyReply, name: string,
@@ -1128,6 +1147,12 @@ th{background:#16213e;color:#a0a8c0;text-align:left}
 </style></head>
 <body>
 <h1>任务目录（quests.csv）· 保存后即时热重载</h1>
+<div style="font-size:12px;color:#8a7a5a;margin:6px 0 12px;line-height:1.7">
+  目标类型 objKind：<b>submit_resources</b>=上交资源(objParam 形如 wood:200|clay:200) ·
+  <b>clear_camp</b>=清剿营地(objParam 形如 task_camp:1) ·
+  <b>sell_discard_treasure</b>=出售/丢弃稀有+宝物(objParam 形如 rare:2，minRarity:count)。<br>
+  触发条件 trigger（仅随机任务）：<b>building_built:&lt;建筑code&gt;</b> = 建造完成该建筑后才进酒馆（如 building_built:treasury=建好宝库）；留空=无触发常驻可刷。
+</div>
 <div id="status" class="ok">就绪</div>
 <div class="toolbar">
   <button onclick="load()">重新加载</button>
@@ -1137,7 +1162,7 @@ th{background:#16213e;color:#a0a8c0;text-align:left}
 <div id="grid"></div>
 <script>
 let token=sessionStorage.getItem('gmToken')??'';
-var COLS=['id','code','name','desc','type','requires','objKind','objParam','rewardRes','rewardTreasure','weight'];
+var COLS=['id','code','name','desc','type','requires','objKind','objParam','rewardRes','rewardTreasure','weight','trigger'];
 var NUM=['id','weight'];
 var ROWS=[];
 function esc(s){s=String(s==null?'':s);return s.replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}

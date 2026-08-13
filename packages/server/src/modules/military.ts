@@ -139,6 +139,8 @@ export class MilitaryModule {
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
+    // 祭祀台等消耗型效果：按 popCost 升序移除驻村士兵直到满足人口缺口（允许超扣）。
+    this.commands.register('military.SacrificeTroops', (c) => this.sacrificeTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
     this.commands.register('military.AddMercenaries', (c) => this.addMercenaries(c));
     // 宝物军事倍率（攻/防分别作用），由 treasure 模块推送，无环。
@@ -763,5 +765,43 @@ export class MilitaryModule {
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
     return { ok: true, payload: { troops: { ...s.troops } } };
+  }
+
+  /**
+   * 祭祀台等消耗型效果：扣除 popNeed 个「士兵人口」。
+   * 优先移除 popCost 最小的兵种；若仍差 1 人口而该兵单个占多个人口，仍整兵扣除（允许超扣）。
+   * popCost<=0 的兵（雇佣兵）不可献祭，跳过。返回实际移除的兵与折合人口。
+   */
+  private sacrificeTroops(cmd: Command): CommandResult {
+    const { villageId, popNeed } = cmd.payload as { villageId: string; popNeed: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    let remaining = Math.max(0, Math.floor(popNeed));
+    const removed: Record<string, number> = {};
+    let sacrificedPop = 0;
+    if (remaining > 0) {
+      const entries = Object.entries(s.troops)
+        .map(([unit, n]) => ({ unit, n, popCost: this.config.units[unit]?.popCost ?? 1 }))
+        .filter((e) => e.popCost > 0)
+        .sort((a, b) => a.popCost - b.popCost);
+      for (const e of entries) {
+        if (remaining <= 0) break;
+        let take = 0;
+        while (take < e.n && remaining > 0) {
+          take++;
+          sacrificedPop += e.popCost;
+          remaining -= e.popCost; // 允许减到负值=超扣
+        }
+        if (take > 0) {
+          removed[e.unit] = take;
+          s.troops[e.unit] = (s.troops[e.unit] ?? 0) - take;
+          if (s.troops[e.unit] <= 0) delete s.troops[e.unit];
+        }
+      }
+    }
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+    this.reportGarrisonPop(s);
+    return { ok: true, payload: { removed, sacrificedPop, remaining: Math.max(0, remaining) } };
   }
 }

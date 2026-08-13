@@ -22,6 +22,7 @@ function objText(task: any): string {
   const o = task.objective;
   if (o.kind === 'submit_resources') return '上交资源';
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
+  if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   return o.kind;
 }
 
@@ -160,6 +161,15 @@ function TaskCard({ task }: { task: any }) {
               已清营地 {task.campCleared}/{task.campTotal}
             </span>
             {task.campTotal > 0 && <span class="task-prog-hint">地图上带 🎯 标记的营地</span>}
+          </div>
+        </div>
+      )}
+      {o.kind === 'sell_discard_treasure' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
+              已出售/丢弃 {task.progress ?? 0}/{o.count} 个稀有+宝物
+            </span>
           </div>
         </div>
       )}

@@ -166,6 +166,7 @@ export function treasureEffectText(info: TreasureInfo): string {
     cropRate: `粮食产出 +${v}%`, goldRate: `金币产出 +${v}%`, allResRate: `全资源产出 +${v}%`,
     atkMult: `全军攻击 +${v}%`, defMult: `全军防御 +${v}%`,
     popGrowth: `人口增长 +${v}%`, instantGold: `立即获得 ${v} 金币`,
+    ritualBuff: `使用后扣除劳动人口，全资源产出 +${v}%（持续2小时）`,
   };
   return map[info.effectType] ?? info.effectType;
 }

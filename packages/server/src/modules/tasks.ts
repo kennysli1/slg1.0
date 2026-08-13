@@ -25,7 +25,7 @@
  *   world.FindFreeTile  在村内找空地放任务营地
  *   pve.Spawn / pve.Remove 生成 / 移除任务营地（task=true，不掉落/不自动重生）
  *   economy.TrySpend / economy.Grant 扣 / 发资源奖励
- *   treasure.Grant {locked:true} 发任务专属宝物（锁定桶）
+ *   treasure.Grant 发任务专属宝物（被动类 locked:true 入锁定桶；即时类如祭祀台不锁定供使用）
  */
 
 import type { Store } from '../infra/store.js';
@@ -57,6 +57,8 @@ interface TaskInstance {
   camps: TaskCamp[];
   /** clear_camp：已清理的营地数。 */
   campCleared: number;
+  /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
+  progress: number;
 }
 
 interface TaskState {
@@ -69,12 +71,21 @@ interface TaskState {
   active: Record<string, TaskInstance>;
   /** 酒馆当前展示、未接取的随机任务 code。 */
   offered: string[];
+  /** 已触发的随机任务触发条件 key（如 `building_built:treasury`）；触发后该任务进入酒馆可刷池。 */
+  firedTriggers: string[];
 }
 
 interface TavernInfo {
   level: number;
   refreshSec: number;
   maxTasks: number;
+}
+
+/** 稀有度排序：普通0/稀有1/史诗2/传说3（用于「稀有及以上」判定）。 */
+function rarityRank(rarity: string): number {
+  const order = ['common', 'rare', 'epic', 'legendary'];
+  const i = order.indexOf(rarity);
+  return i < 0 ? 0 : i;
 }
 
 export class TasksModule {
@@ -146,6 +157,12 @@ export class TasksModule {
     this.bus.on('building.Upgraded', onTavern);
     this.bus.on('building.Demolished', onTavern);
 
+    // 建筑建成 → 触发带 building_built 触发条件的随机任务（如 宝库→祭祀筹备）
+    this.bus.on('building.Built', (evt: DomainEvent) => void this.onBuildingBuilt(evt));
+
+    // 出售/丢弃宝物 → 推进 sell_discard_treasure 任务
+    this.bus.on('treasure.SoldDiscarded', (evt: DomainEvent) => void this.onTreasureSoldDiscarded(evt));
+
     // 战斗结束 → 推进 clear_camp 任务
     this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
   }
@@ -174,7 +191,7 @@ export class TasksModule {
 
   // ── 建村：初始化 + 自动解锁主线 ──
   createVillage(villageId: string): void {
-    const s: TaskState = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [] };
+    const s: TaskState = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [], firedTriggers: [] };
     this.store.set(COLLECTION, villageId, s);
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
@@ -184,13 +201,14 @@ export class TasksModule {
   private ensureState(villageId: string): TaskState {
     let s = this.store.get<TaskState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [] };
+      s = { villageId, completedMain: [], completedRandom: [], active: {}, offered: [], firedTriggers: [] };
       this.store.set(COLLECTION, villageId, s);
     }
     if (!Array.isArray(s.completedMain)) s.completedMain = [];
     if (!Array.isArray(s.completedRandom)) s.completedRandom = [];
     if (!s.active || typeof s.active !== 'object') s.active = {};
     if (!Array.isArray(s.offered)) s.offered = [];
+    if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
     return s;
   }
 
@@ -305,6 +323,7 @@ export class TasksModule {
       submitted: {},
       camps: [],
       campCleared: 0,
+      progress: 0,
     };
     s.active[code] = inst;
     this.store.set(COLLECTION, villageId, s);
@@ -332,7 +351,7 @@ export class TasksModule {
       if (!free.ok) break; // 无空地则少放（避免卡死）
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
       const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
-      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true, ownerVillageId: villageId } });
+      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true } });
       if (spawn.ok) {
         inst.camps.push({ id: campId, q: cq, r: cr, cleared: false });
         placed++;
@@ -365,9 +384,11 @@ export class TasksModule {
     if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
     }
-    // 任务专属宝物（强制锁定）
+    // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
     for (const t of q.rewards.treasures ?? []) {
-      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked: true } });
+      const def = this.config.treasures[t];
+      const locked = !def || def.applyType !== 'instant';
+      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
     }
 
     delete s.active[code];
@@ -470,6 +491,54 @@ export class TasksModule {
     }
   }
 
+  /** 建筑建成 → 标记已触发的随机任务触发条件，并把对应任务立即放进酒馆。 */
+  private async onBuildingBuilt(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId: string; kind: string };
+    const villageId = p.villageId;
+    const kind = p.kind;
+    if (!villageId || !kind) return;
+    const triggerKey = `building_built:${kind}`;
+    // 是否存在以此为触发条件的任务
+    const matched = Object.values(this.config.quests).some((q) => q.trigger === triggerKey);
+    if (!matched) return;
+    const s = this.ensureState(villageId);
+    if (s.firedTriggers.includes(triggerKey)) return; // 已触发过，不重复
+    s.firedTriggers.push(triggerKey);
+    // 把带此触发条件的随机任务直接 offer（若未完成/未进行/未展示）
+    for (const q of Object.values(this.config.quests)) {
+      if (q.trigger !== triggerKey) continue;
+      if (q.type !== 'random') continue;
+      if (s.completedRandom.includes(q.code) || s.active[q.code] || s.offered.includes(q.code)) continue;
+      s.offered.push(q.code);
+    }
+    this.store.set(COLLECTION, villageId, s);
+    await this.pushList(villageId);
+  }
+
+  /** 出售/丢弃宝物 → 推进 sell_discard_treasure 任务的累计计数。 */
+  private async onTreasureSoldDiscarded(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId: string; code: string; rarity: string };
+    const villageId = p.villageId;
+    const rarity = p.rarity;
+    if (!villageId || !rarity) return;
+    const s = this.load(villageId);
+    if (!s) return;
+    for (const [code, inst] of Object.entries(s.active)) {
+      const q = this.quest(code);
+      if (!q || q.objective.kind !== 'sell_discard_treasure') continue;
+      const minRank = rarityRank(q.objective.minRarity ?? 'rare');
+      if (rarityRank(rarity) < minRank) continue; // 品质不达标，不计入
+      inst.progress = (inst.progress ?? 0) + 1;
+      this.store.set(COLLECTION, villageId, s);
+      if (inst.progress >= (q.objective.count ?? 1)) {
+        await this.completeQuest(villageId, code);
+      } else {
+        await this.pushList(villageId);
+      }
+      return;
+    }
+  }
+
   // ── 酒馆等级变化 ──
   private async onTavernChanged(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
@@ -524,6 +593,7 @@ export class TasksModule {
 
     const pool = Object.values(this.config.quests).filter((q) =>
       q.type === 'random' &&
+      (!q.trigger || s.firedTriggers.includes(q.trigger)) &&
       !s.completedRandom.includes(q.code) &&
       !s.active[q.code] &&
       !s.offered.includes(q.code),
@@ -618,6 +688,7 @@ export class TasksModule {
         type: q.type,
         objective: this.serializeObjective(q),
         rewards: this.serializeRewards(q),
+        trigger: q.trigger ?? null,
       }));
     return {
       villageId,
@@ -633,6 +704,7 @@ export class TasksModule {
       kind: q.objective.kind,
       resources: q.objective.resources ?? null,
       campTemplate: q.objective.campTemplate ?? null,
+      minRarity: q.objective.minRarity ?? null,
       count: q.objective.count ?? 0,
     };
   }
@@ -651,6 +723,7 @@ export class TasksModule {
       required: q?.objective.resources ?? {},
       campCleared: inst.campCleared,
       campTotal: inst.camps.length,
+      progress: inst.progress ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
       canAbandon: inst.type === 'random',
       acceptedAt: inst.acceptedAt,

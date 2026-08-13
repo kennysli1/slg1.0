@@ -17,3 +17,4 @@
 15,philosophers_stone,贤者之石,trs_stone,special,epic,instantGold,2500,600,0.015,instant
 16,golden_idol,黄金神像,trs_idol,special,legendary,instantGold,8000,2000,0.004,instant
 17,warrior_token,勇士之证,trs_medal,special,epic,atkMult,5,0,0,passive
+18,ritual_altar,祭祀台,trs_altar,special,epic,ritualBuff,25,0,0,instant

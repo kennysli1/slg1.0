@@ -209,6 +209,7 @@ export interface TreasureDef {
    *  - atkMult/defMult：全军攻/防倍率加成（value=百分比）
    *  - popGrowth：人口增速倍率加成（value=百分比）
    *  - instantGold：获得时立即结算一次的金币数（value=数量）
+   *  - ritualBuff：使用后扣除劳动人口，全资源产量加成持续一段时间（value=百分比；时长/人口见 game_constants）
    */
   effectType: string;
   effectValue: number;
@@ -220,16 +221,19 @@ export interface TreasureDef {
   applyType: string;
 }
 
-/** 任务目标种类。v1 仅两种简单目标；多段流程任务后续扩展。 */
-export type QuestObjectiveKind = 'submit_resources' | 'clear_camp';
+/** 任务目标种类。 */
+export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure';
 
-/** 单个任务目标。v1 每任务恰好一个目标。 */
+/** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
   kind: QuestObjectiveKind;
   /** submit_resources：需上交的资源与数量（key ∈ resources.csv）。 */
   resources?: Record<string, number>;
   /** clear_camp：PvE 营地模板 code（pve_targets.csv）+ 需清理的数量。完全真实化——会在地图上生成真实营地。 */
   campTemplate?: string;
+  /** sell_discard_treasure：累计出售/丢弃 count 个 minRarity 及以上品质的宝物（minRarity ∈ common/rare/epic/legendary）。 */
+  minRarity?: string;
+  /** 通用数量：clear_camp=清理营地数、sell_discard_treasure=宝物数量。 */
   count?: number;
 }
 
@@ -254,6 +258,8 @@ export interface QuestDef {
   };
   /** 随机任务刷新权重（越大越常出现）；主线忽略。 */
   weight: number;
+  /** 触发条件（仅随机任务）：如 `building_built:treasury`=建造完成宝库后出现在酒馆；空=无触发（常驻可刷）。 */
+  trigger?: string;
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -429,6 +435,10 @@ export interface GameConstants {
   treasureCarryTroopsPerSlot: number;
   /** 宝物：军队携带宝物格数硬上限（实际携带上限 = min(此值, floor(总兵力 / treasureCarryTroopsPerSlot))）。 */
   treasureCarryMaxSlots: number;
+  /** 祭祀台（ritualBuff）buff 持续时长（秒；默认 7200=2 小时）。 */
+  ritualBuffDurationSec: number;
+  /** 祭祀台（ritualBuff）使用时扣除的劳动人口数（不足则扣除士兵）。 */
+  ritualBuffPopCost: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -899,6 +909,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
     treasureCarryTroopsPerSlot: cn('treasure_carry_troops_per_slot', 200),
     treasureCarryMaxSlots: cn('treasure_carry_max_slots', 10),
+    ritualBuffDurationSec: cn('ritual_buff_duration_sec', 7200),
+    ritualBuffPopCost: cn('ritual_buff_pop_cost', 5),
     raw,
   };
 
@@ -1037,6 +1049,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (objKind === 'clear_camp') {
       const [tmpl, cnt] = (r.objParam || '').split(':');
       objective = { kind: 'clear_camp', campTemplate: tmpl?.trim(), count: Math.max(1, num(cnt, 1)) };
+    } else if (objKind === 'sell_discard_treasure') {
+      // objParam 形如 `rare:2`：minRarity=稀有及以上，count=2
+      const [rar, cnt] = (r.objParam || '').split(':');
+      objective = { kind: 'sell_discard_treasure', minRarity: (rar?.trim() || 'rare'), count: Math.max(1, num(cnt, 1)) };
     } else {
       objective = { kind: 'submit_resources', resources: parseResourceList(r.objParam) ?? {} };
     }
@@ -1053,6 +1069,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         treasures: r.rewardTreasure ? r.rewardTreasure.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
       },
       weight: num(r.weight, 1),
+      trigger: r.trigger ? String(r.trigger).trim() : undefined,
     };
   }
 
@@ -1192,7 +1209,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1318,7 +1335,8 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure']);
+  const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
@@ -1329,10 +1347,21 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.resources || Object.keys(q.objective.resources).length === 0) {
         errors.push(`quests.csv[${q.code}] submit_resources 必须指定资源(objParam)`);
       }
-    } else {
+    } else if (q.objective.kind === 'clear_camp') {
       const tmpl = q.objective.campTemplate;
       if (!tmpl || !config.pveTemplates[tmpl]) errors.push(`quests.csv[${q.code}] clear_camp 模板 ${tmpl} 不在 pve_targets.csv`);
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] clear_camp 数量必须≥1`);
+    } else if (q.objective.kind === 'sell_discard_treasure') {
+      if (!q.objective.minRarity || !TREASURE_RARITY_ORDER.includes(q.objective.minRarity)) {
+        errors.push(`quests.csv[${q.code}] sell_discard_treasure 的 minRarity 必须是 common/rare/epic/legendary`);
+      }
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] sell_discard_treasure 数量必须≥1`);
+    }
+    // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
+    if (q.trigger) {
+      if (q.type !== 'random') errors.push(`quests.csv[${q.code}] 仅随机任务可设触发条件 trigger`);
+      const [tk] = q.trigger.split(':');
+      if (tk !== 'building_built') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code>）`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

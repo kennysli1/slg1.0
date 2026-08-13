@@ -37,6 +37,8 @@ interface EconomyState {
   baseRate: ResMap;
   /** 产率加成层（派生管线：建筑强化/英雄/工会…每个一层） */
   rateModifiers: { source: string; mult: Partial<ResMap> }[];
+  /** 定时 buff（如祭祀台）：到期自动失效，逐条叠加，各自独立到期。 */
+  timedBuffs?: { source: string; mult: Partial<ResMap>; until: number }[];
   /** crop 每小时消耗，按来源记（building 人口 / military 耗粮） */
   cropUpkeep: Record<string, number>;
   capacity: ResMap;
@@ -90,6 +92,7 @@ export class EconomyModule {
     this.commands.register('economy.SetBaseRate', (c) => this.setBaseRate(c));
     this.commands.register('economy.SetCapacity', (c) => this.setCapacity(c));
     this.commands.register('economy.SetRateModifier', (c) => this.setRateModifier(c));
+    this.commands.register('economy.ApplyTimedBuff', (c) => this.applyTimedBuff(c));
     this.commands.register('economy.GetCropContext', (c) => this.getCropContext(c));
   }
 
@@ -139,6 +142,10 @@ export class EconomyModule {
         s.baseRate[t] = 0;
       }
     }
+    // 惰性清理已过期的定时 buff（grossRate 本已按 now<until 忽略，这里仅回收内存/落盘体积）
+    if (s.timedBuffs && s.timedBuffs.length) {
+      s.timedBuffs = s.timedBuffs.filter((b) => b.until > now);
+    }
     if (elapsed <= 0) return;
     for (const t of RESOURCE_TYPES) {
       const wasOver = s.resources[t] > s.capacity[t];
@@ -168,10 +175,15 @@ export class EconomyModule {
     }
   }
 
-  /** 毛产率（派生管线叠加加成层）。 */
+  /** 毛产率（派生管线叠加加成层，含未过期定时 buff）。 */
   private grossRate(s: EconomyState, t: ResourceType): number {
     let mult = 1;
     for (const m of s.rateModifiers) mult += m.mult[t] ?? 0;
+    // 定时 buff（祭祀台等）：仅未过期者计入，按各自 until 独立失效
+    const now = this.now();
+    for (const b of s.timedBuffs ?? []) {
+      if (now < b.until) mult += b.mult[t] ?? 0;
+    }
     // baseRate[t] 可能为旧存档缺失的 undefined（如 early 村庄在 gold 字段加入前创建）→ 兜底为 0，避免 NaN 污染
     const base = Number.isFinite(s.baseRate[t]) ? s.baseRate[t] : 0;
     return base * mult;
@@ -367,6 +379,28 @@ export class EconomyModule {
     s.rateModifiers.push({ source, mult });
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /**
+   * 施加一条定时产率 buff（如祭祀台）：持续 durationSec 秒后自动失效。
+   * 与 rateModifiers 独立分层叠加；多条同名 source 各自独立到期（可叠加多次使用）。
+   * 到期无需调度器——grossRate 按 now<until 判断，settle 惰性清理过期项。
+   */
+  private applyTimedBuff(cmd: Command): CommandResult {
+    const { villageId, source, mult, durationSec } = cmd.payload as {
+      villageId: string;
+      source: string;
+      mult: Partial<ResMap>;
+      durationSec: number;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s); // 施加前先结算
+    const dur = Math.max(1, Math.floor(durationSec));
+    s.timedBuffs = (s.timedBuffs ?? []).filter((b) => b.until > this.now());
+    s.timedBuffs.push({ source, mult, until: this.now() + dur * 1000 });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { until: s.timedBuffs[s.timedBuffs.length - 1].until, durationSec: dur } };
   }
 
   /**

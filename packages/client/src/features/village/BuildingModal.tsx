@@ -207,9 +207,11 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
               <div class="trs-mgmt-actions">
                 {isInstant && (
                   <Btn size="sm" variant="primary" onClick={async () => {
-                    const ok = await act(req('UseTreasure', { code: t.code }), {
-                      okToast: `已使用「${t.name}」，获得 ${fmt(info?.effectValue ?? 0)} 金币`,
-                    });
+                    const effectType = (info as any)?.effectType ?? '';
+                    const useToast = effectType === 'ritualBuff'
+                      ? `已使用「${t.name}」，全资源产出 +${fmt(info?.effectValue ?? 0)}%（持续2小时）`
+                      : `已使用「${t.name}」，获得 ${fmt(info?.effectValue ?? 0)} 金币`;
+                    const ok = await act(req('UseTreasure', { code: t.code }), { okToast: useToast });
                     if (!ok) return;
                   }}>
                     使用

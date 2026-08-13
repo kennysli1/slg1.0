@@ -97,6 +97,7 @@ export class PopulationModule {
     this.commands.register('population.GetSnapshot', (c) => this.getSnapshot(c));
     this.commands.register('population.GetLaborMult', (c) => this.getLaborMult(c));
     this.commands.register('population.ConsumePop', (c) => this.consumePop(c));
+    this.commands.register('population.ConsumeLabor', (c) => this.consumeLabor(c));
     this.commands.register('population.ReturnPop', (c) => this.returnPop(c));
     this.commands.register('population.RecoverCasualties', (c) => this.recoverCasualties(c));
     this.commands.register('population.ReleaseTrainingPop', (c) => this.releaseTrainingPop(c));
@@ -619,6 +620,28 @@ export class PopulationModule {
     } as DomainEvent);
 
     return { ok: true, payload: { ok: true, consumed: Math.round(cost) } };
+  }
+
+  /**
+   * 祭祀台等消耗型效果：扣除 amount 个劳动人口（平民）。
+   * 不足部分不在此扣（由调用方转扣士兵人口，见 military.SacrificeTroops）。
+   * 返回 { consumed: 实际扣掉的劳动人口, remaining: 仍缺的人口 }。
+   */
+  private async consumeLabor(cmd: Command): Promise<CommandResult> {
+    const { villageId, amount } = cmd.payload as { villageId: string; amount: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    await this.settle(s);
+    const want = Math.max(0, Math.floor(amount));
+    const consumed = Math.min(want, s.currentPop);
+    s.currentPop = Math.max(0, s.currentPop - consumed);
+    await this.reportToEconomy(s);
+    this.store.set(COLLECTION, villageId, s);
+    await this.bus.emit({
+      name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
+      payload: { ...this.publicPayload(s), event: 'consumed_labor', consumed: Math.round(consumed) },
+    } as DomainEvent);
+    return { ok: true, payload: { consumed: Math.round(consumed), remaining: Math.max(0, want - consumed) } };
   }
 
   /**

@@ -779,21 +779,59 @@ export class TreasureModule {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
     if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
-    if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     const t = this.config.treasures[code];
-    if (!t || t.applyType !== 'instant' || t.effectType !== 'instantGold') {
-      return { ok: false, payload: {}, reason: 'not_usable' };
-    }
-    const gold = t.effectValue;
+    // 先校验可用性再移除，避免「不可用也吞宝物」的旧隐患
+    if (!t || t.applyType !== 'instant') return { ok: false, payload: {}, reason: 'not_usable' };
+    if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     this.store.set(COLLECTION, villageId, s);
-    // 发放金币（单向 Grant，无环）
-    await this.commands.send({
-      name: 'economy.Grant', from: TreasureModule.NAME,
-      payload: { villageId, gain: { gold } },
-    });
-    await this.recomputeAndPush(villageId);
-    await this.emitChanged(villageId);
-    return { ok: true, payload: { gold, codes: this.storedCodes(s) } };
+
+    if (t.effectType === 'instantGold') {
+      const gold = t.effectValue;
+      // 发放金币（单向 Grant，无环）
+      await this.commands.send({
+        name: 'economy.Grant', from: TreasureModule.NAME,
+        payload: { villageId, gain: { gold } },
+      });
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { gold, codes: this.storedCodes(s) } };
+    }
+
+    if (t.effectType === 'ritualBuff') {
+      // 祭祀台：扣除劳动人口（不足转扣士兵）→ 全资源产量 +buffPct% 持续 durationSec 秒
+      const c = this.config.constants;
+      const popCost = c.ritualBuffPopCost ?? 5;
+      const buffPct = t.effectValue;
+      const durationSec = c.ritualBuffDurationSec ?? 7200;
+      const labor = await this.commands.send({
+        name: 'population.ConsumeLabor', from: TreasureModule.NAME,
+        payload: { villageId, amount: popCost },
+      });
+      const laborConsumed = Number((labor.payload as any)?.consumed ?? 0);
+      const remaining = Number((labor.payload as any)?.remaining ?? 0);
+      let sacrificed: Record<string, number> = {};
+      if (remaining > 0) {
+        const sac = await this.commands.send({
+          name: 'military.SacrificeTroops', from: TreasureModule.NAME,
+          payload: { villageId, popNeed: remaining },
+        });
+        sacrificed = ((sac.payload as any)?.removed ?? {}) as Record<string, number>;
+      }
+      const frac = buffPct / 100;
+      const mult = { wood: frac, clay: frac, iron: frac, crop: frac };
+      await this.commands.send({
+        name: 'economy.ApplyTimedBuff', from: TreasureModule.NAME,
+        payload: { villageId, source: 'ritual', mult, durationSec },
+      });
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return {
+        ok: true,
+        payload: { buffPct, durationSec, laborConsumed, sacrificed, codes: this.storedCodes(s) },
+      };
+    }
+
+    return { ok: false, payload: {}, reason: 'not_usable' };
   }
 
   /**
@@ -815,6 +853,11 @@ export class TreasureModule {
     });
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    // 任务目标「出售/丢弃稀有+宝物」：广播出售事件供任务模块计数
+    await this.bus.emit({
+      name: 'treasure.SoldDiscarded', source: TreasureModule.NAME, ts: this.now(),
+      payload: { villageId, code, rarity: t.rarity, via: 'sell' },
+    } as DomainEvent);
     return { ok: true, payload: { gold, codes: this.storedCodes(s) } };
   }
 
@@ -823,10 +866,18 @@ export class TreasureModule {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
     if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
+    const t = this.config.treasures[code];
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    // 任务目标「出售/丢弃稀有+宝物」：广播丢弃事件供任务模块计数
+    if (t) {
+      await this.bus.emit({
+        name: 'treasure.SoldDiscarded', source: TreasureModule.NAME, ts: this.now(),
+        payload: { villageId, code, rarity: t.rarity, via: 'discard' },
+      } as DomainEvent);
+    }
     return { ok: true, payload: { codes: this.storedCodes(s) } };
   }
 

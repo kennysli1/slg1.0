@@ -15,6 +15,9 @@
 
 ### 新增
 
+- 任务系统新增「触发条件」：`quests.csv` 增加 `trigger` 列，随机任务可设 `building_built:<建筑code>`（建造完成该建筑后才进酒馆）；服务端 `tasks` 监听 `building.Built` 标记触发并立即 offer，`TaskState.firedTriggers` 持久化，GM 任务目录编辑器展示 trigger 列与说明。新增任务目标 `sell_discard_treasure`（累计出售/丢弃 N 个稀有及以上品质宝物）：`treasure.Sell/Discard` 广播 `treasure.SoldDiscarded`，`tasks` 计数推进并完成后发奖；客户端任务卡显示目标与进度。
+- 新增宝物「祭祀台」（`ritual_altar`，`ritualBuff`）：使用后扣除 `ritual_buff_pop_cost` 个劳动人口（不足按 popCost 升序转扣士兵、允许超扣），获得全资源产量 +25% 持续 `ritual_buff_duration_sec`（默认 2 小时）。`economy` 新增定时 buff 层（`ApplyTimedBuff`，到期自动失效、重启自愈），`population.ConsumeLabor` / `military.SacrificeTroops` 支撑人口扣除；即时类任务奖励宝物改为不锁定（供玩家使用），GM 新增 `/gm/ops/sell-treasure`、`/gm/ops/discard-treasure`。
+- 新增任务「献祭筹备」(`r4`)：触发条件=建造完成宝库，目标=出售/丢弃 2 个稀有+宝物，奖励=祭祀台。
 - 修复 任务营地可见性泄露与越权攻击：任务营地改为写入独立地块类型 `taskcamp`（不再混入全局 `pve`），`world.getArea` 过滤该类型，仅任务拥有者经 `taskMarkers`(🎯) 可见，其他玩家地图与行军均看不到/误击；`findFreeTile` 天然跳过占用格避免营地冲突。新增 `pve` 任务营地 `ownerVillageId` 归属，`movement.SendRaid` 校验仅拥有者本村可攻击任务营地（越权返回 `not_task_owner`）。
 - 新增 15 张科技节点战术徽记，补齐 `research.csv` 的全部美术引用；科技树不再退化为文字占位图标。
 - 新增测试入口登记、推送映射一致性与 GM HTTP 路由闸口，避免测试静默漏跑、推送契约漂移及危险路由绕过鉴权。
