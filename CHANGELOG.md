@@ -89,6 +89,7 @@
 - 地图拖拽、双指移动或缩放导致主城偏离中心后，方向键中央的回城键会立即启用并可一键重新居中
 - 伯乐翻倍改兵力后未重新核算驻军人口足迹（只靠 `ConvertPopToGarrison` 手动累加 `garrisonPopCost`），导致与解散/训练的 `reportGarrisonPop` 重算口径不一致、账目漂移，解散骑兵时人口返还偏多/偏少。现伯乐翻倍后补 `reportGarrisonPop`，按 troops 重新核算足迹，与其它改兵力路径对齐。
 - 解散返还人口钳制口径错误：`population.ReturnPop` 之前把 `currentPop` 钳到 `hardCap`（总上限），有驻军时会超出「硬上限−士兵足迹」的实际平民上限（popCeiling），导致解散后 totalPop 超上限。改为钳到 `popCeiling`（`hardCap − soldierFootprint`）。
+- 资源栏人口悬浮框的「人口增长受露天仓库溢出扣减」提示未生效：客户端 `applyPopPayload`（refresh.ts）逐字段 pick 时漏了 `overflowRatio`，导致服务端下发的溢出系数永远到不了 `PopSnapshot`。补上 `overflowRatio` 的 pick，人口格/人口面板的溢出警告与增速扣减得以正常显示。
 
 ### 移除
 
