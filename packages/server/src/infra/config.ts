@@ -1334,6 +1334,18 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
   }
 
+  // 科技效果类型白名单校验：新增 effectType 必须先在源码中接线，否则启动报错
+  const KNOWN_TECH_EFFECT_TYPES = new Set([
+    'resource_rate', 'unit_unlock', 'building_unlock', 'combat_atk', 'combat_def',
+    'pop_growth', 'storage_cap', 'train_speed', 'build_speed', 'march_speed',
+    'carry_cap', 'mechanism',
+  ]);
+  for (const t of Object.values(config.research)) {
+    if (!KNOWN_TECH_EFFECT_TYPES.has(t.effectType)) {
+      errors.push(`research.csv[${t.code}] effectType=${t.effectType} 不在白名单中——请先在 research.ts applyTech 或相关模块中添加处理逻辑`);
+    }
+  }
+
   // 任务系统校验
   const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];

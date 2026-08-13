@@ -16,6 +16,7 @@
 
 ### 新增
 
+- 恢复两条被部署 reset 丢失的科技（从 `_auth` 副本 git 历史重建）：**全民皆兵**（`universal_conscription`，完成时 `population.SetConscriptionMult` 提升动员上限比例）+ **露天仓库**（`open_warehouse`，`storage_overflow` 机制 + `economy.SetOverflowCap` 溢出系数 + 满仓时人口增长扣减）。同时恢复：`build_speed` 科技效果注入（`building.SetBuildSpeedMult` 缓存 + 建造时间/估算生效）、`research` 重启后重新 apply 已完成科技效果、科技/宝物效果类型启动期白名单校验、`research.GetTechMult` 查询命令。
 - 新增宝物「伯乐」（`bole`，`cavalryTrainSpeed`，id 19）：被动=骑兵训练时间减半（`military.treasureCavalryTrainMult`，`treasures.aggregate` 按 `1-effectValue/100` 累乘、`recomputeAndPush` **总是下发**避免移除后残留）；使用=按现有骑兵等比例翻倍（`military.DuplicateCavalry`：查资源/劳动人口算 95% 安全 ratio → `economy.TrySpend` 扣资源 → `population.ConvertPopToGarrison` 直接转劳动人口为驻军，不走训练预留通道），客户端「使用」按钮按 `effectType` 分派并展示翻倍明细 toast。此宝物曾在 8/11 以未提交改动被部署 reset 回滚丢失，本次从 `_auth` 副本 git 历史完整恢复并以新 id 重建。
 - 任务系统新增「触发条件」：`quests.csv` 增加 `trigger` 列，随机任务可设 `building_built:<建筑code>`（建造完成该建筑后才进酒馆）；服务端 `tasks` 监听 `building.Built` 标记触发并立即 offer，`TaskState.firedTriggers` 持久化，GM 任务目录编辑器展示 trigger 列与说明。新增任务目标 `sell_discard_treasure`（累计出售/丢弃 N 个稀有及以上品质宝物）：`treasure.Sell/Discard` 广播 `treasure.SoldDiscarded`，`tasks` 计数推进并完成后发奖；客户端任务卡显示目标与进度。
 - 新增宝物「祭祀台」（`ritual_altar`，`ritualBuff`）：使用后扣除 `ritual_buff_pop_cost` 个劳动人口（不足按 popCost 升序转扣士兵、允许超扣），获得全资源产量 +25% 持续 `ritual_buff_duration_sec`（默认 2 小时）。`economy` 新增定时 buff 层（`ApplyTimedBuff`，到期自动失效、重启自愈），`population.ConsumeLabor` / `military.SacrificeTroops` 支撑人口扣除；即时类任务奖励宝物改为不锁定（供玩家使用），GM 新增 `/gm/ops/sell-treasure`、`/gm/ops/discard-treasure`。

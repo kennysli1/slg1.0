@@ -15,3 +15,5 @@
 13,diplomacy,外交学,social,2,code_of_laws,解锁贸易路线扩展，行军速度+10%,march_speed,,0.10,player,7200,8,tech_diplomacy
 14,urban_planning,城市规划,social,2,cultural_exchange,解锁新建筑，建造速度+10%,build_speed,all,0.10,village,7200,8,tech_urban
 15,imperial_authority,帝国权威,social,3,diplomacy|urban_planning,所有村庄人口上限+10%(机制),mechanism,imperial_pop_boost,,player,10800,15,tech_imperial
+16,open_warehouse,露天仓库,social,2,code_of_laws,溢出存储：掠夺/购买/转交资源可超出容量100%，满仓时资源田停产人口增长扣减,mechanism,storage_overflow,1.0,village,7200,8,tech_warehouse
+17,universal_conscription,全民皆兵,social,3,imperial_authority,减少15%最低劳动人口占比，更多平民可训练为士兵（动员上限提升）,mechanism,universal_conscription,0.15,village,10800,12,tech_conscription

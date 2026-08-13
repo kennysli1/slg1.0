@@ -43,6 +43,12 @@ interface EconomyState {
   cropUpkeep: Record<string, number>;
   capacity: ResMap;
   /**
+   * 溢出系数：0=不可溢出（Grant 超额丢弃），>0 时有效上限=capacity×(1+overflowCap)。
+   * 露天仓库科技（storage_overflow）完成时由 research 模块通过 SetOverflowCap 注入。
+   * 旧存档无此字段 → 兜底 0。
+   */
+  overflowCap?: number;
+  /**
    * 上次 settle 时是否处于粮食赤字（crop<=0 且净产率<0）。
    * 用于边沿触发：只在从 false→true 时才 emit CropDeficit，避免每次 settle 都触发。
    * 旧存档无此字段，默认 false（视为非赤字状态，下次 settle 若赤字则正常触发）。
@@ -93,6 +99,7 @@ export class EconomyModule {
     this.commands.register('economy.SetCapacity', (c) => this.setCapacity(c));
     this.commands.register('economy.SetRateModifier', (c) => this.setRateModifier(c));
     this.commands.register('economy.ApplyTimedBuff', (c) => this.applyTimedBuff(c));
+    this.commands.register('economy.SetOverflowCap', (c) => this.setOverflowCap(c));
     this.commands.register('economy.GetCropContext', (c) => this.getCropContext(c));
   }
 
@@ -227,9 +234,11 @@ export class EconomyModule {
         resources: { ...s.resources },
         capacity: { ...s.capacity },
         netRate, // 每秒
+        rawRate: { wood: this.grossRate(s, 'wood') * 3600, clay: this.grossRate(s, 'clay') * 3600, iron: this.grossRate(s, 'iron') * 3600, crop: this.grossRate(s, 'crop') * 3600 },
         cropUpkeep: upkeep, // 每小时
         overCapacity,       // 各资源超出容量的量（0=未超额）
         productionPaused,   // 超额则该资源生产暂停
+        overflowCap: s.overflowCap ?? 0,  // 溢出系数（露天仓库科技）
       },
     };
   }
@@ -403,6 +412,17 @@ export class EconomyModule {
     return { ok: true, payload: { until: s.timedBuffs[s.timedBuffs.length - 1].until, durationSec: dur } };
   }
 
+  /** 露天仓库科技：设置溢出系数。0=不可溢出（Grant 超额丢弃），1.0=可溢出 100%。 */
+  private setOverflowCap(cmd: Command): CommandResult {
+    const { villageId, cap } = cmd.payload as { villageId: string; cap: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    this.settle(s);
+    s.overflowCap = Number.isFinite(cap) ? Math.max(0, cap) : 0;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { overflowCap: s.overflowCap } };
+  }
+
   /**
    * 只读查询「粮食上下文」（供 population 模块计算软上限，无回调，无环）。
    * 返回：
@@ -424,6 +444,15 @@ export class EconomyModule {
     const nonCivilianUpkeep = Object.entries(s.cropUpkeep)
       .filter(([src]) => src !== 'civilian_pop')
       .reduce((sum, [, v]) => sum + v, 0);
+    // 存储溢出比例：四资源 (resources - capacity) / capacity 的均值。
+    // 均值=1.0 → 四种资源全部溢出100% → 人口增长停止。
+    let overflowSum = 0;
+    for (const t of ['wood', 'clay', 'iron', 'crop'] as const) {
+      const over = Math.max(0, (s.resources[t] ?? 0) - (s.capacity[t] ?? 0));
+      const cap = Math.max(1, s.capacity[t] ?? 0);
+      overflowSum += Math.min(over / cap, 1); // 单项溢出率封顶 100%
+    }
+    const overflowRatio = overflowSum / 4;
     return {
       ok: true,
       payload: {
@@ -433,6 +462,7 @@ export class EconomyModule {
         nonCivilianUpkeep,
         currentCrop: s.resources.crop,
         cropCapacity: s.capacity.crop,
+        overflowRatio,
       },
     };
   }

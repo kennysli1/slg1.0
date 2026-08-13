@@ -108,6 +108,7 @@ export class ResearchModule {
     this.commands.register('research.GetTechTree', (c: Command) => this.getTechTree(c));
     this.commands.register('research.StartResearch', (c: Command) => this.startResearch(c));
     this.commands.register('research.CancelResearch', (c: Command) => this.cancelResearch(c));
+    this.commands.register('research.GetTechMult', (c: Command) => this.getTechMult(c));
 
     // 学院建造/升级/拆除 → 刷新 academy 参数并重调度 RP
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -126,6 +127,12 @@ export class ResearchModule {
     // 注册首批默认机制
     registerMechanism('imperial_pop_boost', (ctx) => {
       void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, mult: ctx.tech.effectValue } });
+    });
+    registerMechanism('storage_overflow', (ctx) => {
+      void ctx.commands.send({ name: 'economy.SetOverflowCap', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, cap: ctx.tech.effectValue } });
+    });
+    registerMechanism('universal_conscription', (ctx) => {
+      void ctx.commands.send({ name: 'population.SetConscriptionMult', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, bonus: Number(ctx.tech.effectValue) } });
     });
   }
 
@@ -147,6 +154,11 @@ export class ResearchModule {
         }
       }
       // 惰性回溯 RP 生产（onAcademyChanged 已包含 settleRp 调用）
+      // 重新应用已完成的科技效果（服务器重启后各模块需要重新注入）
+      for (const code of s.completed) {
+        const tech = this.config.research[code];
+        if (tech) this.applyTech(s.villageId, tech);
+      }
     }
   }
 
@@ -287,7 +299,18 @@ export class ResearchModule {
           MechanismRegistry[key]({ villageId, tech: { code: tech.code, effectKey: key, effectValue: v }, commands: this.commands, bus: this.bus });
         }
         break;
-      // unit_unlock / building_unlock / train_speed / build_speed / march_speed / carry_cap
+      // build_speed：完成时把已完成科技效果总和推送到 building 模块缓存
+      case 'build_speed': {
+        const s = this.ensureState(villageId);
+        let total = 0;
+        for (const code of s.completed) {
+          const t2 = this.config.research[code];
+          if (t2 && t2.effectType === 'build_speed') total += t2.effectValue ?? 0;
+        }
+        void this.commands.send({ name: 'building.SetBuildSpeedMult', from: ResearchModule.NAME, payload: { villageId, mult: total } });
+        break;
+      }
+      // unit_unlock / building_unlock / train_speed / march_speed / carry_cap
       // 这些由各模块在查询时读取 research.completed 列表来判定（门控模式），不需要 push 注入
       default: break;
     }
@@ -414,5 +437,17 @@ export class ResearchModule {
 
   private async pushRp(villageId: string, rp: number): Promise<void> {
     await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp } });
+  }
+
+  /** 查询指定效果类型的已完成科技效果值总和（供 building/military 等模块计算时查询）。 */
+  private getTechMult(cmd: Command): CommandResult {
+    const { villageId, effectType } = cmd.payload as { villageId: string; effectType: string };
+    const s = this.ensureState(villageId);
+    let total = 0;
+    for (const code of s.completed) {
+      const t = this.config.research[code];
+      if (t && t.effectType === effectType) total += t.effectValue ?? 0;
+    }
+    return { ok: true, payload: { mult: total } };
   }
 }

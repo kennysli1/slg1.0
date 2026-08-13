@@ -44,6 +44,8 @@ interface BuildingState {
   tribe: string;
   placed: PlacedBuilding[];
   queue: QueueItem[];
+  /** build_speed 科技效果总和（如城市规划 0.5 → timeSec /= 1.5）。由 research.TechCompleted 推送更新。旧存档无此字段默认 0。 */
+  techBuildSpeed?: number;
 }
 
 const COLLECTION = 'building';
@@ -109,6 +111,7 @@ export class BuildingModule {
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
+    this.commands.register('building.SetBuildSpeedMult', (c) => this.setBuildSpeedMult(c));
   }
 
   /** 重启恢复：先把旧存档建筑 zone/slotId 对齐到当前 CSV（迁移），再为未完成队列登记定时任务。 */
@@ -336,6 +339,10 @@ export class BuildingModule {
     } catch {
       // population 模块尚未就绪时静默忽略，用不带加速的时间
     }
+    // 科技建造加速（build_speed）：从缓存读取（由 research.TechCompleted 推送更新）
+    if (s.techBuildSpeed && s.techBuildSpeed > 0) {
+      timeSec = Math.max(1, Math.round(timeSec / (1 + s.techBuildSpeed)));
+    }
     return timeSec;
   }
 
@@ -375,7 +382,9 @@ export class BuildingModule {
         totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
       }
       const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
-      return Math.max(1, Math.round(baseSec * speedup));
+      let est = Math.max(1, Math.round(baseSec * speedup));
+      if (s.techBuildSpeed && s.techBuildSpeed > 0) est = Math.max(1, Math.round(est / (1 + s.techBuildSpeed)));
+      return est;
     };
     return {
       ok: true,
@@ -427,7 +436,9 @@ export class BuildingModule {
         totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
       }
       const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
-      return Math.max(1, Math.round(baseSec * speedup));
+      let est = Math.max(1, Math.round(baseSec * speedup));
+      if (s.techBuildSpeed && s.techBuildSpeed > 0) est = Math.max(1, Math.round(est / (1 + s.techBuildSpeed)));
+      return est;
     };
         const placed = s.placed
       .filter((p) => p.zone === zone)
@@ -474,7 +485,9 @@ export class BuildingModule {
         totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
       }
       const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
-      return Math.max(1, Math.round(baseSec * speedup));
+      let est = Math.max(1, Math.round(baseSec * speedup));
+      if (s.techBuildSpeed && s.techBuildSpeed > 0) est = Math.max(1, Math.round(est / (1 + s.techBuildSpeed)));
+      return est;
     };
     const options = Object.values(this.config.buildings)
       .filter((def) => def.zone === zone)
@@ -755,5 +768,15 @@ export class BuildingModule {
       prosperity += p.level * def.prosperityPerLevel;
     }
     return { ok: true, payload: { prosperity } };
+  }
+
+  /** 科技推送：更新 build_speed 效果值缓存，供同步估算使用。 */
+  private setBuildSpeedMult(cmd: Command): CommandResult {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techBuildSpeed = Number.isFinite(mult) ? mult : 0;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
   }
 }

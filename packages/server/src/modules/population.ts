@@ -54,6 +54,10 @@ interface PopulationState {
   techGrowthMult?: number;
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
   treasureGoldMult?: number;
+  /** 存储溢出扣减系数（0=无溢出；1=全部100%溢出），由 settle 更新后供 publicPayload 显示用。旧存档无此字段默认 0。 */
+  storedOverflowRatio?: number;
+  /** 动员加成（默认 0；全民皆兵 +0.15）。mobilizeCap = base + conscriptionBonus。旧存档无此字段默认 0。 */
+  conscriptionBonus?: number;
   lastTick: number;
 }
 
@@ -107,6 +111,7 @@ export class PopulationModule {
     // 宝物模块推送的人口增长倍率（乘数），无环（treasure 只发命令，不回查）
     this.commands.register('population.SetTreasureGrowthMult', (c) => this.setTreasureGrowthMult(c));
     this.commands.register('population.SetTechGrowthMult', (c) => this.setTechGrowthMult(c));
+    this.commands.register('population.SetConscriptionMult', (c) => this.setConscriptionMult(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -255,10 +260,12 @@ export class PopulationModule {
     return Math.max(0, s.hardCap - this.soldierFootprint(s));
   }
 
-  /** 本部族最大动员比例（士兵占总人口上限）：条顿0.80/高卢0.70/罗马0.75。 */
+  /** 本部族最大动员比例（士兵占总人口上限）：条顿0.80/高卢0.70/罗马0.75 + 全民皆兵加成。 */
   private mobilizeCap(s: PopulationState): number {
     const rm = this.config.constants.popRaceMobilizeMax;
-    return (rm as Record<string, number>)[s.tribe] ?? rm.romans;
+    const base = (rm as Record<string, number>)[s.tribe] ?? rm.romans;
+    const bonus = s.conscriptionBonus ?? 0;
+    return base + bonus;
   }
 
   /**
@@ -349,10 +356,17 @@ export class PopulationModule {
     const c = this.config.constants;
 
     const ceiling = this.popCeiling(s);
+    // 存储溢出惩罚：查询 economy 是否有资源超出容量（露天仓库科技相关）
+    let overflowRatio = 0;
+    try {
+      const ctxRes = await this.commands.send({ name: 'economy.GetCropContext', from: PopulationModule.NAME, payload: { villageId: s.villageId } });
+      if (ctxRes.ok) { overflowRatio = Math.min(1, (ctxRes.payload as any).overflowRatio ?? 0); }
+    } catch { /* 查询失败不阻塞 */ }
+    s.storedOverflowRatio = overflowRatio;
     // 粮荒期间不增长（减员路径由 runStarveTick 独占），避免与减员相互抵消导致人口卡在平衡点。
     // 增长目标 = 增长上限 popCeiling（硬上限 − 士兵足迹）：平民(劳动人口)朝它收敛，士兵足迹不占增长空间。
     if (!s.inFamine && s.currentPop < ceiling) {
-      const grow = Math.min(ceiling - s.currentPop, this.growthRateRaw(s) * dtHours);
+      const grow = Math.min(ceiling - s.currentPop, this.growthRateRaw(s) * dtHours * (1 - overflowRatio));
       s.currentPop = Math.min(ceiling, s.currentPop + grow);
     }
     s.currentPop = Math.max(0, s.currentPop);
@@ -405,9 +419,9 @@ export class PopulationModule {
       laborRatio: Math.round(ratio * 100) / 100,
       prosperityBonus: Math.round(bonus * 100) / 100,
       prosperityMult: Math.round(mult * 100) / 100,
-      growthPerHour: Math.round(growth),
+      growthPerHour: Math.max(0, Math.round(growth * (1 - (s.storedOverflowRatio ?? 0)))),
       /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
-      potentialGrowthPerHour: Math.round(this.growthRateRaw(s)),
+      potentialGrowthPerHour: Math.round(this.growthRateRaw(s) * (1 - (s.storedOverflowRatio ?? 0))),
       /** 本部族最大动员比例（士兵占总人口上限）；用于前端展示/校验。 */
       mobilizeCap: this.mobilizeCap(s),
       /** 繁荣度满值阈值（平民占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
@@ -417,6 +431,8 @@ export class PopulationModule {
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,
       /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
       goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour * (s.treasureGoldMult ?? 1)),
+      /** 存储溢出扣减系数（0~1）。前端据此显示人口增长被扣减的原因。 */
+      overflowRatio: Math.round((s.storedOverflowRatio ?? 0) * 100) / 100,
     };
   }
 
@@ -796,6 +812,16 @@ export class PopulationModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.techGrowthMult = Number.isFinite(mult) && mult > 0 ? (1 + mult) : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /** 全民皆兵科技：提升动员上限比例（加法）。mobilizeCap = base + bonus。 */
+  private async setConscriptionMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, bonus } = cmd.payload as { villageId: string; bonus: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.conscriptionBonus = Number.isFinite(bonus) ? bonus : 0;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
