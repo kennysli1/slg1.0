@@ -196,13 +196,19 @@ export class EconomyModule {
     return base * mult;
   }
 
-  /** 净产率：超额时毛产=0；crop 仍减每秒消耗。 */
+  /**
+   * 净产率。满仓(≥容量)时生产先抵消耗、多余丢弃（净变化 ≤0，不增长），
+   * 而不是「生产归零 + 仍减消耗」——避免满仓资源被消耗拖出锯齿波动。
+   * 未满仓：正常 gross − 消耗。消耗仅 crop 有（口粮 upkeep），其余资源为 0。
+   */
   private netRate(s: EconomyState, t: ResourceType): number {
-    const over = s.resources[t] > s.capacity[t];
-    const gross = over ? 0 : this.grossRate(s, t);
-    if (t !== 'crop') return gross;
-    const upkeepPerHour = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);
-    return gross - upkeepPerHour / 3600;
+    const gross = this.grossRate(s, t);
+    const consumption = t === 'crop'
+      ? Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0) / 3600
+      : 0;
+    if (s.resources[t] < s.capacity[t]) return gross - consumption;
+    // 满仓：生产先抵消耗；仅当消耗 > 生产时才减少（如粮食被吃下去）
+    return Math.min(0, gross - consumption);
   }
 
   private load(villageId: string): EconomyState | undefined {
