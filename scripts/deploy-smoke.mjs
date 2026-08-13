@@ -125,6 +125,9 @@ class WireClient {
 async function verifyFrontend(baseUrl) {
   const health = await fetchOk(`${baseUrl}/health`, 'application/json');
   assert(JSON.parse(Buffer.from(health.bytes).toString('utf8')).ok === true, '健康检查内容异常');
+  const version = await fetchOk(`${baseUrl}/version`, 'application/json');
+  const versionBody = JSON.parse(Buffer.from(version.bytes).toString('utf8'));
+  assert(typeof versionBody?.buildId === 'string' && versionBody.buildId.length > 0, '版本探针缺少 buildId');
   const index = await fetchOk(`${baseUrl}/`, 'text/html');
   const html = Buffer.from(index.bytes).toString('utf8');
   assert(html.includes('id="app"'), '生产首页缺少 #app 挂载点');

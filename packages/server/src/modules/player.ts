@@ -6,7 +6,7 @@ import type { ModuleManifest } from '../gateway/manifest.js';
 import type { GameConfig } from '../infra/config.js';
 import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
 import { hexKey, hexDistanceWrapped, wrapHex } from '../infra/hex.js';
-import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { promisify } from 'node:util';
 
 const scryptAsync = promisify(scrypt);
@@ -73,6 +73,7 @@ const COLLECTION_BYNAME = 'player_byname';
 const COLLECTION_BYVILLAGE = 'player_byvillage';
 
 const VALID_TRIBES = ['romans', 'gauls', 'teutons'];
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 async function hashPassword(pwd: string): Promise<string> {
   const salt = randomBytes(16);
@@ -86,6 +87,27 @@ async function verifyPassword(pwd: string, stored: string): Promise<boolean> {
   const hash = await scryptAsync(pwd, Buffer.from(saltHex, 'hex'), 32) as Buffer;
   const expected = Buffer.from(hashHex, 'hex');
   return hash.length === expected.length && timingSafeEqual(hash, expected);
+}
+
+/**
+ * 无需新增存档的持久会话：账号密码哈希同时充当每个账号独立的签名密钥。
+ * 将来改密码后，所有旧会话会自然失效。
+ */
+function signSession(playerId: string, expiresAt: number, passwordHash: string): string {
+  const body = `${playerId}.${expiresAt}`;
+  const mac = createHmac('sha256', passwordHash).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
+
+function validSessionToken(token: string, p: PlayerState, now: number): boolean {
+  const [playerId, expiresRaw, suppliedMac, extra] = token.split('.');
+  if (extra !== undefined || playerId !== p.id || !expiresRaw || !suppliedMac) return false;
+  const expiresAt = Number(expiresRaw);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return false;
+  const expectedMac = createHmac('sha256', p.pwd).update(`${playerId}.${expiresAt}`).digest();
+  let supplied: Buffer;
+  try { supplied = Buffer.from(suppliedMac, 'base64url'); } catch { return false; }
+  return supplied.length === expectedMac.length && timingSafeEqual(supplied, expectedMac);
 }
 
 export class PlayerModule {
@@ -107,6 +129,13 @@ export class PlayerModule {
         schema: {
           name:     { type: 'string', minLen: 1, maxLen: 64 },
           password: { type: 'string', minLen: 1, maxLen: 64 },
+        },
+      },
+      ResumeSession: {
+        command: 'player.ResumeSession',
+        schema: {
+          token: { type: 'string', minLen: 1, maxLen: 256 },
+          currentVillageId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
         },
       },
       SelectVillage: {
@@ -163,6 +192,7 @@ export class PlayerModule {
     this.normalizeCoords();
     this.commands.register('player.Register', (c) => this.register(c));
     this.commands.register('player.Login', (c) => this.login(c));
+    this.commands.register('player.ResumeSession', (c) => this.resumeSession(c));
     this.commands.register('player.Get', (c) => this.get(c));
     this.commands.register('player.GetByVillage', (c) => this.getByVillage(c));
     this.commands.register('player.SelectVillage', (c) => this.selectVillage(c));
@@ -273,7 +303,7 @@ export class PlayerModule {
       this.store.set(COLLECTION, id, p);
       this.store.set(COLLECTION_BYNAME, clean, id);
       this.store.set(COLLECTION_BYVILLAGE, villageId, id);
-      return { ok: true, payload: { player: this.publicPlayer(p) } };
+      return { ok: true, payload: this.authPayload(p) };
     };
 
     if (this.serialQueue) {
@@ -290,7 +320,20 @@ export class PlayerModule {
     const p = this.load(id);
     if (!p) return { ok: false, payload: {}, reason: 'no_such_user' };
     if (!await verifyPassword(password ?? '', p.pwd)) return { ok: false, payload: {}, reason: 'wrong_password' };
-    return { ok: true, payload: { player: this.publicPlayer(p) } };
+    return { ok: true, payload: this.authPayload(p) };
+  }
+
+  private resumeSession(cmd: Command): CommandResult {
+    const { token, currentVillageId } = cmd.payload as { token: string; currentVillageId?: string };
+    const playerId = token.split('.', 1)[0] ?? '';
+    const p = this.load(playerId);
+    if (!p || !validSessionToken(token, p, this.now())) {
+      return { ok: false, payload: {}, reason: 'invalid_session' };
+    }
+    const current = currentVillageId && p.ownedVillages.some((v) => v.id === currentVillageId)
+      ? currentVillageId
+      : p.capitalVillageId;
+    return { ok: true, payload: this.authPayload(p, current) };
   }
 
   private get(cmd: Command): CommandResult {
@@ -502,6 +545,13 @@ export class PlayerModule {
         name: v.name,
         isCapital: v.id === p.capitalVillageId,
       })),
+    };
+  }
+
+  private authPayload(p: PlayerState, currentVillageId?: string) {
+    return {
+      player: this.publicPlayer(p, currentVillageId),
+      sessionToken: signSession(p.id, this.now() + SESSION_TTL_MS, p.pwd),
     };
   }
 

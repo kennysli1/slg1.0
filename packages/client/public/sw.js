@@ -6,7 +6,7 @@
  * - WebSocket / 非 GET / 跨域：完全不拦截，直接放行（游戏实时通信不受影响）
  */
 /* 视觉重构换了全套美术与样式，必须升 CACHE 名把旧壳与旧图整体作废 */
-const CACHE = 'kow-v2';
+const CACHE = 'kow-v3';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -27,6 +27,12 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // 版本探针必须直达网络，否则缓存会让旧页面无法发现新部署。
+  if (url.pathname === '/version' || url.pathname === '/version.json' || url.pathname === '/sw.js') {
+    event.respondWith(fetch(req));
+    return;
+  }
 
   // 导航（HTML）：优先网络，离线回退壳
   if (req.mode === 'navigate') {

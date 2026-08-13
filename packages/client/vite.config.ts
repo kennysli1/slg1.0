@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
 
+const buildId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 export default defineConfig({
-  plugins: [preact()],
+  plugins: [
+    preact(),
+    {
+      name: 'build-version',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId }) });
+      },
+    },
+  ],
   server: {
     port: 5173,
     proxy: {
@@ -11,4 +21,7 @@ export default defineConfig({
     },
   },
   build: { outDir: 'dist' },
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+  },
 });
