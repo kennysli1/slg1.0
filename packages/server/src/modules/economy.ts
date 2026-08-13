@@ -196,9 +196,9 @@ export class EconomyModule {
     return base * mult;
   }
 
-  /** 净产率：超额时毛产=0；crop 仍减每秒消耗。 */
+  /** 净产率：满仓(≥容量)时毛产=0；crop 仍减每秒消耗。 */
   private netRate(s: EconomyState, t: ResourceType): number {
-    const over = s.resources[t] > s.capacity[t];
+    const over = s.resources[t] >= s.capacity[t];
     const gross = over ? 0 : this.grossRate(s, t);
     if (t !== 'crop') return gross;
     const upkeepPerHour = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);

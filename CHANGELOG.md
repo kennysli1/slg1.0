@@ -17,6 +17,7 @@
 ### 新增
 
 - 恢复批量被部署 reset 丢失的科技与配套功能（从 `_auth` 副本 git 历史重建）：**全民皆兵**（`universal_conscription`）+ **露天仓库**（`open_warehouse`，`storage_overflow` 机制，无该科技时 `economy.Grant` 超额资源被丢弃、有科技可溢出至 `capacity×(1+overflowCap)`，`productionPaused` 满仓即停产，客户端人口面板溢出警告）。同时恢复 `build_speed` 科技注入、`research` 重启重新 apply、科技/宝物效果白名单校验、`trade` 热重载重排刷新/宝物出现改 dropRate 权重、打野宝物未归村隐藏信息、客户端科技页无学院锁屏。同步更新相关测试对齐超额语义。
+- 修复 满仓时仍显示产量但不产出：`productionPaused` 已改满仓即停产，但 `netRate` 的超额判断仍是严格 `>`（恰好顶到容量时仍返回正产率）。已把 `netRate` 的超额判断改为 `>=`，满仓/超额时毛产=0，与 `productionPaused` 一致。
 
 - 新增宝物「伯乐」（`bole`，`cavalryTrainSpeed`，id 19）：被动=骑兵训练时间减半（`military.treasureCavalryTrainMult`，`treasures.aggregate` 按 `1-effectValue/100` 累乘、`recomputeAndPush` **总是下发**避免移除后残留）；使用=按现有骑兵等比例翻倍（`military.DuplicateCavalry`：查资源/劳动人口算 95% 安全 ratio → `economy.TrySpend` 扣资源 → `population.ConvertPopToGarrison` 直接转劳动人口为驻军，不走训练预留通道），客户端「使用」按钮按 `effectType` 分派并展示翻倍明细 toast。此宝物曾在 8/11 以未提交改动被部署 reset 回滚丢失，本次从 `_auth` 副本 git 历史完整恢复并以新 id 重建。
 - 任务系统新增「触发条件」：`quests.csv` 增加 `trigger` 列，随机任务可设 `building_built:<建筑code>`（建造完成该建筑后才进酒馆）；服务端 `tasks` 监听 `building.Built` 标记触发并立即 offer，`TaskState.firedTriggers` 持久化，GM 任务目录编辑器展示 trigger 列与说明。新增任务目标 `sell_discard_treasure`（累计出售/丢弃 N 个稀有及以上品质宝物）：`treasure.Sell/Discard` 广播 `treasure.SoldDiscarded`，`tasks` 计数推进并完成后发奖；客户端任务卡显示目标与进度。
