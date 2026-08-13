@@ -236,6 +236,17 @@ export class TasksModule {
       }
       s.offered = remaining;
     }
+    // 迁移旧任务 code（r1→d1, r2→d2, r3→d3, r4→s1）
+    const CODE_MAP: Record<string, string> = { r1: 'd1', r2: 'd2', r3: 'd3', r4: 's1' };
+    const remapCode = (c: string) => CODE_MAP[c] ?? c;
+    s.completedSide = s.completedSide.map(remapCode);
+    s.abandonedSide = s.abandonedSide.map(remapCode);
+    s.offered = s.offered.map(remapCode);
+    s.offeredSide = s.offeredSide.map(remapCode);
+    for (const old of Object.keys(s.active)) {
+      const neu = remapCode(old);
+      if (neu !== old) { s.active[neu] = s.active[old]; delete s.active[old]; }
+    }
     s.cooldownUntil ??= {};
     s.dailyRewards ??= { day: this.dayKey(), groups: {} };
     return s;
