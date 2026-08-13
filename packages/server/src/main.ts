@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -84,6 +84,11 @@ async function main() {
 
   // 托管前端静态文件（构建后的 client）。开发时用 Vite dev server，此目录可能不存在。
   const clientDist = join(__dirname, '../../client/dist');
+  let buildId = 'development';
+  try {
+    const meta = JSON.parse(readFileSync(join(clientDist, 'version.json'), 'utf8')) as { buildId?: unknown };
+    if (typeof meta.buildId === 'string' && meta.buildId) buildId = meta.buildId;
+  } catch { /* 开发环境可能还没有 client/dist */ }
   if (existsSync(clientDist)) {
     await fastify.register(fastifyStatic, { root: clientDist, prefix: '/' });
   }
@@ -115,6 +120,12 @@ async function main() {
           try { socket.close(1001, 'idle timeout'); } catch { /* ignore */ }
         }
       }, Math.min(60_000, Math.max(5_000, Math.floor(IDLE_MS / 2))));
+
+      // 浏览器会自动响应 WS ping。pong 也算活跃，避免玩家只是阅读页面就被当僵尸踢下线。
+      const pingTimer = setInterval(() => {
+        try { socket.ping(); } catch { /* close handler 会清理 */ }
+      }, 30_000);
+      socket.on('pong', () => { lastActivity = Date.now(); });
 
       const conn: ClientConnection = {
         send: (msg) => {
@@ -165,6 +176,7 @@ async function main() {
 
       socket.on('close', () => {
         clearInterval(idleTimer);
+        clearInterval(pingTimer);
         activeConnections--;
         gateway.removeClient(session);
       });
@@ -177,6 +189,10 @@ async function main() {
 
   // 健康检查
   fastify.get('/health', async () => ({ ok: true, ts: app.now() }));
+  fastify.get('/version', async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    return { buildId };
+  });
 
   // GM 调试 API（始终挂载；如需关闭设 GM_ENABLED=off）
   if (process.env.GM_ENABLED !== 'off') {

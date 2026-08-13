@@ -37,7 +37,8 @@ export function App() {
       },
       () => {
         setNotice(getProtocolError() ?? '连接已断开，正在重连…');
-        setPhase('login');
+        // 短暂断线/服务器部署时保留当前游戏画面；重连后会用持久会话自动恢复。
+        if (!me) setPhase('login');
       },
     );
   }, []);

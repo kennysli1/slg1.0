@@ -1,5 +1,6 @@
 import type { WireRequest, WireResponse, WirePush } from '@slg/shared';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
+import { checkForUpdate } from './version.js';
 
 /**
  * 前端 WS 通信层：请求-响应配对 + 推送分发。
@@ -14,6 +15,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 /** 重连指数退避：base 1s，上限 30s */
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const SESSION_TOKEN_KEY = 'kow.session';
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -111,6 +113,33 @@ export function onPush(h: PushHandler) {
 
 export function clearSession(): void {
   me = null;
+  try { localStorage.removeItem(SESSION_TOKEN_KEY); } catch { /* storage 不可用时退化为单次会话 */ }
+}
+
+function readSessionToken(): string | null {
+  try { return localStorage.getItem(SESSION_TOKEN_KEY); } catch { return null; }
+}
+
+function saveSessionToken(payload: Record<string, unknown>): void {
+  const token = payload.sessionToken;
+  if (typeof token !== 'string' || !token) return;
+  try { localStorage.setItem(SESSION_TOKEN_KEY, token); } catch { /* ignore */ }
+}
+
+async function resumeSavedSession(): Promise<void> {
+  const token = readSessionToken();
+  if (!token) { me = null; return; }
+  try {
+    const res = await req('ResumeSession', { token, ...(me?.currentVillageId ? { currentVillageId: me.currentVillageId } : {}) });
+    if (res.ok) {
+      applyMe((res.payload as any).player as Me);
+      saveSessionToken(res.payload);
+      return;
+    }
+    if (res.error?.code === 'invalid_session') clearSession();
+  } catch {
+    // 已连上后恢复请求仍失败，多半是部署切换中的瞬断；保留凭证供下次重试。
+  }
 }
 
 function rejectPending(reason: string): void {
@@ -143,13 +172,12 @@ export function connect(onOpen: () => void, onClose: () => void): void {
 
   ws.onopen = () => {
     reconnectAttempt = 0; // 连接成功，重置退避计数
-    onOpen();
+    void checkForUpdate().finally(() => resumeSavedSession().finally(onOpen));
   };
 
   ws.onerror = () => rejectPending('network_error');
 
   ws.onclose = () => {
-    clearSession();
     rejectPending('connection_closed');
     onClose();
     // 协议不兼容：不重连（客户端版本过旧，重连无意义，须刷新页面）
@@ -188,6 +216,7 @@ export function connect(onOpen: () => void, onClose: () => void): void {
       console.error(`[api] 协议版本不兼容（服务端 v=${msgV}，客户端接受 ${WIRE_MIN_VERSION}–${WIRE_VERSION}），停止重连`);
       protocolError = '协议版本不兼容，请刷新页面';
       rejectPending('protocol_error');
+      void checkForUpdate();
       ws?.close();
       return;
     }
@@ -233,7 +262,7 @@ export function req(action: string, payload: Record<string, unknown> = {}): Prom
 export async function register(name: string, password: string, tribe: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await req('Register', { name, password, tribe });
-    if (res.ok) { applyMe((res.payload as any).player as Me); return { ok: true }; }
+    if (res.ok) { applyMe((res.payload as any).player as Me); saveSessionToken(res.payload); return { ok: true }; }
     return { ok: false, error: res.error?.code };
   } catch {
     return { ok: false, error: 'network_error' };
@@ -244,7 +273,7 @@ export async function register(name: string, password: string, tribe: string): P
 export async function login(name: string, password: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await req('Login', { name, password });
-    if (res.ok) { applyMe((res.payload as any).player as Me); return { ok: true }; }
+    if (res.ok) { applyMe((res.payload as any).player as Me); saveSessionToken(res.payload); return { ok: true }; }
     return { ok: false, error: res.error?.code };
   } catch {
     return { ok: false, error: 'network_error' };

@@ -120,6 +120,47 @@ test('wire-boundary：未登录请求需鉴权的 action 被拒绝', async () =>
   assert.equal(res.error?.code, 'not_logged_in');
 });
 
+test('wire-boundary：登录凭证可在新连接恢复会话，伪造凭证被拒绝', async () => {
+  const { gateway } = makeGateway();
+  const first = gateway.addClient(makeFakeConn().conn);
+  const registered = await gateway.handleRequest(
+    {
+      v: WIRE_VERSION, type: 'req', id: 'register-session', action: 'Register',
+      payload: { name: 'SessionUser', password: 'pass1234', tribe: 'romans' },
+    },
+    first,
+  );
+  assert.equal(registered.ok, true);
+  const token = registered.payload.sessionToken;
+  assert.equal(typeof token, 'string');
+
+  const restored = gateway.addClient(makeFakeConn().conn);
+  const resumed = await gateway.handleRequest(
+    {
+      v: WIRE_VERSION, type: 'req', id: 'resume-session', action: 'ResumeSession',
+      payload: { token },
+    },
+    restored,
+  );
+  assert.equal(resumed.ok, true);
+  const authed = await gateway.handleRequest(
+    { v: WIRE_VERSION, type: 'req', id: 'authed', action: 'GetResources', payload: {} },
+    restored,
+  );
+  assert.equal(authed.ok, true);
+
+  const forged = gateway.addClient(makeFakeConn().conn);
+  const rejected = await gateway.handleRequest(
+    {
+      v: WIRE_VERSION, type: 'req', id: 'forged-session', action: 'ResumeSession',
+      payload: { token: `${String(token).slice(0, -1)}x` },
+    },
+    forged,
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error?.code, 'invalid_session');
+});
+
 // ── Schema 校验 ───────────────────────────────────────────────────────────────
 
 test('wire-boundary：Register payload schema — name 过长被拒绝', async () => {

@@ -154,11 +154,11 @@ export class Gateway {
       this.app.commands
         .send({ name: route.command, from: 'gateway', payload })
         .then((result) => {
-          // 注册/登录成功 → 绑定会话（当前村=主城）
-          if ((req.action === 'Login' || req.action === 'Register') && result.ok) {
+          // 注册/登录/持久会话恢复成功 → 绑定这条新连接
+          if ((req.action === 'Login' || req.action === 'Register' || req.action === 'ResumeSession') && result.ok) {
             const player = (result.payload as any).player;
             const villages: string[] = (player.villages ?? []).map((v: { id: string }) => v.id);
-            const current = player.capitalVillageId ?? player.villageId;
+            const current = player.currentVillageId ?? player.capitalVillageId ?? player.villageId;
             this.bindSession(session, player.id, current, villages.length ? villages : [current]);
           }
           // 切村成功 → 只改当前操作村，推送索引保持全部村
