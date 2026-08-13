@@ -489,6 +489,9 @@ export class MilitaryModule {
 
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
+    // 重新按 troops 核算驻军人口足迹（铁律：任何改兵力的路径都要 reportGarrisonPop，
+    // 不能只靠 ConvertPopToGarrison 手动累加 garrisonPopCost，否则与解散/训练的重算口径不一致会漂移）
+    this.reportGarrisonPop(s);
     const added: Record<string, number> = {};
     for (const code of Object.keys(current)) {
       const gain = (s.troops[code] ?? 0) - current[code];
