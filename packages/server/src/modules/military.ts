@@ -448,7 +448,7 @@ export class MilitaryModule {
       const labor = (popRes.payload as any)?.currentPop ?? 0;
       if (totalPopCost > 0) ratio = Math.min(ratio, labor / totalPopCost);
     }
-    ratio = Math.min(1, Math.max(0, ratio * 0.95)); // 5% 安全边距，防 settle 漂移
+    ratio = Math.min(1, Math.max(0, ratio)); // 全额翻倍，不设安全边距
 
     // 实际增加量
     let duplicated = 0;
