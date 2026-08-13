@@ -216,7 +216,9 @@ export function liveResource(t: string): number {
   else ratePerSec = r.netRate?.[t] ?? 0;
   let v = base + ratePerSec * elapsedSec;
   if (t !== 'gold') {
-    const cap = r.capacity?.[t] ?? Infinity;
+    const baseCap = r.capacity?.[t] ?? Infinity;
+    const overflow = r.overflowCap ?? 0;
+    const cap = baseCap * (1 + overflow); // 露天仓库科技：有效容量 = 容量 × (1+溢出系数)
     v = Math.min(cap, Math.max(0, v));
   }
   return v;
