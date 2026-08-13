@@ -9,6 +9,7 @@ import { checkDocs } from './check-docs.mjs';
 import { checkChangelog } from './check-changelog.mjs';
 import { checkVersion } from './check-version.mjs';
 import { isSkipped, GUARD_SKIP, inSpecialGitState } from './lib.mjs';
+import './check-branch.mjs';
 
 const color = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = (code, s) => (color ? `\u001b[${code}m${s}\u001b[0m` : s);

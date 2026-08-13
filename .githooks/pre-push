@@ -1,3 +1,13 @@
 #!/bin/sh
+# 主分支只通过远程 PR/MR 合并；禁止从本地直接推送 main/master。
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      echo "✖ 禁止直接推送到 ${remote_ref#refs/heads/}，请推送功能分支并创建 PR。" >&2
+      exit 1
+      ;;
+  esac
+done
+
 # push 前重复执行无外部副作用的完整验证，防提交后到推送前环境漂移。
 exec npm run verify:quick
