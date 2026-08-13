@@ -116,6 +116,7 @@
   --topbar-h: 68px;
   --tabbar-h: 56px;
   --page-max: 1180px;
+  --village-page-max: 1440px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 

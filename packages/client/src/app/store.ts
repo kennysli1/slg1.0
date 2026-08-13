@@ -25,15 +25,6 @@ export function bumpReports(): void { reportsVersion.value++; }
 export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'reports';
 export const tab = signal<TabKey>('village');
 
-/** 村庄页视图模式：illustrated=可视化场景，list=列表管理视图。 */
-export const villageView = signal<'scene' | 'list'>(
-  (localStorage.getItem('kow.villageView') as 'scene' | 'list') || 'scene',
-);
-export function setVillageView(v: 'scene' | 'list'): void {
-  villageView.value = v;
-  localStorage.setItem('kow.villageView', v);
-}
-
 /** 登录态版本号（登录/切村后自增，驱动整壳重渲）。 */
 export const sessionVersion = signal(0);
 export function bumpSession(): void { sessionVersion.value++; }

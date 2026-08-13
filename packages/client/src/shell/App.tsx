@@ -86,7 +86,7 @@ function Page() {
   return (
     <main
       id="main-content"
-      class={`page${currentTab === 'map' ? ' page--full' : ''} page-enter`}
+      class={`page${currentTab === 'map' ? ' page--full' : currentTab === 'village' ? ' page--village' : ''} page-enter`}
       key={currentTab}
       tabIndex={-1}
     >
