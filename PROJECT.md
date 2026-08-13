@@ -27,6 +27,7 @@ slg1.0/
 ├── CLAUDE.md             ← AI 每次必读的 L0 入口：红线 + 任务路由表
 ├── CHANGELOG.md          ← 唯一的历史入口，业务改动必须在此记账
 ├── package.json          ← monorepo 工作区配置
+├── .codex/               ← 项目级专业 agent 配置（角色与并发上限）
 ├── .githooks/            ← 提交/推送闸门（npm install 后自动生效）
 ├── scripts/guard/        ← 变更契约校验器（npm run guard）
 ├── .gitignore
@@ -290,4 +291,3 @@ npm run dev -w @slg/client       # 终端B：前端，打开提示的 http://loc
 历次部署/开发踩坑总结（部署两条铁律、架构与数据迁移坑）与模块/命令速查表，
 已拆到 **[`docs/项目约定与速查.md`](./docs/项目约定与速查.md)**（入口文件有 300 行预算，见变更契约 R1）。
 **第一次改这个项目前先通读那一篇。**
-

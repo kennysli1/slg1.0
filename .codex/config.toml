@@ -1,0 +1,3 @@
+[agents]
+# 主 agent 之外最多 3 个并发角色；写代码阶段仍由 CLAUDE.md 约束为默认串行。
+max_concurrent_threads_per_session = 3

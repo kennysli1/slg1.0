@@ -74,6 +74,17 @@ npm run test:server          # 改完逻辑必跑：全循环 + 并发/协议/WA
 npm run verify               # 提交前一键全量（guard + build + lint + typecheck + test + audit）
 ```
 
+## 多 Agent 协作路由
+
+项目角色定义在 `.codex/agents/*.toml`。复杂需求由主 agent 负责拆解、裁决和汇总；只有任务可独立、文件边界不重叠时才并行委派。
+
+1. `game_designer` 先给玩法目标、规则、数值假设与验收条件，不写代码。
+2. 涉及界面时由 `ui_ux_designer` 给信息架构、状态流和交互验收；涉及资源时由 `art_designer` 给资产清单并按美术流水线执行。
+3. `game_architect` 把已确认需求映射到状态 owner、Command/Event、协议、存档与前后端任务；只做技术方案，不写业务代码。
+4. 方案批准后，`frontend_implementer` / `backend_implementer` 按文件边界执行；不得自行改变玩法或架构，遇到契约缺口返回主 agent。
+5. `qa_integrator` 独立核对验收条件、跨端链路、回归风险和提交闸门；只报告问题，不直接修复。
+6. 写代码阶段默认串行；只读调研、设计评审和测试可并行。任何 agent 都必须先遵守本文件路由与四条架构铁律。
+
 ## 提交前（强制）
 
 1. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
