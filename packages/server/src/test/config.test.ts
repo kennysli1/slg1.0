@@ -210,8 +210,8 @@ test('游戏设计约束表：科研多效果、PvP曲线、佣兵合同与随�
   assert.equal(cfg.mercCamp[1].capacity, 10);
   assert.equal(cfg.units.merc_champion.commandCost, 5);
   assert.equal(cfg.units.merc_champion.contractSec, 259200);
-  assert.equal(cfg.quests.r1.repeatable, true);
-  assert.equal(cfg.quests.r1.cooldownSec, 21600);
+  assert.equal(cfg.quests.d1.repeatable, true);
+  assert.equal(cfg.quests.d1.cooldownSec, 21600);
   assert.deepEqual(cfg.pvpPowerCurve.map((x) => x.lootMult), [1, 0.75, 0.5, 0.25, 0.1]);
   assert.equal(cfg.treasures.dragon_banner.effectCap, 50);
 });
