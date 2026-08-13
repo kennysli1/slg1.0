@@ -90,7 +90,7 @@ function PopCell() {
   const population = interpolateTotalPop();
   const atCap = !state.inFamine && state.hardCap > 0 && population / state.hardCap >= 1;
   const growth = Math.round(atCap ? (state.potentialGrowthPerHour ?? 0) : state.growthPerHour);
-  const nearCap = state.hardCap > 0 && population / state.hardCap >= .95;
+  const overflowPct = ((state.overflowRatio ?? 0) * 100).toFixed(0);
   const title = state.inFamine
     ? `人口：${fmt(population)}/${fmt(state.hardCap)}；饥荒中，人口正在减少；变化 ${growth}/时`
     : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(Math.round(interpolatePop()))}；`
@@ -108,7 +108,7 @@ function PopCell() {
           <Bar
             pct={state.hardCap > 0 ? population / state.hardCap * 100 : 0}
             thin
-            kind={state.inFamine ? 'crimson' : nearCap ? 'ember' : 'jade'}
+            kind={state.inFamine ? 'crimson' : 'jade'}
           />
         </span>
       </div>
