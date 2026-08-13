@@ -28,7 +28,7 @@ test('学院建造后 academy 参数更新', async () => {
   assert.equal(academy.highestLevel, 0);
 });
 
-test('科技树查询返回 15 个初始科技 + 正确的 status', async () => {
+test('科技树查询返回配置的 17 个科技 + 正确的 status', async () => {
   const app = freshApp();
   const regRes = await reg(app, '测试2', 'pass1');
   assert.equal(regRes.ok, true, `注册应成功: ${regRes.reason ?? ''}`);
@@ -36,20 +36,20 @@ test('科技树查询返回 15 个初始科技 + 正确的 status', async () => 
   const r = await send(app, 'research.GetTechTree', { villageId: va });
   assert.equal(r.ok, true);
   const techs = (r.payload as any).techs;
-  assert.ok(techs.length >= 15, `应有至少15个科技，实际: ${techs.length}`);
+  assert.equal(techs.length, 17, `应有17个科技，实际: ${techs.length}`);
   const t1 = techs.find((t: any) => t.code === 'infantry_training');
   assert.ok(t1, 'infantry_training 应存在');
   assert.equal(t1.status, 'available', '无前置的 tier-1 科技应 available（但无学院就无法支付 RP）');
 });
 
-test('StartResearch 无学院应被拒（insufficient_rp）', async () => {
+test('StartResearch 无学院应被拒（academy_required）', async () => {
   const app = freshApp();
   const regRes = await reg(app, '测试3', 'pass1');
   assert.equal(regRes.ok, true);
   const va = (regRes.payload as any).player.villageId;
   const r = await send(app, 'research.StartResearch', { villageId: va, techCode: 'infantry_training' });
   assert.equal(r.ok, false);
-  assert.equal(r.reason, 'insufficient_rp');
+  assert.equal(r.reason, 'academy_required');
 });
 
 test('GM 覆盖层：research 表编辑 round-trip', async () => {
@@ -132,7 +132,7 @@ test('研究：StartResearch + 推进时钟 → 状态 completed，GetTechTree �
   // 写入研究状态（含足够 RP）
   app.store.set('research', va, {
     villageId: va, rp: rpCost + 5, completed: [],
-    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 0, academyCount: 0 },
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
   });
 
   // StartResearch 应成功
@@ -165,7 +165,7 @@ test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）',
 
   app.store.set('research', va, {
     villageId: va, rp: rpCost, completed: [],
-    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 0, academyCount: 0 },
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
   });
 
   const startRes = await send(app, 'research.StartResearch', { villageId: va, techCode });
@@ -177,7 +177,7 @@ test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）',
   const cancelRes = await send(app, 'research.CancelResearch', { villageId: va });
   assert.equal(cancelRes.ok, true, `CancelResearch 应成功：${cancelRes.reason}`);
   const refund: number = (cancelRes.payload as any).refund;
-  // 剩余约一半 durationMs → 退款 = floor(rpCost * (remaining/durationMs))
+  // 剩余约一半 durationMs → 退款 = floor(rpCost * (remaining/durationMs) * 0.9)
   // 退款应 >= 0 且 < rpCost
   assert.ok(refund >= 0, '退款应≥0');
   assert.ok(refund < rpCost, `退款 ${refund} 应<rpCost ${rpCost}`);
@@ -187,8 +187,28 @@ test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）',
   assert.equal((stateRes.payload as any).researching, null, '取消后 researching 应为 null');
 });
 
+test('研究：学院拆除暂停后取消，仍按原总时长计算九折退款', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '测试暂停退款', 'pass1');
+  const va = (regRes.payload as any).player.villageId;
+  const tech = app.config.research.infantry_training;
+  const totalDurationMs = tech.durationSec * 1000;
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [],
+    researching: {
+      code: tech.code, startedAt: clock, durationMs: totalDurationMs / 2,
+      totalDurationMs, taskId: '', paused: true,
+    },
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 0, academyCount: 0 },
+  });
+
+  const cancelled = await send(app, 'research.CancelResearch', { villageId: va });
+  assert.equal(cancelled.ok, true);
+  assert.equal((cancelled.payload as any).refund, Math.floor(tech.rpCost * 0.5 * 0.9));
+});
+
 // ─── 新增：拆光学院 → RP 归零 ─────────────────────────────────────────
-test('研究：拆除全部学院后 RP 归零', async () => {
+test('研究：拆除全部学院后 RP 保留', async () => {
   const app = freshApp();
   const regRes = await reg(app, '测试10', 'pass1');
   assert.equal(regRes.ok, true);
@@ -208,8 +228,8 @@ test('研究：拆除全部学院后 RP 归零', async () => {
     payload: { villageId: va, kind: 'academy' },
   });
 
-  // 检查 RP 已归零（拆光学院触发清零）
+  // 拆错建筑不能造成不可逆长期损失
   const stateRes = await send(app, 'research.GetState', { villageId: va });
   assert.equal(stateRes.ok, true);
-  assert.equal((stateRes.payload as any).rp, 0, '拆光学院后 RP 应归零');
+  assert.equal((stateRes.payload as any).rp, 50, '拆光学院后 RP 应保留');
 });

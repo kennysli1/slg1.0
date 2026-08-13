@@ -72,6 +72,18 @@ test('宝物：popGrowth 被动提升人口增长 (+40%)', async () => {
     `增长应 ×1.40: before=${grow0} after=${s1.potentialGrowthPerHour}`);
 });
 
+test('宝物：同名仅一件生效，不同攻击宝物加算且返回 activeCodes', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 3 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'dragon_banner' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'dragon_banner' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'spear_of_ares' });
+  const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(listed.activeCodes.filter((c: string) => c === 'dragon_banner').length, 1);
+  assert.ok(listed.activeCodes.includes('spear_of_ares'));
+  assert.equal(listed.effect.atkMult, 1.48);
+});
+
 test('宝物：instantGold 经 Use 发放金币并移除', async () => {
   const app = await freshApp();
   const r0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
@@ -944,4 +956,3 @@ test('待领取：无贸易中心时「出售」被拒(no_trade_center)，「丢
   const list1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.equal(list1.pending.length, 0, '丢弃后报告应清除');
 });
-

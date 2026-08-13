@@ -63,6 +63,9 @@ export class MetaModule {
           meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
           meleeDef: u.meleeDef, rangedDef: u.rangedDef,
           speed: u.speed, carry: u.carry, goldCost: u.goldCost ?? 0,
+          commandCost: u.commandCost ?? 1,
+          contractSec: u.contractSec ?? 259200,
+          tier: u.mercTier ?? 1,
         })),
         pveTemplates: Object.values(c.pveTemplates).map((p) => ({
           type: p.type, name: p.name, icon: p.icon,
@@ -73,6 +76,10 @@ export class MetaModule {
           category: t.category, rarity: t.rarity,
           effectType: t.effectType, effectValue: t.effectValue,
           priceGold: t.priceGold, dropRate: t.dropRate, applyType: t.applyType,
+          equipCategory: t.equipCategory,
+          stackGroup: t.stackGroup,
+          effectCap: t.effectCap,
+          uniqueEffect: t.uniqueEffect,
         })),
         // 仅下发前端需要的白名单常量（不泄漏平衡参数）
         constants: {

@@ -453,6 +453,7 @@ export class TreasureModule {
 
   /** 把已储存宝物 codes 聚合成统一效果。 */
   aggregate(codes: string[]): TreasureEffects {
+    codes = this.activeCodes(codes);
     const resMult: ResMult = {};
     let goldMult = 1;
     let atkMult = 1;
@@ -464,23 +465,23 @@ export class TreasureModule {
       if (!t) continue;
       const frac = t.effectValue / 100; // effectValue 为百分比
       switch (t.effectType) {
-        case 'woodRate': resMult.wood = (resMult.wood ?? 0) + frac; break;
-        case 'clayRate': resMult.clay = (resMult.clay ?? 0) + frac; break;
-        case 'ironRate': resMult.iron = (resMult.iron ?? 0) + frac; break;
-        case 'cropRate': resMult.crop = (resMult.crop ?? 0) + frac; break;
+        case 'woodRate': resMult.wood = Math.min(t.effectCap / 100, (resMult.wood ?? 0) + frac); break;
+        case 'clayRate': resMult.clay = Math.min(t.effectCap / 100, (resMult.clay ?? 0) + frac); break;
+        case 'ironRate': resMult.iron = Math.min(t.effectCap / 100, (resMult.iron ?? 0) + frac); break;
+        case 'cropRate': resMult.crop = Math.min(t.effectCap / 100, (resMult.crop ?? 0) + frac); break;
         case 'goldRate':
           resMult.gold = (resMult.gold ?? 0) + frac;
-          goldMult *= 1 + frac;
+          goldMult = 1 + Math.min(t.effectCap / 100, (goldMult - 1) + frac);
           break;
         case 'allResRate':
-          resMult.wood = (resMult.wood ?? 0) + frac;
-          resMult.clay = (resMult.clay ?? 0) + frac;
-          resMult.iron = (resMult.iron ?? 0) + frac;
-          resMult.crop = (resMult.crop ?? 0) + frac;
+          resMult.wood = Math.min(t.effectCap / 100, (resMult.wood ?? 0) + frac);
+          resMult.clay = Math.min(t.effectCap / 100, (resMult.clay ?? 0) + frac);
+          resMult.iron = Math.min(t.effectCap / 100, (resMult.iron ?? 0) + frac);
+          resMult.crop = Math.min(t.effectCap / 100, (resMult.crop ?? 0) + frac);
           break;
-        case 'atkMult': atkMult *= 1 + frac; break;
-        case 'defMult': defMult *= 1 + frac; break;
-        case 'popGrowth': popGrowthMult *= 1 + frac; break;
+        case 'atkMult': atkMult = 1 + Math.min(t.effectCap / 100, (atkMult - 1) + frac); break;
+        case 'defMult': defMult = 1 + Math.min(t.effectCap / 100, (defMult - 1) + frac); break;
+        case 'popGrowth': popGrowthMult = 1 + Math.min(t.effectCap / 100, (popGrowthMult - 1) + frac); break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
@@ -492,8 +493,35 @@ export class TreasureModule {
     return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult };
   }
 
-  /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入（城镇失去其加成）。
-   *  multiset：使用 storedCodes（不去重），多份相同宝物的效果在 aggregate 中累加（加性资源 +=、乘性攻防 *= 1+frac 累乘）。
+  private activeCodes(codes: string[]): string[] {
+    const raw = this.config.constants.raw;
+    const slots: Record<string, number> = {
+      economic: Number(raw.treasure_active_slots_economic) || 2,
+      military: Number(raw.treasure_active_slots_military) || 2,
+      social: Number(raw.treasure_active_slots_social) || 1,
+      special: Number(raw.treasure_active_slots_special) || 1,
+    };
+    const candidates = codes
+      .map((code, index) => ({ code, index, def: this.config.treasures[code] }))
+      .filter((x): x is { code: string; index: number; def: TreasureDef } => !!x.def && x.def.applyType === 'passive');
+    const selected: string[] = [];
+    for (const category of Object.keys(slots)) {
+      const usedCodes = new Set<string>();
+      const sorted = candidates.filter((x) => x.def.equipCategory === category)
+        .sort((a, b) => b.def.effectValue - a.def.effectValue || a.index - b.index);
+      for (const x of sorted) {
+        if (selected.length >= 6) break;
+        if (usedCodes.has(x.code) && x.def.uniqueEffect) continue;
+        if (selected.filter((c) => this.config.treasures[c]?.equipCategory === category).length >= slots[category]) break;
+        selected.push(x.code);
+        if (x.def.uniqueEffect) usedCodes.add(x.code);
+      }
+    }
+    return selected;
+  }
+
+  /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
+   *  储存维持 multiset；aggregate 内按类别槽位选择 activeCodes，同名仅一件生效，同类效果加算后封顶。
    */
   async recomputeAndPush(villageId: string): Promise<void> {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
@@ -526,6 +554,7 @@ export class TreasureModule {
     const s = this.ensureState(villageId);
     // multiset：广播 codes 保留重复，客户端按重复数量渲染多个持有图标（含锁定宝物）
     const codes = this.allStoredCodes(s);
+    const activeCodes = this.activeCodes(codes);
     const eff = this.aggregate(codes);
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
@@ -538,6 +567,7 @@ export class TreasureModule {
         carried: Object.fromEntries(Object.entries(s.carried).map(([k, v]) => [k, [...v.codes]])),
         slots: this.getTreasureSlots(villageId),
         effect: eff,
+        activeCodes,
       },
     } as DomainEvent);
   }
@@ -939,6 +969,7 @@ export class TreasureModule {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
     const stored = this.allStoredCodes(s);
+    const activeCodes = this.activeCodes(stored);
     const eff = this.aggregate(stored);
     return {
       ok: true,
@@ -956,6 +987,7 @@ export class TreasureModule {
           .map((code) => this.config.treasures[code])
           .filter((x): x is TreasureDef => !!x),
         effect: eff,
+        activeCodes,
         pending: this.listPending(villageId),
       },
     };

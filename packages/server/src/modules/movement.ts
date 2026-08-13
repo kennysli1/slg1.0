@@ -437,7 +437,6 @@ export class MovementModule {
     // 目标村必须存在（有军队状态即视为存在）
     const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
     if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
-
     // 从源村扣出兵力
     const delta: Record<string, number> = {};
     for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
@@ -925,7 +924,10 @@ export class MovementModule {
     if (mv.type === 'found') { await this.arriveFound(mv); return; }
     if (mv.type === 'transport') { await this.arriveTransport(mv); return; }
     if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
-    if (mv.type === 'attack' && mv.targetVillage) { await this.arriveEngage(mv, 'village', mv.targetVillage); return; }
+    if (mv.type === 'attack' && mv.targetVillage) {
+      await this.arriveEngage(mv, 'village', mv.targetVillage);
+      return;
+    }
   }
 
   /** 出征到达：把兵力快照交给 Combat 开/并入战场，删除去程（兵力进入战斗，由 Combat 追踪）。 */

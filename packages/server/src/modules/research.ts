@@ -19,7 +19,7 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { ModuleManifest } from '../gateway/manifest.js';
-import type { GameConfig } from '../infra/config.js';
+import type { GameConfig, ResearchDef, ResearchEffectDef } from '../infra/config.js';
 
 const COLLECTION = 'research';
 
@@ -41,7 +41,7 @@ export function registerMechanism(code: string, handler: (ctx: MechanismContext)
 export interface ResearchState {
   villageId: string;
   rp: number;
-  researching?: { code: string; startedAt: number; durationMs: number; taskId: string } | null;
+  researching?: { code: string; startedAt: number; durationMs: number; totalDurationMs?: number; taskId: string; paused?: boolean } | null;
   completed: string[];
   academy: AcademyState;
 }
@@ -123,6 +123,10 @@ export class ResearchModule {
       const p = evt.payload as { villageId: string; kind: string };
       if (p.kind === 'academy') void this.onAcademyChanged(p.villageId);
     });
+    this.bus.on('player.VillageAttached', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      void this.recomputeTechEffects(villageId);
+    });
 
     // 注册首批默认机制
     registerMechanism('imperial_pop_boost', (ctx) => {
@@ -141,32 +145,29 @@ export class ResearchModule {
       // 恢复学院参数（已有存档可能缺 academyCount/highestLevel）
       void this.onAcademyChanged(s.villageId);
       // 恢复在途研发计时器
-      if (s.researching) {
+      if (s.researching && !s.researching.paused) {
         const now = this.now();
         const elapsed = now - s.researching.startedAt;
         const remaining = s.researching.durationMs - elapsed;
         if (remaining <= 0) {
           void this.completeResearch(s.villageId, s.researching.code);
         } else {
-          const taskId = this.scheduler.schedule(remaining, () => this.completeResearch(s.villageId, s.researching!.code), `research:${s.villageId}`);
+          const taskId = this.scheduler.schedule(remaining, () => this.completeResearch(s.villageId, s.researching!.code), `research-tech:${s.villageId}`);
           s.researching.taskId = taskId;
           this.store.set(COLLECTION, s.villageId, s);
         }
       }
       // 惰性回溯 RP 生产（onAcademyChanged 已包含 settleRp 调用）
       // 重新应用已完成的科技效果（服务器重启后各模块需要重新注入）
-      for (const code of s.completed) {
-        const tech = this.config.research[code];
-        if (tech) this.applyTech(s.villageId, tech);
-      }
+      if (s.completed.some((code) => Boolean(this.config.research[code]))) void this.recomputeTechEffects(s.villageId);
     }
   }
 
   /** 清除单村数据（放弃分城 / 删号）。 */
   wipeSingleVillage(villageId: string): void {
     const s = this.load(villageId);
-    if (s?.researching?.taskId) this.scheduler.cancelByOwner(`research:${villageId}`);
-    this.scheduler.cancelByOwner(`research:${villageId}`);
+    if (s?.researching?.taskId) this.scheduler.cancelByOwner(`research-tech:${villageId}`);
+    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
     this.store.delete(COLLECTION, villageId);
   }
 
@@ -196,14 +197,14 @@ export class ResearchModule {
   private getTechTree(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
-    const completed = new Set(s.completed);
+    const completed = this.effectiveCompleted(villageId);
     const techs = Object.values(this.config.research).map((t) => {
       let status: string;
       if (completed.has(t.code)) status = 'completed';
       else if (s.researching?.code === t.code) status = 'researching';
       else if (this.prereqsMet(villageId, t.requires)) status = 'available';
       else status = 'locked';
-      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
+      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, effects: t.effects, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
     });
     return { ok: true, payload: { techs, rp: s.rp, researching: s.researching?.code ?? null } };
   }
@@ -213,14 +214,15 @@ export class ResearchModule {
     const s = this.ensureState(villageId);
     const tech = this.config.research[techCode];
     if (!tech) return { ok: false, payload: {}, reason: 'unknown_tech' };
+    if (s.academy.academyCount < 1) return { ok: false, payload: {}, reason: 'academy_required' };
     if (s.researching) return { ok: false, payload: {}, reason: 'already_researching' };
     if (s.completed.includes(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
     if (!this.prereqsMet(villageId, tech.requires)) return { ok: false, payload: {}, reason: 'prerequisites_not_met' };
     if (s.rp < tech.rpCost) return { ok: false, payload: {}, reason: 'insufficient_rp' };
     s.rp -= tech.rpCost;
     const durationMs = tech.durationSec * 1000;
-    const taskId = this.scheduler.schedule(durationMs, () => this.completeResearch(villageId, techCode), `research:${villageId}`);
-    s.researching = { code: techCode, startedAt: this.now(), durationMs, taskId };
+    const taskId = this.scheduler.schedule(durationMs, () => this.completeResearch(villageId, techCode), `research-tech:${villageId}`);
+    s.researching = { code: techCode, startedAt: this.now(), durationMs, totalDurationMs: durationMs, taskId };
     this.store.set(COLLECTION, villageId, s);
     this.store.flush();
     void this.pushRp(villageId, s.rp);
@@ -232,13 +234,13 @@ export class ResearchModule {
     const s = this.ensureState(villageId);
     if (!s.researching) return { ok: false, payload: {}, reason: 'not_researching' };
     const now = this.now();
-    const elapsed = now - s.researching.startedAt;
+    const elapsed = s.researching.paused ? 0 : now - s.researching.startedAt;
     const remaining = Math.max(0, s.researching.durationMs - elapsed);
-    const ratio = remaining / Math.max(1, s.researching.durationMs);
+    const ratio = remaining / Math.max(1, s.researching.totalDurationMs ?? s.researching.durationMs);
     const tech = this.config.research[s.researching.code];
-    const refund = tech ? Math.floor(tech.rpCost * ratio) : 0;
+    const refund = tech ? Math.floor(tech.rpCost * ratio * 0.9) : 0;
     s.rp += refund;
-    if (s.researching.taskId) this.scheduler.cancelByOwner(`research:${villageId}`);
+    if (s.researching.taskId) this.scheduler.cancelByOwner(`research-tech:${villageId}`);
     s.researching = null;
     this.store.set(COLLECTION, villageId, s);
     this.store.flush();
@@ -254,13 +256,13 @@ export class ResearchModule {
     const tech = this.config.research[techCode];
     if (tech) {
       // 应用到本村（所有 scope 类型）
-      this.applyTech(villageId, tech);
+      void this.recomputeTechEffects(villageId);
       // scope=player: 应用到该玩家所有村庄
       if (tech.scope === 'player') {
         const player = this.playerByVillage(villageId);
         if (player) {
           for (const vid of this.playerVillages(player)) {
-            if (vid !== villageId) this.applyTech(vid, tech);
+            if (vid !== villageId) void this.recomputeTechEffects(vid);
           }
         }
       }
@@ -274,29 +276,22 @@ export class ResearchModule {
   }
 
   // ── 科技效果应用 ──
-  private applyTech(villageId: string, tech: { code: string; effectType: string; effectKey: string; effectValue: number; scope: string }): void {
-    const v = tech.effectValue;
-    const key = tech.effectKey;
-    switch (tech.effectType) {
+  private applyEffect(villageId: string, tech: ResearchDef, effect: ResearchEffectDef): void {
+    const v = effect.effectValue;
+    const key = effect.effectKey;
+    switch (effect.effectType) {
       case 'resource_rate':
-        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: { villageId, source: `tech:${tech.code}`, mult: { [key]: v } } });
+        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: { villageId, source: `tech:${tech.code}:${effect.order}`, mult: { [key]: Math.min(effect.cap, v) } } });
         break;
       case 'storage_cap':
-        // 倍率作用于仓储容量（乘在基础之上），通过 economy.SetCapacity 的倍率注入
-        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: { villageId, source: `tech:${tech.code}`, mult: key.split('|').reduce((acc: Record<string,number>, r: string) => { acc[r.trim()] = v; return acc; }, {} as Record<string,number>) } });
-        break;
-      case 'combat_atk':
-        void this.commands.send({ name: 'military.SetTechCombatMult', from: ResearchModule.NAME, payload: { villageId, atkMult: v, defMult: 0 } });
-        break;
-      case 'combat_def':
-        void this.commands.send({ name: 'military.SetTechCombatMult', from: ResearchModule.NAME, payload: { villageId, atkMult: 0, defMult: v } });
+        void this.commands.send({ name: 'building.SetStorageTechMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
         break;
       case 'pop_growth':
-        void this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: v } });
+        void this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
         break;
       case 'mechanism':
         if (MechanismRegistry[key]) {
-          MechanismRegistry[key]({ villageId, tech: { code: tech.code, effectKey: key, effectValue: v }, commands: this.commands, bus: this.bus });
+          MechanismRegistry[key]({ villageId, tech: { code: tech.code, effectKey: key, effectValue: Math.min(effect.cap, v) }, commands: this.commands, bus: this.bus });
         }
         break;
       // build_speed：完成时把已完成科技效果总和推送到 building 模块缓存
@@ -305,7 +300,7 @@ export class ResearchModule {
         let total = 0;
         for (const code of s.completed) {
           const t2 = this.config.research[code];
-          if (t2 && t2.effectType === 'build_speed') total += t2.effectValue ?? 0;
+          if (t2) for (const e of t2.effects) if (e.effectType === 'build_speed') total += Math.min(e.cap, e.effectValue);
         }
         void this.commands.send({ name: 'building.SetBuildSpeedMult', from: ResearchModule.NAME, payload: { villageId, mult: total } });
         break;
@@ -314,6 +309,29 @@ export class ResearchModule {
       // 这些由各模块在查询时读取 research.completed 列表来判定（门控模式），不需要 push 注入
       default: break;
     }
+  }
+
+  private async recomputeTechEffects(villageId: string): Promise<void> {
+    const completed = this.effectiveCompleted(villageId);
+    const combat: Record<string, { atk: number; def: number }> = {};
+    const unlocks = new Set<string>();
+    let trainSpeed = 0;
+    for (const code of completed) {
+      const tech = this.config.research[code];
+      if (!tech) continue;
+      for (const e of tech.effects) {
+        const value = Math.min(e.cap, e.effectValue);
+        if (e.effectType === 'combat_atk' || e.effectType === 'combat_def') {
+          const key = e.effectKey || 'all';
+          combat[key] ??= { atk: 0, def: 0 };
+          if (e.effectType === 'combat_atk') combat[key].atk = Math.min(e.cap, combat[key].atk + value);
+          else combat[key].def = Math.min(e.cap, combat[key].def + value);
+        } else if (e.effectType === 'unit_unlock') unlocks.add(e.effectKey);
+        else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
+        else this.applyEffect(villageId, tech, e);
+      }
+    }
+    await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed } });
   }
 
   // ── RP 生产 ──
@@ -337,9 +355,22 @@ export class ResearchModule {
     s.academy.highestLevel = highestLevel;
     s.academy.academyCount = academyCount;
     // 初次建造学院：重置 lastCheckTime，避免回溯结算建院前的空 tick
-    if (wasZero && academyCount > 0) s.academy.lastCheckTime = this.now();
-    // 全部拆除：科研点归零；部分拆除（还有学院）则不影响
-    if (!wasZero && academyCount <= 0) s.rp = 0;
+    if (wasZero && academyCount > 0) {
+      s.academy.lastCheckTime = this.now();
+      if (s.researching?.paused) {
+        s.researching.paused = false;
+        s.researching.startedAt = this.now();
+        s.researching.taskId = this.scheduler.schedule(s.researching.durationMs, () => this.completeResearch(villageId, s.researching!.code), `research-tech:${villageId}`);
+      }
+    }
+    if (!wasZero && academyCount <= 0 && s.researching && !s.researching.paused) {
+      const elapsed = Math.max(0, this.now() - s.researching.startedAt);
+      s.researching.totalDurationMs ??= s.researching.durationMs;
+      s.researching.durationMs = Math.max(0, s.researching.durationMs - elapsed);
+      s.researching.startedAt = this.now();
+      s.researching.paused = true;
+      this.scheduler.cancelByOwner(`research-tech:${villageId}`);
+    }
     this.store.set(COLLECTION, villageId, s);
     // 重调度 RP tick
     this.settleRp(villageId);
@@ -350,7 +381,7 @@ export class ResearchModule {
     const s = this.ensureState(villageId);
     const { highestLevel, academyCount } = s.academy;
     if (academyCount < 1 || highestLevel < 1) {
-      this.scheduler.cancelByOwner(`research:${villageId}`);
+      this.scheduler.cancelByOwner(`research-rp:${villageId}`);
       return;
     }
     const params = this.config.academy[highestLevel];
@@ -381,8 +412,8 @@ export class ResearchModule {
 
     // 调度下一次 tick
     const nextTickMs = Math.max(1000, lastCheck + intervalMs - now);
-    this.scheduler.cancelByOwner(`research:${villageId}`);
-    this.scheduler.schedule(nextTickMs, () => this.tickRp(villageId), `research:${villageId}`);
+    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
+    this.scheduler.schedule(nextTickMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
   }
 
   /** 单次 RP tick：roll 一次判定，失败则递增 failStreak，成功则 rp+1 并重置。调度下一次。 */
@@ -406,7 +437,7 @@ export class ResearchModule {
     this.store.set(COLLECTION, villageId, s);
 
     const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount));
-    this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research:${villageId}`);
+    this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
   }
 
   // ── 辅助 ──
@@ -426,13 +457,25 @@ export class ResearchModule {
 
   private prereqsMet(villageId: string, requires: string[]): boolean {
     if (!requires.length) return true;
-    const s = this.ensureState(villageId);
-    const completed = new Set(s.completed);
+    const completed = this.effectiveCompleted(villageId);
     for (const req of requires) {
       const orParts = req.split(' OR ');
       if (!orParts.some((p) => completed.has(p.trim()))) return false;
     }
     return true;
+  }
+
+  private effectiveCompleted(villageId: string): Set<string> {
+    const out = new Set(this.ensureState(villageId).completed);
+    const playerId = this.playerByVillage(villageId);
+    if (!playerId) return out;
+    for (const vid of this.playerVillages(playerId)) {
+      const other = this.load(vid);
+      for (const code of other?.completed ?? []) {
+        if (this.config.research[code]?.scope === 'player') out.add(code);
+      }
+    }
+    return out;
   }
 
   private async pushRp(villageId: string, rp: number): Promise<void> {
@@ -442,11 +485,10 @@ export class ResearchModule {
   /** 查询指定效果类型的已完成科技效果值总和（供 building/military 等模块计算时查询）。 */
   private getTechMult(cmd: Command): CommandResult {
     const { villageId, effectType } = cmd.payload as { villageId: string; effectType: string };
-    const s = this.ensureState(villageId);
     let total = 0;
-    for (const code of s.completed) {
+    for (const code of this.effectiveCompleted(villageId)) {
       const t = this.config.research[code];
-      if (t && t.effectType === effectType) total += t.effectValue ?? 0;
+      if (t) for (const e of t.effects) if (e.effectType === effectType) total = Math.min(e.cap, total + e.effectValue);
     }
     return { ok: true, payload: { mult: total } };
   }

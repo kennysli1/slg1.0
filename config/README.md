@@ -48,9 +48,11 @@
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率 |
-| 表15 | `research.csv` | **科技树目录**（分支/层级/前置/效果/RP 造价） | 加科技、调研发耗时与效果数值 |
+| 表15 | `research.csv` | **科技树目录**（分支/层级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
+| 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
 | 表17 | `quests.csv` | **任务目录**（主线/随机任务的目标·奖励·前置） | 加任务、调奖励、加随机任务、改任务前置 |
+| 表18 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -151,6 +153,9 @@
 | trainSec / building / traits | 训练秒数 / 所需建筑 / 特性；当前均留空或为 0 |
 | popCost / popPermanent | 人口消耗 / 是否永久占人口；当前均为 0 |
 | goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
+| commandCost | 单份合同占用的佣兵统御容量 |
+| contractSec | 合同服役秒数；离线继续计时 |
+| tier | 佣兵档位，用于展示与平衡分组 |
 
 ## merc_camp.csv — 雇佣兵营地逐级参数
 | 列 | 含义 |
@@ -159,6 +164,7 @@
 | refreshSec | 自动刷新候选名单的间隔（秒） |
 | mercCount | 每次刷新生成的可雇佣候选数量 |
 | maxStoredRefreshes | 最多可囤积的手动刷新次数 |
+| capacity | 该等级提供的佣兵统御容量 |
 
 ## unit_traits.csv — 兵种特性（攻防之上的额外倍率修正）
 | 列 | 含义 |
@@ -250,6 +256,9 @@
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
 | applyType | `passive` 持续生效或即时消费类型 |
+| equipCategory | 自动生效槽类别：`economic/military/social/special` |
+| stackGroup / effectCap | 同类叠加组 / 该效果封顶值 |
+| uniqueEffect | `1` 表示同名只允许一份生效 |
 
 ## research.csv — 科技树目录
 | 列 | 含义 |
@@ -259,10 +268,17 @@
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
 | tier | 层级，1 为最底层；界面按层分组显示 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
-| effectType | 效果类型：`resource_rate` `combat_atk` `combat_def` `unit_unlock` `building_unlock` `pop_growth` `storage_cap` `train_speed` `build_speed` `march_speed` `carry_cap` `mechanism` |
-| effectKey / effectValue | 效果作用目标（资源/兵种/建筑 code）/ 数值（倍率类填小数，0.15=+15%） |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
 | durationSec / rpCost | 研发耗时（秒）/ 消耗科研点 |
+
+## research_effects.csv — 科技效果明细
+| 列 | 含义 |
+|----|------|
+| techCode / order | 所属科技 code / 同科技内展示与应用顺序 |
+| effectType | 效果类型；必须是服务端白名单中的真实已接线效果 |
+| effectKey | 作用目标，如资源 code、`all`、`form:melee` |
+| effectValue | 效果值；倍率类填小数，`0.15` 表示 +15% |
+| cap | 该叠加组最终上限 |
 
 ## academy.csv — 学院逐级出点参数
 | 列 | 含义 |
@@ -309,6 +325,16 @@
 | rewardRes | 完成奖励资源 `资源:数量|…`（留空表示无资源奖励） |
 | rewardTreasure | 完成奖励宝物 code（如 `warrior_token`，留空表示无宝物） |
 | weight | 随机任务抽取权重（主线填 0；随机任务填正整数，越大越容易被酒馆刷出） |
+| repeatable / cooldownSec | 是否可重复 / 完成后再次进入池的冷却秒数 |
+| abandonCooldownSec | 放弃后再次进入池的冷却秒数 |
+| dailyRewardGroup / dailyRewardValue | 每日奖励预算分组 / 本任务消耗额度 |
+| campSearchRadius / campRetrySec / campMaxRadius | 任务营地初始搜索半径 / 重试间隔 / 最大搜索半径 |
+
+## pvp_power_curve.csv — PvP 强弱差掠夺衰减
+| 列 | 含义 |
+|----|------|
+| maxRatio | 攻击方与防守方出征初始战力比的区间上限；最后一档留空表示无上限 |
+| lootMult | 该区间最终可掠夺量倍率 |
 
 > 主线靠 `requires` 串成链：前一个完成才出现后一个（如 m2/m3 都要求 m1）。随机任务只在酒馆建好后由服务端按 weight 刷新，接取占用酒馆 `taskMaxTasks` 名额。
 

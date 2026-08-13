@@ -404,17 +404,31 @@ export class CombatModule {
       }
       // 掠夺（攻方胜且有载货）
       if (attackerWins && totalCarry > 0) {
-        const lootRes = await this.commands.send({ name: 'economy.GetLootable', from: CombatModule.NAME, payload: { villageId: b.targetId } });
+        const main = await this.commands.send({ name: 'building.GetBuildingLevel', from: CombatModule.NAME, payload: { villageId: b.targetId, kind: 'main' } });
+        const pvp = await this.commands.send({ name: 'player.GetPvpContext', from: CombatModule.NAME, payload: { villageId: b.targetId } });
+        const lootRes = await this.commands.send({ name: 'economy.GetLootable', from: CombatModule.NAME, payload: { villageId: b.targetId, mainLevel: Number((main.payload as any)?.level) || 0 } });
         const lootable: Record<string, number> = (lootRes.payload as any)?.lootable ?? {};
         const total = Object.values(lootable).reduce((a, v) => a + v, 0);
         const want: Record<string, number> = {};
         if (total > 0) {
-          const ratio = Math.min(1, totalCarry / total);
+          const powerRatio = b.attackPower0 / Math.max(1, b.defensePower0);
+          const powerMult = this.config.pvpPowerCurve.find((x) => powerRatio <= x.maxRatio)?.lootMult ?? 0;
+          const hitMult = Number((pvp.payload as any)?.hitMult ?? 1);
+          const ratio = Math.min(1, totalCarry / total) * powerMult * hitMult;
           for (const [t, v] of Object.entries(lootable)) want[t] = Math.floor(v * ratio);
         }
         log('PvP 掠夺前', { target: b.targetId, lootable, totalCarry, ratio: total > 0 ? Math.min(1, totalCarry / total).toFixed(3) : 0, want });
         const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: want } });
         looted = (taken.payload as any)?.taken ?? {};
+        const hasLoot = Object.values(looted).some((amount) => amount > 0);
+        let recovered = false;
+        if ((pvp.payload as any)?.recoveryAvailable) {
+          const recovery = await this.commands.send({ name: 'economy.ApplyPvpRecovery', from: CombatModule.NAME, payload: { villageId: b.targetId } });
+          recovered = Boolean((recovery.payload as any)?.triggered);
+        }
+        if (hasLoot || recovered) {
+          await this.commands.send({ name: 'player.RecordPvpHit', from: CombatModule.NAME, payload: { villageId: b.targetId, recovered, recordHit: hasLoot } });
+        }
         log('PvP 掠夺后', { target: b.targetId, looted });
       }
     }

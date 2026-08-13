@@ -59,6 +59,7 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
+  spawnAttempts?: number;
 }
 
 interface TaskState {
@@ -73,6 +74,8 @@ interface TaskState {
   offered: string[];
   /** 已触发的随机任务触发条件 key（如 `building_built:treasury`）；触发后该任务进入酒馆可刷池。 */
   firedTriggers: string[];
+  cooldownUntil?: Record<string, number>;
+  dailyRewards?: { day: string; groups: Record<string, number> };
 }
 
 interface TavernInfo {
@@ -172,6 +175,7 @@ export class TasksModule {
       // 任务营地(pve.task=true)持久化在 pve 集合，重启后仍在地图；无需重新生成。
       // 仅重排酒馆刷新节奏（若存在酒馆）。
       void this.resumeVillage(s.villageId).catch(() => {});
+      for (const inst of Object.values(s.active)) if (this.quest(inst.code)?.objective.kind === 'clear_camp' && inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
     }
   }
 
@@ -209,6 +213,8 @@ export class TasksModule {
     if (!s.active || typeof s.active !== 'object') s.active = {};
     if (!Array.isArray(s.offered)) s.offered = [];
     if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
+    s.cooldownUntil ??= {};
+    s.dailyRewards ??= { day: this.dayKey(), groups: {} };
     return s;
   }
 
@@ -235,6 +241,7 @@ export class TasksModule {
     const q = this.quest(code);
     if (!q || q.type !== 'random') return { ok: false, payload: {}, reason: 'not_random' };
     if (s.active[code]) return { ok: false, payload: {}, reason: 'already_active' };
+    if ((s.cooldownUntil?.[code] ?? 0) > this.now()) return { ok: false, payload: { cooldownUntil: s.cooldownUntil?.[code] }, reason: 'quest_cooldown' };
 
     const info = await this.tavernInfo(villageId);
     const activeCount = Object.keys(s.active).length;
@@ -254,12 +261,14 @@ export class TasksModule {
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
     const q = this.quest(code);
     if (!q || q.type !== 'random') return { ok: false, payload: {}, reason: 'main_cannot_abandon' };
-
     // 移除生成的营地
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
+    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
     delete s.active[code];
+    s.cooldownUntil ??= {};
+    s.cooldownUntil[code] = this.now() + q.abandonCooldownSec * 1000;
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
@@ -345,10 +354,14 @@ export class TasksModule {
     const xy = await this.getVillageXY(villageId);
     if (!xy) return; // 村庄尚未落位（极端时序），交由后续解锁重试
 
-    let placed = 0;
-    for (let i = 0; i < want; i++) {
-      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius: 8 } });
-      if (!free.ok) break; // 无空地则少放（避免卡死）
+    let placed = inst.camps.length;
+    for (let i = inst.camps.length; i < want; i++) {
+      const attempts = inst.spawnAttempts ?? 0;
+      const radius = attempts >= 3
+        ? this.config.constants.mapSize
+        : Math.min(q.campMaxRadius, q.campSearchRadius + attempts * q.campSearchRadius);
+      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius } });
+      if (!free.ok) break;
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
       const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
       const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true } });
@@ -359,12 +372,20 @@ export class TasksModule {
         break;
       }
     }
-    // 实际放置数即完成所需数（防软锁）
-    if (placed === 0) {
-      // 连一块空地都找不到：放弃营地生成，任务无法以清理方式完成——记录但不卡死界面
-      inst.camps = [];
-    }
+    inst.spawnAttempts = (inst.spawnAttempts ?? 0) + 1;
     this.store.set(COLLECTION, villageId, this.ensureState(villageId));
+    if (placed < want) this.scheduleCampRetry(villageId, inst);
+  }
+
+  private scheduleCampRetry(villageId: string, inst: TaskInstance): void {
+    const q = this.quest(inst.code);
+    if (!q) return;
+    const owner = `task-camp:${villageId}:${inst.code}`;
+    this.scheduler.cancelByOwner(owner);
+    this.scheduler.schedule(q.campRetrySec * 1000, () => {
+      const current = this.ensureState(villageId).active[inst.code];
+      if (current) void this.spawnCamps(villageId, current);
+    }, owner, `village:${villageId}`);
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线 ──
@@ -379,13 +400,15 @@ export class TasksModule {
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
+    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
 
     // 资源奖励
-    if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
+    const allowed = await this.consumeDailyBudget(villageId, s, q);
+    if (allowed && q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
-    for (const t of q.rewards.treasures ?? []) {
+    for (const t of allowed ? (q.rewards.treasures ?? []) : []) {
       const def = this.config.treasures[t];
       const locked = !def || def.applyType !== 'instant';
       await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
@@ -395,7 +418,10 @@ export class TasksModule {
     if (q.type === 'main') {
       if (!s.completedMain.includes(code)) s.completedMain.push(code);
     } else {
+      // completedRandom 是完成历史；可重复性只影响再次入池资格，不抹掉已完成记录。
       if (!s.completedRandom.includes(code)) s.completedRandom.push(code);
+      s.cooldownUntil ??= {};
+      s.cooldownUntil[code] = this.now() + q.cooldownSec * 1000;
     }
     this.store.set(COLLECTION, villageId, s);
 
@@ -508,7 +534,7 @@ export class TasksModule {
     for (const q of Object.values(this.config.quests)) {
       if (q.trigger !== triggerKey) continue;
       if (q.type !== 'random') continue;
-      if (s.completedRandom.includes(q.code) || s.active[q.code] || s.offered.includes(q.code)) continue;
+      if ((!q.repeatable && s.completedRandom.includes(q.code)) || s.active[q.code] || s.offered.includes(q.code)) continue;
       s.offered.push(q.code);
     }
     this.store.set(COLLECTION, villageId, s);
@@ -594,7 +620,8 @@ export class TasksModule {
     const pool = Object.values(this.config.quests).filter((q) =>
       q.type === 'random' &&
       (!q.trigger || s.firedTriggers.includes(q.trigger)) &&
-      !s.completedRandom.includes(q.code) &&
+      (q.repeatable || !s.completedRandom.includes(q.code)) &&
+      (s.cooldownUntil?.[q.code] ?? 0) <= this.now() &&
       !s.active[q.code] &&
       !s.offered.includes(q.code),
     );
@@ -604,6 +631,23 @@ export class TasksModule {
     for (const c of picked) s.offered.push(c);
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
+  }
+
+  private dayKey(): string { return new Date(this.now()).toISOString().slice(0, 10); }
+
+  private async consumeDailyBudget(villageId: string, s: TaskState, q: QuestDef): Promise<boolean> {
+    if (!q.dailyRewardGroup || q.dailyRewardValue <= 0) return true;
+    const day = this.dayKey();
+    if (!s.dailyRewards || s.dailyRewards.day !== day) s.dailyRewards = { day, groups: {} };
+    const tavern = await this.tavernInfo(villageId);
+    const raw = this.config.constants.raw;
+    const cap = q.dailyRewardGroup === 'gold'
+      ? (Number(raw.task_daily_gold_base) || 200) + (Number(raw.task_daily_gold_per_tavern_level) || 100) * tavern.level
+      : (Number(raw.task_daily_treasure_limit) || 1);
+    const used = s.dailyRewards.groups[q.dailyRewardGroup] ?? 0;
+    if (used + q.dailyRewardValue > cap) return false;
+    s.dailyRewards.groups[q.dailyRewardGroup] = used + q.dailyRewardValue;
+    return true;
   }
 
   private weightedPick(pool: QuestDef[], n: number): string[] {

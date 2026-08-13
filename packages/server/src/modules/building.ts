@@ -46,6 +46,8 @@ interface BuildingState {
   queue: QueueItem[];
   /** build_speed 科技效果总和（如城市规划 0.5 → timeSec /= 1.5）。由 research.TechCompleted 推送更新。旧存档无此字段默认 0。 */
   techBuildSpeed?: number;
+  /** storage_cap 科技容量加成；由 research 聚合后覆盖写入。 */
+  techStorageCap?: number;
 }
 
 const COLLECTION = 'building';
@@ -112,6 +114,7 @@ export class BuildingModule {
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
     this.commands.register('building.SetBuildSpeedMult', (c) => this.setBuildSpeedMult(c));
+    this.commands.register('building.SetStorageTechMult', (c) => this.setStorageTechMult(c));
   }
 
   /** 重启恢复：先把旧存档建筑 zone/slotId 对齐到当前 CSV（迁移），再为未完成队列登记定时任务。 */
@@ -728,7 +731,7 @@ export class BuildingModule {
           }
         }
       }
-      return total;
+      return total * (1 + Math.max(0, s.techStorageCap ?? 0));
     };
     void this.commands.send({
       name: 'economy.SetCapacity',
@@ -777,6 +780,16 @@ export class BuildingModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.techBuildSpeed = Number.isFinite(mult) ? mult : 0;
     this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  private setStorageTechMult(cmd: Command): CommandResult {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techStorageCap = Number.isFinite(mult) ? Math.max(0, mult) : 0;
+    this.store.set(COLLECTION, villageId, s);
+    this.reportCapacity(s);
     return { ok: true, payload: {} };
   }
 }

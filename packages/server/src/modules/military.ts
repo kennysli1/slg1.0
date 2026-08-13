@@ -56,6 +56,9 @@ interface MilitaryState {
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
   techDefMult?: number;
+  techCombatByUnit?: Record<string, { atk: number; def: number }>;
+  techUnlockedUnits?: string[];
+  techTrainSpeed?: number;
   /** 宝物骑兵训练加速倍率（默认 1；伯乐提供，training time 乘此值）。 */
   treasureCavalryTrainMult?: number;
 }
@@ -131,6 +134,23 @@ export class MilitaryModule {
     return { ok: true, payload: {} };
   }
 
+  private setTechEffects(cmd: Command): CommandResult {
+    const { villageId, combat, unlocks, trainSpeed } = cmd.payload as {
+      villageId: string; combat: Record<string, { atk: number; def: number }>;
+      unlocks: string[]; trainSpeed: number;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techCombatByUnit = combat ?? {};
+    s.techUnlockedUnits = Array.isArray(unlocks) ? [...new Set(unlocks)] : [];
+    s.techTrainSpeed = Math.max(0, Math.min(0.9, Number(trainSpeed) || 0));
+    // 清掉旧覆盖，避免旧档的最后完成科技继续生效。
+    s.techAtkMult = 1;
+    s.techDefMult = 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
   private units(): Record<string, UnitDef> {
     return this.config.units;
   }
@@ -148,9 +168,11 @@ export class MilitaryModule {
     this.commands.register('military.SacrificeTroops', (c) => this.sacrificeTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
     this.commands.register('military.AddMercenaries', (c) => this.addMercenaries(c));
+    this.commands.register('military.RemoveMercenaries', (c) => this.removeMercenaries(c));
     // 宝物军事倍率（攻/防分别作用），由 treasure 模块推送，无环。
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
     this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
+    this.commands.register('military.SetTechEffects', (c) => this.setTechEffects(c));
     // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
     this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
     this.commands.register('military.DuplicateCavalry', (c) => this.duplicateCavalry(c));
@@ -335,6 +357,21 @@ export class MilitaryModule {
     };
   }
 
+  private techCombatMult(s: MilitaryState, unit: string): { atk: number; def: number } {
+    const all = s.techCombatByUnit?.all;
+    const own = s.techCombatByUnit?.[unit];
+    const form = this.config.units[unit]?.form;
+    const byForm = form ? s.techCombatByUnit?.[`form:${form}`] : undefined;
+    return {
+      atk: 1 + (all?.atk ?? 0) + (byForm?.atk ?? 0) + (own?.atk ?? 0),
+      def: 1 + (all?.def ?? 0) + (byForm?.def ?? 0) + (own?.def ?? 0),
+    };
+  }
+
+  private needsTechUnlock(unit: string): boolean {
+    return Object.values(this.config.research).some((t) => t.effects.some((e) => e.effectType === 'unit_unlock' && e.effectKey === unit));
+  }
+
   // ---- Commands ----
 
   /** 训练用军事建筑（其详情抽屉内嵌训练 UI）：兵营/马厩/兵工厂 + 城镇中心(特殊兵种)。 */
@@ -500,20 +537,22 @@ export class MilitaryModule {
     // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
-      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
+      const tm = this.techCombatMult(s, u.key);
+      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
       const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
-      const unlocked = haveLv >= 1;
+      const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
+      const unlocked = haveLv >= 1 && techUnlocked;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
       return {
         key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-        cost: u.cost, trainSec: Math.max(1, Math.round(u.trainSec * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
+        cost: u.cost, trainSec: Math.max(1, Math.round(u.trainSec * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
         // v3：士兵直接以 upkeep 计入 troops 口粮（人口硬上限模型已无 soldier_pool 额外口粮）
         cropPerHourEach: st.upkeep,
         unlocked,
-        lockReason: unlocked ? undefined : `需${bldName} 1 级`,
+        lockReason: unlocked ? undefined : (!techUnlocked ? '需完成对应科技' : `需${bldName} 1 级`),
       };
     });
 
@@ -524,18 +563,20 @@ export class MilitaryModule {
         const trainableHere = tribeUnits
           .filter((u) => u.building === sl.kind)
           .map((u) => {
-            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
-            const unlocked = sl.level >= 1;
+            const tm = this.techCombatMult(s, u.key);
+            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+            const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
+            const unlocked = sl.level >= 1 && techUnlocked;
             return {
               key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
               cost: this.effectiveCost(u.cost, sl.level, sl.kind), // 已按建筑等级降费
-              trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))), // 已按建筑等级提速 + 伯乐骑兵加速
+              trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind) * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
               meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
               meleeDef: st.meleeDef, rangedDef: st.rangedDef,
               speed: st.speed, carry: st.carry, upkeep: st.upkeep,
               cropPerHourEach: st.upkeep,
               unlocked,
-              lockReason: unlocked ? undefined : '建筑建造中',
+              lockReason: unlocked ? undefined : (!techUnlocked ? '需完成对应科技' : '建筑建造中'),
               level: sl.level,
             };
           });
@@ -592,6 +633,9 @@ export class MilitaryModule {
     const def = this.config.units[unit];
     if (!def) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
     if (def.tribe !== s.tribe) return { ok: false, payload: {}, reason: 'wrong_tribe_unit' };
+    if (this.needsTechUnlock(unit) && !(s.techUnlockedUnits ?? []).includes(unit)) {
+      return { ok: false, payload: {}, reason: 'tech_not_unlocked' };
+    }
     if (!Number.isInteger(count) || count <= 0) return { ok: false, payload: {}, reason: 'bad_count' };
 
     // 该兵种所属建筑：必须通过 slotId 指向的实例，且该实例确为 def.building
@@ -648,6 +692,7 @@ export class MilitaryModule {
     const laborMult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
     // 实际单兵耗时 = 基础耗时 × 建筑等级提速 ÷ 人口劳动力加速 × 骑兵训练加速（伯乐）
     let effectiveTrainSec = (def.trainSec * this.trainTimeFactor(slotInfo.level, slotInfo.kind)) / Math.max(0.01, laborMult);
+    effectiveTrainSec *= 1 - (s.techTrainSpeed ?? 0);
     if (this.isCavalry(unit)) effectiveTrainSec *= (s.treasureCavalryTrainMult ?? 1);
 
     // 入该 slot 队列，登记第一个出兵
@@ -819,7 +864,8 @@ export class MilitaryModule {
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
       if (!this.config.units[unit] || n <= 0) continue;
-      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, (s.treasureAtkMult ?? 1) * (s.techAtkMult ?? 1), (s.treasureDefMult ?? 1) * (s.techDefMult ?? 1));
+      const tm = this.techCombatMult(s, unit);
+      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
       snapshot[unit] = { count: n, ...stats };
     }
     return { ok: true, payload: { snapshot } };
@@ -843,6 +889,23 @@ export class MilitaryModule {
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
     return { ok: true, payload: { troops: { ...s.troops } } };
+  }
+
+  private removeMercenaries(cmd: Command): CommandResult {
+    const { villageId, units } = cmd.payload as { villageId: string; units: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const removed: Record<string, number> = {};
+    for (const [unit, requested] of Object.entries(units ?? {})) {
+      if (!this.config.units[unit]?.isMercenary) continue;
+      const take = Math.min(s.troops[unit] ?? 0, Math.max(0, Math.floor(requested)));
+      if (take <= 0) continue;
+      s.troops[unit] -= take;
+      if (s.troops[unit] <= 0) delete s.troops[unit];
+      removed[unit] = take;
+    }
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { removed } };
   }
 
   /** 增减驻村兵力（出征扣出用负数，返程/补充用正数）。 */

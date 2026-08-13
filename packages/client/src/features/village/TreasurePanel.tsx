@@ -44,7 +44,7 @@ export function TreasurePanel() {
   dataVersion.value; // subscribe
 
   const data = getCache().treasures as
-    | { codes: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
+    | { codes: string[]; activeCodes?: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
     | null;
 
   if (!data) return null;
@@ -53,6 +53,8 @@ export function TreasurePanel() {
   const slots = data.slots ?? 1;
   const list: any[] = data.treasures ?? [];
   const eff = data.effect ?? {};
+  const activeCounts = new Map<string, number>();
+  for (const code of data.activeCodes ?? []) activeCounts.set(code, (activeCounts.get(code) ?? 0) + 1);
 
   if (!list.length) {
     return (
@@ -95,15 +97,17 @@ export function TreasurePanel() {
   return (
     <div class="trs-panel">
       <div class="trs-grid">
-        {list.map((t: any) => {
+        {list.map((t: any, index: number) => {
           const info = treasureInfo(t.code) ?? t;
           const effectTxt = treasureEffectText(info as any);
           const cat = treasureCategoryName(t.category ?? '');
           const rar = treasureRarityName(t.rarity ?? '');
+          const active = (activeCounts.get(t.code) ?? 0) > 0;
+          if (active) activeCounts.set(t.code, (activeCounts.get(t.code) ?? 1) - 1);
 
           return (
             <Panel
-              key={t.code}
+              key={`${t.code}-${index}`}
               variant="flat"
               class={`trs-card rarity-${t.rarity ?? 'common'}`}
               role="button"
@@ -123,6 +127,7 @@ export function TreasurePanel() {
                       : t.rarity === 'epic' ? 'steel'
                         : t.rarity === 'rare' ? 'steel' : undefined
                   }>{rar}</Tag>
+                  <Tag kind={active ? 'jade' : undefined}>{active ? '生效中' : '储存'}</Tag>
                 </div>
                 <div class="trs-effect">{effectTxt}</div>
               </div>
@@ -131,7 +136,7 @@ export function TreasurePanel() {
         })}
       </div>
 
-      <p class="trs-jump-hint">点击宝物卡片 → 跳转至其所在建筑（城镇中心 / 宝库）进行管理</p>
+      <p class="trs-jump-hint">系统按类别槽位自动选择高价值宝物；同名只生效一件，超出槽位的宝物仅储存。点击卡片可前往管理。</p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s-2)', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>本村宝物加成</span>

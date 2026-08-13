@@ -202,3 +202,16 @@ test('特性：多效果特性正确展开', () => {
   assert.doesNotThrow(() => validateGameConfig(patchedConfig));
   assert.equal(patchedConfig.unitTraits['heavy'].effects.length, 2);
 });
+
+test('游戏设计约束表：科研多效果、PvP曲线、佣兵合同与随机任务冷却均从 CSV 载入', () => {
+  const cfg = loadGameConfig(configDir);
+  const formation = cfg.research.advanced_formation;
+  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk', 'combat_def']);
+  assert.equal(cfg.mercCamp[1].capacity, 10);
+  assert.equal(cfg.units.merc_champion.commandCost, 5);
+  assert.equal(cfg.units.merc_champion.contractSec, 259200);
+  assert.equal(cfg.quests.r1.repeatable, true);
+  assert.equal(cfg.quests.r1.cooldownSec, 21600);
+  assert.deepEqual(cfg.pvpPowerCurve.map((x) => x.lootMult), [1, 0.75, 0.5, 0.25, 0.1]);
+  assert.equal(cfg.treasures.dragon_banner.effectCap, 50);
+});

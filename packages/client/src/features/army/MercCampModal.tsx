@@ -78,6 +78,9 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
   const refreshSec: number = c.refreshSec ?? 3600;
   const nextRefreshAt: number = c.nextRefreshAt ?? 0;
   const offers: any[] = c.offers ?? [];
+  const capacity: number = c.capacity ?? 0;
+  const usedCapacity: number = c.usedCapacity ?? 0;
+  const contracts: any[] = c.contracts ?? [];
 
   // ---- 动作 ----
 
@@ -96,7 +99,7 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="雇佣兵营地"
-      sub="金币购买 · 永久持有"
+      sub="金币购买 · 72 小时服役"
       icon={<IconPlate icon="bld_merccenter" label="雇佣兵营地" size="sm" plate="gold" />}
       wide
       onClose={onClose}
@@ -111,8 +114,13 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
         <div class="merc-selling-points">
           <span>✓ 不占人口上限</span>
           <span>✓ 不耗粮食口粮</span>
-          <span>✓ 永久持有不流失</span>
+          <span>✓ 到期离队并释放容量</span>
         </div>
+      </div>
+
+      <div class="merc-refresh-row">
+        <span>统御容量 <b>{usedCapacity}/{capacity}</b></span>
+        <span>{contracts.length} 份服役合同</span>
       </div>
 
       {/* 刷新信息 */}
@@ -135,7 +143,7 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* 可雇佣名单 */}
-      <SectionHead sub="金币一次性购买，不需要人口，不消耗粮食">可雇佣名单</SectionHead>
+      <SectionHead sub="不占人口、不耗粮；受统御容量和服役期限约束">可雇佣名单</SectionHead>
 
       {offers.length === 0
         ? (
@@ -146,7 +154,7 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
         : (
           <div class="merc-offer-list">
             {offers.map((o: any) => (
-              <MercCard key={o.code} offer={o} gold={gold} onHire={handleHire} />
+              <MercCard key={o.code} offer={o} gold={gold} remainingCapacity={Math.max(0, capacity - usedCapacity)} onHire={handleHire} />
             ))}
           </div>
         )}
@@ -176,14 +184,19 @@ function MercRefreshTimer({ nextAt, refreshSec }: { nextAt: number; refreshSec: 
 function MercCard({
   offer: o,
   gold,
+  remainingCapacity,
   onHire,
 }: {
   offer: any;
   gold: number;
+  remainingCapacity: number;
   onHire: (code: string) => void;
 }) {
   const goldCost: number = o.goldCost ?? 0;
   const canAfford = gold >= goldCost;
+  const commandCost: number = o.commandCost ?? 1;
+  const contractSec: number = o.contractSec ?? 259200;
+  const hasCapacity = remainingCapacity >= commandCost;
   const formLabel = o.form === 'ranged' ? '远程' : '近战';
 
   // 优先从 config 取完整属性（含 rangedDef、carry），回退到 payload 字段
@@ -212,6 +225,8 @@ function MercCard({
           <Stat icon="ui_icon_def" label="远程防御" value={rangedDef} />
           <Stat icon="ui_icon_speed" label="速度" value={speed} />
           <Stat icon="ui_icon_carry" label="负重" value={carry} />
+          <Stat icon="ui_icon_pop" label="统御占用" value={commandCost} />
+          <Stat icon="ui_icon_time" label="服役期限" value={fmtDur(contractSec * 1000)} />
         </StatGrid>
 
         <div class="merc-card-footer">
@@ -220,7 +235,7 @@ function MercCard({
             {fmt(goldCost)}
           </div>
 
-          {canAfford
+          {canAfford && hasCapacity
             ? (
               <Btn variant="primary" size="sm" onClick={() => onHire(o.code)}>
                 雇佣
@@ -232,7 +247,7 @@ function MercCard({
                   雇佣
                 </Btn>
                 <span class="merc-lack-reason">
-                  金币不足（差 {fmt(goldCost - gold)}）
+                  {canAfford ? `统御容量不足（需 ${commandCost}）` : `金币不足（差 ${fmt(goldCost - gold)}）`}
                 </span>
               </div>
             )}

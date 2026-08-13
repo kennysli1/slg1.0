@@ -313,7 +313,7 @@ function Confirmation({
           <div><dt>宝物</dt><dd>{treasureNames.length ? treasureNames.join(' · ') : '不携带'}</dd></div>
         </dl>
       </section>
-      {meta.mode === 'attack' && <p class="expedition-warning">进攻会在目标抵达后进入战斗流程，部队将暂时离开本村。</p>}
+      {meta.mode === 'attack' && <p class="expedition-warning">这是最终确认：部队抵达目标后将立即进入战斗。</p>}
       <div class="target-foot expedition-foot expedition-foot--split">
         <Btn onClick={onBack}>返回调整</Btn>
         <Btn variant={meta.mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={onDispatch}>{action}</Btn>
