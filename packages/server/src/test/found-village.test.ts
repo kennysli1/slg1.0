@@ -45,6 +45,11 @@ async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
   );
 
   const per = app.config.constants.foundResourceCostBase;
+  // 抬高容量，避免「无露天仓库超额丢弃」把拓荒开城包钳到容量（测试聚焦拓荒流程，非溢出）
+  await send(app, 'economy.SetCapacity', {
+    villageId,
+    capacity: { wood: 100000, clay: 100000, iron: 100000, crop: 100000 },
+  });
   await send(app, 'economy.Grant', {
     villageId,
     gain: { wood: per, clay: per, iron: per, crop: per },

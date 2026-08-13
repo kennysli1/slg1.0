@@ -19,23 +19,36 @@ async function send(app: GameApp, action: string, payload: any) {
   return app.commands.send({ name: action, from: 'test', payload });
 }
 
-test('Grant 全额入库，允许超过 capacity', async () => {
+test('Grant 无露天仓库超额丢弃；有科技可溢出至 2 倍容量', async () => {
   const app = freshApp();
   const before = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   const cap = before.capacity.wood as number;
   const gain = cap * 2;
-  const g = await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: gain } });
-  assert.equal(g.ok, true);
-  const applied = (g.payload as any).applied.wood;
-  assert.equal(applied, gain, '应全额入账');
-  const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
-  assert.ok(after.resources.wood > after.capacity.wood, '木材应超额');
-  assert.ok(after.overCapacity.wood > 0, 'overCapacity.wood > 0');
-  assert.equal(after.productionPaused.wood, true, '木材生产应暂停');
+
+  // 无露天仓库：超额丢弃，钳到容量
+  const g1 = await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: gain } });
+  assert.equal(g1.ok, true);
+  const applied1 = (g1.payload as any).applied.wood;
+  const discarded1 = (g1.payload as any).discarded.wood;
+  const after1 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.equal(after1.resources.wood, cap, '无科技应钳到容量');
+  assert.ok(discarded1 > 0, '超额部分应被丢弃');
+  assert.equal(applied1, cap - before.resources.wood, '实际入库=容量-已有');
+
+  // 有露天仓库科技：可溢出至 2 倍容量
+  await send(app, 'economy.SetOverflowCap', { villageId: 'v1', cap: 1.0 });
+  const g2 = await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: gain } });
+  assert.equal(g2.ok, true);
+  const after2 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  assert.equal(after2.resources.wood, cap * 2, '有科技应溢出至 2 倍容量');
+  assert.ok(after2.overCapacity.wood > 0, 'overCapacity.wood > 0');
+  assert.equal(after2.productionPaused.wood, true, '木材生产应暂停');
 });
 
 test('超额资源自然产出停止；未超额资源仍可产', async () => {
   const app = freshApp();
+  // 有露天仓库科技才能超额
+  await send(app, 'economy.SetOverflowCap', { villageId: 'v1', cap: 1.0 });
   const snap0 = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   const cap = snap0.capacity.wood as number;
   // 把 wood 灌到超额；clay 保持未满
@@ -111,5 +124,5 @@ test('自然产出顶在 capacity，不会自己涨到超额', async () => {
   setClock(clock);
   const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   assert.ok(after.resources.wood <= after.capacity.wood, '自然产出不得超额');
-  assert.equal(after.productionPaused.wood, false);
+  assert.equal(after.productionPaused.wood, true, '满仓应标记为停产');
 });

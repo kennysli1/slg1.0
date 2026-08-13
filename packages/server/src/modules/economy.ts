@@ -225,7 +225,7 @@ export class EconomyModule {
     for (const t of RESOURCE_TYPES) {
       netRate[t] = this.netRate(s, t);
       overCapacity[t] = Math.max(0, s.resources[t] - s.capacity[t]);
-      productionPaused[t] = s.resources[t] > s.capacity[t];
+      productionPaused[t] = s.resources[t] >= s.capacity[t];
     }
     const upkeep = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);
     return {
@@ -257,8 +257,8 @@ export class EconomyModule {
   }
 
   /**
-   * 强制入库：全额加上，允许超过 capacity。
-   * overflow[t] = 本次入库后该资源超出容量的量（兼容字段；不再表示「未入账」）。
+   * 强制入库。无露天仓库科技时超额丢弃；有科技时可溢出至 capacity×(1+overflowCap)。
+   * 返回 applied(实际入库量)、overflow(超出原容量的量)、discarded(丢弃量)。
    */
   private grant(cmd: Command): CommandResult {
     const { villageId, gain } = cmd.payload as { villageId: string; gain: Partial<ResMap> };
@@ -267,16 +267,26 @@ export class EconomyModule {
     this.settle(s);
     const applied = zero();
     const overflow = zero();
+    const discarded = zero();
+    const overflowCap = s.overflowCap ?? 0;
     for (const t of RESOURCE_TYPES) {
-      // 防御非有限值（NaN/null/undefined）→ 当 0 处理，避免污染存量后持久化为 null
       const raw = Number(gain[t]);
       const add = Number.isFinite(raw) && raw > 0 ? raw : 0;
+      if (add <= 0) continue;
+      const before = s.resources[t];
       s.resources[t] += add;
-      applied[t] = add;
-      overflow[t] = Math.max(0, s.resources[t] - s.capacity[t]);
+      const cap = s.capacity[t];
+      const effCap = overflowCap > 0 ? cap * (1 + overflowCap) : cap;
+      const excess = s.resources[t] - effCap;
+      if (excess > 0) {
+        s.resources[t] = effCap;
+        discarded[t] = excess;
+      }
+      applied[t] = s.resources[t] - before;
+      overflow[t] = Math.max(0, s.resources[t] - cap);
     }
     this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { applied, overflow } };
+    return { ok: true, payload: { applied, overflow, discarded } };
   }
 
   /** 可掠夺量（骨架阶段无地窖，等于全部存量）。 */

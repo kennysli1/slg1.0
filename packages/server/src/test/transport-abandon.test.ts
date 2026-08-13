@@ -41,14 +41,17 @@ test('运输：到达后部队留守且货物入库（可超额）', async () =>
   const app = freshApp();
   const { capital, vid2 } = await makeTwoVillages(app);
 
+  // 目标村有露天仓库科技，可溢出至 2 倍容量（超额入库的前提）
+  await send(app, 'economy.SetOverflowCap', { villageId: vid2, cap: 1.0 });
+
   await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 2 } });
   await send(app, 'economy.Grant', { villageId: capital, gain: { wood: 100 } });
 
   const beforeCap = (await send(app, 'economy.GetResources', { villageId: vid2 })).payload as any;
-  // 灌满目标仓再运入，验证超额
+  // 灌满目标仓到刚好满容量，再运入验证溢出
   await send(app, 'economy.Grant', {
     villageId: vid2,
-    gain: { wood: beforeCap.capacity.wood * 2 },
+    gain: { wood: Math.max(0, beforeCap.capacity.wood - beforeCap.resources.wood) },
   });
 
   const tr = await send(app, 'movement.SendTransport', {

@@ -83,7 +83,11 @@ test('Trade: AcceptNpcOrder 资源增/减与订单声明一致', async () => {
   const normalOrder = orders.find((o: any) => !o.treasure && Object.keys(o.give ?? {}).length > 0);
   assert.ok(normalOrder, 'NPC 订单池至少应包含一条普通资源订单');
 
-  // 确保玩家能支付 want
+  // 确保玩家能支付 want（先抬高容量，避免「无露天仓库超额丢弃」干扰交易守恒验证）
+  await send(app, 'economy.SetCapacity', {
+    villageId: va,
+    capacity: { wood: 1_000_000, clay: 1_000_000, iron: 1_000_000, crop: 1_000_000, gold: Number.MAX_SAFE_INTEGER },
+  });
   const grantCost: Record<string, number> = {};
   for (const [k, v] of Object.entries(normalOrder.want as Record<string, number>)) {
     grantCost[k] = (v as number) + 10_000;
