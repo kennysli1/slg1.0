@@ -247,6 +247,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           resources: { type: 'record_int', minVal: 0, maxVal: 2_000_000_000 },
         },
       },
+      'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
     // 左=内部事件名，右=推给客户端的裸名（与 research/tech 等保持一致）
     eventPushMap: {

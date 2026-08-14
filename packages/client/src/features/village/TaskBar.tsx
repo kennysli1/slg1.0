@@ -123,7 +123,24 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
   );
 }
 
-// ── 单个进行中任务卡片 ────────────────────────────────────────────────────────
+// ── 交付奖励弹窗 ───────────────────────────────────────────────────────────────
+function RewardModal({ task, rewards, close }: { task: any; rewards: any; close: () => void }) {
+  const res = rewards?.resources ?? null;
+  const tres: string[] = rewards?.treasures ?? [];
+  const hasRes = res && Object.keys(res).length > 0;
+  const hasTres = tres.length > 0;
+  return (
+    <Modal title={`任务完成 · ${task.name}`} onClose={close}>
+      {hasRes || hasTres
+        ? <p class="task-reward-hint">你获得了以下奖励：</p>
+        : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
+      <RewardRow rewards={{ resources: res ?? {}, treasures: tres }} />
+      <div class="modal-foot">
+        <Btn variant="primary" onClick={close}>收下</Btn>
+      </div>
+    </Modal>
+  );
+}
 function TaskCard({ task }: { task: any }) {
   const o = task.objective;
   const isMain = task.type === 'main';
@@ -144,6 +161,14 @@ function TaskCard({ task }: { task: any }) {
     openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
   };
   const onGoMap = () => { tab.value = 'map'; };
+  const onDeliver = () => {
+    void act(req('task.Deliver', { code: task.code }), {
+      okToast: '任务完成',
+      onOk: (payload) => {
+        openModal((close) => <RewardModal task={task} rewards={payload?.rewards} close={close} />, `task-reward-${task.code}`);
+      },
+    });
+  };
 
   return (
     <div class={`task-card task-card--${task.type}`}>
@@ -191,11 +216,17 @@ function TaskCard({ task }: { task: any }) {
       <RewardRow rewards={task.rewards} />
 
       <div class="task-card-actions">
-        {o.kind === 'submit_resources' && (
-          <Btn size="sm" variant="primary" onClick={onSubmit}>上交资源</Btn>
-        )}
-        {o.kind === 'clear_camp' && (
-          <Btn size="sm" variant="ghost" onClick={onGoMap}>前往地图</Btn>
+        {task.ready ? (
+          <Btn size="sm" variant="primary" onClick={onDeliver}>交付领取奖励</Btn>
+        ) : (
+          <>
+            {o.kind === 'submit_resources' && (
+              <Btn size="sm" variant="primary" onClick={onSubmit}>上交资源</Btn>
+            )}
+            {o.kind === 'clear_camp' && (
+              <Btn size="sm" variant="ghost" onClick={onGoMap}>前往地图</Btn>
+            )}
+          </>
         )}
         {!isMain && (
           <Btn size="sm" variant="danger" onClick={onAbandon}>放弃</Btn>

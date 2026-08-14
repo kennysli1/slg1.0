@@ -34,7 +34,7 @@ test('建村即自动解锁主线 m1（submit_resources），不自动接随机'
   assert.deepEqual(p.completedMain, []);
 });
 
-test('上交资源完成 m1 → 解锁 m2/m3，奖励发放', async () => {
+test('上交资源 m1 → 就绪 → 交付后解锁 m2/m3 并发放奖励', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试2');
   const va = (regRes.payload as any).player.villageId;
@@ -43,29 +43,43 @@ test('上交资源完成 m1 → 解锁 m2/m3，奖励发放', async () => {
 
   const sub = await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { wood: 200, clay: 200 } });
   assert.equal(sub.ok, true, `上交应成功: ${sub.reason ?? ''}`);
-  assert.equal((sub.payload as any).completed, true, 'm1 应完成');
+  assert.equal((sub.payload as any).completed, true, 'm1 目标应达成（就绪）');
+
+  // 未交付：m1 仍 active 且就绪，未进 completedMain，m2 未解锁，无奖励
+  const st0 = await send(app, 'task.GetState', { villageId: va });
+  const p0 = st0.payload as any;
+  const m1a = p0.active.find((a: any) => a.code === 'm1');
+  assert.ok(m1a && m1a.ready === true, 'm1 应处于就绪可交付');
+  assert.ok(!p0.completedMain.includes('m1'), '未交付 m1 不应在 completedMain');
+  assert.ok(!p0.active.find((a: any) => a.code === 'm2'), '未交付 m2 不应解锁');
+
+  // 交付 → 发放奖励 + 解锁下游
+  const before = await send(app, 'economy.GetResources', { villageId: va });
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+  assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
+  const rewards = (dv.payload as any).rewards;
+  assert.ok(rewards && rewards.resources, '交付应返回资源奖励');
+  assert.equal(rewards.resources.gold, 50, '应发放 gold:50');
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
   assert.ok(p.completedMain.includes('m1'), 'm1 应在 completedMain');
   const activeCodes = p.active.map((a: any) => a.code).sort();
-  // m2(requires m1) 与 m3(requires m1, clear_camp) 应解锁
   assert.ok(activeCodes.includes('m2'), 'm2 应解锁');
   assert.ok(activeCodes.includes('m3'), 'm3 应解锁');
-  // 资源奖励 wood:100 gold:50 应已到账
-  const res = await send(app, 'economy.GetResources', { villageId: va });
-  const r = res.payload as any;
-  assert.ok(r.resources.gold >= 50, `应获 gold:50 奖励，实际 gold=${r.resources.gold}`);
+  const after = await send(app, 'economy.GetResources', { villageId: va });
+  assert.ok((after.payload as any).resources.gold >= (before.payload as any).resources.gold + 50, 'gold 应 +50');
 });
 
-test('clear_camp 主线 m3 自动生成真实营地；战斗清空营地后完成并发锁定宝物', async () => {
+test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发锁定宝物', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试3');
   const va = (regRes.payload as any).player.villageId;
   await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
-  // 完成 m1 → m3 解锁并生成营地
+  // 完成并交付 m1 → m3 解锁并生成营地
   await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { wood: 200, clay: 200 } });
+  await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const m3 = (st.payload as any).active.find((a: any) => a.code === 'm3');
@@ -86,12 +100,21 @@ test('clear_camp 主线 m3 自动生成真实营地；战斗清空营地后完�
   } as any);
   await tick();
 
+  // 战斗后就绪，但未交付前不完成、不移除营地、不发宝物
+  const st1 = await send(app, 'task.GetState', { villageId: va });
+  const p1 = st1.payload as any;
+  const m3a = p1.active.find((a: any) => a.code === 'm3');
+  assert.ok(m3a && m3a.ready === true, 'm3 战斗后应就绪可交付');
+  assert.ok(!p1.completedMain.includes('m3'), '未交付 m3 不应完成');
+
+  // 交付 m3 → 完成 + 移除营地 + 发宝物 + 解锁 m4
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
+  assert.equal(dv.ok, true, `交付 m3 应成功: ${dv.reason ?? ''}`);
+
   const st2 = await send(app, 'task.GetState', { villageId: va });
   const p2 = st2.payload as any;
   assert.ok(p2.completedMain.includes('m3'), 'm3 应已完成');
   assert.ok(!p2.active.find((a: any) => a.code === 'm3'), 'm3 应从 active 移除');
-  assert.ok(p2.completedMain.includes('m4') === false, 'm4 需 m3，但 m4 自身完成才进 completedMain（此处仅验证 m3）');
-  // m4(requires m3) 应解锁为 active
   assert.ok(p2.active.find((a: any) => a.code === 'm4'), 'm4 应解锁');
 
   // 营地地块应被移除
@@ -130,17 +153,22 @@ test('酒馆建造触发随机任务刷新；接取 → 上交 → 完成', asyn
   assert.ok(p2.active.find((a: any) => a.code === code), '接取后应进入 active');
   assert.ok(!p2.offered.includes(code), '接取后应从 offered 移除');
 
-  // 若为目标为 submit_resources，上交完成
+  // 若为目标为 submit_resources，上交 → 就绪 → 交付
   const inst = p2.active.find((a: any) => a.code === code);
   if (inst.objective.kind === 'submit_resources') {
     const res = inst.objective.resources ?? {};
     await grant(app, va, res); // 确保有足够资源
     const sub = await send(app, 'task.SubmitResources', { villageId: va, code, resources: res });
     assert.equal(sub.ok, true, `上交应成功: ${sub.reason ?? ''}`);
-    assert.equal((sub.payload as any).completed, true, '日常 submit 任务应完成');
+    assert.equal((sub.payload as any).completed, true, '日常 submit 任务目标应达成');
     const st3 = await send(app, 'task.GetState', { villageId: va });
-    assert.ok(!(st3.payload as any).active.find((a: any) => a.code === code), '完成后应移出 active');
-    assert.ok(!((st3.payload as any).completedSide ?? []).includes(code), '日常任务不记入已完成支线（可反复）');
+    const inst3 = (st3.payload as any).active.find((a: any) => a.code === code);
+    assert.ok(inst3 && inst3.ready === true, '上交后应就绪可交付');
+    const dv = await send(app, 'task.Deliver', { villageId: va, code });
+    assert.equal(dv.ok, true, '交付应成功');
+    const st4 = await send(app, 'task.GetState', { villageId: va });
+    assert.ok(!(st4.payload as any).active.find((a: any) => a.code === code), '交付后应移出 active');
+    assert.ok(!((st4.payload as any).completedSide ?? []).includes(code), '日常任务不记入已完成支线（可反复）');
   }
 });
 
@@ -269,8 +297,9 @@ test('日常任务可反复：完成后刷新可再次刷出', async () => {
   const res = inst.objective.resources ?? {};
   await grant(app, va, res);
   await send(app, 'task.SubmitResources', { villageId: va, code, resources: res });
+  await send(app, 'task.Deliver', { villageId: va, code });
   const st3 = await send(app, 'task.GetState', { villageId: va });
-  assert.ok(!(st3.payload as any).active.find((a: any) => a.code === code), '完成后应移出 active');
+  assert.ok(!(st3.payload as any).active.find((a: any) => a.code === code), '交付后应移出 active');
   assert.ok(!((st3.payload as any).completedSide ?? []).includes(code), '日常任务完成不记入支线完成');
 
   await app.scheduler.advanceTo(clock + 7200_000, setClock);

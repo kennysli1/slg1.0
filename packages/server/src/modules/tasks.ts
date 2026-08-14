@@ -59,6 +59,8 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
+  /** 目标已达成、等待玩家手动交付领取奖励。 */
+  readyToDeliver?: boolean;
   spawnAttempts?: number;
 }
 
@@ -98,8 +100,6 @@ function rarityRank(rarity: string): number {
 export class TasksModule {
   static readonly NAME = 'task';
 
-
-
   private config: GameConfig;
   private store: Store;
   private commands: CommandBus;
@@ -131,6 +131,7 @@ export class TasksModule {
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
+    this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
     this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
@@ -328,7 +329,7 @@ export class TasksModule {
     if (Object.keys(toSpend).length === 0) {
       // 无需扣（可能已全部满足或提交 0）
       const complete = this.submitMet(inst, required);
-      if (complete) await this.completeQuest(villageId, code);
+      if (complete) await this.markReady(villageId, code);
       return { ok: true, payload: { code, submitted: inst.submitted, remaining: this.remaining(inst, required), completed: complete } };
     }
 
@@ -342,11 +343,35 @@ export class TasksModule {
 
     const complete = this.submitMet(inst, required);
     if (complete) {
-      await this.completeQuest(villageId, code);
+      await this.markReady(villageId, code);
     } else {
       await this.pushList(villageId);
     }
     return { ok: true, payload: { code, submitted: inst.submitted, remaining: this.remaining(inst, required), completed: complete } };
+  }
+
+  // ── 命令：Deliver（手动交付就绪任务，领取奖励）──
+  private async deliver(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const s = this.ensureState(villageId);
+    const inst = s.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (!inst.readyToDeliver) return { ok: false, payload: {}, reason: 'not_ready' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    const rewards = await this.completeQuest(villageId, code);
+    return { ok: true, payload: { code, type: q.type, rewards } };
+  }
+
+  /** 目标已达成 → 标记就绪可交付（不自动发奖），并推送给客户端。 */
+  private async markReady(villageId: string, code: string): Promise<void> {
+    const s = this.ensureState(villageId);
+    const inst = s.active[code];
+    if (!inst || inst.readyToDeliver) return; // 幂等
+    inst.readyToDeliver = true;
+    this.store.set(COLLECTION, villageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
   }
 
   // ── 激活任务（主线自动 / 随机接取共用）──
@@ -418,13 +443,13 @@ export class TasksModule {
     }, owner, `village:${villageId}`);
   }
 
-  // ── 完成任务：发奖励 + 收尾 + 解锁下游主线 ──
-  private async completeQuest(villageId: string, code: string): Promise<void> {
+  // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[] } | null> {
     const s = this.ensureState(villageId);
     const inst = s.active[code];
-    if (!inst) return;
+    if (!inst) return null;
     const q = this.quest(code);
-    if (!q) return;
+    if (!q) return null;
 
     // 移除残留营地
     for (const c of inst.camps) {
@@ -432,16 +457,19 @@ export class TasksModule {
     }
     this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
 
+    const granted: { resources: Record<string, number> | null; treasures: string[] } = { resources: null, treasures: [] };
     // 资源奖励
     const allowed = await this.consumeDailyBudget(villageId, s, q);
     if (allowed && q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
+      granted.resources = { ...q.rewards.resources };
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
     for (const t of allowed ? (q.rewards.treasures ?? []) : []) {
       const def = this.config.treasures[t];
       const locked = !def || def.applyType !== 'instant';
       await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
+      granted.treasures.push(t);
     }
 
     delete s.active[code];
@@ -462,6 +490,7 @@ export class TasksModule {
     // 主线完成 → 解锁下游主线；支线完成 → 解锁下游支线（任务线）
     if (q.type === 'main') await this.unlockMainQuests(villageId);
     else if (q.type === 'side') await this.unlockSideQuests(villageId);
+    return granted;
   }
 
   // ── GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用）──
@@ -561,7 +590,7 @@ export class TasksModule {
       inst.campCleared = (inst.campCleared ?? 0) + 1;
       this.store.set(COLLECTION, villageId, s);
       if (inst.campCleared >= inst.camps.length) {
-        await this.completeQuest(villageId, code);
+        await this.markReady(villageId, code);
       } else {
         await this.pushList(villageId);
         await this.pushMap(villageId);
@@ -604,7 +633,7 @@ export class TasksModule {
       inst.progress = (inst.progress ?? 0) + 1;
       this.store.set(COLLECTION, villageId, s);
       if (inst.progress >= (q.objective.count ?? 1)) {
-        await this.completeQuest(villageId, code);
+        await this.markReady(villageId, code);
       } else {
         await this.pushList(villageId);
       }
@@ -825,6 +854,8 @@ export class TasksModule {
       progress: inst.progress ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
       canAbandon: inst.type !== 'main',
+      ready: inst.readyToDeliver === true,
+      canDeliver: inst.readyToDeliver === true,
       acceptedAt: inst.acceptedAt,
     };
   }
