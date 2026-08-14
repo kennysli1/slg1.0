@@ -51,12 +51,17 @@ test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效'
     assert.ok(before > 0, 'main.popGrowthPerLevel 应有默认值');
 
     // 模拟 GM 保存：把 main 的 popGrowthPerLevel 改成 99
-    const edits: BalanceOverrides = { buildings: { '1': { popGrowthPerLevel: '99' } } };
+    const edits: BalanceOverrides = {
+      buildings: { '1': { popGrowthPerLevel: '99' } },
+      // 用户手填的祭祀人口成本必须和其他 GM 覆盖一样跨 wipe、生效于新进程。
+      constants: { ritual_buff_pop_cost: { value: '20' } },
+    };
     saveBalanceOverrides(overridePath!, edits);
 
     // P1：reloadConfig 后应用生效
     app.reloadConfig();
     assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, 'reload 后覆盖应生效（P1）');
+    assert.equal(app.config.constants.ritualBuffPopCost, 20, 'GM 的祭祀人口成本应生效（P1）');
 
     // P2：文件真实落盘且可原样读回
     assert.ok(existsSync(overridePath!), '覆盖文件应已落盘');
@@ -68,10 +73,12 @@ test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效'
     assert.ok(existsSync(overridePath!), 'wipe 不应删除 balance_overrides.json（P3）');
     app.reloadConfig();
     assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, 'wipe 后重载覆盖应依旧生效（P3）');
+    assert.equal(app.config.constants.ritualBuffPopCost, 20, 'wipe 后 GM 的祭祀人口成本仍应生效（P3）');
 
     // P4：全新进程启动即读取已有覆盖
     const app2 = createGameApp({ now: () => clock, manualScheduler: true, storePath });
     assert.equal(app2.config.buildings.main.popGrowthPerLevel, 99, '新进程启动应读取已有覆盖（P4）');
+    assert.equal(app2.config.constants.ritualBuffPopCost, 20, '新进程应读取 GM 的祭祀人口成本（P4）');
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }

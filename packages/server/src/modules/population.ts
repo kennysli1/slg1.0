@@ -302,11 +302,10 @@ export class PopulationModule {
     return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1);
   }
 
-  /** 每小时实际增长量（已 clamp 到 popCeiling 缺口）。粮荒期间不增长（否则会与减员相互抵消）。 */
+  /** 每小时有效增长速率（不按 popCeiling 剩余缺口截断）。粮荒期间不增长（否则会与减员相互抵消）。 */
   private growthPerHour(s: PopulationState): number {
     if (s.inFamine) return 0;
-    const gap = this.popCeiling(s) - s.currentPop;
-    return Math.max(0, Math.min(gap, this.growthRateRaw(s)));
+    return Math.max(0, this.growthRateRaw(s));
   }
 
   // ── Economy 同步（铁律#4：只上报，不回查软上限）──────────────────────────

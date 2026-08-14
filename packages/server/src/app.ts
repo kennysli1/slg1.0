@@ -143,7 +143,7 @@ export function createGameApp(opts?: {
     ?? (opts?.storePath ? join(dirname(opts.storePath), 'balance_overrides.json') : null);
   // 启动时加载一次覆盖，灌进初始 config
   const initialOverrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
-  const config = loadGameConfig(configDir, initialOverrides);
+  let config = loadGameConfig(configDir, initialOverrides);
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
   const bus = new EventBus();
@@ -284,7 +284,10 @@ export function createGameApp(opts?: {
       const newConfig = loadGameConfig(configDir, overrides);
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
       for (const module of modules) module.setConfig(newConfig);
-      this.config = newConfig;
+      // app 的世界重建/新村创建闭包也必须切到新配置，不能继续引用启动时的 config。
+      config = newConfig;
+      this.config = config;
+      player.setVillageWiper(wipeSingleVillage, config.constants.foundAbandonLockSec);
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {
         try {

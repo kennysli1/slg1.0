@@ -137,7 +137,12 @@ export class PlayerModule {
     private serialQueue?: KeyedSerialQueue,
   ) {}
 
-  setConfig(config: GameConfig): void { this.config = config; }
+  setConfig(config: GameConfig): void {
+    this.config = config;
+    // 出生点分配缓存世界尺寸；GM 热重载后新注册玩家必须使用新的尺寸。
+    this.worldW = config.constants.worldW ?? 41;
+    this.worldH = config.constants.worldH ?? 41;
+  }
 
   /** app 在组装后注入：清理单村进度与地图。 */
   setVillageWiper(fn: (villageId: string) => void, abandonLockSec?: number): void {
