@@ -108,6 +108,19 @@ test('wire-boundary：未知 action 被拒绝', async () => {
   assert.equal(res.error?.code, 'unknown_action');
 });
 
+test('wire-boundary：内部命令不能作为公网 action 调用', async () => {
+  const { gateway } = makeGateway();
+  const s = gateway.addClient(makeFakeConn().conn);
+  for (const action of ['GetMovement', 'SetTradeCenter', 'StoreCarried', 'LoseCarried']) {
+    const res = await gateway.handleRequest(
+      { v: WIRE_VERSION, type: 'req', id: action, action, payload: {} },
+      s,
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.error?.code, 'unknown_action');
+  }
+});
+
 test('wire-boundary：未登录请求需鉴权的 action 被拒绝', async () => {
   const { gateway } = makeGateway();
   const { conn } = makeFakeConn();
@@ -150,10 +163,12 @@ test('wire-boundary：登录凭证可在新连接恢复会话，伪造凭证被�
   assert.equal(authed.ok, true);
 
   const forged = gateway.addClient(makeFakeConn().conn);
+  const tokenText = String(token);
+  const forgedToken = `${tokenText.slice(0, -1)}${tokenText.endsWith('x') ? 'y' : 'x'}`;
   const rejected = await gateway.handleRequest(
     {
       v: WIRE_VERSION, type: 'req', id: 'forged-session', action: 'ResumeSession',
-      payload: { token: `${String(token).slice(0, -1)}x` },
+      payload: { token: forgedToken },
     },
     forged,
   );

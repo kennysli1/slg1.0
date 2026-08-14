@@ -16,7 +16,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TIMEOUT_MS = 30_000;
 const urlAt = process.argv.indexOf('--url');
 const externalUrl = urlAt >= 0 ? process.argv[urlAt + 1] : null;
+const expectCommitAt = process.argv.indexOf('--expect-commit');
+const expectedCommit = expectCommitAt >= 0 ? process.argv[expectCommitAt + 1] : null;
 if (urlAt >= 0 && !externalUrl) throw new Error('[deploy-smoke] --url 后必须提供部署地址');
+if (expectCommitAt >= 0 && !expectedCommit) throw new Error('[deploy-smoke] --expect-commit 后必须提供提交 SHA');
 
 function assert(condition, message) {
   if (!condition) throw new Error(`[deploy-smoke] ${message}`);
@@ -128,6 +131,11 @@ async function verifyFrontend(baseUrl) {
   const version = await fetchOk(`${baseUrl}/version`, 'application/json');
   const versionBody = JSON.parse(Buffer.from(version.bytes).toString('utf8'));
   assert(typeof versionBody?.buildId === 'string' && versionBody.buildId.length > 0, '版本探针缺少 buildId');
+  if (expectedCommit) {
+    assert(versionBody.releaseBranch === 'main', `生产版本分支异常：${String(versionBody.releaseBranch)}`);
+    assert(versionBody.releaseCommit === expectedCommit,
+      `生产版本提交不一致：期望 ${expectedCommit}，实际 ${String(versionBody.releaseCommit)}`);
+  }
   const index = await fetchOk(`${baseUrl}/`, 'text/html');
   const html = Buffer.from(index.bytes).toString('utf8');
   assert(html.includes('id="app"'), '生产首页缺少 #app 挂载点');

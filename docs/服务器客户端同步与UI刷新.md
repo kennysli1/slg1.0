@@ -40,11 +40,11 @@ summary: 服务端事件定向推送与客户端按需刷新机制
 ## 2. 服务端：事件 → 定向推送
 
 ### 2.1 声明（Manifest）
-每个模块在 `static MANIFEST` 里用 `eventPushMap` 把**内部领域事件名**映射到**对外推送事件名**：
+接入层在 `gateway/routes.ts` 中用 `eventPushMap` 把**内部领域事件名**映射到**对外推送事件名**：
 
 ```ts
 // 例：trade 模块
-static readonly MANIFEST: ModuleManifest = {
+const manifest: ModuleManifest = {
   moduleName: 'trade',
   publicActions: { /* … */ },
   eventPushMap: {
@@ -58,7 +58,7 @@ static readonly MANIFEST: ModuleManifest = {
 - payload **必须含 `villageId`**（见 §2.3 定向投递）。
 
 ### 2.2 聚合（`aggregateManifests`）
-`gateway.ts` 启动时汇总所有模块 manifest：
+`gateway.ts` 启动时汇总 `routes.ts` 的领域分组：
 
 ```ts
 const { actionRoutes, eventToPush } = aggregateManifests(MODULE_MANIFESTS);
@@ -123,7 +123,7 @@ push(PopulationChanged) → refreshAll → 重新 settle 结算 → emit Populat
 ## 4. 新增一条「推送 → 刷新」接线的标准步骤
 
 1. **服务端 emit 领域事件**：在业务模块里 `bus.emit({ name: '模块.事件', source, ts, payload: { villageId, … } })`，**务必带 `villageId`**。
-2. **模块 Manifest 登记**：在模块 `MANIFEST.eventPushMap` 加一行 `'模块.事件': '对外Push名'`。无需改 `gateway.ts`（聚合自动生效）。
+2. **接入路由登记**：在 `gateway/routes.ts` 对应分组的 `eventPushMap` 加一行 `'模块.事件': '对外Push名'`。领域模块不感知外部 Push 名。
 3. **（如需 GM/客户端常量）** 同模块 `publicActions` 已含对应查询命令（如 `GetTradeCenter`），客户端用 `req('GetXxx')` 拉详情。
 4. **客户端派发**：在 `bootstrap.ts` 的 `onPush` 里加分支：
    - 默认 → `void refreshAll();`（多数情况）。

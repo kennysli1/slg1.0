@@ -1,6 +1,6 @@
 ---
 class: index
-status: active
+status: archived
 updated: 2026-08-07
 owner: ops
 summary: 服务器文档区指路，完整清单见 PROJECT.md 文档清单

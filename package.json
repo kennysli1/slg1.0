@@ -28,6 +28,7 @@
     "verify:quick": "npm run build:shared && npm run lint:all && npm run typecheck && npm run test:all",
     "verify:deploy": "npm run build && npm run test:deploy",
     "verify:commit": "node scripts/commit-gate.mjs",
+    "deploy:prod": "bash tools/deploy.sh",
     "verify": "npm run guard && npm run verify:quick && npm audit --omit=dev --audit-level=high",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",
     "reset:respawn": "node --import tsx packages/server/src/admin.ts --mode=respawn",

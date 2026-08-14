@@ -1,25 +1,10 @@
 import type { WireRequest, WireResponse, WirePush, DomainEvent } from '@slg/shared';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import type { GameApp } from '../app.js';
-import { aggregateManifests, type ModuleManifest } from './manifest.js';
+import { aggregateManifests } from './manifest.js';
+import { MODULE_MANIFESTS } from './routes.js';
 import { validatePayload } from './validate.js';
 import { KeyedTokenBuckets } from '../infra/rate-limit.js';
-import { PlayerModule } from '../modules/player.js';
-import { EconomyModule } from '../modules/economy.js';
-import { BuildingModule } from '../modules/building.js';
-import { MilitaryModule } from '../modules/military.js';
-import { PopulationModule } from '../modules/population.js';
-import { WorldModule } from '../modules/world.js';
-import { PveModule } from '../modules/pve.js';
-import { MovementModule } from '../modules/movement.js';
-import { CombatModule } from '../modules/combat.js';
-import { MetaModule } from '../modules/meta.js';
-import { NotificationsModule } from '../modules/notifications.js';
-import { MercenaryModule } from '../modules/mercenary.js';
-import { TradeModule } from '../modules/trade.js';
-import { TreasureModule } from '../modules/treasures.js';
-import { ResearchModule } from '../modules/research.js';
-import { TasksModule } from '../modules/tasks.js';
 
 /**
  * 接入层 · Gateway（唯一翻译官 + 多人会话管理）
@@ -33,8 +18,7 @@ import { TasksModule } from '../modules/tasks.js';
  *    villageId（玩家不能伪造别人的村做操作 → 安全）。
  *  - 订阅内部 Event，按事件 payload 里的 villageId **定向推送**给对应玩家（不再广播）。
  *
- * 路由表来源：由各模块的 static MANIFEST 汇总生成，不再手工维护。
- * 新增一个 action 只需在对应模块 manifest 加一行，避免"实现了但网关漏配"。
+ * 路由表集中在接入层 routes.ts。领域模块不知道鉴权、会话注入与外部 payload schema。
  *
  * 不含游戏逻辑，只做翻译、路由、会话与权限。
  */
@@ -52,26 +36,6 @@ interface Session {
   /** 该玩家全部村庄（推送索引：任一村事件都推到此连接） */
   villageIds?: string[];
 }
-
-/** 所有领域模块的 manifest（新增模块在此登记即可被网关汇总）。 */
-export const MODULE_MANIFESTS: ModuleManifest[] = [
-  PlayerModule.MANIFEST,
-  MetaModule.MANIFEST,
-  EconomyModule.MANIFEST,
-  BuildingModule.MANIFEST,
-  MilitaryModule.MANIFEST,
-  PopulationModule.MANIFEST,
-  WorldModule.MANIFEST,
-  PveModule.MANIFEST,
-  MovementModule.MANIFEST,
-  CombatModule.MANIFEST,
-  NotificationsModule.MANIFEST,
-  MercenaryModule.MANIFEST,
-  TradeModule.MANIFEST,
-  TreasureModule.MANIFEST,
-  ResearchModule.MANIFEST,
-  TasksModule.MANIFEST,
-];
 
 const { actionRoutes: ACTION_ROUTES, eventToPush: EVENT_TO_PUSH } = aggregateManifests(MODULE_MANIFESTS);
 

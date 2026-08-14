@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig, Zone, BuildingDef } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Building（三区建筑系统：城镇中心 + 城内 + 城外）
@@ -57,37 +56,7 @@ const CENTER_SLOT = 'center';
 export class BuildingModule {
   static readonly NAME = 'building';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'building',
-    publicActions: {
-      GetVillageLayout: { command: 'building.GetLayout', ownVillage: true, needAuth: true, schema: {} },
-      GetBuildOptions: {
-        command: 'building.GetBuildOptions', ownVillage: true, needAuth: true,
-        schema: { zone: { type: 'enum', values: ['inner', 'outer'] } },
-      },
-      Build: {
-        command: 'building.Build', ownVillage: true, needAuth: true,
-        schema: {
-          zone: { type: 'enum', values: ['inner', 'outer'] },
-          kind: { type: 'string', minLen: 1, maxLen: 32 },
-        },
-      },
-      UpgradeBuilding: {
-        command: 'building.Upgrade', ownVillage: true, needAuth: true,
-        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
-      },
-      DemolishBuilding: {
-        command: 'building.Demolish', ownVillage: true, needAuth: true,
-        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
-      },
-    },
-    eventPushMap: {
-      'building.Built': 'BuildingBuilt',
-      'building.Upgraded': 'BuildingUpgraded',
-      'building.Demolishing': 'BuildingDemolishing',
-      'building.Demolished': 'BuildingDemolished',
-    },
-  };
+
 
   constructor(
     private store: Store,

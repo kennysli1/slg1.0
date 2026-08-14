@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import { makeLogger } from '../infra/logger.js';
 
 const log = makeLogger('mercenary');
@@ -52,20 +51,7 @@ const COLLECTION = 'merc';
 export class MercenaryModule {
   static readonly NAME = 'mercenary';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'mercenary',
-    publicActions: {
-      GetMercCamp: { command: 'mercenary.GetCamp', ownVillage: true, needAuth: true, schema: {} },
-      RefreshMercCamp: { command: 'mercenary.Refresh', ownVillage: true, needAuth: true, schema: {} },
-      HireMerc: {
-        command: 'mercenary.Hire', ownVillage: true, needAuth: true,
-        schema: { code: { type: 'string', minLen: 1, maxLen: 32 } },
-      },
-    },
-    eventPushMap: {
-      'mercenary.CampUpdated': 'MercenaryCampUpdated',
-    },
-  };
+
 
   constructor(
     private store: Store,

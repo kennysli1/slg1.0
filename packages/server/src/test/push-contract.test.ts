@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 import { EVENT_MAP } from '../modules/notifications.js';
 import { aggregateManifests } from '../gateway/manifest.js';
-import { MODULE_MANIFESTS } from '../gateway/gateway.js';
+import { MODULE_MANIFESTS } from '../gateway/routes.js';
 
 const { eventToPush } = aggregateManifests(MODULE_MANIFESTS);
 

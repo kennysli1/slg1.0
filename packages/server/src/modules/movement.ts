@@ -5,7 +5,6 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { Snapshot } from '../infra/combat-types.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import { type Hex, hexDistance, linePath, hexDistanceWrapped, linePathWrapped, wrapHex } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
 
@@ -85,53 +84,7 @@ const COLLECTION = 'movement';
 export class MovementModule {
   static readonly NAME = 'movement';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'movement',
-    publicActions: {
-      SendRaid: {
-        command: 'movement.SendRaid', ownVillage: true, needAuth: true,
-        schema: {
-          targetId: { type: 'string', minLen: 1, maxLen: 64 },
-          troops:   { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
-          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
-        },
-      },
-      SendAttack: {
-        command: 'movement.SendAttack', ownVillage: true, needAuth: true,
-        schema: {
-          targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
-          troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
-          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
-        },
-      },
-      FoundVillage: {
-        command: 'movement.FoundVillage', ownVillage: true, needAuth: true,
-        schema: {
-          q: { type: 'integer', min: -100, max: 100 },
-          r: { type: 'integer', min: -100, max: 100 },
-        },
-      },
-      SendTransport: {
-        command: 'movement.SendTransport', ownVillage: true, needAuth: true,
-        schema: {
-          targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
-          troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
-          cargo: { type: 'record_int', maxKeys: 4, minVal: 0, maxVal: 10_000_000 },
-          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
-        },
-      },
-      ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
-      // 供其他模块（宝物迁移）在不直接读 movement 集合的前提下查询某行军是否仍存在
-      GetMovement: { command: 'movement.GetMovement', ownVillage: false, needAuth: false, schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } } },
-    },
-    eventPushMap: {
-      'movement.Sent': 'MarchSent',
-      'movement.IncomingAttack': 'IncomingAttack',
-      'movement.Returned': 'MarchReturned',
-      'movement.Intercepted': 'MarchIntercepted',
-      'movement.VillageFounded': 'VillageFounded',
-    },
-  };
+
 
   constructor(
     private store: Store,

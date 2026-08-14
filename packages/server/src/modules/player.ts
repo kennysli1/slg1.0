@@ -2,7 +2,6 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import type { GameConfig } from '../infra/config.js';
 import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
 import { hexKey, hexDistanceWrapped, wrapHex } from '../infra/hex.js';
@@ -113,49 +112,7 @@ function validSessionToken(token: string, p: PlayerState, now: number): boolean 
 export class PlayerModule {
   static readonly NAME = 'player';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'player',
-    publicActions: {
-      Register: {
-        command: 'player.Register',
-        schema: {
-          name:     { type: 'string', minLen: 1, maxLen: 16 },
-          password: { type: 'string', minLen: 4, maxLen: 64 },
-          tribe:    { type: 'enum', optional: true, values: ['romans', 'gauls', 'teutons'] },
-        },
-      },
-      Login: {
-        command: 'player.Login',
-        schema: {
-          name:     { type: 'string', minLen: 1, maxLen: 64 },
-          password: { type: 'string', minLen: 1, maxLen: 64 },
-        },
-      },
-      ResumeSession: {
-        command: 'player.ResumeSession',
-        schema: {
-          token: { type: 'string', minLen: 1, maxLen: 256 },
-          currentVillageId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
-        },
-      },
-      SelectVillage: {
-        command: 'player.SelectVillage',
-        needAuth: true,
-        injectPlayerId: true,
-        schema: {
-          villageId: { type: 'string', minLen: 1, maxLen: 64 },
-        },
-      },
-      AbandonVillage: {
-        command: 'player.AbandonVillage',
-        needAuth: true,
-        injectPlayerId: true,
-        schema: {
-          villageId: { type: 'string', minLen: 1, maxLen: 64 },
-        },
-      },
-    },
-  };
+
 
   /** 放弃分城时由 app 注入的清理回调（清进度/地图/行军）。 */
   private wipeVillage?: (villageId: string) => void;

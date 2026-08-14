@@ -1,7 +1,6 @@
 import type { Command, CommandResult } from '@slg/shared';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Meta（对外配置下发）— 无状态
@@ -14,12 +13,7 @@ import type { ModuleManifest } from '../gateway/manifest.js';
 export class MetaModule {
   static readonly NAME = 'meta';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'meta',
-    publicActions: {
-      GetGameConfig: { command: 'meta.GetGameConfig', schema: {} },
-    },
-  };
+
 
   constructor(
     private commands: CommandBus,

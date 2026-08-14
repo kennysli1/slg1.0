@@ -2,7 +2,6 @@ import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import { makeLogger } from '../infra/logger.js';
 
 const log = makeLogger('economy');
@@ -65,15 +64,7 @@ function zero(): ResMap {
 export class EconomyModule {
   static readonly NAME = 'economy';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'economy',
-    publicActions: {
-      GetResources: { command: 'economy.GetResources', ownVillage: true, needAuth: true, schema: {} },
-    },
-    eventPushMap: {
-      'economy.CropDeficit': 'CropDeficit',
-    },
-  };
+
 
   constructor(
     private store: Store,

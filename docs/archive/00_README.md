@@ -1,6 +1,6 @@
 ---
 class: index
-status: active
+status: archived
 updated: 2026-08-07
 owner: design
 summary: 设计三阶段推进流程与进度记录，文档清单见 PROJECT.md §五

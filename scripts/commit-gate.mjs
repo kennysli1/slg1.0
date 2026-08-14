@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** 提交总闸门：只允许“当前暂存快照已完整测试并成功部署”的提交。 */
+/** 提交总闸门：只验证当前暂存快照，不连接或改变生产环境。 */
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,5 @@ if (unstaged || untracked) {
 run('npm', ['run', 'guard'], 'G1 · 变更契约');
 run('npm', ['run', 'verify:quick'], 'G2 · 完整构建、静态检查与全部测试');
 run('npm', ['run', 'verify:deploy'], 'G3 · 构建并执行本地生产部署端到端冒烟');
-run('bash', ['tools/deploy.sh', '--skip-local'], 'G4 · 腾讯云真实部署、验收与失败回滚');
 
-console.log('\n✔ 提交总闸门通过：当前暂存快照已测试、已部署、已从公网验收。');
+console.log('\n✔ 提交总闸门通过：当前暂存快照已完成本地验证；生产部署仅允许显式部署 origin/main。');
