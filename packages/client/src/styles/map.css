@@ -262,57 +262,68 @@
 .map-dpad-btn:disabled { opacity: .32; cursor: not-allowed; }
 .map-dpad-btn--home { color: var(--c-gold); font-size: var(--f-lg); }
 
-/* ---------- 坐标跳转 ---------- */
-.map-jump {
+/* ---------- 战术定位：坐标跳转 + 回主城 ---------- */
+.map-locator {
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
   padding: var(--s-2) var(--s-3);
-  background: rgba(10,13,18,.80);
+  background: var(--c-panel-2);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   backdrop-filter: blur(6px);
-  max-width: 220px;
+  box-shadow: var(--sh-2);
 }
-.map-jump-label {
+.map-locator-title {
   font-size: var(--f-xs);
-  color: var(--c-ink-soft);
-  letter-spacing: .5px;
+  color: var(--c-gold);
+  font-weight: 700;
+  letter-spacing: 1px;
 }
-.map-jump-row {
+.map-locator-row {
   display: flex;
   align-items: center;
   gap: var(--s-1);
 }
-.map-jump-axis {
+.map-coordinate-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+.map-coordinate-field span {
   font-family: var(--ff-num);
   font-size: var(--f-xs);
   color: var(--c-gold);
-  width: 14px;
 }
-.map-jump-input {
+.map-coordinate-field input {
   width: 62px;
-  height: 28px;
+  min-height: 36px;
   padding: 0 var(--s-2);
   background: var(--c-panel-3);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--c-ink);
   font-family: var(--ff-num);
-  font-size: var(--f-xs);
+  font-size: var(--f-sm);
 }
-.map-jump-input:focus { outline: 1px solid var(--c-gold-dim); border-color: var(--c-gold-dim); }
-.map-jump-go {
-  height: 28px;
-  padding: 0 var(--s-2);
-  font-size: var(--f-xs);
+.map-coordinate-field input:focus-visible {
+  outline: 2px solid var(--c-gold-dim);
+  outline-offset: 1px;
+  border-color: var(--c-gold);
+}
+.map-locator-jump,
+.map-locator-home {
+  min-height: 36px;
   white-space: nowrap;
 }
-.map-jump-hint {
+.map-locator-home span { color: var(--c-gold); }
+.map-locator-hint,
+.map-locator-error {
   font-size: var(--f-2xs);
   color: var(--c-ink-dim);
   line-height: 1.4;
 }
+.map-locator-error { color: var(--status-danger-strong); }
 
 /* ---------- 图例 ---------- */
 .map-legend {
@@ -756,16 +767,22 @@
     left: var(--s-3);
   }
   .map-dpad-btn { min-width: 44px; min-height: 44px; }
-  .map-jump { display: none; } /* 手机上收进功能按钮 */
-
-  .map-legend {
-    bottom: var(--s-3);
+  .map-dpad { display: none; }
+  .map-nav {
     right: var(--s-3);
-    font-size: var(--f-2xs);
-    padding: var(--s-1) var(--s-2);
-    gap: 3px;
+    align-items: stretch;
   }
-  .map-legend-dot { width: 8px; height: 8px; }
+  .map-locator { padding: var(--s-2); }
+  .map-locator-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  }
+  .map-coordinate-field { min-width: 0; }
+  .map-coordinate-field input { width: 100%; min-width: 0; min-height: 44px; }
+  .map-locator-jump { min-height: 44px; }
+  .map-locator-home { min-height: 44px; }
+
+  .map-legend { display: none; }
 
   .map-infobar {
     font-size: var(--f-2xs);
