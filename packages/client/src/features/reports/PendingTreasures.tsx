@@ -51,6 +51,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
   const isDeliver = p.kind === 'deliver';
   const isCamp = !isDeliver;
   const isArrived = !!p.arrivedAt;
+  const canDecide = isDeliver || isArrived;
 
   // camp 未归村：仅显示占位卡片（不泄露宝物信息）
   if (isCamp && !isArrived) {
@@ -120,7 +121,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
         </div>
 
         <div class="tcard-actions">
-          {isDeliver ? (
+          {canDecide ? (
             <>
               <Btn
                 variant="primary"
@@ -129,13 +130,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
               >
                 收下
               </Btn>
-              <Btn
-                variant="default"
-                size="sm"
-                onClick={() => void claimTreasure(p.movementId, 'sell', p.name, p.priceGold)}
-              >
-                出售 +{fmt(p.priceGold)} 金
-              </Btn>
+              {p.hasTradeCenter && <Btn variant="default" size="sm" onClick={() => void claimTreasure(p.movementId, 'sell', p.name, p.priceGold)}>出售 +{fmt(p.priceGold)} 金</Btn>}
               <Btn
                 variant="danger"
                 size="sm"

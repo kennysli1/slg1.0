@@ -142,9 +142,9 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tileAfter.ok, false, '营地地块应已被清除');
 
-  // 任务专属宝物 warrior_token 应进入 locked 桶（不可出售/遗弃）
+  // 任务宝物与普通宝物共用栏位；有空位时应进入宝物栏，而不绕过栏位锁定保存。
   const tr = app.store.get<any>('treasure', va);
-  assert.ok(tr && tr.locked.includes('warrior_token'), 'warrior_token 应进入 treasure.locked');
+  assert.ok(tr && [...tr.town, ...tr.treasury].includes('warrior_token'), 'warrior_token 应进入宝物栏');
 });
 
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
