@@ -175,6 +175,29 @@ test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', asy
   assert.equal(s2.awaitingReturn, 1, '清空营地且携旗达到二十人时，应记录待回城出征');
 });
 
+test('GM 可将已完成支线标记未完成，且必须重新触发后才可接取', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '支线重置测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  const state = app.store.get<any>('task', va);
+  state.completedSide = ['s2'];
+  state.firedTriggers = ['troops_reached:20'];
+  app.store.set('task', va, state);
+
+  const reopen = await send(app, 'task.GmReopenCompleted', { villageId: va, code: 's2' });
+  assert.equal(reopen.ok, true, `GM 重置应成功: ${reopen.reason ?? ''}`);
+  const after = reopen.payload as any;
+  assert.ok(!after.completedSide.includes('s2'), '重置后不应保留完成记录');
+  assert.ok(!after.offeredSide.some((q: any) => q.code === 's2'), '未重新触发前不得再次接取');
+
+  const raw = app.store.get<any>('task', va);
+  assert.ok(!raw.firedTriggers.includes('troops_reached:20'), '重置后必须清除该任务的触发状态');
+  const main = await send(app, 'task.GmReopenCompleted', { villageId: va, code: 'm1' });
+  assert.equal(main.ok, false, '主线不可经此 GM 操作重置');
+  assert.equal(main.reason, 'only_completed_side_supported');
+});
+
 test('酒馆建造触发随机任务刷新；接取 → 上交 → 完成', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试4');
