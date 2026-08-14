@@ -9,6 +9,8 @@
 .brand-sub { display: flex; min-width: 0; align-items: center; gap: var(--s-1); color: var(--text-muted); font-size: var(--f-xs); }
 .brand-sub > span { overflow: hidden; max-width: 15ch; text-overflow: ellipsis; white-space: nowrap; }
 .village-pick { width: min(220px, 29vw); min-height: 32px; padding: 0 var(--s-2); border: 0; border-left: 1px solid var(--border-subtle); border-radius: 0; color: var(--text-default); background: transparent; font-size: var(--f-xs); }
+.logout-btn { padding: 2px var(--s-2); border: 0; border-left: 1px solid var(--border-subtle); border-radius: 0; color: var(--text-muted); background: transparent; font-size: var(--f-xs); cursor: pointer; }
+.logout-btn:hover { color: var(--text-default); }
 
 .resbar { display: flex; flex: 1 1 auto; align-items: stretch; justify-content: flex-end; min-width: 0; gap: var(--s-1); }
 .res { display: grid; grid-template-columns: 26px minmax(0, 1fr); grid-template-areas: "icon value" "icon detail"; align-items: center; min-width: 108px; padding: var(--s-1) var(--s-2); border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; }

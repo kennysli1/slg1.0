@@ -72,6 +72,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
   const o = task.objective;
   const reqRes: Record<string, number> = o.resources ?? {};
   const submitted: Record<string, number> = task.submitted ?? {};
+  const remaining = (k: string) => Math.max(0, (reqRes[k] ?? 0) - (submitted[k] ?? 0));
   const [vals, setVals] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {};
     for (const [k, need] of Object.entries(reqRes)) {
@@ -81,7 +82,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
   });
 
   const onInput = (k: string, v: string) => {
-    const n = Math.max(0, Math.floor(Number(v) || 0));
+    const n = Math.min(remaining(k), Math.max(0, Math.floor(Number(v) || 0)));
     setVals((p) => ({ ...p, [k]: n }));
   };
 
@@ -106,7 +107,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
               <span class="task-submit-res">{info.name}</span>
               <input
                 class="task-submit-input"
-                type="number" min="0" value={vals[k] ?? 0}
+                type="number" min="0" max={remaining(k)} value={vals[k] ?? 0}
                 data-modal-initial-focus={k === Object.keys(reqRes)[0] ? 'true' : undefined}
                 onInput={(e) => onInput(k, (e.target as HTMLInputElement).value)}
               />
