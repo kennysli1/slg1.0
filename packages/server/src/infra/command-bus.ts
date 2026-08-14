@@ -12,7 +12,7 @@ import type { Command, CommandResult, CommandHandler } from '@slg/shared';
  * - Event 是一对多、无返回（通知/解耦）。
  */
 export class CommandBus {
-  private handlers = new Map<string, CommandHandler>();
+  private handlers = new Map<string, CommandHandler<any, any>>();
 
   /** 注册一个命令处理器。命令名重复注册会报错（避免静默覆盖）。 */
   register<P = any, R = any>(name: string, handler: CommandHandler<P, R>): void {

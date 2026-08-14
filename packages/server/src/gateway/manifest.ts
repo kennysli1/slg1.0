@@ -1,15 +1,12 @@
 /**
- * 接入层 · 模块清单（Manifest）声明式注册
- * 对应 review1.0 §8.4 / 阶段C：把"模块实现了命令"和"网关能路由到它"绑在一起，
- * 减少"模块已实现但前端调不到（漏配网关）"的失误。
+ * 接入层路由声明。只描述外部 action、鉴权、会话注入和 payload 校验。
  *
- * 每个领域模块导出一个 ModuleManifest，列出：
+ * routes.ts 按业务域分组列出：
  *  - publicActions：对外动作名 → 内部命令名 + 鉴权/自己村标记
  *  - eventPushMap：内部事件名 → 对外推送事件名
  * Gateway 启动时汇总所有 manifest 生成 ACTION_ROUTES / EVENT_TO_PUSH。
  *
- * 这是"自描述优先"：新增一个 action，只在对应模块的 manifest 加一行即可，
- * 不必再回头改 gateway.ts。
+ * 领域模块不 import 本文件，避免领域层反向依赖接入层。
  */
 
 export type { FieldSchema, PayloadSchema } from './validate.js';

@@ -4,7 +4,6 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Notifications（通知/战报持久化）
@@ -45,13 +44,7 @@ export const EVENT_MAP: Record<string, string> = {
 export class NotificationsModule {
   static readonly NAME = 'notifications';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'notifications',
-    publicActions: {
-      GetNotifications: { command: 'notifications.List', ownVillage: true, needAuth: true, schema: {} },
-    },
-    eventPushMap: {},
-  };
+
 
   constructor(
     private store: Store,

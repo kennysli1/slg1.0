@@ -34,7 +34,6 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import type { GameConfig, QuestDef } from '../infra/config.js';
 
 const COLLECTION = 'task';
@@ -99,26 +98,7 @@ function rarityRank(rarity: string): number {
 export class TasksModule {
   static readonly NAME = 'task';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'task',
-    publicActions: {
-      'task.GetState': { command: 'task.GetState', ownVillage: true, needAuth: true, schema: {} },
-      'task.Accept': { command: 'task.Accept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
-      'task.Abandon': { command: 'task.Abandon', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
-      'task.SubmitResources': {
-        command: 'task.SubmitResources', ownVillage: true, needAuth: true,
-        schema: {
-          code: { type: 'string', minLen: 1, maxLen: 32 },
-          resources: { type: 'record_int', minVal: 0, maxVal: 2_000_000_000 },
-        },
-      },
-    },
-    // 左=内部事件名，右=推给客户端的裸名（与 research/tech 等保持一致）
-    eventPushMap: {
-      'task.ListChanged': 'TaskListChanged',
-      'task.MapUpdated': 'TaskMapUpdated',
-    },
-  };
+
 
   private config: GameConfig;
   private store: Store;

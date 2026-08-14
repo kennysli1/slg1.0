@@ -18,7 +18,6 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import type { GameConfig, ResearchDef, ResearchEffectDef } from '../infra/config.js';
 
 const COLLECTION = 'research';
@@ -56,22 +55,7 @@ export interface AcademyState {
 // ── 模块 ──
 export class ResearchModule {
   static NAME = 'research';
-  static MANIFEST: ModuleManifest = {
-    moduleName: 'research',
-    publicActions: {
-      GetState: { command: 'research.GetState', ownVillage: true, needAuth: true, schema: {} },
-      GetTechTree: { command: 'research.GetTechTree', ownVillage: true, needAuth: true, schema: {} },
-      StartResearch: { command: 'research.StartResearch', ownVillage: true, needAuth: true, schema: { techCode: { type: 'string', minLen: 1, maxLen: 32 } } },
-      CancelResearch: { command: 'research.CancelResearch', ownVillage: true, needAuth: true, schema: {} },
-    },
-    // 左=内部事件名，右=推给客户端的事件名。右侧一律用**不带模块前缀**的裸名，
-    // 与其它模块保持一致（military 推 SmithyUpgraded、building 推 BuildingBuilt…），
-    // 客户端的 notificationText / notificationKind 也是按裸名分派的。
-    eventPushMap: {
-      'research.TechCompleted': 'TechCompleted',
-      'research.RpChanged': 'RpChanged',
-    },
-  };
+
 
   private config: GameConfig;
   private store: Store;

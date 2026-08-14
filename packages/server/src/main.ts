@@ -85,9 +85,17 @@ async function main() {
   // 托管前端静态文件（构建后的 client）。开发时用 Vite dev server，此目录可能不存在。
   const clientDist = join(__dirname, '../../client/dist');
   let buildId = 'development';
+  let releaseCommit = 'development';
+  let releaseBranch = 'development';
   try {
-    const meta = JSON.parse(readFileSync(join(clientDist, 'version.json'), 'utf8')) as { buildId?: unknown };
+    const meta = JSON.parse(readFileSync(join(clientDist, 'version.json'), 'utf8')) as {
+      buildId?: unknown;
+      releaseCommit?: unknown;
+      releaseBranch?: unknown;
+    };
     if (typeof meta.buildId === 'string' && meta.buildId) buildId = meta.buildId;
+    if (typeof meta.releaseCommit === 'string' && meta.releaseCommit) releaseCommit = meta.releaseCommit;
+    if (typeof meta.releaseBranch === 'string' && meta.releaseBranch) releaseBranch = meta.releaseBranch;
   } catch { /* 开发环境可能还没有 client/dist */ }
   if (existsSync(clientDist)) {
     await fastify.register(fastifyStatic, { root: clientDist, prefix: '/' });
@@ -191,7 +199,7 @@ async function main() {
   fastify.get('/health', async () => ({ ok: true, ts: app.now() }));
   fastify.get('/version', async (_req, reply) => {
     reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
-    return { buildId };
+    return { buildId, releaseCommit, releaseBranch };
   });
 
   // GM 调试 API（始终挂载；如需关闭设 GM_ENABLED=off）

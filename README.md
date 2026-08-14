@@ -5,7 +5,7 @@
 > 📖 想深入理解整个项目？请读 **[PROJECT.md](./PROJECT.md)** —— 它是理解代码与设计的唯一入口。
 > 本 README 只做快速上手。
 >
-> ⛔ 要提交代码？先读 **[docs/00_变更契约.md](./docs/00_变更契约.md)**：六条硬规矩 + 四道自动闸门（`npm install` 后自动生效，不合规提交会被拒）。
+> ⛔ 要提交代码？先读 **[docs/00_变更契约.md](./docs/00_变更契约.md)**（`npm install` 后自动启用本地闸门）。
 
 ---
 
@@ -59,8 +59,9 @@ npm run test:server      # 跑后端测试（all.test.ts barrel 汇总全部 *.t
 npm run lint:all         # 前后端 ESLint 与架构红线
 npm run guard            # 变更契约检查
 npm run test:deploy      # 隔离启动生产产物，验证 HTTP/静态前端/真实 WebSocket
-npm run verify:commit    # 提交总闸门：完整测试 + 真实部署 + 公网验收
+npm run verify:commit    # 提交总闸门：完整测试 + 本地生产冒烟
 npm run verify           # 提交前全量验证
+npm run deploy:prod      # 显式生产部署；始终发布远程 origin/main
 
 npm run reset:season     # 刷档：留账号+地图位置，进度归零（新赛季）
 npm run reset:respawn    # 刷档：留登录凭据，重新分配地图位置
@@ -98,5 +99,4 @@ slg1.0/
 ## 部署
 
 生产部署请按 **`docs/部署手册_腾讯云轻量服务器.md`**（含 pm2 保活、数据备份）。
-正常 `git commit` 会强制执行完整测试、本地生产冒烟、腾讯云真实部署与公网验收；失败自动回滚且拒绝提交。
-`tools/deploy.sh` 也可手动执行同一部署流程。
+正常 `git commit` 只执行本地验证，不改变生产环境。合并并推送远程 main 后运行 `npm run deploy:prod`；该命令可从任意本地分支发起，但只验证和发布 `origin/main` 的确定提交，并从公网核对提交 SHA。

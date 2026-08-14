@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig, TreasureDef } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Treasures（宝物）
@@ -127,46 +126,7 @@ const TOWN_CENTER_BASE_SLOTS = 1;
 export class TreasureModule {
   static readonly NAME = 'treasure';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'treasure',
-    publicActions: {
-      ListTreasures: { command: 'treasure.List', ownVillage: true, needAuth: true, schema: {} },
-      // 使用宝物：仅对即时类(instantGold)有效，发放金币并移除；被动宝物返回 not_usable。
-      UseTreasure: { command: 'treasure.Use', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
-      // 出售宝物：卖给 NPC 换金币(priceGold)并移除；被动/即时皆可。
-      SellTreasure: { command: 'treasure.Sell', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
-      // 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。
-      DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
-      // 确认领取待领取宝物（军队带回/送达 → 战报确认；超时由服务端自动遗弃）。
-      // 收下(take)遇「已持有」「宝物栏已满」一律拒绝（玩家须显式 出售/遗弃）；出售(sell)需本村有贸易中心。
-      ClaimPendingTreasure: {
-        command: 'treasure.ClaimPending', ownVillage: true, needAuth: true,
-        schema: {
-          movementId: { type: 'string', minLen: 1, maxLen: 64 },
-          decision: { type: 'enum', optional: true, values: ['take', 'sell', 'discard'] },
-        },
-      },
-      // 把已储存的宝物装上某支出征/运输军队（携带上限由调用方按兵力计算后传入 maxCarry）。
-      AssignToArmy: { command: 'treasure.AssignToArmy', ownVillage: true, needAuth: true, schema: {} },
-      // 由 building 模块推送：本村是否拥有贸易中心（决定待领取宝物能否「出售」）。铁律#4：建筑只发命令（内部命令，非客户端动作）。
-      SetTradeCenter: { command: 'treasure.SetTradeCenter', ownVillage: false, needAuth: false, schema: { hasTradeCenter: { type: 'boolean' } } },
-      // 把跟随军队的宝物在返程到家后存回该村（优先宝库格子）。
-      StoreCarried: { command: 'treasure.StoreCarried', ownVillage: false, needAuth: false, schema: {} },
-      // 把跟随军队的宝物在抵达「另一个村庄」时转为该村庄玩家的待处理报告（deliver）。
-      OffloadForeign: { command: 'treasure.OffloadForeign', ownVillage: false, needAuth: false, schema: {} },
-      // 携带宝物的军队被全歼：pve=回收到系统宝物池(销毁)；pvp=转给防守方村庄作为 deliver 报告。
-      LoseCarried: { command: 'treasure.LoseCarried', ownVillage: false, needAuth: false, schema: {} },
-      // 查询某支军队当前携带宝物的聚合效果（供 movement 叠加到出征快照）。
-      GetCarriedEffects: { command: 'treasure.GetCarriedEffects', ownVillage: false, needAuth: false, schema: {} },
-    },
-    eventPushMap: {
-      'treasure.Changed': 'TreasureChanged',
-      'treasure.PendingDropped': 'TreasurePendingDropped',
-      'treasure.PendingExpired': 'TreasurePendingExpired',
-      'treasure.CarriedArrived': 'TreasureCarriedArrived',
-      'treasure.DemolishRedistributed': 'TreasureDemolishRedistributed',
-    },
-  };
+
 
   constructor(
     private store: Store,

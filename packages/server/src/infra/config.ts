@@ -1,116 +1,23 @@
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync } from 'node:fs';
-import { loadCsv, num, parseCsvStructured, serializeCsv, type CsvRow } from './csv.js';
+import { loadCsv, num } from './csv.js';
 import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
+import {
+  loadBalanceOverrides,
+  mergeBalanceOverrides,
+  mergeOverridesIntoRows,
+  saveBalanceOverrides,
+  type BalanceOverrides,
+  type BalanceTableMeta,
+} from './balance-overrides.js';
 
 export type { UnitTraitDef } from './combat-types.js';
-
-// ── 平衡调参覆盖（持久化在 data/balance_overrides.json，git 忽略，部署/wipe 都不动）────
-
-/**
- * 平衡调参覆盖结构：与 GM 保存接口 body 同形。
- * tableName → 行主键 → 字段名 → 新值（字符串，与 CSV 单元格同口径）。
- * 例如：{ buildings: { '16': { maxLevel: '5' } }, building_levels: { 'main|1': { popCap: '99' } } }
- */
-export type BalanceOverrides = Record<string, Record<string, Record<string, string>>>;
-
-/**
- * 单个表的可编辑字段集合（与 gm.ts 的 BALANCE_TABLES 同形，但只关心覆盖逻辑所需的子集）。
- * 这里只声明本文件需要的最小结构，避免直接依赖 gm.ts 造成循环引用。
- */
-export interface BalanceTableMeta {
-  /** CSV 文件名（相对 configDir）。 */
-  file: string;
-  /** 单字段主键列名（如 'id'）。 */
-  key?: string;
-  /** 复合主键列名数组（如 ['code','level']）。 */
-  keyComposite?: string[];
-  /** 数字字段集合：用于校验与规范化。 */
-  numeric?: string[];
-}
-
-/**
- * 读 data/balance_overrides.json。文件不存在或解析失败时返回空对象（视作「无覆盖」）。
- * 注意：路径在 data/ 目录下，与 game.json 同级；data/ 已在 .gitignore 中，
- * 所以部署（git reset --hard）和 wipe:all 都不会触碰。
- */
-export function loadBalanceOverrides(overridePath: string): BalanceOverrides {
-  if (!existsSync(overridePath)) return {};
-  try {
-    const raw = readFileSync(overridePath, 'utf8');
-    const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== 'object') return {};
-    return obj as BalanceOverrides;
-  } catch {
-    // 文件损坏时降级为空对象（不影响启动；玩家改坏的下次保存会被覆盖）
-    return {};
-  }
-}
-
-/**
- * 写 data/balance_overrides.json（原子写入：先写临时文件再 rename，避免半截文件）。
- */
-export function saveBalanceOverrides(overridePath: string, overrides: BalanceOverrides): void {
-  const tmp = overridePath + '.tmp';
-  writeFileSync(tmp, JSON.stringify(overrides, null, 2), 'utf8');
-  // 原子重命名（跨平台：先 rename；失败则 copy + unlink 兜底）
-  try {
-    renameSync(tmp, overridePath);
-  } catch {
-    copyFileSync(tmp, overridePath);
-    unlinkSync(tmp);
-  }
-}
-
-/**
- * 把单个表的覆盖合并到已解析的 CSV 行集合上，返回新行集合。
- * 不做文件 I/O；调用方负责序列化与落盘。
- * 校验逻辑与 gm.applyBalanceEdits 保持一致：数字字段必须能 parseFloat；非数字字段原样覆盖。
- */
-export function mergeOverridesIntoRows(
-  rows: CsvRow[],
-  table: BalanceTableMeta,
-  changes: Record<string, Record<string, string>>,
-): CsvRow[] {
-  const incByKey = new Map(Object.entries(changes));
-  const keyCol = table.key;
-  const compCols = table.keyComposite ?? [];
-  return rows.map((orig) => {
-    const keyVal = keyCol
-      ? String(orig[keyCol] ?? '')
-      : compCols.map((c) => String(orig[c] ?? '')).join('|');
-    const inc = incByKey.get(keyVal);
-    if (!inc) return orig;
-    const merged = { ...orig };
-    for (const h of Object.keys(inc)) {
-      const newVal = inc[h];
-      if (newVal === undefined || newVal === '') continue;
-      if (table.numeric?.includes(h)) {
-        const n = Number(newVal);
-        if (!Number.isFinite(n)) throw new Error(`${table.file} 行 ${keyVal} 字段 ${h}="${newVal}" 不是合法数字`);
-        merged[h] = String(n);
-      } else {
-        merged[h] = newVal;
-      }
-    }
-    return merged;
-  });
-}
-
-/**
- * 深合并两次平衡调参覆盖（表→主键→字段）。后写入覆盖先写入；缺失字段保留。
- * 用于 GM 保存端点：读现有覆盖 → 合并本次编辑 → 落盘（避免一次保存抹掉之前的手改）。
- */
-export function mergeBalanceOverrides(existing: BalanceOverrides, incoming: BalanceOverrides): BalanceOverrides {
-  const merged: BalanceOverrides = { ...existing };
-  for (const table of Object.keys(incoming)) {
-    merged[table] = { ...(merged[table] ?? {}) };
-    for (const key of Object.keys(incoming[table])) {
-      merged[table][key] = { ...(merged[table][key] ?? {}), ...incoming[table][key] };
-    }
-  }
-  return merged;
-}
+export {
+  loadBalanceOverrides,
+  mergeBalanceOverrides,
+  mergeOverridesIntoRows,
+  saveBalanceOverrides,
+};
+export type { BalanceOverrides, BalanceTableMeta };
 
 /**
  * 基础设施 · 配置注册表（GameConfig）

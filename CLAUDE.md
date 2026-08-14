@@ -30,7 +30,7 @@
 | R4 | 规划文档用完即归档 | 功能上线后把结论并入常青文档，原文 `git mv` 到 `docs/archive/` |
 | R5 | CHANGELOG 记账 | 改了 `packages/**/src/` 或 `config/*.csv` → 写 `## [未发布]` 条目 |
 | R6 | 三个版本号同步 | 协议改了升 `WIRE_VERSION`；落盘结构改了升 `SAVE_SCHEMA_VERSION` 且条目带 `[需刷档]` |
-| R7 | 部署验收后提交 | `git commit` 前必须完整测试、启动生产产物冒烟、真实部署并从公网验收；失败自动回滚且拒绝提交 |
+| R7 | 生产只认远程 main | commit 只做本地验证；`deploy:prod` 可从任意分支发起，但只部署 `origin/main` 的确定提交 |
 
 全文（含逃生阀用法）：`docs/00_变更契约.md`。
 
@@ -45,12 +45,12 @@
 |-------|---------|--------|
 | 改数值 / 加兵种·建筑·PvE | `config/README.md` | `config/*.csv` 加一行，重启后端。**前端不用改**（走服务端 `GetGameConfig` 下发） |
 | 加全局常量 / 平衡参数 | `config/README.md` | `config/game_constants.csv` + `infra/config.ts` 的 `GameConstants` 加字段 |
-| 加新系统（工会 / 邮件） | `docs/2_2.0设计/07_扩展与代码规范.md`、`03_架构总览.md` | 照 `modules/` 模板加模块 + `static MANIFEST` + `gateway.ts` 登记 + 挂 `app.ts` |
+| 加新系统（工会 / 邮件） | `docs/2_2.0设计/07_扩展与代码规范.md`、`03_架构总览.md` | 加 owner 模块并挂 `app.ts`；外部 action 只登记到 `gateway/routes.ts` |
 | 改某个系统的逻辑 | PROJECT.md §四 找 owner 模块 | 只改该模块的私有方法，要别人的数据就发 Command |
 | 改前端界面 / 加页面·弹窗 | `docs/2_2.0设计/14_前端设计系统.md` | Preact+TSX 组件；样式只用 `styles/tokens.css` 的变量；动作走 `act()` |
 | 加·换美术资源 | `docs/美术生成规范.md` | `tools/art_manifest.json` 加一条 → 出洋红幕布图 → `python tools/art_pipeline.py` |
 | 改通信接口 / 加 action | `docs/2_2.0设计/04_通信格式规范.md` | `packages/shared` 信封 + gateway；破坏性改动升 `WIRE_VERSION` |
-| 改战斗 / 地图行军 / 建筑 / 人口 | 对应 `docs/2_2.0设计/` 的 08 / 09 / 11 / 13 | 对应 owner 模块 |
+| 改战斗 / 地图行军 / 建筑 / 人口 | PROJECT.md §三 + 对应模块测试 | 对应 owner 模块；历史设计只在考古时读 archive |
 | 改存档结构 / 排查存档 | `docs/服务器/01_数据存储结构.md` | 升 `SAVE_SCHEMA_VERSION`，部署带刷档 |
 | 刷档 / 重置 / GM 调试 | `docs/服务器/02_数据库操作手册.md`、`03_GM调试手册.md` | `npm run reset:season` / `reset:respawn` / `wipe:all`（自动备份） |
 | 第一次读代码 | `docs/2_2.0设计/06_代码导读.md` | — |
@@ -73,6 +73,7 @@ npm run guard                # 变更契约自查（秒级，随时跑）
 npm run lint:all             # 前后端 ESLint（守铁律 #2/#3）
 npm run test:server          # 改完逻辑必跑：全循环 + 并发/协议/WAL/架构守卫
 npm run verify               # 提交前一键全量（guard + build + lint + typecheck + test + audit）
+npm run deploy:prod          # 显式生产部署；任意分支可发起，但内容固定为 origin/main
 ```
 
 ## 多 Agent 协作路由
@@ -92,10 +93,10 @@ npm run verify               # 提交前一键全量（guard + build + lint + ty
 2. 更新受影响的索引（PROJECT.md §四/§五 或 `config/README.md`）
 3. 写 `CHANGELOG.md` 的 `## [未发布]` 条目
 4. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
-5. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保部署快照就是提交快照）
+5. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保本地验证对应提交快照）
 6. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
-7. 正常执行 `git commit`：钩子会依次完整验证、本地生产冒烟、真实部署、公网验收，通过后才创建提交
+7. 正常执行 `git commit`：钩子完成本地验证和隔离生产冒烟，不连接生产环境
 
 **索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
 
-**部署**：见 [`docs/部署手册_腾讯云轻量服务器.md`](./docs/部署手册_腾讯云轻量服务器.md)（含刷档 `--reset respawn` 流程）。
+**部署**：合并并推送远程 main 后运行 `npm run deploy:prod`。命令可从任意本地分支发起，但只取远程 `origin/main`；见 [`docs/部署手册_腾讯云轻量服务器.md`](./docs/部署手册_腾讯云轻量服务器.md)。

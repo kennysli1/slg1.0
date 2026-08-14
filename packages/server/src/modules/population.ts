@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Population（人口）v3 — 硬上限模型
@@ -70,15 +69,7 @@ function clamp(x: number, lo: number, hi: number): number {
 export class PopulationModule {
   static readonly NAME = 'population';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'population',
-    publicActions: {
-      GetPopulation: { command: 'population.GetSnapshot', ownVillage: true, needAuth: true, schema: {} },
-    },
-    eventPushMap: {
-      'population.Changed': 'PopulationChanged',
-    },
-  };
+
 
   constructor(
     private store: Store,

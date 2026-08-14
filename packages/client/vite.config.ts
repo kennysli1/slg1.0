@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
 
 const buildId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+const releaseCommit = process.env.KOW_RELEASE_COMMIT ?? 'development';
+const releaseBranch = process.env.KOW_RELEASE_BRANCH ?? 'development';
 
 export default defineConfig({
   plugins: [
@@ -9,7 +11,11 @@ export default defineConfig({
     {
       name: 'build-version',
       generateBundle() {
-        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId }) });
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: JSON.stringify({ buildId, releaseCommit, releaseBranch }),
+        });
       },
     },
   ],

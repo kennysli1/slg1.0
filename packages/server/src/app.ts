@@ -205,6 +205,16 @@ export function createGameApp(opts?: {
     return owner?.id ?? null;
   });
 
+  /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
+  const modules = [
+    economy, building, military, population, world, pve, movement, combat,
+    player, meta, notifications, mercenary, trade, treasure, research, task,
+  ] as const;
+  const resumableModules = [
+    building, military, population, movement, combat, pve,
+    mercenary, trade, treasure, research, task,
+  ] as const;
+
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
   const wipeSingleVillage = (villageId: string): void => {
     for (const prefix of [
@@ -252,22 +262,7 @@ export function createGameApp(opts?: {
   };
   player.setVillageWiper(wipeSingleVillage, config.constants.foundAbandonLockSec);
 
-  economy.init();
-  building.init();
-  military.init();
-  population.init();
-  world.init();
-  pve.init();
-  movement.init();
-  combat.init();
-  player.init();
-  meta.init();
-  notifications.init();
-  mercenary.init();
-  trade.init();
-  treasure.init();
-  research.init();
-  task.init();
+  for (const module of modules) module.init();
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
@@ -281,39 +276,14 @@ export function createGameApp(opts?: {
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
     },
     resume() {
-      building.resume();
-      military.resume();
-      population.resume();
-      movement.resume();
-      combat.resume();
-      pve.resume();
-      mercenary.resume();
-      trade.resume();
-      treasure.resume();
-      research.resume();
-      task.resume();
+      for (const module of resumableModules) void module.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
       const overrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
       const newConfig = loadGameConfig(configDir, overrides);
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
-      economy.setConfig(newConfig);
-      player.setConfig(newConfig);
-      building.setConfig(newConfig);
-      military.setConfig(newConfig);
-      population.setConfig(newConfig);
-      world.setConfig(newConfig);
-      pve.setConfig(newConfig);
-      movement.setConfig(newConfig);
-      combat.setConfig(newConfig);
-      meta.setConfig(newConfig);
-      notifications.setConfig(newConfig);
-      mercenary.setConfig(newConfig);
-      trade.setConfig(newConfig);
-      treasure.setConfig(newConfig);
-      research.setConfig(newConfig);
-      task.setConfig(newConfig);
+      for (const module of modules) module.setConfig(newConfig);
       this.config = newConfig;
       // 存量村庄即时重报派生值，使 CSV 改动立刻生效（无需刷档）
       for (const b of store.all<{ villageId: string }>('building')) {

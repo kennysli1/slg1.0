@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig, UnitDef } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 
 /**
  * 领域模块 · Military（军队/兵种）
@@ -73,32 +72,7 @@ const CAVALRY_CODES = ['equlegati', 'equimperatoris', 'equcaesaris', 'theutates'
 export class MilitaryModule {
   static readonly NAME = 'military';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'military',
-    publicActions: {
-      GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true, schema: {} },
-      TrainTroops: {
-        command: 'military.TrainTroops', ownVillage: true, needAuth: true,
-        schema: {
-          slotId: { type: 'string', minLen: 1, maxLen: 32, optional: true },
-          unit:  { type: 'string', minLen: 1, maxLen: 32 },
-          count: { type: 'integer', min: 1, max: 10000 },
-        },
-      },
-      UpgradeSmithy: {
-        command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true,
-        schema: { unit: { type: 'string', minLen: 1, maxLen: 32 } },
-      },
-      DisbandTroops: {
-        command: 'military.DisbandTroops', ownVillage: true, needAuth: true,
-        schema: { units: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
-      },
-    },
-    eventPushMap: {
-      'military.TroopTrained': 'TroopTrained',
-      'military.SmithyUpgraded': 'SmithyUpgraded',
-    },
-  };
+
 
   constructor(
     private store: Store,

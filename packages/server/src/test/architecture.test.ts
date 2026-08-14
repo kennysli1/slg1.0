@@ -61,6 +61,14 @@ test('铁律#2：模块之间不互相 import（combat 纯函数除外）', () =
   );
 });
 
+test('分层依赖：领域模块禁止反向 import gateway', () => {
+  const offenders = loadModules()
+    .flatMap((m) => m.text.split('\n').map((line, i) => ({ m, line, i })))
+    .filter(({ line }) => /from\s+['"]\.\.\/gateway\//.test(line))
+    .map(({ m, line, i }) => `${m.name}:${i + 1} ${line.trim()}`);
+  assert.deepEqual(offenders, [], `领域层不得依赖接入层：\n  ${offenders.join('\n  ')}`);
+});
+
 test('铁律#3：模块内禁止 setTimeout/setInterval（用 Scheduler）', () => {
   const mods = loadModules();
   const offenders: string[] = [];

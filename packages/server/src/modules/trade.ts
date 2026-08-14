@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import { type Hex, hexDistanceWrapped } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
 
@@ -99,44 +98,7 @@ const COLLECTION = 'trade';
 export class TradeModule {
   static readonly NAME = 'trade';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'trade',
-    publicActions: {
-      GetTradeCenter: { command: 'trade.GetCenter', ownVillage: true, needAuth: true, schema: {} },
-      RefreshTrade: { command: 'trade.Refresh', ownVillage: true, needAuth: true, schema: {} },
-      AcceptNpcOrder: {
-        command: 'trade.AcceptNpc', ownVillage: true, needAuth: true,
-        schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
-      },
-      // 购买 NPC 出售的宝物；宝物栏满时经 action 选择 替换(replace)/卖给NPC(sell)/放弃(discard)。
-      AcceptNpcTreasure: {
-        command: 'trade.AcceptNpcTreasure', ownVillage: true, needAuth: true,
-        schema: {
-          orderId: { type: 'string', minLen: 1, maxLen: 64 },
-          action: { type: 'enum', values: ['store', 'replace', 'sell', 'discard'], optional: true },
-          replaceCode: { type: 'string', minLen: 1, maxLen: 64, optional: true },
-        },
-      },
-      CreateTradeOrder: {
-        command: 'trade.CreateOrder', ownVillage: true, needAuth: true,
-        schema: {
-          give: { type: 'record_int', maxKeys: 5, minVal: 0, maxVal: 10_000_000 },
-          want: { type: 'record_int', maxKeys: 5, minVal: 0, maxVal: 10_000_000 },
-        },
-      },
-      AcceptPlayerOrder: {
-        command: 'trade.AcceptPlayer', ownVillage: true, needAuth: true,
-        schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
-      },
-      CancelTradeOrder: {
-        command: 'trade.CancelOrder', ownVillage: true, needAuth: true,
-        schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
-      },
-    },
-    eventPushMap: {
-      'trade.CenterUpdated': 'TradeCenterUpdated',
-    },
-  };
+
 
   /** 全局玩家挂单索引（orderId → PlayerOrder），用于快速可见性查询与生命周期管理。 */
   private orders = new Map<string, PlayerOrder>();

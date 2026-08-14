@@ -4,7 +4,6 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import type { CombatUnit, Snapshot, TraitEffect } from '../infra/combat-types.js';
 import { makeLogger } from '../infra/logger.js';
 
@@ -70,20 +69,7 @@ const MAX_TICKS = 20000; // 安全阀：极端情况下(双方都0攻)兜底结�
 export class CombatModule {
   static readonly NAME = 'combat';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'combat',
-    publicActions: {
-      GetBattle: {
-        command: 'combat.GetBattle', ownVillage: true, needAuth: true,
-        schema: { targetId: { type: 'string', minLen: 1, maxLen: 64 } },
-      },
-    },
-    eventPushMap: {
-      'combat.BattleStarted': 'BattleStarted',
-      'combat.BattleTick': 'BattleTick',
-      'combat.BattleEnded': 'BattleEnded',
-    },
-  };
+
 
   /**
    * 同步预占集合：记录当前正在执行 fetchDefender async 阶段的 targetId。

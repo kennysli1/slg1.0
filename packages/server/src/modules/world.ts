@@ -2,7 +2,6 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
-import type { ModuleManifest } from '../gateway/manifest.js';
 import type { GameConfig } from '../infra/config.js';
 import { hexKey, wrapHex, hexDistanceWrapped } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
@@ -45,20 +44,7 @@ export class WorldModule {
   private worldH = 41; // 环绕平行四边形高（axial r 周期）
   static readonly NAME = 'world';
 
-  static readonly MANIFEST: ModuleManifest = {
-    moduleName: 'world',
-    publicActions: {
-      GetArea: {
-        command: 'world.GetArea', needAuth: true,
-        schema: {
-          cq: { type: 'integer', min: -200, max: 200 },
-          cr: { type: 'integer', min: -200, max: 200 },
-          r:  { type: 'integer', min: 0, max: 50 },
-          full: { type: 'boolean', optional: true },
-        },
-      },
-    },
-  };
+
 
   constructor(
     private store: Store,

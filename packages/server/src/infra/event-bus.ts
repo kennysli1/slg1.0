@@ -8,7 +8,7 @@ import type { DomainEvent, EventHandler } from '@slg/shared';
  * 不含任何游戏逻辑。
  */
 export class EventBus {
-  private handlers = new Map<string, Set<EventHandler>>();
+  private handlers = new Map<string, Set<EventHandler<any>>>();
 
   /** 订阅某事件名。返回取消订阅的函数。 */
   on<P = any>(eventName: string, handler: EventHandler<P>): () => void {

@@ -43,9 +43,9 @@ export interface DomainEvent<P = Record<string, unknown>> {
 }
 
 /** 命令处理器签名：领域模块注册自己能处理的 Command */
-export type CommandHandler<P = any, R = any> = (
+export type CommandHandler<P = Record<string, unknown>, R = Record<string, unknown>> = (
   cmd: Command<P>,
 ) => CommandResult<R> | Promise<CommandResult<R>>;
 
 /** 事件处理器签名：订阅者响应 Event */
-export type EventHandler<P = any> = (evt: DomainEvent<P>) => void | Promise<void>;
+export type EventHandler<P = Record<string, unknown>> = (evt: DomainEvent<P>) => void | Promise<void>;
