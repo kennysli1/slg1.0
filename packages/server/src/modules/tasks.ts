@@ -61,6 +61,8 @@ interface TaskInstance {
   progress: number;
   /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
   qualifiedMovements?: string[];
+  /** carry_flag：已合格且已存回本村的军旗对应出征；每项代表一面可用于交付的军旗。 */
+  qualifiedFlagMovements?: string[];
   /** 目标已达成、等待玩家手动交付领取奖励。 */
   readyToDeliver?: boolean;
   spawnAttempts?: number;
@@ -159,6 +161,7 @@ export class TasksModule {
     this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
     this.bus.on('military.TroopTrained', (evt: DomainEvent) => void this.onTroopTrained(evt));
     this.bus.on('treasure.CarriedStored', (evt: DomainEvent) => void this.onCarriedStored(evt));
+    this.bus.on('treasure.StoredRemoved', (evt: DomainEvent) => void this.onStoredRemoved(evt));
   }
 
   async resume(): Promise<void> {
@@ -372,6 +375,24 @@ export class TasksModule {
     if (!inst.readyToDeliver) return { ok: false, payload: {}, reason: 'not_ready' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.objective.kind === 'carry_flag') {
+      const returned = inst.qualifiedFlagMovements ?? [];
+      if (!returned.length) return { ok: false, payload: {}, reason: 'qualifying_flag_not_stored' };
+      // 多面合格军旗可用时等概率选择一面交付；军旗本体由宝物模块原子替换为胜利旗帜。
+      const picked = returned[Math.floor(this.rng() * returned.length)];
+      const exchange = await this.commands.send({
+        name: 'treasure.ExchangeQuestFlag', from: TasksModule.NAME,
+        payload: { villageId, fromCode: q.objective.flagCode ?? '', toCode: 'victory_flag' },
+      });
+      if (!exchange.ok) {
+        inst.qualifiedFlagMovements = [];
+        inst.readyToDeliver = false;
+        this.store.set(COLLECTION, villageId, s);
+        await this.pushList(villageId);
+        return { ok: false, payload: {}, reason: 'qualifying_flag_not_stored' };
+      }
+      inst.qualifiedFlagMovements = returned.filter((id) => id !== picked);
+    }
     const rewards = await this.completeQuest(villageId, code);
     return { ok: true, payload: { code, type: q.type, rewards } };
   }
@@ -674,7 +695,7 @@ export class TasksModule {
     if (changed) { this.store.set(COLLECTION, villageId, s); await this.unlockSideQuests(villageId); }
   }
 
-  /** 合格军队把军旗存回本村后，原旗自动销毁并立即发放胜利旗帜。 */
+  /** 合格军队把军旗存回本村后，只标记为可手动交付，绝不自动发奖。 */
   private async onCarriedStored(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId?: string; movementId?: string; codes?: string[] };
     if (!p.villageId || !p.movementId) return;
@@ -685,11 +706,34 @@ export class TasksModule {
       if (q?.objective.kind !== 'carry_flag' || !inst.qualifiedMovements?.includes(p.movementId)) continue;
       const flag = q.objective.flagCode ?? '';
       if (!p.codes?.includes(flag)) continue;
-      const exchange = await this.commands.send({ name: 'treasure.ExchangeQuestFlag', from: TasksModule.NAME, payload: { villageId: p.villageId, fromCode: flag, toCode: 'victory_flag' } });
-      if (!exchange.ok) return;
-      await this.completeQuest(p.villageId, code);
+      inst.qualifiedMovements = inst.qualifiedMovements.filter((id) => id !== p.movementId);
+      inst.qualifiedFlagMovements ??= [];
+      if (!inst.qualifiedFlagMovements.includes(p.movementId)) inst.qualifiedFlagMovements.push(p.movementId);
+      this.store.set(COLLECTION, p.villageId, s);
+      await this.markReady(p.villageId, code);
+      await this.pushList(p.villageId);
       return;
     }
+  }
+
+  /** 军旗离开本村储存时，按“先移除未合格军旗”的规则收缩可交付标记。 */
+  private async onStoredRemoved(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; code?: string; remainingCount?: number };
+    if (!p.villageId || !p.code) return;
+    const s = this.load(p.villageId);
+    if (!s) return;
+    let changed = false;
+    for (const [code, inst] of Object.entries(s.active)) {
+      const q = this.quest(code);
+      if (q?.objective.kind !== 'carry_flag' || q.objective.flagCode !== p.code) continue;
+      const eligible = inst.qualifiedFlagMovements ?? [];
+      const keep = Math.min(eligible.length, Math.max(0, Number(p.remainingCount) || 0));
+      if (keep === eligible.length) continue;
+      inst.qualifiedFlagMovements = eligible.slice(0, keep);
+      if (keep === 0) inst.readyToDeliver = false;
+      changed = true;
+    }
+    if (changed) { this.store.set(COLLECTION, p.villageId, s); await this.pushList(p.villageId); }
   }
 
   /** 建筑建成 → 标记已触发的支线任务触发条件，并解锁满足条件的支线任务。 */
@@ -948,6 +992,7 @@ export class TasksModule {
       campTotal: inst.camps.length,
       progress: inst.progress ?? 0,
       awaitingReturn: inst.qualifiedMovements?.length ?? 0,
+      deliverableFlags: inst.qualifiedFlagMovements?.length ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,

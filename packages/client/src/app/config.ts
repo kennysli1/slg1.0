@@ -170,6 +170,7 @@ export function treasureEffectText(info: TreasureInfo): string {
     ritualBuff: `使用后扣除劳动人口，全资源产出 +${v}%（持续2小时）`,
     cavalryTrainSpeed: `骑兵训练时间 -${v}%（使用后翻倍骑兵）`,
     soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
+    victoryFlag: `全军攻击、防御 +${v}%；每次携旗清营或成功掠夺并归城，额外 +2%`,
   };
   return map[info.effectType] ?? info.effectType;
 }
