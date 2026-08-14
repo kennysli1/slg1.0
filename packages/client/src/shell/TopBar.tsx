@@ -1,5 +1,5 @@
 /** 常驻战场 HUD：玩家身份、当前村庄与资源概况。 */
-import { me, selectVillage } from '../api.js';
+import { me, selectVillage, clearSession } from '../api.js';
 import { sessionVersion, showToast } from '../app/store.js';
 import { refreshAll } from '../app/refresh.js';
 import { errText } from '../shared/ui/text.js';
@@ -25,6 +25,12 @@ export function TopBar() {
     await refreshAll();
   }
 
+  function onLogout() {
+    if (!window.confirm('确定退出登录？退出后可重新登录或注册新账号。')) return;
+    clearSession();
+    window.location.reload();
+  }
+
   return (
     <header class="topbar">
       <div class="brand">
@@ -42,6 +48,7 @@ export function TopBar() {
                 ))}
               </select>
             ) : <span title={current?.name}>{current?.name ?? `(${me?.q},${me?.r})`}</span>}
+            <button class="logout-btn" type="button" onClick={onLogout} title="退出登录 / 切换账号">退出</button>
           </div>
         </div>
       </div>

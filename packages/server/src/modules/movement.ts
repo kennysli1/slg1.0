@@ -129,18 +129,27 @@ export class MovementModule {
 
   /** 重启恢复：为所有在途、仍在行军的部队重新登记下一格推进（过期则立即触发）。 */
   resume(): void {
-    // 先汇总各村的在途部队 popCost 总量，恢复 population.SetEnRoutePop
-    const enRouteByVillage = new Map<string, number>();
+    // 先汇总各村的在途部队 popCost 总量 + 在途兵力，恢复 population.SetEnRoutePop 与 military 粮耗。
+    const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number> }>();
     for (const mv of this.store.all<Movement>(COLLECTION)) {
       const popSum = this.calcTroopsPopCost(mv.troops);
-      const cur = enRouteByVillage.get(mv.fromVillage) ?? 0;
-      enRouteByVillage.set(mv.fromVillage, cur + popSum);
+      const cur = enRouteByVillage.get(mv.fromVillage) ?? { popCostSum: 0, marching: {} };
+      cur.popCostSum += popSum;
+      for (const [unit, n] of Object.entries(mv.troops)) {
+        cur.marching[unit] = (cur.marching[unit] ?? 0) + n;
+      }
+      enRouteByVillage.set(mv.fromVillage, cur);
     }
-    for (const [villageId, popCostSum] of enRouteByVillage) {
+    for (const [villageId, data] of enRouteByVillage) {
       void this.commands.send({
         name: 'population.SetEnRoutePop',
         from: MovementModule.NAME,
-        payload: { villageId, popCostSum },
+        payload: { villageId, popCostSum: data.popCostSum },
+      });
+      void this.commands.send({
+        name: 'military.SetMarchingTroops',
+        from: MovementModule.NAME,
+        payload: { villageId, troops: data.marching },
       });
     }
 
@@ -164,17 +173,27 @@ export class MovementModule {
     return sum;
   }
 
-  /** 更新某村的在途总 popCost 并通知 population（汇总所有 fromVillage=villageId 的活跃行军）。 */
+  /** 更新某村的在途总 popCost 与在途兵力，通知 population（动员足迹）与 military（粮耗）。 */
   private updateEnRoutePop(villageId: string): void {
     let total = 0;
+    const marching: Record<string, number> = {};
     for (const mv of this.store.all<Movement>(COLLECTION)) {
       if (mv.fromVillage !== villageId) continue;
       total += this.calcTroopsPopCost(mv.troops);
+      for (const [unit, n] of Object.entries(mv.troops)) {
+        marching[unit] = (marching[unit] ?? 0) + n;
+      }
     }
     void this.commands.send({
       name: 'population.SetEnRoutePop',
       from: MovementModule.NAME,
       payload: { villageId, popCostSum: total },
+    });
+    // 在途部队仍耗粮：把在途兵力快照推给 military，计入 upkeep（出征不减免口粮）。
+    void this.commands.send({
+      name: 'military.SetMarchingTroops',
+      from: MovementModule.NAME,
+      payload: { villageId, troops: marching },
     });
   }
 
