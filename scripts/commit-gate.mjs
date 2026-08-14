@@ -19,6 +19,15 @@ function output(command, args) {
   return result.stdout.trim();
 }
 
+// 禁止 Git 用机器名猜测作者身份；否则 GitHub 无法归属贡献，服务器提交也无法追责到人。
+const authorIdent = output('git', ['var', 'GIT_AUTHOR_IDENT']);
+const authorEmail = authorIdent.match(/<([^>]+)>/)?.[1] ?? '';
+if (!authorEmail || /(?:\.local|localhost\.localdomain)$/i.test(authorEmail)) {
+  console.error(`\n✘ 提交已阻止：请先显式配置可识别的 Git 邮箱（当前：${authorEmail || '空'}）。`);
+  console.error('  git config user.email "你的 GitHub 邮箱或 noreply 邮箱"');
+  process.exit(1);
+}
+
 // 构建必须对应即将提交的 index。否则未暂存代码可能让错误快照“替身通过”。
 const unstaged = spawnSync('git', ['diff', '--quiet'], { cwd: ROOT }).status !== 0;
 const untracked = output('git', ['ls-files', '--others', '--exclude-standard']);
