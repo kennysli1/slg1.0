@@ -96,6 +96,21 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   // 任务营地使用独立 taskcamp 地块，既真实占格又不进入其他玩家的全局视野。
   const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tile.ok, true, '营地应在地图上有 taskcamp 地块');
+  const target = await send(app, 'pve.GetTarget', { id: campId });
+  assert.equal((target.payload as any).ownerVillageId, va, '新任务营地必须绑定所属村庄');
+
+  // 模拟旧存档：任务营地缺 owner，且地块曾被错误保存为全局 pve。
+  const legacy = { ...(target.payload as any), ownerVillageId: undefined };
+  app.store.set('pve', campId, legacy);
+  await send(app, 'world.RemoveTile', { q: camp.q, r: camp.r, refId: campId });
+  await send(app, 'world.PlacePve', { q: camp.q, r: camp.r, refId: campId, name: '任务营地', task: false });
+  await app.task.resume();
+  const repaired = await send(app, 'pve.GetTarget', { id: campId });
+  assert.equal((repaired.payload as any).ownerVillageId, va, '恢复时必须回填历史任务营地 owner');
+  const repairedTile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
+  assert.equal(repairedTile.ok, true, '恢复时必须把历史全局 pve 收回 taskcamp');
+  const area = await send(app, 'world.GetArea', { cq: camp.q, cr: camp.r, r: 0 });
+  assert.ok(!(area.payload as any).tiles.some((t: any) => t.refId === campId), '任务营地不得出现在其他玩家共享的地图区域数据中');
 
   // 模拟战斗结束：玩家清空该营地
   await app.bus.emit({
