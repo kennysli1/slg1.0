@@ -63,6 +63,7 @@ export class PveModule {
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
     // 任务模块运行时生成/移除任务营地（内部命令）
     this.commands.register('pve.Spawn', (c) => this.spawn(c));
+    this.commands.register('pve.AssignTaskOwner', (c) => this.assignTaskOwner(c));
     this.commands.register('pve.Remove', (c) => this.remove(c));
   }
 
@@ -74,6 +75,22 @@ export class PveModule {
     if (!tpl) return { ok: false, payload: {}, reason: 'unknown_template' };
     this.create(id, type, q, r, !!task, ownerVillageId);
     return { ok: true, payload: { id, type, q, r } };
+  }
+
+  /** 任务模块在启动恢复时为旧营地回填 owner，并把旧的全局地块归一为私有任务地块。 */
+  private async assignTaskOwner(cmd: Command): Promise<CommandResult> {
+    const { id, ownerVillageId } = cmd.payload as { id: string; ownerVillageId: string };
+    const s = this.load(id);
+    if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (!s.task || !ownerVillageId) return { ok: false, payload: {}, reason: 'not_task_camp' };
+    if (s.ownerVillageId && s.ownerVillageId !== ownerVillageId) return { ok: false, payload: {}, reason: 'task_owner_mismatch' };
+    if (s.ownerVillageId !== ownerVillageId) this.store.set(COLLECTION, id, { ...s, ownerVillageId });
+    const tpl = this.config.pveTemplates[s.type];
+    const placed = await this.commands.send({
+      name: 'world.PlacePve', from: PveModule.NAME,
+      payload: { q: s.q, r: s.r, refId: s.id, name: tpl?.name ?? '任务营地', icon: tpl?.icon, task: true },
+    });
+    return placed.ok ? { ok: true, payload: { id, ownerVillageId } } : placed;
   }
 
   /** 移除一个 PvE 目标：取消重生调度、删状态、清除地图地块（幂等）。 */

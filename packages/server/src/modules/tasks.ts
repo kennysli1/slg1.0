@@ -158,10 +158,16 @@ export class TasksModule {
 
   async resume(): Promise<void> {
     for (const s of this.store.all<TaskState>(COLLECTION)) {
-      // 任务营地(pve.task=true)持久化在 pve 集合，重启后仍在地图；无需重新生成。
+      // 任务营地持久化在 pve 集合。为旧存档回填 owner，并把历史遗留的全局 pve 地块收回私有 taskcamp。
       // 仅重排酒馆刷新节奏（若存在酒馆）。
       void this.resumeVillage(s.villageId).catch(() => {});
-      for (const inst of Object.values(s.active)) if (this.quest(inst.code)?.objective.kind === 'clear_camp' && inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
+      for (const inst of Object.values(s.active)) {
+        if (this.quest(inst.code)?.objective.kind !== 'clear_camp') continue;
+        for (const camp of inst.camps) {
+          if (!camp.cleared) await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId: s.villageId } });
+        }
+        if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
+      }
     }
   }
 
@@ -419,7 +425,7 @@ export class TasksModule {
       if (!free.ok) break;
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
       const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
-      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true } });
+      const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true, ownerVillageId: villageId } });
       if (spawn.ok) {
         inst.camps.push({ id: campId, q: cq, r: cr, cleared: false });
         placed++;

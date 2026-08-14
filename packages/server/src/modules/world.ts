@@ -186,7 +186,14 @@ export class WorldModule {
     const { q, r, refId, name, icon, task } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const exist = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
-    if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
+    // 旧版本可能把任务营地写成全局 pve；恢复时允许同 refId 原子升级为私有 taskcamp。
+    if (exist && exist.kind !== 'empty') {
+      if (task && exist.refId === refId && (exist.kind === 'pve' || exist.kind === 'taskcamp')) {
+        this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { ...exist, kind: 'taskcamp', name, icon });
+        return { ok: true, payload: { q: w.q, r: w.r } };
+      }
+      return { ok: false, payload: {}, reason: 'tile_occupied' };
+    }
     // 任务营地写入独立 kind='taskcamp'：与全局视野隔离（getArea 过滤），但仍占用该格避免与其它营地/建筑冲突
     this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: task ? 'taskcamp' : 'pve', refId, name, icon });
     return { ok: true, payload: { q: w.q, r: w.r } };
