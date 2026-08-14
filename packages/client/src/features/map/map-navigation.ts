@@ -5,6 +5,17 @@ export interface MapCoordinate {
   r: number;
 }
 
+/** 清理营地任务下发的地图坐标。已清理营地会保留在任务进度中，不能再用于导航。 */
+export interface TaskCampCoordinate extends MapCoordinate {
+  id: string;
+  cleared?: boolean;
+}
+
+/** 返回仍需清理的营地，供任务卡坐标展示与“前往地图”复用同一判断。 */
+export function pendingTaskCamps(camps: TaskCampCoordinate[] | null | undefined): TaskCampCoordinate[] {
+  return (camps ?? []).filter((camp) => !camp.cleared);
+}
+
 export type CoordinateParseResult =
   | { ok: true; coordinate: MapCoordinate }
   | { ok: false; error: string };

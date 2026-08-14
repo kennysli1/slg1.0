@@ -6,13 +6,14 @@
  *  - 酒馆可接取的随机任务 → 直接接取
  */
 import { useState } from 'preact/hooks';
-import { dataVersion, taskStates, tab, openModal } from '../../app/store.js';
+import { dataVersion, taskStates, tab, openModal, selected } from '../../app/store.js';
 import { me, req } from '../../api.js';
-import { act } from '../../app/refresh.js';
+import { act, setMapCenter } from '../../app/refresh.js';
 import { Panel, SectionHead, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
+import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -145,6 +146,9 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
 function TaskCard({ task }: { task: any }) {
   const o = task.objective;
   const isMain = task.type === 'main';
+  const camps = o.kind === 'clear_camp'
+    ? pendingTaskCamps(task.camps as TaskCampCoordinate[] | undefined)
+    : [];
 
   const onAbandon = async () => {
     const isSide = task.type === 'side';
@@ -161,7 +165,13 @@ function TaskCard({ task }: { task: any }) {
   const onSubmit = () => {
     openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
   };
-  const onGoMap = () => { tab.value = 'map'; };
+  const onGoMap = (camp = camps[0]) => {
+    if (!camp) return;
+    // 设置地图初始视角与选中目标：地图挂载后会显示既有的金色选中环和目标面板。
+    setMapCenter({ q: camp.q, r: camp.r });
+    selected.value = { refId: camp.id, kind: 'pve', q: camp.q, r: camp.r, name: '任务营地', icon: 'pve_bandits' };
+    tab.value = 'map';
+  };
   const onDeliver = () => {
     void act(req('task.Deliver', { code: task.code }), {
       okToast: '任务完成',
@@ -200,8 +210,20 @@ function TaskCard({ task }: { task: any }) {
             <span class={`task-prog-chip${task.campCleared >= task.campTotal ? ' done' : ''}`}>
               已清营地 {task.campCleared}/{task.campTotal}
             </span>
-            {task.campTotal > 0 && <span class="task-prog-hint">地图上带 🎯 标记的营地</span>}
+            {camps.length > 0
+              ? <span class="task-prog-hint">地图上带 🎯 标记的营地</span>
+              : task.campTotal > 0 && <span class="task-prog-hint">所有营地均已清理</span>}
           </div>
+          {camps.length > 0 && (
+            <div class="task-camp-locations" aria-label="待清理任务营地坐标">
+              <span class="task-camp-locations-label">营地坐标</span>
+              {camps.map((camp) => (
+                <Btn size="sm" variant="ghost" key={camp.id} onClick={() => onGoMap(camp)}>
+                  X {camp.q} · Y {camp.r}
+                </Btn>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {o.kind === 'sell_discard_treasure' && (
@@ -224,8 +246,8 @@ function TaskCard({ task }: { task: any }) {
             {o.kind === 'submit_resources' && (
               <Btn size="sm" variant="primary" onClick={onSubmit}>上交资源</Btn>
             )}
-            {o.kind === 'clear_camp' && (
-              <Btn size="sm" variant="ghost" onClick={onGoMap}>前往地图</Btn>
+            {o.kind === 'clear_camp' && camps.length > 0 && (
+              <Btn size="sm" variant="ghost" onClick={() => onGoMap()}>前往地图</Btn>
             )}
           </>
         )}

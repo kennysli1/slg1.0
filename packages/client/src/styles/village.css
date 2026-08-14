@@ -1045,6 +1045,20 @@
   font-size: var(--f-2xs);
   color: var(--c-ink-soft);
 }
+
+/* 清理营地任务：坐标即定位入口，便于多个任务营地之间切换。 */
+.task-camp-locations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+.task-camp-locations-label {
+  color: var(--c-ink-soft);
+  font-size: var(--f-2xs);
+}
 /* 奖励展示区 */
 .task-card-reward {
   display: flex;
