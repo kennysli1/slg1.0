@@ -14,6 +14,7 @@ import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
 import { setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
+import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
@@ -331,6 +332,19 @@ describe('notificationText - PopulationChanged v3 硬上限', () => {
     const result = notificationText('PopulationChanged', { event: 'returned', returned: 50, currentPop: 150 });
     assert.ok(result != null, '返回事件应有文案');
     assert.ok(result?.includes('50') || result?.includes('150'), `应含数量，实际：${result}`);
+  });
+});
+
+
+describe('人口资源条红框说明', () => {
+  it('仓储溢出时说明人口增长扣减比例', () => {
+    const text = populationTooltip({ hardCap: 300, inFamine: false, overflowRatio: 0.35, soldierPop: 80 }, 200, 120, 4);
+    assert.match(text, /红框原因：仓储溢出使人口增长降低 35%/);
+  });
+
+  it('饥荒时说明人口正在减少', () => {
+    const text = populationTooltip({ hardCap: 300, inFamine: true, overflowRatio: 0, soldierPop: 80 }, 200, 120, -3);
+    assert.match(text, /红框原因：饥荒中，人口正在减少/);
   });
 });
 

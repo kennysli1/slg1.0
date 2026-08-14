@@ -1,6 +1,6 @@
 /** 常驻资源 HUD：同时呈现库存、容量与每小时变化。 */
 import { tick, dataVersion } from '../app/store.js';
-import { getCache, getPopState, liveResource, interpolatePop, interpolateTotalPop } from '../app/state.js';
+import { getCache, getPopState, liveResource, interpolatePop, interpolateTotalPop, type PopSnapshot } from '../app/state.js';
 import { resInfo, resourceKeys } from '../app/config.js';
 import { fmt } from '../shared/utils/format.js';
 import { Icon, Bar } from '../ui/index.js';
@@ -85,18 +85,33 @@ function UpkeepCell({ crop }: { crop: number }) {
   );
 }
 
+export function populationTooltip(
+  state: Pick<PopSnapshot, 'hardCap' | 'inFamine' | 'overflowRatio' | 'soldierPop'>,
+  population: number,
+  civilian: number,
+  growth: number,
+): string {
+  const overflow = Math.max(0, Math.min(1, state.overflowRatio ?? 0));
+  const reasons: string[] = [];
+  if (state.inFamine) reasons.push('饥荒中，人口正在减少');
+  if (overflow > 0) reasons.push(`仓储溢出使人口增长降低 ${Math.round(overflow * 100)}%`);
+  const alarm = reasons.length ? `；红框原因：${reasons.join('；')}` : '';
+  const change = `变化 ${growth >= 0 ? '+' : ''}${growth}/时`;
+  return state.inFamine
+    ? `人口：${fmt(population)}/${fmt(state.hardCap)}${alarm}；${change}`
+    : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(civilian)}；军队 ${fmt(state.soldierPop)}${alarm}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
+}
+
 function PopCell() {
   const state = getPopState();
   if (!state) return null;
   const population = interpolateTotalPop();
   const atCap = !state.inFamine && state.hardCap > 0 && population / state.hardCap >= 1;
   const growth = Math.round(atCap ? (state.potentialGrowthPerHour ?? 0) : state.growthPerHour);
-  const title = state.inFamine
-    ? `人口：${fmt(population)}/${fmt(state.hardCap)}；饥荒中，人口正在减少；变化 ${growth}/时`
-    : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(Math.round(interpolatePop()))}；`
-      + `军队 ${fmt(state.soldierPop)}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
+  const hasGrowthDebuff = (state.overflowRatio ?? 0) > 0;
+  const title = populationTooltip(state, population, Math.round(interpolatePop()), growth);
   return (
-    <div class={`res res--pop${state.inFamine || (state.overflowRatio ?? 0) > 0 ? ' res--alarm' : ''}`} title={title}>
+    <div class={`res res--pop${state.inFamine || hasGrowthDebuff ? ' res--alarm' : ''}`} title={title}>
       <Icon icon="ui_icon_pop" label="" decorative size="sm" />
       <div class="res-value">
         <span class="res-label">人口</span>
@@ -108,7 +123,7 @@ function PopCell() {
           <Bar
             pct={state.hardCap > 0 ? population / state.hardCap * 100 : 0}
             thin
-            kind={state.inFamine ? 'crimson' : 'jade'}
+            kind={state.inFamine || hasGrowthDebuff ? 'crimson' : 'jade'}
           />
         </span>
       </div>

@@ -598,13 +598,19 @@
 /* ---------- 兵力/货物输入格 ---------- */
 .troop-inputs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
   gap: var(--s-2);
 }
+.troop-section-actions { display: inline-flex; align-items: center; gap: var(--s-2); }
+.troop-max-btn { margin-left: auto; flex: none; }
 .troop-input {
+  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2);
+  justify-content: flex-end;
+  row-gap: var(--s-1);
+  column-gap: var(--s-2);
   padding: var(--s-1) var(--s-2);
   background: var(--c-panel-3);
   border: 1px solid var(--line);
@@ -813,7 +819,11 @@
     pointer-events: auto;
   }
 
-  .troop-inputs { grid-template-columns: repeat(2, 1fr); }
+  .troop-inputs { grid-template-columns: 1fr; }
+  .troop-max-btn,
+  .troop-max-all { min-height: 44px; }
+  .troop-section-actions { gap: var(--s-1); }
+  .troop-section-actions small { white-space: nowrap; }
   .target-head { padding: var(--s-2) var(--s-3); }
   .expedition-steps { padding: var(--s-2) var(--s-3); }
   .expedition-steps li { font-size: var(--f-2xs); }

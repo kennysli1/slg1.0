@@ -157,3 +157,47 @@ test('同格相遇即战：两支敌对出征军在途相遇，弱者全灭、�
   const blueOutbound = movements(app).filter((m) => m.fromVillage === B.villageId && m.type !== 'return');
   assert.equal(blueOutbound.length, 0, '弱方出征军应被歼灭');
 });
+
+test('同格相遇：胜方减员后立即更新在途人口足迹', async () => {
+  const app = freshApp();
+  const ra = await send(app, 'player.Register', { name: '人口红', password: 'pass123', tribe: 'romans' });
+  const rb = await send(app, 'player.Register', { name: '人口蓝', password: 'pass123', tribe: 'romans' });
+  const A = (ra.payload as any).player;
+  const B = (rb.payload as any).player;
+  const sent = 100;
+  const enemy = 5;
+  const unitPop = app.config.units.legionnaire.popCost;
+  await giveTroops(app, A.villageId, { legionnaire: sent });
+  await giveTroops(app, B.villageId, { legionnaire: enemy });
+
+  const popState = app.store.get<any>('population', A.villageId);
+  assert.ok(popState, '进攻村应有人口状态');
+  popState.currentPop = popState.hardCap - sent * unitPop;
+  popState.garrisonPopCost = sent * unitPop;
+  popState.enRoutePopCost = 0;
+  popState.trainingPopCost = 0;
+  popState.lastTick = clock;
+  app.store.set('population', A.villageId, popState);
+
+  await send(app, 'movement.SendAttack', {
+    villageId: A.villageId, targetVillage: B.villageId, troops: { legionnaire: sent },
+  });
+  await send(app, 'movement.SendAttack', {
+    villageId: B.villageId, targetVillage: A.villageId, troops: { legionnaire: enemy },
+  });
+
+  let intercepted = false;
+  app.bus.on('movement.Intercepted', () => { intercepted = true; });
+  let iters = 0;
+  while (!intercepted && app.scheduler.pending > 0 && iters < 20_000) {
+    await app.scheduler.advanceTo(clock + 1_000, setClock);
+    iters++;
+  }
+  assert.equal(intercepted, true, '两军应在途中相遇');
+
+  // 敌军 5 人会使 100 人的胜方损失 1 人；人口快照必须立即反映 99 人，
+  // 不能继续把阵亡者计为在途部队直到返程才修正。
+  await Promise.resolve();
+  const snap = (await send(app, 'population.GetSnapshot', { villageId: A.villageId })).payload as any;
+  assert.equal(snap.soldierPop, (sent - 1) * unitPop, '胜方阵亡者不应残留在在途人口足迹中');
+});
