@@ -13,6 +13,7 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
+import { setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
@@ -247,6 +248,24 @@ describe('PopSnapshot v3 硬上限 - 新字段', () => {
   it('interpolatePop 达上限附近（currentPop >= popCeiling）时不外插', () => {
     setPopState(makePopSnap({ currentPop: 200, popCeiling: 200, growthPerHour: 10 }));
     assert.equal(interpolatePop(), 200);
+  });
+});
+
+// ─── 任务营地地图标记 ──────────────────────────────────────────────
+
+describe('任务营地地图标记', () => {
+  it('完整任务快照与单独地图推送都会剔除已清理营地', () => {
+    const villageId = 'task-marker-test';
+    const camps = [
+      { id: 'camp-live', q: 1, r: 2, cleared: false },
+      { id: 'camp-cleared', q: 3, r: 4, cleared: true },
+    ];
+
+    setTaskState({ villageId, active: [{ camps }] });
+    assert.deepEqual(taskMarkers.value[villageId].map((camp: any) => camp.id), ['camp-live']);
+
+    setTaskMarkers({ villageId, camps });
+    assert.deepEqual(taskMarkers.value[villageId].map((camp: any) => camp.id), ['camp-live']);
   });
 });
 

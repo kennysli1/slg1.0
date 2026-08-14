@@ -107,14 +107,19 @@ export function setTaskState(payload: any): void {
   if (!payload?.villageId) return;
   const vid = payload.villageId as string;
   taskStates.value = { ...taskStates.value, [vid]: payload };
-  const camps: any[] = (payload.active ?? []).flatMap((a: any) => (a.camps ?? []));
+  // 已清理营地仍会留在任务快照里显示进度，但不能成为地图标记。
+  // 同时过滤可抵御旧服务端推送、缓存快照或消息乱序造成的幽灵标记。
+  const camps: any[] = (payload.active ?? [])
+    .flatMap((a: any) => (a.camps ?? []))
+    .filter((camp: any) => !camp?.cleared);
   taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
 }
 
 /** 单独推送的地图标记更新（TaskMapUpdated）。 */
 export function setTaskMarkers(payload: any): void {
   if (!payload?.villageId) return;
-  taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: payload.camps ?? [] };
+  const camps = Array.isArray(payload.camps) ? payload.camps.filter((camp: any) => !camp?.cleared) : [];
+  taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: camps };
 }
 
 /** 读取当前村庄的任务快照（无则返回 null）。 */

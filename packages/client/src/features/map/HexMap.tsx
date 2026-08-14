@@ -377,14 +377,15 @@ export function HexMap() {
 
   // ─── task camp markers（任务营地：真实 pve 地块 + 🎯 高亮）──────────────
   function buildTaskMarkers() {
-    const camps: any[] = taskMarkers.value[me?.villageId ?? ''] ?? [];
+    // store 已过滤，但渲染层再守一次：地图上绝不画已清理的任务营地。
+    const camps: any[] = (taskMarkers.value[me?.villageId ?? ''] ?? []).filter((camp: any) => !camp?.cleared);
     const markers: preact.VNode[] = [];
     camps.forEach((c, i) => {
       const p = hexToPixel({ q: c.q, r: c.r });
       markers.push(
         <g
           key={`taskcamp-${i}`}
-          class={`task-camp-marker${c.cleared ? ' cleared' : ''}`}
+          class="task-camp-marker"
           transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
         >
           <polygon class="hex-ring hex-ring--task" points={HEX_CORNER_STR} />

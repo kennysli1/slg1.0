@@ -880,7 +880,11 @@ export class TasksModule {
     const s = this.load(villageId) ?? this.ensureState(villageId);
     const camps: { id: string; q: number; r: number; cleared: boolean }[] = [];
     for (const inst of Object.values(s.active)) {
-      for (const c of inst.camps) camps.push({ id: c.id, q: c.q, r: c.r, cleared: c.cleared });
+      // 地图标记只表示仍可交互的任务营地；已清理的营地保留在任务快照中用于进度展示，
+      // 但绝不能再次推给地图，否则客户端会在已还原的空地上留下幽灵任务标。
+      for (const c of inst.camps) {
+        if (!c.cleared) camps.push({ id: c.id, q: c.q, r: c.r, cleared: false });
+      }
     }
     await this.bus.emit({
       name: 'task.MapUpdated', source: TasksModule.NAME, ts: this.now(),

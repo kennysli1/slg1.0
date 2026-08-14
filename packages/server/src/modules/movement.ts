@@ -902,7 +902,12 @@ export class MovementModule {
     }
   }
 
-  /** 出征到达：把兵力快照交给 Combat 开/并入战场，删除去程（兵力进入战斗，由 Combat 追踪）。 */
+  /** 出征到达：把兵力快照交给 Combat 开/并入战场，并保留为暂停的在途记录。
+   *
+   * 人口模块把驻军和在途士兵共同计入总人口。若这里立即删除去程，战斗尚未结束的士兵会
+   * 暂时从两个池子同时消失；人口在该窗口结算时会误以为住房腾出，导致返程后总人口凭空增加。
+   * 保留 paused movement 直到 BattleEnded，再替换为返程或移除，保证士兵足迹始终连续。
+   */
   private async arriveEngage(mv: Movement, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
     // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
     // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
@@ -916,9 +921,9 @@ export class MovementModule {
         treasures: carried,
       },
     });
-    this.store.delete(COLLECTION, mv.id);
-    // v2：通知 population 在途兵力减少（部队进入战场，不再算在途）
-    this.updateEnRoutePop(mv.fromVillage);
+    mv.status = 'paused';
+    mv.stepToken += 1;
+    this.store.set(COLLECTION, mv.id, mv);
   }
 
   /**
@@ -1071,8 +1076,14 @@ export class MovementModule {
           payload: { movementId: p.movementId, mode, defenderVillage: p.targetId },
         });
       }
+      // 战死部队至此才从在途人口池移除；此前战斗期间始终保留其足迹。
+      this.store.delete(COLLECTION, p.movementId);
+      this.updateEnRoutePop(p.fromVillage);
       return; // 全灭无返程
     }
+    // 先移除战斗中的去程，再建立返程；launch() 会基于最终 movement 集合重算在途人口，
+    // 避免同一批幸存者在去程和返程中被短暂重复计数。
+    this.store.delete(COLLECTION, p.movementId);
     const returnId = this.scheduleReturn(p.fromVillage, p.toXY, p.fromXY, survivors, p.loot ?? {}, treasures, p.movementId);
     // 精化 camp pending 的预计归村时间为返程 movement 的真实 arriveAt（覆盖 rollDrop 的 60s 占位），
     // 让客户端「还有多久抵达」倒计时精确。pending 按出征 id 索引，故用 p.movementId（非 returnId）。
