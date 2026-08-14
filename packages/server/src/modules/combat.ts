@@ -428,6 +428,8 @@ export class CombatModule {
       defenderLosses,
       targetKind: b.targetKind,
       targetId: b.targetId,
+      // 任务结算需要区分“击败部分守军”和“真正清空营地”；必须随 BattleEnded 透传。
+      campCleared,
     };
 
     // 每支来攻部队：算各自幸存兵力 + 按载货比例分战利品 → 发结束事件（Movement 据此返程）
