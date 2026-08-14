@@ -1,4 +1,3 @@
 #!/bin/sh
-# 提交总闸门：当前暂存快照必须完整测试并通过本地生产冒烟。
-# 生产环境不在提交时改变，只能显式部署远程 origin/main。
-exec node scripts/commit-gate.mjs
+# 快速确认提交快照；完整闸门由 commit-msg 在格式校验后执行，避免无效说明浪费数分钟。
+exec node scripts/commit-snapshot.mjs
