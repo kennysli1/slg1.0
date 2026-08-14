@@ -6,7 +6,7 @@
  *  C2  平民占比驱动繁荣度：新村无士兵→平民占总人口100%→繁荣度满值1.0；建兵营抬高硬上限不降繁荣度（与上限解耦，原「升级得负收益」bug 已修复）；
  *      征兵(setGarrisonPop)降平民占比→降繁荣度（仍≥popLaborFloor）；五轴统一；开局存在正增长潜力(growthPerHour>0)
  *  C3  全部兵种 cropPerHourEach>0（士兵以 upkeep 计入口粮，训练严格增加粮食压力）
- *  C4  增长朝 availableLabor 线性收敛：growthPerHour = main.popGrowthPerLevel×mainLevel，夹在缺口内
+ *  C4  增长朝 availableLabor 线性收敛：growthPerHour 始终是实际速率，结算时才夹在缺口内
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
  *  C6  极端粮荒 currentPop 降至 0，v3 无伤兵字段（无 woundedPool/无定时器）
  *  C7  粮荒正确停止 → recovery 事件，inFamine 变 false
@@ -149,11 +149,10 @@ test('v3 C4：增长朝 popCeiling 线性收敛（main.popGrowthPerLevel × main
   const vid = await reg(app, 'c4', 'romans');
 
   const snap0 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
-  const hardCap: number = snap0.hardCap;
   const mainLevel: number = snap0.mainLevel;
   const rate = (app.config.buildings.main?.popGrowthPerLevel ?? 0) * mainLevel;
-  // 开局人口=城镇中心popCap(未满员)：缺口>0 → 增速=min(gap, rate)=rate
-  assert.equal(snap0.growthPerHour, Math.min(hardCap - snap0.currentPop, rate), '开局 growthPerHour 应为 min(gap, rate)');
+  // growthPerHour 是速率本身；缺口只在结算时限制实际增加量，避免客户端把缺口误作低速率。
+  assert.equal(snap0.growthPerHour, rate, '开局 growthPerHour 应等于实际增长速率');
 
   // 扣一部分劳动人口（不超过当前人口），制造增长缺口
   const consumeCount = Math.max(1, Math.min(5, snap0.currentPop - 1));
@@ -161,11 +160,10 @@ test('v3 C4：增长朝 popCeiling 线性收敛（main.popGrowthPerLevel × main
   assert.equal(cRes.ok, true, `ConsumePop 应成功: ${cRes.reason ?? ''}`);
   const snap1 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   // 增长目标 = 增长上限 popCeiling（硬上限 − 士兵足迹）；ConsumePop 预留的 5 人口占用 footprint，故 popCeiling=hardCap−5
-  const gap = snap1.popCeiling - snap1.currentPop;
-  const expectedGrowth = Math.min(gap, rate);
+  const expectedGrowth = rate;
   assert.ok(
     Math.abs(snap1.growthPerHour - expectedGrowth) < 1e-6,
-    `growthPerHour 应为 min(gap, main.popGrowthPerLevel*mainLevel)=${expectedGrowth}，实际 ${snap1.growthPerHour}`,
+    `growthPerHour 应为 main.popGrowthPerLevel*mainLevel=${expectedGrowth}，实际 ${snap1.growthPerHour}`,
   );
 
   // 快进 1 小时：人口应增长（不超 rate）
@@ -182,7 +180,7 @@ test('v3 C4：增长朝 popCeiling 线性收敛（main.popGrowthPerLevel × main
   await flush();
   const snap3 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   assert.equal(snap3.currentPop, snap3.popCeiling, '长期快进后人口应收敛到增长上限 popCeiling');
-  assert.equal(snap3.growthPerHour, 0, '满员后 growthPerHour 应归0');
+  assert.equal(snap3.growthPerHour, rate, '满员后仍下发真实增长速率，供客户端正确外插与展示潜力');
 });
 
 // ── C5：平民口粮口径 ──────────────────────────────────────────────────────

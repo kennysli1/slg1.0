@@ -307,7 +307,7 @@ test('人口：DisbandTroops 兵力不足时拒绝', async () => {
   assert.equal(r.reason, 'insufficient_troops:legionnaire');
 });
 
-test('人口：开局未满员有增长空间（growthPerHour>0）；消耗人口后增长空间仍>0；长期收敛到增长上限 popCeiling 后 growthPerHour=0', async () => {
+test('人口：开局未满员有增长速率；消耗人口后速率不被容量缺口改写；长期收敛到增长上限', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -321,7 +321,7 @@ test('人口：开局未满员有增长空间（growthPerHour>0）；消耗人�
   const cR = await send(app, 'population.ConsumePop', { villageId: 'v1', unit: 'legionnaire', count: 5 });
   assert.equal(cR.ok, true, `ConsumePop 应成功: ${cR.reason ?? ''}`);
   const snap2 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
-  // 缺口 = 5（popCost=1×5），growthPerHour 应>0 且被 popCeiling 缺口/速率夹住
+  // 缺口 = 5（popCost=1×5），但 growthPerHour 仍是实际速率，不得被缺口伪装成低速率。
   assert.ok(snap2.growthPerHour > 0, `消耗人口后应有增长空间 growthPerHour>0（实际 ${snap2.growthPerHour}）`);
 
   // 长期快进 → 收敛到增长上限 popCeiling（预留的 5 人口占用 footprint，故上限=hardCap−5），增速归 0
@@ -330,7 +330,7 @@ test('人口：开局未满员有增长空间（growthPerHour>0）；消耗人�
   await flushMicrotasks();
   const snap3 = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
   assert.equal(snap3.currentPop, snap3.popCeiling, '长期快进后人口应收敛到增长上限 popCeiling');
-  assert.equal(snap3.growthPerHour, 0, '满员后 growthPerHour 应归0');
+  assert.ok(snap3.growthPerHour > 0, '满员后仍应下发真实增长速率（客户端受 popCeiling 限制不会继续增长）');
 });
 
 /**
