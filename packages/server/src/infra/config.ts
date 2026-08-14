@@ -133,7 +133,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure';
+export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -146,6 +146,9 @@ export interface QuestObjective {
   minRarity?: string;
   /** 通用数量：clear_camp=清理营地数、sell_discard_treasure=宝物数量。 */
   count?: number;
+  /** carry_flag：必须携带并带回的宝物代码，以及出征军队至少需要的兵力。 */
+  flagCode?: string;
+  minTroops?: number;
 }
 
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
@@ -1019,6 +1022,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       // objParam 形如 `rare:2`：minRarity=稀有及以上，count=2
       const [rar, cnt] = (r.objParam || '').split(':');
       objective = { kind: 'sell_discard_treasure', minRarity: (rar?.trim() || 'rare'), count: Math.max(1, num(cnt, 1)) };
+    } else if (objKind === 'carry_flag') {
+      const [flagCode, minTroops] = (r.objParam || '').split(':');
+      objective = { kind: 'carry_flag', flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) };
     } else {
       objective = { kind: 'submit_resources', resources: parseResourceList(r.objParam) ?? {} };
     }
@@ -1186,7 +1192,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1328,7 +1334,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure', 'carry_flag']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1349,12 +1355,15 @@ export function validateGameConfig(config: GameConfig): void {
         errors.push(`quests.csv[${q.code}] sell_discard_treasure 的 minRarity 必须是 common/rare/epic/legendary`);
       }
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] sell_discard_treasure 数量必须≥1`);
+    } else if (q.objective.kind === 'carry_flag') {
+      if (!q.objective.flagCode || !config.treasures[q.objective.flagCode]) errors.push(`quests.csv[${q.code}] carry_flag 指定的军旗不在 treasures.csv`);
+      if (!q.objective.minTroops || q.objective.minTroops < 1) errors.push(`quests.csv[${q.code}] carry_flag 兵力必须≥1`);
     }
     // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
       if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code>）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量>）`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

@@ -59,6 +59,8 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
+  /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
+  qualifiedMovements?: string[];
   /** 目标已达成、等待玩家手动交付领取奖励。 */
   readyToDeliver?: boolean;
   spawnAttempts?: number;
@@ -154,6 +156,8 @@ export class TasksModule {
 
     // 战斗结束 → 推进 clear_camp 任务
     this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
+    this.bus.on('military.TroopTrained', (evt: DomainEvent) => void this.onTroopTrained(evt));
+    this.bus.on('treasure.CarriedStored', (evt: DomainEvent) => void this.onCarriedStored(evt));
   }
 
   async resume(): Promise<void> {
@@ -472,8 +476,11 @@ export class TasksModule {
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
     for (const t of allowed ? (q.rewards.treasures ?? []) : []) {
+      // carry_flag 已在军旗归城时由 treasure.ExchangeQuestFlag 原子兑换，禁止通用奖励路径重复生成。
+      if (q.objective.kind === 'carry_flag' && t === 'victory_flag') continue;
       const def = this.config.treasures[t];
-      const locked = !def || def.applyType !== 'instant';
+      // 胜利的旗帜必须可随军，其他既有任务奖励维持原有锁定语义。
+      const locked = t !== 'victory_flag' && (!def || def.applyType !== 'instant');
       await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
       granted.treasures.push(t);
     }
@@ -579,9 +586,8 @@ export class TasksModule {
 
   // ── 战斗结束：推进 clear_camp ──
   private async onBattleEnded(evt: DomainEvent): Promise<void> {
-    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean };
+    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number> };
     if (p.side !== 'attacker') return;
-    if (p.targetKind !== 'pve') return;
     if (!p.attackerWins) return;
     const villageId = p.villageId;
     const targetId = p.targetId;
@@ -590,6 +596,22 @@ export class TasksModule {
     const s = this.load(villageId);
     if (!s) return;
     for (const [code, inst] of Object.entries(s.active)) {
+      const q = this.quest(code);
+      if (q?.objective.kind === 'carry_flag' && p.movementId && p.treasures?.includes(q.objective.flagCode ?? '')) {
+        const troopCount = Object.values(p.deployedTroops ?? {}).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
+        if (troopCount < (q.objective.minTroops ?? 1)) continue;
+        const qualifies = (p.targetKind === 'pve' && p.campCleared === true)
+          || (p.targetKind === 'village' && Object.values(p.looted ?? {}).some((n) => n > 0));
+        if (qualifies) {
+          inst.qualifiedMovements ??= [];
+          if (!inst.qualifiedMovements.includes(p.movementId)) inst.qualifiedMovements.push(p.movementId);
+          this.store.set(COLLECTION, villageId, s);
+          await this.pushList(villageId);
+        }
+        continue;
+      }
+      // 既有 clear_camp 任务只统计 PvE 的专属营地，PvP 仅能推进携旗任务。
+      if (p.targetKind !== 'pve') continue;
       const camp = inst.camps.find((c) => c.id === targetId && !c.cleared);
       if (!camp) continue;
       camp.cleared = true;
@@ -601,6 +623,41 @@ export class TasksModule {
         await this.pushList(villageId);
         await this.pushMap(villageId);
       }
+      return;
+    }
+  }
+
+  /** 训练完成后检查兵力门槛；同时 resume 会补查，避免服务器重启漏掉已达标玩家。 */
+  private async onTroopTrained(evt: DomainEvent): Promise<void> {
+    const villageId = (evt.payload as { villageId?: string }).villageId;
+    if (!villageId) return;
+    const army = await this.commands.send({ name: 'military.GetArmy', from: TasksModule.NAME, payload: { villageId } });
+    const troops = ((army.payload as { troops?: Record<string, number> } | undefined)?.troops) ?? {};
+    const total = Object.values(troops).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
+    const s = this.ensureState(villageId);
+    let changed = false;
+    for (const q of Object.values(this.config.quests)) {
+      if (q.type !== 'side' || !q.trigger?.startsWith('troops_reached:')) continue;
+      const need = Number(q.trigger.split(':')[1]) || 0;
+      if (total >= need && !s.firedTriggers.includes(q.trigger)) { s.firedTriggers.push(q.trigger); changed = true; }
+    }
+    if (changed) { this.store.set(COLLECTION, villageId, s); await this.unlockSideQuests(villageId); }
+  }
+
+  /** 合格军队把军旗存回本村后，原旗自动销毁并立即发放胜利旗帜。 */
+  private async onCarriedStored(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; movementId?: string; codes?: string[] };
+    if (!p.villageId || !p.movementId) return;
+    const s = this.load(p.villageId);
+    if (!s) return;
+    for (const [code, inst] of Object.entries(s.active)) {
+      const q = this.quest(code);
+      if (q?.objective.kind !== 'carry_flag' || !inst.qualifiedMovements?.includes(p.movementId)) continue;
+      const flag = q.objective.flagCode ?? '';
+      if (!p.codes?.includes(flag)) continue;
+      const exchange = await this.commands.send({ name: 'treasure.ExchangeQuestFlag', from: TasksModule.NAME, payload: { villageId: p.villageId, fromCode: flag, toCode: 'victory_flag' } });
+      if (!exchange.ok) return;
+      await this.completeQuest(p.villageId, code);
       return;
     }
   }
@@ -840,6 +897,8 @@ export class TasksModule {
       campTemplate: q.objective.campTemplate ?? null,
       minRarity: q.objective.minRarity ?? null,
       count: q.objective.count ?? 0,
+      flagCode: q.objective.flagCode ?? null,
+      minTroops: q.objective.minTroops ?? 0,
     };
   }
 
@@ -858,6 +917,7 @@ export class TasksModule {
       campCleared: inst.campCleared,
       campTotal: inst.camps.length,
       progress: inst.progress ?? 0,
+      awaitingReturn: inst.qualifiedMovements?.length ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,

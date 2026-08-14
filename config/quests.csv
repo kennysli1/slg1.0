@@ -9,3 +9,4 @@ id,code,name,desc,type,requires,objKind,objParam,rewardRes,rewardTreasure,weight
 7,d2,讨伐游匪,酒馆悬赏清掉一支游匪营地,daily,,clear_camp,task_camp:1,gold:80,,2,,1,28800,7200,gold,80,4,300,12
 8,d3,紧急补给,酒馆急令调拨粮食应急,daily,,submit_resources,crop:300,gold:60,,3,,1,21600,7200,gold,60,4,300,12
 9,s1,献祭筹备,累计出售或丢弃2个稀有及以上品质的宝物,side,,sell_discard_treasure,rare:2,,ritual_altar,3,building_built:treasury,0,0,0,treasure,1,4,300,12
+10,s2,耀武扬威,兵力达到20后，携带军旗与至少20名士兵清理任意营地并将军旗带回城镇中心或宝库。军旗将自动丢弃并换取胜利的旗帜。,side,,carry_flag,war_flag:20,,victory_flag,0,troops_reached:20,0,0,0,,0,4,300,12
