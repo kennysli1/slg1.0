@@ -99,4 +99,4 @@ slg1.0/
 ## 部署
 
 生产部署请按 **`docs/部署手册_腾讯云轻量服务器.md`**（含 pm2 保活、数据备份）。
-正常 `git commit` 只执行本地验证，不改变生产环境。合并并推送远程 main 后运行 `npm run deploy:prod`；该命令可从任意本地分支发起，但只验证和发布 `origin/main` 的确定提交，并从公网核对提交 SHA。
+正常 `git commit` 只执行本地验证，不改变生产环境。合并并推送远程 main 后运行 `npm run deploy:prod`；该命令只验证和发布 `origin/main` 的确定提交到不可变 release，再原子切换 `current` 并从公网核对提交 SHA。生产目录不是 Git 工作树。

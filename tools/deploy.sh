@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 生产发布：可从任意本地分支发起，但发布内容永远来自远程 origin/main 的确定提交。
-# 当前工作区、未提交内容和功能分支绝不会进入生产包。
+# 生产发布入口：从任意本地分支发起，但内容只取远程 origin/main 的确定提交。
+# 远端使用 releases/<sha> + current 原子切换；生产目录不是 Git 工作树。
 set -euo pipefail
 
 DEPLOY_KEY="${DEPLOY_KEY:-$HOME/.ssh/kennysgame.pem}"
@@ -31,15 +31,29 @@ DEPLOY_TMP="$(mktemp -d)"
 WORKTREE="$DEPLOY_TMP/main"
 ARCHIVE="$DEPLOY_TMP/deploy.tgz"
 REMOTE_ARCHIVE="/tmp/kow-deploy-$$.tgz"
-REMOTE_BACKUP="/tmp/kow-rollback-$$.tgz"
+REMOTE_STATE="/tmp/kow-deploy-$$.state"
 SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no)
+DEPLOY_PENDING=0
+
+remote_release() {
+  local action="$1"
+  shift
+  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" bash -s -- "$action" "$@" < "$WORKTREE/tools/remote-release.sh"
+}
 
 cleanup() {
+  local code=$?
+  trap - EXIT INT TERM
+  if [[ "$DEPLOY_PENDING" == 1 && -f "$WORKTREE/tools/remote-release.sh" ]]; then
+    echo "==> 发布未完成，恢复上一个生产版本" >&2
+    remote_release rollback "$DEPLOY_REMOTE" "$REMOTE_STATE" || true
+  fi
   git -C "$ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
   rm -rf "$DEPLOY_TMP"
-  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "rm -f '$REMOTE_ARCHIVE' '$REMOTE_BACKUP'" >/dev/null 2>&1 || true
+  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" "rm -f '$REMOTE_ARCHIVE' '$REMOTE_STATE'" >/dev/null 2>&1 || true
+  exit "$code"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 echo "==> 在隔离 worktree 验证 origin/main"
 git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
@@ -52,81 +66,22 @@ git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
 )
 
 echo "==> 打包已验证的 origin/main@$MAIN_SHA"
-tar czf "$ARCHIVE" -C "$WORKTREE" \
+COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$WORKTREE" \
   --exclude=node_modules --exclude=.git --exclude=data --exclude=logs \
   --exclude='packages/*/dist' \
   packages config tools scripts docs .githooks .github \
   package.json package-lock.json ecosystem.config.cjs PROJECT.md README.md CLAUDE.md AGENTS.md CHANGELOG.md
 
-echo "==> 上传生产包"
+echo "==> 上传并构建不可变 release"
 scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:$REMOTE_ARCHIVE"
-
-echo "==> 备份线上代码、构建并重载"
-ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" bash -s -- "$DEPLOY_REMOTE" "$REMOTE_ARCHIVE" "$REMOTE_BACKUP" "$MAIN_SHA" <<'REMOTE_SCRIPT'
-set -euo pipefail
-REMOTE="$1"
-ARCHIVE="$2"
-BACKUP="$3"
-MAIN_SHA="$4"
-cd "$REMOTE"
-
-BACKUP_ITEMS=()
-for item in packages config tools scripts docs .githooks .github \
-  package.json package-lock.json ecosystem.config.cjs PROJECT.md README.md CLAUDE.md AGENTS.md CHANGELOG.md; do
-  [[ -e "$item" ]] && BACKUP_ITEMS+=("$item")
-done
-tar czf "$BACKUP" "${BACKUP_ITEMS[@]}"
-
-clear_release_files() {
-  rm -rf packages config tools scripts docs .githooks .github
-  rm -f package.json package-lock.json ecosystem.config.cjs PROJECT.md README.md CLAUDE.md AGENTS.md CHANGELOG.md
-}
-
-rollback() {
-  code=$?
-  trap - ERR
-  echo "远端发布失败，正在恢复部署前快照……" >&2
-  clear_release_files
-  tar xzf "$BACKUP" -C "$REMOTE"
-  npm ci
-  npm run build
-  pm2 reload kow --update-env
-  exit "$code"
-}
-trap rollback ERR
-
-clear_release_files
-tar xzf "$ARCHIVE" -C "$REMOTE"
-npm ci
-KOW_RELEASE_BRANCH=main KOW_RELEASE_COMMIT="$MAIN_SHA" npm run build
-pm2 reload kow --update-env
-sleep 2
-curl --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
-trap - ERR
-REMOTE_SCRIPT
-
-rollback_remote() {
-  echo "==> 公网验收失败，恢复线上部署前快照" >&2
-  ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" bash -s -- "$DEPLOY_REMOTE" "$REMOTE_BACKUP" <<'ROLLBACK_SCRIPT'
-set -euo pipefail
-REMOTE="$1"
-BACKUP="$2"
-cd "$REMOTE"
-rm -rf packages config tools scripts docs .githooks .github
-rm -f package.json package-lock.json ecosystem.config.cjs PROJECT.md README.md CLAUDE.md AGENTS.md CHANGELOG.md
-tar xzf "$BACKUP" -C "$REMOTE"
-npm ci
-npm run build
-pm2 reload kow --update-env
-sleep 2
-curl --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
-ROLLBACK_SCRIPT
-}
+remote_release deploy "$DEPLOY_REMOTE" "$REMOTE_STATE" "$REMOTE_ARCHIVE" "$MAIN_SHA"
+DEPLOY_PENDING=1
 
 echo "==> 验证公网正在运行 origin/main@$MAIN_SHA"
-if ! node "$WORKTREE/scripts/deploy-smoke.mjs" --url "$DEPLOY_URL" --expect-commit "$MAIN_SHA"; then
-  rollback_remote
-  exit 1
-fi
+node "$WORKTREE/scripts/deploy-smoke.mjs" --url "$DEPLOY_URL" --expect-commit "$MAIN_SHA"
+
+echo "==> 固化发布并归档旧生产 Git 元数据"
+remote_release finalize "$DEPLOY_REMOTE" "$REMOTE_STATE"
+DEPLOY_PENDING=0
 
 echo "✔ 生产部署通过：origin/main@$MAIN_SHA → $DEPLOY_URL"

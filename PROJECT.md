@@ -90,7 +90,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 - 加外部 action：`gateway/routes.ts` + owner 的内部契约；破坏性协议变更升级 `WIRE_VERSION`。
 - 改存档：升级 `SAVE_SCHEMA_VERSION`，在 CHANGELOG 标记 `[需刷档]`。
 - 看最近变化：只读 `CHANGELOG.md`。
-- 生产部署：`npm run deploy:prod`；可从任意本地分支发起，但只会部署远程 `origin/main` 的确定提交。
+- 生产部署：`npm run deploy:prod`；只发布远程 `origin/main` 到不可变 `releases/<SHA>`，由 `current` 原子切换，数据独立放在 `shared/`。
 
 ## 七、验证
 
