@@ -44,7 +44,7 @@ export function TreasurePanel() {
   dataVersion.value; // subscribe
 
   const data = getCache().treasures as
-    | { codes: string[]; activeCodes?: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
+    | { codes: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
     | null;
 
   if (!data) return null;
@@ -53,8 +53,6 @@ export function TreasurePanel() {
   const slots = data.slots ?? 1;
   const list: any[] = data.treasures ?? [];
   const eff = data.effect ?? {};
-  const activeCounts = new Map<string, number>();
-  for (const code of data.activeCodes ?? []) activeCounts.set(code, (activeCounts.get(code) ?? 0) + 1);
 
   if (!list.length) {
     return (
@@ -102,8 +100,6 @@ export function TreasurePanel() {
           const effectTxt = treasureEffectText(info as any);
           const cat = treasureCategoryName(t.category ?? '');
           const rar = treasureRarityName(t.rarity ?? '');
-          const active = (activeCounts.get(t.code) ?? 0) > 0;
-          if (active) activeCounts.set(t.code, (activeCounts.get(t.code) ?? 1) - 1);
 
           return (
             <Panel
@@ -127,7 +123,6 @@ export function TreasurePanel() {
                       : t.rarity === 'epic' ? 'steel'
                         : t.rarity === 'rare' ? 'steel' : undefined
                   }>{rar}</Tag>
-                  <Tag kind={active ? 'jade' : undefined}>{active ? '生效中' : '储存'}</Tag>
                 </div>
                 <div class="trs-effect">{effectTxt}</div>
               </div>
@@ -136,7 +131,7 @@ export function TreasurePanel() {
         })}
       </div>
 
-      <p class="trs-jump-hint">系统按类别槽位自动选择高价值宝物；同名只生效一件，超出槽位的宝物仅储存。点击卡片可前往管理。</p>
+      <p class="trs-jump-hint">城镇中心与宝库中的每件被动宝物都会同时生效；同名宝物也会叠加。点击卡片可前往管理。</p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s-2)', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>本村宝物加成</span>

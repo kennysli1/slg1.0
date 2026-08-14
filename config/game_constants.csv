@@ -66,10 +66,6 @@ pvp_recovery_cooldown_sec,86400,number,战败恢复冷却秒数
 pvp_recovery_trigger_total_ratio,0.20,number,战后四资源总量低于总容量此比例才触发恢复
 pvp_recovery_resource_ratio,0.10,number,战败恢复把每种基础资源补到容量比例
 pvp_recovery_gold_floor,100,number,战败恢复金币下限
-treasure_active_slots_economic,2,number,经济宝物自动生效槽
-treasure_active_slots_military,2,number,军事宝物自动生效槽
-treasure_active_slots_social,1,number,社会宝物自动生效槽
-treasure_active_slots_special,1,number,特殊被动宝物自动生效槽
 task_daily_gold_base,200,number,随机任务每日金币预算基础值
 task_daily_gold_per_tavern_level,100,number,随机任务每日金币预算每酒馆等级增量
 task_daily_treasure_limit,1,number,随机任务每日宝物奖励上限

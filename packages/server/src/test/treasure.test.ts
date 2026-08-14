@@ -72,16 +72,15 @@ test('宝物：popGrowth 被动提升人口增长 (+40%)', async () => {
     `增长应 ×1.40: before=${grow0} after=${s1.potentialGrowthPerHour}`);
 });
 
-test('宝物：同名仅一件生效，不同攻击宝物加算且返回 activeCodes', async () => {
+test('宝物：栏内全部被动宝物生效，同名宝物也叠加', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 3 });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'dragon_banner' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'dragon_banner' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'spear_of_ares' });
   const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(listed.activeCodes.filter((c: string) => c === 'dragon_banner').length, 1);
-  assert.ok(listed.activeCodes.includes('spear_of_ares'));
-  assert.equal(listed.effect.atkMult, 1.48);
+  assert.equal(listed.activeCodes, undefined, '不再下发类别生效槽选择结果');
+  assert.equal(listed.effect.atkMult, 1.78);
 });
 
 test('宝物：instantGold 经 Use 发放金币并移除', async () => {

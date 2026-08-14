@@ -26,7 +26,7 @@
  *   world.FindFreeTile  在村内找空地放任务营地
  *   pve.Spawn / pve.Remove 生成 / 移除任务营地（task=true，不掉落/不自动重生）
  *   economy.TrySpend / economy.Grant 扣 / 发资源奖励
- *   treasure.Grant 发任务专属宝物（被动类 locked:true 入锁定桶；即时类如祭祀台不锁定供使用）
+ *   treasure.Grant 发任务奖励；满栏时转待处理报告，由玩家决定领取、出售或丢弃
  */
 
 import type { Store } from '../infra/store.js';
@@ -503,9 +503,8 @@ export class TasksModule {
       // carry_flag 已在军旗归城时由 treasure.ExchangeQuestFlag 原子兑换，禁止通用奖励路径重复生成。
       if (q.objective.kind === 'carry_flag' && t === 'victory_flag') continue;
       const def = this.config.treasures[t];
-      // 胜利的旗帜必须可随军，其他既有任务奖励维持原有锁定语义。
-      const locked = t !== 'victory_flag' && (!def || def.applyType !== 'instant');
-      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, locked } });
+      // 任务奖励与其他宝物一样占用栏位；满栏时进入待处理报告，由玩家决定领取/出售/丢弃。
+      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, pendingIfFull: true } });
       granted.treasures.push(t);
     }
 
