@@ -80,6 +80,50 @@ test('到达触发战斗接入：raid 走完全程后交给 combat（movement �
   assert.equal(movements(app).filter((m) => m.type === 'raid').length, 0, 'raid 去程应已结束');
 });
 
+test('战斗中的部队持续占用人口足迹，幸存者返程不会凭空增加村庄人口', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '人口行军', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  const troops = { legionnaire: 10 };
+  const troopPop = app.config.units.legionnaire.popCost * troops.legionnaire;
+  await giveTroops(app, p.villageId, troops);
+
+  // 构造一个恰好住满「扣除出征士兵后容量」的村庄。若战斗中的士兵从人口池消失，
+  // 一小时后的结算就会错误增长；正确行为是整个战斗期间人口与容量均保持不变。
+  const popState = app.store.get<any>('population', p.villageId);
+  assert.ok(popState, '村庄应有人口状态');
+  popState.currentPop = popState.hardCap - troopPop;
+  popState.garrisonPopCost = troopPop;
+  popState.enRoutePopCost = 0;
+  popState.trainingPopCost = 0;
+  popState.lastTick = clock;
+  app.store.set('population', p.villageId, popState);
+
+  const raid = await send(app, 'movement.SendRaid', {
+    villageId: p.villageId, targetId: 'pve-0', troops,
+  });
+  assert.equal(raid.ok, true, `派兵应成功: ${raid.reason ?? ''}`);
+  const outbound = movements(app).find((m) => m.id === (raid.payload as any).id);
+  assert.ok(outbound, '应记录去程行军');
+
+  // 逐格推进到终点，只启动战斗而不推进下一次 combat tick，故部队仍在战斗中。
+  // Scheduler 每轮只消费当时已登记的任务，不能用一次大跳代替逐格推进。
+  let engaged: any;
+  for (let i = 0; i <= outbound.path.length; i++) {
+    await app.scheduler.advanceTo(clock + outbound.perStepMs + 1, setClock);
+    engaged = movements(app).find((m) => m.id === outbound.id);
+    if (engaged?.status === 'paused') break;
+  }
+  assert.equal(engaged?.status, 'paused', '交战期间去程应保留为 paused，持续计入在途人口');
+
+  // 模拟战斗持续一小时后读取人口快照：不应因为士兵在战斗中暂时消失而获得额外增长。
+  setClock(clock + 3_600_000);
+  const snap = (await send(app, 'population.GetSnapshot', { villageId: p.villageId })).payload as any;
+  assert.equal(snap.currentPop, popState.hardCap - troopPop, '战斗期间平民不应凭空增长');
+  assert.equal(snap.soldierPop, troopPop, '战斗中的部队仍应计入士兵人口');
+  assert.equal(snap.totalPop, popState.hardCap, '战斗中的总人口应保持守恒');
+});
+
 test('同格相遇即战：两支敌对出征军在途相遇，弱者全灭、强者继续', async () => {
   const app = freshApp();
   // 两名玩家

@@ -88,6 +88,10 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const camp = m3.camps[0];
   assert.ok(camp && camp.id, '营地应有 id 与坐标');
   const campId = camp.id;
+  let latestMapUpdate: any;
+  const stopWatchingTaskMap = app.bus.on('task.MapUpdated', (evt) => {
+    if ((evt.payload as any).villageId === va) latestMapUpdate = evt.payload;
+  });
 
   // 任务营地使用独立 taskcamp 地块，既真实占格又不进入其他玩家的全局视野。
   const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
@@ -106,6 +110,8 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const m3a = p1.active.find((a: any) => a.code === 'm3');
   assert.ok(m3a && m3a.ready === true, 'm3 战斗后应就绪可交付');
   assert.ok(!p1.completedMain.includes('m3'), '未交付 m3 不应完成');
+  assert.deepEqual(latestMapUpdate?.camps, [], '已清理营地不得继续出现在 TaskMapUpdated 地图标记中');
+  stopWatchingTaskMap();
 
   // 交付 m3 → 完成 + 移除营地 + 发宝物 + 解锁 m4
   const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
