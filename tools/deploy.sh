@@ -66,7 +66,7 @@ git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
 )
 
 echo "==> 打包已验证的 origin/main@$MAIN_SHA"
-COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$WORKTREE" \
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" -C "$WORKTREE" \
   --exclude=node_modules --exclude=.git --exclude=data --exclude=logs \
   --exclude='packages/*/dist' \
   packages config tools scripts docs .githooks .github \
