@@ -43,7 +43,7 @@
 
 | 我要… | 只读这些 | 改这里 |
 |-------|---------|--------|
-| 开始 / 继续 / 合并 / 提交任何修改 | `docs/Git协作规范.md` | 按一个需求一个分支、一个写入者一个 worktree 执行；main 只走 PR |
+| 开始 / 继续 / 合并 / 提交任何修改 | `docs/Git协作规范.md` | 一需求一分支、一写入者一 worktree；checks 通过后默认 squash merge |
 | 改数值 / 加兵种·建筑·PvE | `config/README.md` | `config/*.csv` 加一行，重启后端。**前端不用改**（走服务端 `GetGameConfig` 下发） |
 | 加全局常量 / 平衡参数 | `config/README.md` | `config/game_constants.csv` + `infra/config.ts` 的 `GameConstants` 加字段 |
 | 加新系统（工会 / 邮件） | `docs/2_2.0设计/07_扩展与代码规范.md`、`03_架构总览.md` | 加 owner 模块并挂 `app.ts`；外部 action 只登记到 `gateway/routes.ts` |

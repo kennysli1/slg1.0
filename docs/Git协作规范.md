@@ -16,7 +16,7 @@ summary: 双人和多 AI 开发的分支、worktree、提交、同步、PR 与�
 
 1. **一个需求 = 一个功能分支**：每次从最新 `origin/main` 新建；已合并分支不得承接新需求。
 2. **一个写入者 = 一个独立工作目录**：不同人、AI 或并行任务使用不同 clone/worktree。
-3. **`main` 只通过 PR 改变**：禁止在 `main` 提交、直接 push、force push；功能分支同步 main 不等于合入 main。
+3. **`main` 只通过 PR 改变并默认自动交付**：禁止在 `main` 提交、直接 push、force push；用户要求修改项目即授权 AI 在条件满足后 squash merge。
 4. **生产只来自 `origin/main`**：功能分支已部署不代表已合入；正式部署必须在 PR 合并后执行。
 
 必须区分三个完成状态：
@@ -192,7 +192,7 @@ git push
 
 本项目默认使用 merge 同步功能分支，避免新手 rebase 后误用 force push。只有分支唯一负责人明确理解历史重写时，才能另行决定 rebase，并且绝不对 `main` 或多人共用分支 rebase/force push。
 
-### 5. 创建 PR 并自助合并
+### 5. 创建 PR、等待检查并自动合并
 
 当前 GitHub 规则要求 PR 和 `verify`，但强制批准人数为 `0`，不需要另一人审批。创建 PR：
 
@@ -208,7 +208,7 @@ gh pr view --web
 gh pr checks --watch
 ```
 
-检查失败时用 `gh pr checks` 取得失败项并修复；长时间没有结果可以中断等待，但不得把等待中当作通过。只有用户明确要求交付/合入 main，或已批准的任务流程明确包含合并时，AI 才能执行外部合并。
+检查失败时用 `gh pr checks` 取得失败项并修复；长时间没有结果可以中断等待，但不得把等待中当作通过。**用户要求 AI 修改本项目，即同时授权标准交付链路：commit → push 功能分支 → 创建 PR → 等待 checks → 条件满足后 squash merge；AI 不得在 checks 已通过且可合并时无故停在 Open PR。** 只有用户明确要求“只审查”“暂不提交”“暂不推送”“暂不合并”或“创建 Draft PR”时，才在对应阶段停止。
 
 合并前机器核验（把占位符替换为确切值）：
 
@@ -219,7 +219,7 @@ git rev-parse origin/<功能分支>
 git rev-list --left-right --count origin/main...origin/<功能分支>
 ```
 
-要求 PR 为 Open 且非 Draft、base=`main`、head 名与 SHA 匹配远程功能分支、领先/落后输出的第一个数为 `0`、checks 全部成功且 `mergeable` 不为冲突。普通 `gh pr view` 不能完整证明讨论已解决，必须在 PR 页面确认；无法查看时不得猜测，GitHub 保护规则也会拒绝违规合并。全部满足后使用 squash：
+要求 PR 为 Open 且非 Draft、base=`main`、head 名与 SHA 匹配远程功能分支、领先/落后输出的第一个数为 `0`、checks 全部成功且 `mergeable` 不为冲突。普通 `gh pr view` 不能完整证明讨论已解决，必须在 PR 页面确认；无法查看时不得猜测，GitHub 保护规则也会拒绝违规合并。全部满足后，AI 应直接使用 squash，不再等待重复批准：
 
 ```bash
 gh pr merge --squash --delete-branch
