@@ -18,7 +18,7 @@ import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
-import { capitalCoordinate, parseMapCoordinate } from '../features/map/map-navigation.js';
+import { capitalCoordinate, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -29,6 +29,14 @@ describe('modalLayerZ', () => {
 });
 
 describe('地图定位', () => {
+  it('任务营地导航只保留未清理的营地', () => {
+    assert.deepEqual(pendingTaskCamps([
+      { id: 'camp-cleared', q: 1, r: 2, cleared: true },
+      { id: 'camp-active', q: 3, r: 4, cleared: false },
+    ]), [{ id: 'camp-active', q: 3, r: 4, cleared: false }]);
+    assert.deepEqual(pendingTaskCamps(undefined), []);
+  });
+
   it('回主城优先使用 capitalVillageId 对应坐标', () => {
     const player = {
       id: 'p1', name: '领主', tribe: 't1', villageId: 'v2', capitalVillageId: 'v1', q: 8, r: 9,

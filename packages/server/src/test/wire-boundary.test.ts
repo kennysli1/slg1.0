@@ -164,7 +164,10 @@ test('wire-boundary：登录凭证可在新连接恢复会话，伪造凭证被�
 
   const forged = gateway.addClient(makeFakeConn().conn);
   const tokenText = String(token);
-  const forgedToken = `${tokenText.slice(0, -1)}${tokenText.endsWith('x') ? 'y' : 'x'}`;
+  // 不改 MAC 尾字符：Base64URL 尾部可能含未参与解码的补齐位，改掉它不一定改变签名字节。
+  const macStart = tokenText.lastIndexOf('.') + 1;
+  const macFirst = tokenText[macStart];
+  const forgedToken = `${tokenText.slice(0, macStart)}${macFirst === 'A' ? 'B' : 'A'}${tokenText.slice(macStart + 1)}`;
   const rejected = await gateway.handleRequest(
     {
       v: WIRE_VERSION, type: 'req', id: 'forged-session', action: 'ResumeSession',
