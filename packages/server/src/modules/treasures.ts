@@ -675,6 +675,9 @@ export class TreasureModule {
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    for (const [code] of wantCounts) {
+      await this.bus.emit({ name: 'treasure.StoredRemoved', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code, remainingCount: this.storedCodes(s).filter((x) => x === code).length, via: 'assign' } } as DomainEvent);
+    }
     return { ok: true, payload: { movementId, codes: entry.codes, cap } };
   }
 
@@ -934,6 +937,7 @@ export class TreasureModule {
     });
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    await this.bus.emit({ name: 'treasure.StoredRemoved', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code, remainingCount: this.storedCodes(s).filter((x) => x === code).length, via: 'sell' } } as DomainEvent);
     // 任务目标「出售/丢弃稀有+宝物」：广播出售事件供任务模块计数
     await this.bus.emit({
       name: 'treasure.SoldDiscarded', source: TreasureModule.NAME, ts: this.now(),
@@ -952,6 +956,7 @@ export class TreasureModule {
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    await this.bus.emit({ name: 'treasure.StoredRemoved', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code, remainingCount: this.storedCodes(s).filter((x) => x === code).length, via: 'discard' } } as DomainEvent);
     // 任务目标「出售/丢弃稀有+宝物」：广播丢弃事件供任务模块计数
     if (t) {
       await this.bus.emit({
@@ -980,6 +985,7 @@ export class TreasureModule {
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    await this.bus.emit({ name: 'treasure.StoredRemoved', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code: oldCode, remainingCount: this.storedCodes(s).filter((x) => x === oldCode).length, via: 'replace' } } as DomainEvent);
     return { ok: true, payload: { codes: this.storedCodes(s), treasure: t } };
   }
 

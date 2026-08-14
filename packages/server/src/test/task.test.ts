@@ -175,6 +175,32 @@ test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', asy
   assert.equal(s2.awaitingReturn, 1, '清空营地且携旗达到二十人时，应记录待回城出征');
 });
 
+test('「耀武扬威」合格军旗归城后须手动交付，交付时才兑换胜利旗帜', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '手动交付测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  const taskState = app.store.get<any>('task', va);
+  taskState.active.s2 = {
+    code: 's2', type: 'side', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0, progress: 0,
+    qualifiedMovements: [], qualifiedFlagMovements: ['mv-qualified'], readyToDeliver: true,
+  };
+  app.store.set('task', va, taskState);
+  app.store.set('treasure', va, {
+    villageId: va, town: ['war_flag'], treasury: [], carried: {}, extraSlots: 0,
+    hasTradeCenter: false, locked: [], victoryFlagBonus: 0, victoryFlagQualified: {},
+  });
+
+  const before = await send(app, 'task.GetState', { villageId: va });
+  assert.ok((before.payload as any).active.find((x: any) => x.code === 's2'), '归城后任务仍应等待玩家手动交付');
+  const delivered = await send(app, 'task.Deliver', { villageId: va, code: 's2' });
+  assert.equal(delivered.ok, true, `手动交付应成功: ${delivered.reason ?? ''}`);
+  const after = await send(app, 'task.GetState', { villageId: va });
+  assert.ok((after.payload as any).completedSide.includes('s2'), '交付后才记录完成');
+  const treasure = app.store.get<any>('treasure', va);
+  assert.deepEqual(treasure.town, ['victory_flag'], '交付时应原子消耗军旗并获得胜利旗帜');
+});
+
 test('GM 可将已完成支线标记未完成，且必须重新触发后才可接取', async () => {
   const app = freshApp();
   const regRes = await reg(app, '支线重置测试');
