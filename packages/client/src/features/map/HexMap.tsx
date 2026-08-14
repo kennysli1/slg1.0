@@ -753,9 +753,9 @@ export function HexMap() {
                       preserveAspectRatio="xMidYMid meet"
                     />
                   )}
-                  {/* Occupied village name */}
+                  {/* 名称必须留在所属六边形内；放到格外会被后绘制的相邻地形遮住。 */}
                   {c.kind !== 'empty' && (
-                    <text class="hex-label" textAnchor="middle" dy={HEX_SIZE * 1.2}>
+                    <text class="hex-label" textAnchor="middle" dominantBaseline="middle" y={HEX_SIZE * 0.62}>
                       {c.name.slice(0, 5)}
                     </text>
                   )}
