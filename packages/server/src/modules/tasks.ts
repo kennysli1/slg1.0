@@ -172,6 +172,8 @@ export class TasksModule {
         }
         if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
       }
+      // 支线门槛可能在本次部署/重启前已经达到；恢复时补查，不能只依赖新训练事件。
+      await this.checkTroopTriggers(s.villageId);
     }
   }
 
@@ -631,6 +633,11 @@ export class TasksModule {
   private async onTroopTrained(evt: DomainEvent): Promise<void> {
     const villageId = (evt.payload as { villageId?: string }).villageId;
     if (!villageId) return;
+    await this.checkTroopTriggers(villageId);
+  }
+
+  /** 训练事件与服务器恢复共用的兵力门槛检查。 */
+  private async checkTroopTriggers(villageId: string): Promise<void> {
     const army = await this.commands.send({ name: 'military.GetArmy', from: TasksModule.NAME, payload: { villageId } });
     const troops = ((army.payload as { troops?: Record<string, number> } | undefined)?.troops) ?? {};
     const total = Object.values(troops).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);

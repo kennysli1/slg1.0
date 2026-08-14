@@ -147,6 +147,34 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   assert.ok(tr && tr.locked.includes('warrior_token'), 'warrior_token 应进入 treasure.locked');
 });
 
+test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '携旗测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+
+  // 直接建立已接取的支线，聚焦验证战斗结束事件的结算契约。
+  const state = app.store.get<any>('task', va);
+  state.active.s2 = {
+    code: 's2', type: 'side', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0, progress: 0,
+  };
+  app.store.set('task', va, state);
+
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: {
+      villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-test',
+      attackerWins: true, movementId: 'mv-flag', treasures: ['war_flag'],
+      deployedTroops: { legionnaire: 20 }, campCleared: true,
+    },
+  } as any);
+  await tick();
+
+  const st = await send(app, 'task.GetState', { villageId: va });
+  const s2 = (st.payload as any).active.find((a: any) => a.code === 's2');
+  assert.equal(s2.awaitingReturn, 1, '清空营地且携旗达到二十人时，应记录待回城出征');
+});
+
 test('酒馆建造触发随机任务刷新；接取 → 上交 → 完成', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试4');
