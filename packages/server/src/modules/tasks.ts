@@ -136,6 +136,7 @@ export class TasksModule {
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
+    this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
     this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
 
@@ -517,6 +518,28 @@ export class TasksModule {
     const s = this.ensureState(villageId);
     if (!s.active[code]) return { ok: false, payload: {}, reason: 'not_active' };
     await this.completeQuest(villageId, code);
+    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+  }
+
+  /** 把已完成的一次性支线恢复为未完成，并要求再次满足触发条件才可接取。 */
+  private async gmReopenCompleted(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_completed_side_supported' };
+    const s = this.ensureState(villageId);
+    if (!s.completedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_completed_side' };
+
+    s.completedSide = s.completedSide.filter((x) => x !== code);
+    s.offeredSide = s.offeredSide.filter((x) => x !== code);
+    // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
+    if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
+    this.store.set(COLLECTION, villageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    // 没有触发条件的支线可立刻重新出现；有触发条件的由下一次领域事件解锁。
+    if (!q.trigger) await this.unlockSideQuests(villageId);
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
