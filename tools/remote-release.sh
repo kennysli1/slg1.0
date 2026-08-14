@@ -33,7 +33,10 @@ activate() {
   local next="$BASE/.current-$$"
   ln -s "$target" "$next"
   node -e "require('node:fs').renameSync(process.argv[1], process.argv[2])" "$next" "$CURRENT"
-  "$PM2_BIN" startOrReload "$CURRENT/ecosystem.config.cjs" --only kow --update-env
+  # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
+  # 先重建同名进程，确保它真正运行 current release 的 dist 产物。
+  "$PM2_BIN" delete kow >/dev/null 2>&1 || true
+  "$PM2_BIN" start "$CURRENT/ecosystem.config.cjs" --only kow --update-env
   sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
   "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
 }
@@ -47,7 +50,8 @@ restore_previous() {
     activate "$previous"
   elif [[ "$mode" == legacy && -f "$BASE/ecosystem.config.cjs" ]]; then
     rm -f "$CURRENT"
-    "$PM2_BIN" startOrReload "$BASE/ecosystem.config.cjs" --only kow --update-env
+    "$PM2_BIN" delete kow >/dev/null 2>&1 || true
+    "$PM2_BIN" start "$BASE/ecosystem.config.cjs" --only kow --update-env
     sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
     "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
   fi
