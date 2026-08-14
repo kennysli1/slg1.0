@@ -283,6 +283,8 @@ export function HexMap() {
             const isSelf = !!(me && me.q === q && me.r === r);
             const ownV = ownVillageAt(q, r);
             const t = tileAt(q, r);
+            // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
+            const taskCamp = (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
             let terrain = terrainFor(q, r);
 
@@ -292,6 +294,9 @@ export function HexMap() {
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
               icon = 'bld_main'; terrain = 'village';
+            } else if (taskCamp) {
+              kind = 'pve'; refId = taskCamp.id; name = '任务营地';
+              icon = pveIcon('任务营地'); terrain = 'ruins';
             } else if (t?.kind === 'village') {
               kind = 'village'; refId = t.refId; name = t.name;
               icon = 'bld_main'; terrain = 'village';

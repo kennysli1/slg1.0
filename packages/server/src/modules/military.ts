@@ -36,6 +36,8 @@ interface MilitaryState {
   tribe: string;
   /** 驻村兵力：兵种 -> 数量 */
   troops: Record<string, number>;
+  /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
+  marching?: Record<string, number>;
   /** 铁匠对各兵种的强化等级（养成层） */
   smithyLevel: Record<string, number>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
@@ -140,6 +142,8 @@ export class MilitaryModule {
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
+    // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
+    this.commands.register('military.SetMarchingTroops', (c) => this.setMarchingTroops(c));
     // 祭祀台等消耗型效果：按 popCost 升序移除驻村士兵直到满足人口缺口（允许超扣）。
     this.commands.register('military.SacrificeTroops', (c) => this.sacrificeTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
@@ -246,6 +250,10 @@ export class MilitaryModule {
     const base = this.config.constants.popCropPerLabor;
     let ration = 0; // 军晌（默认口粮 + upkeep，含精神食粮减免）
     for (const [unit, n] of Object.entries(s.troops)) {
+      ration += this.foodPerSoldier(unit, s, base) * n;
+    }
+    // 在途（行军）部队同样耗粮（出征不减免口粮）。
+    for (const [unit, n] of Object.entries(s.marching ?? {})) {
       ration += this.foodPerSoldier(unit, s, base) * n;
     }
     // 训练队列：每个未产出的兵也按 foodPerSoldier 计入（即便尚未入 troops）。
@@ -937,6 +945,17 @@ export class MilitaryModule {
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
     return { ok: true, payload: { troops: { ...s.troops } } };
+  }
+
+  /** 记录在途（行军）兵力快照：仅计粮耗，不改驻村兵力/动员上限（动员由 population.SetEnRoutePop 单独算）。 */
+  private setMarchingTroops(cmd: Command): CommandResult {
+    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.marching = troops;
+    this.store.set(COLLECTION, villageId, s);
+    this.reportUpkeep(s);
+    return { ok: true, payload: { marching: { ...troops } } };
   }
 
   /**
