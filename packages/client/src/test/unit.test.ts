@@ -17,12 +17,33 @@ import { setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
+import { capitalCoordinate, parseMapCoordinate } from '../features/map/map-navigation.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
     assert.equal(modalLayerZ(0), 'calc(var(--z-scrim) + 0)');
     assert.equal(modalLayerZ(1), 'calc(var(--z-scrim) + 20)');
     assert.equal(modalLayerZ(-1), 'calc(var(--z-scrim) + 0)');
+  });
+});
+
+describe('地图定位', () => {
+  it('回主城优先使用 capitalVillageId 对应坐标', () => {
+    const player = {
+      id: 'p1', name: '领主', tribe: 't1', villageId: 'v2', capitalVillageId: 'v1', q: 8, r: 9,
+      villages: [
+        { id: 'v1', q: 2, r: 3, name: '主城', isCapital: true },
+        { id: 'v2', q: 8, r: 9, name: '分城', isCapital: false },
+      ],
+    };
+    assert.deepEqual(capitalCoordinate(player), { q: 2, r: 3 });
+  });
+
+  it('坐标跳转只接受地图范围内的完整整数', () => {
+    assert.deepEqual(parseMapCoordinate('4', '7', 10, 10), { ok: true, coordinate: { q: 4, r: 7 } });
+    assert.equal(parseMapCoordinate('', '7', 10, 10).ok, false);
+    assert.equal(parseMapCoordinate('1.5', '7', 10, 10).ok, false);
+    assert.equal(parseMapCoordinate('10', '7', 10, 10).ok, false);
   });
 });
 

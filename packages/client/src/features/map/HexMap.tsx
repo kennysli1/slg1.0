@@ -11,7 +11,8 @@ import { getCache } from '../../app/state.js';
 import { dataVersion, selected, tick, taskMarkers } from '../../app/store.js';
 import { getMapCenter, setMapCenter } from '../../app/refresh.js';
 import { me, ownVillageAt } from '../../api.js';
-import { artPath } from '../../ui/index.js';
+import { artPath, Btn } from '../../ui/index.js';
+import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.7;
@@ -139,6 +140,9 @@ export function HexMap() {
   const centeredKey  = useRef('');
   const [homeCentered, setHomeCentered] = useState(true);
   const [navCoord,     setNavCoord]     = useState({ q: me?.q ?? 0, r: me?.r ?? 0 });
+  const [jumpQ, setJumpQ] = useState(String(me?.q ?? 0));
+  const [jumpR, setJumpR] = useState(String(me?.r ?? 0));
+  const [jumpError, setJumpError] = useState('');
 
   // ── Tooltip ──
   type TipState = { q: number; r: number; kind: string; name: string; dist: number; x: number; y: number } | null;
@@ -204,9 +208,28 @@ export function HexMap() {
     return getMapCenter() ?? { q: me?.q ?? 0, r: me?.r ?? 0 };
   }
 
+  function cameraCenter(): { q: number; r: number } {
+    const x = (cw.current / 2 - panX.current) / zoom.current - ox.current;
+    const y = (ch.current / 2 - panY.current) / zoom.current - oy.current;
+    const fractionalR = (2 / 3 * y) / HEX_SIZE;
+    const fractionalQ = (Math.sqrt(3) / 3 * x - y / 3) / HEX_SIZE;
+
+    // axial → cube 后取最近六边形。
+    let q = Math.round(fractionalQ);
+    let r = Math.round(fractionalR);
+    const s = Math.round(-fractionalQ - fractionalR);
+    const qDiff = Math.abs(q - fractionalQ);
+    const rDiff = Math.abs(r - fractionalR);
+    const sDiff = Math.abs(s + fractionalQ + fractionalR);
+    if (qDiff > rDiff && qDiff > sDiff) q = -r - s;
+    else if (rDiff > sDiff) r = -q - s;
+    return wrapCoord(q, r, W, H);
+  }
+
   function isHomeCentered(): boolean {
-    if (!me || zoom.current <= 0 || cw.current <= 0) return true;
-    const hp = hexToPixel({ q: me.q, r: me.r });
+    const capital = capitalCoordinate(me);
+    if (!capital || zoom.current <= 0 || cw.current <= 0) return true;
+    const hp = hexToPixel(capital);
     const hx = hp.x + ox.current, hy = hp.y + oy.current;
     const cx = (cw.current / 2 - panX.current) / zoom.current;
     const cy = (ch.current / 2 - panY.current) / zoom.current;
@@ -221,7 +244,8 @@ export function HexMap() {
   }
 
   function syncNavUI() {
-    const c = viewCenter();
+    const c = cameraCenter();
+    setMapCenter(c);
     setNavCoord(c);
     setHomeCentered(isHomeCentered());
   }
@@ -574,16 +598,21 @@ export function HexMap() {
     syncNavUI();
   }
   function doHome() {
-    if (!me) return;
-    setMapCenter(null);
-    centerViewOn(me.q, me.r);
+    const capital = capitalCoordinate(me);
+    if (!capital) return;
+    setMapCenter(capital);
+    centerViewOn(capital.q, capital.r);
     syncNavUI();
   }
-  function doJump(qVal: number, rVal: number) {
-    if (isNaN(qVal) || isNaN(rVal)) return;
-    const w = wrapCoord(qVal, rVal, W, H);
-    setMapCenter(w);
-    centerViewOn(w.q, w.r);
+  function doJump() {
+    const parsed = parseMapCoordinate(jumpQ, jumpR, W, H);
+    if (!parsed.ok) {
+      setJumpError(parsed.error);
+      return;
+    }
+    setJumpError('');
+    setMapCenter(parsed.coordinate);
+    centerViewOn(parsed.coordinate.q, parsed.coordinate.r);
     syncNavUI();
   }
 
@@ -648,15 +677,16 @@ export function HexMap() {
     };
   }, [_dv]); // intentional: _dv is the data dependency
 
+  useEffect(() => {
+    setJumpQ(String(navCoord.q));
+    setJumpR(String(navCoord.r));
+  }, [navCoord.q, navCoord.r]);
+
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
   const taskMarkersEls = buildTaskMarkers();
-
-  // Jump input refs
-  const jumpQRef = useRef<HTMLInputElement>(null);
-  const jumpRRef = useRef<HTMLInputElement>(null);
 
   return (
     <>
@@ -769,35 +799,44 @@ export function HexMap() {
             <button class="map-dpad-btn" onClick={() => doDir('down')} title="向下" aria-label="向下">▼</button>
             <span />
           </div>
-          <div class="map-jump">
-            <span class="map-jump-label">跳转坐标</span>
-            <div class="map-jump-row">
-              <span class="map-jump-axis">X</span>
-              <input
-                ref={jumpQRef}
-                type="number"
-                class="map-jump-input"
-                defaultValue={navCoord.q}
-                onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') doJump(Number(jumpQRef.current!.value), Number(jumpRRef.current!.value)); }}
-              />
-              <span class="map-jump-axis">Y</span>
-              <input
-                ref={jumpRRef}
-                type="number"
-                class="map-jump-input"
-                defaultValue={navCoord.r}
-                onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') doJump(Number(jumpQRef.current!.value), Number(jumpRRef.current!.value)); }}
-              />
-              <button
-                class="btn btn--sm map-jump-go"
-                onClick={() => doJump(Number(jumpQRef.current!.value), Number(jumpRRef.current!.value))}
-              >跳转</button>
+          <form class="map-locator" noValidate onSubmit={(e) => { e.preventDefault(); doJump(); }}>
+            <span class="map-locator-title">战术定位</span>
+            <div class="map-locator-row">
+              <label class="map-coordinate-field">
+                <span>X</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={W - 1}
+                  step={1}
+                  value={jumpQ}
+                  onInput={(e) => { setJumpQ(e.currentTarget.value); setJumpError(''); }}
+                  aria-label="地图 X 坐标"
+                />
+              </label>
+              <label class="map-coordinate-field">
+                <span>Y</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={H - 1}
+                  step={1}
+                  value={jumpR}
+                  onInput={(e) => { setJumpR(e.currentTarget.value); setJumpError(''); }}
+                  aria-label="地图 Y 坐标"
+                />
+              </label>
+              <Btn type="submit" size="sm" variant="primary" class="map-locator-jump">跳转</Btn>
+              <Btn size="sm" class="map-locator-home" onClick={doHome} title="将地图居中到自己的主城">
+                <span aria-hidden="true">◎</span> 回主城
+              </Btn>
             </div>
-            <span class="map-jump-hint">
-              环面世界 · 拖拽平移 / 滚轮缩放 / 双击空白复位<br />
-              X∈[0,{W}) Y∈[0,{H})
-            </span>
-          </div>
+            {jumpError
+              ? <span class="map-locator-error" role="alert">{jumpError}</span>
+              : <span class="map-locator-hint">可输入 X 0–{W - 1}，Y 0–{H - 1}</span>}
+          </form>
         </div>
 
         {/* Legend */}
@@ -828,16 +867,17 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   homeCentered: boolean;
   onGoHome: () => void;
 }) {
-  if (!me) return null;
-  const atHome = navCoord.q === me.q && navCoord.r === me.r;
+  const capital = capitalCoordinate(me);
+  if (!capital) return null;
+  const atHome = navCoord.q === capital.q && navCoord.r === capital.r;
   return (
     <div class="map-infobar">
       {!homeCentered && !atHome ? (
-        <>全图模式 · 视角偏离本城 · <a onClick={onGoHome}>回到本城</a></>
+        <>全图模式 · 视角偏离主城 · <a onClick={onGoHome}>回主城</a></>
       ) : atHome ? (
-        <>全图模式 · 你在 <b>X={me.q} Y={me.r}</b>（已居中）</>
+        <>全图模式 · 主城 <b>X={capital.q} Y={capital.r}</b>（已居中）</>
       ) : (
-        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回到本城</a></>
+        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回主城</a></>
       )}
     </div>
   );
