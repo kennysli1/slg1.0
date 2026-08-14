@@ -476,7 +476,7 @@ export class CombatModule {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
-          survivors, loot: share, looted: share, treasures: contrib.treasures, ...reportBase,
+          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, ...reportBase,
         },
       } as DomainEvent);
     }

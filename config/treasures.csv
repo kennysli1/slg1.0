@@ -20,3 +20,4 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 18,ritual_altar,祭祀台,trs_altar,special,epic,ritualBuff,25,0,0,instant,special,ritualBuff,50,1
 19,bole,伯乐,trs_bole,military,legendary,cavalryTrainSpeed,50,3000,0.004,instant,military,cavalryTrainSpeed,50,1
 20,spiritual_food,精神食粮,trs_food,economic,rare,soldierFoodReduce,1,250,0.04,passive,economic,soldierFoodReduce,0,0
+21,victory_flag,胜利的旗帜,trs_warflag,military,epic,victoryFlag,10,0,0,passive,military,victoryFlag,100,1

@@ -61,6 +61,10 @@ interface TreasureState {
   hasTradeCenter: boolean;
   /** 任务专属宝物（锁定）：完成任务获得，存于此独立桶，不受出售/遗弃/宝库拆除重分布/随军携带影响，也绝不进入待领取 Pending。仍占面板展示并贡献效果（aggregate 包含）。 */
   locked: string[];
+  /** 胜利的旗帜由本村拥有时累积的额外攻防百分比；易主时归零。 */
+  victoryFlagBonus?: number;
+  /** 已携胜利旗帜取得合格战果、等待归城的出征。 */
+  victoryFlagQualified?: Record<string, true>;
 }
 
 const COLLECTION = 'treasure';
@@ -174,6 +178,8 @@ export class TreasureModule {
     this.commands.register('treasure.SetExpectedArrival', (c) => this.setExpectedArrival(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
+    this.commands.register('treasure.ExchangeQuestFlag', (c) => this.exchangeQuestFlag(c));
+    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
   }
 
   /** 重启恢复：为每个存量村庄重算并推送效果（覆盖层改动后重载亦走此路径）。 */
@@ -283,6 +289,8 @@ export class TreasureModule {
     if (typeof s.hasTradeCenter !== 'boolean') { s.hasTradeCenter = false; dirty = true; }
     // 兼容旧存档（缺 locked 字段）
     if (!Array.isArray(s.locked)) { s.locked = []; dirty = true; }
+    if (typeof s.victoryFlagBonus !== 'number') { s.victoryFlagBonus = 0; dirty = true; }
+    if (!s.victoryFlagQualified || typeof s.victoryFlagQualified !== 'object') { s.victoryFlagQualified = {}; dirty = true; }
     // 兼容旧存档：宝库已扩容但城镇中心仍有宝物的历史数据，自动迁移到宝库（宝物优先存宝库）
     while (s.treasury.length < s.extraSlots && s.town.length > 0) {
       s.treasury.push(s.town.pop()!);
@@ -414,7 +422,7 @@ export class TreasureModule {
   }
 
   /** 把已储存宝物 codes 聚合成统一效果。 */
-  aggregate(codes: string[]): TreasureEffects {
+  aggregate(codes: string[], victoryFlagBonus = 0): TreasureEffects {
     codes = this.activeCodes(codes);
     const resMult: ResMult = {};
     let goldMult = 1;
@@ -447,6 +455,12 @@ export class TreasureModule {
         case 'popGrowth': popGrowthMult = 1 + Math.min(t.effectCap / 100, (popGrowthMult - 1) + frac); break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'soldierFoodReduce': soldierFoodReduce += t.effectValue; break; // 精神食粮：每兵减粮绝对值（非百分比，直接累加）
+        case 'victoryFlag': {
+          const total = Math.min(t.effectCap / 100, frac + Math.max(0, victoryFlagBonus) / 100);
+          atkMult = 1 + Math.min(t.effectCap / 100, (atkMult - 1) + total);
+          defMult = 1 + Math.min(t.effectCap / 100, (defMult - 1) + total);
+          break;
+        }
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -491,7 +505,7 @@ export class TreasureModule {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
     // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.allStoredCodes(s));
+    const eff = this.aggregate(this.allStoredCodes(s), s.victoryFlagBonus ?? 0);
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
       name: 'economy.SetRateModifier', from: TreasureModule.NAME,
@@ -524,7 +538,7 @@ export class TreasureModule {
     // multiset：广播 codes 保留重复，客户端按重复数量渲染多个持有图标（含锁定宝物）
     const codes = this.allStoredCodes(s);
     const activeCodes = this.activeCodes(codes);
-    const eff = this.aggregate(codes);
+    const eff = this.aggregate(codes, s.victoryFlagBonus ?? 0);
     await this.bus.emit({
       name: 'treasure.Changed', source: TreasureModule.NAME, ts: this.now(),
       payload: {
@@ -682,11 +696,44 @@ export class TreasureModule {
       }
     }
     delete s.carried[movementId];
+    // 成功战果只有在旗帜随幸存者归城并真正存回时才兑现；全灭、被夺或未归城均不会增长。
+    if (storedCodes.includes('victory_flag') && s.victoryFlagQualified?.[movementId]) {
+      s.victoryFlagBonus = Math.max(0, (s.victoryFlagBonus ?? 0) + 2);
+      delete s.victoryFlagQualified[movementId];
+    }
     this.store.set(COLLECTION, villageId, s);
     for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined, true);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    await this.bus.emit({ name: 'treasure.CarriedStored', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, movementId, codes: storedCodes } } as DomainEvent);
     return { ok: true, payload: { stored: storedCodes, pending: pendingCodes } };
+  }
+
+  /** 任务归还军旗的原子兑换：先移除原旗，再以同一格子放入奖励旗。 */
+  private async exchangeQuestFlag(cmd: Command): Promise<CommandResult> {
+    const { villageId, fromCode, toCode } = cmd.payload as { villageId: string; fromCode: string; toCode: string };
+    const s = this.ensureState(villageId);
+    if (!this.config.treasures[toCode]) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    if (!this.removeStored(s, fromCode)) return { ok: false, payload: {}, reason: 'flag_not_stored' };
+    this.storeIfRoom(s, toCode);
+    s.victoryFlagBonus = 0;
+    this.store.set(COLLECTION, villageId, s);
+    await this.recomputeAndPush(villageId);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { fromCode, toCode } };
+  }
+
+  /** 胜利旗在普通营地全灭、或成功取得 PvP 战利品后，回城才增加 2%。 */
+  private async onBattleEnded(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { side?: string; villageId?: string; movementId?: string; targetKind?: string; attackerWins?: boolean; campCleared?: boolean; looted?: Record<string, number>; treasures?: string[] };
+    if (p.side !== 'attacker' || !p.villageId || !p.movementId || !p.treasures?.includes('victory_flag') || !p.attackerWins) return;
+    const qualifies = (p.targetKind === 'pve' && p.campCleared === true)
+      || (p.targetKind === 'village' && Object.values(p.looted ?? {}).some((n) => n > 0));
+    if (!qualifies) return;
+    const s = this.ensureState(p.villageId);
+    s.victoryFlagQualified ??= {};
+    s.victoryFlagQualified[p.movementId] = true;
+    this.store.set(COLLECTION, p.villageId, s);
   }
 
   /** 抵达另一个村庄：把携带宝物转为该村庄玩家的 deliver 待处理报告（sell/discard/take）。 */
@@ -695,6 +742,11 @@ export class TreasureModule {
       villageId: string; codes?: string[]; fromMovementId?: string;
     };
     const got = fromMovementId ? (this.removeCarried(fromMovementId) ?? []) : (codes ?? []);
+    if (got.includes('victory_flag')) {
+      const receiver = this.ensureState(villageId);
+      receiver.victoryFlagBonus = 0;
+      this.store.set(COLLECTION, villageId, receiver);
+    }
     for (const code of got) this.createDeliverPending(villageId, code, undefined);
     if (got.length > 0) {
       await this.bus.emit({
@@ -774,7 +826,7 @@ export class TreasureModule {
     const { movementId } = cmd.payload as { movementId: string };
     for (const s of this.store.all<TreasureState>(COLLECTION)) {
       const entry = s.carried[movementId];
-      if (entry) return { ok: true, payload: { effects: this.aggregate(entry.codes) } };
+      if (entry) return { ok: true, payload: { effects: this.aggregate(entry.codes, s.victoryFlagBonus ?? 0) } };
     }
     return { ok: true, payload: { effects: this.aggregate([]) } };
   }
@@ -939,7 +991,7 @@ export class TreasureModule {
     const s = this.ensureState(villageId);
     const stored = this.allStoredCodes(s);
     const activeCodes = this.activeCodes(stored);
-    const eff = this.aggregate(stored);
+    const eff = this.aggregate(stored, s.victoryFlagBonus ?? 0);
     return {
       ok: true,
       payload: {
