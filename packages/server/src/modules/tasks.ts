@@ -85,7 +85,6 @@ interface TaskState {
   /** 已触发的支线任务触发条件 key（如 `building_built:treasury`）；触发后对应支线进入可接取。 */
   firedTriggers: string[];
   cooldownUntil?: Record<string, number>;
-  dailyRewards?: { day: string; groups: Record<string, number> };
 }
 
 interface TavernInfo {
@@ -245,7 +244,6 @@ export class TasksModule {
       if (neu !== old) { s.active[neu] = s.active[old]; delete s.active[old]; }
     }
     s.cooldownUntil ??= {};
-    s.dailyRewards ??= { day: this.dayKey(), groups: {} };
     return s;
   }
 
@@ -493,13 +491,12 @@ export class TasksModule {
 
     const granted: { resources: Record<string, number> | null; treasures: string[] } = { resources: null, treasures: [] };
     // 资源奖励
-    const allowed = await this.consumeDailyBudget(villageId, s, q);
-    if (allowed && q.rewards.resources && Object.keys(q.rewards.resources).length) {
+    if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
       granted.resources = { ...q.rewards.resources };
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
-    for (const t of allowed ? (q.rewards.treasures ?? []) : []) {
+    for (const t of q.rewards.treasures ?? []) {
       // carry_flag 已在军旗归城时由 treasure.ExchangeQuestFlag 原子兑换，禁止通用奖励路径重复生成。
       if (q.objective.kind === 'carry_flag' && t === 'victory_flag') continue;
       const def = this.config.treasures[t];
@@ -844,21 +841,6 @@ export class TasksModule {
   }
 
   private dayKey(): string { return new Date(this.now()).toISOString().slice(0, 10); }
-
-  private async consumeDailyBudget(villageId: string, s: TaskState, q: QuestDef): Promise<boolean> {
-    if (!q.dailyRewardGroup || q.dailyRewardValue <= 0) return true;
-    const day = this.dayKey();
-    if (!s.dailyRewards || s.dailyRewards.day !== day) s.dailyRewards = { day, groups: {} };
-    const tavern = await this.tavernInfo(villageId);
-    const raw = this.config.constants.raw;
-    const cap = q.dailyRewardGroup === 'gold'
-      ? (Number(raw.task_daily_gold_base) || 200) + (Number(raw.task_daily_gold_per_tavern_level) || 100) * tavern.level
-      : (Number(raw.task_daily_treasure_limit) || 1);
-    const used = s.dailyRewards.groups[q.dailyRewardGroup] ?? 0;
-    if (used + q.dailyRewardValue > cap) return false;
-    s.dailyRewards.groups[q.dailyRewardGroup] = used + q.dailyRewardValue;
-    return true;
-  }
 
   private weightedPick(pool: QuestDef[], n: number): string[] {
     const out: string[] = [];
