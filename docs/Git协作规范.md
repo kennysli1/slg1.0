@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-08-14
+updated: 2026-08-15
 owner: ops
 summary: 双人和多 AI 开发的分支、worktree、提交、同步、PR 与恢复流程
 ---
@@ -58,6 +58,8 @@ git config --get pull.ff
 git config --get fetch.prune
 git config --get rerere.enabled
 ```
+
+每个新建 worktree 都需要独立安装依赖；进入该目录后执行 `npm run worktree:prepare`。`node_modules/` 已被 Git 忽略，禁止用跨 worktree 软链接替代安装，以免 ESM 解析或提交快照检查出现假失败。
 
 预期配置：钩子目录为 `.githooks`、`pull.ff=only`、`fetch.prune=true`、`rerere.enabled=true`。缺失时执行：
 
@@ -172,6 +174,8 @@ git status --short
 git commit -m "<type>(<scope>): <中文主题>"
 git push -u origin HEAD
 ```
+
+提交钩子先做作者/工作区快检，再校验提交信息，最后才跑完整构建、测试和生产冒烟；因此应始终使用格式正确的说明，避免无效说明触发昂贵验证。
 
 提交信息示例：
 

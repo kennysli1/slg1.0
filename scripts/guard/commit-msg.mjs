@@ -4,6 +4,9 @@
  * 由 .githooks/commit-msg 调用，参数是 git 传进来的消息文件路径。
  */
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isSkipped } from './lib.mjs';
 
 const TYPES = ['feat', 'fix', 'docs', 'refactor', 'perf', 'test', 'chore', 'config', 'build', 'revert'];
@@ -51,3 +54,9 @@ if (problems.length) {
   console.error('');
   process.exit(1);
 }
+
+// Git 的 pre-commit 发生在 commit-msg 之前；把耗时验证放到这里，确保不合规说明瞬时失败。
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const result = spawnSync(process.execPath, ['scripts/commit-gate.mjs'], { cwd: root, stdio: 'inherit', env: process.env });
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);

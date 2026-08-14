@@ -3,7 +3,8 @@
 # 远端使用 releases/<sha> + current 原子切换；生产目录不是 Git 工作树。
 set -euo pipefail
 
-DEPLOY_KEY="${DEPLOY_KEY:-$HOME/.ssh/kennysgame.pem}"
+# 发布发起机专用的回连 key；可用 DEPLOY_KEY 覆盖，避免依赖已弃用的个人 PEM 文件。
+DEPLOY_KEY="${DEPLOY_KEY:-$HOME/.ssh/kow_release_ed25519}"
 DEPLOY_HOST="${DEPLOY_HOST:-ubuntu@101.43.64.22}"
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-~/kow}"
 DEPLOY_URL="${DEPLOY_URL:-http://101.43.64.22:8080}"
@@ -34,6 +35,12 @@ REMOTE_ARCHIVE="/tmp/kow-deploy-$$.tgz"
 REMOTE_STATE="/tmp/kow-deploy-$$.state"
 SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no)
 DEPLOY_PENDING=0
+
+# 在耗时的隔离验证前确认发布通道。失败时绝不切换生产 current。
+if ! ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" true; then
+  echo "无法通过部署密钥连接目标服务器：$DEPLOY_HOST（可用 DEPLOY_KEY 覆盖）" >&2
+  exit 1
+fi
 
 remote_release() {
   local action="$1"
