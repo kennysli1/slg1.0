@@ -155,18 +155,25 @@ function TroopPlanner({
   const entries = Object.entries(army?.troops ?? {}).filter(([, amount]) => Number(amount) > 0);
   if (!entries.length) return <p class="expedition-empty">无可用兵力，先去军队页训练。</p>;
 
+  const maxTroops = Object.fromEntries(entries.map(([unitKey, raw]) => [
+    unitKey, Math.max(0, Math.floor(Number(raw) || 0)),
+  ])) as NumberMap;
+
   return (
     <section class="target-section">
       <div class="target-section-head">
         <span>{transport ? '运输部队' : '出征兵力'}</span>
-        <small>已选 {fmt(total(troops))}</small>
+        <span class="troop-section-actions">
+          <small>已选 {fmt(total(troops))}</small>
+          <Btn class="troop-max-all" variant="ghost" size="sm" onClick={() => setTroops(maxTroops)}>全部 MAX</Btn>
+        </span>
       </div>
       <div class="troop-inputs">
-        {entries.map(([unitKey, raw]) => {
-          const max = Number(raw);
+        {entries.map(([unitKey, _raw]) => {
+          const max = maxTroops[unitKey];
           const info = unitInfo(unitKey);
           return (
-            <label key={unitKey} class="troop-input">
+            <div key={unitKey} class="troop-input">
               <Icon icon={info.icon} label={info.name} size="xs" />
               <span class="troop-name">{info.name}</span>
               <NumberInput
@@ -176,7 +183,8 @@ function TroopPlanner({
                 onChange={(amount) => setTroops({ ...troops, [unitKey]: amount })}
               />
               <small>/{fmt(max)}</small>
-            </label>
+              <Btn class="troop-max-btn" variant="ghost" size="sm" onClick={() => setTroops({ ...troops, [unitKey]: max })}>MAX</Btn>
+            </div>
           );
         })}
       </div>

@@ -1041,6 +1041,10 @@ export class MovementModule {
     winner.stepToken += 1;
     winner.nextStepAt = this.now() + winner.perStepMs;
     this.store.set(COLLECTION, winner.id, winner);
+    // 野战减员后必须立即缩小胜方的在途人口足迹；否则阵亡者会继续占住房，
+    // 直到幸存者到达/返程才释放，导致人口增长结算时机错误。
+    this.updateEnRoutePop(winner.fromVillage);
+
     // 若胜方已在终点格相遇，直接到达；否则继续走
     if (winner.stepIndex >= winner.path.length - 1) await this.arrive(winner);
     else this.scheduler.schedule(winner.perStepMs, () => this.step(winner.id, winner.stepToken), `movement:${winner.id}`, `movement:${winner.id}`);
