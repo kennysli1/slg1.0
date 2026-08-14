@@ -573,6 +573,8 @@ export class TradeModule {
         await refund();
         return { ok: false, payload: res.payload, reason: res.reason ?? 'replace_failed' };
       }
+      // 替换会把原栏位宝物自动出售，回收额必须取被替换宝物自身价格。
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: { gold: this.config.treasures[replaceCode]?.priceGold ?? 0 } } });
     } else if (act === 'sell') {
       // 买下后立即卖给 NPC 回收 sellPrice，不占格
       await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: { gold: sellPrice } } });

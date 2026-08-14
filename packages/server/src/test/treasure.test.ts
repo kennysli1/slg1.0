@@ -539,7 +539,7 @@ test('宝物购买：栏满且无 action 时返回 overflow（不扣金、不消
   assert.equal(tradePoolLen(app), 1, 'overflow 不应消费订单');
 });
 
-test('宝物购买：栏满选 replace → 丢弃旧宝物并入新宝物', async () => {
+test('宝物购买：栏满选 replace → 出售旧宝物并入新宝物', async () => {
   const app = await freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { gold: 1000 } });
   seedTreasureOffer(app); // 新宝物 chainsaw
@@ -550,7 +550,7 @@ test('宝物购买：栏满选 replace → 丢弃旧宝物并入新宝物', asyn
   assert.equal(r.ok, true, `replace 应成功: ${r.reason ?? ''}`);
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.deepEqual(list.codes, ['chainsaw'], 'war_flag 应被 chainsaw 替换');
-  assert.equal(await goldOf(app), gold0 - 96, '应扣 buyPrice=96');
+  assert.equal(await goldOf(app), gold0 - 96 + 70, '应扣 buyPrice=96，并出售 war_flag 得 70 金币');
   assert.equal(tradePoolLen(app), 0, '订单应被消费');
 });
 

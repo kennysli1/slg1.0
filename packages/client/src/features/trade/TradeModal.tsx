@@ -683,7 +683,7 @@ function TreasureOverflowPanel({
               >
                 {overflow.codes.map((c) => {
                   const oi = treasureInfo(c);
-                  const label = oi ? `${oi.name}（${treasureRarityName(oi.rarity)}）` : c;
+                  const label = oi ? `${oi.name}（${treasureRarityName(oi.rarity)}，出售 +${fmt(oi.priceGold ?? 0)} 金）` : c;
                   return <option key={c} value={c}>{label}</option>;
                 })}
               </select>
@@ -693,7 +693,7 @@ function TreasureOverflowPanel({
                 disabled={!replaceCode || busy}
                 onClick={() => onAction('replace')}
               >
-                替换
+                替换并出售（+{fmt(treasureInfo(replaceCode)?.priceGold ?? 0)} 金）
               </Btn>
             </div>
           )}
