@@ -14,7 +14,7 @@ summary: 双人和多 AI 开发的分支、worktree、提交、同步、PR 与�
 
 ## 一、四个不变量
 
-1. **一个需求 = 一个功能分支**：每次从最新 `origin/main` 新建；已合并分支不得承接新需求。
+1. **开发必须在非 main 分支**：开发者可长期复用自己的开发分支；每项需求开工前必须合入最新 `origin/main`。
 2. **一个写入者 = 一个独立工作目录**：不同人、AI 或并行任务使用不同 clone/worktree。
 3. **`main` 只通过 PR 改变并默认自动交付**：禁止在 `main` 提交、直接 push、force push；用户要求修改项目即授权 AI 在条件满足后 squash merge。
 4. **生产只来自 `origin/main`**：功能分支已部署不代表已合入；正式部署必须在 PR 合并后执行。
@@ -69,7 +69,7 @@ npm run hooks:install
 
 ## 四、隔离工作目录
 
-两人在不同电脑各自 clone，天然隔离。若同一电脑运行多个 AI/任务，必须使用 worktree。先在主工作目录确认没有陌生修改：
+两人在不同电脑各自 clone，天然隔离。若同一电脑运行多个 AI，必须让每个并行写入者使用独立 worktree 和独立分支。先确认没有陌生修改：
 
 ```bash
 git status --short --branch
@@ -77,23 +77,23 @@ git fetch --prune origin
 git worktree list
 ```
 
-为新任务创建独立目录和分支：
+长期开发分支首次创建时，可以同时建立固定工作目录：
 
 ```bash
-git worktree add ../slg1.0-任务名 \
-  -b feat/姓名-任务名 origin/main
+git worktree add ../slg1.0-姓名 -b dev/姓名 origin/main
+git -C ../slg1.0-姓名 push -u origin dev/姓名
 ```
 
-让对应 AI 的工作目录固定为新目录。一个分支不能同时被两个 worktree 检出；一个 worktree 同一时刻只允许一个写代码的 AI。
+以后让该开发者或 AI 固定使用这个目录和分支。一个分支不能同时被两个 worktree 检出；一个 worktree 同一时刻只允许一个写代码的 AI。临时并行任务仍须另建分支和 worktree，结束后可保留或按明确指令清理。
 
-任务合并后，在其他 worktree 中执行：
+长期 worktree 在 PR 合并后**不删除**。只有明确废弃且工作区干净、全部提交已推送并合入 main 时，才在其他 worktree 中按准确路径移除：
 
 ```bash
-git worktree remove ../slg1.0-任务名
+git worktree remove ../slg1.0-姓名
 git worktree prune
 ```
 
-移除前必须确认工作区干净、提交已推送且 PR 已合并；分支按第五节第 6 步核验并删除。不得用 `--force` 绕过 worktree 检查。
+不得用 `--force` 绕过 worktree 检查；删除分支属于独立操作，不是合并后的默认收尾。
 
 ## 五、标准开发流程
 
@@ -114,29 +114,40 @@ git branch -vv
 
 满足以下条件才能继续：
 
-- 当前目录是分配给本任务的 clone/worktree；
+- 当前目录是分配给该写入者的 clone/worktree；
 - 工作区干净，或现有改动经确认属于当前任务；
 - 当前分支不是 `main`/`master`；
-- 分支名能识别负责人和需求；
+- 分支名能识别负责人，且没有被其他人或 AI 同时写入；
 - AI 已说明准备修改的文件范围。
 
 看到不认识的修改必须停止并报告，不得擅自 stash、提交、恢复或删除。
 
-### 2. 创建新任务分支
+### 2. 首次创建或继续长期开发分支
 
-普通独立 clone/工作目录使用：
+已有本地开发分支时，每项需求开始前执行：
 
 ```bash
 git status --porcelain
 git fetch --prune origin
-git switch main
-git pull --ff-only origin main
-git switch -c feat/姓名-任务名
+git switch dev/姓名
+git merge origin/main
+git push -u origin HEAD
 ```
 
-第一条命令有输出时不得切分支，先确认改动归属。分支格式为 `<type>/<owner>-<description>`，`type` 使用 `feat`、`fix`、`docs`、`refactor`、`test`、`chore` 等；名称只用小写 ASCII 字母、数字和连字符，并且已完成的分支名不得复用。
+第一条命令有输出时不得切分支，先确认改动归属。如果本地没有、远程已有个人分支：
 
-使用 worktree 时，直接按第四节从 `origin/main` 创建，不需要在任务目录切换 main。
+```bash
+git switch --track origin/dev/姓名
+```
+
+本地和远程都没有时只需首次创建：
+
+```bash
+git switch -c dev/姓名 origin/main
+git push -u origin HEAD
+```
+
+分支名建议使用 `dev/<owner>`；临时分支可用 `<type>/<owner>-<description>`。`/` 只作路径分隔，每个路径段只用小写 ASCII 字母、数字和连字符。长期分支允许跨需求复用，但每次开始前都必须工作区干净、fetch 并 merge 最新 `origin/main`。
 
 ### 3. 修改与提交
 
@@ -183,7 +194,7 @@ git branch --show-current
 git merge origin/main
 ```
 
-第一条命令有输出时先处理当前改动；第三条必须显示本任务功能分支，若为空或是 `main`/`master` 则停止。合并成功后运行相应测试，再 push：
+第一条命令有输出时先处理当前改动；第三条必须显示本人的非 main 开发分支，若为空或是 `main`/`master` 则停止。合并成功后运行相应测试，再 push：
 
 ```bash
 npm run verify:quick
@@ -222,38 +233,26 @@ git rev-list --left-right --count origin/main...origin/<功能分支>
 要求 PR 为 Open 且非 Draft、base=`main`、head 名与 SHA 匹配远程功能分支、领先/落后输出的第一个数为 `0`、checks 全部成功且 `mergeable` 不为冲突。普通 `gh pr view` 不能完整证明讨论已解决，必须在 PR 页面确认；无法查看时不得猜测，GitHub 保护规则也会拒绝违规合并。全部满足后，AI 应直接使用 squash，不再等待重复批准：
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge --squash
 ```
+
+仓库设置 `delete_branch_on_merge` 必须保持 `false`；若发现为 `true`，停止合并并报告，避免长期分支被 GitHub 自动删除。
 
 若仓库规则改变，以 GitHub 实际保护规则为准，但不得自行降低保护或绕过检查。AI 必须报告 PR 链接、检查结果和最终合并状态；PR 仅创建或获得批准都不等于已合并。
 
 ### 6. 合并后的收尾
 
-普通工作目录：
+长期开发分支和 worktree 默认保留。由于 squash 会在 main 上生成新 commit，PR 合并后必须把这个 commit 合回开发分支，建立新的共同祖先：
 
 ```bash
 git fetch --prune origin
-git switch main
-git pull --ff-only origin main
+git switch dev/姓名
+git merge origin/main
+git push
+git diff --stat origin/main...HEAD
 ```
 
-本仓库使用 squash merge，Git 不会把原功能 commit 视为 main 的祖先，因此 `git branch -d` 可能拒绝删除。先取得 PR 编号，并核验 PR 已合并、PR 的 `headRefOid` 与待删本地分支 HEAD 完全一致：
-
-```bash
-gh pr list --state merged --base main --head feat/姓名-任务名 --limit 2 \
-  --json number,url,mergedAt,headRefOid
-git rev-parse feat/姓名-任务名
-```
-
-查询结果必须恰好一条；PR 的 `headRefOid` 与本地分支 HEAD 一致、工作区干净时，允许删除这个**明确命名**的已合并本地分支。`--delete-branch` 通常已经删除远程分支，这是预期结果：
-
-```bash
-git branch -D feat/姓名-任务名
-```
-
-没有匹配的 merged PR、SHA 不一致或存在未推送提交时停止并报告。worktree 要先在其他目录完成上述 PR/SHA 核验，再按第四节移除任务目录，最后删除本地分支。
-
-下一项需求重新从最新 `origin/main` 建分支，不得继续使用已经完成的分支。
+最后一条在尚未开始下一项需求时应无输出；若仍有差异，说明分支存在未合入或意外改动，必须先查明。此同步步骤保证下一次从同一分支创建 PR 时不会重复带出已经 squash 的旧改动。不得因为 PR 已合并就自动删除本地/远程分支或 worktree。
 
 ### 7. 部署
 
@@ -339,9 +338,9 @@ git switch -c recovery/姓名-日期-说明
 | `non-fast-forward` | 远程分支有本地没有的提交 | fetch 后检查差异；功能分支按约定 merge，禁止 force |
 | `protected branch` / `GH006` | 尝试直接修改 main | push 功能分支，创建 PR |
 | PR 仍要求处理 | 检查失败、分支落后、冲突或讨论未解决 | 查看 `gh pr checks` 和 PR 页面，修复后再合并 |
-| `already checked out at ...` | 同一分支已被其他 worktree 使用 | 使用对应目录，或为新任务创建新分支 |
+| `already checked out at ...` | 同一分支已被其他 worktree 使用 | 使用对应固定目录；并行写入则另建临时分支/worktree |
 | `local changes would be overwritten` | 切换会覆盖未提交文件 | 停止，确认改动归属；不得自动 stash/reset |
-| 当前分支已合并但 HEAD 不同 | 仍停留在旧功能分支，或使用了 squash | 确认 PR 后收尾，从最新 main 新建分支 |
+| PR 已合并但 HEAD 不同 | squash 生成了新的 main commit | 按第 6 步把 `origin/main` 合回长期分支 |
 | merge 成功但功能消失 | 冲突解决错误或存在逻辑冲突 | 检查 merge commit 差异、测试和 PR；不要批量 ours/theirs |
 
 ## 九、默认禁止的操作
@@ -355,7 +354,7 @@ git checkout -- .
 git restore .
 git stash / git stash pop
 git push --force / --force-with-lease
-git branch -D（第五节已核验的 squash 分支收尾除外）
+git branch -D
 git commit --no-verify
 git push --no-verify
 ```
