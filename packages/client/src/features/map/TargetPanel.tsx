@@ -4,7 +4,7 @@
  */
 import { useState } from 'preact/hooks';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, openModal } from '../../app/store.js';
+import { dataVersion, selected, openModal, garrisonContinue } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo, resourceKeys, resInfo,
@@ -15,7 +15,7 @@ import { fmt } from '../../shared/utils/format.js';
 import { Btn, Icon, IconPlate, Modal, Panel, Tag } from '../../ui/index.js';
 
 type WorkflowStep = 1 | 2 | 3;
-type DispatchMode = 'attack' | 'raid' | 'transport';
+type DispatchMode = 'attack' | 'raid' | 'transport' | 'garrison' | 'explore';
 type NumberMap = Record<string, number>;
 
 interface TargetMeta {
@@ -61,7 +61,7 @@ function formatUnitSummary(troops: NumberMap): string {
 function WorkflowHeader({
   meta, step, onClose,
 }: { meta: TargetMeta; step: WorkflowStep; onClose: () => void }) {
-  const modeLabel = meta.mode === 'transport' ? '运输' : meta.mode === 'raid' ? '掠夺' : '进攻';
+  const modeLabel = meta.mode === 'transport' ? '运输' : meta.mode === 'raid' ? '掠夺' : meta.mode === 'garrison' ? '驻扎' : meta.mode === 'explore' ? '探索' : '进攻';
   return (
     <>
       <div class="target-head">
@@ -96,7 +96,11 @@ function Assessment({
   onAbandon?: () => void;
 }) {
   const isTransport = meta.mode === 'transport';
-  const copy = isTransport
+  const copy = meta.mode === 'explore'
+    ? '该格尚未探索。军队抵达后会立刻返城；若目标格已有设施或军队，则会在前一格掉头。集结点等级决定可探索的未探索深度。'
+    : meta.mode === 'garrison'
+    ? '派军队前往该坐标。抵达后若仍为空地便会原地驻扎；若已被设施或其他军队占据，部队将在前一格驻扎。'
+    : isTransport
     ? '选择运输部队、物资与随队宝物。运输需要同时携带部队和货物。'
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
@@ -107,13 +111,13 @@ function Assessment({
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
-          {isTransport ? '己方村庄补给线' : meta.mode === 'raid' ? '野怪据点' : '敌对村庄'}
+          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' ? '野外空地' : isTransport ? '己方村庄补给线' : meta.mode === 'raid' ? '野怪据点' : '敌对村庄'}
         </div>
         <p>{copy}</p>
         <div class="expedition-facts">
           <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
           <span>行军距离 <b>{meta.dist} 格</b></span>
-          <span>行动类型 <Tag kind={isTransport ? 'steel' : meta.mode === 'raid' ? 'ember' : 'crimson'}>{isTransport ? '运输' : meta.mode === 'raid' ? '掠夺' : '进攻'}</Tag></span>
+          <span>行动类型 <Tag kind={isTransport ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' ? 'gold' : 'crimson'}>{isTransport ? '运输' : meta.mode === 'raid' ? '掠夺' : meta.mode === 'garrison' ? '驻扎' : meta.mode === 'explore' ? '探索' : '进攻'}</Tag></span>
         </div>
       </section>
 
@@ -308,7 +312,7 @@ function Confirmation({
   meta, troops, cargo, treasures, onBack, onDispatch,
 }: { meta: TargetMeta; troops: NumberMap; cargo: NumberMap; treasures: string[]; onBack: () => void; onDispatch: () => void }) {
   const treasureNames = treasures.map((code) => treasureInfo(code)?.name ?? code);
-  const action = meta.mode === 'transport' ? '确认运输' : meta.mode === 'raid' ? '确认掠夺' : '确认进攻';
+  const action = meta.mode === 'transport' ? '确认运输' : meta.mode === 'raid' ? '确认掠夺' : meta.mode === 'garrison' ? '确认驻扎' : meta.mode === 'explore' ? '确认探索' : '确认进攻';
   return (
     <div class="target-body expedition-body">
       <section class="expedition-confirm-card">
@@ -348,6 +352,10 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
       }), { okToast: '运输部队出发' });
     } else if (meta.mode === 'raid') {
       ok = await act(req('SendRaid', { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '掠夺部队出发' });
+    } else if (meta.mode === 'garrison') {
+      ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '驻扎部队出发' });
+    } else if (meta.mode === 'explore') {
+      ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '探索部队出发，抵达后将返城' });
     } else {
       ok = await act(req('SendAttack', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '攻击部队出发' });
     }
@@ -385,17 +393,22 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
   );
 }
 
-function EmptyTilePanel({ q, r, dist, onClose }: { q: number; r: number; dist: number; onClose: () => void }) {
+function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: number; dist: number; visibility?: string; onClose: () => void }) {
   const [step, setStep] = useState<WorkflowStep>(1);
+  const [garrison, setGarrison] = useState(false);
   async function found() {
     if (await act(req('FoundVillage', { q, r }), { okToast: '拓荒令已发出' })) onClose();
   }
   const meta: TargetMeta = { refId: '', q, r, dist, name: '空地', icon: 'bld_main', mode: 'transport' };
+  if (garrison) {
+    const exploring = visibility === 'unexplored';
+    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : 'garrison' }} onClose={onClose} />;
+  }
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
       <div class="target-body expedition-body">
-        {step === 1 && <section class="expedition-assessment"><div class="expedition-kicker">目标评估</div><div class="expedition-assessment-title">可拓荒空地</div><p>需主基地与人口规模达标，并备齐 3 名拓荒者与开城资源。失败不退开城包。</p></section>}
+        {step === 1 && <section class="expedition-assessment"><div class="expedition-kicker">目标评估</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? '未探索格不能驻扎，只能派军探索；军队抵达后会立即返城。' : '可派军队野外驻扎，或在条件达标时派拓荒者建村。驻扎军抵达时会再次确认格子仍为空地。'}</p><Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '派军探索' : '派军队驻扎'}</Btn></section>}
         {step === 2 && <section class="expedition-assessment"><div class="expedition-kicker">拓荒准备</div><div class="expedition-assessment-title">由服务器复核条件</div><p>提交后将由服务器校验拓荒者、资源、人口和村庄数量限制。</p></section>}
         {step === 3 && <section class="expedition-confirm-card"><div class="expedition-kicker">确认命令</div><h3>拓荒至 ({q},{r})</h3><p>确认后将消耗开城资源并派遣拓荒者。</p></section>}
         <div class="target-foot expedition-foot expedition-foot--split">
@@ -409,13 +422,40 @@ function EmptyTilePanel({ q, r, dist, onClose }: { q: number; r: number; dist: n
   );
 }
 
+/** 驻扎军“行军”后的目标确认：兵力与宝物保持在原军中，不会重新扣兵或多占行军点。 */
+function GarrisonContinuation({ movementId, target, onClose }: {
+  movementId: string; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string }; onClose: () => void;
+}) {
+  const mode: 'garrison' | 'explore' | 'raid' | 'attack' = target.kind === 'pve'
+    ? 'raid'
+    : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : 'garrison';
+  const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : '驻扎';
+  async function continueMarch() {
+    const payload: Record<string, unknown> = { movementId, q: target.q, r: target.r, mode };
+    if (mode === 'raid') payload.targetId = target.refId;
+    if (mode === 'attack') payload.targetVillage = target.refId;
+    if (await act(req('ContinueGarrison', payload), { okToast: `驻扎军开始${label}` })) {
+      garrisonContinue.value = null;
+      onClose();
+    }
+  }
+  return (
+    <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
+      <div class="target-head"><IconPlate icon={mode === 'garrison' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">驻扎军下一道命令</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消续行">×</button></div>
+      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>继续{label}至「{target.name}」</h3><p>该军队会从当前驻扎地继续行军，保持所携部队和宝物，并继续占用原有的一个行军点。</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>取消</Btn><Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn></div></div>
+    </Panel>
+  );
+}
+
 export function TargetPanel() {
   const _dv = dataVersion.value;
   const sel = selected.value;
   if (!sel || !me) return null;
   const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
-  const close = () => { selected.value = null; };
-  if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} onClose={close} />;
+  const pending = garrisonContinue.value;
+  const close = () => { selected.value = null; garrisonContinue.value = null; };
+  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={close} />;
+  if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={close} />;
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
   const village = me.villages?.find((item) => item.id === sel.refId);

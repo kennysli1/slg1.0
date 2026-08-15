@@ -362,6 +362,8 @@ export function HexMap() {
         : m.type === 'transport' ? 'transport'
         : m.type === 'found'     ? 'found'
         : m.type === 'caravan'   ? 'caravan'
+        : m.type === 'garrison'  ? 'garrison'
+        : m.type === 'explore'   ? 'explore'
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
         : 'return';
@@ -387,6 +389,8 @@ export function HexMap() {
         : m.type === 'found'     ? '🚩'
         : m.type === 'transport' ? '📦'
         : m.type === 'caravan'   ? '💰'
+        : m.type === 'garrison'  ? '⚑'
+        : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
       markers.push(
@@ -589,7 +593,8 @@ export function HexMap() {
     const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
     const name = cell.getAttribute('data-name') ?? '空地';
     const icon = cell.getAttribute('data-icon') ?? undefined;
-    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}) };
+    const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
+    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}), ...(visibility ? { visibility } : {}) };
   }
 
   // ─── D-pad handlers ────────────────────────────────────────────────────────
@@ -729,7 +734,7 @@ export function HexMap() {
                   key={`${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
                   class={`hex-cell hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.isSelected ? ' hex-cell--selected' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                  {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                  {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
                 >
                   {/* Base fill (token-derived, always visible) */}
                   <polygon class={`hex-base hex-fill-${c.terrain}`} points={HEX_CORNER_STR} />

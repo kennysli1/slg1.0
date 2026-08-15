@@ -71,6 +71,13 @@ const ERR_MSG: Record<string, string> = {
   quest_cooldown: '该任务仍在冷却中',
   abandon_cooldown: '任务刚被放弃，请等待冷却结束',
   recovery_cooldown: '战败恢复仍在冷却中',
+  march_points_exhausted: '行军点已用完；升级集结点可提高同时在外行动的军队数量',
+  garrison_not_found: '这支驻扎军已不存在或不归你指挥',
+  same_tile: '目标不能是部队当前所在格',
+  target_unexplored: '目标仍未探索；只能派军执行探索行军',
+  target_already_explored: '该格已被探索，请改用驻扎、掠夺或攻城命令',
+  explore_too_deep: '目标未探索深度超过集结点允许范围；升级集结点后再试',
+  vision_unavailable: '无法确认地图视野，请稍后重试',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */

@@ -2,11 +2,13 @@
  * MarchList — 行军中列表：倒计时 ETA、方向、类型、来源/目标。
  * 订阅 tick（每秒刷新倒计时）和 dataVersion（数据更新后重渲）。
  */
-import { dataVersion, tick } from '../../app/store.js';
+import { dataVersion, tick, garrisonContinue, selected, showToast } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { unitInfo } from '../../app/config.js';
 import { fmt } from '../../shared/utils/format.js';
-import { Panel } from '../../ui/index.js';
+import { act } from '../../app/refresh.js';
+import { req } from '../../api.js';
+import { Btn, Panel } from '../../ui/index.js';
 
 function secUntil(ts: number): string {
   const left = Math.max(0, ts - Date.now());
@@ -25,6 +27,8 @@ const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   found: (_) => '拓荒',
   transport: (_) => '运输',
   caravan: (d) => d ? '商队抵达' : '商队出发',
+  garrison: (_) => '野外驻扎',
+  explore: (_) => '探索返程',
 };
 
 export function MarchList() {
@@ -33,12 +37,13 @@ export function MarchList() {
 
   const moves: any[] = getCache().moves?.movements ?? [];
   if (!moves.length) return null;
+  const points = getCache().moves?.marchPoints;
 
   return (
     <Panel variant="flat" class="map-march-list">
       <div style={{ padding: 'var(--s-2) var(--s-3)', borderBottom: '1px solid var(--line)' }}>
         <span style={{ fontSize: 'var(--f-xs)', fontWeight: 700, color: 'var(--c-ink-soft)', letterSpacing: '1px', textTransform: 'uppercase' }}>
-          行军中 ({moves.length})
+          行军与驻扎 ({moves.length}){points ? ` · 行军点 ${points.used}/${points.cap}` : ''}
         </span>
       </div>
       {moves.map((m, i) => {
@@ -49,7 +54,8 @@ export function MarchList() {
           ? `来自 (${m.from?.q ?? '?'},${m.from?.r ?? '?'})`
           : `→ (${m.to?.q ?? '?'},${m.to?.r ?? '?'})`;
         const paused = m.status === 'paused';
-        const troops = (type === 'attack' || type === 'raid') && m.troops && Object.keys(m.troops).length
+        const stationed = m.status === 'stationed';
+        const troops = m.troops && Object.keys(m.troops).length
           ? Object.entries(m.troops as Record<string, number>)
             .map(([u, n]) => `${unitInfo(u).name}${fmt(n)}`)
             .join(' ')
@@ -59,10 +65,16 @@ export function MarchList() {
           <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}`}>
             <span class="march-item-icon" aria-hidden="true" />
             <div class="march-item-body">
-              <div class="march-item-kind">{label}{paused ? ' · 交战中' : ''}</div>
-              <div class="march-item-dest">{dest}{troops ? ` · ${troops}` : ''}</div>
+              <div class="march-item-kind">{label}{paused ? ' · 交战中' : stationed ? ' · 等待命令' : ''}</div>
+              <div class="march-item-dest">{stationed ? `驻扎于 (${m.pos?.q ?? '?'},${m.pos?.r ?? '?'})` : dest}{troops ? ` · ${troops}` : ''}</div>
             </div>
-            <span class="march-item-eta">{secUntil(m.arriveAt)}</span>
+            {stationed && !inDir ? <span class="march-item-eta"><Btn size="sm" onClick={async () => {
+              await act(req('RecallGarrison', { movementId: m.id }), { okToast: '驻扎军开始返程' });
+            }}>召回</Btn><Btn size="sm" variant="primary" onClick={() => {
+              garrisonContinue.value = { movementId: m.id };
+              selected.value = null;
+              showToast('请在地图上选择驻扎军的下一处目标');
+            }}>行军</Btn></span> : <span class="march-item-eta">{secUntil(m.arriveAt)}</span>}
           </div>
         );
       })}

@@ -14,17 +14,63 @@ export class VisionModule {
   static readonly NAME = 'vision';
   constructor(private store: Store, private commands: CommandBus, private config: GameConfig) {}
   setConfig(config: GameConfig): void { this.config = config; }
-  init(): void { this.commands.register('vision.FilterArea', (c) => this.filterArea(c)); }
+  init(): void {
+    this.commands.register('vision.FilterArea', (c) => this.filterArea(c));
+    this.commands.register('vision.GetVisibility', (c) => this.getVisibility(c));
+    this.commands.register('vision.Reveal', (c) => this.reveal(c));
+  }
 
-  private async filterArea(cmd: Command): Promise<CommandResult> {
-    const { playerId, tiles } = cmd.payload as { playerId: string; tiles: TileSnapshot[] };
+  private async sourcesFor(playerId: string): Promise<Source[] | null> {
     const playerRes = await this.commands.send({ name: 'player.Get', from: VisionModule.NAME, payload: { playerId } });
-    if (!playerRes.ok) return { ok: false, payload: {}, reason: playerRes.reason };
+    if (!playerRes.ok) return null;
     const player = (playerRes.payload as any).player;
     const cityRadius = Math.max(0, Number(this.config.constants.raw.city_vision ?? 4));
     const sources: Source[] = (player.villages ?? []).map((v: any) => ({ q: v.q, r: v.r, radius: cityRadius }));
     const marchRes = await this.commands.send({ name: 'movement.ListVisionSources', from: VisionModule.NAME, payload: { playerId } });
     if (marchRes.ok) sources.push(...((marchRes.payload as any).sources ?? []));
+    return sources;
+  }
+
+  /** 给行军模块的服务器权威可见性查询，同时返回未探索格距已知区域的最小深度。 */
+  private async getVisibility(cmd: Command): Promise<CommandResult> {
+    const { playerId, q, r } = cmd.payload as { playerId: string; q: number; r: number };
+    const sources = await this.sourcesFor(playerId);
+    if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
+    const visible = (x: number, y: number) => sources.some((s) => hexDistanceWrapped({ q: x, r: y }, s, W, H) <= s.radius);
+    if (visible(q, r)) return { ok: true, payload: { visibility: 'visible', unexploredDepth: 0 } };
+    if (state.explored[`${q},${r}`]) return { ok: true, payload: { visibility: 'explored', unexploredDepth: 0 } };
+    let depth = Number.POSITIVE_INFINITY;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (!state.explored[`${x},${y}`] && !visible(x, y)) continue;
+      depth = Math.min(depth, hexDistanceWrapped({ q, r }, { q: x, r: y }, W, H));
+    }
+    return { ok: true, payload: { visibility: 'unexplored', unexploredDepth: Number.isFinite(depth) ? depth : -1 } };
+  }
+
+  /** 行军每到一格即把它当刻视野内的地块写为已探索，保证玩家不打开地图也不会丢探索进度。 */
+  private async reveal(cmd: Command): Promise<CommandResult> {
+    const { playerId, q, r, radius } = cmd.payload as { playerId: string; q: number; r: number; radius: number };
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const raw = await this.commands.send({ name: 'world.GetArea', from: VisionModule.NAME, payload: { cq: q, cr: r, full: true } });
+    if (!raw.ok) return { ok: false, payload: {}, reason: raw.reason };
+    const nowTiles = new Map<string, TileSnapshot>();
+    for (const tile of ((raw.payload as any)?.tiles ?? [])) nowTiles.set(`${tile.q},${tile.r}`, tile);
+    const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
+    const sight = Math.max(0, Math.floor(Number(radius) || 0));
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (hexDistanceWrapped({ q, r }, { q: x, r: y }, W, H) > sight) continue;
+      state.explored[`${x},${y}`] = nowTiles.get(`${x},${y}`) ?? { q: x, r: y, kind: 'empty' };
+    }
+    this.store.set(COLLECTION, playerId, state);
+    return { ok: true, payload: {} };
+  }
+
+  private async filterArea(cmd: Command): Promise<CommandResult> {
+    const { playerId, tiles } = cmd.payload as { playerId: string; tiles: TileSnapshot[] };
+    const sources = await this.sourcesFor(playerId);
+    if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
 
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const current = new Map<string, TileSnapshot>();

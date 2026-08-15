@@ -296,6 +296,9 @@ export interface GameConstants {
   combatStrength: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
+  /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
+  marchPointBase: number;
+  marchPointPerRallypointLevel: number;
   /** 每个村庄最多保留的通知/战报条数。 */
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
@@ -816,6 +819,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     combatStrength: cn('combat_strength', 1),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
+    marchPointBase: cn('march_point_base', 0),
+    marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),

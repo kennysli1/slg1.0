@@ -140,6 +140,39 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
+      SendGarrison: {
+        command: 'movement.SendGarrison', ownVillage: true, needAuth: true,
+        schema: {
+          q: { type: 'integer', min: -100, max: 100 },
+          r: { type: 'integer', min: -100, max: 100 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
+      SendExplore: {
+        command: 'movement.SendExplore', ownVillage: true, needAuth: true,
+        schema: {
+          q: { type: 'integer', min: -100, max: 100 },
+          r: { type: 'integer', min: -100, max: 100 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
+      RecallGarrison: {
+        command: 'movement.RecallGarrison', ownVillage: true, needAuth: true,
+        schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      ContinueGarrison: {
+        command: 'movement.ContinueGarrison', ownVillage: true, needAuth: true,
+        schema: {
+          movementId: { type: 'string', minLen: 1, maxLen: 64 },
+          q: { type: 'integer', min: -100, max: 100 },
+          r: { type: 'integer', min: -100, max: 100 },
+          mode: { type: 'enum', values: ['garrison', 'explore', 'raid', 'attack'] },
+          targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+          targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+        },
+      },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
     },
     eventPushMap: {
@@ -148,6 +181,9 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.Returned': 'MarchReturned',
       'movement.Intercepted': 'MarchIntercepted',
       'movement.VillageFounded': 'VillageFounded',
+      'movement.Garrisoned': 'Garrisoned',
+      'movement.GarrisonRecalled': 'GarrisonRecalled',
+      'movement.Explored': 'Explored',
     },
     },
   {
