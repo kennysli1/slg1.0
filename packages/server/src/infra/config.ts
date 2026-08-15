@@ -654,7 +654,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.units) {
     unitRows = mergeOverridesIntoRows(unitRows, {
       file: 'units.csv', key: 'code',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
     }, overrides.units);
   }
   const units: Record<string, UnitDef> = {};

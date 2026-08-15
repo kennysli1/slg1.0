@@ -8,7 +8,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function run(command, args, label) {
   console.log(`\n==> ${label}`);
-  const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', env: process.env });
+  // Windows 下 node 的 spawnSync('npm') 不会自动解析 .cmd；经 shell 执行保持与终端 npm 一致。
+  const result = spawnSync(command, args, {
+    cwd: ROOT, stdio: 'inherit', env: process.env,
+    shell: process.platform === 'win32',
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
