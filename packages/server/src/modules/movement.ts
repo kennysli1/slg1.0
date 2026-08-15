@@ -395,7 +395,14 @@ export class MovementModule {
     if (radius <= 0) return;
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
-    if (playerId) await this.commands.send({ name: 'vision.Reveal', from: MovementModule.NAME, payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius } });
+    if (!playerId) return;
+    const revealed = await this.commands.send({ name: 'vision.Reveal', from: MovementModule.NAME, payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius } });
+    if (revealed.ok) {
+      void this.bus.emit({
+        name: 'movement.VisionUpdated', source: MovementModule.NAME, ts: this.now(),
+        payload: { villageId: mv.fromVillage, movementId: mv.id, q: mv.pos.q, r: mv.pos.r },
+      } as DomainEvent);
+    }
   }
 
   /** 目标终点被设施或其他军队占据时，驻扎在最后一格之前。 */
