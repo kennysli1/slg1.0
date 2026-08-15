@@ -44,6 +44,25 @@ function hexDistanceWrapped(a: { q: number; r: number }, b: { q: number; r: numb
   return best;
 }
 
+/** 地图快照包含整张世界的可见性；用同一六边形距离口径算未知格距已知区域的最小深度。 */
+function unexploredDepth(q: number, r: number): number {
+  const tiles = getCache().area?.tiles as Array<{ q: number; r: number; visibility?: string }> | undefined;
+  if (!tiles?.length) return -1;
+  let depth = Number.POSITIVE_INFINITY;
+  for (const tile of tiles) {
+    if (tile.visibility === 'unexplored') continue;
+    depth = Math.min(depth, hexDistanceWrapped({ q, r }, tile, worldW(), worldH()));
+  }
+  return Number.isFinite(depth) ? depth : -1;
+}
+
+/** 集结点等级决定一次可踏入的未探索深度；没有集结点时不能探索。 */
+function rallypointLevel(): number {
+  const zones = getCache().vil?.zones;
+  const placed = [...(zones?.inner?.placed ?? []), ...(zones?.outer?.placed ?? [])] as Array<{ kind?: string; level?: number }>;
+  return Math.max(0, ...placed.filter((building) => building.kind === 'rallypoint').map((building) => Number(building.level) || 0));
+}
+
 function sanitizeCount(value: string, max: number): number {
   return Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
 }
@@ -400,6 +419,9 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
     if (await act(req('FoundVillage', { q, r }), { okToast: '拓荒令已发出' })) onClose();
   }
   const meta: TargetMeta = { refId: '', q, r, dist, name: '空地', icon: 'bld_main', mode: 'transport' };
+  const depth = visibility === 'unexplored' ? unexploredDepth(q, r) : 0;
+  const maxExploreDepth = rallypointLevel();
+  const allowExplore = visibility !== 'unexplored' || (depth >= 1 && depth <= maxExploreDepth);
   if (garrison) {
     const exploring = visibility === 'unexplored';
     return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : 'garrison' }} onClose={onClose} />;
@@ -408,7 +430,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
     <Panel variant="gold" corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
       <div class="target-body expedition-body">
-        {step === 1 && <section class="expedition-assessment"><div class="expedition-kicker">目标评估</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? '未探索格不能驻扎，只能派军探索；军队抵达后会立即返城。' : '可派军队野外驻扎，或在条件达标时派拓荒者建村。驻扎军抵达时会再次确认格子仍为空地。'}</p><Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '派军探索' : '派军队驻扎'}</Btn></section>}
+        {step === 1 && <section class="expedition-assessment"><div class="expedition-kicker">目标评估</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，可派军探索，军队抵达后会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可派军队野外驻扎，或在条件达标时派拓荒者建村。驻扎军抵达时会再次确认格子仍为空地。'}</p>{allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '派军探索' : '派军队驻扎'}</Btn>}</section>}
         {step === 2 && <section class="expedition-assessment"><div class="expedition-kicker">拓荒准备</div><div class="expedition-assessment-title">由服务器复核条件</div><p>提交后将由服务器校验拓荒者、资源、人口和村庄数量限制。</p></section>}
         {step === 3 && <section class="expedition-confirm-card"><div class="expedition-kicker">确认命令</div><h3>拓荒至 ({q},{r})</h3><p>确认后将消耗开城资源并派遣拓荒者。</p></section>}
         <div class="target-foot expedition-foot expedition-foot--split">
@@ -430,6 +452,9 @@ function GarrisonContinuation({ movementId, target, onClose }: {
     ? 'raid'
     : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : 'garrison';
   const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : '驻扎';
+  const depth = mode === 'explore' ? unexploredDepth(target.q, target.r) : 0;
+  const maxExploreDepth = rallypointLevel();
+  const allowExplore = mode !== 'explore' || (depth >= 1 && depth <= maxExploreDepth);
   async function continueMarch() {
     const payload: Record<string, unknown> = { movementId, q: target.q, r: target.r, mode };
     if (mode === 'raid') payload.targetId = target.refId;
@@ -442,7 +467,7 @@ function GarrisonContinuation({ movementId, target, onClose }: {
   return (
     <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
       <div class="target-head"><IconPlate icon={mode === 'garrison' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">驻扎军下一道命令</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消续行">×</button></div>
-      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>继续{label}至「{target.name}」</h3><p>该军队会从当前驻扎地继续行军，保持所携部队和宝物，并继续占用原有的一个行军点。</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>取消</Btn><Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn></div></div>
+      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>继续{label}至「{target.name}」</h3><p>{allowExplore ? '该军队会从当前驻扎地继续行军，保持所携部队和宝物，并继续占用原有的一个行军点。' : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
     </Panel>
   );
 }
