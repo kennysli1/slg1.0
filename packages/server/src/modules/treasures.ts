@@ -59,7 +59,7 @@ interface TreasureState {
   extraSlots: number;
   /** 本村是否拥有贸易中心（决定待领取宝物能否「出售」换金币）。由 building 模块经 treasure.SetTradeCenter 推送镜像（铁律#4：建筑拥有，此处只存镜像）。 */
   hasTradeCenter: boolean;
-  /** 任务专属宝物（锁定）：完成任务获得，存于此独立桶，不受出售/遗弃/宝库拆除重分布/随军携带影响，也绝不进入待领取 Pending。仍占面板展示并贡献效果（aggregate 包含）。 */
+  /** 仅为旧存档迁移保留：早期任务宝物曾绕过栏位存入此桶。ensureState 会将其迁至正常栏位，满栏则转为待领取报告。 */
   locked: string[];
   /** 胜利的旗帜由本村拥有时累积的额外攻防百分比；易主时归零。 */
   victoryFlagBonus?: number;
@@ -305,10 +305,21 @@ export class TreasureModule {
     if (rawTown.length !== s.town.length || rawTreasury.length !== s.treasury.length) dirty = true;
     s.town = rawTown;
     s.treasury = rawTreasury;
-    // locked 桶同样做类型清理
+    // 兼容旧的任务专属宝物桶：它曾绕过栏位，导致「勇士之证」等宝物
+    // 不会显示在宝库或城镇中心、也无法交互。新版所有宝物都必须在栏位中。
     const rawLocked = norm(s.locked ?? []);
     if (rawLocked.length !== (s.locked ?? []).length) dirty = true;
-    s.locked = rawLocked;
+    if (rawLocked.length) {
+      s.locked = [];
+      for (const code of rawLocked) {
+        if (this.storeIfRoom(s, code)) continue;
+        // 历史锁定宝物遇到满栏时，遵循当前任务奖励的统一规则：进入报告等待领取/出售/丢弃。
+        this.createDeliverPending(villageId, code);
+      }
+      dirty = true;
+    } else {
+      s.locked = [];
+    }
     // 必须把归一化结果写回存档：否则重启后旧格式仍在，resume() 仍会崩溃循环
     if (dirty) this.store.set(COLLECTION, villageId, s);
     return s;
@@ -339,14 +350,9 @@ export class TreasureModule {
     return Array.from(new Set(this.storedCodes(s)));
   }
 
-  /** 已储存 + 历史锁定宝物 code 列表。新任务奖励不再绕过宝物栏。 */
+  /** 已储存在村庄栏位中的宝物 code 列表。 */
   private allStoredCodes(s: TreasureState): string[] {
-    return [...(s.town ?? []), ...(s.treasury ?? []), ...(s.locked ?? [])];
-  }
-
-  /** 是否锁定宝物（完成任务获得，不可出售/遗弃/丢失）。 */
-  private isLocked(s: TreasureState, code: string): boolean {
-    return (s.locked ?? []).includes(code);
+    return this.storedCodes(s);
   }
 
   /**
@@ -580,18 +586,10 @@ export class TreasureModule {
 
   /** 授予宝物到村庄宝物栏；任务奖励满栏时可转为待处理报告。 */
   private async grant(cmd: Command): Promise<CommandResult> {
-    const { villageId, code, locked, pendingIfFull } = cmd.payload as { villageId: string; code: string; locked?: boolean; pendingIfFull?: boolean };
+    const { villageId, code, pendingIfFull } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
-    // 任务专属宝物：锁定入村，绕过槽位上限，绝不丢失/出售/遗弃。
-    if (locked) {
-      if (!s.locked.includes(code)) s.locked.push(code);
-      this.store.set(COLLECTION, villageId, s);
-      await this.recomputeAndPush(villageId);
-      await this.emitChanged(villageId);
-      return { ok: true, payload: { codes: this.allStoredCodes(s), treasure: t, locked: true } };
-    }
     if (!this.storeIfRoom(s, code)) {
       if (pendingIfFull) {
         this.createDeliverPending(villageId, code);
@@ -617,8 +615,6 @@ export class TreasureModule {
     };
     const s = this.ensureState(villageId);
     const want = Array.isArray(codes) ? codes.filter(Boolean) : [];
-    // 锁定宝物不可随军携带
-    for (const c of want) if (this.isLocked(s, c)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'locked_treasure' };
     // 统计 want 中各 code 的需求数量，并校验持有数量（multiset 下需按数量而非仅存在性判断）
     const wantCounts = new Map<string, number>();
     for (const c of want) wantCounts.set(c, (wantCounts.get(c) ?? 0) + 1);
@@ -818,7 +814,6 @@ export class TreasureModule {
   private async use(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
-    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     const t = this.config.treasures[code];
     // 先校验可用性再移除，避免「不可用也吞宝物」的旧隐患
     if (!t || t.applyType !== 'instant') return { ok: false, payload: {}, reason: 'not_usable' };
@@ -902,7 +897,6 @@ export class TreasureModule {
   private async sell(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
-    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
@@ -927,7 +921,6 @@ export class TreasureModule {
   private async discard(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(villageId);
-    if (this.isLocked(s, code)) return { ok: false, payload: {}, reason: 'locked_treasure' };
     const t = this.config.treasures[code];
     if (!this.removeStored(s, code)) return { ok: false, payload: {}, reason: 'not_held' };
     this.store.set(COLLECTION, villageId, s);
@@ -952,7 +945,6 @@ export class TreasureModule {
   private async replaceTreasure(cmd: Command): Promise<CommandResult> {
     const { villageId, oldCode, newCode } = cmd.payload as { villageId: string; oldCode: string; newCode: string };
     const s = this.ensureState(villageId);
-    if (this.isLocked(s, oldCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'locked_treasure' };
     if (!this.storedCodes(s).includes(oldCode)) return { ok: false, payload: { codes: this.storedCodes(s) }, reason: 'not_held' };
     const t = this.config.treasures[newCode];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
