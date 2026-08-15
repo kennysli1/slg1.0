@@ -325,7 +325,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     moduleName: 'world',
     publicActions: {
       GetArea: {
-        command: 'world.GetArea', needAuth: true,
+        command: 'world.GetArea', needAuth: true, injectPlayerId: true,
         schema: {
           cq: { type: 'integer', min: -200, max: 200 },
           cr: { type: 'integer', min: -200, max: 200 },

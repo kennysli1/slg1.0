@@ -265,6 +265,7 @@ export function HexMap() {
     name: string;
     icon: string | null;
     terrain: string;
+    visibility: 'unexplored' | 'explored' | 'visible';
     isSelected: boolean;
     isSelf: boolean;
   }
@@ -307,12 +308,15 @@ export function HexMap() {
             const isSelf = !!(me && me.q === q && me.r === r);
             const ownV = ownVillageAt(q, r);
             const t = tileAt(q, r);
+            const visibility = (t?.visibility ?? 'visible') as HexCell['visibility'];
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
             let terrain = terrainFor(q, r);
 
-            if (isSelf) {
+            if (visibility === 'unexplored') {
+              name = '未探索区域'; terrain = 'water';
+            } else if (isSelf) {
               kind = 'own_village'; refId = me!.id; name = me!.name;
               icon = 'bld_main'; terrain = 'village';
             } else if (ownV) {
@@ -334,7 +338,7 @@ export function HexMap() {
             }
 
             cells.push({
-              q, r, camX, camY, kind, refId, name, icon, terrain,
+              q, r, camX, camY, kind, refId, name, icon, terrain, visibility,
               isSelf,
               isSelected: !!(sel && sel.q === q && sel.r === r),
             });
@@ -723,7 +727,7 @@ export function HexMap() {
               return (
                 <g
                   key={`${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                  class={`hex-cell${c.isSelf ? ' hex-cell--self' : ''}${c.isSelected ? ' hex-cell--selected' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
+                  class={`hex-cell hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.isSelected ? ' hex-cell--selected' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
                   {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
                 >

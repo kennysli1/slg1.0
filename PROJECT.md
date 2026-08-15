@@ -34,6 +34,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `military.ts` | 常规兵力、训练队列与铁匠养成 |
 | `population.ts` | 劳动人口、士兵人口、硬上限与繁荣倍率 |
 | `world.ts` | 六边形地图、地块与坐标 |
+| `vision.ts` | 玩家探索记录、城池/行军视野与地图战争迷雾 |
 | `pve.ts` | PvE 守军、战利品与重生 |
 | `movement.ts` | 出征、运输、拦截与返程中的部队 |
 | `combat.ts` | 进行中的逐 tick 战斗 |

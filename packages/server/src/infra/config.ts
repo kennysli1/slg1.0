@@ -204,6 +204,8 @@ export interface UnitDef {
   meleeDef: number;
   rangedDef: number;
   speed: number;
+  /** 地图视野半径（格）。 */
+  vision: number;
   carry: number;
   upkeep: number;
   cost: Record<string, number>;
@@ -659,7 +661,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       form: (r.form as UnitForm) || 'melee',
       meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
       meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef),
-      speed: num(r.speed, 6), carry: num(r.carry), upkeep: num(r.upkeep, 1),
+      speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: num(r.upkeep, 1),
       cost: { wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) },
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
@@ -688,7 +690,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       form: (r.form as UnitForm) || 'melee',
       meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
       meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef),
-      speed: num(r.speed, 6), carry: num(r.carry), upkeep: 0,
+      speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: 0,
       cost: { wood: 0, clay: 0, iron: 0, crop: 0 },
       trainSec: 0,
       building: '', // 雇佣兵不经训练建筑

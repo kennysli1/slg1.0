@@ -56,7 +56,8 @@ test('冒烟·Wire：注册→建造→训练→出征→战报', async () => {
   assert.ok(((army.payload as any).troops?.legionnaire ?? 0) >= 2, '应训出至少 2 军团兵');
 
   // 找一个 PvE 目标
-  const area = await req('GetArea', { cq: 0, cr: 0, r: 30 });
+  // 客户端地图受视野过滤；冒烟测试需从服务端权威地图选择一个已配置的 PvE 目标。
+  const area = await app.commands.send({ name: 'world.GetArea', from: 'test', payload: { cq: 0, cr: 0, r: 30 } });
   assert.equal(area.ok, true);
   const pve = ((area.payload as any).tiles as any[]).find((t) => t.kind === 'pve');
   assert.ok(pve, '地图上应有 PvE');
