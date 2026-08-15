@@ -11,4 +11,5 @@
  * 标记双向绑定——升了不写标记、写了标记不升，都会被拒绝提交。
  * 规矩全文见 docs/00_变更契约.md R6。
  */
-export const SAVE_SCHEMA_VERSION = 5;
+// vision 与驻扎/探索行军均按缺省值和惰性创建兼容旧存档；不构成破坏性 schema 变更。
+export const SAVE_SCHEMA_VERSION = 2;
