@@ -201,3 +201,87 @@ test('同格相遇：胜方减员后立即更新在途人口足迹', async () =>
   const snap = (await send(app, 'population.GetSnapshot', { villageId: A.villageId })).payload as any;
   assert.equal(snap.soldierPop, (sent - 1) * unitPop, '胜方阵亡者不应残留在在途人口足迹中');
 });
+
+test('野外驻扎：抵达空地后持续占用一个行军点，可续行并召回', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '驻扎甲', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 30 });
+
+  const target = { q: p.q + 9, r: p.r + 7 };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...target, radius: 0 });
+  const first = await send(app, 'movement.SendGarrison', { villageId: p.villageId, ...target, troops: { legionnaire: 10 } });
+  assert.equal(first.ok, true, `驻扎派遣应成功: ${first.reason ?? ''}`);
+  const mv = movements(app).find((m) => m.id === (first.payload as any).id);
+  assert.ok(mv, '应创建驻扎行军');
+  for (let step = 0; step < mv.path.length + 1; step++) {
+    await app.scheduler.advanceTo(clock + mv.perStepMs + 1, setClock);
+    if (movements(app).find((m) => m.id === mv.id)?.status === 'stationed') break;
+  }
+  const stationed = movements(app).find((m) => m.id === mv.id);
+  assert.equal(stationed?.status, 'stationed', '抵达空地后应保持驻扎');
+  assert.deepEqual(stationed?.pos, mv.toXY, '空地应在目标格驻扎');
+
+  const exhausted = await send(app, 'movement.SendGarrison', {
+    villageId: p.villageId, q: p.q + 11, r: p.r + 7, troops: { legionnaire: 10 },
+  });
+  assert.equal(exhausted.ok, false, '1级集结点只能同时派出一支军队');
+  assert.equal(exhausted.reason, 'march_points_exhausted');
+
+  const continued = await send(app, 'movement.ContinueGarrison', {
+    villageId: p.villageId, movementId: mv.id, q: target.q + 1, r: target.r, mode: 'garrison',
+  });
+  assert.equal(continued.ok, true, `驻扎军续行应成功: ${continued.reason ?? ''}`);
+  assert.equal(movements(app).filter((m) => m.fromVillage === p.villageId).length, 1, '续行不应额外占用行军点');
+
+  const moving = movements(app).find((m) => m.id === mv.id);
+  await app.scheduler.advanceTo(clock + moving.perStepMs + 1, setClock);
+  const restationed = movements(app).find((m) => m.id === mv.id);
+  assert.equal(restationed?.status, 'stationed');
+  const recalled = await send(app, 'movement.RecallGarrison', { villageId: p.villageId, movementId: mv.id });
+  assert.equal(recalled.ok, true, `驻扎军召回应成功: ${recalled.reason ?? ''}`);
+  assert.equal(movements(app).some((m) => m.id === mv.id), false, '原驻扎记录应被返程军替换');
+  assert.equal(movements(app).filter((m) => m.type === 'return').length, 1, '应生成返程军');
+});
+
+test('野外驻扎：目标在抵达前变为被占据格时停在路径前一格', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '驻扎乙', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 20 });
+  const pve = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  const target = { q: (pve.payload as any).q, r: (pve.payload as any).r };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...target, radius: 0 });
+  const sent = await send(app, 'movement.SendGarrison', { villageId: p.villageId, ...target, troops: { legionnaire: 10 } });
+  assert.equal(sent.ok, true, `可先向未知占据格派驻扎军: ${sent.reason ?? ''}`);
+  const mv = movements(app).find((m) => m.id === (sent.payload as any).id);
+  for (let step = 0; step < mv.path.length + 1; step++) {
+    await app.scheduler.advanceTo(clock + mv.perStepMs + 1, setClock);
+    if (movements(app).find((m) => m.id === mv.id)?.status === 'stationed') break;
+  }
+  const stationed = movements(app).find((m) => m.id === mv.id);
+  assert.equal(stationed?.status, 'stationed');
+  assert.deepEqual(stationed?.pos, mv.path[mv.path.length - 2], '目标格被占据时应停在进入目标的前一格');
+});
+
+test('未探索格只能探索：1级集结点可探索一格深，抵达后返程并写入探索历史', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '探索甲', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 20 });
+  // 城池默认视野为4；离城5格正好是未探索深度1。
+  const target = { q: p.q + 5, r: p.r };
+  const badGarrison = await send(app, 'movement.SendGarrison', { villageId: p.villageId, ...target, troops: { legionnaire: 10 } });
+  assert.equal(badGarrison.ok, false);
+  assert.equal(badGarrison.reason, 'target_unexplored');
+  const exploring = await send(app, 'movement.SendExplore', { villageId: p.villageId, ...target, troops: { legionnaire: 10 } });
+  assert.equal(exploring.ok, true, `1级集结点应可探索1格深: ${exploring.reason ?? ''}`);
+  const mv = movements(app).find((m) => m.id === (exploring.payload as any).id);
+  for (let step = 0; step < mv.path.length * 3; step++) {
+    await app.scheduler.advanceTo(clock + mv.perStepMs + 1, setClock);
+    if (!movements(app).length) break;
+  }
+  assert.equal(movements(app).length, 0, '探索军应抵达后立即返程并归队');
+  const visible = await send(app, 'vision.GetVisibility', { playerId: p.id, ...target });
+  assert.equal((visible.payload as any).visibility, 'explored', '行军视野覆盖过的目标格应保留为已探索');
+});

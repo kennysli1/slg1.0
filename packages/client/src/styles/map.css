@@ -181,6 +181,7 @@
 .march-path--transport{ stroke: var(--c-steel);      stroke-dasharray: 6 4; }
 .march-path--found    { stroke: var(--c-gold);       stroke-dasharray: 6 4; }
 .march-path--caravan  { stroke: var(--c-gold-dim); }
+.march-path--garrison { stroke: var(--c-jade);      stroke-dasharray: 3 3; }
 
 /* 行军箭头动画（dashoffset 流动） */
 .march-path--attack,
@@ -192,6 +193,7 @@
 .march-path--found {
   animation: march-flow 2s linear infinite;
 }
+.march-path--garrison { animation: march-flow 2.6s linear infinite; }
 @keyframes march-flow {
   to { stroke-dashoffset: -26; }
 }
@@ -207,6 +209,7 @@
 .march-dot--return  { fill: var(--c-jade); }
 .march-dot--transport { fill: var(--c-steel); }
 .march-dot--found   { fill: var(--c-gold); }
+.march-dot--garrison{ fill: var(--c-jade); }
 .march-dot.paused {
   fill: var(--c-crimson);
   animation: dot-blink .75s step-end infinite;
@@ -752,10 +755,11 @@
 .march-item--transport .march-item-icon,
 .march-item--caravan .march-item-icon { background: var(--c-steel); }
 .march-item--found .march-item-icon { background: var(--c-gold); }
+.march-item--garrison .march-item-icon { background: var(--c-jade); }
 .march-item-body { flex: 1; min-width: 0; }
 .march-item-kind { font-weight: 700; color: var(--c-ink); }
 .march-item-dest { color: var(--c-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.march-item-eta  { font-family: var(--ff-num); color: var(--c-gold); flex: none; }
+.march-item-eta  { font-family: var(--ff-num); color: var(--c-gold); flex: none; display: flex; gap: var(--s-1); align-items: center; }
 .march-item--in  .march-item-kind { color: var(--c-crimson-hi); }
 .march-item--paused .march-item-kind { color: var(--c-ember); animation: dot-blink .75s step-end infinite; }
 

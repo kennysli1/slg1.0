@@ -78,9 +78,12 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 // ---------- 地图选中目标 ----------
 
 export interface SelectedTarget {
-  refId: string; kind: string; q: number; r: number; name: string; icon?: string;
+  refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
 }
 export const selected = signal<SelectedTarget | null>(null);
+
+/** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
+export const garrisonContinue = signal<{ movementId: string } | null>(null);
 
 // ---------- 次级数据源（不在主刷新包里、按需拉取的面板数据） ----------
 

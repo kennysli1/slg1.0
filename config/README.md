@@ -233,6 +233,8 @@
 | base_production_per_hour | 1000 | 基础产量兼容常量；当前资源田实际产量以 `buildings.csv` 的 `prodBase/prodGrowth` 为准 |
 | map_size | 20 | 地图半径（地图为 [-size,size] 方形） |
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
+| march_point_base | 0 | 每座城镇的基础行军点数 |
+| march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
