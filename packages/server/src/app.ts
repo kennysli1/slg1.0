@@ -22,6 +22,7 @@ import { TradeModule } from './modules/trade.js';
 import { TreasureModule } from './modules/treasures.js';
 import { ResearchModule } from './modules/research.js';
 import { TasksModule } from './modules/tasks.js';
+import { VisionModule } from './modules/vision.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -51,6 +52,7 @@ const PROGRESS_COLLECTIONS = [
   'treasure_pending',
   'research',
   'task',
+  'vision',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -92,6 +94,7 @@ export interface GameApp {
   trade: TradeModule;
   treasure: TreasureModule;
   task: TasksModule;
+  vision: VisionModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -193,6 +196,7 @@ export function createGameApp(opts?: {
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
   const treasure = new TreasureModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  const vision = new VisionModule(store, commands, config);
   // playerVillages: 轻量跨村查询（research/academy 需要知道某玩家所有村庄，用于 scope=player 科技）
   const playerVillages = (playerId: string): string[] => {
     const owner = store.all<{ id?: string; ownedVillages?: string[] }>('player')
@@ -208,7 +212,7 @@ export function createGameApp(opts?: {
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, task,
+    player, meta, notifications, mercenary, trade, treasure, research, task, vision,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
@@ -266,7 +270,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, now,
+    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },

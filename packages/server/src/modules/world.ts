@@ -125,8 +125,8 @@ export class WorldModule {
   /** 返回以 (cq,cr) 为中心、六边形半径 r 内的所有非空地块。
    *  full=true 时忽略半径上限，返回整张地图的全部非空地块（用于全图渲染）。
    *  注：任务营地（kind==='taskcamp'）不进入全局视野——仅任务拥有者经 taskMarkers 可见，避免泄露给其他玩家。 */
-  private getArea(cmd: Command): CommandResult {
-    const { cq, cr, r, full } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean };
+  private async getArea(cmd: Command): Promise<CommandResult> {
+    const { cq, cr, r, full, playerId } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean; playerId?: string };
     const center = { q: cq, r: cr };
     const radius = full
       ? Number.POSITIVE_INFINITY
@@ -136,7 +136,9 @@ export class WorldModule {
       if (t.kind === 'taskcamp') continue; // 任务营地仅任务拥有者可见，不泄露给其它玩家
       if (full || hexDistanceWrapped(center, t, this.worldW, this.worldH) <= radius) tiles.push(t);
     }
-    return { ok: true, payload: { tiles } };
+    if (!playerId) return { ok: true, payload: { tiles } }; // 仅内部测试/服务器查询保留原始地块
+    const masked = await this.commands.send({ name: 'vision.FilterArea', from: WorldModule.NAME, payload: { playerId, tiles } });
+    return masked.ok ? masked : { ok: false, payload: {}, reason: masked.reason };
   }
 
   /** 六边形距离（格）。行军时间由 Movement 用它和速度算。 */

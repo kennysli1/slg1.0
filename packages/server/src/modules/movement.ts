@@ -109,6 +109,7 @@ export class MovementModule {
     this.commands.register('movement.SendCaravan', (c) => this.sendCaravan(c));
     this.commands.register('movement.List', (c) => this.list(c));
     this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
+    this.commands.register('movement.ListVisionSources', (c) => this.listVisionSources(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
   }
@@ -296,6 +297,24 @@ export class MovementModule {
     const { movementId } = cmd.payload as { movementId: string };
     const mv = this.store.get<Movement>(COLLECTION, movementId);
     return { ok: true, payload: { exists: !!mv } };
+  }
+
+  /** 为视野模块提供指定玩家在途军队的位置和视野；不暴露给客户端。 */
+  private async listVisionSources(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    const sources: Array<{ q: number; r: number; radius: number }> = [];
+    for (const mv of this.store.all<Movement>(COLLECTION)) {
+      const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
+      if (!owner.ok || (owner.payload as any).player?.id !== playerId) continue;
+      let most = 0, radius = 0;
+      for (const [code, raw] of Object.entries(mv.troops ?? {})) {
+        const count = Math.max(0, Number(raw) || 0);
+        const sight = this.config.units[code]?.vision ?? 1;
+        if (count > most || (count === most && sight > radius)) { most = count; radius = sight; }
+      }
+      if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius });
+    }
+    return { ok: true, payload: { sources } };
   }
 
   /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
