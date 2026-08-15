@@ -41,6 +41,21 @@ test('宝物：woodRate 被动提升木产率 (+5%)', async () => {
     `木产率应 ×1.05: before=${woodBefore} after=${after.netRate.wood}`);
 });
 
+test('宝物：旧版 locked 桶中的勇士之证迁入城镇中心，可正常交互', async () => {
+  const app = await freshApp();
+  const legacy = app.store.get<any>('treasure', 'v1');
+  app.store.set('treasure', 'v1', { ...legacy, town: [], treasury: [], locked: ['warrior_token'] });
+
+  const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(listed.town, ['warrior_token'], '旧凭证应迁入城镇中心栏位');
+  assert.deepEqual(listed.treasury, [], '未建宝库时不应显示在宝库');
+  assert.deepEqual(listed.locked, [], '旧锁定桶应被清空');
+  assert.deepEqual(listed.codes, ['warrior_token'], '列表应返回可管理的凭证');
+
+  const discarded = await send(app, 'treasure.Discard', { villageId: 'v1', code: 'warrior_token' });
+  assert.equal(discarded.ok, true, `迁移后的凭证应可交互: ${discarded.reason ?? ''}`);
+});
+
 test('宝物：atkMult 被动提升军事攻防快照 (+5%)', async () => {
   const app = await freshApp();
   const a0 = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
