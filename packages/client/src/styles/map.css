@@ -81,6 +81,11 @@
 .hex-cell:hover .hex-entity-img,
 .hex-cell--selected .hex-entity-img { filter: saturate(1) brightness(1.12) drop-shadow(0 4px 7px rgb(0 0 0 / 86%)); }
 
+/* 服务器权威视野：已探索显示最后一次观测的内容并覆以灰雾；未探索不泄露内容。 */
+.hex-fog { pointer-events: none; }
+.hex-fog--explored { fill: var(--c-steel); fill-opacity: .42; }
+.hex-fog--unexplored { fill: var(--c-ink); fill-opacity: .9; }
+
 /* ---------- 实体描边（占领格的描边环） ---------- */
 .hex-ring {
   fill: none;

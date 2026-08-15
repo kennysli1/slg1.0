@@ -310,12 +310,14 @@ export function HexMap() {
             const t = tileAt(q, r);
             const visibility = (t?.visibility ?? 'visible') as HexCell['visibility'];
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
-            const taskCamp = (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
+            const taskCamp = visibility === 'unexplored'
+              ? undefined
+              : (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
             let terrain = terrainFor(q, r);
 
             if (visibility === 'unexplored') {
-              name = '未探索区域'; terrain = 'water';
+              name = '未探索区域'; terrain = 'empty';
             } else if (isSelf) {
               kind = 'own_village'; refId = me!.id; name = me!.name;
               icon = 'bld_main'; terrain = 'village';
@@ -739,15 +741,17 @@ export function HexMap() {
                   {/* Base fill (token-derived, always visible) */}
                   <polygon class={`hex-base hex-fill-${c.terrain}`} points={HEX_CORNER_STR} />
                   {/* Terrain texture (PNG, clipped to hex shape) */}
-                  <image
-                    href={artPath(`map_tile_${c.terrain}`)}
-                    x={-HEX_SIZE}
-                    y={-HEX_SIZE}
-                    width={HEX_SIZE * 2}
-                    height={HEX_SIZE * 2}
-                    class="hex-terrain-img"
-                    preserveAspectRatio="xMidYMid slice"
-                  />
+                  {c.visibility !== 'unexplored' && (
+                    <image
+                      href={artPath(`map_tile_${c.terrain}`)}
+                      x={-HEX_SIZE}
+                      y={-HEX_SIZE}
+                      width={HEX_SIZE * 2}
+                      height={HEX_SIZE * 2}
+                      class="hex-terrain-img"
+                      preserveAspectRatio="xMidYMid slice"
+                    />
+                  )}
                   {/* Entity ring */}
                   {rk && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
@@ -767,6 +771,10 @@ export function HexMap() {
                     <text class="hex-label" textAnchor="middle" dominantBaseline="middle" y={HEX_SIZE * 0.62}>
                       {c.name.slice(0, 5)}
                     </text>
+                  )}
+                  {/* 服务器下发的探索快照仍可读，但必须与实时可见格区分。 */}
+                  {c.visibility !== 'visible' && (
+                    <polygon class={`hex-fog hex-fog--${c.visibility}`} points={HEX_CORNER_STR} />
                   )}
                   {/* Selection ring */}
                   {c.isSelected && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}

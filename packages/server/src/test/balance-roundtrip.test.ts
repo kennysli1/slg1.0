@@ -92,3 +92,15 @@ test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 resid
     assert.equal(cfg.buildings['main'].maxLevel, 10, 'main maxLevel 应保持不变(10)');
   });
 });
+
+test('GM 面板：兵种视野可编辑并由配置加载为运行时权威值', () => {
+  const table = BALANCE_TABLES['units'];
+  const numeric = table.numeric ?? [];
+  assert.ok(numeric.includes('vision'), 'GM units 白名单必须包含 vision');
+  withTmp((tmp) => {
+    const legionnaireId = String(loadGameConfig(configDir).units.legionnaire.id);
+    applyBalanceEdits(configDir, tmp, table, { [legionnaireId]: { vision: '7' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.units.legionnaire.vision, 7, 'GM 保存的视野值必须覆盖 CSV 并进入运行时配置');
+  });
+});
