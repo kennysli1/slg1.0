@@ -184,6 +184,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.Garrisoned': 'Garrisoned',
       'movement.GarrisonRecalled': 'GarrisonRecalled',
       'movement.Explored': 'Explored',
+      'movement.VisionUpdated': 'VisionUpdated',
     },
     },
   {
