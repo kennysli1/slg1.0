@@ -127,3 +127,104 @@ test('放弃：主城不可弃；锁定期内不可弃；解锁后可弃', async
   assert.equal((ok.payload as any).player.villages.length, 1);
   assert.equal(app.store.get('economy', vid2), undefined);
 });
+
+/** 等待事件总线把（被 void 忽略的）领域事件异步派发完毕，避免测试竞态。 */
+function flushEvents(): Promise<void> {
+  return new Promise((r) => setImmediate(r));
+}
+
+test('运输：目标村途中消失→军队原路返回，货物与兵力退回发货村', async () => {
+  const app = freshApp();
+  const { capital, vid2 } = await makeTwoVillages(app);
+  await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 3 } });
+  await send(app, 'economy.Grant', { villageId: capital, gain: { wood: 100 } });
+
+  const tr = await send(app, 'movement.SendTransport', {
+    villageId: capital, targetVillage: vid2, troops: { legionnaire: 3 }, cargo: { wood: 80 },
+  });
+  assert.equal(tr.ok, true, tr.reason);
+
+  // 推进到行程中段，确认仍在途、未抵达
+  const list0 = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mv0 = list0.movements.find((m: any) => m.id === tr.payload.id);
+  assert.ok(mv0, '运输应已发出');
+  const midMs = Math.floor((mv0.arriveAt - clock) / 2);
+  await app.scheduler.advanceTo(clock + midMs, setClock);
+
+  const listMid = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mvMid = listMid.movements.find((m: any) => m.id === tr.payload.id);
+  assert.ok(mvMid, '运输仍应在途');
+  assert.notEqual(mvMid.type, 'return', '尚未折返');
+
+  // 目标村消失（放弃/删村）
+  const clear = await send(app, 'world.ClearVillage', { refId: vid2 });
+  assert.equal(clear.ok, true, clear.reason);
+  await flushEvents();
+
+  // 立即断言：运输已折返，且终点指向出发村（原路返回）
+  const listAfter = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mvAfter = listAfter.movements.find((m: any) => m.id === tr.payload.id);
+  assert.ok(mvAfter, '折返后仍应在途');
+  assert.equal(mvAfter.type, 'return', '应已转为返程');
+  assert.deepEqual(mvAfter.to, mv0.from, '折返终点应为出发村坐标');
+  assert.equal(mvAfter.targetVillage, undefined, '应已清空目标村');
+
+  // 跑完剩余行程
+  await drain(app);
+
+  // 兵力与货物都应回到发货村 capital
+  const army = (await send(app, 'military.GetArmy', { villageId: capital })).payload as any;
+  assert.equal(army.troops?.legionnaire ?? 0, 3, '兵力应回到发货村');
+  const res = (await send(app, 'economy.GetResources', { villageId: capital })).payload as any;
+  assert.ok(res.resources.wood >= 100 - 0.01, '货物应退回发货村（含原 80 木）');
+  const listDone = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  assert.equal(listDone.movements.length, 0, '折返后 movement 应已清理');
+});
+
+test('出征：PvE 目标途中被移除→军队原路返回，兵力退回出发村', async () => {
+  const app = freshApp();
+  const { capital } = await makeTwoVillages(app);
+  // 默认世界已生成 pve-0（rats），位于 (3,1) 附近；先确认目标存在
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  assert.equal(target.ok, true, '默认 PvE 目标 pve-0 应存在');
+
+  await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 4 } });
+
+  const raid = await send(app, 'movement.SendRaid', {
+    villageId: capital, targetId: 'pve-0', troops: { legionnaire: 4 },
+  });
+  assert.equal(raid.ok, true, raid.reason);
+
+  // 推进到行程中段，确认仍在途
+  const list0 = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mv0 = list0.movements.find((m: any) => m.id === raid.payload.id);
+  assert.ok(mv0, '出征应已发出');
+  const midMs = Math.floor((mv0.arriveAt - clock) / 2);
+  await app.scheduler.advanceTo(clock + midMs, setClock);
+
+  const listMid = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mvMid = listMid.movements.find((m: any) => m.id === raid.payload.id);
+  assert.ok(mvMid, '出征仍应在途');
+  assert.notEqual(mvMid.type, 'return', '尚未折返');
+
+  // 目标被移除（营地清除 / 幸福村移除等）
+  const rm = await send(app, 'pve.Remove', { id: 'pve-0' });
+  assert.equal(rm.ok, true, rm.reason);
+  await flushEvents();
+
+  // 立即断言：出征已折返
+  const listAfter = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mvAfter = listAfter.movements.find((m: any) => m.id === raid.payload.id);
+  assert.ok(mvAfter, '折返后仍应在途');
+  assert.equal(mvAfter.type, 'return', '应已转为返程');
+  assert.equal(mvAfter.targetId, undefined, '应已清空目标');
+
+  // 跑完剩余行程
+  await drain(app);
+
+  // 兵力应回到出发村
+  const army = (await send(app, 'military.GetArmy', { villageId: capital })).payload as any;
+  assert.equal(army.troops?.legionnaire ?? 0, 4, '兵力应回到出发村');
+  const listDone = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  assert.equal(listDone.movements.length, 0, '折返后 movement 应已清理');
+});

@@ -1,4 +1,4 @@
-import type { Command, CommandResult } from '@slg/shared';
+import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
@@ -178,6 +178,11 @@ export class WorldModule {
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
       if (t.kind === 'village' && t.refId === refId) {
         this.store.set<Tile>(COLLECTION_TILE, hexKey(t.q, t.r), { q: t.q, r: t.r, kind: 'empty' });
+        // 村庄消失：通知行军模块——所有前往该村庄的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
+        void this._bus.emit({
+          name: 'world.VillageRemoved', source: WorldModule.NAME, ts: this._now(),
+          payload: { villageId: refId, q: t.q, r: t.r },
+        } as DomainEvent);
         return { ok: true, payload: { q: t.q, r: t.r } };
       }
     }

@@ -119,6 +119,9 @@ export class MovementModule {
     this.commands.register('movement.ListForeign', (c) => this.listForeign(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
+    // 目标消失（PvE 营地/幸福村被移除、玩家村庄被放弃）→ 在途的进攻/运输/商队立即原路返回
+    this.bus.on('pve.TargetRemoved', (e: DomainEvent) => void this.onTargetRemoved(e));
+    this.bus.on('world.VillageRemoved', (e: DomainEvent) => void this.onVillageRemoved(e));
   }
 
   /** 归一行军坐标进环面（幂等，兼容旧档）。 */
@@ -948,6 +951,14 @@ export class MovementModule {
   /** 商队到达：去程→把货物交给目标村（目标村不存在则跳过交付）后启动返程；返程→到家回收贸易路线。 */
   private async arriveCaravan(mv: Movement): Promise<void> {
     if (mv.returning) {
+      // 货物随商队返回发货村（目标丢失中途折返时仍携带原货物，须完整归还，不凭空消失）
+      if (mv.cargo && Object.keys(mv.cargo).length > 0) {
+        const home = mv.homeVillage ?? mv.fromVillage;
+        await this.commands.send({
+          name: 'economy.Grant', from: MovementModule.NAME,
+          payload: { villageId: home, gain: mv.cargo },
+        });
+      }
       if (mv.routesFreed && mv.homeVillage) {
         void this.bus.emit({
           name: 'movement.CaravanReturned', source: MovementModule.NAME, ts: this.now(),
@@ -1483,6 +1494,72 @@ export class MovementModule {
     return id;
   }
 
+  /** PvE 目标被移除（营地/NPC 幸福村）：所有前往该目标的出征(raid)或商队(caravan→NPC)立即原路返回。 */
+  private async onTargetRemoved(e: DomainEvent): Promise<void> {
+    const { id } = e.payload as { id: string };
+    for (const mv of this.store.all<Movement>(COLLECTION)) {
+      if (mv.status !== 'marching') continue;
+      if (mv.type === 'return' || (mv.type === 'caravan' && mv.returning)) continue; // 已在返程，避免重复触发
+      // 出征按 targetId 匹配；商队送 NPC 村按 targetVillage(=pve id) 匹配
+      if (mv.targetId !== id && mv.targetVillage !== id) continue;
+      if (mv.type !== 'raid' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
+      await this.startReturn(mv);
+    }
+  }
+
+  /** 玩家村庄被放弃/消失：所有前往该村庄的进攻(attack)/运输(transport)/商队(caravan)立即原路返回。 */
+  private async onVillageRemoved(e: DomainEvent): Promise<void> {
+    const { villageId } = e.payload as { villageId: string };
+    for (const mv of this.store.all<Movement>(COLLECTION)) {
+      if (mv.status !== 'marching') continue;
+      if (mv.type === 'return' || (mv.type === 'caravan' && mv.returning)) continue; // 已在返程，避免重复触发
+      if (mv.targetVillage !== villageId) continue;
+      if (mv.type !== 'attack' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
+      await this.startReturn(mv);
+    }
+  }
+
+  /**
+   * 目标消失·原地转为返程：从当前所在格原路返回出发村，保留兵力/战利品/宝物/货物。
+   * 原地改写同一条 movement（保留 id，确保携带宝物 pending 与 outwardId 链路不丢），仅翻转类型并重算路径。
+   * 商队保留 caravan 类型并置 returning=true，以便到家时释放贸易路线；其余转为 return 类型。
+   */
+  private async startReturn(mv: Movement): Promise<void> {
+    const home = mv.fromXY; // 始终为出发村坐标（launch/launchCaravan 时写入）
+    const cur = mv.pos;
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const path = linePathWrapped(cur, home, W, H);
+    const steps = Math.max(1, path.length - 1);
+    let totalMs: number;
+    if (mv.type === 'caravan') {
+      const dist = hexDistanceWrapped(cur, home, W, H);
+      const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+      totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
+    } else {
+      totalMs = this.travelSec(cur, home, mv.troops) * 1000;
+    }
+    const perStepMs = Math.max(1, Math.round(totalMs / steps));
+
+    const wasCaravan = mv.type === 'caravan';
+    mv.type = wasCaravan ? 'caravan' : 'return';
+    mv.fromXY = cur;
+    mv.toXY = home;
+    mv.path = path;
+    mv.stepIndex = 0;
+    mv.pos = cur;
+    mv.status = 'marching';
+    mv.stepToken += 1; // 作废旧的逐格推进定时（step 回调校验 token 后自动忽略）
+    mv.departAt = this.now();
+    mv.nextStepAt = this.now() + perStepMs;
+    mv.arriveAt = this.now() + perStepMs * steps;
+    mv.targetId = undefined;
+    if (!wasCaravan) mv.targetVillage = undefined; // 商队保留 targetVillage 仅作展示，不影响回家逻辑
+    if (wasCaravan) mv.returning = true; // 到家即回收贸易路线 + 退还货物
+    this.store.set(COLLECTION, mv.id, mv);
+    this.scheduler.schedule(perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
+    log('目标消失·原路返回', { id: mv.id, type: mv.type, from: mv.fromVillage });
+  }
+
   /** 返程到达：兵力归队 + 战利品入库。 */
   private async arriveReturn(id: string): Promise<void> {
     const mv = this.load(id);
@@ -1503,6 +1580,14 @@ export class MovementModule {
         name: 'economy.Grant',
         from: MovementModule.NAME,
         payload: { villageId: mv.fromVillage, gain: mv.loot },
+      });
+    }
+    // 运输货物随军返程到家（目标丢失时原路带回，不凭空消失；普通返程无 cargo，安全空操作）
+    if (mv.cargo && Object.keys(mv.cargo).length > 0) {
+      await this.commands.send({
+        name: 'economy.Grant',
+        from: MovementModule.NAME,
+        payload: { villageId: mv.fromVillage, gain: mv.cargo },
       });
     }
     // 携带宝物随军返程到家 → 存回该村（优先宝库）。按出征 id 匹配，避免返程新 id 不匹配丢失宝物。
