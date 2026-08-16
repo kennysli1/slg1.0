@@ -237,6 +237,19 @@ export class MovementModule {
     return res.ok && tile ? { q: tile.q, r: tile.r } : null;
   }
 
+  /** 解析任意地块坐标：先试玩家村庄，再试 PvE / 任务营地（用于商队向幸福村等 NPC 村庄送货）。 */
+  private async tileXY(refId: string): Promise<Hex | null> {
+    const v = await this.villageXY(refId);
+    if (v) return v;
+    const res = await this.commands.send({
+      name: 'world.GetTileByRef',
+      from: MovementModule.NAME,
+      payload: { refId },
+    });
+    const tile = (res.payload as any)?.tile;
+    return res.ok && tile ? { q: tile.q, r: tile.r } : null;
+  }
+
   /**
    * 把玩家选定的宝物装上即将出征的军队（treasure.AssignToArmy）。携带上限 = min(treasureCarryMaxSlots, floor(总兵力 / treasureCarryTroopsPerSlot))。
    * 在任何「扣兵」动作之前调用无副作用；若调用方已先扣兵、本函数失败，调用方应退还兵力。
@@ -685,8 +698,8 @@ export class MovementModule {
     const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
     if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
     const tp = target.payload as any;
-    // 任务营地：仅拥有者本村可攻击（防止其它玩家越权攻打 / 误伤他人任务），其余情况静默拒绝
-    if (tp.task && tp.ownerVillageId && tp.ownerVillageId !== villageId) {
+    // 私有 PvE（任务营地 / 幸福村等带 ownerVillageId 的目标）：仅拥有者本村可攻击，其余情况静默拒绝
+    if (tp.ownerVillageId && tp.ownerVillageId !== villageId) {
       return { ok: false, payload: {}, reason: 'not_task_owner' };
     }
     const toXY: Hex = { q: tp.q, r: tp.r };
@@ -922,7 +935,7 @@ export class MovementModule {
     if (cleaned.total <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
     const fromXY = await this.villageXY(fromVillage);
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
-    const toXY = await this.villageXY(targetVillage);
+    const toXY = await this.tileXY(targetVillage);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
     const mv = this.launchCaravan({
       id: this.nextId(), fromVillage, fromXY, toXY, cargo: cleaned.clean,
@@ -944,7 +957,7 @@ export class MovementModule {
       this.store.delete(COLLECTION, mv.id);
       return;
     }
-    // 去程：把货物交给目标村（目标村不存在则跳过交付，仍正常返程回收路线）
+    // 去程：把货物交给目标村；目标不是玩家村庄（如幸福村这类 NPC 村庄）则发到达事件由任务模块处理
     if (mv.cargo && Object.keys(mv.cargo).length > 0) {
       const tgt = await this.commands.send({
         name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
@@ -954,6 +967,18 @@ export class MovementModule {
           name: 'economy.Grant', from: MovementModule.NAME,
           payload: { villageId: mv.targetVillage, gain: mv.cargo },
         });
+      } else {
+        // 目标非玩家村庄：可能是 NPC 村庄（幸福村），由 tasks 模块据此推进 deliver_to_npc 目标
+        const tile = await this.commands.send({
+          name: 'world.GetTileByRef', from: MovementModule.NAME, payload: { refId: mv.targetVillage },
+        });
+        const kind = (tile.payload as any)?.tile?.kind;
+        if (tile.ok && (kind === 'pve' || kind === 'taskcamp')) {
+          void this.bus.emit({
+            name: 'movement.CaravanArrivedNpc', source: MovementModule.NAME, ts: this.now(),
+            payload: { villageId: mv.fromVillage, npcId: mv.targetVillage, cargo: mv.cargo, toXY: mv.toXY },
+          } as DomainEvent);
+        }
       }
     }
     const home = mv.homeVillage ?? mv.fromVillage;

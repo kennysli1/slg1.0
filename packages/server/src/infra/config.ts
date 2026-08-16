@@ -133,7 +133,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag';
+export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -149,6 +149,9 @@ export interface QuestObjective {
   /** carry_flag：必须携带并带回的宝物代码，以及出征军队至少需要的兵力。 */
   flagCode?: string;
   minTroops?: number;
+  /** deliver_to_npc：向 NPC 村庄（幸福村）运送的资源种类与数量（deliverResource∈resources.csv）。 */
+  deliverResource?: string;
+  deliverAmount?: number;
 }
 
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
@@ -1032,6 +1035,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     } else if (objKind === 'carry_flag') {
       const [flagCode, minTroops] = (r.objParam || '').split(':');
       objective = { kind: 'carry_flag', flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) };
+    } else if (objKind === 'deliver_to_npc') {
+      // objParam 形如 `crop:500`：deliverResource=资源种类，deliverAmount=数量
+      const [res, amt] = (r.objParam || '').split(':');
+      objective = { kind: 'deliver_to_npc', deliverResource: (res?.trim() || 'crop'), deliverAmount: Math.max(1, num(amt, 1)) };
     } else {
       objective = { kind: 'submit_resources', resources: parseResourceList(r.objParam) ?? {} };
     }
@@ -1186,7 +1193,8 @@ export function validateGameConfig(config: GameConfig): void {
   // pve：每个模板必须有守军；spawn 目标必须存在且坐标在地图内
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
-    if (Object.keys(p.defender).length === 0) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
+    // happy_village（幸福村）是 0 守军的 NPC 村庄（玩家可接受订单送达，或掠夺触发失败），特例放行
+    if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village') errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
   }
   for (const s of config.pveSpawns) {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
@@ -1199,7 +1207,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1341,7 +1349,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure', 'carry_flag']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1365,12 +1373,15 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'carry_flag') {
       if (!q.objective.flagCode || !config.treasures[q.objective.flagCode]) errors.push(`quests.csv[${q.code}] carry_flag 指定的军旗不在 treasures.csv`);
       if (!q.objective.minTroops || q.objective.minTroops < 1) errors.push(`quests.csv[${q.code}] carry_flag 兵力必须≥1`);
+    } else if (q.objective.kind === 'deliver_to_npc') {
+      if (!q.objective.deliverResource || !resourceKeys.has(q.objective.deliverResource)) errors.push(`quests.csv[${q.code}] deliver_to_npc 资源 ${q.objective.deliverResource} 不在 resources.csv`);
+      if (!q.objective.deliverAmount || q.objective.deliverAmount < 1) errors.push(`quests.csv[${q.code}] deliver_to_npc 数量必须≥1`);
     }
     // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
       if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量>）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used）`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

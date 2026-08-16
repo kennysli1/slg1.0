@@ -10,3 +10,5 @@ id,code,name,desc,type,requires,objKind,objParam,rewardRes,rewardTreasure,weight
 8,d3,紧急补给,酒馆急令调拨粮食应急,daily,,submit_resources,crop:300,gold:60,,3,,1,21600,7200,gold,60,4,300,12
 9,s1,献祭筹备,累计出售或丢弃2个稀有及以上品质的宝物,side,,sell_discard_treasure,rare:2,,ritual_altar,3,building_built:treasury,0,0,0,treasure,1,4,300,12
 10,s2,耀武扬威,兵力达到20后，携带军旗与至少20名士兵清理任意营地并将军旗带回城镇中心或宝库。军旗将自动丢弃并换取胜利的旗帜。,side,,carry_flag,war_flag:20,,victory_flag,0,troops_reached:20,0,0,0,,0,4,300,12
+11,villager_request,村民的请求,成功掠夺PvE营地后，一位村民向你求助。在贸易中心接受幸福村的粮食订单并送达，即可获得娜塔莉的祝福；若你选择掠夺幸福村，任务失败但会得到秘密字条。,side,,deliver_to_npc,crop:500,,natalie,0,pve_camp_cleared,0,0,0,,0,4,300,12
+12,investigate_coords,调查坐标,使用秘密字条获得的战报，其中标记了可疑坐标，前往探查。,side,,submit_resources,crop:1,,,0,secret_note_used,0,0,0,,0,4,300,12

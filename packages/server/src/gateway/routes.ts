@@ -326,6 +326,11 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'trade.CancelOrder', ownVillage: true, needAuth: true,
         schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
       },
+      // 「村民的请求」：玩家接受幸福村送达订单，把资源送往幸福村（单向商队）
+      AcceptNpcDelivery: {
+        command: 'trade.AcceptNpcDelivery', ownVillage: true, needAuth: true,
+        schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
     },
     eventPushMap: {
       'trade.CenterUpdated': 'TradeCenterUpdated',
@@ -357,6 +362,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'treasure.PendingExpired': 'TreasurePendingExpired',
       'treasure.CarriedArrived': 'TreasureCarriedArrived',
       'treasure.DemolishRedistributed': 'TreasureDemolishRedistributed',
+      'treasure.ReportCoords': 'TreasureReport',
     },
     },
   {

@@ -116,6 +116,13 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
     if (ok) void reloadTrade();
   }
 
+  async function handleAcceptNpcDelivery(orderId: string) {
+    const ok = await act(req('AcceptNpcDelivery', { orderId }), {
+      okToast: '已派商队将粮食送往幸福村',
+    });
+    if (ok) void reloadTrade();
+  }
+
   async function handleAcceptNpcTreasure(orderId: string) {
     const r = await req('AcceptNpcTreasure', { orderId });
     if (!r.ok) {
@@ -257,6 +264,18 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
         onAccept={handleAcceptNpc}
         onAcceptTreasure={handleAcceptNpcTreasure}
       />
+
+      {/* 幸福村送达订单（支线任务：村民的请求）*/}
+      {Array.isArray(c.npcDeliveryOrders) && c.npcDeliveryOrders.length > 0 && (
+        <>
+          <SectionHead sub="支线任务 · 村民的请求">幸福村订单</SectionHead>
+          <NpcDeliveryOrderList
+            orders={c.npcDeliveryOrders}
+            availableRoutes={routeAvail}
+            onAccept={handleAcceptNpcDelivery}
+          />
+        </>
+      )}
 
       {/* 附近玩家挂单 */}
       <SectionHead sub={`视野半径 ${c.viewRadius ?? '?'} 格内`}>附近玩家挂单</SectionHead>
@@ -424,6 +443,59 @@ function NpcTreasureOffer({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- 幸福村送达订单列表（村民的请求）----
+
+function NpcDeliveryOrderList({
+  orders,
+  availableRoutes,
+  onAccept,
+}: {
+  orders: any[];
+  availableRoutes: number;
+  onAccept: (id: string) => void;
+}) {
+  return (
+    <div class="trade-offer-list">
+      {orders.map((o: any) => {
+        const wantUnits = TRADE_RES.reduce(
+          (s, k) => s + Math.max(0, Math.floor(o.want[k] ?? 0)),
+          0,
+        );
+        const needRoutes = Math.max(1, Math.ceil(wantUnits / Math.max(1, tradeRouteCapacity())));
+        const canAccept = needRoutes <= availableRoutes;
+        return (
+          <div key={o.id} class="trade-offer trade-offer--npc-delivery">
+            <div class="trade-offer-head">
+              <Tag kind="ember">幸福村 · {o.ownerName ?? '幸福村'}</Tag>
+              {o.npcXY && (
+                <span class="trade-offer-meta">
+                  坐标 ({o.npcXY.q}, {o.npcXY.r})
+                </span>
+              )}
+            </div>
+            <ExchangeDisplay pay={o.want} get={{}} />
+            <div class="trade-offer-foot">
+              <Btn
+                size="sm"
+                variant="primary"
+                disabled={!canAccept}
+                onClick={() => onAccept(o.id)}
+              >
+                接单（派商队送粮）
+              </Btn>
+              {!canAccept && (
+                <span class="trade-disable-reason">
+                  路线不足（需 {needRoutes}，可用 {availableRoutes}）
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

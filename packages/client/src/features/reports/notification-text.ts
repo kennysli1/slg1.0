@@ -96,6 +96,11 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}宝库被拆除：价值最高的宝物「${kept}」留于城镇中心，其余 ${count} 件转入报告页待你处理`;
     }
     return `${time}宝库被拆除：宝物「${kept}」已留于城镇中心`;
+  } else if (event === 'TreasureReport') {
+    const coords: Array<{ q: number; r: number }> = payload.coords ?? [];
+    if (!coords.length) return `${time}秘密字条化作一片空白——附近没有可标记的空地`;
+    const list = coords.map((c: any) => `(${c.q}, ${c.r})`).join('、');
+    return `${time}秘密字条显现出可疑坐标：${list}（前往探查可解锁后续任务）`;
   } else if (event === 'TechCompleted') {
     return `${time}科技研发完成：${payload?.name ?? payload?.techCode ?? ''}`;
   } else if (event === 'RpChanged') {

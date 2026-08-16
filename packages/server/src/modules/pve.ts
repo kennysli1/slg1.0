@@ -33,6 +33,8 @@ interface PveState {
   task?: boolean;
   /** 任务营地的拥有村庄 id（仅该村可攻击该营地，防止其它玩家越权攻打）。非任务营地为空。 */
   ownerVillageId?: string;
+  /** 不重生标记：幸福村（happy_village）这类 0 守军 NPC 村庄清空后不重生、不掉落普通宝物，生命周期由任务模块接管。 */
+  noRespawn?: boolean;
 }
 
 const COLLECTION = 'pve';
@@ -69,11 +71,11 @@ export class PveModule {
 
   /** 运行时创建一个 PvE 目标（任务营地）。返回 ok:false 若 id 已存在或模板不存在。 */
   private spawn(cmd: Command): CommandResult {
-    const { id, type, q, r, task, ownerVillageId } = cmd.payload as { id: string; type: string; q: number; r: number; task?: boolean; ownerVillageId?: string };
+    const { id, type, q, r, task, ownerVillageId, loot, noRespawn } = cmd.payload as { id: string; type: string; q: number; r: number; task?: boolean; ownerVillageId?: string; loot?: Record<string, number>; noRespawn?: boolean };
     if (this.load(id)) return { ok: false, payload: {}, reason: 'already_exists' };
     const tpl = this.config.pveTemplates[type];
     if (!tpl) return { ok: false, payload: {}, reason: 'unknown_template' };
-    this.create(id, type, q, r, !!task, ownerVillageId);
+    this.create(id, type, q, r, !!task, ownerVillageId, loot, !!noRespawn);
     return { ok: true, payload: { id, type, q, r } };
   }
 
@@ -122,12 +124,12 @@ export class PveModule {
   resume(): void {
     for (const s of this.store.all<PveState>(COLLECTION)) {
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
-      if (s.cleared && !s.task) this.respawn(s.id);
+      if (s.cleared && !s.task && !s.noRespawn) this.respawn(s.id);
     }
   }
 
   /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。task=true 时登记为任务营地，ownerVillageId 标记所属村庄。 */
-  create(id: string, type: string, q: number, r: number, task = false, ownerVillageId?: string): void {
+  create(id: string, type: string, q: number, r: number, task = false, ownerVillageId?: string, loot?: Record<string, number>, noRespawn = false): void {
     const tpl = this.config.pveTemplates[type];
     const s: PveState = {
       id,
@@ -135,11 +137,12 @@ export class PveModule {
       q,
       r,
       defender: structuredClone(tpl.defender),
-      loot: { ...tpl.loot },
+      loot: loot ? { ...loot } : { ...tpl.loot },
       cleared: false,
       clearCount: 0,
       task: task || undefined,
       ownerVillageId: ownerVillageId || undefined,
+      noRespawn: noRespawn || undefined,
     };
     this.store.set(COLLECTION, id, s);
     void this.commands.send({
@@ -163,7 +166,7 @@ export class PveModule {
   private getDefenderSnapshot(cmd: Command): CommandResult {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
-    return { ok: true, payload: { snapshot: s.cleared ? {} : s.defender, loot: { ...s.loot } } };
+    return { ok: true, payload: { snapshot: s.cleared ? {} : s.defender, loot: { ...s.loot }, noRespawn: !!s.noRespawn } };
   }
 
   /**
@@ -192,14 +195,14 @@ export class PveModule {
       s.clearCount = (s.clearCount ?? 0) + 1;
       looted = this.takeLoot(s, looterCarry);
       s.cleared = true;
-      // 任务营地不自动重生（由任务模块在目标达成后显式 pve.Remove 清除）
-      if (!s.task) {
+      // 任务营地 / 不重生 NPC 村庄（幸福村）不自动重生，生命周期由任务模块接管
+      if (!s.task && !s.noRespawn) {
         const tpl = this.config.pveTemplates[s.type];
         this.scheduler.schedule(tpl.respawnSec * 1000, () => this.respawn(id), `pve:${id}`, `pve:${id}`);
       }
     }
     this.store.set(COLLECTION, id, s);
-    return { ok: true, payload: { looted, cleared: s.cleared, task: !!s.task } };
+    return { ok: true, payload: { looted, cleared: s.cleared, task: !!s.task, noRespawn: !!s.noRespawn } };
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {
