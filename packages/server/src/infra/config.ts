@@ -117,6 +117,7 @@ export interface TreasureDef {
    *  - popGrowth：人口增速倍率加成（value=百分比）
    *  - instantGold：获得时立即结算一次的金币数（value=数量）
    *  - ritualBuff：使用后扣除劳动人口，全资源产量加成持续一段时间（value=百分比；时长/人口见 game_constants）
+   *  - honestHeart：复合效果（value=百分比，统一作用于以下四项）：全军攻击+value%、全军防御+value%、金币收入+value%、科技点判定间隔×(1-value/100)（更快）
    */
   effectType: string;
   effectValue: number;
@@ -1207,7 +1208,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);

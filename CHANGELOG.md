@@ -11,6 +11,8 @@
 
 ### 新增
 
+- 扩展支线任务「调查坐标」：接取后于玩家村庄附近随机空地生成 3 个与老鼠窝同驻兵/掠夺资源的任务营地（rats 模板，真实占格、清空后不触发普通掉落）。清剿第 3 处营地时掉落宝物「被囚禁的娜塔莉们」（`captured_natalies`，popGrowth +20%，passive，走标准待领取报告流程，需军队归村后处理）。玩家处理该宝物二选一：① 放入宝库 → 获得 +20% 人口增长（无额外奖励）；② 释放（客户端以「释放」替代「丢弃」字样，并隐藏「出售」）→ 获得任务奖励 500 金币与宝物「正直的心」（`honest_heart`，epic/special）。新增复合效果类型 `honestHeart`（已注册进 `TREASURE_EFFECTS` 白名单）：全军攻击 +10%、全军防御 +10%、金币收入 +10%、科技点判定间隔 -10%（经 `research.SetTreasureTechInterval` 接入判定调度，倍率变化即按新间隔重调度 RP tick）；`ResearchState` 新增可选字段 `treasureTechIntervalMult`（默认 1，向后兼容）。网关 `ClaimPendingTreasure` 决策枚举新增 `release`；客户端待领取卡片为 `captured_natalies` 显示「释放」按钮、隐藏「出售」，`app/config.ts` 的 `treasureEffectText` 已补充复合效果文案。
+
 - 新增支线任务「村民的请求」：成功掠夺（清空）普通 PvE 营地后，按 GM 概率触发；接取后玩家村庄 3 格内随机空地出现 NPC 村庄「幸福村」（pve 类型、0 守军、无重生）。玩家在贸易中心接取幸福村的粮食送达订单（500 粮食）并送达即完成任务，奖励宝物「娜塔莉」（人口增速 +10%，被动）；幸福村随后从地图消失。失败路径：若玩家选择掠夺幸福村（而非送达），任务失败并获得宝物「秘密字条」（instant）；使用后生成玩家村 5 格内 3 个随机空地坐标的战报，经 `treasure.ReportCoords` 推送并解锁后续支线「调查坐标」。
 
 - 新增宝物「娜塔莉」（`natalie`，popGrowth +10%，passive，rare）与「秘密字条」（`secret_note`，reportCoords，instant，common），并补齐 `TREASURE_EFFECTS` 白名单的 `reportCoords` 分支（客户端 `TreasureReport` 通知已接入网关推送与通知映射）。

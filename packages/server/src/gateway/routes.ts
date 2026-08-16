@@ -352,7 +352,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'treasure.ClaimPending', ownVillage: true, needAuth: true,
         schema: {
           movementId: { type: 'string', minLen: 1, maxLen: 64 },
-          decision: { type: 'enum', optional: true, values: ['take', 'sell', 'discard'] },
+          decision: { type: 'enum', optional: true, values: ['take', 'sell', 'discard', 'release'] },
         },
       },
     },

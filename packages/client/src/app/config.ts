@@ -162,6 +162,10 @@ export function treasureRarityName(rarity: string): string {
 /** 宝物效果类型 → 中文描述（含数值，value 单位：rate 类为 %，instantGold 为金币）。 */
 export function treasureEffectText(info: TreasureInfo): string {
   const v = info.effectValue;
+  // 正直的心：复合效果（value=百分比，统一作用于四项）
+  if (info.effectType === 'honestHeart') {
+    return `全军攻击 +${v}%、全军防御 +${v}%、金币收入 +${v}%、科技点判定间隔 -${v}%`;
+  }
   const map: Record<string, string> = {
     woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,
     cropRate: `粮食产出 +${v}%`, goldRate: `金币产出 +${v}%`, allResRate: `全资源产出 +${v}%`,

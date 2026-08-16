@@ -704,6 +704,11 @@ export class TasksModule {
       inst.campCleared = (inst.campCleared ?? 0) + 1;
       this.store.set(COLLECTION, villageId, s);
       if (inst.campCleared >= inst.camps.length) {
+        // 最后一处营地清剿：掉落「被囚禁的娜塔莉们」（走标准待领取报告流程，需军队归村后才可领取）
+        await this.commands.send({
+          name: 'treasure.RollDrop', from: TasksModule.NAME,
+          payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
+        });
         await this.markReady(villageId, code);
       } else {
         await this.pushList(villageId);
