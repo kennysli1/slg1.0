@@ -229,6 +229,43 @@
   pointer-events: none;
 }
 
+/* ---------- 外国军队标记（视野内其他玩家，脱敏，不可点自己的） ---------- */
+.enemy-march-mk { cursor: pointer; }
+.enemy-march-ring {
+  fill: rgba(192, 57, 43, 0.16);
+  stroke: var(--c-crimson);
+  stroke-width: 2.5;
+  stroke-dasharray: 4 3;
+}
+.enemy-march-emoji {
+  font-size: 11px;
+  pointer-events: none;
+}
+.enemy-march-mk--attack  .enemy-march-ring { stroke: var(--c-crimson); }
+.enemy-march-mk--raid    .enemy-march-ring { stroke: var(--c-ember); }
+.enemy-march-mk--caravan .enemy-march-ring { stroke: var(--c-gold); }
+.enemy-march-mk--transport .enemy-march-ring { stroke: var(--c-steel); }
+
+/* ---------- 敌方军队信息卡（只读，脱敏） ---------- */
+.enemy-army-facts {
+  margin: 0 0 8px;
+  display: grid;
+  gap: 4px;
+}
+.enemy-army-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.enemy-army-facts dt { color: var(--c-muted); margin: 0; }
+.enemy-army-facts dd { margin: 0; font-weight: 600; }
+.enemy-army-note {
+  font-size: 12px;
+  color: var(--c-muted);
+  margin: 6px 0 0;
+}
+
 /* ---------- 浮层容器（nav/legend/tooltip 在地图上面） ---------- */
 .map-overlay {
   position: absolute;

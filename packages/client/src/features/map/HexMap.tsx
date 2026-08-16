@@ -8,8 +8,8 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers } from '../../app/store.js';
-import { getMapCenter, setMapCenter } from '../../app/refresh.js';
+import { dataVersion, selected, tick, taskMarkers, foreignMoves } from '../../app/store.js';
+import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
@@ -131,6 +131,7 @@ export function HexMap() {
   const svgEl    = useRef<SVGSVGElement>(null);
   const camEl    = useRef<SVGGElement>(null);
   const markerEl = useRef<SVGGElement>(null);
+  const foreignEl = useRef<SVGGElement>(null);
 
   // ── 视口剔除触发器 ──
   const [_cullVer, setCullVer] = useState(0);
@@ -409,6 +410,52 @@ export function HexMap() {
     return markers;
   }
 
+  /** 点击外国军队标记 → 写入选中目标（kind=enemy_army），交给 TargetPanel 渲染只读信息卡。 */
+  function selectEnemy(m: any, e: MouseEvent) {
+    e.stopPropagation();
+    if (!m?.pos) return;
+    selected.value = {
+      refId: m.id,
+      kind: 'enemy_army',
+      q: m.pos.q,
+      r: m.pos.r,
+      name: m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队',
+      icon: 'bld_main',
+    };
+  }
+
+  // ─── foreign march markers（视野内其他玩家的脱敏军队，地图轮询填充）──────────
+  function buildForeignMarkers() {
+    const moves: any[] = foreignMoves.value?.movements ?? [];
+    const markers: preact.VNode[] = [];
+    moves.forEach((m, i) => {
+      if (!m.pos) return;
+      const p = hexToPixel(m.pos);
+      const emoji = m.type === 'attack' ? '⚔'
+        : m.type === 'raid'      ? '⚡'
+        : m.type === 'found'     ? '🚩'
+        : m.type === 'transport' ? '📦'
+        : m.type === 'caravan'   ? '💰'
+        : m.type === 'garrison'  ? '⚑'
+        : m.type === 'explore'   ? '🔭'
+        : '🏠';
+      const t = m.type ?? 'return';
+      markers.push(
+        <g
+          key={`fmk-${i}`}
+          id={`foreign-mk-${i}`}
+          class={`enemy-march-mk enemy-march-mk--${t}`}
+          transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
+          onClick={(e: MouseEvent) => selectEnemy(m, e)}
+        >
+          <circle r={11} class="enemy-march-ring" />
+          <text class="enemy-march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
+        </g>,
+      );
+    });
+    return markers;
+  }
+
   // ─── task camp markers（任务营地：真实 pve 地块 + 🎯 高亮）──────────────
   function buildTaskMarkers() {
     // store 已过滤，但渲染层再守一次：地图上绝不画已清理的任务营地。
@@ -439,6 +486,20 @@ export function HexMap() {
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
+        if (!el || !m.path || m.stepIndex == null) return;
+        const cur = m.path[m.stepIndex];
+        if (!cur) return;
+        let px = hexToPixel(cur);
+        if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
+          const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
+          px = lerpPixel(hexToPixel(cur), hexToPixel(m.path[m.stepIndex + 1]), t);
+        }
+        el.setAttribute('transform', `translate(${(px.x + ox.current).toFixed(1)},${(px.y + oy.current).toFixed(1)})`);
+      });
+      // 外国军队：同样的逐格插值，但读数来自 foreignMoves 信号。
+      const foeMoves: any[] = foreignMoves.value?.movements ?? [];
+      foeMoves.forEach((m, i) => {
+        const el = foreignEl.current?.querySelector(`#foreign-mk-${i}`) as SVGGElement | null;
         if (!el || !m.path || m.stepIndex == null) return;
         const cur = m.path[m.stepIndex];
         if (!cur) return;
@@ -673,10 +734,15 @@ export function HexMap() {
     // Start march animation
     startMarchAnimation();
 
+    // 地图页打开时轮询视野内的外国军队（脱敏）。每 3.5s 拉一次，关闭地图即停止。
+    void refreshForeignMoves();
+    const foreignTimer = window.setInterval(() => void refreshForeignMoves(), 3500);
+
     return () => {
       ro.disconnect();
       svg.removeEventListener('wheel', onWheel);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      window.clearInterval(foreignTimer);
     };
   }, []); // intentional: one-time mount effect, only refs are used inside
 
@@ -697,6 +763,7 @@ export function HexMap() {
   const visibleCells = buildVisibleHexes();
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
+  const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
 
   return (
@@ -788,6 +855,9 @@ export function HexMap() {
 
           {/* ── March markers (animated via rAF) ── */}
           <g ref={markerEl} class="layer-markers">{marchMarkers}</g>
+
+          {/* ── Foreign army markers (other players' desensitized armies, animated via rAF) ── */}
+          <g ref={foreignEl} class="layer-foreign-markers">{foreignMarkers}</g>
 
           {/* ── Task camp markers (static) ── */}
           <g class="layer-taskmarkers">{taskMarkersEls}</g>
