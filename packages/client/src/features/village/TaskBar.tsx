@@ -14,6 +14,7 @@ import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
 import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
+import { openTradeCenter } from '../trade/TradeModal.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -24,6 +25,7 @@ function objText(task: any): string {
   if (o.kind === 'submit_resources') return '上交资源';
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
+  if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
   return o.kind;
 }
 
@@ -235,6 +237,20 @@ function TaskCard({ task }: { task: any }) {
           </div>
         </div>
       )}
+      {o.kind === 'deliver_to_npc' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class="task-prog-hint">向幸福村运输 {resInfo(o.deliverResource).name} ×{o.deliverAmount}</span>
+            {task.npcPending ? (
+              <span class="task-prog-hint task-prog-hint--warn">需先建造贸易中心</span>
+            ) : task.npcVillageId ? (
+              <span class="task-prog-hint task-prog-hint--ok">幸福村已出现在附近，前往贸易中心接取粮食订单</span>
+            ) : (
+              <span class="task-prog-hint">正在生成幸福村…</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <RewardRow rewards={task.rewards} />
 
@@ -248,6 +264,9 @@ function TaskCard({ task }: { task: any }) {
             )}
             {o.kind === 'clear_camp' && camps.length > 0 && (
               <Btn size="sm" variant="ghost" onClick={() => onGoMap()}>前往地图</Btn>
+            )}
+            {o.kind === 'deliver_to_npc' && !task.npcPending && (
+              <Btn size="sm" variant="primary" onClick={() => openTradeCenter()}>前往贸易中心</Btn>
             )}
           </>
         )}

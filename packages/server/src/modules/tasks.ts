@@ -66,6 +66,16 @@ interface TaskInstance {
   /** 目标已达成、等待玩家手动交付领取奖励。 */
   readyToDeliver?: boolean;
   spawnAttempts?: number;
+  /** deliver_to_npc：NPC 村庄（幸福村）refId 与目标坐标。 */
+  npcVillageId?: string;
+  npcXY?: { q: number; r: number };
+  /** deliver_to_npc：注入到贸易中心的幸福村订单 id。 */
+  npcOrderId?: string;
+  /** deliver_to_npc：订单要求的资源种类与数量。 */
+  npcRes?: string;
+  npcAmt?: number;
+  /** deliver_to_npc：等待贸易中心建成后再生成幸福村的挂起标记。 */
+  npcPending?: boolean;
 }
 
 interface TaskState {
@@ -161,6 +171,10 @@ export class TasksModule {
     this.bus.on('military.TroopTrained', (evt: DomainEvent) => void this.onTroopTrained(evt));
     this.bus.on('treasure.CarriedStored', (evt: DomainEvent) => void this.onCarriedStored(evt));
     this.bus.on('treasure.StoredRemoved', (evt: DomainEvent) => void this.onStoredRemoved(evt));
+    // 商队抵达幸福村 → 完成 deliver_to_npc 目标
+    this.bus.on('movement.CaravanArrivedNpc', (evt: DomainEvent) => void this.onCaravanArrivedNpc(evt));
+    // 使用秘密字条生成战报 → 解锁「调查坐标」任务
+    this.bus.on('treasure.ReportCoords', (evt: DomainEvent) => void this.onReportCoords(evt));
   }
 
   async resume(): Promise<void> {
@@ -174,6 +188,10 @@ export class TasksModule {
           if (!camp.cleared) await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId: s.villageId } });
         }
         if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
+      // 补生成挂起的幸福村（贸易中心在任务接取后才建成的情况）
+      for (const inst of Object.values(s.active)) {
+        if (inst.npcPending) await this.retryNpcSpawn(s.villageId, s, inst);
+      }
       }
       // 支线门槛可能在本次部署/重启前已经达到；恢复时补查，不能只依赖新训练事件。
       await this.checkTroopTriggers(s.villageId);
@@ -303,6 +321,8 @@ export class TasksModule {
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
+    // 移除幸福村（deliver_to_npc 目标）
+    if (inst.npcVillageId) await this.removeNpc(villageId, inst);
     this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
     delete s.active[code];
     // 支线任务：放弃后永久不再出现（记入 abandonedSide，并从可接取移除）
@@ -425,6 +445,8 @@ export class TasksModule {
     this.store.set(COLLECTION, villageId, s);
     if (q.objective.kind === 'clear_camp') {
       await this.spawnCamps(villageId, inst);
+    } else if (q.objective.kind === 'deliver_to_npc') {
+      await this.spawnNpcVillage(villageId, s, inst);
     }
     await this.pushList(villageId);
     await this.pushMap(villageId);
@@ -637,7 +659,29 @@ export class TasksModule {
 
     const s = this.load(villageId);
     if (!s) return;
+
+    // 村民的请求：成功掠夺(清空)普通 PvE 营地后，按 GM 概率触发支线任务
+    if (p.targetKind === 'pve' && p.campCleared === true && !targetId.startsWith('happy-')) {
+      const chance = this.gmNum('villager_request_trigger_chance', 0.3);
+      if (this.rng() < chance && !s.firedTriggers.includes('pve_camp_cleared')) {
+        s.firedTriggers.push('pve_camp_cleared');
+        this.store.set(COLLECTION, villageId, s);
+        await this.unlockSideQuests(villageId);
+      }
+    }
+
     for (const [code, inst] of Object.entries(s.active)) {
+      // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 任务失败，改发「秘密字条」
+      if (p.targetKind === 'pve' && inst.npcVillageId && targetId === inst.npcVillageId && p.attackerWins) {
+        await this.removeNpc(villageId, inst);
+        await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'secret_note', pendingIfFull: true } });
+        if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
+        delete s.active[code];
+        this.store.set(COLLECTION, villageId, s);
+        await this.pushList(villageId);
+        await this.pushMap(villageId);
+        return;
+      }
       const q = this.quest(code);
       if (q?.objective.kind === 'carry_flag' && p.movementId && p.treasures?.includes(q.objective.flagCode ?? '')) {
         const troopCount = Object.values(p.deployedTroops ?? {}).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
@@ -738,6 +782,13 @@ export class TasksModule {
     const villageId = p.villageId;
     const kind = p.kind;
     if (!villageId || !kind) return;
+    // 贸易中心建成 → 为接取「村民的请求」时尚未建贸易中心的村庄补生成幸福村
+    if (kind === 'tradecenter') {
+      const s = this.ensureState(villageId);
+      for (const inst of Object.values(s.active)) {
+        if (inst.npcPending) await this.retryNpcSpawn(villageId, s, inst);
+      }
+    }
     const triggerKey = `building_built:${kind}`;
     // 是否存在以此为触发条件的任务
     const matched = Object.values(this.config.quests).some((q) => q.trigger === triggerKey);
@@ -895,6 +946,139 @@ export class TasksModule {
     return res.ok && tile ? { q: tile.q, r: tile.r } : null;
   }
 
+  // ── GM 常量（运行时可在 /gm/balance 调整）──
+  private gmNum(key: string, def: number): number {
+    const v = this.config.constants.raw?.[key];
+    return typeof v === 'number' ? v : def;
+  }
+  private gmStr(key: string, def: string): string {
+    const v = this.config.constants.raw?.[key];
+    return typeof v === 'string' ? v : def;
+  }
+
+  /** 读贸易中心建筑等级（口径唯一）。 */
+  private async getTradeCenterLevel(villageId: string): Promise<number> {
+    const res = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind: 'tradecenter' } });
+    return (res.payload as any)?.level ?? 0;
+  }
+
+  // ── 幸福村（NPC 村庄 / deliver_to_npc 目标）──
+
+  /** 接取「村民的请求」时生成幸福村 + 注入贸易订单；无贸易中心则挂起，待其建成/重启后重试。 */
+  private async spawnNpcVillage(villageId: string, s: TaskState, inst: TaskInstance): Promise<void> {
+    const level = await this.getTradeCenterLevel(villageId);
+    if (level <= 0) {
+      inst.npcPending = true;
+      this.store.set(COLLECTION, villageId, s);
+      return;
+    }
+    const xy = await this.getVillageXY(villageId);
+    if (!xy) {
+      inst.npcPending = true;
+      this.store.set(COLLECTION, villageId, s);
+      return;
+    }
+    const radius = this.gmNum('villager_request_spawn_radius', 3);
+    const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius } });
+    if (!free.ok) {
+      // 临时无空地：挂起并稍后重试
+      inst.npcPending = true;
+      this.store.set(COLLECTION, villageId, s);
+      this.scheduleNpcRetry(villageId, inst);
+      return;
+    }
+    const { q, r } = free.payload as { q: number; r: number };
+    const npcId = `happy-${villageId}`;
+    const loot = {
+      wood: this.gmNum('villager_request_npc_wood', 200),
+      clay: this.gmNum('villager_request_npc_clay', 200),
+      iron: this.gmNum('villager_request_npc_iron', 200),
+      gold: this.gmNum('villager_request_npc_gold', 100),
+    };
+    const spawn = await this.commands.send({
+      name: 'pve.Spawn', from: TasksModule.NAME,
+      payload: { id: npcId, type: 'happy_village', q, r, task: false, ownerVillageId: villageId, loot, noRespawn: true },
+    });
+    if (!spawn.ok) {
+      inst.npcPending = true;
+      this.store.set(COLLECTION, villageId, s);
+      this.scheduleNpcRetry(villageId, inst);
+      return;
+    }
+    const orderRes = this.gmStr('villager_request_order_resource', 'crop');
+    const orderAmt = this.gmNum('villager_request_order_amount', 500);
+    const order = await this.commands.send({
+      name: 'trade.CreateNpcOrder', from: TasksModule.NAME,
+      payload: { villageId, npcId, npcXY: { q, r }, want: { [orderRes]: orderAmt }, ownerName: '幸福村' },
+    });
+    inst.npcVillageId = npcId;
+    inst.npcXY = { q, r };
+    inst.npcRes = orderRes;
+    inst.npcAmt = orderAmt;
+    inst.npcOrderId = (order.payload as any)?.id ?? null;
+    inst.npcPending = false;
+    this.store.set(COLLECTION, villageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+  }
+
+  /** 挂起态重试：贸易中心建成后或临时无空地恢复后补生成幸福村。 */
+  private async retryNpcSpawn(villageId: string, s: TaskState, inst: TaskInstance): Promise<void> {
+    if (!inst.npcPending) return;
+    inst.npcPending = false;
+    await this.spawnNpcVillage(villageId, s, inst);
+  }
+
+  private scheduleNpcRetry(villageId: string, inst: TaskInstance): void {
+    this.scheduler.schedule(30_000, () => {
+      const s = this.load(villageId);
+      const cur = s?.active[inst.code];
+      if (s && cur && cur.npcPending) void this.retryNpcSpawn(villageId, s, cur);
+    }, `task-npc:${villageId}:${inst.code}`, `village:${villageId}`);
+  }
+
+  /** 移除幸福村地块与对应贸易订单（任务完成/失败/放弃时清理）。 */
+  private async removeNpc(villageId: string, inst: TaskInstance): Promise<void> {
+    if (!inst.npcVillageId) return;
+    await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.npcVillageId } });
+    if (inst.npcOrderId) {
+      await this.commands.send({ name: 'trade.RemoveNpcOrder', from: TasksModule.NAME, payload: { villageId, orderId: inst.npcOrderId } });
+    }
+  }
+
+  /** 商队抵达幸福村（npc 非玩家村庄）→ 校验货量达标则完成任务（发娜塔莉 + 清幸福村 + 清订单）。 */
+  private async onCaravanArrivedNpc(evt: DomainEvent): Promise<void> {
+    const { villageId, npcId, cargo } = evt.payload as { villageId: string; npcId: string; cargo?: Record<string, number> };
+    if (!villageId || !npcId) return;
+    const s = this.load(villageId);
+    if (!s) return;
+    for (const [code, inst] of Object.entries(s.active)) {
+      const q = this.quest(code);
+      if (q?.objective.kind !== 'deliver_to_npc') continue;
+      if (inst.npcVillageId !== npcId) continue;
+      const res = q.objective.deliverResource ?? 'crop';
+      const amount = q.objective.deliverAmount ?? 1;
+      const have = Math.floor(Number(cargo?.[res]) || 0);
+      if (have < amount) continue; // 货量不足：忽略本次，等待后续送达
+      // 先清幸福村与订单，再走通用完成流程发娜塔莉
+      await this.removeNpc(villageId, inst);
+      await this.completeQuest(villageId, code);
+      return;
+    }
+  }
+
+  /** 使用秘密字条生成战报 → 解锁后续「调查坐标」任务。 */
+  private async onReportCoords(evt: DomainEvent): Promise<void> {
+    const { villageId } = evt.payload as { villageId: string };
+    if (!villageId) return;
+    const s = this.ensureState(villageId);
+    if (!s.firedTriggers.includes('secret_note_used')) {
+      s.firedTriggers.push('secret_note_used');
+      this.store.set(COLLECTION, villageId, s);
+      await this.unlockSideQuests(villageId);
+    }
+  }
+
   // ── 进度判定 ──
   private submitMet(inst: TaskInstance, required: Record<string, number>): boolean {
     for (const [res, need] of Object.entries(required)) {
@@ -954,6 +1138,8 @@ export class TasksModule {
       count: q.objective.count ?? 0,
       flagCode: q.objective.flagCode ?? null,
       minTroops: q.objective.minTroops ?? 0,
+      deliverResource: q.objective.deliverResource ?? null,
+      deliverAmount: q.objective.deliverAmount ?? 0,
     };
   }
 
@@ -975,6 +1161,12 @@ export class TasksModule {
       awaitingReturn: inst.qualifiedMovements?.length ?? 0,
       deliverableFlags: inst.qualifiedFlagMovements?.length ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),
+      npcVillageId: inst.npcVillageId ?? null,
+      npcXY: inst.npcXY ?? null,
+      npcRes: inst.npcRes ?? null,
+      npcAmt: inst.npcAmt ?? 0,
+      npcOrderId: inst.npcOrderId ?? null,
+      npcPending: inst.npcPending === true,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,
       canDeliver: inst.readyToDeliver === true,

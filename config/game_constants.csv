@@ -68,3 +68,13 @@ pvp_recovery_cooldown_sec,86400,number,战败恢复冷却秒数
 pvp_recovery_trigger_total_ratio,0.20,number,战后四资源总量低于总容量此比例才触发恢复
 pvp_recovery_resource_ratio,0.10,number,战败恢复把每种基础资源补到容量比例
 pvp_recovery_gold_floor,100,number,战败恢复金币下限
+villager_request_trigger_chance,0.3,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
+villager_request_order_resource,crop,string,幸福村贸易订单所需资源种类（key∈resources.csv）
+villager_request_order_amount,500,number,幸福村贸易订单所需资源数量
+villager_request_spawn_radius,3,number,幸福村生成于玩家村庄周围的六边形环数（仅邻近 3 格内）
+villager_request_npc_wood,200,number,幸福村被掠夺时可抢木材
+villager_request_npc_clay,200,number,幸福村被掠夺时可抢泥土
+villager_request_npc_iron,200,number,幸福村被掠夺时可抢铁矿
+villager_request_npc_gold,100,number,幸福村被掠夺时可抢金币
+villager_request_report_count,3,number,秘密字条战报标记的坐标数量
+villager_request_report_radius,5,number,秘密字条战报搜索玩家村庄周围的六边形环数

@@ -887,6 +887,45 @@ export class TreasureModule {
       };
     }
 
+    if (t.effectType === 'reportCoords') {
+      // 秘密字条：使用后生成一份战报，标记玩家村庄附近若干随机空地的坐标（供「调查坐标」任务后续使用）
+      const c = this.config.constants;
+      const rawNum = (k: string, d: number): number => {
+        const v = c.raw?.[k];
+        return typeof v === 'number' ? v : d;
+      };
+      const count = Math.max(1, rawNum('villagerRequestReportCount', 3));
+      const radius = Math.max(1, rawNum('villagerRequestReportRadius', 5));
+      const vTile = await this.commands.send({
+        name: 'world.GetTileByRef', from: TreasureModule.NAME,
+        payload: { refId: villageId, kind: 'village' },
+      });
+      const vXY = (vTile.payload as any)?.tile;
+      const coords: { q: number; r: number }[] = [];
+      if (vXY) {
+        // 取村庄周边半径内的所有地块（不传 playerId → 返回原始地块），筛空地后随机抽 count 个
+        const area = await this.commands.send({
+          name: 'world.GetArea', from: TreasureModule.NAME,
+          payload: { cq: vXY.q, cr: vXY.r, r: radius },
+        });
+        const empties: any[] = ((area.payload as any)?.tiles ?? []).filter((t: any) => t.kind === 'empty');
+        const pool = [...empties];
+        for (let i = 0; i < count && pool.length > 0; i++) {
+          const idx = Math.floor(this.rng() * pool.length);
+          coords.push({ q: pool[idx].q, r: pool[idx].r });
+          pool.splice(idx, 1);
+        }
+      }
+      // 战报持久化 + 解锁「调查坐标」任务（secret_note_used 触发）
+      await this.bus.emit({
+        name: 'treasure.ReportCoords', source: TreasureModule.NAME, ts: this.now(),
+        payload: { villageId, coords },
+      } as DomainEvent);
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { coords, codes: this.storedCodes(s) } };
+    }
+
     return { ok: false, payload: {}, reason: 'not_usable' };
   }
 

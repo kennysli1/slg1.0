@@ -39,6 +39,7 @@ export const EVENT_MAP: Record<string, string> = {
   'treasure.PendingExpired':   'TreasurePendingExpired',
   'treasure.CarriedArrived':   'TreasureCarriedArrived',
   'treasure.DemolishRedistributed': 'TreasureDemolishRedistributed',
+  'treasure.ReportCoords':      'TreasureReport',
 };
 
 export class NotificationsModule {

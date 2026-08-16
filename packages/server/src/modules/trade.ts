@@ -76,6 +76,23 @@ interface PlayerOrder {
   ttlAt: number;
 }
 
+/** 来自 NPC 村庄（幸福村）的送达订单：玩家需向幸福村运送指定资源以推进「村民的请求」任务。 */
+interface NpcDeliveryOrder {
+  id: string;
+  /** 幸福村（pve 目标）的 refId。 */
+  npcId: string;
+  /** 幸福村坐标（商队目的地，客户端展示用）。 */
+  npcXY: Hex;
+  /** 玩家需运送给幸福村的资源（如 { crop: 500 }）。 */
+  want: Record<string, number>;
+  /** 占用贸易路线数（按 want 单位数 / 路线运力 向上取整）。 */
+  routesNeeded: number;
+  /** 展示归属名（幸福村）。 */
+  ownerName: string;
+  createdAt: number;
+  ttlAt: number;
+}
+
 interface TradeCenterState {
   villageId: string;
   /** 中心等级（缓存自 building.GetBuildingLevel；升级时刷新）。 */
@@ -90,6 +107,8 @@ interface TradeCenterState {
   tradeRoutesUsed: number;
   /** 本村挂出的玩家订单。 */
   createdOrders: PlayerOrder[];
+  /** 来自 NPC 村庄（幸福村）的送达订单。 */
+  npcDeliveryOrders: NpcDeliveryOrder[];
   taskId?: string;
 }
 
@@ -147,6 +166,11 @@ export class TradeModule {
     this.commands.register('trade.CreateOrder', (c) => this.createOrder(c));
     this.commands.register('trade.AcceptPlayer', (c) => this.acceptPlayer(c));
     this.commands.register('trade.CancelOrder', (c) => this.cancelOrder(c));
+    // 任务模块内部命令：注入 / 移除「幸福村」送达订单
+    this.commands.register('trade.CreateNpcOrder', (c) => this.createNpcOrder(c));
+    this.commands.register('trade.RemoveNpcOrder', (c) => this.removeNpcOrder(c));
+    // 玩家在贸易中心接单：把资源送往幸福村（网关对外暴露）
+    this.commands.register('trade.AcceptNpcDelivery', (c) => this.acceptNpcDelivery(c));
 
     // 中心建成/升级 → 确保中心状态存在并刷新参数。
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -166,6 +190,7 @@ export class TradeModule {
 
   resume(): void {
     for (const s of this.store.all<TradeCenterState>(COLLECTION)) {
+      s.npcDeliveryOrders = s.npcDeliveryOrders ?? [];
       // 重建全局挂单索引
       for (const o of s.createdOrders) this.orders.set(o.id, o);
       // 过期挂单清理
@@ -330,7 +355,7 @@ export class TradeModule {
       const nextRefreshAt = expiresAt;
       const s: TradeCenterState = {
         villageId, level, npcOrderPool: pool, storedRefreshes: 0,
-        nextRefreshAt, tradeRoutesUsed: 0, createdOrders: [],
+        nextRefreshAt, tradeRoutesUsed: 0, createdOrders: [], npcDeliveryOrders: [],
       };
       s.taskId = this.scheduleRefresh(villageId, nextRefreshAt);
       this.store.set(COLLECTION, villageId, s);
@@ -339,6 +364,7 @@ export class TradeModule {
     }
     // 升级：更新等级、按新间隔重排自动刷新；保留订单池与已存储次数。
     existing.level = level;
+    existing.npcDeliveryOrders = existing.npcDeliveryOrders ?? [];
     existing.nextRefreshAt = this.now() + tc.npcRefreshSec * 1000;
     existing.taskId = this.scheduleRefresh(villageId, existing.nextRefreshAt);
     this.store.set(COLLECTION, villageId, existing);
@@ -383,7 +409,7 @@ export class TradeModule {
     const s = this.load(villageId);
     const level = await this.getCenterLevel(villageId);
     if (!s || level <= 0) {
-      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
+      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcDeliveryOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
     }
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
@@ -447,6 +473,10 @@ export class TradeModule {
         npcMaxStored: tc.npcStoredRefreshes,
         npcRefreshSec: tc.npcRefreshSec,
         npcNextRefreshAt: s.nextRefreshAt,
+        npcDeliveryOrders: s.npcDeliveryOrders.map((o) => ({
+          id: o.id, npcId: o.npcId, npcXY: o.npcXY, want: o.want, routesNeeded: o.routesNeeded,
+          ownerName: o.ownerName, ttlAt: o.ttlAt,
+        })),
         playerOrders,
         myOrders,
         playerOrderMax: this.config.constants.tradeOrderMaxPerVillage ?? 5,
@@ -735,6 +765,78 @@ export class TradeModule {
       s.createdOrders = s.createdOrders.filter((o) => o.id !== order.id);
       this.store.set(COLLECTION, order.villageId, s);
     }
+  }
+
+  // ── NPC 送达订单（幸福村 / 村民的请求） ──────────────────────────────────────
+
+  /** 任务模块调用：在指定村庄的贸易中心注入一条来自幸福村的送达订单（向幸福村运送 want 资源）。 */
+  private async createNpcOrder(cmd: Command): Promise<CommandResult> {
+    const { villageId, npcId, npcXY, want, ownerName } = cmd.payload as {
+      villageId: string; npcId: string; npcXY: Hex; want: Record<string, number>; ownerName?: string;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'no_center' };
+    const cleanWant = this.cleanRes(want ?? {});
+    if (Object.keys(cleanWant).length === 0) return { ok: false, payload: {}, reason: 'empty_payload' };
+    const routesNeeded = Math.ceil(this.sumUnits(cleanWant) / this.routeCapacity());
+    const order: NpcDeliveryOrder = {
+      id: this.nextId(), npcId, npcXY, want: cleanWant, routesNeeded,
+      ownerName: ownerName ?? '幸福村', createdAt: this.now(), ttlAt: this.now() + 1e9,
+    };
+    s.npcDeliveryOrders.push(order);
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
+    return { ok: true, payload: { id: order.id } };
+  }
+
+  /** 任务模块调用：移除一条幸福村送达订单（任务完成/失败/放弃时清理）。 */
+  private async removeNpcOrder(cmd: Command): Promise<CommandResult> {
+    const { villageId, orderId } = cmd.payload as { villageId: string; orderId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: true, payload: {} };
+    s.npcDeliveryOrders = s.npcDeliveryOrders.filter((o) => o.id !== orderId);
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
+    return { ok: true, payload: {} };
+  }
+
+  /** 玩家在贸易中心接单：把 want 资源送往幸福村（NPC 不付任何代价，仅单向商队；任务模块据到达事件推进）。 */
+  private async acceptNpcDelivery(cmd: Command): Promise<CommandResult> {
+    const { villageId, orderId } = cmd.payload as { villageId: string; orderId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'no_center' };
+    const order = s.npcDeliveryOrders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, payload: {}, reason: 'order_not_found' };
+    const level = await this.getCenterLevel(villageId);
+    const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
+    const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
+    if (order.routesNeeded > available) return { ok: false, payload: { routesNeeded: order.routesNeeded, available }, reason: 'insufficient_routes' };
+
+    // 资源预检 + 扣减（仅扣玩家资源；幸福村无需付任何东西）
+    const aRes = await this.commands.send({ name: 'economy.GetResources', from: TradeModule.NAME, payload: { villageId } });
+    const aResources = (aRes.payload as any)?.resources ?? {};
+    for (const k of RES_KEYS) {
+      if ((order.want[k] ?? 0) > (aResources[k] ?? 0)) return { ok: false, payload: { res: k }, reason: 'acceptor_insufficient_resource' };
+    }
+    const spend = await this.commands.send({ name: 'economy.TrySpend', from: TradeModule.NAME, payload: { villageId, cost: order.want } });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+
+    // 派单向商队：acceptor → 幸福村（NPC 无经济/状态，不回程货物，仅回收贸易路线）
+    const caravan = await this.commands.send({
+      name: 'movement.SendCaravan', from: TradeModule.NAME,
+      payload: { fromVillage: villageId, targetVillage: order.npcId, cargo: order.want, homeVillage: villageId, routesFreed: order.routesNeeded },
+    });
+    if (!caravan.ok) {
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: order.want } });
+      return { ok: false, payload: {}, reason: caravan.reason ?? 'caravan_failed' };
+    }
+    s.tradeRoutesUsed += order.routesNeeded;
+    // 接单后从列表移除（任务模块据 CaravanArrivedNpc 推进，无需保留挂单）
+    s.npcDeliveryOrders = s.npcDeliveryOrders.filter((o) => o.id !== orderId);
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
+    const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
+    return { ok: true, payload: (base.payload as any) };
   }
 
   // ── 运维钩子（app.ts 调用） ────────────────────────────────────────────────

@@ -405,3 +405,146 @@ test('日常任务可反复：完成后刷新可再次刷出', async () => {
   const st4 = await send(app, 'task.GetState', { villageId: va });
   assert.ok((st4.payload as any).offered.length > 0, '刷新后酒馆仍应有日常任务可刷');
 });
+
+test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易中心)生成幸福村与送达订单', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '村民请求触发测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  // 强制触发概率=1，消除随机性
+  app.config.constants.raw['villager_request_trigger_chance'] = 1;
+
+  // 模拟成功掠夺一个普通 PvE 营地（targetId 不以 happy- 开头）
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' },
+  } as any);
+  await tick();
+
+  const st = await send(app, 'task.GetState', { villageId: va });
+  const p = st.payload as any;
+  assert.ok(p.offeredSide.some((q: any) => q.code === 'villager_request'), '清空普通 PvE 营地后应点亮「村民的请求」支线');
+
+  // 准备贸易中心（写入 building 状态并触发 trade 初始化）
+  app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
+  await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
+  await tick();
+
+  // 接取支线
+  const acc = await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  assert.equal(acc.ok, true, `接取应成功: ${acc.reason ?? ''}`);
+  await tick();
+
+  // 幸福村 pve 目标应已生成
+  const npcId = `happy-${va}`;
+  const npc = await send(app, 'pve.GetTarget', { id: npcId });
+  assert.equal(npc.ok, true, '幸福村 NPC 目标应已生成');
+  const npcPayload = npc.payload as any;
+  assert.equal(npcPayload.ownerVillageId, va, '幸福村应绑定玩家村（仅主人可掠夺）');
+  assert.deepEqual(npcPayload.loot, { wood: 200, clay: 200, iron: 200, gold: 100 }, '幸福村掠夺资源应为 200/200/200/100');
+  assert.equal(npcPayload.noRespawn, true, '幸福村应标记不重生');
+
+  // 贸易中心应有幸福村送达订单（crop 500）
+  const tc = await send(app, 'trade.GetCenter', { villageId: va });
+  const orders = (tc.payload as any).npcDeliveryOrders ?? [];
+  assert.equal(orders.length, 1, '贸易中心应有 1 条幸福村订单');
+  assert.equal(orders[0].want.crop, 500, '订单应为 500 粮食');
+  assert.equal(orders[0].npcId, npcId, '订单应指向幸福村');
+});
+
+test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获得秘密字条', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '村民请求失败测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  app.config.constants.raw['villager_request_trigger_chance'] = 1;
+  await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' } } as any);
+  await tick();
+  app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
+  await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
+  await tick();
+  await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  await tick();
+
+  const npcId = `happy-${va}`;
+  // 掠夺幸福村（失败路径）
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: npcId, attackerWins: true, campCleared: true, battleId: 'b2' },
+  } as any);
+  await tick();
+
+  const st = await send(app, 'task.GetState', { villageId: va });
+  const p = st.payload as any;
+  assert.ok(!p.active.some((a: any) => a.code === 'villager_request'), '掠夺幸福村后任务应终止');
+  assert.ok(p.abandonedSide.includes('villager_request'), '失败路径应记入 abandonedSide（不再出现）');
+  const treasure = app.store.get<any>('treasure', va);
+  const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
+  assert.ok(codes.includes('secret_note'), '失败应获得秘密字条');
+  const npc = await send(app, 'pve.GetTarget', { id: npcId });
+  assert.equal(npc.ok, false, '幸福村地块应已被移除');
+});
+
+test('村民的请求：接单送粮完成 → 获得娜塔莉，幸福村与订单消失', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '村民请求完成测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  app.config.constants.raw['villager_request_trigger_chance'] = 1;
+  await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' } } as any);
+  await tick();
+  app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
+  await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
+  await tick();
+  await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  await tick();
+
+  const npcId = `happy-${va}`;
+  // 接取幸福村送达订单（扣粮 + 派商队 + 移除订单）
+  await grant(app, va, { crop: 1000 });
+  const tc = await send(app, 'trade.GetCenter', { villageId: va });
+  const orderId = (tc.payload as any).npcDeliveryOrders[0].id;
+  const acc = await send(app, 'trade.AcceptNpcDelivery', { villageId: va, orderId });
+  assert.equal(acc.ok, true, `接单应成功: ${acc.reason ?? ''}`);
+  await tick();
+  const tc2 = await send(app, 'trade.GetCenter', { villageId: va });
+  assert.equal((tc2.payload as any).npcDeliveryOrders.length, 0, '接单后订单应从贸易中心移除');
+
+  // 商队抵达幸福村（movement.arriveCaravan 会发此事件）
+  await app.bus.emit({
+    name: 'movement.CaravanArrivedNpc', source: 'test', ts: clock,
+    payload: { villageId: va, npcId, cargo: { crop: 500 } },
+  } as any);
+  await tick();
+
+  const st = await send(app, 'task.GetState', { villageId: va });
+  const p = st.payload as any;
+  assert.ok(p.completedSide.includes('villager_request'), '送达后任务应完成');
+  assert.ok(!p.active.some((a: any) => a.code === 'villager_request'), '任务应移出 active');
+  const treasure = app.store.get<any>('treasure', va);
+  const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
+  assert.ok(codes.includes('natalie'), '完成应获得娜塔莉');
+  const npc = await send(app, 'pve.GetTarget', { id: npcId });
+  assert.equal(npc.ok, false, '幸福村应随任务完成消失');
+});
+
+test('秘密字条：使用后生成战报并解锁「调查坐标」', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '秘密字条测试');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  app.store.set('treasure', va, {
+    villageId: va, town: ['secret_note'], treasury: [], carried: {}, extraSlots: 0,
+    hasTradeCenter: false, locked: [], victoryFlagBonus: 0, victoryFlagQualified: {},
+  });
+  const use = await send(app, 'treasure.Use', { villageId: va, code: 'secret_note' });
+  assert.equal(use.ok, true, `使用秘密字条应成功: ${use.reason ?? ''}`);
+  await tick();
+
+  const st = await send(app, 'task.GetState', { villageId: va });
+  const p = st.payload as any;
+  assert.ok(p.offeredSide.some((q: any) => q.code === 'investigate_coords'), '使用秘密字条后应解锁「调查坐标」支线');
+  const treasure = app.store.get<any>('treasure', va);
+  const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
+  assert.ok(!codes.includes('secret_note'), '秘密字条使用后应被消耗');
+});
