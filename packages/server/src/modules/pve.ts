@@ -1,4 +1,4 @@
-import type { Command, CommandResult } from '@slg/shared';
+import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
@@ -106,6 +106,11 @@ export class PveModule {
       name: 'world.RemoveTile', from: PveModule.NAME,
       payload: { q: s.q, r: s.r, refId: id },
     });
+    // 目标被移除：通知行军模块——所有前往该目标的出征/商队应原路返回（见 movement.onTargetRemoved）。
+    void this._bus.emit({
+      name: 'pve.TargetRemoved', source: PveModule.NAME, ts: this.now(),
+      payload: { id, q: s.q, r: s.r },
+    } as DomainEvent);
     return { ok: true, payload: { id } };
   }
 
