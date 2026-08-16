@@ -76,6 +76,12 @@ interface TaskInstance {
   npcAmt?: number;
   /** deliver_to_npc：等待贸易中心建成后再生成幸福村的挂起标记。 */
   npcPending?: boolean;
+  /** ② 调查坐标末营清剿后掉落的 captured_natalies 待玩家抉择（入库=完成任务 / 释放=领取奖励）。 */
+  awaitingNatalieDecision?: boolean;
+  /** 与 awaitingNatalieDecision 配套：等待抉择的宝物 code（当前固定 captured_natalies）。 */
+  awaitingNatalieCode?: string;
+  /** 玩家对 captured_natalies 的抉择结果：'store'=入库完成任务 / 'release'=释放领取奖励。 */
+  natalieDecision?: 'store' | 'release';
 }
 
 interface TaskState {
@@ -150,6 +156,7 @@ export class TasksModule {
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
     this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
+    this.commands.register('task.GmRetriggerAbandoned', (c: Command) => this.gmRetriggerAbandoned(c));
 
     // 酒馆建造/升级/拆除 → 重排随机刷新节奏 + 接取上限
     const onTavern = (evt: DomainEvent) => {
@@ -175,6 +182,9 @@ export class TasksModule {
     this.bus.on('movement.CaravanArrivedNpc', (evt: DomainEvent) => void this.onCaravanArrivedNpc(evt));
     // 使用秘密字条生成战报 → 解锁「调查坐标」任务
     this.bus.on('treasure.ReportCoords', (evt: DomainEvent) => void this.onReportCoords(evt));
+    // ② captured_natalies 报告被玩家抉择（入库/释放）→ 决定是否标记任务就绪
+    this.bus.on('treasure.PendingClaimed', (evt: DomainEvent) => void this.onNatalieDecision(evt));
+    this.bus.on('treasure.PendingExpired', (evt: DomainEvent) => void this.onNatalieExpired(evt));
   }
 
   async resume(): Promise<void> {
@@ -582,6 +592,54 @@ export class TasksModule {
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
+  /** ③ 把已放弃的支线任务恢复为可接取：移出 abandonedSide 并清空触发/冷却，重新进入可接取列表。 */
+  private async gmRetriggerAbandoned(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_side_supported' };
+    const s = this.ensureState(villageId);
+    if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
+    s.abandonedSide = s.abandonedSide.filter((c) => c !== code);
+    // 重新触发：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
+    // （与 gmReopenCompleted 相反：那里是已完成→需世界事件重新触发，故移除触发标记；
+    //   这里是已放弃→GM 强制重新出现，故补回触发标记。）
+    if (q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
+    if (s.cooldownUntil) delete s.cooldownUntil[code];
+    this.store.set(COLLECTION, villageId, s);
+    await this.unlockSideQuests(villageId);
+    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+  }
+
+  /** ② captured_natalies 报告被玩家抉择（入库/释放）→ 标记调查坐标任务就绪。 */
+  private async onNatalieDecision(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId: string; code: string; stored?: boolean; released?: boolean };
+    if (p.code !== 'captured_natalies') return;
+    const s = this.load(p.villageId);
+    if (!s) return;
+    const inst = Object.values(s.active).find((i) => i.awaitingNatalieDecision && i.awaitingNatalieCode === 'captured_natalies');
+    if (!inst) return;
+    inst.awaitingNatalieDecision = false;
+    inst.natalieDecision = p.released ? 'release' : 'store';
+    this.store.set(COLLECTION, p.villageId, s);
+    await this.markReady(p.villageId, inst.code);
+  }
+
+  /** ② captured_natalies 报告超时未处理：重新投放，给玩家再次抉择机会（避免任务卡死）。 */
+  private async onNatalieExpired(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId: string; code: string };
+    if (p.code !== 'captured_natalies') return;
+    const s = this.load(p.villageId);
+    if (!s) return;
+    const inst = Object.values(s.active).find((i) => i.awaitingNatalieDecision && i.awaitingNatalieCode === 'captured_natalies');
+    if (!inst) return;
+    await this.commands.send({
+      name: 'treasure.Grant', from: TasksModule.NAME,
+      payload: { villageId: p.villageId, code: 'captured_natalies', pendingIfFull: true },
+    });
+  }
+
   /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
   private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
@@ -704,12 +762,21 @@ export class TasksModule {
       inst.campCleared = (inst.campCleared ?? 0) + 1;
       this.store.set(COLLECTION, villageId, s);
       if (inst.campCleared >= inst.camps.length) {
-        // 最后一处营地清剿：掉落「被囚禁的娜塔莉们」（走标准待领取报告流程，需军队归村后才可领取）
+        // 最后一处营地清剿：掉落「被囚禁的娜塔莉们」（走标准待领取报告流程，需军队归村后才可领取）。
+        // ② 仅调查坐标：在玩家抉择前不标记可交付；置 awaitingNatalieDecision，待 treasure.PendingClaimed 后再 markReady。
         await this.commands.send({
           name: 'treasure.RollDrop', from: TasksModule.NAME,
           payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
         });
-        await this.markReady(villageId, code);
+        if (code === 'investigate_coords') {
+          inst.awaitingNatalieDecision = true;
+          inst.awaitingNatalieCode = 'captured_natalies';
+          this.store.set(COLLECTION, villageId, s);
+          await this.pushList(villageId);
+          await this.pushMap(villageId);
+        } else {
+          await this.markReady(villageId, code);
+        }
       } else {
         await this.pushList(villageId);
         await this.pushMap(villageId);
@@ -1175,6 +1242,8 @@ export class TasksModule {
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,
       canDeliver: inst.readyToDeliver === true,
+      awaitingNatalieDecision: inst.awaitingNatalieDecision === true,
+      natalieDecision: inst.natalieDecision ?? null,
       acceptedAt: inst.acceptedAt,
     };
   }

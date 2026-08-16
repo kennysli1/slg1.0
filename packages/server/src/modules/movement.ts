@@ -1558,6 +1558,12 @@ export class MovementModule {
     this.store.set(COLLECTION, mv.id, mv);
     this.scheduler.schedule(perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
     log('目标消失·原路返回', { id: mv.id, type: mv.type, from: mv.fromVillage });
+    // ① 修复：返程改写后必须广播 movement.Sent，否则客户端 ListForeign 轮询缓存不刷新，
+    // 视觉上表现为「未返程 / 运送倒计时被重置」。网关按 villageId 定向推送，客户端 refreshAll 重拉行军列表。
+    void this.bus.emit({
+      name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
+      payload: { id: mv.id, type: mv.type, villageId: mv.fromVillage, q: mv.toXY.q, r: mv.toXY.r, arriveAt: mv.arriveAt },
+    } as DomainEvent);
   }
 
   /** 返程到达：兵力归队 + 战利品入库。 */

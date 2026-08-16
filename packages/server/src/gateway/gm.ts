@@ -908,6 +908,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.post('/gm/ops/task/submit', (req, reply) => taskOp(req, reply, 'task.SubmitResources', (b) => ({ villageId: b.villageId, code: b.code, resources: b.resources ?? {} })));
   fastify.post('/gm/ops/task/complete', (req, reply) => taskOp(req, reply, 'task.GmComplete', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/reopen-completed', (req, reply) => taskOp(req, reply, 'task.GmReopenCompleted', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/refresh', (req, reply) => taskOp(req, reply, 'task.GmRefreshRandom', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset', (req, reply) => taskOp(req, reply, 'task.GmReset', (b) => ({ villageId: b.villageId })));
 
@@ -1114,7 +1115,12 @@ function render(s){
     h+='<div class="card">'+esc(sc)+' <button class="act" data-act="reopen" data-code="'+esc(sc)+'">标记未完成（重新触发）</button></div>';
   }
   if(!(s.completedSide||[]).length)h+='<div class="card">无</div>';
-  h+='<h2>已放弃支线</h2><div class="card">'+(s.abandonedSide||[]).join(', ')+'</div>';
+  h+='<h2>已放弃支线</h2>';
+  if((s.abandonedSide||[]).length){
+    for(var m=0;m<(s.abandonedSide||[]).length;m++){var ab=s.abandonedSide[m];
+      h+='<div class="card">'+esc(ab)+' <button class="act" data-act="retrigger" data-code="'+esc(ab)+'">重新触发</button></div>';
+    }
+  } else { h+='<div class="card">无</div>'; }
   document.getElementById('content').innerHTML=h;
 }
 document.addEventListener('click',function(e){
@@ -1125,11 +1131,13 @@ document.addEventListener('click',function(e){
   else if(act==='accept')doAccept(code);
   else if(act==='submit')doSubmit(code);
   else if(act==='reopen')doReopen(code);
+  else if(act==='retrigger')doRetrigger(code);
 });
 async function doComplete(code){var r=await api('POST','/ops/task/complete',{villageId:vid(),code:code});after(r,'完成');}
 async function doAbandon(code){var r=await api('POST','/ops/task/abandon',{villageId:vid(),code:code});after(r,'放弃');}
 async function doAccept(code){var r=await api('POST','/ops/task/accept',{villageId:vid(),code:code});after(r,'接取');}
 async function doReopen(code){if(!confirm('标记 '+code+' 为未完成后，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/reopen-completed',{villageId:vid(),code:code});after(r,'标记未完成');}
+async function doRetrigger(code){if(!confirm('重新触发 '+code+'？该支线将从「已放弃」移出并重新进入可接取列表。'))return;var r=await api('POST','/ops/task/retrigger-abandoned',{villageId:vid(),code:code});after(r,'重新触发');}
 async function doSubmit(code){var raw=document.querySelector('input.res[data-code="'+code+'"]').value.trim();var res={};raw.split(',').forEach(function(p){var kv=p.split(':');if(kv.length===2)res[kv[0].trim()]=Number(kv[1].trim());});var r=await api('POST','/ops/task/submit',{villageId:vid(),code:code,resources:res});after(r,'上交');}
 async function refreshRandom(){var r=await api('POST','/ops/task/refresh',{villageId:vid()});after(r,'刷新随机');}
 async function resetTasks(){if(!confirm('确认重置该村全部任务进度（重激活主线 m1）？'))return;var r=await api('POST','/ops/task/reset',{villageId:vid()});after(r,'重置');}

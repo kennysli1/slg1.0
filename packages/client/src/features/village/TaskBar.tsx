@@ -256,7 +256,7 @@ function TaskCard({ task }: { task: any }) {
 
       <div class="task-card-actions">
         {task.ready ? (
-          <Btn size="sm" variant="primary" onClick={onDeliver}>交付领取奖励</Btn>
+          <Btn size="sm" variant="primary" onClick={onDeliver}>{task.natalieDecision === 'release' ? '领取奖励' : '完成任务'}</Btn>
         ) : (
           <>
             {o.kind === 'submit_resources' && (
