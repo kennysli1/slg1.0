@@ -92,6 +92,8 @@ interface PendingTreasure {
   expiresAt: number;
   /** 军队到家时间戳（仅 kind='camp' 有效；deliver 在创建时已在场故无此字段）。claimPending 必须等军队归村后才允许领取 camp 掉落。 */
   arrivedAt?: number;
+  /** ④ 胜利旗帜经「报告(满栏转 deliver)」路径领回时，标记该 pending 携带 +2% 加成资格。 */
+  victoryFlagQualified?: boolean;
   /** 预计军队到家时间戳（仅 kind='camp' 有效）。rollDrop 时按运动常量估算占位，movement.onBattleEnded 创建返程后用真实 arrivesAt 精化。客户端在 !arrivedAt 时用此字段渲染「还有多久抵达」倒计时。 */
   expectedArrivalAt?: number;
   /** 该待领取宝物由「军队带出的宝物返程回家」产生（storeCarried 因满栏转出的 deliver）。仅为 UI 标记（显示「本村带回」badge），multiset 下重复不再特殊处理。 */
@@ -571,7 +573,7 @@ export class TreasureModule {
   }
 
   /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
-  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false): void {
+  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false): void {
     const t = this.config.treasures[code];
     if (!t) return;
     const now = this.now();
@@ -582,7 +584,7 @@ export class TreasureModule {
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
       priceGold: t.priceGold, kind: 'deliver', createdAt: now, expiresAt: now + timeoutMs,
-      fromCarry,
+      fromCarry, victoryFlagQualified,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
     this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
@@ -690,12 +692,16 @@ export class TreasureModule {
     }
     delete s.carried[movementId];
     // 成功战果只有在旗帜随幸存者归城并真正存回时才兑现；全灭、被夺或未归城均不会增长。
-    if (storedCodes.includes('victory_flag') && s.victoryFlagQualified?.[movementId]) {
+    // ④ 若宝物栏已满、旗帜转为「报告」(deliver pending)，资格一并转入 pending，待玩家收下时兑现 +2%。
+    const vfgQualified = s.victoryFlagQualified?.[movementId] === true;
+    if (storedCodes.includes('victory_flag') && vfgQualified) {
       s.victoryFlagBonus = Math.max(0, (s.victoryFlagBonus ?? 0) + 2);
-      delete s.victoryFlagQualified[movementId];
     }
+    if (vfgQualified && s.victoryFlagQualified) delete s.victoryFlagQualified[movementId];
     this.store.set(COLLECTION, villageId, s);
-    for (const code of pendingCodes) this.createDeliverPending(villageId, code, undefined, true);
+    for (const code of pendingCodes) {
+      this.createDeliverPending(villageId, code, undefined, true, code === 'victory_flag' && vfgQualified);
+    }
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
     await this.bus.emit({ name: 'treasure.CarriedStored', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, movementId, codes: storedCodes } } as DomainEvent);
@@ -1182,6 +1188,10 @@ export class TreasureModule {
       });
     }
     if (stored) {
+      // ④ 胜利旗帜经「报告」路径收下：兑现 +2% 加成资格
+      if (p.victoryFlagQualified) {
+        s.victoryFlagBonus = Math.max(0, (s.victoryFlagBonus ?? 0) + 2);
+      }
       this.store.set(COLLECTION, p.villageId, s);
       await this.recomputeAndPush(p.villageId);
     }
@@ -1189,6 +1199,11 @@ export class TreasureModule {
     this.store.delete(COLLECTION_PENDING, movementId);
     this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
     await this.emitChanged(p.villageId);
+    // ② 通知任务模块：报告已被玩家抉择（入库/释放），用于解锁调查坐标的「完成/领取奖励」按钮
+    await this.bus.emit({
+      name: 'treasure.PendingClaimed', source: TreasureModule.NAME, ts: this.now(),
+      payload: { villageId: p.villageId, movementId, code: p.code, stored, released, sold, discarded },
+    } as DomainEvent);
     return {
       ok: true,
       payload: {

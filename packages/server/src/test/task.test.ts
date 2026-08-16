@@ -608,7 +608,9 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
 
   const st3 = await send(app, 'task.GetState', { villageId: va });
   const inst3 = st3.payload.active.find((a: any) => a.code === 'investigate_coords');
-  assert.ok(inst3.ready === true, '清剿 3 处后应就绪可交付');
+  assert.ok(inst3.ready === false, '清剿 3 处后未抉择 captured_natalies 前不应就绪可交付');
+  assert.ok(inst3.awaitingNatalieDecision === true, '清剿 3 处后应等待玩家抉择 captured_natalies');
+  assert.equal(inst3.natalieDecision, null, '抉择前 natalieDecision 应为空');
   const pend = (app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va);
   assert.equal(pend.length, 1, '第 3 处清剿应掉落 1 件待领取宝物');
   assert.equal(pend[0].code, 'captured_natalies', '掉落应为「被囚禁的娜塔莉们」');
@@ -630,6 +632,11 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   await tick();
   const popA = app.store.get<any>('population', va);
   assert.ok(popA.treasureGrowthMult >= 1.2 - 1e-9, `放入宝库应使人口增长倍率≥1.2（实际 ${popA.treasureGrowthMult}）`);
+  // 放入宝库（take）后任务应变为就绪可交付，且记 natalieDecision=store（完成任务）
+  const stA = await send(app, 'task.GetState', { villageId: va });
+  const instA = stA.payload.active.find((a: any) => a.code === 'investigate_coords');
+  assert.ok(instA.ready === true, '放入宝库（take）后任务应就绪可交付');
+  assert.equal(instA.natalieDecision, 'store', '放入宝库应记 natalieDecision=store');
 
   // 路径B：释放（release）一个 captured_natalies → +500 金币 + 宝物「正直的心」，不入库 captured_natalies
   // 预留宝物栏（模拟已建宝库），确保正直的心能进入宝物栏并激活效果
