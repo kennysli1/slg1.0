@@ -18,6 +18,7 @@ export class VisionModule {
     this.commands.register('vision.FilterArea', (c) => this.filterArea(c));
     this.commands.register('vision.GetVisibility', (c) => this.getVisibility(c));
     this.commands.register('vision.Reveal', (c) => this.reveal(c));
+    this.commands.register('vision.GetVisibleTiles', (c) => this.getVisibleTiles(c));
   }
 
   private async sourcesFor(playerId: string): Promise<Source[] | null> {
@@ -47,6 +48,21 @@ export class VisionModule {
       depth = Math.min(depth, hexDistanceWrapped({ q, r }, { q: x, r: y }, W, H));
     }
     return { ok: true, payload: { visibility: 'unexplored', unexploredDepth: Number.isFinite(depth) ? depth : -1 } };
+  }
+
+  /** 返回当前对 playerId 可见的所有格子 "q,r" 键集合，供其他模块（如 movement.ListForeign）做视野判定。 */
+  private async getVisibleTiles(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    const sources = await this.sourcesFor(playerId);
+    if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const tiles: string[] = [];
+    for (let r = 0; r < H; r++) {
+      for (let q = 0; q < W; q++) {
+        if (sources.some((s) => hexDistanceWrapped({ q, r }, s, W, H) <= s.radius)) tiles.push(`${q},${r}`);
+      }
+    }
+    return { ok: true, payload: { tiles } };
   }
 
   /** 行军每到一格即把它当刻视野内的地块写为已探索，保证玩家不打开地图也不会丢探索进度。 */

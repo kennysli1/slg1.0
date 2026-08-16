@@ -51,3 +51,4 @@ import './mercenary.test.js';
 
 import './task.test.js';
 import './modifier-coverage.test.js';
+import './movement-foreign-visibility.test.js';

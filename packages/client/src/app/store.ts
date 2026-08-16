@@ -98,6 +98,9 @@ export const researchState = signal<any>(null);
 /** 进行中战斗的实时快照：battleId → 双方兵力聚合（来自 BattleTick 推送）。 */
 export const battles = signal<Record<string, any>>({});
 
+/** 视野内的外国军队（脱敏）快照（ListForeign）。地图页定时轮询填充，供 HexMap 渲染与 TargetPanel 展示。 */
+export const foreignMoves = signal<any>(null);
+
 // ---------- 任务数据（服务端快照 + 推送，按 villageId 分桶） ----------
 
 /** 任务完整快照：villageId → task.GetState 的 payload（active/offered/completed）。 */

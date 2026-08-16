@@ -174,6 +174,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
+      ListForeign: { command: 'movement.ListForeign', needAuth: true, injectPlayerId: true, schema: {} },
     },
     eventPushMap: {
       'movement.Sent': 'MarchSent',

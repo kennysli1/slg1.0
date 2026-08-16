@@ -116,6 +116,7 @@ export class MovementModule {
     this.commands.register('movement.List', (c) => this.list(c));
     this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
     this.commands.register('movement.ListVisionSources', (c) => this.listVisionSources(c));
+    this.commands.register('movement.ListForeign', (c) => this.listForeign(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
   }
@@ -324,6 +325,69 @@ export class MovementModule {
       if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius });
     }
     return { ok: true, payload: { sources } };
+  }
+
+  /**
+   * 对外暴露「其他玩家」在「己方视野内」的离城军（脱敏，绝不含兵力/携带物/战利品）。
+   * 用于大地图轮询：所有拥有该格子可见视野的玩家都能看到这支军队，
+   * 但只能看到它属于谁（玩家名/来源城镇）与行军几何，看不到具体兵力和货物。
+   * 已方军队由 movement.List 下发，此处一律排除。
+   */
+  private async listForeign(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    if (!playerId) return { ok: false, payload: {}, reason: 'player_not_found' };
+
+    // 1) 取己方可见格集合（城市视野 + 己方行军视野），其余格子上的军队一律不可见。
+    const visRes = await this.commands.send({ name: 'vision.GetVisibleTiles', from: MovementModule.NAME, payload: { playerId } });
+    if (!visRes.ok) return { ok: false, payload: {}, reason: (visRes as any).reason ?? 'vision_unavailable' };
+    const visible = new Set<string>((visRes.payload as any).tiles ?? []);
+    if (visible.size === 0) return { ok: true, payload: { movements: [] } };
+
+    // 2) 遍历全量行军，按「位置可见 + 非己方」过滤，并脱敏。
+    //    村→玩家归属解析按 villageId 缓存，避免每个 movement 都打 player 模块。
+    const ownerCache = new Map<string, { playerId?: string; name?: string; villageName?: string } | null>();
+    const resolveOwner = async (villageId: string) => {
+      const cached = ownerCache.get(villageId);
+      if (cached !== undefined) return cached;
+      const res = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
+      let owner: { playerId?: string; name?: string; villageName?: string } | null = null;
+      if (res.ok) {
+        const p = (res.payload as any).player;
+        const v = (p?.villages ?? []).find((x: any) => x.id === villageId);
+        owner = { playerId: p?.id, name: p?.name, villageName: v?.name ?? villageId };
+      }
+      ownerCache.set(villageId, owner);
+      return owner;
+    };
+
+    const out: any[] = [];
+    for (const mv of this.store.all<Movement>(COLLECTION)) {
+      if (!mv.fromVillage || !mv.pos) continue;
+      const key = `${mv.pos.q},${mv.pos.r}`;
+      if (!visible.has(key)) continue;
+      const owner = await resolveOwner(mv.fromVillage);
+      if (!owner || owner.playerId === playerId) continue; // 看不到自己
+      // 脱敏视图：仅位置/类型/来源归属，剔除 troops/cargo/loot/treasures。
+      out.push({
+        id: mv.id,
+        type: mv.type,
+        ownerPlayerId: owner.playerId,
+        ownerPlayerName: owner.name,
+        ownerVillageName: owner.villageName,
+        from: mv.fromXY,
+        to: mv.toXY,
+        path: mv.path,
+        pos: mv.pos,
+        stepIndex: mv.stepIndex,
+        status: mv.status,
+        perStepMs: mv.perStepMs,
+        nextStepAt: mv.nextStepAt,
+        arriveAt: mv.arriveAt,
+        requested: mv.requestedXY,
+        returning: mv.returning,
+      });
+    }
+    return { ok: true, payload: { movements: out } };
   }
 
   /** 一支离城军（行军、交战、返程或驻扎）占用一个行军点；纯商队不占用。 */

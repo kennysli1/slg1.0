@@ -3,8 +3,8 @@
  * Existing request payloads remain unchanged; only the interaction is staged.
  */
 import { useState } from 'preact/hooks';
-import { getCache } from '../../app/state.js';
-import { dataVersion, selected, openModal, garrisonContinue } from '../../app/store.js';
+import { getCache, type SelectedTarget } from '../../app/state.js';
+import { dataVersion, selected, openModal, garrisonContinue, foreignMoves, tick } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo, resourceKeys, resInfo,
@@ -472,6 +472,57 @@ function GarrisonContinuation({ movementId, target, onClose }: {
   );
 }
 
+/** 点击地图上「视野内的外国军队」后展示的只读信息卡：仅显示归属与类型，绝不暴露兵力/携带物。 */
+function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => void }) {
+  // 订阅 dataVersion（每次外国军队轮询刷新）与 tick（ETA 每秒走字）
+  const _dv = dataVersion.value;
+  void tick.value;
+  const m = (foreignMoves.value?.movements ?? []).find((x: any) => x.id === sel.refId) as any;
+  const typeLabel: Record<string, string> = {
+    raid: '掠夺军', attack: '进攻军', return: '返程军', found: '拓荒军',
+    transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军',
+  };
+  const eta = m?.arriveAt != null ? Math.max(0, Number(m.arriveAt) - Date.now()) : null;
+  const fmtEta = (ms: number) => {
+    if (ms <= 0) return '已到达';
+    const h = Math.floor(ms / 3_600_000);
+    const mm = Math.floor((ms % 3_600_000) / 60_000);
+    const s = Math.floor((ms % 60_000) / 1000);
+    return h > 0 ? `${h} 时 ${mm} 分` : mm > 0 ? `${mm} 分 ${s} 秒` : `${s} 秒`;
+  };
+  return (
+    <Panel variant="danger" corners class="map-target-panel">
+      <div class="target-head">
+        <IconPlate icon="bld_main" label={sel.name} size="sm" plate="round" />
+        <div class="target-heading-copy">
+          <div class="target-title">{sel.name}</div>
+          <div class="target-coord">({sel.q},{sel.r})</div>
+        </div>
+        <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
+      </div>
+      <div class="target-body expedition-body">
+        {m ? (
+          <section class="expedition-assessment">
+            <div class="expedition-kicker">敌方军队（脱敏信息）</div>
+            <dl class="enemy-army-facts">
+              <div><dt>所属玩家</dt><dd>{m.ownerPlayerName ?? '未知'}</dd></div>
+              <div><dt>来源城镇</dt><dd>{m.ownerVillageName ?? '未知'}</dd></div>
+              <div><dt>军队类型</dt><dd>{typeLabel[m.type] ?? m.type}</dd></div>
+              <div><dt>预计到达</dt><dd>{eta == null ? '—' : fmtEta(eta)}</dd></div>
+            </dl>
+            <p class="enemy-army-note">看不到具体兵力与携带物。</p>
+          </section>
+        ) : (
+          <p class="expedition-empty">该军队已离开视野或抵达目的地。</p>
+        )}
+        <div class="target-foot expedition-foot">
+          <Btn onClick={onClose}>关闭</Btn>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export function TargetPanel() {
   const _dv = dataVersion.value;
   const sel = selected.value;
@@ -479,6 +530,7 @@ export function TargetPanel() {
   const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
   const pending = garrisonContinue.value;
   const close = () => { selected.value = null; garrisonContinue.value = null; };
+  if (sel.kind === 'enemy_army') return <EnemyArmyPanel sel={sel} onClose={close} />;
   if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={close} />;
   if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={close} />;
 

@@ -19,7 +19,7 @@ import {
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setTaskMarkers,
+  setTaskState, setTaskMarkers, foreignMoves,
 } from './store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
@@ -188,6 +188,13 @@ export async function reloadResearch(): Promise<void> {
   ]);
   if (tree.ok) techTree.value = tree.payload;
   if (state.ok) researchState.value = state.payload;
+}
+
+/** 重拉视野内的外国军队（脱敏）。地图页打开时由 HexMap 定时轮询。 */
+export async function refreshForeignMoves(): Promise<void> {
+  if (!me) return;
+  const r = await req('ListForeign').catch(() => ({ ok: false } as any));
+  if (r.ok) foreignMoves.value = r.payload;
 }
 
 /** 登录后拉一次历史通知，播种战报列表。 */
