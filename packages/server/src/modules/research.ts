@@ -43,6 +43,8 @@ export interface ResearchState {
   researching?: { code: string; startedAt: number; durationMs: number; totalDurationMs?: number; taskId: string; paused?: boolean } | null;
   completed: string[];
   academy: AcademyState;
+  /** 宝物（正直的心）带来的科技点判定间隔倍率（默认 1；<1 表示更快）。由 treasure 模块经 SetTreasureTechInterval 下发。 */
+  treasureTechIntervalMult?: number;
 }
 
 export interface AcademyState {
@@ -93,6 +95,8 @@ export class ResearchModule {
     this.commands.register('research.StartResearch', (c: Command) => this.startResearch(c));
     this.commands.register('research.CancelResearch', (c: Command) => this.cancelResearch(c));
     this.commands.register('research.GetTechMult', (c: Command) => this.getTechMult(c));
+    // 宝物（正直的心）下发科技点判定间隔倍率
+    this.commands.register('research.SetTreasureTechInterval', (c: Command) => this.setTreasureTechInterval(c));
 
     // 学院建造/升级/拆除 → 刷新 academy 参数并重调度 RP
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -159,7 +163,7 @@ export class ResearchModule {
   private ensureState(villageId: string): ResearchState {
     let s = this.store.get<ResearchState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, rp: 0, completed: [], academy: { failStreak: 0, lastCheckTime: this.now(), highestLevel: 0, academyCount: 0 } };
+      s = { villageId, rp: 0, completed: [], academy: { failStreak: 0, lastCheckTime: this.now(), highestLevel: 0, academyCount: 0 }, treasureTechIntervalMult: 1 };
       this.store.set(COLLECTION, villageId, s);
     }
     return s;
@@ -375,7 +379,7 @@ export class ResearchModule {
 
     // 惰性回溯：计算从上一次判定到现在的 tick 数
     const now = this.now();
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount));
+    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1)));
     let lastCheck = s.academy.lastCheckTime || now;
     if (lastCheck > now) lastCheck = now;
     let failStreak = s.academy.failStreak;
@@ -400,6 +404,19 @@ export class ResearchModule {
     this.scheduler.schedule(nextTickMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
   }
 
+  /** 由 treasure 模块下发：设置宝物（正直的心）带来的科技点判定间隔倍率（<1 更快）。倍率变化即按新间隔重调度 RP tick。 */
+  private async setTreasureTechInterval(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.ensureState(villageId);
+    const m = Number.isFinite(mult) && mult > 0 ? mult : 1;
+    if ((s.treasureTechIntervalMult ?? 1) === m) return { ok: true, payload: {} };
+    s.treasureTechIntervalMult = m;
+    this.store.set(COLLECTION, villageId, s);
+    // 立即按新倍率重调度 RP tick（惰性回溯会据此重新结算未结算的判定）
+    await this.settleRp(villageId);
+    return { ok: true, payload: { mult: m } };
+  }
+
   /** 单次 RP tick：roll 一次判定，失败则递增 failStreak，成功则 rp+1 并重置。调度下一次。 */
   private async tickRp(villageId: string): Promise<void> {
     const s = this.ensureState(villageId);
@@ -420,7 +437,7 @@ export class ResearchModule {
     s.academy.lastCheckTime = this.now();
     this.store.set(COLLECTION, villageId, s);
 
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount));
+    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1)));
     this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
   }
 

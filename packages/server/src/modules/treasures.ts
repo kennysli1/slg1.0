@@ -45,6 +45,8 @@ export interface TreasureEffects {
   cavalryTrainMult: number;
   /** 精神食粮：每兵粮耗减免绝对值（加性累加，effectValue 直接累加，非百分比）。 */
   soldierFoodReduce: number;
+  /** 正直的心：科技点判定间隔倍率（乘数，默认 1；<1 表示更快）。 */
+  techIntervalMult: number;
 }
 
 interface TreasureState {
@@ -438,6 +440,7 @@ export class TreasureModule {
     let popGrowthMult = 1;
     let cavalryTrainMult = 1;
     let soldierFoodReduce = 0;
+    let techIntervalMult = 1;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -462,6 +465,15 @@ export class TreasureModule {
         case 'popGrowth': popGrowthMult = 1 + (popGrowthMult - 1) + frac; break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'soldierFoodReduce': soldierFoodReduce += t.effectValue; break; // 精神食粮：每兵减粮绝对值（非百分比，直接累加）
+        case 'honestHeart': {
+          // 复合效果（value=百分比）：攻+value%、防+value%、金币+value%、科技判定间隔×(1-value/100)
+          const pct = frac;
+          atkMult = 1 + (atkMult - 1) + pct;
+          defMult = 1 + (defMult - 1) + pct;
+          goldMult = 1 + (goldMult - 1) + pct;
+          techIntervalMult *= (1 - frac);
+          break;
+        }
         case 'victoryFlag': {
           const total = frac + Math.max(0, victoryFlagBonus) / 100;
           atkMult = 1 + (atkMult - 1) + total;
@@ -475,7 +487,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult, soldierFoodReduce };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult, soldierFoodReduce, techIntervalMult };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
@@ -510,6 +522,11 @@ export class TreasureModule {
     await this.commands.send({
       name: 'military.SetTreasureFoodReduce', from: TreasureModule.NAME,
       payload: { villageId, reduce: eff.soldierFoodReduce },
+    });
+    // 正直的心：科技点判定间隔倍率（总是下发，mult=1 即归零，避免移除宝物后残留）
+    await this.commands.send({
+      name: 'research.SetTreasureTechInterval', from: TreasureModule.NAME,
+      payload: { villageId, mult: eff.techIntervalMult },
     });
   }
 
@@ -1099,7 +1116,7 @@ export class TreasureModule {
    * 超时未处理由调度器自动遗弃（treasure.PendingExpired）。
    */
   private async claimPending(cmd: Command): Promise<CommandResult> {
-    const { movementId, decision } = cmd.payload as { movementId: string; decision?: 'take' | 'sell' | 'discard' };
+    const { movementId, decision } = cmd.payload as { movementId: string; decision?: 'take' | 'sell' | 'discard' | 'release' };
     const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
     if (!p) return { ok: false, payload: {}, reason: 'pending_not_found' };
     if (p.expiresAt < this.now()) {
@@ -1120,6 +1137,8 @@ export class TreasureModule {
     let sold = false;
     let gold = 0;
     let discarded = false;
+    let released = false;
+    let grantedHonestHeart = false;
     let stored = false;
 
     if (decision === 'sell') {
@@ -1131,6 +1150,21 @@ export class TreasureModule {
       gold = t ? t.priceGold : 0;
     } else if (decision === 'discard') {
       discarded = true;
+    } else if (decision === 'release') {
+      // 释放（仅用于 captured_natalies 等「释放替代丢弃」的宝物）：不入库，改为发放任务奖励
+      if (p.code === 'captured_natalies') {
+        // 任务奖励：500 金币 + 宝物「正直的心」
+        await this.commands.send({
+          name: 'economy.Grant', from: TreasureModule.NAME,
+          payload: { villageId: p.villageId, gain: { gold: 500 } },
+        });
+        const g = await this.commands.send({
+          name: 'treasure.Grant', from: TreasureModule.NAME,
+          payload: { villageId: p.villageId, code: 'honest_heart', pendingIfFull: true },
+        });
+        grantedHonestHeart = g.ok;
+      }
+      released = true;
     } else {
       // 'take' 或 camp 默认：收下（multiset 下「重复」不再特殊处理，直接入栏再添一份；满则拒绝由玩家显式决策）
       if (this.storeIfRoom(s, p.code)) {
@@ -1159,7 +1193,7 @@ export class TreasureModule {
       ok: true,
       payload: {
         treasure: t ?? { code: p.code, name: p.name }, kind: p.kind,
-        sold, gold, discarded, stored, codes: this.storedCodes(s),
+        sold, gold, discarded, released, grantedHonestHeart, stored, codes: this.storedCodes(s),
       },
     };
   }

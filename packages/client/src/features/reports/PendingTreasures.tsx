@@ -32,18 +32,20 @@ function rarityTextClass(rarity: string): string {
 
 async function claimTreasure(
   movementId: string,
-  decision?: 'take' | 'sell' | 'discard',
+  decision?: 'take' | 'sell' | 'discard' | 'release',
   name?: string,
   priceGold?: number,
 ): Promise<void> {
   const payload = decision ? { movementId, decision } : { movementId };
-  const label = decision === 'sell' ? '出售' : decision === 'discard' ? '遗弃' : '领取';
+  const label = decision === 'sell' ? '出售' : decision === 'discard' ? '遗弃' : decision === 'release' ? '释放' : '领取';
   await act(req('ClaimPendingTreasure', payload), {
     okToast: decision === 'sell'
       ? `已出售宝物「${name ?? ''}」 → +${fmt(priceGold ?? 0)} 金币`
       : decision === 'discard'
         ? `已遗弃宝物「${name ?? ''}」`
-        : `已${label}宝物「${name ?? ''}」`,
+        : decision === 'release'
+          ? `已释放「${name ?? ''}」 → 获得任务奖励 500 金币与宝物「正直的心」`
+          : `已${label}宝物「${name ?? ''}」`,
   });
 }
 
@@ -52,6 +54,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
   const isCamp = !isDeliver;
   const isArrived = !!p.arrivedAt;
   const canDecide = isDeliver || isArrived;
+  const isCaptured = p.code === 'captured_natalies';
 
   // camp 未归村：仅显示占位卡片（不泄露宝物信息）
   if (isCamp && !isArrived) {
@@ -122,23 +125,42 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
 
         <div class="tcard-actions">
           {canDecide ? (
-            <>
-              <Btn
-                variant="primary"
-                size="sm"
-                onClick={() => void claimTreasure(p.movementId, 'take', p.name)}
-              >
-                收下
-              </Btn>
-              {p.hasTradeCenter && <Btn variant="default" size="sm" onClick={() => void claimTreasure(p.movementId, 'sell', p.name, p.priceGold)}>出售 +{fmt(p.priceGold)} 金</Btn>}
-              <Btn
-                variant="danger"
-                size="sm"
-                onClick={() => void confirmDiscard()}
-              >
-                遗弃
-              </Btn>
-            </>
+            isCaptured ? (
+              <>
+                <Btn
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void claimTreasure(p.movementId, 'take', p.name)}
+                >
+                  放入宝库
+                </Btn>
+                <Btn
+                  variant="default"
+                  size="sm"
+                  onClick={() => void claimTreasure(p.movementId, 'release', p.name)}
+                >
+                  释放
+                </Btn>
+              </>
+            ) : (
+              <>
+                <Btn
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void claimTreasure(p.movementId, 'take', p.name)}
+                >
+                  收下
+                </Btn>
+                {p.hasTradeCenter && <Btn variant="default" size="sm" onClick={() => void claimTreasure(p.movementId, 'sell', p.name, p.priceGold)}>出售 +{fmt(p.priceGold)} 金</Btn>}
+                <Btn
+                  variant="danger"
+                  size="sm"
+                  onClick={() => void confirmDiscard()}
+                >
+                  遗弃
+                </Btn>
+              </>
+            )
           ) : (
             <Btn
               variant="primary"

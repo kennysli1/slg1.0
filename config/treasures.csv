@@ -23,3 +23,5 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 21,victory_flag,胜利的旗帜,trs_warflag,military,epic,victoryFlag,10,0,0,passive,military,victoryFlag,100,1
 22,natalie,娜塔莉,trs_natalie,special,rare,popGrowth,10,0,0,passive,special,natalie,50,1
 23,secret_note,秘密字条,trs_note,special,common,reportCoords,0,0,0,instant,special,secret_note,0,1
+24,captured_natalies,被囚禁的娜塔莉们,trs_natalie,special,rare,popGrowth,20,0,0,passive,special,captured_natalies,50,1
+25,honest_heart,正直的心,trs_blessing,special,epic,honestHeart,10,0,0,passive,special,honestHeart,50,1

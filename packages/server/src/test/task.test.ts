@@ -548,3 +548,117 @@ test('秘密字条：使用后生成战报并解锁「调查坐标」', async ()
   const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
   assert.ok(!codes.includes('secret_note'), '秘密字条使用后应被消耗');
 });
+
+test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁的娜塔莉们 → 处理(放入宝库/释放)', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '调查坐标完整流程');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  // 强制初始化各模块村状态，避免 recomputeAndPush 下游 state 缺失导致字段未写入
+  await send(app, 'population.GetState', { villageId: va });
+  await send(app, 'military.GetState', { villageId: va });
+  await send(app, 'research.GetState', { villageId: va });
+
+  // 解锁 investigate_coords（使用秘密字条）
+  app.store.set('treasure', va, {
+    villageId: va, town: ['secret_note'], treasury: [], carried: {}, extraSlots: 0,
+    hasTradeCenter: false, locked: [], victoryFlagBonus: 0, victoryFlagQualified: {},
+  });
+  await send(app, 'treasure.Use', { villageId: va, code: 'secret_note' });
+  await tick();
+
+  const st0 = await send(app, 'task.GetState', { villageId: va });
+  const off = (st0.payload as any).offeredSide.find((q: any) => q.code === 'investigate_coords');
+  assert.ok(off, '使用秘密字条后应解锁「调查坐标」');
+  assert.equal(off.objective.kind, 'clear_camp', '目标应为 clear_camp');
+  assert.equal(off.objective.campTemplate, 'rats', '营地模板应为 rats（与老鼠窝同驻兵/资源）');
+  assert.equal(off.objective.count, 3, '需清剿 3 个营地');
+
+  // 接取
+  const acc = await send(app, 'task.Accept', { villageId: va, code: 'investigate_coords' });
+  assert.equal(acc.ok, true, `接取应成功: ${acc.reason ?? ''}`);
+  await tick();
+
+  const st1 = await send(app, 'task.GetState', { villageId: va });
+  const inst = st1.payload.active.find((a: any) => a.code === 'investigate_coords');
+  assert.equal(inst.camps.length, 3, '应生成 3 个任务营地');
+  const campIds = inst.camps.map((c: any) => c.id);
+
+  // 清剿前 2 个营地（不应掉落 captured_natalies）
+  for (let i = 0; i < 2; i++) {
+    await app.bus.emit({
+      name: 'combat.BattleEnded', source: 'test', ts: clock,
+      payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: campIds[i], attackerWins: true, campCleared: true, movementId: `mv-p${i}`, battleId: `b${i}` },
+    } as any);
+    await tick();
+  }
+  const st2 = await send(app, 'task.GetState', { villageId: va });
+  const inst2 = st2.payload.active.find((a: any) => a.code === 'investigate_coords');
+  assert.equal(inst2.campCleared, 2, '应已清剿 2 处');
+  const pendBefore = (app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va);
+  assert.equal(pendBefore.length, 0, '前 2 处清剿不应掉落 captured_natalies（仅普通掠夺资源）');
+
+  // 第 3 处清剿 → 掉落 captured_natalies（走标准待领取报告流程）
+  const mvNatalie = 'mv-natalie';
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: campIds[2], attackerWins: true, campCleared: true, movementId: mvNatalie, battleId: 'b2' },
+  } as any);
+  await tick();
+
+  const st3 = await send(app, 'task.GetState', { villageId: va });
+  const inst3 = st3.payload.active.find((a: any) => a.code === 'investigate_coords');
+  assert.ok(inst3.ready === true, '清剿 3 处后应就绪可交付');
+  const pend = (app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va);
+  assert.equal(pend.length, 1, '第 3 处清剿应掉落 1 件待领取宝物');
+  assert.equal(pend[0].code, 'captured_natalies', '掉落应为「被囚禁的娜塔莉们」');
+  assert.equal(pend[0].kind, 'camp', '掉落类型应为 camp（需军队归村后处理）');
+  assert.ok(!pend[0].arrivedAt, '未归村前 arrivedAt 应未设置');
+
+  // 模拟军队归村 → 标记到达
+  const mark = await send(app, 'treasure.MarkPendingArrived', { movementId: mvNatalie });
+  assert.equal(mark.ok, true, '标记归村应成功');
+  const pendArr = app.store.get<any>('treasure_pending', mvNatalie);
+  assert.ok(pendArr.arrivedAt, '归村后 arrivedAt 应设置');
+
+  // 路径A：放入宝库（take）→ 入库 captured_natalies，获得 +20% 人口增长，无额外奖励
+  const take = await send(app, 'treasure.ClaimPending', { movementId: mvNatalie, decision: 'take' });
+  assert.equal(take.ok, true, `放入宝库应成功: ${take.reason ?? ''}`);
+  const trA = app.store.get<any>('treasure', va);
+  assert.ok([...trA.town, ...trA.treasury].includes('captured_natalies'), '放入宝库应入库 captured_natalies');
+  assert.ok(![...trA.town, ...trA.treasury].includes('honest_heart'), '放入宝库不应给予正直的心（无任务奖励）');
+  await tick();
+  const popA = app.store.get<any>('population', va);
+  assert.ok(popA.treasureGrowthMult >= 1.2 - 1e-9, `放入宝库应使人口增长倍率≥1.2（实际 ${popA.treasureGrowthMult}）`);
+
+  // 路径B：释放（release）一个 captured_natalies → +500 金币 + 宝物「正直的心」，不入库 captured_natalies
+  // 预留宝物栏（模拟已建宝库），确保正直的心能进入宝物栏并激活效果
+  app.store.get<any>('treasure', va).extraSlots = 5;
+  const beforeGold = ((await send(app, 'economy.GetResources', { villageId: va })).payload as any).resources.gold ?? 0;
+  // 直接模拟第 3 处掉落的待领取记录（清剿逻辑已验证），走释放路径
+  await send(app, 'treasure.RollDrop', { villageId: va, source: 'camp', movementId: 'mv-rel', forceCode: 'captured_natalies' });
+  await send(app, 'treasure.MarkPendingArrived', { movementId: 'mv-rel' });
+  const rel = await send(app, 'treasure.ClaimPending', { movementId: 'mv-rel', decision: 'release' });
+  assert.equal(rel.ok, true, `释放应成功: ${rel.reason ?? ''}`);
+  assert.equal((rel.payload as any).released, true, '应标记 released');
+  assert.equal((rel.payload as any).grantedHonestHeart, true, '应发放「正直的心」');
+  const trB = app.store.get<any>('treasure', va);
+  assert.ok([...trB.town, ...trB.treasury].includes('honest_heart'), '「正直的心」应已进入宝物栏');
+  assert.equal(app.store.get('treasure_pending', 'mv-rel'), undefined, '释放后应移除待领取记录');
+  await tick();
+  const afterGold = ((await send(app, 'economy.GetResources', { villageId: va })).payload as any).resources.gold ?? 0;
+  assert.equal(afterGold, beforeGold + 500, `释放应 +500 金币（实际 ${afterGold} vs ${beforeGold}）`);
+  // 正直的心效果：攻/防 +10%、金币 +10%、科技判定间隔 -10%
+  const popB = app.store.get<any>('population', va);
+  assert.ok(popB.treasureGoldMult >= 1.1 - 1e-9, `正直的心应使金币倍率≥1.1（实际 ${popB.treasureGoldMult}）`);
+  const milB = app.store.get<any>('military', va);
+  assert.ok(milB.treasureAtkMult >= 1.1 - 1e-9 && milB.treasureDefMult >= 1.1 - 1e-9, `正直的心应使攻防倍率≥1.1（atk ${milB.treasureAtkMult} / def ${milB.treasureDefMult}）`);
+  const resB = app.store.get<any>('research', va);
+  assert.ok(resB.treasureTechIntervalMult < 1 - 1e-9 && resB.treasureTechIntervalMult > 0.8, `正直的心应使科技判定间隔倍率≈0.9（实际 ${resB.treasureTechIntervalMult}）`);
+
+  // 任务交付：完成调查坐标（宝藏已处理，任务结束）
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'investigate_coords' });
+  assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
+  const st4 = await send(app, 'task.GetState', { villageId: va });
+  assert.ok(!st4.payload.active.some((a: any) => a.code === 'investigate_coords'), '交付后调查坐标应移出 active');
+});
