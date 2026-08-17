@@ -44,7 +44,7 @@ async function claimTreasure(
       : decision === 'discard'
         ? `已遗弃宝物「${name ?? ''}」`
         : decision === 'release'
-          ? `已释放「${name ?? ''}」 → 获得任务奖励 500 金币与宝物「正直的心」`
+          ? `已释放「${name ?? ''}」 → 娜塔莉获释；任务奖励请到任务栏点击「领取奖励」领取（500 金币与宝物「正直的心」）`
           : `已${label}宝物「${name ?? ''}」`,
   });
 }

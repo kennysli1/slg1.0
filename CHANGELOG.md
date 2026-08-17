@@ -9,6 +9,12 @@
 
 ## [未发布]
 
+### 修复
+
+- 修复「目标消失·原路返回」兜底：除 `pve.Remove` 外，直接在 `world.RemoveTile` 移除 PvE/任务营地地块时也补发 `pve.TargetRemoved`，确保无论地块由哪条路径移除，前往该目标的商队/出征都立即从当前位置返程，不会继续冲向已消失的目标后由 `arriveCaravan` 重算整段倒计时。
+
+- 修复客户端误导文案：释放「被囚禁的娜塔莉们」（`captured_natalies`）的 toast 原谎称「释放即获得 500 金币与宝物「正直的心」」。服务端释放分支（`treasure.ClaimPending` release 分支）本就不发奖，奖励仅在任务栏点击「领取奖励」（`task.Deliver`）后由 `tasks.completeQuest` 发放；现 toast 改为如实说明「释放仅使娜塔莉获释，奖励需到任务栏领取」。
+
 ### 新增
 
 - 扩展支线任务「调查坐标」：接取后于玩家村庄附近随机空地生成 3 个与老鼠窝同驻兵/掠夺资源的任务营地（rats 模板，真实占格、清空后不触发普通掉落）。清剿第 3 处营地时掉落宝物「被囚禁的娜塔莉们」（`captured_natalies`，popGrowth +20%，passive，走标准待领取报告流程，需军队归村后处理）。玩家处理该宝物二选一：① 放入宝库 → 获得 +20% 人口增长（无额外奖励）；② 释放（客户端以「释放」替代「丢弃」字样，并隐藏「出售」）→ 获得任务奖励 500 金币与宝物「正直的心」（`honest_heart`，epic/special）。新增复合效果类型 `honestHeart`（已注册进 `TREASURE_EFFECTS` 白名单）：全军攻击 +10%、全军防御 +10%、金币收入 +10%、科技点判定间隔 -10%（经 `research.SetTreasureTechInterval` 接入判定调度，倍率变化即按新间隔重调度 RP tick）；`ResearchState` 新增可选字段 `treasureTechIntervalMult`（默认 1，向后兼容）。网关 `ClaimPendingTreasure` 决策枚举新增 `release`；客户端待领取卡片为 `captured_natalies` 显示「释放」按钮、隐藏「出售」，`app/config.ts` 的 `treasureEffectText` 已补充复合效果文案。
