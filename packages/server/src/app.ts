@@ -235,6 +235,13 @@ export function createGameApp(opts?: {
     trade.wipeSingleVillage(villageId);
     treasure.wipeSingleVillage(villageId);
     task.wipeSingleVillage(villageId);
+    // 通知行军模块：来向该村的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
+    // 必须在删除行军记录之前发出，并保留「来向本村」的行军，留给 onVillageRemoved→startReturn
+    // 就地改写为返程；否则村庄数据被清后行军记录已删，客户端只看到陈旧倒计时且不刷新。
+    void bus.emit({
+      name: 'world.VillageRemoved', source: 'app', ts: now(),
+      payload: { villageId },
+    } as any);
     for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
       if (mv.fromVillage === villageId && mv.id) scheduler.cancelByOwner(`movement:${mv.id}`);
     }
@@ -248,7 +255,10 @@ export function createGameApp(opts?: {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
-      if (m.fromVillage === villageId || m.targetId === villageId || m.targetVillage === villageId) {
+      // 来向本村的行军（targetVillage===villageId）已触发 world.VillageRemoved 返程，勿删
+      if (m.targetVillage === villageId) continue;
+      if (m.fromVillage === villageId || m.targetId === villageId) {
+        if (m.id) scheduler.cancelByOwner(`movement:${m.id}`);
         store.delete('movement', (m as any).id ?? '');
       }
     }

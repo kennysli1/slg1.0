@@ -228,3 +228,48 @@ test('出征：PvE 目标途中被移除→军队原路返回，兵力退回出�
   const listDone = (await send(app, 'movement.List', { villageId: capital })).payload as any;
   assert.equal(listDone.movements.length, 0, '折返后 movement 应已清理');
 });
+
+test('商队：目标村被放弃(wipeSingleVillage)后也应原路返程（补 world.VillageRemoved 触发缺口）', async () => {
+  const app = freshApp();
+  const { player, capital, vid2 } = await makeTwoVillages(app);
+  await send(app, 'economy.Grant', { villageId: capital, gain: { wood: 100 } });
+
+  // 一条从 capital 发往 vid2 的在途商队
+  const car = await send(app, 'movement.SendCaravan', { fromVillage: capital, targetVillage: vid2, cargo: { wood: 50 } });
+  assert.equal(car.ok, true, car.reason);
+
+  // 推进到行程中段，确认仍在途
+  const list0 = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mv0 = list0.movements.find((m: any) => m.id === (car.payload as any).id);
+  assert.ok(mv0, '商队应已发出');
+  const midMs = Math.floor((mv0.arriveAt - clock) / 2);
+  await app.scheduler.advanceTo(clock + midMs, setClock);
+
+  // 突破放弃锁定期
+  const raw = app.store.get<any>('player', player.id);
+  const v = raw.ownedVillages.find((x: any) => x.id === vid2);
+  v.foundedAt = clock - app.config.constants.foundAbandonLockSec * 1000 - 1;
+  app.store.set('player', player.id, raw);
+
+  // 放弃目标村（走 wipeSingleVillage 真实路径，原 bug 此处不触发返程）
+  const ab = await send(app, 'player.AbandonVillage', { playerId: player.id, villageId: vid2 });
+  assert.equal(ab.ok, true, ab.reason);
+  await flushEvents();
+
+  // 立即断言：商队已折返（movement.List 为只读视图，不含 returning；用原始 store 校验）
+  const listAfter = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  const mvAfter = listAfter.movements.find((m: any) => m.id === (car.payload as any).id);
+  assert.ok(mvAfter, '放弃目标村后商队应仍在途（已改返程）');
+  assert.equal(mvAfter.type, 'caravan', '商队类型保持 caravan');
+  assert.deepEqual(mvAfter.to, mv0.from, '商队应转向出发村 capital（立即返程）');
+  const rawMv = app.store.get<any>('movement', (car.payload as any).id);
+  assert.equal(rawMv.returning, true, '商队应置 returning=true（原始 store）');
+  assert.ok(rawMv.arriveAt > clock && rawMv.arriveAt !== mv0.arriveAt, '倒计时应重置为返程耗时');
+
+  // 跑完剩余行程，货物应退回发货村 capital
+  await drain(app);
+  const res = (await send(app, 'economy.GetResources', { villageId: capital })).payload as any;
+  assert.ok(res.resources.wood >= 100 - 0.01, '商队应把货物退回发货村 capital');
+  const listDone = (await send(app, 'movement.List', { villageId: capital })).payload as any;
+  assert.equal(listDone.movements.length, 0, '折返后 movement 应已清理');
+});

@@ -537,6 +537,14 @@ export class TasksModule {
       granted.treasures.push(t);
     }
 
+    // captured_natalies 释放替代丢弃：玩家点「领取奖励」时才发放 500 金币 + 宝物「正直的心」。
+    // natalieDecision 仅在 captured_natalies 任务被释放裁决时置为 'release'（见 onNatalieDecision）。
+    if (inst.natalieDecision === 'release') {
+      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: { gold: 500 } } });
+      const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'honest_heart', pendingIfFull: true } });
+      if (gh.ok) granted.treasures.push('honest_heart');
+    }
+
     delete s.active[code];
     if (q.type === 'main') {
       if (!s.completedMain.includes(code)) s.completedMain.push(code);

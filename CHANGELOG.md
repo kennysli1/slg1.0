@@ -90,6 +90,10 @@
 
 - 修复「胜利的旗帜」在掠夺完成后放入**报告**（待处理）而非宝库时未获得 +2% 额外加成的问题：现在 `storeCarried`/`claimPending` 在入库或报告中收下胜利旗帜且携带资格（`victoryFlagQualified`）成立时，均正确累加 `victoryFlagBonus += 2`；资格标记在结算后清理。
 
+- 修复商队（含贸易商队/运输）在目标村庄被放弃或遭删村（`wipeSingleVillage` 真实路径）后不返程、地图仍显示原行程倒计时的问题：清村时现在会广播 `world.VillageRemoved` 并保留来向该村的在途行军，交由 `movement.onVillageRemoved→startReturn` 就地改写为返程。此前仅 `world.ClearVillage` 测试命令会广播该事件，正常放弃/删村路径静默删除行军记录，导致 `onVillageRemoved` 永不触发、客户端倒计时不刷新。
+
+- 修复释放「被囚禁的娜塔莉们」时立即发奖、与"需点领取奖励后才获得"相悖的问题：500 金币与宝物「正直的心」的发放从 `treasure.ClaimPending` 的 release 分支移至 `task.completeQuest`，仅在玩家点「领取奖励」（`task.Deliver`）且 `natalieDecision==='release'` 时发放。
+
 ### 新增
 
 - GM 任务管理新增「重新触发放弃任务」按钮：已放弃（`abandonedSide`）的支线可一键移出放弃列表、补回触发条件、清除冷却并重新解锁，使其可再次接取；新增 `task.GmRetriggerAbandoned` 命令与对应 GM 面板入口。

@@ -638,7 +638,12 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   assert.ok(instA.ready === true, '放入宝库（take）后任务应就绪可交付');
   assert.equal(instA.natalieDecision, 'store', '放入宝库应记 natalieDecision=store');
 
-  // 路径B：释放（release）一个 captured_natalies → +500 金币 + 宝物「正直的心」，不入库 captured_natalies
+  // 路径B：释放（release）一个 captured_natalies → 不应立即发奖，需点「领取奖励」后才发
+  // 重新挂起 natalie 抉择（路径A已消费 awaitingNatalieDecision，这里模拟另一次掉落重新挂起）
+  const ts = app.store.get<any>('task', va);
+  ts.active['investigate_coords'].awaitingNatalieDecision = true;
+  ts.active['investigate_coords'].awaitingNatalieCode = 'captured_natalies';
+  app.store.set('task', va, ts);
   // 预留宝物栏（模拟已建宝库），确保正直的心能进入宝物栏并激活效果
   app.store.get<any>('treasure', va).extraSlots = 5;
   const beforeGold = ((await send(app, 'economy.GetResources', { villageId: va })).payload as any).resources.gold ?? 0;
@@ -648,13 +653,27 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   const rel = await send(app, 'treasure.ClaimPending', { movementId: 'mv-rel', decision: 'release' });
   assert.equal(rel.ok, true, `释放应成功: ${rel.reason ?? ''}`);
   assert.equal((rel.payload as any).released, true, '应标记 released');
-  assert.equal((rel.payload as any).grantedHonestHeart, true, '应发放「正直的心」');
-  const trB = app.store.get<any>('treasure', va);
-  assert.ok([...trB.town, ...trB.treasury].includes('honest_heart'), '「正直的心」应已进入宝物栏');
+  assert.notEqual((rel.payload as any).grantedHonestHeart, true, '释放不应立即发放「正直的心」');
+  const trB0 = app.store.get<any>('treasure', va);
+  assert.ok(![...trB0.town, ...trB0.treasury].includes('honest_heart'), '释放不应立即入库「正直的心」');
   assert.equal(app.store.get('treasure_pending', 'mv-rel'), undefined, '释放后应移除待领取记录');
   await tick();
+  const goldMid = ((await send(app, 'economy.GetResources', { villageId: va })).payload as any).resources.gold ?? 0;
+  assert.equal(goldMid, beforeGold, '释放不应立即发放 500 金币');
+  // 释放后任务应就绪可交付，且记 natalieDecision=release（按钮文案「领取奖励」）
+  const stB = await send(app, 'task.GetState', { villageId: va });
+  const instB = stB.payload.active.find((a: any) => a.code === 'investigate_coords');
+  assert.ok(instB.ready === true, '释放后任务应就绪可交付');
+  assert.equal(instB.natalieDecision, 'release', '释放应记 natalieDecision=release');
+
+  // 点「领取奖励」= task.Deliver → completeQuest 才发奖励
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'investigate_coords' });
+  assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
+  const trB = app.store.get<any>('treasure', va);
+  assert.ok([...trB.town, ...trB.treasury].includes('honest_heart'), '「领取奖励」后应入库「正直的心」');
   const afterGold = ((await send(app, 'economy.GetResources', { villageId: va })).payload as any).resources.gold ?? 0;
-  assert.equal(afterGold, beforeGold + 500, `释放应 +500 金币（实际 ${afterGold} vs ${beforeGold}）`);
+  assert.equal(afterGold, beforeGold + 500, `领取奖励应 +500 金币（实际 ${afterGold} vs ${beforeGold}）`);
+  await tick();
   // 正直的心效果：攻/防 +10%、金币 +10%、科技判定间隔 -10%
   const popB = app.store.get<any>('population', va);
   assert.ok(popB.treasureGoldMult >= 1.1 - 1e-9, `正直的心应使金币倍率≥1.1（实际 ${popB.treasureGoldMult}）`);
@@ -663,9 +682,7 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   const resB = app.store.get<any>('research', va);
   assert.ok(resB.treasureTechIntervalMult < 1 - 1e-9 && resB.treasureTechIntervalMult > 0.8, `正直的心应使科技判定间隔倍率≈0.9（实际 ${resB.treasureTechIntervalMult}）`);
 
-  // 任务交付：完成调查坐标（宝藏已处理，任务结束）
-  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'investigate_coords' });
-  assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
+  // 交付后任务移出 active
   const st4 = await send(app, 'task.GetState', { villageId: va });
   assert.ok(!st4.payload.active.some((a: any) => a.code === 'investigate_coords'), '交付后调查坐标应移出 active');
 });
