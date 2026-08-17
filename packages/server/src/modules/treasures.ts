@@ -1157,19 +1157,9 @@ export class TreasureModule {
     } else if (decision === 'discard') {
       discarded = true;
     } else if (decision === 'release') {
-      // 释放（仅用于 captured_natalies 等「释放替代丢弃」的宝物）：不入库，改为发放任务奖励
-      if (p.code === 'captured_natalies') {
-        // 任务奖励：500 金币 + 宝物「正直的心」
-        await this.commands.send({
-          name: 'economy.Grant', from: TreasureModule.NAME,
-          payload: { villageId: p.villageId, gain: { gold: 500 } },
-        });
-        const g = await this.commands.send({
-          name: 'treasure.Grant', from: TreasureModule.NAME,
-          payload: { villageId: p.villageId, code: 'honest_heart', pendingIfFull: true },
-        });
-        grantedHonestHeart = g.ok;
-      }
+      // 释放（仅用于 captured_natalies 等「释放替代丢弃」的宝物）：不入库。
+      // 注意：500 金币 + 宝物「正直的心」改在玩家点「领取奖励」时由任务模块发放（见 tasks.completeQuest），
+      // 避免在报告抉择瞬间提前发奖（与「释放即获奖」相悖，原需求为点领取后才获得）。
       released = true;
     } else {
       // 'take' 或 camp 默认：收下（multiset 下「重复」不再特殊处理，直接入栏再添一份；满则拒绝由玩家显式决策）
