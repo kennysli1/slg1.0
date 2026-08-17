@@ -215,6 +215,13 @@ export class WorldModule {
     if (!t) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
     if ((t.kind !== 'pve' && t.kind !== 'taskcamp') || t.refId !== refId) return { ok: false, payload: {}, reason: 'tile_mismatch' };
     this.store.set<Tile>(COLLECTION_TILE, key, { q: w.q, r: w.r, kind: 'empty' });
+    // PvE/任务营地地块消失：通知行军模块——所有前往该目标的出征/商队应立即原路返回
+    // （见 movement.onTargetRemoved）。pve.Remove 已发过同一事件，这里再兜底一次，
+    // 保证无论地块由哪条路径移除（pve.Remove / 直接 world.RemoveTile），商队都不会继续冲向已消失的目标。
+    void this._bus.emit({
+      name: 'pve.TargetRemoved', source: WorldModule.NAME, ts: this._now(),
+      payload: { id: refId, q: w.q, r: w.r },
+    } as DomainEvent);
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
