@@ -113,6 +113,19 @@ export class WorldModule {
     return { ok: true, payload: { tile: t ?? { q: w.q, r: w.r, kind: 'empty' } } };
   }
 
+  /**
+   * 返回所有"非空"地块的坐标 key（kind !== 'empty'），含玩家村 / pve / taskcamp / 临时 PvE / 资源点等。
+   * allocateSpot 复用这一份占用真相，确保与 placeVillage 的占用口径（exist && exist.kind !== 'empty'）完全一致，
+   * 否则会出现"随机抽到被 PvE 占用的格子 → placeVillage 拒绝 → 注册失败"的 bug。
+   */
+  public getOccupiedTileKeys(): Set<string> {
+    const s = new Set<string>();
+    for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
+      if (t.kind !== 'empty') s.add(hexKey(t.q, t.r));
+    }
+    return s;
+  }
+
   /** 按 owner id 反查地块，供行军等模块派生服务器权威坐标。 */
   private getTileByRef(cmd: Command): CommandResult {
     const { refId, kind } = cmd.payload as { refId: string; kind?: TileKind };

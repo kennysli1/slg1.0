@@ -189,7 +189,7 @@ export function createGameApp(opts?: {
       throw err;
     }
   };
-  const player = new PlayerModule(store, bus, commands, now, config, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue);
+  const player = new PlayerModule(store, bus, commands, now, config, doCreateVillage, config.constants.worldW, config.constants.worldH, serialQueue, () => world.getOccupiedTileKeys());
   const meta = new MetaModule(commands, config);
   const notifications = new NotificationsModule(store, bus, commands, now, config);
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);

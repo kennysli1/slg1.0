@@ -51,6 +51,7 @@ const ERR_MSG: Record<string, string> = {
   found_inflight_limit: '已有拓荒队伍在途',
   tile_occupied: '目标地块已被占用',
   too_close_to_village: '距离其他村庄过近',
+  village_creation_failed: '建村失败：目标地块冲突，请稍后重试',
   out_of_map: '超出地图范围',
   no_settlers: '拓荒者不足',
   no_settler_unit: '当前部族没有拓荒者',

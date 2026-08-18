@@ -135,6 +135,11 @@ export class PlayerModule {
      * Register 命令用 "account:<normalizedName>" 车道串行化，防止同名并发注册 TOCTOU。
      */
     private serialQueue?: KeyedSerialQueue,
+    /**
+     * 注入：返回所有"非空"地块坐标 key（含 pve/taskcamp/临时 PvE/玩家村），
+     * 与 world.PlaceVillage 的占用口径一致。allocateSpot 复用，避免随机抽到被占用的格子。
+     */
+    private getOccupiedTiles?: () => Set<string>,
   ) {}
 
   setConfig(config: GameConfig): void {
@@ -544,13 +549,19 @@ export class PlayerModule {
 
   /**
    * 为新玩家分配地图空位：在地图内随机散布，与现有**主城**保持最小间距。
+   * 关键修正：空格子 = 该坐标在 world_tile 无记录或 kind==='empty'（pve/taskcamp/临时 PvE 都算"非空"）。
+   * 选到非空格子时，随机换一个继续，**绝不报错放弃**；占用真相直接复用 world.getOccupiedTileKeys()，
+   * 保证与 PlaceVillage 的口径（exist && exist.kind !== 'empty'）完全一致。
    */
   private allocateSpot(): { q: number; r: number } {
     const existing = this.store.all<RawPlayer>(COLLECTION).map((raw) => this.normalize(raw));
+    // 玩家主城坐标（既有占用口径之一）
     const taken = new Set<string>();
     for (const p of existing) {
       for (const v of p.ownedVillages) taken.add(hexKey(v.q, v.r));
     }
+    // 世界占用（pve / taskcamp / 临时 PvE / 资源点等），与 world.PlaceVillage 占用口径完全一致
+    const occupied = this.getOccupiedTiles?.() ?? new Set<string>();
 
     const W = this.worldW, H = this.worldH;
     const MIN_SPACING = Math.max(3, Math.min(8, Math.floor(Math.min(W, H) / 4)));
@@ -561,26 +572,31 @@ export class PlayerModule {
       return (seed >>> 0) / 0x100000000;
     };
 
+    // 完全空格子的判定：既不在世界占用集合，也不在玩家主城集合，且与任何主城保持最小间距
+    const isFree = (q: number, r: number): boolean => {
+      const key = hexKey(q, r);
+      if (occupied.has(key) || taken.has(key)) return false; // 世界占用 / 玩家主城 都不可
+      return !existing.some((p) =>
+        p.ownedVillages.some((v) => hexDistanceWrapped({ q, r }, { q: v.q, r: v.r }, W, H) < MIN_SPACING),
+      );
+    };
+
+    // 随机散布：命中占用/过近就换一个继续，绝不报错放弃
     const MAX_ATTEMPTS = 400;
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       const q = Math.floor(lcg() * W);
       const r = Math.floor(lcg() * H);
-      if (taken.has(hexKey(q, r))) continue;
-      const tooClose = existing.some((p) =>
-        p.ownedVillages.some((v) => hexDistanceWrapped({ q, r }, { q: v.q, r: v.r }, W, H) < MIN_SPACING),
-      );
-      if (tooClose) continue;
-      return { q, r };
+      if (isFree(q, r)) return { q, r };
     }
 
-    // 兜底：线性扫描第一个空位
+    // 兜底：线性扫描第一个完全空格子（含世界占用与间距判定）
     for (let r = 0; r < H; r++) {
       for (let q = 0; q < W; q++) {
-        if (!taken.has(hexKey(q, r))) return { q, r };
+        if (isFree(q, r)) return { q, r };
       }
     }
+    // 理论兜底：地图全满（极不可能）。返回一个坐标，交由 PlaceVillage 做最终裁决。
     return { q: 0, r: 0 };
-    return { q: 1, r: 0 };
   }
 
   /**
