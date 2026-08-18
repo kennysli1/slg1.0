@@ -11,6 +11,8 @@
 
 ### 修复
 
+- 修复新账号注册失败（操作失败）：建村坐标分配 `allocateSpot` 原先只把玩家主城当作“已占用”，漏算了世界里的 PvE / 任务营地 / 临时 PvE / 资源点等 `kind !== 'empty'` 地块；随机抽到被占格后 `world.PlaceVillage` 以 `tile_occupied` 拒绝，导致注册直接失败。现改为复用 `world.getOccupiedTileKeys()` 这一份与世界占用完全一致的真相：选到“完全空格子”（含 PvE 等临时内容皆不可）才落点，选到非空格子就随机换一个继续，**绝不报错放弃**；并给客户端 `village_creation_failed` 补充中文文案，避免将来再被通用「操作失败」吞掉。
+
 - 修复「目标消失·原路返回」兜底：除 `pve.Remove` 外，直接在 `world.RemoveTile` 移除 PvE/任务营地地块时也补发 `pve.TargetRemoved`，确保无论地块由哪条路径移除，前往该目标的商队/出征都立即从当前位置返程，不会继续冲向已消失的目标后由 `arriveCaravan` 重算整段倒计时。
 
 - 修复客户端误导文案：释放「被囚禁的娜塔莉们」（`captured_natalies`）的 toast 原谎称「释放即获得 500 金币与宝物「正直的心」」。服务端释放分支（`treasure.ClaimPending` release 分支）本就不发奖，奖励仅在任务栏点击「领取奖励」（`task.Deliver`）后由 `tasks.completeQuest` 发放；现 toast 改为如实说明「释放仅使娜塔莉获释，奖励需到任务栏领取」。

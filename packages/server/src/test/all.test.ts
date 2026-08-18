@@ -55,3 +55,4 @@ import './movement-foreign-visibility.test.js';
 import './caravan-return.test.js';
 import './caravan-npc-faithful.test.js';
 import './task-flows.test.js';
+import './register-spot.test.js';
