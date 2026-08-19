@@ -8,28 +8,24 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, foreignMoves } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, foreignMoves, garrisonContinue, showToast } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
-const ZOOM_MIN = 0.7;
-const ZOOM_MAX = 2.2;
-const INITIAL_ZOOM = 1.6;
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 1.2;
+const INITIAL_ZOOM = 1;
 const PAD = HEX_SIZE * 1.4;
-const STEP = 4; // D-pad 每次移动格数
+const DRAG_THRESHOLD = 8; // 超过此像素视为拖拽，不触发点击
+const TIP_PAD = 14;
 
 /** pointy-top 六边形六个顶点字符串（模块级常量，避免每帧重建） */
 const HEX_CORNER_STR = hexCorners()
   .map((c) => `${c.x.toFixed(2)},${c.y.toFixed(2)}`)
   .join(' ');
-
-const SCREEN_DIRS: Record<string, { dq: number; dr: number }> = {
-  up: { dq: 0, dr: -1 }, down: { dq: 0, dr: 1 },
-  left: { dq: -1, dr: 0 }, right: { dq: 1, dr: 0 },
-};
 
 // ─── terrain helpers ─────────────────────────────────────────────────────────
 
@@ -209,7 +205,6 @@ export function HexMap() {
   const [jumpR, setJumpR] = useState(String(me?.r ?? 0));
   const [jumpError, setJumpError] = useState('');
   const jumpEditing = useRef(false);
-  const [zoomUi, setZoomUi] = useState(INITIAL_ZOOM);
 
   // ── Tooltip ──
   type TipState = { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number } | null;
@@ -244,20 +239,10 @@ export function HexMap() {
       'transform',
       `translate(${panX.current.toFixed(2)},${panY.current.toFixed(2)}) scale(${zoom.current.toFixed(4)})`,
     );
-    setZoomUi(zoom.current);
   }
 
   function viewRef(): { x: number; y: number } {
     return viewRefCamera(panX.current, panY.current, zoom.current, cw.current, ch.current);
-  }
-
-  function hexToScreen(camX: number, camY: number): { x: number; y: number } {
-    const rect = svgEl.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return {
-      x: rect.left + panX.current + zoom.current * camX,
-      y: rect.top + panY.current + zoom.current * camY,
-    };
   }
 
   function reducePanToLattice() {
@@ -338,22 +323,6 @@ export function HexMap() {
   function resetView() {
     zoom.current = clampZoom(INITIAL_ZOOM);
     centerViewOn(viewCenter().q, viewCenter().r);
-    syncNavUI();
-  }
-
-  function adjustZoom(factor: number, anchorSx?: number, anchorSy?: number) {
-    const rect = svgEl.current?.getBoundingClientRect();
-    if (!rect) return;
-    const sx = anchorSx ?? rect.width / 2;
-    const sy = anchorSy ?? rect.height / 2;
-    const fw = (sx - panX.current) / zoom.current;
-    const fh = (sy - panY.current) / zoom.current;
-    zoom.current = clampZoom(zoom.current * factor);
-    panX.current = sx - zoom.current * fw;
-    panY.current = sy - zoom.current * fh;
-    reducePanToLattice();
-    applyTransform();
-    scheduleCull();
     syncNavUI();
   }
 
@@ -453,6 +422,27 @@ export function HexMap() {
   }
 
   // ─── march path + marker rendering ────────────────────────────────────────
+  function buildForeignMarchPaths() {
+    const moves: any[] = foreignMoves.value?.movements ?? [];
+    const paths: preact.VNode[] = [];
+    const ref = viewRef();
+    moves.forEach((m) => {
+      if (!m.path || m.path.length < 2 || !m.id) return;
+      const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
+        .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+        .join(' ');
+      const t = m.type ?? 'return';
+      paths.push(
+        <polyline
+          key={`fpath-${m.id}`}
+          class={`march-path march-path--${t} march-path--foreign`}
+          points={pts}
+        />,
+      );
+    });
+    return paths;
+  }
+
   function buildMarchPaths() {
     const moves: any[] = getCache().moves?.movements ?? [];
     const paths: preact.VNode[] = [];
@@ -516,6 +506,10 @@ export function HexMap() {
   function selectEnemy(m: any, e: MouseEvent) {
     e.stopPropagation();
     if (!m?.pos) return;
+    if (garrisonContinue.value) {
+      showToast('请先完成驻扎续行，或取消后再查看敌方军队', 'bad');
+      return;
+    }
     selected.value = {
       refId: m.id,
       kind: 'enemy_army',
@@ -531,8 +525,8 @@ export function HexMap() {
     const moves: any[] = foreignMoves.value?.movements ?? [];
     const markers: preact.VNode[] = [];
     const ref = viewRef();
-    moves.forEach((m, i) => {
-      if (!m.pos) return;
+    moves.forEach((m) => {
+      if (!m.pos || !m.id) return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
         : m.type === 'raid'      ? '⚡'
@@ -545,8 +539,9 @@ export function HexMap() {
       const t = m.type ?? 'return';
       markers.push(
         <g
-          key={`fmk-${i}`}
-          id={`foreign-mk-${i}`}
+          key={`fmk-${m.id}`}
+          id={`foreign-mk-${m.id}`}
+          data-move-id={m.id}
           class={`enemy-march-mk enemy-march-mk--${t}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
           onClick={(e: MouseEvent) => selectEnemy(m, e)}
@@ -561,16 +556,19 @@ export function HexMap() {
 
   // ─── task camp markers（任务营地：真实 pve 地块 + 🎯 高亮）──────────────
   function buildTaskMarkers() {
-    // store 已过滤，但渲染层再守一次：地图上绝不画已清理的任务营地。
     const camps: any[] = (taskMarkers.value[me?.villageId ?? ''] ?? []).filter((camp: any) => !camp?.cleared);
     const markers: preact.VNode[] = [];
-    camps.forEach((c, i) => {
-      const p = hexToPixel({ q: c.q, r: c.r });
+    const ref = viewRef();
+    camps.forEach((c) => {
+      const t = tileAt(c.q, c.r);
+      const visibility = (t?.visibility ?? 'visible') as string;
+      if (visibility === 'unexplored') return;
+      const p = cameraPixelForHex(c.q, c.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
-          key={`taskcamp-${i}`}
+          key={`taskcamp-${c.id ?? `${c.q},${c.r}`}`}
           class="task-camp-marker"
-          transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
+          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <polygon class="hex-ring hex-ring--task" points={HEX_CORNER_STR} />
           <text class="task-camp-emoji" textAnchor="middle" dy={HEX_SIZE * 0.32}>🎯</text>
@@ -581,6 +579,54 @@ export function HexMap() {
   }
 
   // ─── rAF march animation ───────────────────────────────────────────────────
+  function setMarkerTransform(el: SVGGElement, x: number, y: number) {
+    const key = `${x.toFixed(1)},${y.toFixed(1)}`;
+    if (el.dataset.pos === key) return;
+    el.dataset.pos = key;
+    el.setAttribute('transform', `translate(${key})`);
+  }
+
+  function foreignMoveById(id: string): any | null {
+    return foreignMoves.value?.movements?.find((m: any) => m.id === id) ?? null;
+  }
+
+  function updateHoverTip(clientX: number, clientY: number) {
+    const mx = clientX;
+    const my = clientY;
+    const hit = document.elementFromPoint(mx, my);
+    const enemyMk = hit?.closest?.('.enemy-march-mk') as Element | null;
+    const moveId = enemyMk?.getAttribute('data-move-id') ?? (enemyMk?.id?.startsWith('foreign-mk-') ? enemyMk.id.slice('foreign-mk-'.length) : null);
+    if (moveId) {
+      const m = foreignMoveById(moveId);
+      if (m?.pos) {
+        const name = m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队';
+        const key = `enemy:${m.id ?? m.pos.q},${m.pos.r}`;
+        if (key !== hovKey.current) {
+          hovKey.current = key;
+          const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, m.pos, W, H) : 0;
+          setTooltip({ q: m.pos.q, r: m.pos.r, kind: 'enemy_army', name, dist, screenX: mx, screenY: my });
+        } else {
+          setTooltip((t) => t ? { ...t, screenX: mx, screenY: my } : t);
+        }
+        return;
+      }
+    }
+    const cell = hit?.closest?.('.hex-cell') as Element | null;
+    if (!cell) { setTooltip(null); hovKey.current = ''; return; }
+    const q = Number(cell.getAttribute('data-tq'));
+    const r = Number(cell.getAttribute('data-tr'));
+    const kind = cell.getAttribute('data-kind') ?? 'empty';
+    const name = cell.getAttribute('data-name') ?? '空地';
+    const key = `${kind}:${q},${r}`;
+    if (key === hovKey.current) {
+      setTooltip((t) => t ? { ...t, screenX: mx, screenY: my } : t);
+      return;
+    }
+    hovKey.current = key;
+    const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
+    setTooltip({ q, r, kind, name, dist, screenX: mx, screenY: my });
+  }
+
   function marchMarkerPixel(m: any, now: number, refX: number, refY: number): { x: number; y: number } | null {
     if (!m.path || m.stepIndex == null) return null;
     const cur = m.path[m.stepIndex];
@@ -609,19 +655,43 @@ export function HexMap() {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        el.setAttribute('transform', `translate(${px.x.toFixed(1)},${px.y.toFixed(1)})`);
+        setMarkerTransform(el, px.x, px.y);
       });
       // 外国军队：同样的逐格插值，但读数来自 foreignMoves 信号。
       const foeMoves: any[] = foreignMoves.value?.movements ?? [];
-      foeMoves.forEach((m, i) => {
-        const el = foreignEl.current?.querySelector(`#foreign-mk-${i}`) as SVGGElement | null;
+      foeMoves.forEach((m) => {
+        if (!m.id) return;
+        const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        el.setAttribute('transform', `translate(${px.x.toFixed(1)},${px.y.toFixed(1)})`);
+        setMarkerTransform(el, px.x, px.y);
       });
       rafRef.current = requestAnimationFrame(frame);
     };
     rafRef.current = requestAnimationFrame(frame);
+  }
+
+  function handleMapTap(clientX: number, clientY: number) {
+    const hit = document.elementFromPoint(clientX, clientY);
+    const enemyMk = hit?.closest?.('.enemy-march-mk') as Element | null;
+    const moveId = enemyMk?.getAttribute('data-move-id') ?? (enemyMk?.id?.startsWith('foreign-mk-') ? enemyMk.id.slice('foreign-mk-'.length) : null);
+    if (moveId) {
+      const m = foreignMoveById(moveId);
+      if (m) {
+        selectEnemy(m, { stopPropagation: () => {} } as MouseEvent);
+        return;
+      }
+    }
+    const cell = hit?.closest?.('.hex-cell') as Element | null;
+    if (!cell) return;
+    const q = Number(cell.getAttribute('data-tq'));
+    const r = Number(cell.getAttribute('data-tr'));
+    const kind = cell.getAttribute('data-kind') ?? 'empty';
+    const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
+    const name = cell.getAttribute('data-name') ?? '空地';
+    const icon = cell.getAttribute('data-icon') ?? undefined;
+    const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
+    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}), ...(visibility ? { visibility } : {}) };
   }
 
   // ─── event handlers ────────────────────────────────────────────────────────
@@ -638,7 +708,7 @@ export function HexMap() {
   function onMouseMove(e: MouseEvent) {
     if (dragging.current) {
       const dx = e.clientX - dragSX.current, dy = e.clientY - dragSY.current;
-      if (!dragMoved.current && Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+      if (!dragMoved.current && Math.hypot(dx, dy) <= DRAG_THRESHOLD) return;
       dragMoved.current = true;
       panX.current = dragPX.current + dx;
       panY.current = dragPY.current + dy;
@@ -647,35 +717,21 @@ export function HexMap() {
       scheduleCull();
       return;
     }
-    // hover tooltip
-    const cell = (e.target as Element)?.closest?.('.hex-cell') as Element | null;
-    if (!cell) { setTooltip(null); hovKey.current = ''; return; }
-    const q = Number(cell.getAttribute('data-tq'));
-    const r = Number(cell.getAttribute('data-tr'));
-    const kind = cell.getAttribute('data-kind') ?? 'empty';
-    const name = cell.getAttribute('data-name') ?? '空地';
-    const camX = Number(cell.getAttribute('data-cam-x'));
-    const camY = Number(cell.getAttribute('data-cam-y'));
-    const key = `${kind}:${q},${r},${camX.toFixed(0)},${camY.toFixed(0)}`;
-    const screen = hexToScreen(camX, camY);
-    if (key === hovKey.current) {
-      setTooltip((t) => t ? { ...t, screenX: screen.x, screenY: screen.y } : t);
-      return;
-    }
-    hovKey.current = key;
-    const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
-    setTooltip({ q, r, kind, name, dist, screenX: screen.x, screenY: screen.y });
+    updateHoverTip(e.clientX, e.clientY);
   }
 
-  function onMouseUp() {
+  function onMouseUp(e: MouseEvent) {
     if (!dragging.current) return;
     dragging.current = false;
     svgEl.current?.classList.remove('grabbing');
-    if (dragMoved.current) {
+    const moved = Math.hypot(e.clientX - dragSX.current, e.clientY - dragSY.current) > DRAG_THRESHOLD;
+    if (moved) {
       suppress.current = true;
       scheduleCull();
       syncNavUI();
     }
+    dragMoved.current = false;
+    if (!moved) updateHoverTip(e.clientX, e.clientY);
   }
 
   function onWheel(e: WheelEvent) {
@@ -740,7 +796,7 @@ export function HexMap() {
     } else if (e.touches.length === 1 && dragging.current) {
       const t = e.touches[0];
       const dx = t.clientX - dragSX.current, dy = t.clientY - dragSY.current;
-      if (!dragMoved.current && Math.abs(dx) <= 3 && Math.abs(dy) <= 3) return;
+      if (!dragMoved.current && Math.hypot(dx, dy) <= DRAG_THRESHOLD) return;
       dragMoved.current = true;
       panX.current = dragPX.current + dx;
       panY.current = dragPY.current + dy;
@@ -753,35 +809,23 @@ export function HexMap() {
   function onTouchEnd(e: TouchEvent) {
     if (e.touches.length < 2) { pinchDist.current = 0; syncNavUI(); }
     if (e.touches.length === 0) {
-      if (dragMoved.current) suppress.current = true;
+      const wasDrag = dragMoved.current;
+      if (wasDrag) suppress.current = true;
       dragging.current = false;
+      if (!wasDrag && e.changedTouches[0]) {
+        suppress.current = true;
+        const t = e.changedTouches[0];
+        handleMapTap(t.clientX, t.clientY);
+      }
       dragMoved.current = false;
     }
   }
 
   function onSvgClick(e: MouseEvent) {
     if (suppress.current) { suppress.current = false; return; }
-    const cell = (e.target as Element)?.closest?.('.hex-cell') as Element | null;
-    if (!cell) return;
-    const q = Number(cell.getAttribute('data-tq'));
-    const r = Number(cell.getAttribute('data-tr'));
-    const kind = cell.getAttribute('data-kind') ?? 'empty';
-    const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
-    const name = cell.getAttribute('data-name') ?? '空地';
-    const icon = cell.getAttribute('data-icon') ?? undefined;
-    const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
-    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}), ...(visibility ? { visibility } : {}) };
+    handleMapTap(e.clientX, e.clientY);
   }
 
-  // ─── D-pad handlers ────────────────────────────────────────────────────────
-  function doDir(dir: string) {
-    const d = SCREEN_DIRS[dir];
-    const cur = viewCenter();
-    const w = wrapCoord(cur.q + d.dq * STEP, cur.r + d.dr * STEP, W, H);
-    setMapCenter(w);
-    centerViewOn(w.q, w.r);
-    syncNavUI();
-  }
   function doHome() {
     const capital = capitalCoordinate(me);
     if (!capital) return;
@@ -818,7 +862,7 @@ export function HexMap() {
     // Initial center
     if (centeredKey.current === '') {
       const c = getMapCenter() ?? { q: me?.q ?? 0, r: me?.r ?? 0 };
-      zoom.current = INITIAL_ZOOM;
+      zoom.current = clampZoom(INITIAL_ZOOM);
       const p = hexToPixel(c);
       const wx = p.x + ox.current, wy = p.y + oy.current;
       panX.current = cw.current / 2 - zoom.current * wx;
@@ -879,6 +923,7 @@ export function HexMap() {
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
   const marchPaths   = buildMarchPaths();
+  const foreignPaths = buildForeignMarchPaths();
   const marchMarkers = buildMarchMarkers();
   const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
@@ -893,7 +938,11 @@ export function HexMap() {
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={() => { onMouseUp(); setTooltip(null); hovKey.current = ''; }}
+        onMouseLeave={(e) => {
+          if (dragging.current) onMouseUp(e);
+          setTooltip(null);
+          hovKey.current = '';
+        }}
         onDblClick={onDblClick}
         onClick={onSvgClick}
         onTouchStart={onTouchStart as any}
@@ -968,7 +1017,7 @@ export function HexMap() {
           </g>
 
           {/* ── March paths ── */}
-          <g class="layer-paths">{marchPaths}</g>
+          <g class="layer-paths">{marchPaths}{foreignPaths}</g>
 
           {/* ── March markers (animated via rAF) ── */}
           <g ref={markerEl} class="layer-markers">{marchMarkers}</g>
@@ -990,19 +1039,8 @@ export function HexMap() {
           onGoHome={doHome}
         />
 
-        {/* D-pad + jump nav */}
+        {/* 坐标跳转 */}
         <div class="map-nav">
-          <div class="map-dpad">
-            <span />
-            <button class="map-dpad-btn" onClick={() => doDir('up')} title="向上" aria-label="向上">▲</button>
-            <span />
-            <button class="map-dpad-btn" onClick={() => doDir('left')} title="向左" aria-label="向左">◀</button>
-            <button class="map-dpad-btn map-dpad-btn--home" onClick={doHome} disabled={homeCentered} title="回到本城" aria-label="回到本城">⌂</button>
-            <button class="map-dpad-btn" onClick={() => doDir('right')} title="向右" aria-label="向右">▶</button>
-            <span />
-            <button class="map-dpad-btn" onClick={() => doDir('down')} title="向下" aria-label="向下">▼</button>
-            <span />
-          </div>
           <form class="map-locator" noValidate onSubmit={(e) => { e.preventDefault(); doJump(); }}>
             <span class="map-locator-title">坐标跳转</span>
             <div class="map-locator-row">
@@ -1045,23 +1083,6 @@ export function HexMap() {
               ? <span class="map-locator-error" role="alert">{jumpError}</span>
               : <span class="map-locator-hint">输入 X 0–{W - 1}、Y 0–{H - 1} 后点跳转</span>}
           </form>
-          <div class="map-zoom" aria-label="地图缩放">
-            <button
-              type="button"
-              class="map-zoom-btn"
-              title="缩小"
-              disabled={zoomUi <= ZOOM_MIN + 0.001}
-              onClick={() => adjustZoom(1 / 1.15)}
-            >−</button>
-            <span class="map-zoom-label">{Math.round(zoomUi * 100)}%</span>
-            <button
-              type="button"
-              class="map-zoom-btn"
-              title="放大"
-              disabled={zoomUi >= ZOOM_MAX - 0.001}
-              onClick={() => adjustZoom(1.15)}
-            >+</button>
-          </div>
         </div>
 
         {/* Legend */}
@@ -1074,6 +1095,8 @@ export function HexMap() {
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--raid" />掠夺</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--return" />返程</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--transport" />运输</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />敌方军队</div>
+          <div class="map-legend-row"><span>🎯</span>任务营地</div>
         </div>
       </div>
 
@@ -1094,12 +1117,12 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
 }) {
   const capital = capitalCoordinate(me);
   if (!capital) return null;
-  const atHome = navCoord.q === capital.q && navCoord.r === capital.r;
+  const atHome = homeCentered || (navCoord.q === capital.q && navCoord.r === capital.r);
   return (
     <div class="map-infobar">
       {!homeCentered && !atHome ? (
         <>全图模式 · 视角偏离主城 · <a onClick={onGoHome}>回主城</a></>
-      ) : atHome ? (
+      ) : homeCentered && (navCoord.q === capital.q && navCoord.r === capital.r) ? (
         <>全图模式 · 主城 <b>X={capital.q} Y={capital.r}</b>（已居中）</>
       ) : (
         <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回主城</a></>
@@ -1112,20 +1135,19 @@ function tileKindLabel(kind: string, isSelf: boolean): string {
   if (kind === 'own_village') return isSelf ? '本城（己方）' : '己方村庄';
   if (kind === 'village') return '玩家村庄（可进攻）';
   if (kind === 'pve') return '野怪据点（可掠夺）';
+  if (kind === 'enemy_army') return '敌方军队';
   return '空地（可拓荒）';
 }
 
 function HexTooltip({ tip }: {
   tip: { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number };
 }) {
-  const offsetX = HEX_SIZE * 0.55;
-  const offsetY = -HEX_SIZE * 0.85;
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
   const label = tileKindLabel(tip.kind, isSelf);
 
   const style = {
-    left: Math.min(Math.max(8, tip.screenX + offsetX), window.innerWidth - 260),
-    top:  Math.min(Math.max(8, tip.screenY + offsetY), window.innerHeight - 120),
+    left: Math.min(Math.max(8, tip.screenX + TIP_PAD), window.innerWidth - 260),
+    top:  Math.min(Math.max(8, tip.screenY + TIP_PAD), window.innerHeight - 120),
   };
 
   return (
@@ -1144,6 +1166,9 @@ function HexTooltip({ tip }: {
       </div>
       {tip.kind === 'empty' && (
         <div class="map-tooltip-hint">点击可拓荒建村</div>
+      )}
+      {tip.kind === 'enemy_army' && (
+        <div class="map-tooltip-hint">点击查看脱敏军情</div>
       )}
     </div>
   );

@@ -418,7 +418,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   async function found() {
     if (await act(req('FoundVillage', { q, r }), { okToast: '拓荒令已发出' })) onClose();
   }
-  const meta: TargetMeta = { refId: '', q, r, dist, name: '空地', icon: 'bld_main', mode: 'transport' };
+  const meta: TargetMeta = { refId: '', q, r, dist, name: '空地', icon: 'bld_main', mode: 'garrison' };
   const depth = visibility === 'unexplored' ? unexploredDepth(q, r) : 0;
   const maxExploreDepth = rallypointLevel();
   const allowExplore = visibility !== 'unexplored' || (depth >= 1 && depth <= maxExploreDepth);
@@ -523,16 +523,44 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
   );
 }
 
+/** 驻扎续行等待选格：行军列表点了「行军」后，在点地图目标前显示。 */
+function GarrisonWaitPanel({ onCancel }: { onCancel: () => void }) {
+  return (
+    <Panel variant="gold" corners class="map-target-panel">
+      <div class="target-head">
+        <IconPlate icon="pve_bandits" label="驻扎续行" size="sm" plate="gold" />
+        <div class="target-heading-copy">
+          <div class="target-title">选择下一处目标</div>
+          <div class="target-coord">点击地图上的空地、野怪或玩家村庄</div>
+        </div>
+        <button type="button" class="target-close" onClick={onCancel} aria-label="取消续行">×</button>
+      </div>
+      <div class="target-body expedition-body">
+        <p class="expedition-modal-copy">编队与宝物保持在原驻扎军中，不会重新扣兵或多占行军点。</p>
+        <div class="target-foot expedition-foot">
+          <Btn onClick={onCancel}>取消续行</Btn>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export function TargetPanel() {
   const _dv = dataVersion.value;
   const sel = selected.value;
-  if (!sel || !me) return null;
-  const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
   const pending = garrisonContinue.value;
-  const close = () => { selected.value = null; garrisonContinue.value = null; };
-  if (sel.kind === 'enemy_army') return <EnemyArmyPanel sel={sel} onClose={close} />;
-  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={close} />;
-  if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={close} />;
+  if (!me) return null;
+  if (pending && !sel) return <GarrisonWaitPanel onCancel={() => { garrisonContinue.value = null; }} />;
+  if (!sel) return null;
+
+  const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
+  const clearSelection = () => { selected.value = null; };
+  const cancelAll = () => { selected.value = null; garrisonContinue.value = null; };
+  if (sel.kind === 'enemy_army') {
+    return <EnemyArmyPanel sel={sel} onClose={clearSelection} />;
+  }
+  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={cancelAll} />;
+  if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />;
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
   const village = me.villages?.find((item) => item.id === sel.refId);
@@ -548,5 +576,5 @@ export function TargetPanel() {
     isCapital: village?.isCapital || sel.refId === me.capitalVillageId,
   };
 
-  return <ExpeditionWorkflow meta={meta} onClose={close} />;
+  return <ExpeditionWorkflow meta={meta} onClose={clearSelection} />;
 }

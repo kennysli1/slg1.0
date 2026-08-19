@@ -161,10 +161,6 @@ export function setTab(t: string): void { currentTab = t; }
 export function getSelected(): SelectedTarget | null { return selected; }
 export function setSelected(s: SelectedTarget | null): void { selected = s; }
 
-let mapCenter: { q: number; r: number } | null = null;
-export function getMapCenter(): { q: number; r: number } | null { return mapCenter; }
-export function setMapCenter(c: { q: number; r: number } | null): void { mapCenter = c; }
-
 /** 人口快照读写。 */
 export function getPopState(): PopSnapshot | null { return popState; }
 export function setPopState(s: PopSnapshot): void { popState = s; }

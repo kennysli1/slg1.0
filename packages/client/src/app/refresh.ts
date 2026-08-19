@@ -19,14 +19,18 @@ import {
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setTaskMarkers, foreignMoves,
+  setTaskState, setTaskMarkers, foreignMoves, mapCenter,
 } from './store.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
-let mapCenter: { q: number; r: number } | null = null;
-export function getMapCenter(): { q: number; r: number } | null { return mapCenter; }
-export function setMapCenter(c: { q: number; r: number } | null): void { mapCenter = c; }
-
+let mapCenterLegacy: { q: number; r: number } | null = null;
+export function getMapCenter(): { q: number; r: number } | null {
+  return mapCenter.value ?? mapCenterLegacy;
+}
+export function setMapCenter(c: { q: number; r: number } | null): void {
+  mapCenter.value = c;
+  mapCenterLegacy = c;
+}
 /** 登录态失效时由 App 注册的回调（回登录页）。 */
 let onSessionLost: ((msg: string) => void) | null = null;
 export function setSessionLostHandler(fn: (msg: string) => void): void { onSessionLost = fn; }
@@ -35,7 +39,7 @@ export function setSessionLostHandler(fn: (msg: string) => void): void { onSessi
 export async function refreshAll(): Promise<void> {
   if (!me) return;
   try {
-    const center = mapCenter ?? { q: me.q, r: me.r };
+    const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
     const [res, vil, army, area, moves, pop, treasures] = await Promise.all([
       req('GetResources'),
@@ -64,6 +68,7 @@ export async function refreshAll(): Promise<void> {
     markResFetched();
     if (pop.ok) applyPopPayload(pop.payload);
     bumpData();
+    void refreshForeignMoves();
 
     // 任务快照（任务条常驻村庄页，登录/刷新即拉取）
     const taskRes = await req('task.GetState').catch(() => null);
