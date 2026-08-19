@@ -5,7 +5,7 @@
  */
 import * as preact from 'preact';
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
-import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
+import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { dataVersion, selected, tick, taskMarkers, foreignMoves } from '../../app/store.js';
@@ -85,6 +85,70 @@ function wrapCoord(q: number, r: number, W: number, H: number) {
   return { q: ((q % W) + W) % W, r: ((r % H) + H) % H };
 }
 
+/** 当前视口中心在相机坐标系下的像素位置（与 hex-cell 的 camX/camY 同系）。 */
+function viewRefCamera(
+  panX: number, panY: number, zoom: number, cw: number, ch: number,
+): { x: number; y: number } {
+  return { x: (cw / 2 - panX) / zoom, y: (ch / 2 - panY) / zoom };
+}
+
+/** 把六边形基准像素对齐到距 ref 最近的环面副本。 */
+function wrapPixelNearRef(
+  x: number, y: number, refX: number, refY: number, W: number, H: number,
+): { x: number; y: number } {
+  const Vx = hexToPixel({ q: W, r: 0 });
+  const Vy = hexToPixel({ q: 0, r: H });
+  if (Math.abs(Vx.x) < 1e-6 || Math.abs(Vy.y) < 1e-6) return { x, y };
+  const v = (refY - y) / Vy.y;
+  const u = (refX - x - v * Vy.x) / Vx.x;
+  const i = Math.round(u);
+  const j = Math.round(v);
+  return { x: x + i * Vx.x + j * Vy.x, y: y + j * Vy.y };
+}
+
+/**
+ * 行军路径在环面地图上展开：首点对齐视口，后续每格选与上一格相邻的最近副本，
+ * 避免折线画到屏幕外或跨图断线。
+ */
+function unwrapPathPixels(
+  path: Hex[], ox: number, oy: number, refX: number, refY: number, W: number, H: number,
+): { x: number; y: number }[] {
+  const Vx = hexToPixel({ q: W, r: 0 });
+  const Vy = hexToPixel({ q: 0, r: H });
+  const out: { x: number; y: number }[] = [];
+  for (let idx = 0; idx < path.length; idx++) {
+    const p = hexToPixel(path[idx]);
+    let x = p.x + ox;
+    let y = p.y + oy;
+    if (idx === 0) {
+      ({ x, y } = wrapPixelNearRef(x, y, refX, refY, W, H));
+    } else {
+      const prev = out[idx - 1];
+      let bestX = x, bestY = y, bestD = Infinity;
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          const tx = x + di * Vx.x + dj * Vy.x;
+          const ty = y + dj * Vy.y;
+          const d = Math.hypot(tx - prev.x, ty - prev.y);
+          if (d < bestD) { bestD = d; bestX = tx; bestY = ty; }
+        }
+      }
+      x = bestX;
+      y = bestY;
+    }
+    out.push({ x, y });
+  }
+  return out;
+}
+
+/** 单格对齐视口最近副本（部队标记/悬停用）。 */
+function cameraPixelForHex(
+  q: number, r: number, ox: number, oy: number, refX: number, refY: number, W: number, H: number,
+): { x: number; y: number } {
+  const p = hexToPixel({ q, r });
+  return wrapPixelNearRef(p.x + ox, p.y + oy, refX, refY, W, H);
+}
+
 // ─── tile index ──────────────────────────────────────────────────────────────
 let _tilesRef: any = null;
 let _tileIndex: Map<string, any> | null = null;
@@ -144,9 +208,11 @@ export function HexMap() {
   const [jumpQ, setJumpQ] = useState(String(me?.q ?? 0));
   const [jumpR, setJumpR] = useState(String(me?.r ?? 0));
   const [jumpError, setJumpError] = useState('');
+  const jumpEditing = useRef(false);
+  const [zoomUi, setZoomUi] = useState(INITIAL_ZOOM);
 
   // ── Tooltip ──
-  type TipState = { q: number; r: number; kind: string; name: string; dist: number; x: number; y: number } | null;
+  type TipState = { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
 
@@ -169,11 +235,29 @@ export function HexMap() {
   const rafRef = useRef<number | null>(null);
 
   // ─── camera helpers ────────────────────────────────────────────────────────
+  function clampZoom(z: number): number {
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  }
+
   function applyTransform() {
     camEl.current?.setAttribute(
       'transform',
       `translate(${panX.current.toFixed(2)},${panY.current.toFixed(2)}) scale(${zoom.current.toFixed(4)})`,
     );
+    setZoomUi(zoom.current);
+  }
+
+  function viewRef(): { x: number; y: number } {
+    return viewRefCamera(panX.current, panY.current, zoom.current, cw.current, ch.current);
+  }
+
+  function hexToScreen(camX: number, camY: number): { x: number; y: number } {
+    const rect = svgEl.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: rect.left + panX.current + zoom.current * camX,
+      y: rect.top + panY.current + zoom.current * camY,
+    };
   }
 
   function reducePanToLattice() {
@@ -252,8 +336,24 @@ export function HexMap() {
   }
 
   function resetView() {
-    zoom.current = 1;
+    zoom.current = clampZoom(INITIAL_ZOOM);
     centerViewOn(viewCenter().q, viewCenter().r);
+    syncNavUI();
+  }
+
+  function adjustZoom(factor: number, anchorSx?: number, anchorSy?: number) {
+    const rect = svgEl.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = anchorSx ?? rect.width / 2;
+    const sy = anchorSy ?? rect.height / 2;
+    const fw = (sx - panX.current) / zoom.current;
+    const fh = (sy - panY.current) / zoom.current;
+    zoom.current = clampZoom(zoom.current * factor);
+    panX.current = sx - zoom.current * fw;
+    panY.current = sy - zoom.current * fh;
+    reducePanToLattice();
+    applyTransform();
+    scheduleCull();
     syncNavUI();
   }
 
@@ -356,10 +456,11 @@ export function HexMap() {
   function buildMarchPaths() {
     const moves: any[] = getCache().moves?.movements ?? [];
     const paths: preact.VNode[] = [];
+    const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.path || m.path.length < 2) return;
-      const pts = m.path
-        .map((h: Hex) => { const p = hexToPixel(h); return `${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)}`; })
+      const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
+        .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
         .join(' ');
       const t = m.type === 'return' ? 'return'
         : m.type === 'transport' ? 'transport'
@@ -384,9 +485,10 @@ export function HexMap() {
   function buildMarchMarkers() {
     const moves: any[] = getCache().moves?.movements ?? [];
     const markers: preact.VNode[] = [];
+    const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const p = hexToPixel(m.pos);
+      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
         : m.type === 'raid'      ? '⚡'
         : m.type === 'found'     ? '🚩'
@@ -400,7 +502,7 @@ export function HexMap() {
         <g
           key={`mk-${i}`}
           id={`march-mk-${i}`}
-          transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
+          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <circle r={10} class={`march-dot march-dot--${t}${m.status === 'paused' ? ' paused' : ''}`} />
           <text class="march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
@@ -428,9 +530,10 @@ export function HexMap() {
   function buildForeignMarkers() {
     const moves: any[] = foreignMoves.value?.movements ?? [];
     const markers: preact.VNode[] = [];
+    const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const p = hexToPixel(m.pos);
+      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
         : m.type === 'raid'      ? '⚡'
         : m.type === 'found'     ? '🚩'
@@ -445,7 +548,7 @@ export function HexMap() {
           key={`fmk-${i}`}
           id={`foreign-mk-${i}`}
           class={`enemy-march-mk enemy-march-mk--${t}`}
-          transform={`translate(${(p.x + ox.current).toFixed(1)},${(p.y + oy.current).toFixed(1)})`}
+          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
           onClick={(e: MouseEvent) => selectEnemy(m, e)}
         >
           <circle r={11} class="enemy-march-ring" />
@@ -478,37 +581,43 @@ export function HexMap() {
   }
 
   // ─── rAF march animation ───────────────────────────────────────────────────
+  function marchMarkerPixel(m: any, now: number, refX: number, refY: number): { x: number; y: number } | null {
+    if (!m.path || m.stepIndex == null) return null;
+    const cur = m.path[m.stepIndex];
+    if (!cur) return null;
+    const unwrapped = unwrapPathPixels(m.path, ox.current, oy.current, refX, refY, W, H);
+    let px = unwrapped[m.stepIndex];
+    if (!px) return null;
+    if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
+      const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
+      const nxt = unwrapped[m.stepIndex + 1];
+      if (nxt) {
+        px = { x: px.x + (nxt.x - px.x) * t, y: px.y + (nxt.y - px.y) * t };
+      }
+    }
+    return px;
+  }
+
   function startMarchAnimation() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     const frame = () => {
       if (!markerEl.current) return;
+      const ref = viewRef();
       const moves: any[] = getCache().moves?.movements ?? [];
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
-        if (!el || !m.path || m.stepIndex == null) return;
-        const cur = m.path[m.stepIndex];
-        if (!cur) return;
-        let px = hexToPixel(cur);
-        if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
-          const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
-          px = lerpPixel(hexToPixel(cur), hexToPixel(m.path[m.stepIndex + 1]), t);
-        }
-        el.setAttribute('transform', `translate(${(px.x + ox.current).toFixed(1)},${(px.y + oy.current).toFixed(1)})`);
+        const px = marchMarkerPixel(m, now, ref.x, ref.y);
+        if (!el || !px) return;
+        el.setAttribute('transform', `translate(${px.x.toFixed(1)},${px.y.toFixed(1)})`);
       });
       // 外国军队：同样的逐格插值，但读数来自 foreignMoves 信号。
       const foeMoves: any[] = foreignMoves.value?.movements ?? [];
       foeMoves.forEach((m, i) => {
         const el = foreignEl.current?.querySelector(`#foreign-mk-${i}`) as SVGGElement | null;
-        if (!el || !m.path || m.stepIndex == null) return;
-        const cur = m.path[m.stepIndex];
-        if (!cur) return;
-        let px = hexToPixel(cur);
-        if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
-          const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
-          px = lerpPixel(hexToPixel(cur), hexToPixel(m.path[m.stepIndex + 1]), t);
-        }
-        el.setAttribute('transform', `translate(${(px.x + ox.current).toFixed(1)},${(px.y + oy.current).toFixed(1)})`);
+        const px = marchMarkerPixel(m, now, ref.x, ref.y);
+        if (!el || !px) return;
+        el.setAttribute('transform', `translate(${px.x.toFixed(1)},${px.y.toFixed(1)})`);
       });
       rafRef.current = requestAnimationFrame(frame);
     };
@@ -545,15 +654,17 @@ export function HexMap() {
     const r = Number(cell.getAttribute('data-tr'));
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const name = cell.getAttribute('data-name') ?? '空地';
-    const key = `${kind}:${q},${r}`;
+    const camX = Number(cell.getAttribute('data-cam-x'));
+    const camY = Number(cell.getAttribute('data-cam-y'));
+    const key = `${kind}:${q},${r},${camX.toFixed(0)},${camY.toFixed(0)}`;
+    const screen = hexToScreen(camX, camY);
     if (key === hovKey.current) {
-      // just update position
-      setTooltip((t) => t ? { ...t, x: e.clientX, y: e.clientY } : t);
+      setTooltip((t) => t ? { ...t, screenX: screen.x, screenY: screen.y } : t);
       return;
     }
     hovKey.current = key;
     const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
-    setTooltip({ q, r, kind, name, dist, x: e.clientX, y: e.clientY });
+    setTooltip({ q, r, kind, name, dist, screenX: screen.x, screenY: screen.y });
   }
 
   function onMouseUp() {
@@ -573,7 +684,9 @@ export function HexMap() {
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const fw = (sx - panX.current) / zoom.current;
     const fh = (sy - panY.current) / zoom.current;
-    zoom.current = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.current * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    const prev = zoom.current;
+    zoom.current = clampZoom(zoom.current * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+    if (zoom.current === prev) return;
     panX.current = sx - zoom.current * fw;
     panY.current = sy - zoom.current * fh;
     reducePanToLattice();
@@ -615,7 +728,7 @@ export function HexMap() {
       const rect = svgEl.current!.getBoundingClientRect();
       const mx = (t[0].clientX + t[1].clientX) / 2;
       const my = (t[0].clientY + t[1].clientY) / 2;
-      zoom.current = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinchZoom.current * scale));
+      zoom.current = clampZoom(pinchZoom.current * scale);
       const sx = mx - rect.left, sy = my - rect.top;
       const fw = (sx - pinchPX.current) / pinchZoom.current;
       const fh = (sy - pinchPY.current) / pinchZoom.current;
@@ -683,9 +796,12 @@ export function HexMap() {
       return;
     }
     setJumpError('');
+    jumpEditing.current = false;
     setMapCenter(parsed.coordinate);
     centerViewOn(parsed.coordinate.q, parsed.coordinate.r);
     syncNavUI();
+    setJumpQ(String(parsed.coordinate.q));
+    setJumpR(String(parsed.coordinate.r));
   }
 
   // ─── initial center & resize ───────────────────────────────────────────────
@@ -755,6 +871,7 @@ export function HexMap() {
   }, [_dv]); // intentional: _dv is the data dependency
 
   useEffect(() => {
+    if (jumpEditing.current) return;
     setJumpQ(String(navCoord.q));
     setJumpR(String(navCoord.r));
   }, [navCoord.q, navCoord.r]);
@@ -803,7 +920,7 @@ export function HexMap() {
                   key={`${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
                   class={`hex-cell hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.isSelected ? ' hex-cell--selected' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                  {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                  {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
                 >
                   {/* Base fill (token-derived, always visible) */}
                   <polygon class={`hex-base hex-fill-${c.terrain}`} points={HEX_CORNER_STR} />
@@ -887,7 +1004,7 @@ export function HexMap() {
             <span />
           </div>
           <form class="map-locator" noValidate onSubmit={(e) => { e.preventDefault(); doJump(); }}>
-            <span class="map-locator-title">战术定位</span>
+            <span class="map-locator-title">坐标跳转</span>
             <div class="map-locator-row">
               <label class="map-coordinate-field">
                 <span>X</span>
@@ -898,7 +1015,9 @@ export function HexMap() {
                   max={W - 1}
                   step={1}
                   value={jumpQ}
-                  onInput={(e) => { setJumpQ(e.currentTarget.value); setJumpError(''); }}
+                  onFocus={() => { jumpEditing.current = true; }}
+                  onBlur={() => { jumpEditing.current = false; }}
+                  onInput={(e) => { jumpEditing.current = true; setJumpQ(e.currentTarget.value); setJumpError(''); }}
                   aria-label="地图 X 坐标"
                 />
               </label>
@@ -911,7 +1030,9 @@ export function HexMap() {
                   max={H - 1}
                   step={1}
                   value={jumpR}
-                  onInput={(e) => { setJumpR(e.currentTarget.value); setJumpError(''); }}
+                  onFocus={() => { jumpEditing.current = true; }}
+                  onBlur={() => { jumpEditing.current = false; }}
+                  onInput={(e) => { jumpEditing.current = true; setJumpR(e.currentTarget.value); setJumpError(''); }}
                   aria-label="地图 Y 坐标"
                 />
               </label>
@@ -922,8 +1043,25 @@ export function HexMap() {
             </div>
             {jumpError
               ? <span class="map-locator-error" role="alert">{jumpError}</span>
-              : <span class="map-locator-hint">可输入 X 0–{W - 1}，Y 0–{H - 1}</span>}
+              : <span class="map-locator-hint">输入 X 0–{W - 1}、Y 0–{H - 1} 后点跳转</span>}
           </form>
+          <div class="map-zoom" aria-label="地图缩放">
+            <button
+              type="button"
+              class="map-zoom-btn"
+              title="缩小"
+              disabled={zoomUi <= ZOOM_MIN + 0.001}
+              onClick={() => adjustZoom(1 / 1.15)}
+            >−</button>
+            <span class="map-zoom-label">{Math.round(zoomUi * 100)}%</span>
+            <button
+              type="button"
+              class="map-zoom-btn"
+              title="放大"
+              disabled={zoomUi >= ZOOM_MAX - 0.001}
+              onClick={() => adjustZoom(1.15)}
+            >+</button>
+          </div>
         </div>
 
         {/* Legend */}
@@ -978,16 +1116,16 @@ function tileKindLabel(kind: string, isSelf: boolean): string {
 }
 
 function HexTooltip({ tip }: {
-  tip: { q: number; r: number; kind: string; name: string; dist: number; x: number; y: number };
+  tip: { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number };
 }) {
-  const pad = 14;
+  const offsetX = HEX_SIZE * 0.55;
+  const offsetY = -HEX_SIZE * 0.85;
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
   const label = tileKindLabel(tip.kind, isSelf);
 
-  // Position calculation: rough estimate, will be slightly off on first render but that's fine
   const style = {
-    left: Math.min(tip.x + pad, window.innerWidth - 260),
-    top:  Math.min(tip.y + pad, window.innerHeight - 120),
+    left: Math.min(Math.max(8, tip.screenX + offsetX), window.innerWidth - 260),
+    top:  Math.min(Math.max(8, tip.screenY + offsetY), window.innerHeight - 120),
   };
 
   return (
