@@ -13,10 +13,8 @@
  *    （含起点与终点）。Movement 逐格推进就沿它走。
  */
 
-export interface Hex {
-  q: number;
-  r: number;
-}
+import type { Hex } from '@slg/shared';
+export type { Hex };
 
 interface Cube {
   x: number;
@@ -147,4 +145,31 @@ export function linePathWrapped(from: Hex, to: Hex, W: number, H: number): Hex[]
     }
   }
   return linePath(from, bestTo).map((p) => wrapHex(p, W, H));
+}
+
+/**
+ * 从 from 指向 to 的单位方向增量（六邻居之一）。
+ * from 与 to 不相邻或相同时返回 null。
+ */
+export function headingWrapped(from: Hex, to: Hex, W: number, H: number): Hex | null {
+  let bestTo = to;
+  let bestD = hexDistance(from, to);
+  for (let dq = -W; dq <= W; dq += W) {
+    for (let dr = -H; dr <= H; dr += H) {
+      if (dq === 0 && dr === 0) continue;
+      const cand = { q: to.q + dq, r: to.r + dr };
+      const d = hexDistance(from, cand);
+      if (d < bestD) { bestD = d; bestTo = cand; }
+    }
+  }
+  if (bestD !== 1) return null;
+  const dq = bestTo.q - from.q;
+  const dr = bestTo.r - from.r;
+  let ndq = dq;
+  let ndr = dr;
+  if (ndq > W / 2) ndq -= W;
+  else if (ndq < -W / 2) ndq += W;
+  if (ndr > H / 2) ndr -= H;
+  else if (ndr < -H / 2) ndr += H;
+  return { q: ndq, r: ndr };
 }

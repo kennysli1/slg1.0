@@ -102,7 +102,6 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     eventPushMap: {
       'military.TroopTrained': 'TroopTrained',
-      'military.SmithyUpgraded': 'SmithyUpgraded',
     },
     },
   {
@@ -162,6 +161,10 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'movement.RecallGarrison', ownVillage: true, needAuth: true,
         schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
       },
+      RecallMarch: {
+        command: 'movement.RecallMarch', ownVillage: true, needAuth: true,
+        schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
       ContinueGarrison: {
         command: 'movement.ContinueGarrison', ownVillage: true, needAuth: true,
         schema: {
@@ -186,6 +189,11 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.GarrisonRecalled': 'GarrisonRecalled',
       'movement.Explored': 'Explored',
       'movement.VisionUpdated': 'VisionUpdated',
+      'movement.Recalled': 'MarchRecalled',
+      'movement.Stepped': 'MarchStep',
+      'movement.Removed': 'MarchRemoved',
+      'movement.ForeignStepped': 'ForeignArmyStep',
+      'movement.ForeignRemoved': 'ForeignArmyRemoved',
     },
     },
   {
@@ -265,7 +273,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       CancelResearch: { command: 'research.CancelResearch', ownVillage: true, needAuth: true, schema: {} },
     },
     // 左=内部事件名，右=推给客户端的事件名。右侧一律用**不带模块前缀**的裸名，
-    // 与其它模块保持一致（military 推 SmithyUpgraded、building 推 BuildingBuilt…），
+    // 与其它模块保持一致（military 推 TroopTrained、building 推 BuildingBuilt…），
     // 客户端的 notificationText / notificationKind 也是按裸名分派的。
     eventPushMap: {
       'research.TechCompleted': 'TechCompleted',

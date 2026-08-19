@@ -8,8 +8,9 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, foreignMoves } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, foreignMoves, tab } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
+import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
@@ -422,27 +423,6 @@ export function HexMap() {
   }
 
   // ─── march path + marker rendering ────────────────────────────────────────
-  function buildForeignMarchPaths() {
-    const moves: any[] = foreignMoves.value?.movements ?? [];
-    const paths: preact.VNode[] = [];
-    const ref = viewRef();
-    moves.forEach((m) => {
-      if (!m.path || m.path.length < 2 || !m.id) return;
-      const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
-        .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
-        .join(' ');
-      const t = m.type ?? 'return';
-      paths.push(
-        <polyline
-          key={`fpath-${m.id}`}
-          class={`march-path march-path--${t} march-path--foreign`}
-          points={pts}
-        />,
-      );
-    });
-    return paths;
-  }
-
   function buildMarchPaths() {
     const moves: any[] = getCache().moves?.movements ?? [];
     const paths: preact.VNode[] = [];
@@ -504,12 +484,12 @@ export function HexMap() {
     return markers;
   }
 
-  // ─── foreign march markers（视野内其他玩家的脱敏军队，地图轮询填充）──────────
+  // ─── foreign march markers（视野内其他玩家的脱敏军队，增量推送驱动）──────────
   function buildForeignMarkers() {
-    const moves: any[] = foreignMoves.value?.movements ?? [];
+    const armies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
     const markers: preact.VNode[] = [];
     const ref = viewRef();
-    moves.forEach((m) => {
+    armies.forEach((m) => {
       if (!m.pos || !m.id) return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
@@ -521,6 +501,27 @@ export function HexMap() {
         : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
+
+      // 朝向箭头：heading 指向下一格，计算像素方向后绘制小三角
+      let arrowEl: preact.VNode | null = null;
+      if (m.heading && m.status === 'marching') {
+        const dir = hexToPixel(m.heading);
+        const len = Math.hypot(dir.x, dir.y);
+        if (len > 0.01) {
+          const ux = dir.x / len, uy = dir.y / len;
+          const px = -uy, py = ux;
+          const tip = { x: ux * 15, y: uy * 15 };
+          const b1  = { x: px * 3.5, y: py * 3.5 };
+          const b2  = { x: -px * 3.5, y: -py * 3.5 };
+          arrowEl = (
+            <polygon
+              class="foreign-march-arrow"
+              points={`${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${b1.x.toFixed(1)},${b1.y.toFixed(1)} ${b2.x.toFixed(1)},${b2.y.toFixed(1)}`}
+            />
+          );
+        }
+      }
+
       markers.push(
         <g
           key={`fmk-${m.id}`}
@@ -531,6 +532,7 @@ export function HexMap() {
         >
           <circle r={11} class="enemy-march-ring" />
           <text class="enemy-march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
+          {arrowEl}
         </g>,
       );
     });
@@ -569,8 +571,8 @@ export function HexMap() {
     el.setAttribute('transform', `translate(${key})`);
   }
 
-  function foreignMoveById(id: string): any | null {
-    return foreignMoves.value?.movements?.find((m: any) => m.id === id) ?? null;
+  function foreignMoveById(id: string): ForeignArmy | null {
+    return foreignMoves.value?.movements?.find((m) => m.id === id) ?? null;
   }
 
   function updateHoverTip(clientX: number, clientY: number) {
@@ -627,6 +629,19 @@ export function HexMap() {
     return px;
   }
 
+  /** 外国军队位置插值：pos → pos+heading 单段（无完整 path）。 */
+  function foreignMarkerPixel(m: ForeignArmy, now: number, refX: number, refY: number): { x: number; y: number } | null {
+    if (!m.pos) return null;
+    const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, refX, refY, W, H);
+    if (m.status === 'marching' && m.heading && m.nextStepAt && m.perStepMs) {
+      const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
+      const nextHex = { q: m.pos.q + m.heading.q, r: m.pos.r + m.heading.r };
+      const np = cameraPixelForHex(nextHex.q, nextHex.r, ox.current, oy.current, refX, refY, W, H);
+      return { x: p.x + (np.x - p.x) * t, y: p.y + (np.y - p.y) * t };
+    }
+    return p;
+  }
+
   function startMarchAnimation() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     const frame = () => {
@@ -640,12 +655,12 @@ export function HexMap() {
         if (!el || !px) return;
         setMarkerTransform(el, px.x, px.y);
       });
-      // 外国军队：同样的逐格插值，但读数来自 foreignMoves 信号。
-      const foeMoves: any[] = foreignMoves.value?.movements ?? [];
-      foeMoves.forEach((m) => {
+      // 外国军队：pos+heading 单段插值（无 path），读数来自 foreignMoves 信号。
+      const foeArmies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+      foeArmies.forEach((m) => {
         if (!m.id) return;
         const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
-        const px = marchMarkerPixel(m, now, ref.x, ref.y);
+        const px = foreignMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
         setMarkerTransform(el, px.x, px.y);
       });
@@ -880,15 +895,25 @@ export function HexMap() {
     // Start march animation
     startMarchAnimation();
 
-    // 地图页打开时轮询视野内的外国军队（脱敏）。每 3.5s 拉一次，关闭地图即停止。
+    // 首次加载：全量拉取外国军队
     void refreshForeignMoves();
-    const foreignTimer = window.setInterval(() => void refreshForeignMoves(), 3500);
+
+    // 30s 兜底刷新（增量推送可能漏推）
+    const fallbackTimer = window.setInterval(() => {
+      if (tab.value === 'map') void refreshForeignMoves();
+    }, 30_000);
+
+    // 切换回地图标签时补一次全量拉取
+    const unsubTab = tab.subscribe((t) => {
+      if (t === 'map') void refreshForeignMoves();
+    });
 
     return () => {
       ro.disconnect();
       svg.removeEventListener('wheel', onWheel);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      window.clearInterval(foreignTimer);
+      window.clearInterval(fallbackTimer);
+      unsubTab();
     };
   }, []); // intentional: one-time mount effect, only refs are used inside
 
@@ -909,7 +934,6 @@ export function HexMap() {
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
   const marchPaths   = buildMarchPaths();
-  const foreignPaths = buildForeignMarchPaths();
   const marchMarkers = buildMarchMarkers();
   const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
@@ -1003,7 +1027,7 @@ export function HexMap() {
           </g>
 
           {/* ── March paths ── */}
-          <g class="layer-paths">{marchPaths}{foreignPaths}</g>
+          <g class="layer-paths">{marchPaths}</g>
 
           {/* ── March markers (animated via rAF) ── */}
           <g ref={markerEl} class="layer-markers">{marchMarkers}</g>

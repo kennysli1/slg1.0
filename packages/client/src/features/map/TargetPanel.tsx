@@ -477,18 +477,10 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
   // 订阅 dataVersion（每次外国军队轮询刷新）与 tick（ETA 每秒走字）
   const _dv = dataVersion.value;
   void tick.value;
-  const m = (foreignMoves.value?.movements ?? []).find((x: any) => x.id === sel.refId) as any;
+  const m = (foreignMoves.value?.movements ?? []).find((x) => x.id === sel.refId);
   const typeLabel: Record<string, string> = {
     raid: '掠夺军', attack: '进攻军', return: '返程军', found: '拓荒军',
     transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军',
-  };
-  const eta = m?.arriveAt != null ? Math.max(0, Number(m.arriveAt) - Date.now()) : null;
-  const fmtEta = (ms: number) => {
-    if (ms <= 0) return '已到达';
-    const h = Math.floor(ms / 3_600_000);
-    const mm = Math.floor((ms % 3_600_000) / 60_000);
-    const s = Math.floor((ms % 60_000) / 1000);
-    return h > 0 ? `${h} 时 ${mm} 分` : mm > 0 ? `${mm} 分 ${s} 秒` : `${s} 秒`;
   };
   return (
     <Panel variant="danger" corners class="map-target-panel">
@@ -508,7 +500,7 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
               <div><dt>所属玩家</dt><dd>{m.ownerPlayerName ?? '未知'}</dd></div>
               <div><dt>来源城镇</dt><dd>{m.ownerVillageName ?? '未知'}</dd></div>
               <div><dt>军队类型</dt><dd>{typeLabel[m.type] ?? m.type}</dd></div>
-              <div><dt>预计到达</dt><dd>{eta == null ? '—' : fmtEta(eta)}</dd></div>
+              <div><dt>当前状态</dt><dd>{m.status === 'marching' ? '行军中' : m.status === 'paused' ? '交战中' : '驻扎中'}</dd></div>
             </dl>
             <p class="enemy-army-note">看不到具体兵力与携带物。</p>
           </section>

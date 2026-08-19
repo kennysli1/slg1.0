@@ -104,7 +104,10 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
   assert.ok(foreign.ownerVillageName, '应带归属城镇名');
   assert.equal(foreign.type, 'garrison');
   assert.deepEqual(foreign.pos, vis, '应带当前位置');
-  assert.ok(foreign.path && foreign.arriveAt, '应带路径与预计到达');
+  assert.equal(foreign.path, undefined, '不得泄露 path');
+  assert.equal(foreign.to, undefined, '不得泄露 to');
+  assert.equal(foreign.arriveAt, undefined, '不得泄露 arriveAt');
+  assert.ok(foreign.heading === null || (typeof foreign.heading.q === 'number' && typeof foreign.heading.r === 'number'), '应带 heading 或 null');
 
   // 商队同样脱敏，且 type 应为 caravan
   const caravan = list.find((m) => m.id === 'mv-B-caravan')!;

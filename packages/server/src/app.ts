@@ -160,7 +160,7 @@ export function createGameApp(opts?: {
   const population = new PopulationModule(store, bus, commands, scheduler, now, config);
   const world = new WorldModule(store, bus, commands, now, config);
   const pve = new PveModule(store, bus, commands, scheduler, now, config);
-  const movement = new MovementModule(store, bus, commands, scheduler, now, config);
+  const movement = new MovementModule(store, bus, commands, scheduler, now, config, serialQueue);
   const combat = new CombatModule(store, bus, commands, scheduler, now, config);
 
   // 实际建村的函数（供 Player 注册时调用）。坐标为六边形轴坐标 (q,r)。
