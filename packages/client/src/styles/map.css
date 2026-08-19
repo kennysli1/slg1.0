@@ -60,8 +60,9 @@
 .hex-terrain-img {
   clip-path: url(#hex-clip);
   overflow: hidden;
-  opacity: 0;
-  transition: filter var(--t-fast);
+  opacity: .58;
+  filter: saturate(.72) brightness(.84);
+  transition: filter var(--t-fast), opacity var(--t-fast);
 }
 /* 自己的城、被占领格、选中格、悬停格：提亮到接近原图，形成"聚光"效果，
    空地则退到背景里，玩家一眼就能扫到有内容的格子 */
@@ -69,7 +70,8 @@
 .hex-cell--occupied .hex-terrain-img,
 .hex-cell--self .hex-terrain-img,
 .hex-cell--selected .hex-terrain-img {
-  opacity: 0;
+  opacity: .95;
+  filter: saturate(.95) brightness(1.05);
 }
 
 /* 实体图标：透明美术压在地形上，补一层投影才立得住 */
@@ -172,6 +174,10 @@
 }
 
 /* ---------- 行军路径 ---------- */
+.layer-paths,
+.layer-markers {
+  pointer-events: none;
+}
 .march-path {
   fill: none;
   stroke: var(--c-steel);
@@ -202,6 +208,10 @@
 }
 .march-path--garrison,
 .march-path--explore { animation: march-flow 2.6s linear infinite; }
+.march-path--foreign {
+  opacity: .42;
+  stroke-dasharray: 4 7;
+}
 @keyframes march-flow {
   to { stroke-dashoffset: -26; }
 }
@@ -883,17 +893,17 @@
     padding: 4px var(--s-3);
   }
 
-  /* 手机目标面板：贴底抽屉 */
+  /* 手机目标面板：贴底抽屉（避开底部 Tab 栏） */
   .map-target-panel {
     position: absolute;
     right: 0; left: 0;
     top: auto;
-    bottom: 0;
+    bottom: calc(var(--tabbar-h) + var(--safe-b));
     width: 100%;
-    max-height: min(76vh, 680px);
+    max-height: min(calc(76vh - var(--tabbar-h)), 680px);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     animation: sheet-up var(--t-med) var(--ease-out) both;
-    padding-bottom: var(--safe-b);
+    padding-bottom: var(--s-2);
   }
 
   /* 手机行军列表：保留为地图顶部可滚动状态条，避免失去 ETA 与来袭信息。 */

@@ -85,6 +85,9 @@ export const selected = signal<SelectedTarget | null>(null);
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
 export const garrisonContinue = signal<{ movementId: string } | null>(null);
 
+/** 地图相机中心（环面坐标 q,r）；跳转/拖拽后写入，供 refresh 与 HexMap 共享。 */
+export const mapCenter = signal<{ q: number; r: number } | null>(null);
+
 // ---------- 次级数据源（不在主刷新包里、按需拉取的面板数据） ----------
 
 /** 雇佣兵营地快照（GetMercCamp）。营地弹层打开时按 push 事件重拉。 */

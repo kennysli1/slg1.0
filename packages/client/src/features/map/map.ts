@@ -3,7 +3,8 @@ import { art, escapeAttr, escapeHtml, unitArt, unitArtFallback } from '../../sha
 import { secStr } from '../../shared/utils/format.js';
 import { hexToPixel, hexCorners, lerpPixel, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { mapViewRadius, mapSize, pveInfoByType } from '../../app/config.js';
-import { getCache, getSelected, setSelected, addReport, getMapCenter, setMapCenter } from '../../app/state.js';
+import { getCache, getSelected, setSelected, addReport } from '../../app/state.js';
+import { getMapCenter, setMapCenter } from '../../app/refresh.js';
 import { unitName } from '../army/army.js';
 import { req, me, ownVillageAt, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
 import { errText } from '../../shared/ui/text.js';
