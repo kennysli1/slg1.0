@@ -19,6 +19,7 @@ export class VisionModule {
     this.commands.register('vision.GetVisibility', (c) => this.getVisibility(c));
     this.commands.register('vision.Reveal', (c) => this.reveal(c));
     this.commands.register('vision.GetVisibleTiles', (c) => this.getVisibleTiles(c));
+    this.commands.register('vision.GetObservers', (c) => this.getObservers(c));
   }
 
   private async sourcesFor(playerId: string): Promise<Source[] | null> {
@@ -81,6 +82,26 @@ export class VisionModule {
     }
     this.store.set(COLLECTION, playerId, state);
     return { ok: true, payload: {} };
+  }
+
+  /**
+   * 返回所有「城市视野」能看到 (q,r) 的玩家 id 列表（仅城市视野，不计行军视野，O(players×villages)）。
+   * 用于增量推送外军步进：只推给能看见该格的玩家。
+   */
+  private async getObservers(cmd: Command): Promise<CommandResult> {
+    const { q, r } = cmd.payload as { q: number; r: number };
+    const allRes = await this.commands.send({ name: 'player.ListAll', from: VisionModule.NAME, payload: {} });
+    if (!allRes.ok) return { ok: true, payload: { playerIds: [] } };
+    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const cityRadius = Math.max(0, Number(this.config.constants.raw.city_vision ?? 4));
+    const playerIds: string[] = [];
+    for (const player of ((allRes.payload as any).players ?? [])) {
+      const canSee = (player.villages ?? []).some(
+        (v: any) => hexDistanceWrapped({ q, r }, { q: v.q, r: v.r }, W, H) <= cityRadius,
+      );
+      if (canSee) playerIds.push(player.id);
+    }
+    return { ok: true, payload: { playerIds } };
   }
 
   private async filterArea(cmd: Command): Promise<CommandResult> {

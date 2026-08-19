@@ -43,6 +43,8 @@ export class Gateway {
   private sessions = new Set<Session>();
   /** villageId → 会话集合（同一玩家可能多端登录）。用于定向推送。 */
   private byVillage = new Map<string, Set<Session>>();
+  /** playerId → 会话集合（外军增量推送、跨村玩家维度事件）。 */
+  private byPlayer = new Map<string, Set<Session>>();
 
   /**
    * Login/Register 按规范化账号名的令牌桶：
@@ -186,6 +188,7 @@ export class Gateway {
     for (const vid of session.villageIds ?? (session.villageId ? [session.villageId] : [])) {
       this.byVillage.get(vid)?.delete(session);
     }
+    if (session.playerId) this.byPlayer.get(session.playerId)?.delete(session);
   }
 
   private bindSession(
@@ -203,19 +206,39 @@ export class Gateway {
       if (!set) { set = new Set(); this.byVillage.set(vid, set); }
       set.add(session);
     }
+    let pset = this.byPlayer.get(playerId);
+    if (!pset) { pset = new Set(); this.byPlayer.set(playerId, pset); }
+    pset.add(session);
   }
 
   private subscribeEvents(): void {
     for (const [internalName, pushEvent] of Object.entries(EVENT_TO_PUSH)) {
       this.app.bus.on(internalName, (evt: DomainEvent) => {
-        const villageId = (evt.payload as any)?.villageId;
+        const raw = evt.payload as Record<string, unknown>;
+        const villageId = raw?.villageId as string | undefined;
+        const playerIds = raw?.playerIds as string[] | undefined;
+        // 剥离路由字段，避免把观察者名单泄露给客户端
+        const { playerIds: _drop, ...outPayload } = raw;
         const push: WirePush = {
           v: WIRE_VERSION, type: 'push', id: `push-${evt.ts}`, ts: evt.ts,
-          event: pushEvent, payload: evt.payload,
+          event: pushEvent, payload: outPayload,
         };
-        // 定向：只推给拥有该村的连接
         if (villageId) this.sendToVillage(villageId, push);
+        else if (playerIds?.length) this.sendToPlayers(playerIds, push);
       });
+    }
+  }
+
+  private sendToPlayers(playerIds: string[], push: WirePush): void {
+    const seen = new Set<Session>();
+    for (const pid of playerIds) {
+      const set = this.byPlayer.get(pid);
+      if (!set) continue;
+      for (const s of set) {
+        if (seen.has(s)) continue;
+        seen.add(s);
+        try { s.conn.send(push); } catch { /* ignore */ }
+      }
     }
   }
 

@@ -42,8 +42,8 @@ interface Contribution {
 
 interface Battle {
   id: string;
-  targetKind: 'village' | 'pve';
-  targetId: string; // 防守方村 id 或 PvE 目标 id
+  targetKind: 'village' | 'pve' | 'field';
+  targetId: string; // 防守方村 id、PvE 目标 id 或野战时的 defender movement id
   targetXY: { q: number; r: number }; // 六边形轴坐标（不透明透传）
   wallLevel: number;
   /** 进攻方：key = `${movementId}#${code}`（多支来攻并入时按贡献命名空间隔离，各自 smithy 数值不同）。 */
@@ -53,6 +53,8 @@ interface Battle {
   /** 防守方开战时各兵种原始数量（结束时算实际损失，交回 owner 扣兵）。 */
   defenderOriginal: Record<string, number>;
   contributions: Record<string, Contribution>; // movementId -> 贡献
+  /** 野战时防守方行军贡献（用于 BattleEnded 中恢复防守方行军）。 */
+  defenderContribution?: Contribution;
   /** 分数击杀累加（不足1个的伤害留到下tick，保证战斗必然推进）。 */
   attackerPending: number;
   defenderPending: number;
@@ -137,6 +139,7 @@ export class CombatModule {
 
   private canViewBattle(b: Battle, villageId: string): boolean {
     if (b.targetKind === 'village' && b.targetId === villageId) return true;
+    if (b.defenderContribution?.fromVillage === villageId) return true;
     return Object.values(b.contributions).some((c) => c.fromVillage === villageId);
   }
 
@@ -153,16 +156,23 @@ export class CombatModule {
    */
   private async engage(cmd: Command): Promise<CommandResult> {
     const p = cmd.payload as {
-      targetKind: 'village' | 'pve';
+      targetKind: 'village' | 'pve' | 'field';
       targetId: string;
       targetXY: { q: number; r: number };
       movementId: string;
       fromVillage: string;
       fromXY: { q: number; r: number };
+      originalFromXY?: { q: number; r: number };
       troops: Record<string, number>;
       attackerSnapshot: Snapshot;
       /** 该军队携带的宝物（军队携带宝物机制）。 */
       treasures?: string[];
+      /** 野战时：防守方行军贡献信息（由 movement 模块提供）。 */
+      defenderField?: {
+        movementId: string; fromVillage: string; fromXY: { q: number; r: number };
+        originalFromXY?: { q: number; r: number };
+        troops: Record<string, number>; attackerSnapshot: Snapshot; treasures?: string[];
+      };
     };
 
     const contribId = p.movementId;
@@ -201,6 +211,41 @@ export class CombatModule {
         return { ok: true, payload: { battleId: raceCheck.id, merged: true } };
       }
     }
+    // 野战（field）：从 payload 直接取防守方，跳过 fetchDefender
+    if (p.targetKind === 'field') {
+      const df = p.defenderField;
+      if (!df) return { ok: false, payload: {}, reason: 'field_missing_defender' };
+      const defender: Snapshot = {};
+      for (const [code, u] of Object.entries(df.attackerSnapshot)) defender[code] = { ...u };
+      const defenderOriginal: Record<string, number> = {};
+      for (const [code, u] of Object.entries(defender)) defenderOriginal[code] = u.count;
+      const attacker: Snapshot = {};
+      for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
+
+      const id = this.nextId();
+      const defContrib: Contribution = {
+        movementId: df.movementId, fromVillage: df.fromVillage, fromXY: df.fromXY,
+        troops: { ...df.troops }, treasures: df.treasures ?? [],
+      };
+      const battle: Battle = {
+        id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
+        wallLevel: 0, attacker, defender, defenderOriginal,
+        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
+        defenderContribution: defContrib,
+        attackerPending: 0, defenderPending: 0,
+        attackPower0: totalPower(attacker), defensePower0: totalPower(defender),
+        startedAt: this.now(), ticks: 0, status: 'active',
+      };
+      this.store.set(COLLECTION, id, battle);
+      log('野战开始', { battleId: id, at: p.targetXY, atkPower: Math.round(battle.attackPower0), defPower: Math.round(battle.defensePower0) });
+      this.emitToParties(battle, 'combat.BattleStarted', (villageId, side) => ({
+        villageId, side, battleId: id, targetKind: 'field', targetId: p.targetId,
+        attackPower: Math.round(battle.attackPower0), defensePower: Math.round(battle.defensePower0),
+      }));
+      this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
+      return { ok: true, payload: { battleId: id, merged: false } };
+    }
+
     this.claiming.add(p.targetId);
 
     let fetchedDefender: { defender: Snapshot; wallLevel: number } | null = null;
@@ -369,6 +414,13 @@ export class CombatModule {
 
     log('战斗结束', { battleId: b.id, ticks: b.ticks, attackerWins, atkAlive: totalCount(b.attacker), defAlive, attackerLosses, defenderLosses, totalCarry });
 
+    // 野战（field）分支：跳过 pve/pvp 逻辑，双方各自处理伤亡
+    if (b.targetKind === 'field') {
+      await this.finishField(b, attackerLosses, defenderLosses);
+      this.store.delete(COLLECTION, b.id);
+      return;
+    }
+
     // 应用防守方损失 + 取战利品
     let looted: Record<string, number> = {};
     let campCleared = false;
@@ -503,7 +555,65 @@ export class CombatModule {
     this.store.delete(COLLECTION, b.id);
   }
 
-  /** 给战场相关的双方各发一个事件（attacker 各贡献村 + defender 村）。 */
+  /** 野战结算：双方同等对待，各自处理伤亡回收，然后发 BattleEnded（targetKind:'field'）给双方。 */
+  private async finishField(b: Battle, attackerLosses: Record<string, number>, defenderLosses: Record<string, number>): Promise<void> {
+    const reportBase = {
+      attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
+      attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, campCleared: false,
+    };
+
+    // 进攻方（各贡献村）幸存者 → BattleEnded(attacker)
+    for (const [cid, contrib] of Object.entries(b.contributions)) {
+      const survivors: Record<string, number> = {};
+      const losses: Record<string, number> = {};
+      for (const code of Object.keys(contrib.troops)) {
+        const alive = b.attacker[`${cid}#${code}`]?.count ?? 0;
+        const dead = contrib.troops[code] - alive;
+        if (alive > 0) survivors[code] = alive;
+        if (dead > 0) losses[code] = dead;
+      }
+      if (Object.keys(losses).length > 0) {
+        void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: contrib.fromVillage, losses } });
+      }
+      void this.bus.emit({
+        name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
+        payload: {
+          villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
+          movementId: contrib.movementId, fromVillage: contrib.fromVillage,
+          fromXY: contrib.fromXY, toXY: b.targetXY,
+          survivors, loot: {}, treasures: contrib.treasures, deployedTroops: contrib.troops,
+          attackerWins: false, ...reportBase,
+        },
+      } as DomainEvent);
+    }
+
+    // 防守方（另一支行军）幸存者 → BattleEnded(attacker) (它从自身视角也是进攻方)
+    const dc = b.defenderContribution;
+    if (dc) {
+      const defSurvivors: Record<string, number> = {};
+      const defLosses: Record<string, number> = {};
+      for (const [code, orig] of Object.entries(dc.troops)) {
+        const alive = orig - (defenderLosses[code] ?? 0);
+        if (alive > 0) defSurvivors[code] = alive;
+        if (defenderLosses[code]) defLosses[code] = defenderLosses[code]!;
+      }
+      if (Object.keys(defLosses).length > 0) {
+        void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: dc.fromVillage, losses: defLosses } });
+      }
+      void this.bus.emit({
+        name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
+        payload: {
+          villageId: dc.fromVillage, side: 'attacker', battleId: b.id,
+          movementId: dc.movementId, fromVillage: dc.fromVillage,
+          fromXY: dc.fromXY, toXY: b.targetXY,
+          survivors: defSurvivors, loot: {}, treasures: dc.treasures, deployedTroops: dc.troops,
+          attackerWins: false, ...reportBase,
+        },
+      } as DomainEvent);
+    }
+  }
+
+  /** 给战场相关的双方各发一个事件（attacker 各贡献村 + defender 村/野战防守方村）。 */
   private emitToParties(b: Battle, name: string, make: (villageId: string, side: 'attacker' | 'defender') => Record<string, unknown>): void {
     const seen = new Set<string>();
     for (const contrib of Object.values(b.contributions)) {
@@ -513,6 +623,11 @@ export class CombatModule {
     }
     if (b.targetKind === 'village') {
       void this.bus.emit({ name, source: CombatModule.NAME, ts: this.now(), payload: make(b.targetId, 'defender') } as DomainEvent);
+    } else if (b.targetKind === 'field' && b.defenderContribution) {
+      const v = b.defenderContribution.fromVillage;
+      if (!seen.has(v)) {
+        void this.bus.emit({ name, source: CombatModule.NAME, ts: this.now(), payload: make(v, 'defender') } as DomainEvent);
+      }
     }
   }
 
