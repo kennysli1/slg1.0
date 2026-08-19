@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, foreignMoves, garrisonContinue, showToast } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, foreignMoves } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
@@ -449,6 +449,7 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.path || m.path.length < 2) return;
+      if (m.status === 'paused') return;
       const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
         .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
         .join(' ');
@@ -478,6 +479,7 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
+      if (m.status === 'paused') return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
         : m.type === 'raid'      ? '⚡'
@@ -500,24 +502,6 @@ export function HexMap() {
       );
     });
     return markers;
-  }
-
-  /** 点击外国军队标记 → 写入选中目标（kind=enemy_army），交给 TargetPanel 渲染只读信息卡。 */
-  function selectEnemy(m: any, e: MouseEvent) {
-    e.stopPropagation();
-    if (!m?.pos) return;
-    if (garrisonContinue.value) {
-      showToast('请先完成驻扎续行，或取消后再查看敌方军队', 'bad');
-      return;
-    }
-    selected.value = {
-      refId: m.id,
-      kind: 'enemy_army',
-      q: m.pos.q,
-      r: m.pos.r,
-      name: m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队',
-      icon: 'bld_main',
-    };
   }
 
   // ─── foreign march markers（视野内其他玩家的脱敏军队，地图轮询填充）──────────
@@ -544,7 +528,6 @@ export function HexMap() {
           data-move-id={m.id}
           class={`enemy-march-mk enemy-march-mk--${t}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
-          onClick={(e: MouseEvent) => selectEnemy(m, e)}
         >
           <circle r={11} class="enemy-march-ring" />
           <text class="enemy-march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
@@ -673,16 +656,19 @@ export function HexMap() {
 
   function handleMapTap(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
-    const enemyMk = hit?.closest?.('.enemy-march-mk') as Element | null;
-    const moveId = enemyMk?.getAttribute('data-move-id') ?? (enemyMk?.id?.startsWith('foreign-mk-') ? enemyMk.id.slice('foreign-mk-'.length) : null);
-    if (moveId) {
-      const m = foreignMoveById(moveId);
-      if (m) {
-        selectEnemy(m, { stopPropagation: () => {} } as MouseEvent);
-        return;
+    // 即使点中了外国军队标记，也优先选中底层格子（统一交互）
+    let cell = hit?.closest?.('.hex-cell') as Element | null;
+    if (!cell) {
+      // 可能点在 enemy marker 上（在 hex 层之上），暂时隐藏标记层重新检测
+      const foreignLayer = foreignEl.current;
+      if (foreignLayer) {
+        foreignLayer.style.pointerEvents = 'none';
+        foreignLayer.style.visibility = 'hidden';
+        cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
+        foreignLayer.style.pointerEvents = '';
+        foreignLayer.style.visibility = '';
       }
     }
-    const cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) return;
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
@@ -859,9 +845,9 @@ export function HexMap() {
     ch.current = rect.height || 700;
     svg.setAttribute('viewBox', `0 0 ${cw.current} ${ch.current}`);
 
-    // Initial center
+    // Initial center — 每次打开地图默认居中主城
     if (centeredKey.current === '') {
-      const c = getMapCenter() ?? { q: me?.q ?? 0, r: me?.r ?? 0 };
+      const c = { q: me?.q ?? 0, r: me?.r ?? 0 };
       zoom.current = clampZoom(INITIAL_ZOOM);
       const p = hexToPixel(c);
       const wx = p.x + ox.current, wy = p.y + oy.current;

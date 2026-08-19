@@ -241,7 +241,7 @@
 }
 
 /* ---------- 外国军队标记（视野内其他玩家，脱敏，不可点自己的） ---------- */
-.enemy-march-mk { cursor: pointer; }
+.enemy-march-mk { pointer-events: none; }
 .enemy-march-ring {
   fill: rgba(192, 57, 43, 0.16);
   stroke: var(--c-crimson);
