@@ -13,7 +13,6 @@
  *  - description, effect text, provides section, production, popCap info
  *  - upgrade cost + button with disabled reasons
  *  - demolish with in-modal 2-step confirmation (NO window.confirm)
- *  - TrainPanel embed for military buildings (detected via army.slots)
  *  - Treasure management section for 'main' and 'treasury'
  */
 import { dataVersion, openModal, showToast, taskStates } from '../../app/store.js';
@@ -26,7 +25,6 @@ import {
   gameConstants,
   storageBase,
   storageGrowthPerLevel,
-  smithyBonusPerLevel,
   wallBonusPerLevel,
   popHospitalRecoveryBase,
   popHospitalRecoveryPerLevel,
@@ -41,7 +39,6 @@ import {
   Modal, IconPlate, Btn, Tag, CostRow, canAfford,
   TimerBar, SectionHead, Divider, StatGrid, Stat, SecondaryActions, confirmDanger,
 } from '../../ui/index.js';
-import { TrainPanel } from '../army/TrainPanel.js';
 import { openMercCamp } from '../army/MercCampModal.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { openAcademy } from '../research/AcademyModal.js';
@@ -61,7 +58,7 @@ function sumLevelsOfKind(kind: string): number {
   return sum;
 }
 
-/** Produces section for warehouse, granary, smithy, wall, hospital, residence. */
+/** Produces section for warehouse, granary, wall, hospital, residence. */
 function ProvidesSection({ kind, level }: { kind: string; level: number }) {
   if (!gameConstants()) return null;
 
@@ -87,10 +84,6 @@ function ProvidesSection({ kind, level }: { kind: string; level: number }) {
         ['粮食 上限（全村）', fmt(total)],
         [level >= 1 ? '本建筑贡献' : '建成 Lv1 贡献', `+${fmt(contrib)}`],
       ];
-      break;
-    }
-    case 'smithy': {
-      rows = [['全军攻防加成', `+${(level * smithyBonusPerLevel() * 100).toFixed(0)}%`]];
       break;
     }
     case 'wall': {
@@ -340,9 +333,6 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   const isMain = kind === 'main';
   const isMax = maxLevel > 0 && level >= maxLevel;
 
-  // Is this a military building (has an army slot)?
-  const isTrainer = !!(getCache().army?.slots?.some((s: any) => s.slotId === slotId));
-
   // Treasure management: main or treasury
   const showTreasureMgmt = kind === 'treasury' || kind === 'main';
 
@@ -391,7 +381,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       sub={lvStr}
       icon={<IconPlate icon={info.icon} label={info.name} size="lg" plate={isMain ? 'gold' : 'stone'} lvl={level > 0 ? level : undefined} maxed={isMax} />}
       onClose={close}
-      wide={isTrainer || showTreasureMgmt}
+      wide={showTreasureMgmt}
       foot={
         (!demolishing && !isMax && !building) ? (
           <div style={{ display: 'flex', gap: 'var(--s-2)', flex: 1 }}>
@@ -476,15 +466,6 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
             宝物管理
           </SectionHead>
           <TreasureMgmtSection kind={kind as 'main' | 'treasury'} />
-        </>
-      )}
-
-      {/* Training section */}
-      {isTrainer && !demolishing && (
-        <>
-          <Divider ornate />
-          <SectionHead sub="本建筑独立队列 · 升级可提速降费">训练</SectionHead>
-          <TrainPanel slotId={slotId} kind={kind} level={level} />
         </>
       )}
 

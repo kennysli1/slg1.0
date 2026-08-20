@@ -34,7 +34,6 @@ const ERR_MSG: Record<string, string> = {
   insufficient_population: '人口不足，无法训练',
   // 训练/动员相关
   mobilize_cap_exceeded: '已达本族动员上限（士兵占总人口比例超限），无法继续训练',
-  smithy_busy: '铁匠铺正在升级中，请稍后再试',
   bad_units: '解散兵种不合法',
   battle_forbidden: '不能查看这场战斗',
   // 协议/信封错误
@@ -73,6 +72,14 @@ const ERR_MSG: Record<string, string> = {
   abandon_cooldown: '任务刚被放弃，请等待冷却结束',
   recovery_cooldown: '战败恢复仍在冷却中',
   march_points_exhausted: '行军点已用完；升级集结点可提高同时在外行动的军队数量',
+  already_stopped: '该部队已经停止待命',
+  not_stopped: '该部队当前不处于停止状态',
+  not_stoppable: '该部队当前无法停止',
+  not_recallable: '该部队当前无法撤回',
+  already_returning: '该部队已经在返程中',
+  in_combat: '部队交战中，无法下达该命令',
+  use_garrison_commands: '驻扎军请使用驻扎指令',
+  use_recall_garrison: '驻扎军请使用召回指令',
   garrison_not_found: '这支驻扎军已不存在或不归你指挥',
   same_tile: '目标不能是部队当前所在格',
   target_unexplored: '目标仍未探索；只能派军执行探索行军',

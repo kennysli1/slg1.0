@@ -863,6 +863,7 @@
 .march-item-eta--paused { font-size: var(--f-xs); color: var(--c-ember); flex: none; }
 .march-item--in  .march-item-kind { color: var(--c-crimson-hi); }
 .march-item--paused .march-item-kind { color: var(--c-ember); animation: dot-blink .75s step-end infinite; }
+.march-item--stopped .march-item-kind { color: var(--c-steel); }
 
 /* 行军进度条 */
 .march-item-progress {

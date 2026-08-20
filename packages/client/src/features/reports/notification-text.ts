@@ -17,7 +17,7 @@ export type { ReportKind };
 
 export function notificationKind(event: string, payload?: any): ReportKind {
   if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingDemolished' || event === 'BuildingDemolishing') return 'build';
-  if (event === 'TroopTrained' || event === 'SmithyUpgraded') return 'train';
+  if (event === 'TroopTrained') return 'train';
   if (event === 'BattleStarted' || event === 'BattleEnded' || event === 'MarchIntercepted') return 'battle';
   if (event === 'MarchSent' || event === 'MarchReturned' || event === 'MarchRecalled' || event === 'VillageFounded') return 'march';
   if (event === 'IncomingAttack' || event === 'CropDeficit') return 'alarm';
@@ -37,8 +37,6 @@ export function notificationText(event: string, payload: any, ts?: number): stri
   } else if (event === 'BuildingDemolished') {
     const name = buildingInfo(payload.kind).name ?? payload.kind;
     return `${time}拆除完成：${name}`;
-  } else if (event === 'SmithyUpgraded') {
-    return `${time}铁匠铺锻造升级完成 → ${payload.level}级（全军攻防提升）`;
   } else if (event === 'TroopTrained') {
     return `${time}训练出 ${unitName(payload.unit)}（共${payload.total}）`;
   } else if (event === 'MarchSent') {
