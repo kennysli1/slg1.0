@@ -8,6 +8,7 @@
  */
 import { signal } from '@preact/signals';
 import type { VNode } from 'preact';
+import type { ListForeignPayload, ForeignArmy } from '@slg/shared';
 import { me } from '../api.js';
 
 /** 每秒心跳。读取本地外插值（资源/人口/倒计时）的组件订阅它即可每秒刷新。 */
@@ -101,8 +102,25 @@ export const researchState = signal<any>(null);
 /** 进行中战斗的实时快照：battleId → 双方兵力聚合（来自 BattleTick 推送）。 */
 export const battles = signal<Record<string, any>>({});
 
-/** 视野内的外国军队（脱敏）快照（ListForeign）。地图页定时轮询填充，供 HexMap 渲染与 TargetPanel 展示。 */
-export const foreignMoves = signal<any>(null);
+/** 视野内的外国军队（脱敏）快照（ListForeign）。由 ForeignArmyStep/ForeignArmyRemoved 推送增量更新，供 HexMap 渲染与 TargetPanel 展示。 */
+export const foreignMoves = signal<ListForeignPayload | null>(null);
+
+/** 增量更新：插入或替换一条外国军队记录。 */
+export function patchForeignArmy(army: ForeignArmy): void {
+  const prev = foreignMoves.value?.movements ?? [];
+  const idx = prev.findIndex((m) => m.id === army.id);
+  const next = idx >= 0
+    ? [...prev.slice(0, idx), army, ...prev.slice(idx + 1)]
+    : [...prev, army];
+  foreignMoves.value = { movements: next };
+}
+
+/** 增量更新：移除一条外国军队记录。 */
+export function dropForeignArmy(id: string): void {
+  const prev = foreignMoves.value?.movements ?? [];
+  const next = prev.filter((m) => m.id !== id);
+  if (next.length !== prev.length) foreignMoves.value = { movements: next };
+}
 
 // ---------- 任务数据（服务端快照 + 推送，按 villageId 分桶） ----------
 

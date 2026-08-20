@@ -14,13 +14,14 @@ import { worldW, worldH } from './config.js';
 import type { StoredNotification } from '@slg/shared';
 import {
   getCache, setCache, setPopState, getPopState, markResFetched, setPendingTreasures,
-  addReport, seedReports, type ReportKind, type StoredReport,
+  addReport, seedReports, patchMovement, dropMovement, type ReportKind, type StoredReport,
 } from './state.js';
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setTaskMarkers, foreignMoves, mapCenter,
+  setTaskState, setTaskMarkers, foreignMoves, mapCenter, patchForeignArmy, dropForeignArmy,
 } from './store.js';
+import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
 let mapCenterLegacy: { q: number; r: number } | null = null;
@@ -195,11 +196,21 @@ export async function reloadResearch(): Promise<void> {
   if (state.ok) researchState.value = state.payload;
 }
 
-/** 重拉视野内的外国军队（脱敏）。地图页打开时由 HexMap 定时轮询。 */
+/** 重拉视野内的外国军队（脱敏）。地图页切换时 / 30s 兜底 / MarchStep 后防御触发。 */
 export async function refreshForeignMoves(): Promise<void> {
   if (!me) return;
   const r = await req('ListForeign').catch(() => ({ ok: false } as any));
   if (r.ok) foreignMoves.value = r.payload;
+}
+
+let _foreignDebounceTimer: number | null = null;
+/** 在 delayMs 后触发一次 refreshForeignMoves（debounce：重复调用只保留最后一次）。 */
+export function scheduleForeignRefresh(delayMs = 1000): void {
+  if (_foreignDebounceTimer !== null) window.clearTimeout(_foreignDebounceTimer);
+  _foreignDebounceTimer = window.setTimeout(() => {
+    _foreignDebounceTimer = null;
+    void refreshForeignMoves();
+  }, delayMs);
 }
 
 /** 登录后拉一次历史通知，播种战报列表。 */
@@ -251,6 +262,29 @@ export function handlePush(event: string, payload: any): void {
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
   if (event === 'TaskListChanged') { setTaskState(payload); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
+
+  // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野
+  if (event === 'MarchStep') {
+    patchMovement(payload as MarchStepPush);
+    bumpData();
+    scheduleForeignRefresh(1000);
+    return;
+  }
+  if (event === 'MarchRemoved') {
+    dropMovement((payload as MarchRemovedPush).id);
+    bumpData();
+    return;
+  }
+  if (event === 'ForeignArmyStep') {
+    patchForeignArmy((payload as ForeignArmyStepPush).army);
+    bumpData();
+    return;
+  }
+  if (event === 'ForeignArmyRemoved') {
+    dropForeignArmy((payload as ForeignArmyRemovedPush).id);
+    bumpData();
+    return;
+  }
 
   void refreshAll();
 }

@@ -3,6 +3,7 @@
  * 各 feature 模块通过这里读写，避免互相直接依赖。
  */
 import { resourceKeys } from './config.js';
+import type { ListMovementsPayload, MarchStepPush } from '@slg/shared';
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
@@ -120,6 +121,26 @@ let popState: PopSnapshot | null = null;
 
 export function getCache(): any { return cache; }
 export function setCache(c: any): void { cache = c; }
+
+/** 增量更新：将 MarchStep 推送的字段合并到 cache.moves.movements 中对应的行军条目。 */
+export function patchMovement(push: MarchStepPush): void {
+  const moves: ListMovementsPayload | undefined = cache.moves;
+  if (!moves?.movements) return;
+  const idx = moves.movements.findIndex((m) => m.id === push.id);
+  if (idx < 0) return;
+  const prev = moves.movements[idx];
+  const next = [...moves.movements];
+  next[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
+  cache.moves = { ...moves, movements: next };
+}
+
+/** 增量更新：从 cache.moves.movements 中移除指定 id 的行军条目。 */
+export function dropMovement(id: string): void {
+  const moves: ListMovementsPayload | undefined = cache.moves;
+  if (!moves?.movements) return;
+  const next = moves.movements.filter((m) => m.id !== id);
+  if (next.length !== moves.movements.length) cache.moves = { ...moves, movements: next };
+}
 
 export function getReports(): StoredReport[] { return reports; }
 

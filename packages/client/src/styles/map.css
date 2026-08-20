@@ -208,10 +208,6 @@
 }
 .march-path--garrison,
 .march-path--explore { animation: march-flow 2.6s linear infinite; }
-.march-path--foreign {
-  opacity: .42;
-  stroke-dasharray: 4 7;
-}
 @keyframes march-flow {
   to { stroke-dashoffset: -26; }
 }
@@ -256,6 +252,16 @@
 .enemy-march-mk--raid    .enemy-march-ring { stroke: var(--c-ember); }
 .enemy-march-mk--caravan .enemy-march-ring { stroke: var(--c-gold); }
 .enemy-march-mk--transport .enemy-march-ring { stroke: var(--c-steel); }
+
+/* 外国军队朝向箭头：小三角，颜色跟随类型描边 */
+.foreign-march-arrow {
+  fill: var(--c-crimson-hi);
+  opacity: .85;
+  pointer-events: none;
+}
+.enemy-march-mk--raid     .foreign-march-arrow { fill: var(--c-ember); }
+.enemy-march-mk--caravan  .foreign-march-arrow { fill: var(--c-gold); }
+.enemy-march-mk--transport .foreign-march-arrow { fill: var(--c-steel); }
 
 /* ---------- 敌方军队信息卡（只读，脱敏） ---------- */
 .enemy-army-facts {
@@ -814,7 +820,7 @@
 .map-march-list {
   position: relative;
   width: 100%;
-  max-height: 220px;
+  max-height: min(40vh, 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: var(--z-map-ui);
@@ -852,8 +858,36 @@
 .march-item-kind { font-weight: 700; color: var(--c-ink); }
 .march-item-dest { color: var(--c-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .march-item-eta  { font-family: var(--ff-num); color: var(--c-gold); flex: none; display: flex; gap: var(--s-1); align-items: center; }
+.march-item-eta--sm { font-size: var(--f-2xs); }
+.march-item-eta--paused { font-size: var(--f-xs); color: var(--c-ember); flex: none; }
 .march-item--in  .march-item-kind { color: var(--c-crimson-hi); }
 .march-item--paused .march-item-kind { color: var(--c-ember); animation: dot-blink .75s step-end infinite; }
+
+/* 行军进度条 */
+.march-item-progress {
+  margin-top: var(--s-1);
+  height: 3px;
+  background: var(--c-panel-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.march-item-progress-bar {
+  height: 100%;
+  background: var(--c-gold-dim);
+  border-radius: 2px;
+  transition: width .4s linear;
+}
+.march-item--attack  .march-item-progress-bar { background: var(--c-crimson-hi); }
+.march-item--raid    .march-item-progress-bar { background: var(--c-ember); }
+.march-item--return  .march-item-progress-bar { background: var(--c-jade); }
+
+/* 行军操控按钮区 */
+.march-item-actions {
+  flex: none;
+  display: flex;
+  gap: var(--s-1);
+  align-items: center;
+}
 
 /* ---------- 手机端响应式 ---------- */
 @media (max-width: 720px) {
@@ -913,9 +947,13 @@
     right: var(--s-3);
     left: var(--s-3);
     width: auto;
-    max-height: 152px;
+    max-height: min(40vh, 180px);
     pointer-events: auto;
   }
+
+  /* 手机端按钮区：只显示图标，减少横向占用 */
+  .march-item-actions .btn { padding: 0 var(--s-1); min-width: 44px; min-height: 36px; }
+  .march-item-eta--sm { display: none; }
 
   .troop-inputs { grid-template-columns: 1fr; }
   .troop-max-btn,

@@ -6,7 +6,7 @@
  * 采用 redblobgames 的 pointy-top 标准公式。
  */
 
-export interface Hex { q: number; r: number; }
+export type { Hex } from '@slg/shared';
 
 /** 六边形"大小"（中心到顶点，像素）。列渲染时统一用它算宽高。 */
 export const HEX_SIZE = 30;

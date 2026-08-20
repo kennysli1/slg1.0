@@ -164,8 +164,8 @@ test('同格相遇：胜方减员后立即更新在途人口足迹', async () =>
   const rb = await send(app, 'player.Register', { name: '人口蓝', password: 'pass123', tribe: 'romans' });
   const A = (ra.payload as any).player;
   const B = (rb.payload as any).player;
-  const sent = 100;
-  const enemy = 5;
+  const sent = 30;
+  const enemy = 25;
   const unitPop = app.config.units.legionnaire.popCost;
   await giveTroops(app, A.villageId, { legionnaire: sent });
   await giveTroops(app, B.villageId, { legionnaire: enemy });
@@ -188,18 +188,26 @@ test('同格相遇：胜方减员后立即更新在途人口足迹', async () =>
 
   let intercepted = false;
   app.bus.on('movement.Intercepted', () => { intercepted = true; });
+  let battleEnded = false;
+  app.bus.on('combat.BattleEnded', (e) => {
+    if ((e.payload as any).fromVillage === A.villageId) battleEnded = true;
+  });
   let iters = 0;
-  while (!intercepted && app.scheduler.pending > 0 && iters < 20_000) {
+  while ((!intercepted || !battleEnded) && app.scheduler.pending > 0 && iters < 20_000) {
     await app.scheduler.advanceTo(clock + 1_000, setClock);
     iters++;
   }
   assert.equal(intercepted, true, '两军应在途中相遇');
+  assert.equal(battleEnded, true, '野战应已结束');
 
-  // 敌军 5 人会使 100 人的胜方损失 1 人；人口快照必须立即反映 99 人，
-  // 不能继续把阵亡者计为在途部队直到返程才修正。
+  const mv = movements(app).find((m) => m.fromVillage === A.villageId && m.type !== 'return');
+  assert.ok(mv, '胜方应仍在途');
+  const survivors = Object.values(mv.troops as Record<string, number>).reduce((a, n) => a + n, 0);
+  assert.ok(survivors > 0 && survivors < sent, '胜方应有减员且未全灭');
+
   await Promise.resolve();
   const snap = (await send(app, 'population.GetSnapshot', { villageId: A.villageId })).payload as any;
-  assert.equal(snap.soldierPop, (sent - 1) * unitPop, '胜方阵亡者不应残留在在途人口足迹中');
+  assert.equal(snap.soldierPop, survivors * unitPop, '胜方阵亡者不应残留在在途人口足迹中');
 });
 
 test('野外驻扎：抵达空地后持续占用一个行军点，可续行并召回', async () => {

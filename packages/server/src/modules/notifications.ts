@@ -35,6 +35,7 @@ export const EVENT_MAP: Record<string, string> = {
   'movement.Returned':        'MarchReturned',
   'movement.IncomingAttack':  'IncomingAttack',
   'movement.Intercepted':     'MarchIntercepted',
+  'movement.Recalled':        'MarchRecalled',
   'treasure.PendingDropped':   'TreasurePendingDropped',
   'treasure.PendingExpired':   'TreasurePendingExpired',
   'treasure.CarriedArrived':   'TreasureCarriedArrived',

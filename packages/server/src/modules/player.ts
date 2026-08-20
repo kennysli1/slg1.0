@@ -170,6 +170,7 @@ export class PlayerModule {
     this.commands.register('player.CreateOwnedVillage', (c) => this.createOwnedVillage(c));
     this.commands.register('player.GetPvpContext', (c) => this.getPvpContext(c));
     this.commands.register('player.RecordPvpHit', (c) => this.recordPvpHit(c));
+    this.commands.register('player.ListAll', (c) => this.listAll(c));
   }
 
   /** 规范化旧档 → 完整 PlayerState；若发生迁移则写回。 */
@@ -492,6 +493,15 @@ export class PlayerModule {
    * 对外安全字段。
    * villageId / q / r：默认主城；若传入 currentVillageId 则指向当前操作村（供 Select 响应）。
    */
+  /** 返回所有玩家的 id + villages，供视野模块计算观察者（city vision）。 */
+  private listAll(_cmd: Command): CommandResult {
+    const players = this.store.all<PlayerState>(COLLECTION).map((p) => ({
+      id: p.id,
+      villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r })),
+    }));
+    return { ok: true, payload: { players } };
+  }
+
   private publicPlayer(p: PlayerState, currentVillageId?: string) {
     const current = currentVillageId
       ?? p.capitalVillageId;

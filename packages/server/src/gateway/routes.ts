@@ -157,6 +157,10 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'movement.RecallGarrison', ownVillage: true, needAuth: true,
         schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
       },
+      RecallMarch: {
+        command: 'movement.RecallMarch', ownVillage: true, needAuth: true,
+        schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
       ContinueGarrison: {
         command: 'movement.ContinueGarrison', ownVillage: true, needAuth: true,
         schema: {
@@ -181,6 +185,11 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.GarrisonRecalled': 'GarrisonRecalled',
       'movement.Explored': 'Explored',
       'movement.VisionUpdated': 'VisionUpdated',
+      'movement.Recalled': 'MarchRecalled',
+      'movement.Stepped': 'MarchStep',
+      'movement.Removed': 'MarchRemoved',
+      'movement.ForeignStepped': 'ForeignArmyStep',
+      'movement.ForeignRemoved': 'ForeignArmyRemoved',
     },
     },
   {

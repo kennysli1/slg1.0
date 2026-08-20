@@ -19,7 +19,7 @@ export function notificationKind(event: string, payload?: any): ReportKind {
   if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingDemolished' || event === 'BuildingDemolishing') return 'build';
   if (event === 'TroopTrained') return 'train';
   if (event === 'BattleStarted' || event === 'BattleEnded' || event === 'MarchIntercepted') return 'battle';
-  if (event === 'MarchSent' || event === 'MarchReturned' || event === 'VillageFounded') return 'march';
+  if (event === 'MarchSent' || event === 'MarchReturned' || event === 'MarchRecalled' || event === 'VillageFounded') return 'march';
   if (event === 'IncomingAttack' || event === 'CropDeficit') return 'alarm';
   if (event.startsWith('Treasure')) return 'treasure';
   if (event === 'PopulationChanged') return payload?.event === 'famine' || payload?.event === 'starved' ? 'alarm' : 'pop';
@@ -56,14 +56,17 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}被进攻结束（${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜被抢：${loot || '无'}`;
     }
   } else if (event === 'IncomingAttack') {
-    return `${time}警报！有敌军来袭，预计 ${secLeft(payload.arriveAt)} 后抵达！`;
+    const atStr = payload.at ? ` 于 (${payload.at.q},${payload.at.r})` : '';
+    return `${time}警报！有敌军来袭${atStr}，预计 ${secLeft(payload.arriveAt)} 后抵达！`;
   } else if (event === 'MarchIntercepted') {
     const at = payload.at ? `(${payload.at.q},${payload.at.r})` : '途中';
     if (payload.side === 'winner') {
       const surv = Object.entries(payload.winnerSurvivors || {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
-      return `${time}遭遇战胜利 ${at}！我军幸存：${surv}`;
+      return `${time}遭遇开战胜利 ${at}！我军幸存：${surv}`;
     }
-    return `${time}遭遇战失利 ${at}！出征部队全灭`;
+    return `${time}遭遇开战失利 ${at}！出征部队全灭`;
+  } else if (event === 'MarchRecalled') {
+    return `${time}撤回令已下达，部队开始返程`;
   } else if (event === 'MarchReturned') {
     const loot = Object.entries(payload.loot || {}).map(([t, n]: any) => `${resInfo(t).name}${n}`).join(' ');
     return `${time}部队返回，带回：${loot || '无'}`;
