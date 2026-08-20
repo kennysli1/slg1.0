@@ -9,6 +9,8 @@ import { TargetPanel } from './TargetPanel.js';
 import { MarchList } from './MarchList.js';
 
 export function MapScreen() {
+  void selected.value;
+  void garrisonContinue.value;
   const showPanel = !!selected.value || !!garrisonContinue.value;
   return (
     <div class="map-screen">

@@ -4,7 +4,7 @@
  */
 import { useState } from 'preact/hooks';
 import { getCache, type SelectedTarget } from '../../app/state.js';
-import { dataVersion, selected, openModal, garrisonContinue, foreignMoves, tick } from '../../app/store.js';
+import { dataVersion, selected, openModal, garrisonContinue, foreignMoves, tick, showToast } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo, resourceKeys, resInfo,
@@ -13,6 +13,8 @@ import { act } from '../../app/refresh.js';
 import { req, me, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Btn, Icon, IconPlate, Modal, Panel, Tag } from '../../ui/index.js';
+import { foreignArmyAt, foreignArmyName, ownStationedMoveAt } from './map-target-helpers.js';
+import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
 type DispatchMode = 'attack' | 'raid' | 'transport' | 'garrison' | 'explore';
@@ -472,6 +474,41 @@ function GarrisonContinuation({ movementId, target, onClose }: {
   );
 }
 
+/** 点击地图上己方驻扎军所在格：召回 / 续行，与行军列表一致。 */
+function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => void }) {
+  const q = move.pos?.q ?? 0;
+  const r = move.pos?.r ?? 0;
+  return (
+    <Panel variant="gold" corners class="map-target-panel">
+      <div class="target-head">
+        <IconPlate icon="pve_bandits" label="野外驻扎" size="sm" plate="gold" />
+        <div class="target-heading-copy">
+          <div class="target-title">己方驻扎军</div>
+          <div class="target-coord">({q},{r})</div>
+        </div>
+        <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
+      </div>
+      <div class="target-body expedition-body">
+        <section class="expedition-assessment">
+          <div class="expedition-kicker">驻扎中</div>
+          <p>该格有你的驻扎军。可召回返城，或在地图上选择下一处目标继续行军（编队与宝物保持原样）。</p>
+        </section>
+        <div class="target-foot expedition-foot expedition-foot--split">
+          <Btn onClick={async () => {
+            if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: '驻扎军开始返程' })) onClose();
+          }}>召回</Btn>
+          <Btn variant="primary" onClick={() => {
+            garrisonContinue.value = { movementId: move.id };
+            selected.value = null;
+            showToast('请在地图上选择驻扎军的下一处目标');
+            onClose();
+          }}>行军</Btn>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /** 点击地图上「视野内的外国军队」后展示的只读信息卡：仅显示归属与类型，绝不暴露兵力/携带物。 */
 function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => void }) {
   // 订阅 dataVersion（每次外国军队轮询刷新）与 tick（ETA 每秒走字）
@@ -539,6 +576,7 @@ function GarrisonWaitPanel({ onCancel }: { onCancel: () => void }) {
 
 export function TargetPanel() {
   const _dv = dataVersion.value;
+  void foreignMoves.value;
   const sel = selected.value;
   const pending = garrisonContinue.value;
   if (!me) return null;
@@ -548,10 +586,26 @@ export function TargetPanel() {
   const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
   const clearSelection = () => { selected.value = null; };
   const cancelAll = () => { selected.value = null; garrisonContinue.value = null; };
+
+  const foe = foreignArmyAt(sel.q, sel.r);
+  if (foe?.id) {
+    return (
+      <EnemyArmyPanel
+        sel={{ ...sel, refId: foe.id, kind: 'enemy_army', name: foreignArmyName(foe) }}
+        onClose={clearSelection}
+      />
+    );
+  }
+
+  const stationed = ownStationedMoveAt(sel.q, sel.r);
+  if (stationed) {
+    return <OwnStationedPanel move={stationed} onClose={clearSelection} />;
+  }
+
+  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={cancelAll} />;
   if (sel.kind === 'enemy_army') {
     return <EnemyArmyPanel sel={sel} onClose={clearSelection} />;
   }
-  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={cancelAll} />;
   if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />;
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
