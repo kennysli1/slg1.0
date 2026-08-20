@@ -157,6 +157,14 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
+      StopMarch: {
+        command: 'movement.StopMarch', ownVillage: true, needAuth: true,
+        schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      ResumeMarch: {
+        command: 'movement.ResumeMarch', ownVillage: true, needAuth: true,
+        schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
       RecallGarrison: {
         command: 'movement.RecallGarrison', ownVillage: true, needAuth: true,
         schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
@@ -190,6 +198,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.Explored': 'Explored',
       'movement.VisionUpdated': 'VisionUpdated',
       'movement.Recalled': 'MarchRecalled',
+      'movement.Stopped': 'MarchStopped',
+      'movement.Resumed': 'MarchResumed',
       'movement.Stepped': 'MarchStep',
       'movement.Removed': 'MarchRemoved',
       'movement.ForeignStepped': 'ForeignArmyStep',

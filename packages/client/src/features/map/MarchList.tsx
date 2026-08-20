@@ -67,6 +67,7 @@ export function MarchList() {
         const label     = (MARCH_LABEL[type] ?? (() => type))(inDir);
         const paused    = m.status === 'paused';
         const stationed = m.status === 'stationed';
+        const stopped   = m.status === 'stopped';
         const marching  = m.status === 'marching';
 
         // 目标行文本
@@ -110,10 +111,22 @@ export function MarchList() {
               }}>行军</Btn>
             </span>
           );
-        } else if (marching && m.recallable && !inDir) {
+        } else if (marching && !inDir) {
           actions = (
             <span class="march-item-actions">
-              <Btn size="sm" variant="danger" onClick={() => doRecall(m)}>撤回</Btn>
+              {m.stoppable && <Btn size="sm" onClick={async () => {
+                await act(req('StopMarch', { movementId: m.id }), { okToast: '部队已在当前位置停止' });
+              }}>停止</Btn>}
+              {m.recallable && <Btn size="sm" variant="danger" onClick={() => doRecall(m)}>撤回</Btn>}
+            </span>
+          );
+        } else if (stopped && !inDir) {
+          actions = (
+            <span class="march-item-actions">
+              <Btn size="sm" variant="primary" onClick={async () => {
+                await act(req('ResumeMarch', { movementId: m.id }), { okToast: '部队继续行军' });
+              }}>继续</Btn>
+              {m.recallable && <Btn size="sm" variant="danger" onClick={() => doRecall(m)}>撤回</Btn>}
             </span>
           );
         } else if (paused && !inDir) {
@@ -124,17 +137,17 @@ export function MarchList() {
           );
         }
 
-        const etaEl = (!stationed && !paused && !actions)
+        const etaEl = (!stationed && !paused && !stopped && !actions)
           ? <span class="march-item-eta">{secUntil(m.arriveAt)}</span>
-          : (!stationed && !paused && actions)
+          : (!stationed && !paused && !stopped && actions)
             ? <span class="march-item-eta march-item-eta--sm">{secUntil(m.arriveAt)}</span>
             : null;
 
         return (
-          <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}`}>
+          <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}${stopped ? ' march-item--stopped' : ''}`}>
             <span class="march-item-icon" aria-hidden="true" />
             <div class="march-item-body">
-              <div class="march-item-kind">{label}{paused ? ' · 交战中' : stationed ? ' · 等待命令' : ''}</div>
+              <div class="march-item-kind">{label}{paused ? ' · 交战中' : stationed ? ' · 等待命令' : stopped ? ' · 已停止' : ''}</div>
               <div class="march-item-dest">{destText}{troops ? ` · ${troops}` : ''}</div>
               {prog && (
                 <div class="march-item-progress" role="progressbar" aria-valuenow={Math.round(prog.ratio * 100)} aria-valuemin={0} aria-valuemax={100}>

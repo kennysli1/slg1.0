@@ -8,7 +8,7 @@ export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
   | 'transport' | 'caravan' | 'garrison' | 'explore';
 
-export type MovementStatus = 'marching' | 'paused' | 'stationed';
+export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
 
 /** 己方视图：movement.List 下发的完整行军。 */
@@ -36,6 +36,8 @@ export interface Movement {
   requested?: Hex;
   /** 服务端权威判定：本军当前是否可被玩家撤回。 */
   recallable: boolean;
+  /** 服务端权威判定：本军当前是否可被玩家原地停止。 */
+  stoppable: boolean;
   /** 服务端权威判定：撤回是否会造成不可退还的损失（found 的开城包）。 */
   recallForfeits?: boolean;
 }

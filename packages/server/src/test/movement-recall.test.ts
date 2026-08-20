@@ -90,3 +90,33 @@ test('RecallMarch：返程中不可再次撤回', async () => {
   assert.equal(recall2.ok, false);
   assert.equal(recall2.reason, 'already_returning');
 });
+
+test('StopMarch：停止后可继续原路线或撤回，过期步进不得推进', async () => {
+  const app = freshApp();
+  const A = await register(app, '停止甲');
+  const B = await register(app, '停止乙');
+  await send(app, 'military.AdjustTroops', { villageId: A.villageId, delta: { legionnaire: 20 } });
+
+  const attack = await send(app, 'movement.SendAttack', {
+    villageId: A.villageId, targetVillage: B.villageId, troops: { legionnaire: 10 },
+  });
+  const movementId = (attack.payload as any).id as string;
+  const before = app.store.get<any>('movement', movementId);
+  const stopped = await send(app, 'movement.StopMarch', { villageId: A.villageId, movementId });
+  assert.equal(stopped.ok, true);
+  assert.equal(app.store.get<any>('movement', movementId)?.status, 'stopped');
+
+  // 原先登记的 Scheduler 回调即使到点也会被 stepToken 拦住。
+  await app.scheduler.advanceTo(clock + before.perStepMs + 1_000, setClock);
+  assert.equal(app.store.get<any>('movement', movementId)?.stepIndex, before.stepIndex);
+
+  const resumed = await send(app, 'movement.ResumeMarch', { villageId: A.villageId, movementId });
+  assert.equal(resumed.ok, true);
+  const resumedRecord = app.store.get<any>('movement', movementId);
+  assert.equal(resumedRecord?.status, 'marching');
+  assert.ok(resumedRecord?.arriveAt > clock);
+
+  const recalled = await send(app, 'movement.RecallMarch', { villageId: A.villageId, movementId });
+  assert.equal(recalled.ok, true);
+  assert.equal(app.store.get<any>('movement', movementId)?.type, 'return');
+});
