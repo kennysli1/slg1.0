@@ -91,10 +91,6 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           count: { type: 'integer', min: 1, max: 10000 },
         },
       },
-      UpgradeSmithy: {
-        command: 'military.UpgradeSmithy', ownVillage: true, needAuth: true,
-        schema: { unit: { type: 'string', minLen: 1, maxLen: 32 } },
-      },
       DisbandTroops: {
         command: 'military.DisbandTroops', ownVillage: true, needAuth: true,
         schema: { units: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
@@ -102,7 +98,6 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     eventPushMap: {
       'military.TroopTrained': 'TroopTrained',
-      'military.SmithyUpgraded': 'SmithyUpgraded',
     },
     },
   {
@@ -265,7 +260,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       CancelResearch: { command: 'research.CancelResearch', ownVillage: true, needAuth: true, schema: {} },
     },
     // 左=内部事件名，右=推给客户端的事件名。右侧一律用**不带模块前缀**的裸名，
-    // 与其它模块保持一致（military 推 SmithyUpgraded、building 推 BuildingBuilt…），
+    // 与其它模块保持一致（military 推 TroopTrained、building 推 BuildingBuilt…），
     // 客户端的 notificationText / notificationKind 也是按裸名分派的。
     eventPushMap: {
       'research.TechCompleted': 'TechCompleted',

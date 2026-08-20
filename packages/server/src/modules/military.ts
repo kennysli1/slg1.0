@@ -9,12 +9,11 @@ import type { GameConfig, UnitDef } from '../infra/config.js';
  * 领域模块 · Military（军队/兵种）
  * 对应设计文档 02_系统清单C组、10_兵种特性效果表、07_扩展与代码规范
  *
- * 职责：每村兵力数量、训练队列、兵种养成(铁匠)等级的 owner。
+ * 职责：每村兵力数量、训练队列与军事科技派生快照的 owner。
  * 兵种数据来自 GameConfig（config/units.csv）——改 CSV 即改兵种/加部族。
  * 不直接改资源——训练时向 Economy 发 TrySpend 扣费（状态归属唯一）。
  *
  * 训练队列：逐个产出（每 trainSec 出 1 个），资源一次性预扣。
- * 铁匠养成：smithyLevel 提升某兵种攻防 → 派生管线（对外只给最终三维）。
  */
 
 export type { UnitDef };
@@ -38,18 +37,10 @@ interface MilitaryState {
   troops: Record<string, number>;
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
   marching?: Record<string, number>;
-  /** 铁匠对各兵种的强化等级（养成层） */
-  smithyLevel: Record<string, number>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
   training: TrainOrder | null;
   /** 逐建筑实例训练队列：slotId -> 该建筑的独立训练队列（多实例并行训练）。 */
   trainingBySlot: Record<string, TrainOrder>;
-  /**
-   * 进行中的铁匠升级（一次仅一个；v3 改为耗时操作，受繁荣度加成加速）。
-   * `startAt` 是可选的**新增**字段（客户端画进度条要有个起点）：老存档里没有，
-   * 读取方一律按 `?? null` 兜底，因此不构成不兼容的落盘结构变更、无需刷档。
-   */
-  pendingSmithy?: { unit: string; taskId: string; startAt?: number; doneAt: number };
   /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
   treasureAtkMult?: number;
   treasureDefMult?: number;
@@ -60,6 +51,8 @@ interface MilitaryState {
   techCombatByUnit?: Record<string, { atk: number; def: number }>;
   techUnlockedUnits?: string[];
   techTrainSpeed?: number;
+  /** 科技行军速度加成（加性百分比，已按 research cap 聚合）。 */
+  techMarchSpeed?: number;
   /** 宝物骑兵训练加速倍率（默认 1；伯乐提供，training time 乘此值）。 */
   treasureCavalryTrainMult?: number;
   /** 精神食粮减粮（每兵每小时减免的绝对 crop 值，加性；默认 0）。 */
@@ -122,11 +115,24 @@ export class MilitaryModule {
     s.techCombatByUnit = combat ?? {};
     s.techUnlockedUnits = Array.isArray(unlocks) ? [...new Set(unlocks)] : [];
     s.techTrainSpeed = Math.max(0, Math.min(0.9, Number(trainSpeed) || 0));
+    s.techMarchSpeed = Math.max(0, Math.min(0.9, Number((cmd.payload as any).marchSpeed) || 0));
     // 清掉旧覆盖，避免旧档的最后完成科技继续生效。
     s.techAtkMult = 1;
     s.techDefMult = 1;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /** 行军模块只可取得已聚合的最终最慢速度快照，不能读取军事状态。 */
+  private getMarchSpeedSnapshot(cmd: Command): CommandResult {
+    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const units = Object.keys(troops ?? {}).filter((unit) => (troops[unit] ?? 0) > 0 && this.config.units[unit]);
+    if (units.length === 0) return { ok: false, payload: {}, reason: 'empty_troops' };
+    const bonus = 1 + (s.techMarchSpeed ?? 0);
+    const slowest = Math.min(...units.map((unit) => this.config.units[unit].speed * bonus));
+    return { ok: true, payload: { slowestSpeed: slowest } };
   }
 
   private units(): Record<string, UnitDef> {
@@ -136,7 +142,6 @@ export class MilitaryModule {
   init(): void {
     this.commands.register('military.GetArmy', (c) => this.getArmy(c));
     this.commands.register('military.TrainTroops', (c) => this.trainTroops(c));
-    this.commands.register('military.UpgradeSmithy', (c) => this.upgradeSmithy(c));
     this.commands.register('military.DisbandTroops', (c) => this.disbandTroops(c));
     // 供 Combat/Movement 取"参战快照"：对外只给算好的最终三维（派生管线对外口径）
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
@@ -153,6 +158,7 @@ export class MilitaryModule {
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
     this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
     this.commands.register('military.SetTechEffects', (c) => this.setTechEffects(c));
+    this.commands.register('military.GetMarchSpeedSnapshot', (c) => this.getMarchSpeedSnapshot(c));
     // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
     this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
     this.commands.register('military.DuplicateCavalry', (c) => this.duplicateCavalry(c));
@@ -205,18 +211,6 @@ export class MilitaryModule {
     this.store.set(COLLECTION, s.villageId, s);
   }
 
-    // 重注册进行中的铁匠升级（v3 耗时操作）
-    for (const s of this.store.all<MilitaryState>(COLLECTION)) {
-      if (!s.pendingSmithy) continue;
-      const delay = Math.max(0, s.pendingSmithy.doneAt - this.now());
-      s.pendingSmithy.taskId = this.scheduler.schedule(
-        delay,
-        () => this.onSmithyDone(s.villageId),
-        `military:${s.villageId}`,
-        `village:${s.villageId}`,
-      );
-      this.store.set(COLLECTION, s.villageId, s);
-    }
   }
 
   createVillage(villageId: string, tribe = 'romans'): void {
@@ -224,7 +218,6 @@ export class MilitaryModule {
       villageId,
       tribe,
       troops: {},
-      smithyLevel: {},
       training: null,
       trainingBySlot: {},
     };
@@ -319,16 +312,15 @@ export class MilitaryModule {
     this.reportGarrisonPop(s); // 同步更新士兵池口粮（不返还人口）
   }
 
-  /** 派生管线：最终数值 = 基础 × (1 + 铁匠等级×每级加成) × 宝物军事倍率。对外只暴露这个结果（含形态/特性）。 */
-  private finalStats(unit: string, smithyLv: number, atkMult = 1, defMult = 1) {
+  /** 派生管线：最终数值 = 基础 × 科技/宝物倍率。对外只暴露最终结果快照。 */
+  private finalStats(unit: string, atkMult = 1, defMult = 1) {
     const def = this.config.units[unit];
-    const bonus = 1 + smithyLv * this.config.constants.smithyBonusPerLevel; // 每级加成来自 config
     return {
       form: def.form,
-      meleeAtk: def.meleeAtk * bonus * atkMult,
-      rangedAtk: def.rangedAtk * bonus * atkMult,
-      meleeDef: def.meleeDef * bonus * defMult,
-      rangedDef: def.rangedDef * bonus * defMult,
+      meleeAtk: def.meleeAtk * atkMult,
+      rangedAtk: def.rangedAtk * atkMult,
+      meleeDef: def.meleeDef * defMult,
+      rangedDef: def.rangedDef * defMult,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
@@ -557,7 +549,7 @@ export class MilitaryModule {
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
       const tm = this.techCombatMult(s, u.key);
-      const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+      const st = this.finalStats(u.key, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
       const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
       const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
       const unlocked = haveLv >= 1 && techUnlocked;
@@ -583,7 +575,7 @@ export class MilitaryModule {
           .filter((u) => u.building === sl.kind)
           .map((u) => {
             const tm = this.techCombatMult(s, u.key);
-            const st = this.finalStats(u.key, s.smithyLevel[u.key] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+            const st = this.finalStats(u.key, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
             const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
             const unlocked = sl.level >= 1 && techUnlocked;
             return {
@@ -624,12 +616,6 @@ export class MilitaryModule {
       payload: {
         tribe: s.tribe,
         troops: { ...s.troops },
-        smithyLevel: { ...s.smithyLevel },
-        // 进行中的铁匠升级（客户端画进度条用）。只给 unit/起止时刻，
-        // taskId 是调度器内部句柄，不外泄。
-        pendingSmithy: s.pendingSmithy
-          ? { unit: s.pendingSmithy.unit, startAt: s.pendingSmithy.startAt ?? null, doneAt: s.pendingSmithy.doneAt }
-          : null,
         trainable,
         training,
         slots: slotsOut,
@@ -779,60 +765,6 @@ export class MilitaryModule {
   }
 
   /**
-   * 铁匠升级（v3 改为耗时操作）：扣资源 → 登记定时任务 → 完成时提升某兵种养成等级。
-   * 时长受繁荣度加成加速：durMs = smithyUpgradeSec × 1000 / prosperityMult（population.GetLaborMult('smithy')）。
-   * 同一时刻仅允许一个铁匠升级（队列占用则拒）。
-   */
-  private async upgradeSmithy(cmd: Command): Promise<CommandResult> {
-    const { villageId, unit } = cmd.payload as { villageId: string; unit: string };
-    const s = this.load(villageId);
-    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    if (!this.config.units[unit]) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
-    if (s.pendingSmithy) return { ok: false, payload: {}, reason: 'smithy_busy' };
-
-    const nextLv = (s.smithyLevel[unit] ?? 0) + 1;
-    const base = this.config.constants.smithyCostBase;
-    const cost = { wood: base * nextLv, clay: base * nextLv }; // 成本基数来自 config
-    const spend = await this.commands.send({
-      name: 'economy.TrySpend',
-      from: MilitaryModule.NAME,
-      payload: { villageId, cost },
-    });
-    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
-
-    // 读取人口劳动力锻造加速（GetLaborMult，只读快照，无副作用）
-    const laborRes = await this.commands.send({
-      name: 'population.GetLaborMult',
-      from: MilitaryModule.NAME,
-      payload: { villageId, buildingKind: 'smithy' },
-    });
-    const mult: number = laborRes.ok ? ((laborRes.payload as any).mult as number) : 1.0;
-    const durMs = Math.max(1, Math.round((this.config.constants.smithyUpgradeSec * 1000) / Math.max(0.01, mult)));
-
-    const startAt = this.now();
-    const doneAt = startAt + durMs;
-    const taskId = this.scheduler.schedule(durMs, () => this.onSmithyDone(villageId), `military:${villageId}`, `village:${villageId}`);
-    s.pendingSmithy = { unit, taskId, startAt, doneAt };
-    this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { unit, nextLevel: nextLv, doneAt, durationMs: durMs } };
-  }
-
-  /** 铁匠升级完成：提升养成等级并广播。 */
-  private async onSmithyDone(villageId: string): Promise<void> {
-    const s = this.load(villageId);
-    if (!s || !s.pendingSmithy) return;
-    const unit = s.pendingSmithy.unit;
-    const level = (s.smithyLevel[unit] ?? 0) + 1;
-    s.smithyLevel[unit] = level;
-    s.pendingSmithy = undefined;
-    this.store.set(COLLECTION, villageId, s);
-    await this.bus.emit({
-      name: 'military.SmithyUpgraded', source: MilitaryModule.NAME, ts: this.now(),
-      payload: { villageId, unit, smithyLevel: level },
-    } as DomainEvent);
-  }
-
-  /**
    * 解散驻村军队（DisbandTroops）：减兵力 + 归还人口 + 更新维护。
    * 只能解散驻村部队（出征中的军队不在 troops 里，归 movement 管辖）。
    * 100% 归还人口（但拓荒者 popPermanent=true，由 population.ReturnPop 跳过）。
@@ -884,7 +816,7 @@ export class MilitaryModule {
     for (const [unit, n] of Object.entries(source)) {
       if (!this.config.units[unit] || n <= 0) continue;
       const tm = this.techCombatMult(s, unit);
-      const stats = this.finalStats(unit, s.smithyLevel[unit] ?? 0, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+      const stats = this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
       snapshot[unit] = { count: n, ...stats };
     }
     return { ok: true, payload: { snapshot } };

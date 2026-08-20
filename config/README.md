@@ -41,7 +41,7 @@
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
-| 表8 | `game_constants.csv` | **全局常量**（城墙/铁匠加成、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
+| 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
 | 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量或宝库槽位 |
 | 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
@@ -224,8 +224,6 @@
 | key | 默认 | 作用 |
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
-| smithy_bonus_per_level | 0.1 | 铁匠每级攻防加成（+10%/级） |
-| smithy_cost_base | 20 | 铁匠升级成本基数（木+泥各 base×目标等级） |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
 | main_build_speedup_cap | 0.6 | 主基地提速上限（最多-60%） |
 | storage_base | 800 | 仓库/粮仓基础容量 |
@@ -300,7 +298,7 @@
 | start_placed | 开局预置建筑（含资源田），格式 `code:等级`，多段用 `\|` 分隔，如 `main:1\|rallypoint:1\|woodcutter:1\|claypit:1\|ironmine:1\|cropland:1`。zone 由 buildings.csv 自动归区；开局预置数量不能超过 tcLevel=1 的城内/城外槽位上限 |
 | start_resources | 初始资源覆盖（**可选**），格式 `res:量`，留空则各资源用 `game_constants` 的 `start_resource_amount` |
 
-> 想让条顿开局多带一座兵营、或某部族自带铁匠铺？改这张表 `start_placed`，无需动代码。
+> 铁匠铺只承担建筑介绍与繁荣度，不再承载锻造玩法；军事攻防与行军速度加成统一配置在 `research.csv` / `research_effects.csv`。
 
 ---
 

@@ -4,7 +4,7 @@
  * 覆盖设计文档 13/14「硬上限重做」核心不变量：
  *  C1  三部族 createVillage 开局人口=城镇中心popCap：currentPop=Σmain[1..level].popCap，hardCap>currentPop（其他默认建筑只提供上限），softLimit===availableLabor
  *  C2  平民占比驱动繁荣度：新村无士兵→平民占总人口100%→繁荣度满值1.0；建兵营抬高硬上限不降繁荣度（与上限解耦，原「升级得负收益」bug 已修复）；
- *      征兵(setGarrisonPop)降平民占比→降繁荣度（仍≥popLaborFloor）；五轴统一；开局存在正增长潜力(growthPerHour>0)
+ *      征兵(setGarrisonPop)降平民占比→降繁荣度（仍≥popLaborFloor）；四轴统一；开局存在正增长潜力(growthPerHour>0)
  *  C3  全部兵种 cropPerHourEach>0（士兵以 upkeep 计入口粮，训练严格增加粮食压力）
  *  C4  增长朝 availableLabor 线性收敛：growthPerHour 始终是实际速率，结算时才夹在缺口内
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
@@ -85,8 +85,8 @@ test('v3 C2：平民占比驱动繁荣度——新村满值、升上限不变、
   assert.ok(Math.abs(snap0.prosperityMult - 1) < 1e-6, `无士兵 prosperityMult 应≈1.0，实际 ${snap0.prosperityMult}`);
   // 存在增长潜力：growthPerHour>0（速率=main.popGrowthPerLevel×mainLevel，缺口>0）
   assert.ok(snap0.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${snap0.growthPerHour}`);
-  // 五轴统一
-  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+  // 四轴统一
+  for (const axis of ['production', 'build', 'train', 'research'] as const) {
     assert.ok(typeof snap0.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
     assert.ok(Math.abs(snap0.laborMults[axis] - snap0.prosperityMult) < 1e-6, `${axis} 倍率应=prosperityMult`);
   }
@@ -363,7 +363,7 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
     assert.ok(snap[field] !== undefined, `字段 ${field} 不应为 undefined`);
   }
   assert.ok(snap.laborMults && typeof snap.laborMults === 'object', '应有 laborMults 对象');
-  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+  for (const axis of ['production', 'build', 'train', 'research'] as const) {
     assert.ok(typeof snap.laborMults[axis] === 'number', `laborMults.${axis} 应为数值`);
   }
   // 类型校验

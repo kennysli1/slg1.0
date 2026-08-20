@@ -1,19 +1,29 @@
 id,code,name,branch,tier,requires,desc,scope,durationSec,rpCost,icon
 #数字ID,代码标识(勿改),显示名,分支,层级,前置科技,简介,作用域(village/player),研发耗时(秒),消耗RP,图标基名
-1,infantry_training,步兵训练,military,1,,近战单位攻击+15%,village,3600,3,tech_infantry
-2,cavalry_tactics,骑术,military,1,,三族主力骑兵攻击+10%,village,5400,5,tech_cavalry
-3,advanced_formation,进阶阵型,military,2,infantry_training,全军攻击与防御各+10%,village,7200,8,tech_formation
-4,siege_warfare,攻城术,military,2,cavalry_tactics,三族攻城锤攻击+20%,village,7200,8,tech_siege
-5,elite_guard,精锐卫队,military,3,advanced_formation|siege_warfare,全军攻击与防御各+25%,player,10800,15,tech_elite
-6,improved_plow,改良犁,production,1,,粮食产率+15%,village,3600,3,tech_plow
-7,mining_tech,采矿技术,production,1,,铁矿产率+20%,village,5400,5,tech_mining
-8,architecture,建筑学,production,2,improved_plow,建造加速+15%,village,7200,8,tech_architecture
-9,logistics,后勤操练,production,2,mining_tech,部队训练加速+15%,village,7200,8,tech_logistics
-10,advanced_storage,高级仓储,production,3,architecture|logistics,四种基础资源容量+25%,player,10800,15,tech_storage
-11,code_of_laws,民兵法典,social,1,,全军防御+10%,village,3600,3,tech_laws
-12,cultural_exchange,文化交流,social,1,,人口增长速度+15%,village,5400,5,tech_culture
-13,diplomacy,军政协作,social,2,code_of_laws,部队训练加速+10%,player,7200,8,tech_diplomacy
-14,urban_planning,城市规划,social,2,cultural_exchange,建造加速+10%,village,7200,8,tech_urban
-15,imperial_authority,帝国权威,social,3,diplomacy|urban_planning,所有村庄人口上限+10%,player,10800,15,tech_imperial
-16,open_warehouse,露天仓库,social,2,code_of_laws,允许强制入库至基础容量200%并在溢出时停产,village,7200,8,tech_warehouse
-17,universal_conscription,全民皆兵,social,3,imperial_authority,所有村庄动员比例上限+10个百分点,player,10800,12,tech_conscription
+1,melee_attack_i,近战攻击 I,military,1,,近战单位攻击+10%,village,3600,2,tech_infantry
+2,melee_attack_ii,近战攻击 II,military,2,melee_attack_i,近战单位攻击再+10%,village,7200,4,tech_infantry
+3,melee_attack_iii,近战攻击 III,military,3,melee_attack_ii,近战单位攻击再+15%,village,10800,6,tech_infantry
+4,melee_defense_i,近战防御 I,military,1,,近战单位防御+10%,village,3600,2,tech_formation
+5,melee_defense_ii,近战防御 II,military,2,melee_defense_i,近战单位防御再+10%,village,7200,4,tech_formation
+6,melee_defense_iii,近战防御 III,military,3,melee_defense_ii,近战单位防御再+15%,village,10800,6,tech_formation
+7,ranged_attack_i,远程攻击 I,military,1,,远程单位攻击+10%,village,3600,2,tech_cavalry
+8,ranged_attack_ii,远程攻击 II,military,2,ranged_attack_i,远程单位攻击再+10%,village,7200,4,tech_cavalry
+9,ranged_attack_iii,远程攻击 III,military,3,ranged_attack_ii,远程单位攻击再+15%,village,10800,6,tech_cavalry
+10,ranged_defense_i,远程防御 I,military,1,,远程单位防御+10%,village,3600,2,tech_siege
+11,ranged_defense_ii,远程防御 II,military,2,ranged_defense_i,远程单位防御再+10%,village,7200,4,tech_siege
+12,ranged_defense_iii,远程防御 III,military,3,ranged_defense_ii,远程单位防御再+15%,village,10800,6,tech_siege
+13,march_speed_i,行军速度 I,military,1,,部队行军速度+5%,village,3600,2,tech_logistics
+14,march_speed_ii,行军速度 II,military,2,march_speed_i,部队行军速度再+5%,village,7200,4,tech_logistics
+15,march_speed_iii,行军速度 III,military,3,march_speed_ii,部队行军速度再+5%,village,10800,6,tech_logistics
+16,improved_plow,改良犁,production,1,,粮食产率+15%,village,3600,3,tech_plow
+17,mining_tech,采矿技术,production,1,,铁矿产率+20%,village,5400,5,tech_mining
+18,architecture,建筑学,production,2,improved_plow,建造加速+15%,village,7200,8,tech_architecture
+19,logistics,后勤操练,production,2,mining_tech,部队训练加速+15%,village,7200,8,tech_logistics
+20,advanced_storage,高级仓储,production,3,architecture|logistics,四种基础资源容量+25%,player,10800,15,tech_storage
+21,code_of_laws,民兵法典,social,1,,民兵组织制度,village,3600,3,tech_laws
+22,cultural_exchange,文化交流,social,1,,人口增长速度+15%,village,5400,5,tech_culture
+23,diplomacy,军政协作,social,2,code_of_laws,部队训练加速+10%,player,7200,8,tech_diplomacy
+24,urban_planning,城市规划,social,2,cultural_exchange,建造加速+10%,village,7200,8,tech_urban
+25,imperial_authority,帝国权威,social,3,diplomacy|urban_planning,所有村庄人口上限+10%,player,10800,15,tech_imperial
+26,open_warehouse,露天仓库,social,2,code_of_laws,允许强制入库至基础容量200%并在溢出时停产,village,7200,8,tech_warehouse
+27,universal_conscription,全民皆兵,social,3,imperial_authority,所有村庄动员比例上限+10个百分点,player,10800,12,tech_conscription

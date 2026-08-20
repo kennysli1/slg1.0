@@ -241,7 +241,7 @@ test('人口：v5 RecoverCasualties 按医院等级回收平民（其余计永�
   assert.equal(snap1.wounded, undefined, 'v5 快照不应含 wounded 字段');
 });
 
-test('人口：五轴繁荣度乘数（laborMults 字段正确，v3 统一为数值）', async () => {
+test('人口：四轴繁荣度乘数（laborMults 字段正确，v3 统一为数值）', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
@@ -249,15 +249,15 @@ test('人口：五轴繁荣度乘数（laborMults 字段正确，v3 统一为数
   assert.equal(r.ok, true, `GetPopulation 应成功: ${r.reason ?? ''}`);
   const snap = r.payload as any;
 
-  // v3：laborMults 五个轴均为数值（五轴统一 prosperityMult）
+  // v3：laborMults 四个轴均为数值（四轴统一 prosperityMult）
   assert.ok(snap.laborMults, '应有劳动力倍率对象');
-  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+  for (const axis of ['production', 'build', 'train', 'research'] as const) {
     assert.ok(typeof snap.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
   }
 
-  // 五轴统一：所有倍率 = prosperityMult，且 ∈ [popLaborFloor, 1.0]（新模型：新村无士兵→平民占比100%→满值1.0）
+  // 四轴统一：所有倍率 = prosperityMult，且 ∈ [popLaborFloor, 1.0]（新模型：新村无士兵→满值1.0）
   const c = app.config.constants;
-  for (const axis of ['production', 'build', 'train', 'research', 'smithy'] as const) {
+  for (const axis of ['production', 'build', 'train', 'research'] as const) {
     const m = snap.laborMults[axis];
     assert.ok(m >= c.popLaborFloor - 0.01 && m <= 1.01,
       `${axis} 倍率应在[${c.popLaborFloor},1.0]，当前 ${m.toFixed(3)}`);

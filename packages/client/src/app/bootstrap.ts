@@ -135,7 +135,7 @@ async function refreshAll() {
         },
         cropDeficitRate: 0,
         laborMults: p.laborMults ?? {
-          production: 1, build: 1, train: 1, research: 1, smithy: 1,
+          production: 1, build: 1, train: 1, research: 1,
         },
         lastTick: p.lastTick ?? Date.now(),
         fetchedAt: Date.now(),

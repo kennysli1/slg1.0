@@ -22,37 +22,6 @@ const BRANCHES: { key: Branch; name: string; icon: string; desc: string }[] = [
   { key: 'social', name: '社会', icon: 'ui_icon_pop', desc: '人口、贸易与治理' },
 ];
 
-/** 科技效果 → 中文一句话。 */
-function effectText(t: any): string {
-  const value = t.value ?? t.effectValue ?? 0;
-  const pct = Math.round(value * 100);
-  const key = t.target ?? t.effectKey ?? '';
-  switch (t.effectType) {
-    case 'resource_rate': return `${key} 产量 +${pct}%`;
-    case 'combat_atk': return `${key} 攻击 +${pct}%`;
-    case 'combat_def': return `${key} 防御 +${pct}%`;
-    case 'unit_unlock': return `解锁兵种 ${key}`;
-    case 'building_unlock': return `解锁建筑 ${key}`;
-    case 'pop_growth': return `人口增长 +${pct}%`;
-    case 'storage_cap': return `仓储上限 +${pct}%`;
-    case 'train_speed': return `训练加速 ${pct}%`;
-    case 'build_speed': return `建造加速 ${pct}%`;
-    case 'march_speed': return `行军加速 ${pct}%`;
-    case 'carry_cap': return `运载上限 +${pct}%`;
-    case 'mechanism': return `特殊机制：${key}`;
-    case 'trade_routes': return `贸易路线 +${value}`;
-    case 'caravan_speed': return `商队速度 +${pct}%`;
-    case 'pop_cap': return `人口上限 +${pct}%`;
-    case 'mobilize_cap': return `动员比例上限 +${pct} 个百分点`;
-    default: return `${t.effectType}：+${value}`;
-  }
-}
-
-function effectTexts(t: any): string[] {
-  const effects = Array.isArray(t.effects) && t.effects.length > 0 ? t.effects : [t];
-  return effects.map(effectText);
-}
-
 export function TechTreeScreen() {
   const [branch, setBranch] = useState<Branch>('military');
 
@@ -275,12 +244,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
         {t.scope === 'player' && <Tag kind="gold" title="对全部村庄生效">全局</Tag>}
       </div>
 
-      <div class="tech-node-effect">{t.desc || effectText(t)}</div>
-
-      <div class="tech-node-outcome">
-        <Icon icon="ui_seal_gold" label="研究效果" size="2xs" />
-        <span>{effectTexts(t).join(' · ')}</span>
-      </div>
+      <div class="tech-node-effect">{t.desc || '该科技的具体效果由服务器配置下发。'}</div>
 
       <div class="tech-node-meta">
         <span><Icon icon="bld_academy" label="科研点" size="2xs" /> <b>{fmt(t.rpCost)}</b> RP</span>

@@ -290,7 +290,7 @@ export class PopulationModule {
     return fillBonus * overcrowd;
   }
 
-  /** 五轴统一的繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
+  /** 四轴统一的繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
   private prosperityMult(s: PopulationState): number {
     const c = this.config.constants;
     return c.popLaborFloor + (1 - c.popLaborFloor) * this.prosperityBonus(s);
@@ -312,7 +312,7 @@ export class PopulationModule {
 
   /**
    * 向 economy 上报：① 平民口粮 currentPop × popCropPerLabor（source='civilian_pop'）；
-   * ② 五轴繁荣度乘数（source='pop_labor'，mult[res] = prosperityMult − 1）。
+   * ② 四轴繁荣度乘数（source='pop_labor'，mult[res] = prosperityMult − 1）。
    * 士兵口粮（source='troops'）由 military 自行上报，此处不重复。
    */
   private async reportToEconomy(s: PopulationState): Promise<void> {
@@ -562,7 +562,6 @@ export class PopulationModule {
       build: mult,
       train: mult,
       research: mult,
-      smithy: mult,
     };
 
     return {
@@ -575,7 +574,7 @@ export class PopulationModule {
     };
   }
 
-  /** 繁荣度乘数（v3 五轴统一；kind 参数保留兼容，不再区分）。 */
+  /** 繁荣度乘数（v3 四轴统一；kind 参数保留兼容，不再区分）。 */
   private getLaborMult(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.load(villageId);

@@ -53,7 +53,7 @@ export interface PopSnapshot {
   laborRatio: number;
   /** 繁荣度加成 [0,1]（平民占比从种族最低到满值处的线性插值）。 */
   prosperityBonus: number;
-  /** 五轴统一繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
+  /** 四轴统一繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
   prosperityMult: number;
   /** 每小时增长（朝 popCeiling 收敛）。 */
   growthPerHour: number;
@@ -81,13 +81,12 @@ export interface PopSnapshot {
   wounded: { total: number; entries: any[] };
   /** 每小时粮食赤字速率（饥荒减员速率），由 famine_reduction push 校正。 */
   cropDeficitRate: number;
-  /** 五轴繁荣度乘数（全 = prosperityMult）。 */
+  /** 四轴繁荣度乘数（全 = prosperityMult）。 */
   laborMults: {
     production: number;
     build: number;
     train: number;
     research: number;
-    smithy: number;
   };
   /** 兼容别名 = availableLabor（movement 拓荒门槛）。 */
   softLimit: number;
