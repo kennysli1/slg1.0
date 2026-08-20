@@ -9,6 +9,10 @@
 
 ## [未发布]
 
+### 破坏性
+
+- **[需刷档]** 移除铁匠锻造状态、`UpgradeSmithy` 协议动作与旧攻防常量；军事科技改为村庄作用域的近战攻击/防御、远程攻击/防御、行军速度五组三级节点。行军速度经军事模块最终快照在出发、续行与返程时锁定；协议版本升至 4，存档结构版本升至 3。
+
 ### 新增
 
 - 行军系统全面改进（Wire v4，最低兼容 v4，旧客户端强制刷新）：共享 `Movement`/`ForeignArmy` 类型；新增 `RecallMarch` 主动撤回在途军队；地图右上角行军面板显示进度条与撤回按钮（`found` 类型撤回会 forfeits 开城包，需确认）；来袭告警改为部队进入守方视野后触发（不再出征瞬间通知）；`ListForeign` 脱敏视图改为仅 `pos`+`heading`（隐藏完整路径与目的地）；行军逐格增量推送（`MarchStep`/`MarchRemoved`/`ForeignArmyStep`/`ForeignArmyRemoved`）替代 3.5s 外国军队轮询；空间索引优化同格相遇检测；途中相遇战统一走 Combat 模块逐 tick 结算（双方均可收到 `BattleStarted`/`BattleTick`）。

@@ -37,12 +37,6 @@ interface ServerConfig {
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
     /** 仓储容量：base×(1+Σ等级×growth)，仓库→木泥铁 / 粮仓→粮。 */
     storageBase: number; storageGrowthPerLevel: number;
-    /** 铁匠每级全军攻防加成系数（ratio=1+等级×该值）。 */
-    smithyBonusPerLevel: number;
-    /** 铁匠升级造价基数：木/泥各 base×目标等级。 */
-    smithyCostBase: number;
-    /** 铁匠升级基础时长（秒），实际时长受繁荣度加速。 */
-    smithyUpgradeSec: number;
     /** 城墙每级守城防御加成系数（ratio=1+等级×该值）。 */
     wallBonusPerLevel: number;
     /** 医院战死回收比例：min(max, base+等级×perLevel)。 */
@@ -217,23 +211,6 @@ export function storageBase(): number {
 /** 仓库/粮仓每级容量增长系数。 */
 export function storageGrowthPerLevel(): number {
   return cfg?.constants?.storageGrowthPerLevel ?? 0.5;
-}
-/** 铁匠每级全军攻防加成系数。 */
-export function smithyBonusPerLevel(): number {
-  return cfg?.constants?.smithyBonusPerLevel ?? 0.1;
-}
-/** 铁匠升级造价基数（木/泥各 base×目标等级），与服务端 upgradeSmithy 同公式。 */
-export function smithyCostBase(): number {
-  return cfg?.constants?.smithyCostBase ?? 20;
-}
-/** 铁匠升级到指定等级的资源消耗。 */
-export function smithyUpgradeCost(nextLevel: number): Record<string, number> {
-  const base = smithyCostBase() * Math.max(1, nextLevel);
-  return { wood: base, clay: base };
-}
-/** 铁匠升级基础时长（秒）；实际时长再除以繁荣度乘数（服务端计算）。 */
-export function smithyUpgradeSec(): number {
-  return cfg?.constants?.smithyUpgradeSec ?? 30;
 }
 /** 城墙每级守城防御加成系数。 */
 export function wallBonusPerLevel(): number {

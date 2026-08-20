@@ -1,8 +1,6 @@
 ﻿key,value,type,note
 #常量键(代码读取用,勿改),值,类型(number/bool/string),中文说明
 wall_bonus_per_level,0.03,number,城墙每级防御加成(0.03=每级+3%)
-smithy_bonus_per_level,0.1,number,铁匠每级攻防加成(0.1=每级+10%)
-smithy_cost_base,20,number,铁匠升级成本基数(木+泥各 base×目标等级)
 main_build_speedup_per_level,0.05,number,主基地每级建造提速(0.05=每级-5%耗时)
 main_build_speedup_cap,0.6,number,主基地建造提速上限(0.6=最多-60%)
 train_time_reduce_per_level,0.05,number,军事建筑每级训练提速(0.05=每级-5%训练耗时)
@@ -34,7 +32,6 @@ pop_famine_tick_sec,300,number,饥荒减员定时任务间隔(秒;5分钟=300)
 pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口的比例(其余永久扣除;无伤兵池)
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
-smithy_upgrade_sec,30,number,铁匠升级基础时长(秒);受繁荣度加成加速(除以prosperityMult)
 found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
 found_min_soft_limit,200,number,拓荒建村：出发村可用劳动人口最低门槛(=快照softLimit别名=硬上限-士兵人口);v3硬上限模型下main L10约244,留余量设200
 found_settler_count,3,number,拓荒建村：所需拓荒者数量

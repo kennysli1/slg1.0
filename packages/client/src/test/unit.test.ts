@@ -123,7 +123,6 @@ describe('errText', () => {
 
   it('训练/动员相关错误码返回中文（不再回退到“操作失败”）', () => {
     assert.equal(errText('mobilize_cap_exceeded'), '已达本族动员上限（士兵占总人口比例超限），无法继续训练');
-    assert.equal(errText('smithy_busy'), '铁匠铺正在升级中，请稍后再试');
     assert.notEqual(errText('mobilize_cap_exceeded'), '操作失败');
   });
 
@@ -235,7 +234,7 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     wounded: { total: 0, entries: [] },
     cropDeficitRate: 0,
     laborMults: {
-      production: 0.875, build: 0.875, train: 0.875, research: 0.875, smithy: 0.875,
+      production: 0.875, build: 0.875, train: 0.875, research: 0.875,
     },
     softLimit: 160,
     lastTick: Date.now(),
@@ -365,9 +364,8 @@ describe('notificationKind', () => {
     assert.equal(notificationKind('BuildingDemolished'), 'build');
   });
 
-  it('训练与锻造归 train', () => {
+  it('训练归 train', () => {
     assert.equal(notificationKind('TroopTrained'), 'train');
-    assert.equal(notificationKind('SmithyUpgraded'), 'train');
   });
 
   it('战斗与遭遇战归 battle', () => {

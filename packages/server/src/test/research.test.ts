@@ -28,7 +28,7 @@ test('学院建造后 academy 参数更新', async () => {
   assert.equal(academy.highestLevel, 0);
 });
 
-test('科技树查询返回配置的 17 个科技 + 正确的 status', async () => {
+test('科技树查询返回配置的 27 个科技 + 正确的 status', async () => {
   const app = freshApp();
   const regRes = await reg(app, '测试2', 'pass1');
   assert.equal(regRes.ok, true, `注册应成功: ${regRes.reason ?? ''}`);
@@ -36,9 +36,9 @@ test('科技树查询返回配置的 17 个科技 + 正确的 status', async () 
   const r = await send(app, 'research.GetTechTree', { villageId: va });
   assert.equal(r.ok, true);
   const techs = (r.payload as any).techs;
-  assert.equal(techs.length, 17, `应有17个科技，实际: ${techs.length}`);
-  const t1 = techs.find((t: any) => t.code === 'infantry_training');
-  assert.ok(t1, 'infantry_training 应存在');
+  assert.equal(techs.length, 27, `应有27个科技，实际: ${techs.length}`);
+  const t1 = techs.find((t: any) => t.code === 'melee_attack_i');
+  assert.ok(t1, 'melee_attack_i 应存在');
   assert.equal(t1.status, 'available', '无前置的 tier-1 科技应 available（但无学院就无法支付 RP）');
 });
 
@@ -47,7 +47,7 @@ test('StartResearch 无学院应被拒（academy_required）', async () => {
   const regRes = await reg(app, '测试3', 'pass1');
   assert.equal(regRes.ok, true);
   const va = (regRes.payload as any).player.villageId;
-  const r = await send(app, 'research.StartResearch', { villageId: va, techCode: 'infantry_training' });
+  const r = await send(app, 'research.StartResearch', { villageId: va, techCode: 'melee_attack_i' });
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'academy_required');
 });
@@ -58,9 +58,9 @@ test('GM 覆盖层：research 表编辑 round-trip', async () => {
   assert.equal(regRes.ok, true);
   const r = await send(app, 'research.GetTechTree', { villageId: (regRes.payload as any).player.villageId });
   assert.equal(r.ok, true);
-  const t = (r.payload as any).techs.find((t: any) => t.code === 'infantry_training');
-  assert.equal(t.rpCost, 3, 'infantry_training 默认 rpCost=3');
-  assert.equal(t.durationSec, 3600, 'infantry_training 默认 durationSec=3600');
+  const t = (r.payload as any).techs.find((t: any) => t.code === 'melee_attack_i');
+  assert.equal(t.rpCost, 2, 'melee_attack_i 默认 rpCost=2');
+  assert.equal(t.durationSec, 3600, 'melee_attack_i 默认 durationSec=3600');
 });
 
 test('CancelResearch 无在途研发时返回 not_researching', async () => {
@@ -78,8 +78,8 @@ test('依赖链：有前置的科技在未满足时 locked', async () => {
   assert.equal(regRes.ok, true);
   const va = (regRes.payload as any).player.villageId;
   const r = await send(app, 'research.GetTechTree', { villageId: va });
-  const elite = (r.payload as any).techs.find((t: any) => t.code === 'elite_guard');
-  assert.ok(elite, 'elite_guard 应存在');
+  const elite = (r.payload as any).techs.find((t: any) => t.code === 'melee_attack_iii');
+  assert.ok(elite, 'melee_attack_iii 应存在');
   assert.equal(elite.status, 'locked', '无前置完成应是 locked');
   assert.ok(elite.requires.length > 0, 'elite_guard 应有前置');
 });
@@ -88,8 +88,8 @@ test('科研配置校验 — 无环依赖', () => {
   const app = freshApp();
   // setupWorld 已调用 loadGameConfig，配置校验通过意味着无环。
   const r = app.config.research;
-  assert.ok(r['infantry_training'], 'infantry_training 存在');
-  assert.ok(r['elite_guard'], 'elite_guard 存在');
+  assert.ok(r['melee_attack_i'], 'melee_attack_i 存在');
+  assert.ok(r['melee_attack_iii'], 'melee_attack_iii 存在');
   // elite_guard 依赖于 advanced_formation|siege_warfare，不应有环
 });
 
@@ -123,9 +123,9 @@ test('研究：StartResearch + 推进时钟 → 状态 completed，GetTechTree �
   const va = (regRes.payload as any).player.villageId;
 
   // 直接注入 RP（测试专用 store 写入；不绕过 Command/Event 架构，仅填充初始状态）
-  const techCode = 'infantry_training';
+  const techCode = 'melee_attack_i';
   const tech = app.config.research[techCode];
-  assert.ok(tech, 'infantry_training 应存在于 config');
+  assert.ok(tech, 'melee_attack_i 应存在于 config');
   const rpCost: number = tech.rpCost;
   const durationMs: number = tech.durationSec * 1000;
 
@@ -158,7 +158,7 @@ test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）',
   assert.equal(regRes.ok, true);
   const va = (regRes.payload as any).player.villageId;
 
-  const techCode = 'infantry_training';
+  const techCode = 'melee_attack_i';
   const tech = app.config.research[techCode];
   const rpCost: number = tech.rpCost;
   const durationMs: number = tech.durationSec * 1000;
@@ -191,7 +191,7 @@ test('研究：学院拆除暂停后取消，仍按原总时长计算九折退�
   const app = freshApp();
   const regRes = await reg(app, '测试暂停退款', 'pass1');
   const va = (regRes.payload as any).player.villageId;
-  const tech = app.config.research.infantry_training;
+  const tech = app.config.research.melee_attack_i;
   const totalDurationMs = tech.durationSec * 1000;
   app.store.set('research', va, {
     villageId: va, rp: 0, completed: [],

@@ -1,14 +1,13 @@
 /**
- * 军队页：驻军 / 训练队列 / 铁匠锻造 / 解散。
+ * 军队页：驻军 / 训练中心 / 解散。
  *
  * 分区设计：
  *  § 1  驻军（Garrison）
  *       - 按 form 分组：近战（melee）/ 远程（ranged）
  *       - 雇佣兵独立区块（金色高亮，无人口耗粮）
  *       - 汇总条：总兵数 / 总攻 / 总防 / 总耗粮 / 宝物携带上限
- *  § 2  训练队列（正在练兵的建筑，点击→openBuilding）
- *  § 3  铁匠锻造（SmithyPanel）
- *  § 4  解散部队（非雇佣兵）
+ *  § 2  训练中心（选择军事建筑实例，在本页完成训练）
+ *  § 3  解散部队（非雇佣兵）
  *
  * 驻军分组选择理由：
  *  form（melee/ranged）是兵种唯一的战术分类字段。按 form 分组可以直观地
@@ -17,22 +16,21 @@
  *  时再细分。雇佣兵因无人口/耗粮消耗，单独成区并使用金色样式区分。
  */
 import { useState } from 'preact/hooks';
-import { dataVersion } from '../../app/store.js';
+import { dataVersion, tab } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { openModal } from '../../app/store.js';
 import {
-  unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
+  buildingInfo, unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
 } from '../../app/config.js';
 import { formName, tribeName } from '../../shared/ui/text.js';
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt } from '../../shared/utils/format.js';
-import { openBuilding } from '../village/BuildingModal.js';
 import { openUnitDetail } from './UnitDetail.js';
-import { SmithyPanel } from './SmithyPanel.js';
+import { TrainPanel } from './TrainPanel.js';
 import {
   Panel, SectionHead, Divider, Empty, Btn, Tag,
-  Icon, IconPlate, TimerBar, Stat, Modal, SecondaryActions,
+  Icon, IconPlate, Stat, Modal, SecondaryActions,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 
@@ -51,13 +49,11 @@ export function ArmyScreen() {
   return (
     <div class="army-page">
       <GarrisonSection army={army} />
-      <TrainingQueuesSection army={army} />
-      <SmithySection army={army} />
+      <TrainingCenterSection army={army} />
       <DisbandSection army={army} />
     </div>
   );
 }
-
 // ============================================================
 // § 1  驻军
 // ============================================================
@@ -161,7 +157,7 @@ function GarrisonSection({ army }: { army: any }) {
 
       {/* 无正规军 */}
       {regEntries.length === 0 && (
-        <Empty icon="⚔️" title="暂无驻军">前往村庄军事建筑开始训练</Empty>
+        <Empty icon="⚔️" title="暂无驻军">可在下方训练中心组建部队</Empty>
       )}
 
       {/* 雇佣兵区 */}
@@ -222,88 +218,63 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
 }
 
 // ============================================================
-// § 2  训练队列
+// § 2  训练中心
 // ============================================================
 
-function TrainingQueuesSection({ army }: { army: any }) {
-  const slots: any[] = (army.slots ?? []).filter((s: any) => s.training);
-  if (slots.length === 0) return null;
+function TrainingCenterSection({ army }: { army: any }) {
+  const slots: any[] = army.slots ?? [];
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(() => slots[0]?.slotId ?? null);
+  const selected = slots.find((slot: any) => slot.slotId === selectedSlotId) ?? slots[0];
+
+  if (!slots.length) {
+    return (
+      <Panel pad>
+        <SectionHead sub="每座军事建筑拥有独立的训练队列">训练中心</SectionHead>
+        <Empty icon="⚔️" title="尚无军事建筑">
+          <p>建造军事建筑后，即可在这里训练对应部队。</p>
+          <Btn size="sm" variant="primary" onClick={() => { tab.value = 'village'; }}>前往村庄</Btn>
+        </Empty>
+      </Panel>
+    );
+  }
 
   return (
-    <Panel pad>
-      <SectionHead sub="正在练兵的军事建筑 · 点击查看详情">训练队列</SectionHead>
-      <div class="train-q-list">
-        {slots.map((s: any) => <TrainQueueCard key={s.slotId} slot={s} />)}
+    <Panel pad class="training-center">
+      <div class="training-center__selector">
+        <SectionHead sub="每座建筑独立排队">训练建筑</SectionHead>
+        <div class="training-center__slots" role="listbox" aria-label="选择训练建筑">
+          {slots.map((slot: any) => {
+            const info = buildingInfo(slot.kind);
+            const selectedHere = slot.slotId === selected.slotId;
+            return (
+              <button
+                key={slot.slotId}
+                type="button"
+                role="option"
+                aria-selected={selectedHere}
+                class={`training-center__slot${selectedHere ? ' training-center__slot--selected' : ''}`}
+                onClick={() => setSelectedSlotId(slot.slotId)}
+              >
+                <IconPlate icon={info.icon ?? `bld_${slot.kind}`} label={info.name ?? slot.kind} size="sm" plate="stone" lvl={slot.level} />
+                <span class="training-center__slot-copy">
+                  <b>{info.name ?? slot.kind}</b>
+                  <small>{slot.training ? '训练中' : '队列空闲'}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div class="training-center__panel">
+        <SectionHead sub={`${buildingInfo(selected.kind).name ?? selected.kind} · Lv${selected.level}`}>训练</SectionHead>
+        <TrainPanel slotId={selected.slotId} kind={selected.kind} level={selected.level} />
       </div>
     </Panel>
   );
 }
 
-function TrainQueueCard({ slot }: { slot: any }) {
-  const tr = slot.training;
-  const trainable: any[] = slot.trainable ?? [];
-  const unitEntry = trainable.find((u: any) => u.key === tr.unit);
-  const unitName = unitEntry?.name ?? tr.unit;
-  const bldName = buildingName(slot.kind);
-
-  const trainSec = (unitEntry?.trainSec ?? 30) * 1000;
-  const startAt = tr.nextDoneAt - trainSec;
-  const totalEtaMs = (unitEntry?.trainSec ?? 30) * 1000 * tr.remaining;
-
-  return (
-    <div
-      class="train-q-card"
-      onClick={() => openBuilding(slot.slotId)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') openBuilding(slot.slotId); }}
-      aria-label={`${bldName} Lv${slot.level}，正在训练 ${unitName}，点击查看详情`}
-    >
-      <IconPlate
-        icon={bldIcon(slot.kind)}
-        label={bldName}
-        size="md"
-        plate="stone"
-        lvl={slot.level}
-      />
-      <div class="train-q-card__body">
-        <div class="train-q-card__title">
-          {bldName}
-          <span class="lvl">Lv{slot.level}</span>
-          <span style="color: var(--c-ink-dim); font-weight: 400; font-size: var(--f-xs);">详情 ›</span>
-        </div>
-        <div class="train-q-card__unit">
-          🎯 {unitName} ×{tr.remaining}
-        </div>
-        <TimerBar startAt={startAt} finishAt={tr.nextDoneAt} label="下一个" kind="ember" />
-        {tr.remaining > 1 && (
-          <div class="train-q-hint">
-            全部完成约 {fmtMsTotal(totalEtaMs)} 后
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ============================================================
-// § 3  铁匠锻造
-// ============================================================
-
-function SmithySection({ army }: { army: any }) {
-  const trainable: any[] = army.trainable ?? [];
-  if (trainable.length === 0) return null;
-
-  return (
-    <Panel pad>
-      <SectionHead sub="提升全军攻防 · 消耗木材 + 泥土">锻造</SectionHead>
-      <SmithyPanel />
-    </Panel>
-  );
-}
-
-// ============================================================
-// § 4  解散
+// § 3  解散
 // ============================================================
 
 function DisbandSection({ army }: { army: any }) {
@@ -443,30 +414,4 @@ function DisbandConfirmModal({
       </div>
     </Modal>
   );
-}
-
-// ============================================================
-// 工具函数
-// ============================================================
-
-function buildingName(kind: string): string {
-  const m: Record<string, string> = {
-    barracks: '兵营', stable: '马厩', workshop: '兵工厂', main: '城镇中心',
-    smithy: '铁匠铺', wall: '城墙', hospital: '医院',
-  };
-  return m[kind] ?? kind;
-}
-
-function bldIcon(kind: string): string {
-  return `bld_${kind}`;
-}
-
-function fmtMsTotal(ms: number): string {
-  const totalSec = Math.ceil(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (m === 0) return `${s}秒`;
-  const h = Math.floor(m / 60);
-  if (h === 0) return `${m}分${s > 0 ? `${s}秒` : ''}`;
-  return `${h}时${m % 60 > 0 ? `${m % 60}分` : ''}`;
 }

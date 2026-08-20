@@ -133,7 +133,7 @@ function applyPopPayload(p: any, merge = false): void {
     cropDeficitRate: Number(pick(p.cropDeficitRate, prev?.cropDeficitRate ?? 0)),
     laborMults: pick(p.laborMults, prev?.laborMults) ?? {
       production: prosperityMult, build: prosperityMult, train: prosperityMult,
-      research: prosperityMult, smithy: prosperityMult,
+      research: prosperityMult,
     },
     softLimit: Number(pick(p.softLimit, prev?.softLimit ?? availableLabor)),
     lastTick: Number(pick(p.lastTick, prev?.lastTick ?? Date.now())),
