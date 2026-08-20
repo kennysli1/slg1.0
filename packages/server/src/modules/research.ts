@@ -304,6 +304,7 @@ export class ResearchModule {
     const combat: Record<string, { atk: number; def: number }> = {};
     const unlocks = new Set<string>();
     let trainSpeed = 0;
+    let marchSpeed = 0;
     for (const code of completed) {
       const tech = this.config.research[code];
       if (!tech) continue;
@@ -316,10 +317,11 @@ export class ResearchModule {
           else combat[key].def = Math.min(e.cap, combat[key].def + value);
         } else if (e.effectType === 'unit_unlock') unlocks.add(e.effectKey);
         else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
+        else if (e.effectType === 'march_speed') marchSpeed = Math.min(e.cap, marchSpeed + value);
         else this.applyEffect(villageId, tech, e);
       }
     }
-    await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed } });
+    await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed, marchSpeed } });
   }
 
   // ── RP 生产 ──

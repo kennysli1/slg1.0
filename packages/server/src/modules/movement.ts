@@ -624,7 +624,7 @@ export class MovementModule {
     const landing = await this.garrisonLanding(mv);
     this.remove(mv.id);
     this.updateEnRoutePop(mv.fromVillage);
-    this.scheduleReturn(mv.fromVillage, landing, mv.fromXY, mv.troops, {}, mv.treasures, mv.id);
+    await this.scheduleReturn(mv.fromVillage, landing, mv.fromXY, mv.troops, {}, mv.treasures, mv.id);
     void this.bus.emit({
       name: 'movement.Explored', source: MovementModule.NAME, ts: this.now(),
       payload: { id: mv.id, villageId: mv.fromVillage, q: landing.q, r: landing.r, blocked: landing.q !== mv.toXY.q || landing.r !== mv.toXY.r },
@@ -657,7 +657,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = this.launch({ id, type: 'garrison', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'garrison', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -688,7 +688,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = this.launch({ id, type: 'explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -778,7 +778,7 @@ export class MovementModule {
     const mv = this.load(movementId);
     if (!mv || mv.fromVillage !== villageId || mv.type !== 'garrison' || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
     this.remove(mv.id);
-    const id = this.scheduleReturn(mv.fromVillage, mv.pos, mv.fromXY, mv.troops, {}, mv.treasures, mv.id);
+    const id = await this.scheduleReturn(mv.fromVillage, mv.pos, mv.fromXY, mv.troops, {}, mv.treasures, mv.id);
     void this.bus.emit({ name: 'movement.GarrisonRecalled', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, returnId: id, villageId } } as DomainEvent);
     return { ok: true, payload: { id } };
   }
@@ -804,7 +804,7 @@ export class MovementModule {
     if (mode === 'attack' && !targetVillage) return { ok: false, payload: {}, reason: 'target_not_found' };
     const path = linePathWrapped(mv.pos, toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
-    const perStepMs = Math.max(1, Math.round(this.travelSec(mv.pos, toXY, mv.troops) * 1000 / steps));
+    const perStepMs = Math.max(1, Math.round(await this.travelSec(mv.fromVillage, mv.pos, toXY, mv.troops) * 1000 / steps));
     mv.type = mode;
     mv.targetId = mode === 'raid' ? targetId : undefined;
     mv.targetVillage = mode === 'attack' ? targetVillage : undefined;
@@ -825,21 +825,22 @@ export class MovementModule {
   }
 
   /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
-  private travelSec(from: Hex, to: Hex, troops: Record<string, number>): number {
+  private async travelSec(villageId: string, from: Hex, to: Hex, troops: Record<string, number>): Promise<number> {
     const dist = hexDistanceWrapped(from, to, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const mult = this.config.constants.marchSpeedMultiplier ?? 1;
-    const slowest = Math.min(...Object.keys(troops).map((u) => (this.config.units[u]?.speed ?? 6) * mult));
+    const speed = await this.commands.send({ name: 'military.GetMarchSpeedSnapshot', from: MovementModule.NAME, payload: { villageId, troops } });
+    const slowest = (speed.ok ? Number((speed.payload as any).slowestSpeed) : Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6))) * mult;
     return Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
   }
 
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
-  private launch(
+  private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
       Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
-  ): MovementRecord {
+  ): Promise<MovementRecord> {
     const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
-    const totalMs = this.travelSec(base.fromXY, base.toXY, base.troops) * 1000;
+    const totalMs = await this.travelSec(base.fromVillage, base.fromXY, base.toXY, base.troops) * 1000;
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
     const full: MovementRecord = {
       ...base,
@@ -906,7 +907,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
-    const mv = this.launch({
+    const mv = await this.launch({
       id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
@@ -954,7 +955,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
-    const mv = this.launch({
+    const mv = await this.launch({
       id, type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
@@ -1037,7 +1038,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
-    const mv = this.launch({
+    const mv = await this.launch({
       id, type: 'transport', fromVillage: villageId, fromXY, toXY,
       targetVillage, troops: valid.troops, cargo: cleanedCargo, treasures: carry.codes, departAt: this.now(),
     });
@@ -1313,7 +1314,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: adj.reason ?? 'no_settlers' };
     }
 
-    const mv = this.launch({
+    const mv = await this.launch({
       id: this.nextId(), type: 'found', fromVillage: villageId, fromXY, toXY,
       troops, departAt: this.now(), founderPlayerId: playerId,
     });
@@ -1373,7 +1374,7 @@ export class MovementModule {
       log('拓荒失败返程', { id: mv.id, reason: site.ok ? 'no_player' : site.reason });
       this.remove(mv.id);
       this.updateEnRoutePop(mv.fromVillage);
-      this.scheduleReturn(mv.fromVillage, mv.toXY, mv.fromXY, mv.troops, {});
+      await this.scheduleReturn(mv.fromVillage, mv.toXY, mv.fromXY, mv.troops, {});
       return;
     }
 
@@ -1390,7 +1391,7 @@ export class MovementModule {
 
     if (!created.ok) {
       log('拓荒建村失败返程', { id: mv.id, reason: created.reason });
-      this.scheduleReturn(mv.fromVillage, mv.toXY, mv.fromXY, mv.troops, {});
+      await this.scheduleReturn(mv.fromVillage, mv.toXY, mv.fromXY, mv.troops, {});
       return;
     }
 
@@ -1645,7 +1646,7 @@ export class MovementModule {
   }
 
   /** 战斗结束事件：为幸存者安排带战利品返程；全歼时按 pve/pvp 处理携带宝物。field 侧：幸存者继续行军。 */
-  private onBattleEnded(e: DomainEvent): void {
+  private async onBattleEnded(e: DomainEvent): Promise<void> {
     const p = e.payload as {
       side: string; fromVillage: string; fromXY: Hex; toXY: Hex;
       survivors?: Record<string, number>; loot?: Record<string, number>;
@@ -1703,7 +1704,7 @@ export class MovementModule {
     // 先移除战斗中的去程，再建立返程；launch() 会基于最终 movement 集合重算在途人口，
     // 避免同一批幸存者在去程和返程中被短暂重复计数。
     this.remove(p.movementId);
-    const returnId = this.scheduleReturn(
+    const returnId = await this.scheduleReturn(
       p.fromVillage, p.toXY, p.originalFromXY ?? p.fromXY,
       survivors, p.loot ?? {}, treasures, p.movementId, p.originalFromXY ?? p.fromXY,
     );
@@ -1718,7 +1719,7 @@ export class MovementModule {
     }
   }
 
-  private scheduleReturn(
+  private async scheduleReturn(
     fromVillage: string,
     fromXY: Hex,
     toXY: Hex,
@@ -1727,9 +1728,9 @@ export class MovementModule {
     treasures?: string[],
     outwardId?: string,
     originalFromXY?: Hex,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     const id = this.nextId();
-    this.launch({
+    await this.launch({
       id, type: 'return', fromVillage, fromXY, toXY,
       originalFromXY: originalFromXY ?? toXY,
       troops, loot, treasures, departAt: this.now(), outwardId,
@@ -1780,7 +1781,7 @@ export class MovementModule {
       const mult = this.config.constants.tradeCaravanSpeed ?? 12;
       totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
     } else {
-      totalMs = this.travelSec(cur, home, mv.troops) * 1000;
+      totalMs = await this.travelSec(mv.fromVillage, cur, home, mv.troops) * 1000;
     }
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
 
@@ -1796,6 +1797,7 @@ export class MovementModule {
     mv.departAt = this.now();
     mv.nextStepAt = this.now() + perStepMs;
     mv.arriveAt = this.now() + perStepMs * steps;
+    mv.perStepMs = perStepMs;
     mv.targetId = undefined;
     if (!wasCaravan) mv.targetVillage = undefined; // 商队保留 targetVillage 仅作展示，不影响回家逻辑
     if (wasCaravan) mv.returning = true; // 到家即回收贸易路线 + 退还货物

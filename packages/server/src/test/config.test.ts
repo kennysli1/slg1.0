@@ -13,7 +13,6 @@ const configDir = join(dirname(fileURLToPath(import.meta.url)), '../../../../con
 test('常量表：game_constants.csv 被解析为强类型', () => {
   const c = loadGameConfig(configDir).constants;
   assert.equal(c.wallBonusPerLevel, 0.03, '城墙加成');
-  assert.equal(c.smithyBonusPerLevel, 0.1, '铁匠加成');
   assert.equal(c.mainBuildSpeedupCap, 0.6, '主基地提速上限');
   assert.equal(c.startResourceAmount, 750, '初始资源');
   assert.equal(c.storageBase, 800, '基础容量');
@@ -203,10 +202,10 @@ test('特性：多效果特性正确展开', () => {
   assert.equal(patchedConfig.unitTraits['heavy'].effects.length, 2);
 });
 
-test('游戏设计约束表：科研多效果、PvP曲线、佣兵合同与随机任务冷却均从 CSV 载入', () => {
+test('游戏设计约束表：军事科技、PvP曲线、佣兵合同与随机任务冷却均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
-  const formation = cfg.research.advanced_formation;
-  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk', 'combat_def']);
+  const formation = cfg.research.melee_attack_iii;
+  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk']);
   assert.equal(cfg.mercCamp[1].capacity, 10);
   assert.equal(cfg.units.merc_champion.commandCost, 5);
   assert.equal(cfg.units.merc_champion.contractSec, 259200);

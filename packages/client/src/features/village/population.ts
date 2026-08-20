@@ -162,7 +162,6 @@ export function renderPopPanel(): string {
         <span class="pop-labor-item"><i>资源产率</i><b>${multPct(prodAvg)}</b></span>
         <span class="pop-labor-item pop-labor-build"><i>建造</i><b>${buildSaveStr(lm.build)}</b></span>
         <span class="pop-labor-item"><i>练兵速率</i><b>${multPct(trainMin)}</b></span>
-        <span class="pop-labor-item"><i>锻造速率</i><b>${multPct(lm.smithy)}</b></span>
       </div>
     </div>
   </div>`;

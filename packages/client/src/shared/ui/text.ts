@@ -34,7 +34,6 @@ const ERR_MSG: Record<string, string> = {
   insufficient_population: '人口不足，无法训练',
   // 训练/动员相关
   mobilize_cap_exceeded: '已达本族动员上限（士兵占总人口比例超限），无法继续训练',
-  smithy_busy: '铁匠铺正在升级中，请稍后再试',
   bad_units: '解散兵种不合法',
   battle_forbidden: '不能查看这场战斗',
   // 协议/信封错误

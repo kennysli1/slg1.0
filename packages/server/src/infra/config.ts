@@ -271,8 +271,6 @@ export interface VillageTemplate {
  */
 export interface GameConstants {
   wallBonusPerLevel: number;
-  smithyBonusPerLevel: number;
-  smithyCostBase: number;
   mainBuildSpeedupPerLevel: number;
   mainBuildSpeedupCap: number;
   /** 军事建筑每级训练提速比例 + 上限（与 main_build_speedup 同形态，作用于该建筑训练兵种）。 */
@@ -327,8 +325,6 @@ export interface GameConstants {
   popHospitalRecoveryPerLevel: number;
   /** 人口：医院回收比例上限。 */
   popHospitalRecoveryMax: number;
-  /** 铁匠升级基础时长（秒），受繁荣度加成加速（除以 prosperityMult）。 */
-  smithyUpgradeSec: number;
   /** 拓荒：出发村主基地最低等级。 */
   foundMinMainLevel: number;
   /** 拓荒：出发村人口软上限最低门槛。 */
@@ -801,8 +797,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   const cn = (k: string, def: number) => (typeof raw[k] === 'number' ? (raw[k] as number) : def);
   const constants: GameConstants = {
     wallBonusPerLevel: cn('wall_bonus_per_level', 0.03),
-    smithyBonusPerLevel: cn('smithy_bonus_per_level', 0.1),
-    smithyCostBase: cn('smithy_cost_base', 200),
     mainBuildSpeedupPerLevel: cn('main_build_speedup_per_level', 0.05),
     mainBuildSpeedupCap: cn('main_build_speedup_cap', 0.6),
     trainTimeReducePerLevel: cn('train_time_reduce_per_level', 0.05),
@@ -840,7 +834,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     popHospitalRecoveryBase: cn('pop_hospital_recovery_base', 0.20),
     popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
-    smithyUpgradeSec: cn('smithy_upgrade_sec', 30),
     foundMinMainLevel: cn('found_min_main_level', 10),
     foundMinSoftLimit: cn('found_min_soft_limit', 350),
     foundSettlerCount: cn('found_settler_count', 3),
@@ -1284,7 +1277,6 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.popHospitalRecoveryBase < 0 || c.popHospitalRecoveryBase > 1) errors.push(`game_constants.csv pop_hospital_recovery_base 必须在[0,1]`);
   if (c.popHospitalRecoveryPerLevel < 0) errors.push(`game_constants.csv pop_hospital_recovery_per_level 必须≥0`);
   if (c.popHospitalRecoveryMax <= 0 || c.popHospitalRecoveryMax > 1) errors.push(`game_constants.csv pop_hospital_recovery_max 必须在(0,1]`);
-  if (c.smithyUpgradeSec <= 0) errors.push(`game_constants.csv smithy_upgrade_sec 必须>0`);
 
   // 人口启动配置守卫：训练一个兵时，净粮食消耗不应下降（防止免费兵种）。
   // 推导：转化 1 名平民(popCost)为 1 个兵 → 释放平民口粮 popCost×popCropPerLabor，

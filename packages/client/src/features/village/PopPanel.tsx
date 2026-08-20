@@ -42,7 +42,6 @@ export function PopPanel() {
     { label: '建造速度', val: lm.build },
     { label: '练兵速率', val: lm.train },
     { label: '研究速率', val: lm.research },
-    { label: '锻造速率', val: lm.smithy },
   ];
 
   return (

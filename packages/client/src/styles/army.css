@@ -102,50 +102,36 @@
   color: var(--c-gold-hi);
 }
 
-/* ---------- 训练队列卡片 ---------- */
-.train-q-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
+/* ---------- 训练中心 ---------- */
+.training-center {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: var(--s-5);
+  align-items: start;
 }
-.train-q-card {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-3);
-  padding: var(--s-3);
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(224,138,60,.07), rgba(0,0,0,.08));
-  cursor: pointer;
-  transition: border-color var(--t-fast);
-  min-height: 44px;
-}
-.train-q-card:hover {
-  border-color: var(--c-ember);
-}
-.train-q-card__body {
-  flex: 1;
-  min-width: 0;
-}
-.train-q-card__title {
-  font-size: var(--f-sm);
-  font-weight: 700;
-  color: var(--c-ink);
+.training-center__selector,
+.training-center__panel { min-width: 0; }
+.training-center__slots { display: flex; flex-direction: column; gap: var(--s-2); }
+.training-center__slot {
   display: flex;
   align-items: center;
+  width: 100%;
+  min-height: 52px;
   gap: var(--s-2);
-  flex-wrap: wrap;
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--c-panel-3);
+  color: var(--c-ink);
+  cursor: pointer;
+  text-align: left;
 }
-.train-q-card__unit {
-  font-size: var(--f-xs);
-  color: var(--c-ink-soft);
-  margin-top: var(--s-1);
-}
-.train-q-hint {
-  font-size: var(--f-2xs);
-  color: var(--c-ink-dim);
-  margin-top: var(--s-1);
-}
+.training-center__slot:hover,
+.training-center__slot--selected { border-color: var(--c-gold); }
+.training-center__slot--selected { background: var(--c-raise); box-shadow: var(--glow-gold); }
+.training-center__slot-copy { display: flex; min-width: 0; flex-direction: column; gap: var(--s-1); }
+.training-center__slot-copy b { font-size: var(--f-sm); }
+.training-center__slot-copy small { color: var(--c-ink-dim); font-size: var(--f-xs); }
 
 /* ---------- TrainPanel ---------- */
 .train-panel {
@@ -288,64 +274,6 @@
 }
 .train-warn--danger {
   color: var(--c-crimson-hi);
-}
-
-/* ---------- SmithyPanel ---------- */
-.smithy-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-}
-.smithy-busy-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s-3);
-  padding: var(--s-3);
-  border-radius: var(--r-md);
-  border: 1px solid var(--line-strong);
-  background: rgba(216,177,104,.07);
-}
-.smithy-busy-banner__body {
-  flex: 1;
-}
-.smithy-busy-banner__label {
-  font-size: var(--f-xs);
-  color: var(--c-gold);
-  font-weight: 700;
-  margin-bottom: var(--s-2);
-}
-.smithy-unit-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-.smithy-unit-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: var(--s-3);
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
-}
-.smithy-unit-row__info {
-  flex: 1;
-  min-width: 0;
-}
-.smithy-unit-row__name {
-  font-size: var(--f-sm);
-  font-weight: 700;
-  color: var(--c-ink);
-}
-.smithy-unit-row__bonus {
-  font-size: var(--f-xs);
-  color: var(--c-jade);
-  margin-top: 2px;
-}
-.smithy-unit-row__cost-hint {
-  font-size: var(--f-2xs);
-  color: var(--c-ink-dim);
-  margin-top: 2px;
 }
 
 /* ---------- 解散面板 ---------- */
@@ -500,11 +428,12 @@
   .qty-row {
     gap: var(--s-1);
   }
+  .training-center {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-4);
+  }
   .disband-row {
     flex-direction: column;
     align-items: flex-start;
-  }
-  .smithy-unit-row {
-    flex-wrap: wrap;
   }
 }
