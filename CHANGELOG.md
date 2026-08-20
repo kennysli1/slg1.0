@@ -15,7 +15,7 @@
 
 ### 新增
 
-- 行军系统全面改进（Wire v4，最低兼容 v4，旧客户端强制刷新）：共享 `Movement`/`ForeignArmy` 类型；新增 `RecallMarch` 主动撤回在途军队；地图右上角行军面板显示进度条与撤回按钮（`found` 类型撤回会 forfeits 开城包，需确认）；来袭告警改为部队进入守方视野后触发（不再出征瞬间通知）；`ListForeign` 脱敏视图改为仅 `pos`+`heading`（隐藏完整路径与目的地）；行军逐格增量推送（`MarchStep`/`MarchRemoved`/`ForeignArmyStep`/`ForeignArmyRemoved`）替代 3.5s 外国军队轮询；空间索引优化同格相遇检测；途中相遇战统一走 Combat 模块逐 tick 结算（双方均可收到 `BattleStarted`/`BattleTick`）。
+- 行军系统全面改进（Wire v4，最低兼容 v4，旧客户端强制刷新）：共享 `Movement`/`ForeignArmy` 类型；新增 `RecallMarch` 主动撤回在途军队；新增 `StopMarch` / `ResumeMarch`，可令正在出征的部队在当前位置待命、继续原路线或撤回；地图右上角行军面板按每支部队状态显示停止、继续、撤回、召回或续行操作（`found` 类型撤回会 forfeits 开城包，需确认）；来袭告警改为部队进入守方视野后触发（不再出征瞬间通知）；`ListForeign` 脱敏视图改为仅 `pos`+`heading`（隐藏完整路径与目的地）；行军逐格增量推送（`MarchStep`/`MarchRemoved`/`ForeignArmyStep`/`ForeignArmyRemoved`）替代 3.5s 外国军队轮询；空间索引优化同格相遇检测；途中相遇战统一走 Combat 模块逐 tick 结算（双方均可收到 `BattleStarted`/`BattleTick`）。
 
 ### 变更
 

@@ -72,8 +72,8 @@ interface MovementRecord {
   perStepMs: number;
   /** 下一格到达时刻(ms, epoch)；前端据此在两格间插值动画。 */
   nextStepAt: number;
-  /** marching=正常行军；paused=相遇/战斗中暂停；stationed=野外驻扎，等待下一道指令。 */
-  status: 'marching' | 'paused' | 'stationed';
+  /** marching=正常行军；stopped=玩家原地待命；paused=相遇/战斗中暂停；stationed=野外驻扎，等待下一道指令。 */
+  status: 'marching' | 'paused' | 'stationed' | 'stopped';
   /** 驻扎命令原本指定的落点；若落点后来被占据，部队会停在前一格而保留此记录供 UI 说明。 */
   requestedXY?: Hex;
   /**
@@ -122,6 +122,8 @@ export class MovementModule {
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendGarrison', (c) => this.sendGarrison(c));
     this.commands.register('movement.SendExplore', (c) => this.sendExplore(c));
+    this.commands.register('movement.StopMarch', (c) => this.stopMarch(c));
+    this.commands.register('movement.ResumeMarch', (c) => this.resumeMarch(c));
     this.commands.register('movement.RecallMarch', (c) => this.recallMarch(c));
     this.commands.register('movement.RecallGarrison', (c) => this.recallGarrison(c));
     this.commands.register('movement.ContinueGarrison', (c) => this.continueGarrison(c));
@@ -198,12 +200,19 @@ export class MovementModule {
     if (m.type === 'return') return false;
     if (m.status === 'paused') return false;
     if (m.status === 'stationed') return false;
-    return m.status === 'marching';
+    return m.status === 'marching' || m.status === 'stopped';
+  }
+
+  private stoppable(m: MovementRecord, viewerVillageId: string): boolean {
+    return m.fromVillage === viewerVillageId
+      && m.type !== 'return'
+      && m.status === 'marching';
   }
 
   private toWire(m: MovementRecord, viewerVillageId: string): MovementWire {
     const dir = m.targetVillage === viewerVillageId && m.fromVillage !== viewerVillageId ? 'in' : 'out';
     const canRecall = dir === 'out' && this.recallable(m, viewerVillageId);
+    const canStop = dir === 'out' && this.stoppable(m, viewerVillageId);
     return {
       id: m.id,
       type: m.type,
@@ -227,6 +236,7 @@ export class MovementModule {
       arriveAt: m.arriveAt,
       requested: m.requestedXY,
       recallable: canRecall,
+      stoppable: canStop,
       recallForfeits: canRecall && m.type === 'found' ? true : undefined,
     };
   }
@@ -683,6 +693,61 @@ export class MovementModule {
     this.save(mv);
     await this.revealVision(mv);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  /**
+   * 原地停止正在出征的军队。停止只冻结行军，不改变路线、目标或携带物；
+   * 后续可继续原路线，或改为撤回。stepToken 使已经登记的步进回调自然失效。
+   */
+  private async stopMarch(cmd: Command): Promise<CommandResult> {
+    const { villageId, movementId } = cmd.payload as { villageId: string; movementId: string };
+    const run = async (): Promise<CommandResult> => {
+      const mv = this.load(movementId);
+      if (!mv || mv.fromVillage !== villageId) return { ok: false, payload: {}, reason: 'not_found' };
+      if (mv.status === 'paused') return { ok: false, payload: {}, reason: 'in_combat' };
+      if (mv.status === 'stationed') return { ok: false, payload: {}, reason: 'use_garrison_commands' };
+      if (mv.type === 'return') return { ok: false, payload: {}, reason: 'already_returning' };
+      if (mv.status === 'stopped') return { ok: false, payload: {}, reason: 'already_stopped' };
+      if (!this.stoppable(mv, villageId)) return { ok: false, payload: {}, reason: 'not_stoppable' };
+      mv.status = 'stopped';
+      mv.stepToken += 1;
+      mv.nextStepAt = 0;
+      mv.arriveAt = 0;
+      this.save(mv);
+      void this.bus.emit({
+        name: 'movement.Stopped', source: MovementModule.NAME, ts: this.now(),
+        payload: { villageId, id: mv.id, q: mv.pos.q, r: mv.pos.r },
+      } as DomainEvent);
+      return { ok: true, payload: { id: mv.id, pos: mv.pos } };
+    };
+    if (this.serialQueue) return this.serialQueue.run(`movement:${movementId}`, run);
+    return run();
+  }
+
+  /** 继续已停止的军队，沿原有路径从当前格进入下一格。 */
+  private async resumeMarch(cmd: Command): Promise<CommandResult> {
+    const { villageId, movementId } = cmd.payload as { villageId: string; movementId: string };
+    const run = async (): Promise<CommandResult> => {
+      const mv = this.load(movementId);
+      if (!mv || mv.fromVillage !== villageId) return { ok: false, payload: {}, reason: 'not_found' };
+      if (mv.status !== 'stopped') return { ok: false, payload: {}, reason: 'not_stopped' };
+      const remainingSteps = Math.max(0, mv.path.length - 1 - mv.stepIndex);
+      if (remainingSteps <= 0) return { ok: false, payload: {}, reason: 'already_arrived' };
+      mv.status = 'marching';
+      mv.stepToken += 1;
+      mv.departAt = this.now();
+      mv.nextStepAt = this.now() + mv.perStepMs;
+      mv.arriveAt = this.now() + mv.perStepMs * remainingSteps;
+      this.save(mv);
+      this.scheduler.schedule(mv.perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
+      void this.bus.emit({
+        name: 'movement.Resumed', source: MovementModule.NAME, ts: this.now(),
+        payload: { villageId, id: mv.id, arriveAt: mv.arriveAt },
+      } as DomainEvent);
+      return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt } };
+    };
+    if (this.serialQueue) return this.serialQueue.run(`movement:${movementId}`, run);
+    return run();
   }
 
   /** 主动撤回在途军队（掉头返程）。 */
