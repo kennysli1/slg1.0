@@ -14,6 +14,7 @@ import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
+import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.8;
@@ -163,18 +164,6 @@ function tileAt(q: number, r: number): any {
   return getTileIndex()?.get(`${q},${r}`);
 }
 
-/** 视野内他国军队按格子索引（同格多军时取列表首条）。 */
-function foreignArmyAt(q: number, r: number): ForeignArmy | null {
-  for (const m of foreignMoves.value?.movements ?? []) {
-    if (m.pos?.q === q && m.pos?.r === r) return m;
-  }
-  return null;
-}
-
-function foreignArmyName(m: ForeignArmy): string {
-  return m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队';
-}
-
 // ─── PvE icon helper ─────────────────────────────────────────────────────────
 function pveIcon(name?: string): string {
   const type = name?.includes('鼠') ? 'rats'
@@ -188,6 +177,8 @@ export function HexMap() {
   // 订阅服务端数据（dataVersion 变化时整组件重渲，重算可见格）
   const _dv = dataVersion.value;
   const _tk = tick.value; // 订阅心跳：行军 ETA 文案每秒刷新
+  void selected.value;
+  void foreignMoves.value;
 
   const W = worldW(), H = worldH();
 
@@ -218,6 +209,7 @@ export function HexMap() {
   const [jumpR, setJumpR] = useState(String(me?.r ?? 0));
   const [jumpError, setJumpError] = useState('');
   const jumpEditing = useRef(false);
+  const [zoomUi, setZoomUi] = useState(INITIAL_ZOOM);
 
   // ── Tooltip ──
   type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
@@ -262,6 +254,29 @@ export function HexMap() {
       'transform',
       `translate(${panX.current.toFixed(2)},${panY.current.toFixed(2)}) scale(${zoom.current.toFixed(4)})`,
     );
+  }
+
+  function syncZoomUi() {
+    setZoomUi(zoom.current);
+  }
+
+  function adjustZoom(factor: number, anchorSx?: number, anchorSy?: number) {
+    const rect = svgEl.current?.getBoundingClientRect();
+    if (!rect) return;
+    const sx = anchorSx ?? rect.width / 2;
+    const sy = anchorSy ?? rect.height / 2;
+    const prev = zoom.current;
+    const fw = (sx - panX.current) / zoom.current;
+    const fh = (sy - panY.current) / zoom.current;
+    zoom.current = clampZoom(zoom.current * factor);
+    if (zoom.current === prev) return;
+    panX.current = sx - zoom.current * fw;
+    panY.current = sy - zoom.current * fh;
+    reducePanToLattice();
+    applyTransform();
+    scheduleCull();
+    syncNavUI();
+    syncZoomUi();
   }
 
   function viewRef(): { x: number; y: number } {
@@ -347,6 +362,7 @@ export function HexMap() {
     zoom.current = clampZoom(INITIAL_ZOOM);
     centerViewOn(viewCenter().q, viewCenter().r);
     syncNavUI();
+    syncZoomUi();
   }
 
   // ─── viewport culling ──────────────────────────────────────────────────────
@@ -705,20 +721,6 @@ export function HexMap() {
     if (!cell) return;
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
-
-    // 同格有他国军队：选中军队而非底层空地
-    const army = foreignArmyAt(q, r);
-    if (army?.id) {
-      selected.value = {
-        refId: army.id,
-        kind: 'enemy_army',
-        q,
-        r,
-        name: foreignArmyName(army),
-      };
-      return;
-    }
-
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
     const name = cell.getAttribute('data-name') ?? '空地';
@@ -770,18 +772,7 @@ export function HexMap() {
   function onWheel(e: WheelEvent) {
     e.preventDefault();
     const rect = svgEl.current!.getBoundingClientRect();
-    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-    const fw = (sx - panX.current) / zoom.current;
-    const fh = (sy - panY.current) / zoom.current;
-    const prev = zoom.current;
-    zoom.current = clampZoom(zoom.current * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
-    if (zoom.current === prev) return;
-    panX.current = sx - zoom.current * fw;
-    panY.current = sy - zoom.current * fh;
-    reducePanToLattice();
-    applyTransform();
-    scheduleCull();
-    syncNavUI();
+    adjustZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - rect.left, e.clientY - rect.top);
   }
 
   function onDblClick(e: MouseEvent) {
@@ -840,7 +831,11 @@ export function HexMap() {
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (e.touches.length < 2) { pinchDist.current = 0; syncNavUI(); }
+    if (e.touches.length < 2) {
+      if (pinchDist.current > 0) syncZoomUi();
+      pinchDist.current = 0;
+      syncNavUI();
+    }
     if (e.touches.length === 0) {
       const wasDrag = dragMoved.current;
       if (wasDrag) suppress.current = true;
@@ -904,6 +899,7 @@ export function HexMap() {
       applyTransform();
       centeredKey.current = `${c.q},${c.r}`;
       syncNavUI();
+      syncZoomUi();
     } else {
       applyTransform();
     }
@@ -1125,6 +1121,23 @@ export function HexMap() {
               ? <span class="map-locator-error" role="alert">{jumpError}</span>
               : <span class="map-locator-hint">输入 X 0–{W - 1}、Y 0–{H - 1} 后点跳转</span>}
           </form>
+          <div class="map-zoom" aria-label="地图缩放">
+            <button
+              type="button"
+              class="map-zoom-btn"
+              title="缩小"
+              disabled={zoomUi <= ZOOM_MIN + 0.001}
+              onClick={() => adjustZoom(1 / 1.15)}
+            >−</button>
+            <span class="map-zoom-label">{Math.round(zoomUi * 100)}%</span>
+            <button
+              type="button"
+              class="map-zoom-btn"
+              title="放大"
+              disabled={zoomUi >= ZOOM_MAX - 0.001}
+              onClick={() => adjustZoom(1.15)}
+            >+</button>
+          </div>
         </div>
 
         {/* Legend */}
