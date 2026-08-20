@@ -21,7 +21,7 @@ const ZOOM_MAX = 1.2;
 const INITIAL_ZOOM = 1;
 const PAD = HEX_SIZE * 1.4;
 const DRAG_THRESHOLD = 8; // 超过此像素视为拖拽，不触发点击
-const TIP_PAD = 14;
+const TIP_ABOVE = 72; // tooltip 锚定在格心上方时的上移量
 
 /** pointy-top 六边形六个顶点字符串（模块级常量，避免每帧重建） */
 const HEX_CORNER_STR = hexCorners()
@@ -163,6 +163,18 @@ function tileAt(q: number, r: number): any {
   return getTileIndex()?.get(`${q},${r}`);
 }
 
+/** 视野内他国军队按格子索引（同格多军时取列表首条）。 */
+function foreignArmyAt(q: number, r: number): ForeignArmy | null {
+  for (const m of foreignMoves.value?.movements ?? []) {
+    if (m.pos?.q === q && m.pos?.r === r) return m;
+  }
+  return null;
+}
+
+function foreignArmyName(m: ForeignArmy): string {
+  return m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队';
+}
+
 // ─── PvE icon helper ─────────────────────────────────────────────────────────
 function pveIcon(name?: string): string {
   const type = name?.includes('鼠') ? 'rats'
@@ -208,9 +220,19 @@ export function HexMap() {
   const jumpEditing = useRef(false);
 
   // ── Tooltip ──
-  type TipState = { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number } | null;
+  type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
+
+  /** 相机坐标系下的格心 → 屏幕 client 坐标（与 wheel 缩放同一套 pan/zoom）。 */
+  function cameraToScreen(camX: number, camY: number): { x: number; y: number } {
+    const rect = svgEl.current?.getBoundingClientRect();
+    if (!rect) return { x: camX, y: camY };
+    return {
+      x: rect.left + panX.current + zoom.current * camX,
+      y: rect.top + panY.current + zoom.current * camY,
+    };
+  }
 
   // ── 拖拽状态 ──
   const dragging    = useRef(false);
@@ -571,45 +593,42 @@ export function HexMap() {
     el.setAttribute('transform', `translate(${key})`);
   }
 
-  function foreignMoveById(id: string): ForeignArmy | null {
-    return foreignMoves.value?.movements?.find((m) => m.id === id) ?? null;
-  }
-
   function updateHoverTip(clientX: number, clientY: number) {
-    const mx = clientX;
-    const my = clientY;
-    const hit = document.elementFromPoint(mx, my);
-    const enemyMk = hit?.closest?.('.enemy-march-mk') as Element | null;
-    const moveId = enemyMk?.getAttribute('data-move-id') ?? (enemyMk?.id?.startsWith('foreign-mk-') ? enemyMk.id.slice('foreign-mk-'.length) : null);
-    if (moveId) {
-      const m = foreignMoveById(moveId);
-      if (m?.pos) {
-        const name = m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队';
-        const key = `enemy:${m.id ?? m.pos.q},${m.pos.r}`;
-        if (key !== hovKey.current) {
-          hovKey.current = key;
-          const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, m.pos, W, H) : 0;
-          setTooltip({ q: m.pos.q, r: m.pos.r, kind: 'enemy_army', name, dist, screenX: mx, screenY: my });
-        } else {
-          setTooltip((t) => t ? { ...t, screenX: mx, screenY: my } : t);
-        }
-        return;
-      }
-    }
+    const hit = document.elementFromPoint(clientX, clientY);
     const cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) { setTooltip(null); hovKey.current = ''; return; }
+
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
+    const camX = Number(cell.getAttribute('data-cam-x'));
+    const camY = Number(cell.getAttribute('data-cam-y'));
+    const anchor = cameraToScreen(camX, camY);
+
+    // 同格有他国军队时，优先展示军队信息（底层格可能是 empty）
+    const army = foreignArmyAt(q, r);
+    if (army?.pos) {
+      const name = foreignArmyName(army);
+      const key = `enemy:${army.id ?? `${q},${r}`}`;
+      const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, army.pos, W, H) : 0;
+      if (key !== hovKey.current) {
+        hovKey.current = key;
+        setTooltip({ q, r, kind: 'enemy_army', name, dist, anchorX: anchor.x, anchorY: anchor.y });
+      } else {
+        setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
+      }
+      return;
+    }
+
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const name = cell.getAttribute('data-name') ?? '空地';
     const key = `${kind}:${q},${r}`;
+    const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
     if (key === hovKey.current) {
-      setTooltip((t) => t ? { ...t, screenX: mx, screenY: my } : t);
+      setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
       return;
     }
     hovKey.current = key;
-    const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
-    setTooltip({ q, r, kind, name, dist, screenX: mx, screenY: my });
+    setTooltip({ q, r, kind, name, dist, anchorX: anchor.x, anchorY: anchor.y });
   }
 
   function marchMarkerPixel(m: any, now: number, refX: number, refY: number): { x: number; y: number } | null {
@@ -671,10 +690,9 @@ export function HexMap() {
 
   function handleMapTap(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
-    // 即使点中了外国军队标记，也优先选中底层格子（统一交互）
     let cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) {
-      // 可能点在 enemy marker 上（在 hex 层之上），暂时隐藏标记层重新检测
+      // 可能点在外军标记层之上：暂时隐藏后回落到底层格
       const foreignLayer = foreignEl.current;
       if (foreignLayer) {
         foreignLayer.style.pointerEvents = 'none';
@@ -687,6 +705,20 @@ export function HexMap() {
     if (!cell) return;
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
+
+    // 同格有他国军队：选中军队而非底层空地
+    const army = foreignArmyAt(q, r);
+    if (army?.id) {
+      selected.value = {
+        refId: army.id,
+        kind: 'enemy_army',
+        q,
+        r,
+        name: foreignArmyName(army),
+      };
+      return;
+    }
+
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
     const name = cell.getAttribute('data-name') ?? '空地';
@@ -1150,14 +1182,18 @@ function tileKindLabel(kind: string, isSelf: boolean): string {
 }
 
 function HexTooltip({ tip }: {
-  tip: { q: number; r: number; kind: string; name: string; dist: number; screenX: number; screenY: number };
+  tip: { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number };
 }) {
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
   const label = tileKindLabel(tip.kind, isSelf);
 
+  const left = Math.min(Math.max(130, tip.anchorX), window.innerWidth - 130);
+  const top = Math.min(Math.max(8, tip.anchorY - TIP_ABOVE), window.innerHeight - 120);
+
   const style = {
-    left: Math.min(Math.max(8, tip.screenX + TIP_PAD), window.innerWidth - 260),
-    top:  Math.min(Math.max(8, tip.screenY + TIP_PAD), window.innerHeight - 120),
+    left: `${left}px`,
+    top: `${top}px`,
+    transform: 'translateX(-50%)',
   };
 
   return (
