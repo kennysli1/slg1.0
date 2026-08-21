@@ -23,6 +23,7 @@ import { TreasureModule } from './modules/treasures.js';
 import { ResearchModule } from './modules/research.js';
 import { TasksModule } from './modules/tasks.js';
 import { VisionModule } from './modules/vision.js';
+import { DiplomacyModule } from './modules/diplomacy.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -53,6 +54,7 @@ const PROGRESS_COLLECTIONS = [
   'research',
   'task',
   'vision',
+  'diplomacy',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -95,6 +97,7 @@ export interface GameApp {
   treasure: TreasureModule;
   task: TasksModule;
   vision: VisionModule;
+  diplomacy: DiplomacyModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -160,6 +163,7 @@ export function createGameApp(opts?: {
   const population = new PopulationModule(store, bus, commands, scheduler, now, config);
   const world = new WorldModule(store, bus, commands, now, config);
   const pve = new PveModule(store, bus, commands, scheduler, now, config);
+  const diplomacy = new DiplomacyModule(store, bus, commands, now);
   const movement = new MovementModule(store, bus, commands, scheduler, now, config, serialQueue);
   const combat = new CombatModule(store, bus, commands, scheduler, now, config);
 
@@ -211,7 +215,7 @@ export function createGameApp(opts?: {
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
-    economy, building, military, population, world, pve, movement, combat,
+    economy, building, military, population, world, pve, diplomacy, movement, combat,
     player, meta, notifications, mercenary, trade, treasure, research, task, vision,
   ] as const;
   const resumableModules = [
@@ -280,7 +284,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },

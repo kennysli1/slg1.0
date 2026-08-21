@@ -37,6 +37,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `vision.ts` | 玩家探索记录、城池/行军视野与地图战争迷雾 |
 | `pve.ts` | PvE 守军、战利品与重生 |
 | `movement.ts` | 出征、运输、拦截与返程中的部队 |
+| `diplomacy.ts` | 玩家对盟军/中立/敌对关系与宣战 |
 | `combat.ts` | 进行中的逐 tick 战斗 |
 | `mercenary.ts` | 雇佣兵营地、候选与刷新任务 |
 | `trade.ts` | NPC/玩家订单、贸易中心与路线占用 |
@@ -78,6 +79,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `雇佣兵营地模块.md` | 修改雇佣与刷新 |
 | `科研模块.md` | 修改科研点、科技树和效果 |
 | `服务器客户端同步与UI刷新.md` | 增加推送或调整客户端刷新 |
+| `外交模块.md` | 修改玩家关系或行军目标外交门控 |
 | `服务器/01_数据存储结构.md` | 修改存档结构或排查数据 |
 | `服务器/02_数据库操作手册.md` | 备份、刷档或恢复 |
 | `服务器/03_GM调试手册.md` | GM 联调和故障诊断 |

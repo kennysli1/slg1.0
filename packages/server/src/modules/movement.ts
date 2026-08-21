@@ -120,6 +120,10 @@ export class MovementModule {
     this.normalizeCoords();
     this.commands.register('movement.SendRaid', (c) => this.sendRaid(c));
     this.commands.register('movement.SendAttack', (c) => this.sendAttack(c));
+    this.commands.register('movement.SendVillageRaid', (c) => this.sendVillageRaid(c));
+    this.commands.register('movement.SendReinforce', (c) => this.sendReinforce(c));
+    this.commands.register('movement.GetMarchOptions', (c) => this.getMarchOptions(c));
+    this.commands.register('movement.PreviewMarch', (c) => this.previewMarch(c));
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendGarrison', (c) => this.sendGarrison(c));
@@ -935,11 +939,11 @@ export class MovementModule {
    * 与 sendRaid 同结构，目标是玩家村（targetVillage）而非 PvE 目标。
    */
   private async sendAttack(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, troops, treasures } = cmd.payload as {
+    const { villageId, targetVillage, troops, treasures, declareWar } = cmd.payload as {
       villageId: string;
       targetVillage: string;
       troops: Record<string, number>;
-      treasures?: string[];
+      treasures?: string[]; declareWar?: boolean;
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
     const valid = this.validateTroops(troops);
@@ -954,6 +958,9 @@ export class MovementModule {
     // 目标村必须存在（有军队状态即视为存在）
     const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
     if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+    // 旧客户端未携带 declareWar 字段时沿用旧行为（视为确认宣战）；新客户端显式 false 才拒绝。
+    const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
+    if (!relation.ok) return relation;
     // 从源村扣出兵力
     const delta: Record<string, number> = {};
     for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
@@ -978,27 +985,129 @@ export class MovementModule {
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
+  private async getRallyLevel(villageId: string): Promise<number> {
+    const res = await this.commands.send({ name: 'building.GetBuildingLevel', from: MovementModule.NAME, payload: { villageId, kind: 'rallypoint' } });
+    return res.ok ? Math.max(0, Number((res.payload as any)?.level) || 0) : 0;
+  }
+
+  /** 地图目标的唯一模式清单；客户端不再自行猜测盟军/中立/敌对。 */
+  private async getMarchOptions(cmd: Command): Promise<CommandResult> {
+    const { villageId, kind, refId, q, r } = cmd.payload as { villageId: string; kind: string; refId?: string; q: number; r: number };
+    const modes: Array<{ mode: string; label: string; requiresDeclaration?: boolean }> = [];
+    let relation: string | undefined;
+    let targetPlayerId: string | undefined;
+    if (kind === 'empty') modes.push({ mode: 'garrison', label: '驻扎' });
+    else if (kind === 'pve' || kind === 'taskcamp') modes.push({ mode: 'raid', label: '掠夺' });
+    else if (kind === 'village' || kind === 'own_village') {
+      const owner = refId ? await this.ownerOf(refId) : '';
+      const mine = await this.ownerOf(villageId);
+      if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
+      else {
+        targetPlayerId = owner;
+        const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
+        relation = rel.ok ? (rel.payload as any).relation : 'neutral';
+        if (relation === 'allied') modes.push({ mode: 'reinforce', label: '增援' });
+        else if (relation === 'neutral') {
+          modes.push({ mode: 'reinforce', label: '增援' });
+          modes.push({ mode: 'raid', label: '掠夺并宣战', requiresDeclaration: true });
+          modes.push({ mode: 'attack', label: '攻城并宣战', requiresDeclaration: true });
+        } else {
+          modes.push({ mode: 'raid', label: '掠夺' });
+          modes.push({ mode: 'attack', label: '攻城' });
+        }
+      }
+    } else if (kind === 'unexplored') modes.push({ mode: 'explore', label: '探索' });
+    return { ok: true, payload: { q, r, relation: relation ?? 'neutral', targetPlayerId, modes, rallyPointLevel: await this.getRallyLevel(villageId), marchPoints: await this.marchPointState(villageId) } };
+  }
+
+  /** 最终确认页的权威预览：行军时长、可派兵快照、行军点与集结点等级。 */
+  private async previewMarch(cmd: Command): Promise<CommandResult> {
+    const { villageId, q, r, mode, troops, targetVillage } = cmd.payload as { villageId: string; q: number; r: number; mode: string; troops: Record<string, number>; targetVillage?: string };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const from = await this.villageXY(villageId);
+    if (!from) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const target = targetVillage ? await this.villageXY(targetVillage) : wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if (!target) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const army = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId } });
+    const availableTroops = army.ok ? ((army.payload as any).troops ?? {}) : {};
+    const point = await this.marchPointState(villageId);
+    let declarationRequired = false, relation = 'neutral';
+    if (targetVillage && (mode === 'raid' || mode === 'attack')) {
+      const mine = await this.ownerOf(villageId), other = await this.ownerOf(targetVillage);
+      const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: other } });
+      relation = rel.ok ? (rel.payload as any).relation : 'neutral'; declarationRequired = relation === 'neutral';
+    }
+    return { ok: true, payload: { travelSec: await this.travelSec(villageId, from, target, valid.troops), availableTroops, selectedTroops: valid.troops, marchPoints: point, rallyPointLevel: await this.getRallyLevel(villageId), relation, declarationRequired } };
+  }
+
+  /** 向玩家村发起掠夺。与攻城共享战斗结算，但保留 raid 行军类型供地图/UI识别。 */
+  private async sendVillageRaid(cmd: Command): Promise<CommandResult> {
+    const { villageId, targetVillage, troops, treasures, declareWar } = cmd.payload as { villageId: string; targetVillage: string; troops: Record<string, number>; treasures?: string[]; declareWar?: boolean };
+    if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const fromXY = await this.villageXY(villageId), toXY = await this.villageXY(targetVillage);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
+    if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
+    if (!relation.ok) return relation;
+    const point = await this.ensureMarchPoint(villageId); if (point) return point;
+    const delta = Object.fromEntries(Object.entries(valid.troops).map(([u, n]) => [u, -n]));
+    const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
+    const id = this.nextId();
+    const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
+    if (!carry.ok) { await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } }); return { ok: false, payload: {}, reason: carry.reason }; }
+    const mv = await this.launch({ id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  private async validatePvPRelation(villageId: string, targetVillage: string, declareWar: boolean): Promise<CommandResult> {
+    const from = await this.ownerOf(villageId), target = await this.ownerOf(targetVillage);
+    if (!from || !target || from === target) return { ok: false, payload: {}, reason: 'not_enemy_village' };
+    const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
+    const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
+    if (relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
+    if (relation === 'neutral') {
+      if (!declareWar) return { ok: false, payload: {}, reason: 'declare_war_required' };
+      const war = await this.commands.send({ name: 'diplomacy.DeclareWar', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
+      if (!war.ok) return { ok: false, payload: {}, reason: war.reason ?? 'declare_war_failed' };
+    }
+    return { ok: true, payload: { relation: relation === 'neutral' && declareWar ? 'hostile' : relation } };
+  }
+
   /**
    * 村间运输：仅己方村；运力=Σ(carry×数量)；可见可截；到达部队留守、货物全额入库。
    */
   private async sendTransport(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, troops, cargo, treasures } = cmd.payload as {
+    const { villageId, targetVillage, troops, cargo, treasures, mode } = cmd.payload as {
       villageId: string;
       targetVillage: string;
       troops: Record<string, number>;
       cargo?: Record<string, number>;
       treasures?: string[];
+      mode?: 'transfer' | 'reinforce';
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'same_village' };
 
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
 
-    // 两端须属同一玩家
+    const isReinforce = mode === 'reinforce';
+    // 转移只允许己方村；增援允许盟军/中立村，不会改变关系。
     const fromOwner = await this.ownerOf(villageId);
     const toOwner = await this.ownerOf(targetVillage);
-    if (!fromOwner || !toOwner || fromOwner !== toOwner) {
+    if (!fromOwner || !toOwner || (!isReinforce && fromOwner !== toOwner)) {
       return { ok: false, payload: {}, reason: 'not_own_village' };
+    }
+    if (isReinforce && fromOwner !== toOwner) {
+      const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
+      const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
+      if (relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }
 
     const cleanedCargo: Record<string, number> = {};
@@ -1007,13 +1116,13 @@ export class MovementModule {
       const n = Math.max(0, Math.floor(cargo?.[t] ?? 0));
       if (n > 0) { cleanedCargo[t] = n; cargoTotal += n; }
     }
-    if (cargoTotal <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
+    if (!isReinforce && cargoTotal <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
 
     let capacity = 0;
     for (const [u, n] of Object.entries(valid.troops)) {
       capacity += (this.config.units[u]?.carry ?? 0) * n;
     }
-    if (cargoTotal > capacity) return { ok: false, payload: {}, reason: 'cargo_exceeds_carry' };
+    if (!isReinforce && cargoTotal > capacity) return { ok: false, payload: {}, reason: 'cargo_exceeds_carry' };
 
     const fromXY = await this.villageXY(villageId);
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
@@ -1022,7 +1131,7 @@ export class MovementModule {
     const toXY = await this.villageXY(targetVillage);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
 
-    const spend = await this.commands.send({
+    const spend: { ok: boolean; reason?: string } = isReinforce ? { ok: true } : await this.commands.send({
       name: 'economy.TrySpend', from: MovementModule.NAME,
       payload: { villageId, cost: cleanedCargo },
     });
@@ -1140,6 +1249,10 @@ export class MovementModule {
     });
     log('出征(caravan)', { id: mv.id, from: fromVillage, to: targetVillage, cargo: cleaned.clean, returning: !!returning });
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  private async sendReinforce(cmd: Command): Promise<CommandResult> {
+    return this.sendTransport({ ...cmd, payload: { ...(cmd.payload as any), mode: 'reinforce', cargo: {} } });
   }
 
   /** 商队到达：去程→把货物交给目标村（目标村不存在则跳过交付）后启动返程；返程→到家回收贸易路线。 */
@@ -1529,6 +1642,7 @@ export class MovementModule {
     if (mv.type === 'garrison') { await this.arriveGarrison(mv); return; }
     if (mv.type === 'explore') { await this.arriveExplore(mv); return; }
     if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
+    if (mv.type === 'raid' && mv.targetVillage) { await this.arriveEngage(mv, 'village', mv.targetVillage); return; }
     if (mv.type === 'attack' && mv.targetVillage) {
       await this.arriveEngage(mv, 'village', mv.targetVillage);
       return;

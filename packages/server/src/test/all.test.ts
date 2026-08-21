@@ -59,3 +59,4 @@ import './caravan-return.test.js';
 import './caravan-npc-faithful.test.js';
 import './task-flows.test.js';
 import './register-spot.test.js';
+import './diplomacy-movement.test.js';
