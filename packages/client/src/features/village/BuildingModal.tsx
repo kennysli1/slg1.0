@@ -152,7 +152,7 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
   dataVersion.value; // subscribe so it refreshes when treasures change
 
   const data = getCache().treasures as
-    | { codes: string[]; slots: number; mainSlots?: number; reserveSlots?: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[]; treasuryReserve?: string[]; needsLoad?: boolean }
+    | { codes: string[]; slots: number; mainSlots?: number; reserveSlots?: number; slotBreakdown?: { town?: number; treasury?: number; reserve?: number }; treasures: any[]; effect: any; town?: string[]; treasury?: string[]; treasuryReserve?: string[]; needsLoad?: boolean }
     | null;
 
   if (!data) return <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>宝物数据加载中…</p>;
@@ -160,9 +160,22 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
   const locCodes: string[] = kind === 'treasury' ? (data.treasury ?? []) : (data.town ?? []);
   const reserveCodes: string[] = kind === 'treasury' ? (data.treasuryReserve ?? []) : [];
   const totalCodes = (data.codes ?? []).length;
-  const slots = kind === 'treasury' ? (data.mainSlots ?? 0) : 1;
+  // mainSlots is the village-wide passive capacity (town centre + treasury).
+  // This modal manages only the selected building, so the treasury view must
+  // use its own per-building capacity rather than counting the town-centre slot.
+  const slots = kind === 'treasury'
+    ? (data.slotBreakdown?.treasury ?? data.reserveSlots ?? 0)
+    : 1;
 
-  const locLabel = kind === 'treasury' ? '宝库' : '城镇中心';
+  const locLabel = kind === 'treasury' ? '宝库主栏' : '城镇中心主栏';
+
+  // Empty slots are rendered explicitly so the player can see the capacity of
+  // both bars even when no treasure is currently stored there.
+  const emptySlots = (count: number, label: string) => Array.from({ length: Math.max(0, count) }, (_, index) => (
+    <div key={`empty-${label}-${index}`} class="trs-empty-slot" aria-label={`${label}空槽`}>
+      <span>{label}空槽</span>
+    </div>
+  ));
 
   const renderCard = (code: string, index: number, location: 'town' | 'treasury' | 'reserve') => {
     const info = treasureInfo(code) ?? (data.treasures ?? []).find((t: any) => t.code === code);
@@ -207,20 +220,20 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
     );
   };
 
-  if (!locCodes.length && !reserveCodes.length) {
-    return (
-      <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>
-        {locLabel}为空（{totalCodes}/{slots}）。清理野营、击败敌军或在贸易中心购买可获得宝物。
-      </p>
-    );
-  }
-
   return (
     <div class="trs-mgmt-list">
       {kind === 'treasury' && data.needsLoad && <div class="trs-load-warning">备用栏有宝物且主宝物栏有空位，可点击「装载」使其生效。</div>}
+      <SectionHead sub={`${locCodes.length}/${slots}`}>主宝物栏 · 被动生效</SectionHead>
       {locCodes.map((code, index) => renderCard(code, index, kind === 'treasury' ? 'treasury' : 'town'))}
-      {reserveCodes.length > 0 && kind === 'treasury' && <SectionHead sub={`${reserveCodes.length}/${data.reserveSlots ?? 0}`}>备用宝物栏 · 不生效</SectionHead>}
-      {reserveCodes.map((code, index) => renderCard(code, index, 'reserve'))}
+      {emptySlots(slots - locCodes.length, '主栏')}
+      {kind === 'treasury' && (
+        <>
+          <SectionHead sub={`${reserveCodes.length}/${data.reserveSlots ?? 0}`}>备用宝物栏 · 不生效</SectionHead>
+          {reserveCodes.map((code, index) => renderCard(code, index, 'reserve'))}
+          {emptySlots((data.reserveSlots ?? 0) - reserveCodes.length, '备用栏')}
+        </>
+      )}
+      {!totalCodes && <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>清理野营、击败敌军或在贸易中心购买可获得宝物。</p>}
     </div>
   );
 }

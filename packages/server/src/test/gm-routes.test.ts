@@ -143,6 +143,22 @@ test('/gm/balance/data 返回 ok:true + meta 字段', async () => {
   }
 });
 
+test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任务图', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
@@ -260,6 +276,23 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
       999,
       'balance/data 中 main.popGrowthPerLevel 应为 999',
     );
+
+    // 宝库每级的 treasureSlots 是复合主键字段；GM 修改后应热重载，
+    // 且该增量同时作为主宝物栏与备用宝物栏的容量来源。
+    const treasurySave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ building_levels: { 'treasury|1': { treasureSlots: '7' } } }),
+    });
+    assert.equal(treasurySave.statusCode, 200, `宝库槽位覆盖应成功：${treasurySave.body}`);
+    assert.equal(app.config.buildings.treasury.levels[1].treasureSlots, 7, '宝库 L1 treasureSlots 应热重载为 7');
+
+    const levelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const treasuryLevel = (levelData.building_levels ?? []).find((r) => r.code === 'treasury' && String(r.level) === '1');
+    assert.equal(Number(treasuryLevel?.treasureSlots), 7, 'balance/data 应返回修改后的宝库槽位');
 
     await fastify.close();
   } finally {
