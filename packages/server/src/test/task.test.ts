@@ -423,7 +423,7 @@ test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易�
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok(p.offeredSide.some((q: any) => q.code === 'villager_request'), '清空普通 PvE 营地后应点亮「村民的请求」支线');
+  assert.ok(p.offeredSide.some((q: any) => q.code === 's3'), '清空普通 PvE 营地后应点亮「村民的请求」支线');
 
   // 准备贸易中心（写入 building 状态并触发 trade 初始化）
   app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
@@ -431,7 +431,7 @@ test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易�
   await tick();
 
   // 接取支线
-  const acc = await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  const acc = await send(app, 'task.Accept', { villageId: va, code: 's3' });
   assert.equal(acc.ok, true, `接取应成功: ${acc.reason ?? ''}`);
   await tick();
 
@@ -463,7 +463,7 @@ test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获�
   app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
   await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
   await tick();
-  await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  await send(app, 'task.Accept', { villageId: va, code: 's3' });
   await tick();
 
   const npcId = `happy-${va}`;
@@ -476,8 +476,8 @@ test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获�
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok(!p.active.some((a: any) => a.code === 'villager_request'), '掠夺幸福村后任务应终止');
-  assert.ok(p.abandonedSide.includes('villager_request'), '失败路径应记入 abandonedSide（不再出现）');
+  assert.ok(!p.active.some((a: any) => a.code === 's3'), '掠夺幸福村后任务应终止');
+  assert.ok(p.abandonedSide.includes('s3'), '失败路径应记入 abandonedSide（不再出现）');
   const treasure = app.store.get<any>('treasure', va);
   const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
   assert.ok(codes.includes('secret_note'), '失败应获得秘密字条');
@@ -496,7 +496,7 @@ test('村民的请求：接单送粮完成 → 获得娜塔莉，幸福村与订
   app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
   await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
   await tick();
-  await send(app, 'task.Accept', { villageId: va, code: 'villager_request' });
+  await send(app, 'task.Accept', { villageId: va, code: 's3' });
   await tick();
 
   const npcId = `happy-${va}`;
@@ -519,8 +519,8 @@ test('村民的请求：接单送粮完成 → 获得娜塔莉，幸福村与订
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok(p.completedSide.includes('villager_request'), '送达后任务应完成');
-  assert.ok(!p.active.some((a: any) => a.code === 'villager_request'), '任务应移出 active');
+  assert.ok(p.completedSide.includes('s3'), '送达后任务应完成');
+  assert.ok(!p.active.some((a: any) => a.code === 's3'), '任务应移出 active');
   const treasure = app.store.get<any>('treasure', va);
   const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
   assert.ok(codes.includes('natalie'), '完成应获得娜塔莉');
@@ -543,7 +543,7 @@ test('秘密字条：使用后生成战报并解锁「调查坐标」', async ()
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok(p.offeredSide.some((q: any) => q.code === 'investigate_coords'), '使用秘密字条后应解锁「调查坐标」支线');
+  assert.ok(p.offeredSide.some((q: any) => q.code === 's4'), '使用秘密字条后应解锁「调查坐标」支线');
   const treasure = app.store.get<any>('treasure', va);
   const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
   assert.ok(!codes.includes('secret_note'), '秘密字条使用后应被消耗');
@@ -559,7 +559,7 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   await send(app, 'military.GetState', { villageId: va });
   await send(app, 'research.GetState', { villageId: va });
 
-  // 解锁 investigate_coords（使用秘密字条）
+  // 解锁 s4（使用秘密字条）
   app.store.set('treasure', va, {
     villageId: va, town: ['secret_note'], treasury: [], carried: {}, extraSlots: 0,
     hasTradeCenter: false, locked: [], victoryFlagBonus: 0, victoryFlagQualified: {},
@@ -568,19 +568,19 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   await tick();
 
   const st0 = await send(app, 'task.GetState', { villageId: va });
-  const off = (st0.payload as any).offeredSide.find((q: any) => q.code === 'investigate_coords');
+  const off = (st0.payload as any).offeredSide.find((q: any) => q.code === 's4');
   assert.ok(off, '使用秘密字条后应解锁「调查坐标」');
   assert.equal(off.objective.kind, 'clear_camp', '目标应为 clear_camp');
   assert.equal(off.objective.campTemplate, 'rats', '营地模板应为 rats（与老鼠窝同驻兵/资源）');
   assert.equal(off.objective.count, 3, '需清剿 3 个营地');
 
   // 接取
-  const acc = await send(app, 'task.Accept', { villageId: va, code: 'investigate_coords' });
+  const acc = await send(app, 'task.Accept', { villageId: va, code: 's4' });
   assert.equal(acc.ok, true, `接取应成功: ${acc.reason ?? ''}`);
   await tick();
 
   const st1 = await send(app, 'task.GetState', { villageId: va });
-  const inst = st1.payload.active.find((a: any) => a.code === 'investigate_coords');
+  const inst = st1.payload.active.find((a: any) => a.code === 's4');
   assert.equal(inst.camps.length, 3, '应生成 3 个任务营地');
   const campIds = inst.camps.map((c: any) => c.id);
 
@@ -593,7 +593,7 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
     await tick();
   }
   const st2 = await send(app, 'task.GetState', { villageId: va });
-  const inst2 = st2.payload.active.find((a: any) => a.code === 'investigate_coords');
+  const inst2 = st2.payload.active.find((a: any) => a.code === 's4');
   assert.equal(inst2.campCleared, 2, '应已清剿 2 处');
   const pendBefore = (app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va);
   assert.equal(pendBefore.length, 0, '前 2 处清剿不应掉落 captured_natalies（仅普通掠夺资源）');
@@ -607,7 +607,7 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   await tick();
 
   const st3 = await send(app, 'task.GetState', { villageId: va });
-  const inst3 = st3.payload.active.find((a: any) => a.code === 'investigate_coords');
+  const inst3 = st3.payload.active.find((a: any) => a.code === 's4');
   assert.ok(inst3.ready === false, '清剿 3 处后未抉择 captured_natalies 前不应就绪可交付');
   assert.ok(inst3.awaitingNatalieDecision === true, '清剿 3 处后应等待玩家抉择 captured_natalies');
   assert.equal(inst3.natalieDecision, null, '抉择前 natalieDecision 应为空');
@@ -634,15 +634,15 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   assert.ok(popA.treasureGrowthMult >= 1.2 - 1e-9, `放入宝库应使人口增长倍率≥1.2（实际 ${popA.treasureGrowthMult}）`);
   // 放入宝库（take）后任务应变为就绪可交付，且记 natalieDecision=store（完成任务）
   const stA = await send(app, 'task.GetState', { villageId: va });
-  const instA = stA.payload.active.find((a: any) => a.code === 'investigate_coords');
+  const instA = stA.payload.active.find((a: any) => a.code === 's4');
   assert.ok(instA.ready === true, '放入宝库（take）后任务应就绪可交付');
   assert.equal(instA.natalieDecision, 'store', '放入宝库应记 natalieDecision=store');
 
   // 路径B：释放（release）一个 captured_natalies → 不应立即发奖，需点「领取奖励」后才发
   // 重新挂起 natalie 抉择（路径A已消费 awaitingNatalieDecision，这里模拟另一次掉落重新挂起）
   const ts = app.store.get<any>('task', va);
-  ts.active['investigate_coords'].awaitingNatalieDecision = true;
-  ts.active['investigate_coords'].awaitingNatalieCode = 'captured_natalies';
+  ts.active['s4'].awaitingNatalieDecision = true;
+  ts.active['s4'].awaitingNatalieCode = 'captured_natalies';
   app.store.set('task', va, ts);
   // 预留宝物栏（模拟已建宝库），确保正直的心能进入宝物栏并激活效果
   app.store.get<any>('treasure', va).extraSlots = 5;
@@ -662,12 +662,12 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   assert.equal(goldMid, beforeGold, '释放不应立即发放 500 金币');
   // 释放后任务应就绪可交付，且记 natalieDecision=release（按钮文案「领取奖励」）
   const stB = await send(app, 'task.GetState', { villageId: va });
-  const instB = stB.payload.active.find((a: any) => a.code === 'investigate_coords');
+  const instB = stB.payload.active.find((a: any) => a.code === 's4');
   assert.ok(instB.ready === true, '释放后任务应就绪可交付');
   assert.equal(instB.natalieDecision, 'release', '释放应记 natalieDecision=release');
 
   // 点「领取奖励」= task.Deliver → completeQuest 才发奖励
-  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'investigate_coords' });
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
   assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
   const trB = app.store.get<any>('treasure', va);
   assert.ok([...trB.town, ...trB.treasury].includes('honest_heart'), '「领取奖励」后应入库「正直的心」');
@@ -684,5 +684,5 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
 
   // 交付后任务移出 active
   const st4 = await send(app, 'task.GetState', { villageId: va });
-  assert.ok(!st4.payload.active.some((a: any) => a.code === 'investigate_coords'), '交付后调查坐标应移出 active');
+  assert.ok(!st4.payload.active.some((a: any) => a.code === 's4'), '交付后调查坐标应移出 active');
 });

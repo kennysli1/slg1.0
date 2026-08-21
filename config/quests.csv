@@ -10,5 +10,5 @@ id,code,lineCode,name,desc,type,weight,repeatable,cooldownSec,abandonCooldownSec
 8,d3,tavern_commissions,紧急补给,酒馆急令调拨粮食应急,daily,3,1,21600,7200
 9,s1,ritual_altar,献祭筹备,累计出售或丢弃2个稀有及以上品质的宝物,side,3,0,0,0
 10,s2,show_of_force,耀武扬威,兵力达到20后携带军旗与至少20名士兵清理任意营地并将军旗带回城内,side,0,0,0,0
-11,villager_request,villager_story,村民的请求,成功掠夺PvE营地后村民向你求助；送达幸福村获得娜塔莉，掠夺则获得秘密字条,side,0,0,0,0
-12,investigate_coords,villager_story,调查坐标,使用秘密字条获得的战报标记了可疑坐标，前往探查,side,0,0,0,0
+11,s3,villager_story,村民的请求,成功掠夺PvE营地后村民向你求助；送达幸福村获得娜塔莉，掠夺则获得秘密字条,side,0,0,0,0
+12,s4,villager_story,调查坐标,使用秘密字条获得的战报标记了可疑坐标，前往探查,side,0,0,0,0

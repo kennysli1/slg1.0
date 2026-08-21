@@ -30,8 +30,8 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   const app = freshApp();
   const va = await reg(app, 'natalie1');
   app.store.set('task', va, baseState(va, {
-    investigate_coords: {
-      code: 'investigate_coords', type: 'side', acceptedAt: clock,
+    s4: {
+      code: 's4', type: 'side', acceptedAt: clock,
       submitted: {}, camps: [
         { id: 'c1', q: 1, r: 1, cleared: false },
         { id: 'c2', q: 2, r: 2, cleared: false },
@@ -53,7 +53,7 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   await tick();
 
   const st = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  const t = st.active.find((a: any) => a.code === 'investigate_coords');
+  const t = st.active.find((a: any) => a.code === 's4');
   assert.ok(t, '调查坐标应仍 active');
   assert.equal(t.ready, false, '抉择前不应就绪可交付');
   assert.equal(t.awaitingNatalieDecision, true, '应置 awaitingNatalieDecision');
@@ -63,15 +63,15 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   await emit(app, 'treasure.PendingClaimed', { villageId: va, code: 'captured_natalies', released: true, stored: false });
   await tick();
   const st2 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  const t2 = st2.active.find((a: any) => a.code === 'investigate_coords');
+  const t2 = st2.active.find((a: any) => a.code === 's4');
   assert.equal(t2.ready, true, '释放后任务应就绪');
   assert.equal(t2.natalieDecision, 'release', '释放应记 natalieDecision=release');
 
   // 交付完成任务
-  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'investigate_coords' });
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
   assert.equal(dv.ok, true, '交付应成功: ' + (dv.reason ?? ''));
   const st3 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  assert.ok(st3.completedSide.includes('investigate_coords'), '完成后应进 completedSide');
+  assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
 
 // ② 变体：入库 → 完成任务
@@ -79,8 +79,8 @@ test('② 变体：放入宝库 -> natalieDecision=store 并可完成任务', as
   const app = freshApp();
   const va = await reg(app, 'natalie2');
   app.store.set('task', va, baseState(va, {
-    investigate_coords: {
-      code: 'investigate_coords', type: 'side', acceptedAt: clock,
+    s4: {
+      code: 's4', type: 'side', acceptedAt: clock,
       submitted: {}, camps: [{ id: 'c1', q: 1, r: 1, cleared: false }],
       campCleared: 0, progress: 0, awaitingNatalieDecision: false,
     },
@@ -94,7 +94,7 @@ test('② 变体：放入宝库 -> natalieDecision=store 并可完成任务', as
   await emit(app, 'treasure.PendingClaimed', { villageId: va, code: 'captured_natalies', released: false, stored: true });
   await tick();
   const st = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  const t = st.active.find((a: any) => a.code === 'investigate_coords');
+  const t = st.active.find((a: any) => a.code === 's4');
   assert.equal(t.ready, true, '入库后任务应就绪');
   assert.equal(t.natalieDecision, 'store', '入库应记 natalieDecision=store');
 });
@@ -105,15 +105,36 @@ test('③ GM 重新触发已放弃支线 -> 移出 abandonedSide 并重新可接
   const va = await reg(app, 'retrig1');
   app.store.set('task', va, baseState(va, {}));
   const st0 = app.store.get('task', va) as any;
-  st0.abandonedSide = ['investigate_coords'];
+  st0.abandonedSide = ['s4'];
   app.store.set('task', va, st0);
   await tick();
 
-  const r = await send(app, 'task.GmRetriggerAbandoned', { villageId: va, code: 'investigate_coords' });
+  const r = await send(app, 'task.GmRetriggerAbandoned', { villageId: va, code: 's4' });
   assert.equal(r.ok, true, '重新触发应成功: ' + (r.reason ?? ''));
   const st = r.payload as any;
-  assert.ok(!st.abandonedSide.includes('investigate_coords'), '应移出 abandonedSide');
-  assert.ok(st.offeredSide.some((o: any) => o.code === 'investigate_coords'), '应重新进入可接取列表');
+  assert.ok(!st.abandonedSide.includes('s4'), '应移出 abandonedSide');
+  assert.ok(st.offeredSide.some((o: any) => o.code === 's4'), '应重新进入可接取列表');
+});
+
+test('任务代码迁移：旧 villager_request / investigate_coords 自动映射到 s3 / s4', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'code-migrate');
+  app.store.set('task', va, baseState(va, {
+    investigate_coords: {
+      code: 'investigate_coords', type: 'side', acceptedAt: clock,
+      submitted: {}, camps: [], campCleared: 0, progress: 0,
+    },
+  }));
+  const raw = app.store.get<any>('task', va);
+  raw.completedSide = ['villager_request'];
+  raw.cooldownUntil = { investigate_coords: clock + 60_000 };
+  app.store.set('task', va, raw);
+  const state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(state.active.some((x: any) => x.code === 's4'), '旧 active 实例应改为 s4');
+  assert.ok(state.completedSide.includes('s3'), '旧完成记录应改为 s3');
+  const persisted = app.store.get<any>('task', va);
+  assert.ok(persisted.active.s4 && !persisted.active.investigate_coords, '迁移应写回实例键');
+  assert.equal(persisted.cooldownUntil.s4, clock + 60_000, '冷却键应一并迁移');
 });
 
 // ④ 胜利旗帜经「报告(满栏转 pending)」收下 -> 仍获得 +2% 加成
