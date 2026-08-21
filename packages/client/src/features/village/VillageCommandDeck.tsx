@@ -48,8 +48,8 @@ export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
   const pop = getPopState();
   const totalPop = interpolateTotalPop();
   const treasures = getCache().treasures;
-  const treasureCount = treasures?.codes?.length ?? 0;
-  const treasureSlots = treasures?.slots ?? 0;
+  const treasureCount = treasures?.activeCodes?.length ?? 0;
+  const treasureSlots = treasures?.mainSlots ?? 0;
   const activeTask = queueItems[0];
   const activeInfo = activeTask ? buildingInfo(activeTask.kind) : null;
 

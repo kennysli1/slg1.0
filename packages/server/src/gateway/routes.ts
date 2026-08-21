@@ -355,11 +355,22 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     publicActions: {
       ListTreasures: { command: 'treasure.List', ownVillage: true, needAuth: true, schema: {} },
       // 使用宝物：仅对即时类(instantGold)有效，发放金币并移除；被动宝物返回 not_usable。
-      UseTreasure: { command: 'treasure.Use', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      UseTreasure: { command: 'treasure.Use', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 }, location: { type: 'enum', optional: true, values: ['town', 'treasury', 'reserve'] } } },
       // 出售宝物：卖给 NPC 换金币(priceGold)并移除；被动/即时皆可。
-      SellTreasure: { command: 'treasure.Sell', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      SellTreasure: { command: 'treasure.Sell', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 }, location: { type: 'enum', optional: true, values: ['town', 'treasury', 'reserve'] } } },
       // 丢弃宝物：直接移除（不给金币），用于腾出宝物栏格子。
-      DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      DiscardTreasure: { command: 'treasure.Discard', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 }, location: { type: 'enum', optional: true, values: ['town', 'treasury', 'reserve'] } } },
+      UnloadTreasure: {
+        command: 'treasure.Unload', ownVillage: true, needAuth: true,
+        schema: {
+          code: { type: 'string', minLen: 1, maxLen: 64 },
+          from: { type: 'enum', values: ['town', 'treasury'] },
+        },
+      },
+      LoadTreasure: {
+        command: 'treasure.Load', ownVillage: true, needAuth: true,
+        schema: { code: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
       // 确认领取待领取宝物（军队带回/送达 → 战报确认；超时由服务端自动遗弃）。
       // 收下(take)遇「已持有」「宝物栏已满」一律拒绝（玩家须显式 出售/遗弃）；出售(sell)需本村有贸易中心。
       ClaimPendingTreasure: {

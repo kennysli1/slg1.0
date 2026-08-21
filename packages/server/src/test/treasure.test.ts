@@ -94,7 +94,7 @@ test('宝物：栏内全部被动宝物生效，同名宝物也叠加', async ()
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'dragon_banner' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'spear_of_ares' });
   const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(listed.activeCodes, undefined, '不再下发类别生效槽选择结果');
+  assert.deepEqual(listed.activeCodes, ['dragon_banner', 'dragon_banner', 'spear_of_ares'], '主栏宝物应作为生效列表下发');
   assert.equal(listed.effect.atkMult, 1.78);
 });
 
@@ -335,12 +335,56 @@ test('宝库：SetSlots 推高槽位后可储存更多宝物', async () => {
   const set = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 5 });
   assert.equal(set.ok, true, 'SetSlots 应成功');
   const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(l1.slots, 6, '总槽位应为 1+5=6');
+  assert.equal(l1.slots, 11, '总槽位应为城镇中心1+主栏5+备用栏5=11');
 
   const g3 = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
   assert.equal(g3.ok, true, '槽位扩充后应可入库');
   const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.deepEqual(l2.codes.sort(), ['chainsaw', 'war_flag'], '两个宝物均应入库');
+});
+
+test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主动操作', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  const before = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  const baseAtk = before.trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  assert.ok(baseAtk > 0);
+
+  const unload = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'treasury' });
+  assert.equal(unload.ok, true, `主栏宝物应可卸下: ${unload.reason ?? ''}`);
+  const parked = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(parked.treasury, [], '卸下后宝库主栏应为空');
+  assert.deepEqual(parked.town, ['chainsaw'], '城镇中心主栏宝物不应被隐式搬运');
+  assert.deepEqual(parked.treasuryReserve, ['war_flag'], '卸下后应进入备用栏');
+  assert.equal(parked.needsLoad, true, '主栏出现空位且备用栏有宝物时应提醒');
+  const parkedAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  assert.equal(parkedAtk, baseAtk / 1.05, '备用栏宝物不应继续提供攻防加成');
+
+  const load = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(load.ok, true, `备用栏宝物应可装载: ${load.reason ?? ''}`);
+  const active = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(active.treasury, ['war_flag'], '装载后应回到宝库主栏');
+  assert.deepEqual(active.treasuryReserve, [], '装载后备用栏应为空');
+  const activeAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  assert.equal(activeAtk, baseAtk, '装载后攻防加成应恢复');
+});
+
+test('宝库：备用栏已满或主栏已满时移动返回明确错误', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  const u1 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'treasury' });
+  assert.equal(u1.ok, true);
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'spear_of_ares' });
+  const u2 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'spear_of_ares', from: 'treasury' });
+  assert.equal(u2.ok, false);
+  assert.equal(u2.reason, 'no_reserve_room');
+  await send(app, 'treasure.Discard', { villageId: 'v1', code: 'spear_of_ares', location: 'treasury' });
+  const l = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(l.ok, true, '主栏有空位时应可装载');
 });
 
 test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根因回归）', async () => {
@@ -362,18 +406,18 @@ test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根
   assert.deepEqual(l2.treasury, ['chainsaw'], '原城镇中心宝物应迁入宝库');
 });
 
-test('宝库：旧存档（town 有宝+extraSlots 已存在）加载时自动迁入宝库', async () => {
+test('宝库：旧存档（town 有宝+extraSlots 已存在）加载时保持主栏位置', async () => {
   // 模拟部署前的真实线上数据：宝库已建（extraSlots=1），但城镇中心仍留有 1 个旧宝物
   const app = await freshApp();
   app.store.set('treasure', 'v1', { villageId: 'v1', town: ['chainsaw'], treasury: [], carried: {}, extraSlots: 1 });
   // 任意触发 ensureState 的命令都会触发迁移
   const l = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(l.town, [], '加载时城镇中心应自动清空');
-  assert.deepEqual(l.treasury, ['chainsaw'], '加载时旧城镇中心宝物应迁入宝库');
-  // 再次 List 应幂等（无重复写入/迁移）
+  assert.deepEqual(l.town, ['chainsaw'], '加载时城镇中心宝物仍属于主栏');
+  assert.deepEqual(l.treasury, [], '加载时宝库主栏仍为空');
+  // 再次 List 应幂等
   const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(l2.town, [], '幂等：城镇中心应仍为空');
-  assert.deepEqual(l2.treasury, ['chainsaw'], '幂等：宝库应仍含 1 个');
+  assert.deepEqual(l2.town, ['chainsaw'], '幂等：城镇中心仍含 1 个');
+  assert.deepEqual(l2.treasury, [], '幂等：宝库仍为空');
 });
 
 test('迁移：resume 修复 pre-Bug3 遗留 pending（无 arrivedAt 且行军已删除）→ 标记归村', async () => {
@@ -434,14 +478,14 @@ test('宝库：建造/落成经 building 推送 SetSlots，槽位随等级增加
 
   const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   // treasury L1 每级 +1 槽位 ⇒ 总槽位 2
-  assert.equal(l1.slots, 2, '宝库 L1 落成后总槽位应为 2');
+  assert.equal(l1.slots, 3, '宝库 L1 落成后总槽位应为城镇中心1+主栏1+备用栏1=3');
 
   // 升级到 L2 ⇒ 总槽位 3
   const up = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: (await layoutOf(app)).slotId, });
   assert.equal(up.ok, true, `升级宝库应成功: ${up.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 60_000, (t) => { clock = t; });
   const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(l2.slots, 3, '宝库 L2 落成后总槽位应为 3');
+  assert.equal(l2.slots, 5, '宝库 L2 落成后总槽位应为城镇中心1+主栏2+备用栏2=5');
 });
 
 test('宝库：拆除宝库后归属转移——价值最高宝物留城镇中心，其余转为送达报告', async () => {
@@ -451,7 +495,7 @@ test('宝库：拆除宝库后归属转移——价值最高宝物留城镇中�
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });   // priceGold 60
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });     // priceGold 70
   const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.equal(l0.slots, 2, '扩槽后应为 2');
+  assert.equal(l0.slots, 3, '扩槽后应为 3（主栏1+备用栏1+城镇中心1）');
 
   // 槽位回退到 0（等价拆除宝库）
   const dem = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 0 });
