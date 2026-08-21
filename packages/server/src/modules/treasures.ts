@@ -605,10 +605,15 @@ export class TreasureModule {
 
   /** 授予宝物到村庄宝物栏；任务奖励满栏时可转为待处理报告。 */
   private async grant(cmd: Command): Promise<CommandResult> {
-    const { villageId, code, pendingIfFull } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean };
+    const { villageId, code, pendingIfFull, alwaysPending } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean; alwaysPending?: boolean };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    if (alwaysPending) {
+      this.createDeliverPending(villageId, code);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
+    }
     if (!this.storeIfRoom(s, code)) {
       if (pendingIfFull) {
         this.createDeliverPending(villageId, code);

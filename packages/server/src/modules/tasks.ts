@@ -648,6 +648,15 @@ export class TasksModule {
     if (!inst) return;
     inst.awaitingNatalieDecision = false;
     inst.natalieDecision = p.released ? 'release' : 'store';
+    if (!p.released) {
+      const code = inst.code;
+      delete s.active[code];
+      if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
+      this.store.set(COLLECTION, p.villageId, s);
+      await this.pushList(p.villageId);
+      await this.pushMap(p.villageId);
+      return;
+    }
     this.store.set(COLLECTION, p.villageId, s);
     await this.markReady(p.villageId, inst.code);
   }
@@ -758,7 +767,7 @@ export class TasksModule {
       // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 任务失败，改发「秘密字条」
       if (p.targetKind === 'pve' && inst.npcVillageId && targetId === inst.npcVillageId && p.attackerWins) {
         await this.removeNpc(villageId, inst);
-        await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'secret_note', pendingIfFull: true } });
+        await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'secret_note', pendingIfFull: true, alwaysPending: true } });
         if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
         delete s.active[code];
         this.store.set(COLLECTION, villageId, s);
@@ -1062,12 +1071,18 @@ export class TasksModule {
 
   // ── 幸福村（NPC 村庄 / deliver_to_npc 目标）──
 
-  /** 接取「村民的请求」时生成幸福村 + 注入贸易订单；无贸易中心则挂起，待其建成/重启后重试。 */
+  /** 接取时立即生成幸福村；贸易中心只决定送达订单何时可用。 */
   private async spawnNpcVillage(villageId: string, s: TaskState, inst: TaskInstance): Promise<void> {
     const level = await this.getTradeCenterLevel(villageId);
-    if (level <= 0) {
-      inst.npcPending = true;
+    if (inst.npcVillageId && inst.npcXY) {
+      if (level <= 0) { inst.npcPending = true; this.store.set(COLLECTION, villageId, s); return; }
+      if (!inst.npcOrderId) {
+        const order = await this.commands.send({ name: 'trade.CreateNpcOrder', from: TasksModule.NAME, payload: { villageId, npcId: inst.npcVillageId, npcXY: inst.npcXY, want: { [inst.npcRes ?? 'crop']: inst.npcAmt ?? 1 }, ownerName: '幸福村' } });
+        inst.npcOrderId = (order.payload as any)?.id ?? null;
+      }
+      inst.npcPending = false;
       this.store.set(COLLECTION, villageId, s);
+      await this.pushList(villageId);
       return;
     }
     const xy = await this.getVillageXY(villageId);
@@ -1105,17 +1120,14 @@ export class TasksModule {
     }
     const orderRes = this.gmStr('villager_request_order_resource', 'crop');
     const orderAmt = this.gmNum('villager_request_order_amount', 500);
-    const order = await this.commands.send({
-      name: 'trade.CreateNpcOrder', from: TasksModule.NAME,
-      payload: { villageId, npcId, npcXY: { q, r }, want: { [orderRes]: orderAmt }, ownerName: '幸福村' },
-    });
     inst.npcVillageId = npcId;
     inst.npcXY = { q, r };
     inst.npcRes = orderRes;
     inst.npcAmt = orderAmt;
-    inst.npcOrderId = (order.payload as any)?.id ?? null;
-    inst.npcPending = false;
+    inst.npcOrderId = undefined;
+    inst.npcPending = level <= 0;
     this.store.set(COLLECTION, villageId, s);
+    if (level > 0) await this.spawnNpcVillage(villageId, s, inst);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }

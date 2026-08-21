@@ -215,6 +215,7 @@ function TaskCard({ task }: { task: any }) {
             {camps.length > 0
               ? <span class="task-prog-hint">地图上带 🎯 标记的营地</span>
               : task.campTotal > 0 && <span class="task-prog-hint">所有营地均已清理</span>}
+            {task.awaitingNatalieDecision && <span class="task-prog-hint task-prog-hint--warn">阶段 2/2：请在报告中选择释放或放入宝库。</span>}
           </div>
           {camps.length > 0 && (
             <div class="task-camp-locations" aria-label="待清理任务营地坐标">
@@ -242,7 +243,7 @@ function TaskCard({ task }: { task: any }) {
           <div class="task-card-prog">
             <span class="task-prog-hint">向幸福村运输 {resInfo(o.deliverResource).name} ×{o.deliverAmount}</span>
             {task.npcPending ? (
-              <span class="task-prog-hint task-prog-hint--warn">需先建造贸易中心</span>
+              <span class="task-prog-hint task-prog-hint--warn">幸福村已出现；建造贸易中心后可创建送达订单</span>
             ) : task.npcVillageId ? (
               <span class="task-prog-hint task-prog-hint--ok">幸福村已出现在附近，前往贸易中心接取粮食订单</span>
             ) : (

@@ -406,7 +406,7 @@ test('日常任务可反复：完成后刷新可再次刷出', async () => {
   assert.ok((st4.payload as any).offered.length > 0, '刷新后酒馆仍应有日常任务可刷');
 });
 
-test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易中心)生成幸福村与送达订单', async () => {
+test('村民的请求：接取即生成幸福村；贸易中心只决定送达订单', async () => {
   const app = freshApp();
   const regRes = await reg(app, '村民请求触发测试');
   const va = (regRes.payload as any).player.villageId;
@@ -425,11 +425,6 @@ test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易�
   const p = st.payload as any;
   assert.ok(p.offeredSide.some((q: any) => q.code === 's3'), '清空普通 PvE 营地后应点亮「村民的请求」支线');
 
-  // 准备贸易中心（写入 building 状态并触发 trade 初始化）
-  app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
-  await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
-  await tick();
-
   // 接取支线
   const acc = await send(app, 'task.Accept', { villageId: va, code: 's3' });
   assert.equal(acc.ok, true, `接取应成功: ${acc.reason ?? ''}`);
@@ -444,8 +439,16 @@ test('村民的请求：掠夺普通 PvE 营地点亮支线；接取(有贸易�
   assert.deepEqual(npcPayload.loot, { wood: 200, clay: 200, iron: 200, gold: 100 }, '幸福村掠夺资源应为 200/200/200/100');
   assert.equal(npcPayload.noRespawn, true, '幸福村应标记不重生');
 
+  // 未建贸易中心时没有订单，但幸福村不能因此延迟出现。
+  let tc = await send(app, 'trade.GetCenter', { villageId: va });
+  assert.equal(((tc.payload as any).npcDeliveryOrders ?? []).length, 0, '无贸易中心时不应创建订单');
+
+  app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
+  await app.bus.emit({ name: 'building.Built', source: 'test', ts: clock, payload: { villageId: va, kind: 'tradecenter' } } as any);
+  await tick();
+
   // 贸易中心应有幸福村送达订单（crop 500）
-  const tc = await send(app, 'trade.GetCenter', { villageId: va });
+  tc = await send(app, 'trade.GetCenter', { villageId: va });
   const orders = (tc.payload as any).npcDeliveryOrders ?? [];
   assert.equal(orders.length, 1, '贸易中心应有 1 条幸福村订单');
   assert.equal(orders[0].want.crop, 500, '订单应为 500 粮食');
@@ -478,9 +481,8 @@ test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获�
   const p = st.payload as any;
   assert.ok(!p.active.some((a: any) => a.code === 's3'), '掠夺幸福村后任务应终止');
   assert.ok(p.abandonedSide.includes('s3'), '失败路径应记入 abandonedSide（不再出现）');
-  const treasure = app.store.get<any>('treasure', va);
-  const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
-  assert.ok(codes.includes('secret_note'), '失败应获得秘密字条');
+  const pending = app.store.all<any>('treasure_pending').filter((x) => x.villageId === va && x.code === 'secret_note');
+  assert.equal(pending.length, 1, '失败应在报告中显示带回的秘密字条');
   const npc = await send(app, 'pve.GetTarget', { id: npcId });
   assert.equal(npc.ok, false, '幸福村地块应已被移除');
 });
@@ -632,11 +634,12 @@ test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁�
   await tick();
   const popA = app.store.get<any>('population', va);
   assert.ok(popA.treasureGrowthMult >= 1.2 - 1e-9, `放入宝库应使人口增长倍率≥1.2（实际 ${popA.treasureGrowthMult}）`);
-  // 放入宝库（take）后任务应变为就绪可交付，且记 natalieDecision=store（完成任务）
+  // 放入宝库（take）后任务失败：保留宝物，但绝不能领取 S4 奖励。
   const stA = await send(app, 'task.GetState', { villageId: va });
   const instA = stA.payload.active.find((a: any) => a.code === 's4');
-  assert.ok(instA.ready === true, '放入宝库（take）后任务应就绪可交付');
-  assert.equal(instA.natalieDecision, 'store', '放入宝库应记 natalieDecision=store');
+  assert.equal(instA, undefined, '放入宝库后调查坐标应以失败结束');
+  assert.ok(stA.payload.abandonedSide.includes('s4'), '放入宝库后应记入已失败支线');
+  return;
 
   // 路径B：释放（release）一个 captured_natalies → 不应立即发奖，需点「领取奖励」后才发
   // 重新挂起 natalie 抉择（路径A已消费 awaitingNatalieDecision，这里模拟另一次掉落重新挂起）

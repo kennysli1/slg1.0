@@ -1213,6 +1213,8 @@ function render(s){
     h+='<div class="card" data-code="'+esc(c)+'"><b>'+esc(t.name)+'</b> ['+esc(t.type)+'] code='+esc(c);
     if(t.objective&&t.objective.kind==='submit_resources')h+=' 已交:'+esc(JSON.stringify(t.submitted))+' / 需'+esc(JSON.stringify(t.required));
     if(t.objective&&t.objective.kind==='clear_camp')h+=' 营地'+esc(t.campCleared)+'/'+esc(t.campTotal);
+    if(t.awaitingNatalieDecision)h+=' <div>当前阶段：2/2 · 等待报告中选择「释放」或「放入宝库」</div>';
+    else if(t.natalieDecision==='release')h+=' <div>当前阶段：2/2 · 已释放，等待领取任务奖励</div>';
     h+=' <button class="act" data-act="complete" data-code="'+esc(c)+'">完成</button>';
     if(t.canAbandon)h+=' <button class="act" data-act="abandon" data-code="'+esc(c)+'">放弃</button>';
     if(t.objective&&t.objective.kind==='submit_resources')h+=' 资源<input class="res" data-code="'+esc(c)+'" placeholder="wood:100,clay:100" style="width:160px"> <button class="act" data-act="submit" data-code="'+esc(c)+'">上交</button>';
