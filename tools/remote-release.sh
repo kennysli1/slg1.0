@@ -91,6 +91,12 @@ mkdir -p "$RELEASES" "$SHARED/data" "$SHARED/logs"
 if [[ ! -e "$SHARED/data/game.json" && -d "$BASE/data" ]]; then
   cp -a "$BASE/data/." "$SHARED/data/"
 fi
+# 平衡调参覆盖与 game.json 是两份独立的持久数据。旧版生产目录可能已经有
+# shared/data/game.json，但 balance_overrides.json 仍只在 BASE/data；不能因为
+# 存档已迁移就漏掉 GM 覆盖。已有 shared 覆盖时保持它为当前权威值，不覆盖。
+if [[ -f "$BASE/data/balance_overrides.json" && ! -e "$SHARED/data/balance_overrides.json" ]]; then
+  cp -p "$BASE/data/balance_overrides.json" "$SHARED/data/balance_overrides.json"
+fi
 if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
   cp -a "$BASE/logs/." "$SHARED/logs/"
 fi

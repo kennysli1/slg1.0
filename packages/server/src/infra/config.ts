@@ -723,7 +723,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   assertUniqueRows(unitRows, 'units.csv');
   if (overrides?.units) {
     unitRows = mergeOverridesIntoRows(unitRows, {
-      file: 'units.csv', key: 'code',
+      // GM 平衡表按 units.csv 的数字 id 保存覆盖；这里必须使用同一主键，
+      // 否则覆盖文件存在但重启/删档后会静默回退到 CSV 默认值。
+      file: 'units.csv', key: 'id',
       numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
     }, overrides.units);
   }
