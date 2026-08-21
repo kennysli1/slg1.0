@@ -649,6 +649,14 @@ export class TasksModule {
     if (!inst) return;
     inst.awaitingNatalieDecision = false;
     inst.natalieDecision = p.released ? 'release' : 'store';
+    await this.commands.send({
+      name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+      payload: {
+        villageId: p.villageId,
+        delta: p.released ? this.config.constants.reputationS4ReleaseDelta : this.config.constants.reputationS4KeepDelta,
+        reason: p.released ? 's4_release_natalies' : 's4_keep_natalies',
+      },
+    });
     if (!p.released) {
       const code = inst.code;
       delete s.active[code];

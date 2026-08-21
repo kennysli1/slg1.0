@@ -42,7 +42,7 @@ export async function refreshAll(): Promise<void> {
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, pop, treasures] = await Promise.all([
+    const [res, vil, army, area, moves, pop, treasures, reputation] = await Promise.all([
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
@@ -50,6 +50,7 @@ export async function refreshAll(): Promise<void> {
       req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
       req('ListTreasures').catch(() => ({ ok: false } as any)),
+      req('GetReputation').catch(() => ({ ok: false } as any)),
     ]);
 
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
@@ -64,6 +65,7 @@ export async function refreshAll(): Promise<void> {
       res: res.payload, vil: vil.payload, army: army.payload,
       area: area.payload, moves: moves.payload,
       treasures: treasures.ok ? treasures.payload : null,
+      reputation: reputation.ok ? reputation.payload : null,
     });
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();

@@ -38,6 +38,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `pve.ts` | PvE 守军、战利品与重生 |
 | `movement.ts` | 出征、运输、拦截与返程中的部队 |
 | `diplomacy.ts` | 玩家对盟军/中立/敌对关系与宣战 |
+| `reputation.ts` | 玩家善恶声望、声望效果与跨模块调整 |
 | `combat.ts` | 进行中的逐 tick 战斗 |
 | `mercenary.ts` | 雇佣兵营地、候选与刷新任务 |
 | `trade.ts` | NPC/玩家订单、贸易中心与路线占用 |
@@ -85,6 +86,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `服务器/03_GM调试手册.md` | GM 联调和故障诊断 |
 | `任务模块.md` | 修改任务定义、任务图、任务营地或 GM 任务编辑 |
 | `视野模块.md` | 修改战争迷雾、视野参数或探索行军 |
+| `声望模块.md` | 修改玩家善恶值、声望效果、任务抉择或声望 GM 参数 |
 | `美术资源清单.md` | 查询资产命名与事实源 |
 | `美术生成规范.md` | 生成或替换美术资源 |
 | `部署手册_腾讯云轻量服务器.md` | 生产部署和回滚 |

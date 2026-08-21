@@ -75,3 +75,13 @@ villager_request_npc_iron,200,number,幸福村被掠夺时可抢铁矿
 villager_request_npc_gold,100,number,幸福村被掠夺时可抢金币
 villager_request_report_count,3,number,秘密字条战报标记的坐标数量
 villager_request_report_radius,5,number,秘密字条战报搜索玩家村庄周围的六边形环数
+reputation_s4_release_delta,2,number,S4释放被囚禁的娜塔莉们时增加善恶值
+reputation_s4_keep_delta,-2,number,S4将被囚禁的娜塔莉们收入宝库时减少善恶值
+reputation_good_pvp_target_threshold,10,number,善玩家攻击恶玩家所需的目标善恶值下限（严格大于）
+reputation_good_pvp_reward,2,number,善玩家攻击符合条件的恶玩家时增加善恶值
+reputation_evil_pvp_target_threshold,10,number,恶玩家攻击善玩家所需的目标善恶值下限（严格大于）
+reputation_evil_pvp_reward,2,number,恶玩家攻击符合条件的善玩家时增加恶值（绝对值）
+reputation_good_pop_growth_per_point,0.005,number,每点善值带来的人口增长倍率（0.005=0.5%）
+reputation_good_pop_growth_cap,0.5,number,善值人口增长倍率上限（0.5=+50%）
+reputation_evil_pve_drop_rate_per_point,0.01,number,每点恶值带来的PvE宝物掉落概率倍率
+reputation_evil_pve_drop_rate_cap,0.5,number,恶值PvE宝物掉落概率倍率上限（0.5=+50%）

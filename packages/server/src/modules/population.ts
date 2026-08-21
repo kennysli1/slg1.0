@@ -49,6 +49,8 @@ interface PopulationState {
   inFamine?: boolean;
   /** 宝物人口增长倍率（乘数，默认 1；由 treasure 模块推送，无环）。 */
   treasureGrowthMult?: number;
+  /** 善恶声望人口增长倍率（乘数，默认 1；由 reputation 模块推送，无环）。 */
+  reputationGrowthMult?: number;
   /** 科技人口增长倍率（乘数，默认 1；由 research 模块推送，无环）。 */
   techGrowthMult?: number;
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
@@ -102,6 +104,7 @@ export class PopulationModule {
     // 宝物模块推送的人口增长倍率（乘数），无环（treasure 只发命令，不回查）
     this.commands.register('population.SetTreasureGrowthMult', (c) => this.setTreasureGrowthMult(c));
     this.commands.register('population.SetTechGrowthMult', (c) => this.setTechGrowthMult(c));
+    this.commands.register('population.SetReputationGrowthMult', (c) => this.setReputationGrowthMult(c));
     this.commands.register('population.SetConscriptionMult', (c) => this.setConscriptionMult(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
@@ -134,6 +137,7 @@ export class PopulationModule {
       if (s.trainingPopCost === undefined) s.trainingPopCost = 0;
       if (s.inFamine === undefined) s.inFamine = false;
       if (s.treasureGrowthMult === undefined) s.treasureGrowthMult = 1;
+      if (s.reputationGrowthMult === undefined) s.reputationGrowthMult = 1;
       if (s.techGrowthMult === undefined) s.techGrowthMult = 1;
       if (s.treasureGoldMult === undefined) s.treasureGoldMult = 1;
       if (s.tribe === undefined) s.tribe = 'romans';
@@ -299,7 +303,7 @@ export class PopulationModule {
   /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。再乘宝物人口增长倍率。 */
   private growthRateRaw(s: PopulationState): number {
     const base = (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
-    return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1);
+    return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1) * (s.reputationGrowthMult ?? 1);
   }
 
   /** 每小时有效增长速率（不按 popCeiling 剩余缺口截断）。粮荒期间不增长（否则会与减员相互抵消）。 */
@@ -801,6 +805,15 @@ export class PopulationModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.techGrowthMult = Number.isFinite(mult) && mult > 0 ? (1 + mult) : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  private async setReputationGrowthMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.reputationGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }

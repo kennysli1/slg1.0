@@ -1162,9 +1162,14 @@ export class TreasureModule {
     };
     const c = this.config.constants;
     const baseChance = c.treasureCampDropChance;
+    let chanceMult = 1;
+    try {
+      const rep = await this.commands.send({ name: 'reputation.GetByVillage', from: TreasureModule.NAME, payload: { villageId } });
+      if (rep.ok) chanceMult = Math.max(1, Number((rep.payload as any)?.pveTreasureDropMult) || 1);
+    } catch { /* 声望模块不可用时保持旧概率，兼容启动顺序/旧测试夹具 */ }
 
     // 门控：未命中总体概率 → 无掉落
-    const hit = forceCode ? true : this.rng() < baseChance;
+    const hit = forceCode ? true : this.rng() < Math.min(1, baseChance * chanceMult);
     if (!hit) return { ok: true, payload: { dropped: null } };
 
     // 加权抽选宝物（按 dropRate 轮盘赌）

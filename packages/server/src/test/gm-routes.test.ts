@@ -152,6 +152,8 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
+    assert.match(res.body, /善恶 \/ 声望参数/, 'GM 页面应包含声望专用调参板块');
+    assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 善恶值参数');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
