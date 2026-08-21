@@ -18,15 +18,18 @@ FIXTURE="$TEST_ROOT/fixture"
 ARCHIVE="$TEST_ROOT/release.tgz"
 STATE1="$TEST_ROOT/state1"
 STATE2="$TEST_ROOT/state2"
+STATE3="$TEST_ROOT/state3"
 PM2_LOG="$TEST_ROOT/pm2.log"
 FAKE_PM2="$TEST_ROOT/fake-pm2"
 SHA1=1111111111111111111111111111111111111111
 SHA2=2222222222222222222222222222222222222222
+SHA3=3333333333333333333333333333333333333333
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 mkdir -p "$BASE/.git" "$BASE/data" "$BASE/logs" "$FIXTURE"
 BASE="$(cd "$BASE" && pwd -P)"
 printf 'legacy-save' > "$BASE/data/game.json"
+printf 'legacy-balance' > "$BASE/data/balance_overrides.json"
 printf 'legacy-log' > "$BASE/logs/out.log"
 printf 'legacy-config' > "$BASE/ecosystem.config.cjs"
 printf 'fixture-config' > "$FIXTURE/ecosystem.config.cjs"
@@ -45,6 +48,7 @@ run_helper() {
 
 run_helper deploy "$BASE" "$STATE1" "$ARCHIVE" "$SHA1"
 [[ "$(<"$BASE/shared/data/game.json")" == legacy-save ]]
+[[ "$(<"$BASE/shared/data/balance_overrides.json")" == legacy-balance ]]
 [[ "$(<"$BASE/releases/$SHA1/.release-commit")" == "$SHA1" ]]
 [[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA1" ]]
 grep -Fxq 'delete kow' "$PM2_LOG"
@@ -54,7 +58,20 @@ run_helper finalize "$BASE" "$STATE1"
 [[ ! -d "$BASE/.git" ]]
 find "$BASE/backups" -maxdepth 1 -type d -name 'legacy-git-*' | grep -q .
 
+# 旧存档已经在 shared/ 时，后续迁移仍须补齐缺失的 GM 覆盖文件。
+rm -f "$BASE/shared/data/balance_overrides.json"
+printf 'legacy-balance-v2' > "$BASE/data/balance_overrides.json"
 run_helper deploy "$BASE" "$STATE2" "$ARCHIVE" "$SHA2"
+[[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA2" ]]
+[[ "$(<"$BASE/shared/data/balance_overrides.json")" == legacy-balance-v2 ]]
+run_helper finalize "$BASE" "$STATE2"
+
+# active 覆盖存在时不得被旧目录覆盖，避免回退到历史调参。
+printf 'active-balance' > "$BASE/shared/data/balance_overrides.json"
+printf 'legacy-balance-v3' > "$BASE/data/balance_overrides.json"
+run_helper deploy "$BASE" "$STATE3" "$ARCHIVE" "$SHA3"
+[[ "$(<"$BASE/shared/data/balance_overrides.json")" == active-balance ]]
+run_helper rollback "$BASE" "$STATE3"
 [[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA2" ]]
 run_helper rollback "$BASE" "$STATE2"
 [[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA1" ]]
