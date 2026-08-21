@@ -509,6 +509,10 @@ async function load(){
 function sectionGeneric(table){
   var meta = DATA.meta[table];
   var rows = DATA[table] || [];
+  if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
+    var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key]; });
+  }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
@@ -531,6 +535,34 @@ function sectionGeneric(table){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
+}
+
+// ── 善恶/声望专用视图：把行为、门槛和城镇/PvE效果集中展示，避免在庞大的全局常量表中遗漏。 ──
+var REP_ROWS = [
+  ['reputation_s4_release_delta','S4释放娜塔莉们','选择释放时的善恶值变化'],
+  ['reputation_s4_keep_delta','S4收纳娜塔莉们','选择将宝物收入宝库时的善恶值变化'],
+  ['reputation_good_pvp_target_threshold','善攻恶目标门槛','目标善恶值必须严格小于负门槛'],
+  ['reputation_good_pvp_reward','善攻恶奖励','符合门槛时每次攻击增加善值'],
+  ['reputation_evil_pvp_target_threshold','恶攻善目标门槛','目标善恶值必须严格大于门槛'],
+  ['reputation_evil_pvp_reward','恶攻善奖励','符合门槛时每次攻击增加恶值绝对值'],
+  ['reputation_good_pop_growth_per_point','善值人口增长/点','每点善值带来的人口增长倍率'],
+  ['reputation_good_pop_growth_cap','善值人口增长上限','善值人口增长倍率上限'],
+  ['reputation_evil_pve_drop_rate_per_point','恶值PvE掉宝/点','每点恶值带来的PvE宝物掉落概率倍率'],
+  ['reputation_evil_pve_drop_rate_cap','恶值PvE掉宝上限','恶值PvE宝物掉落概率倍率上限'],
+];
+function sectionReputation(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">正数为善、负数为恶、初始值为 0。人口增长和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<REP_ROWS.length;j++){
+    var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>善恶 / 声望参数</h2>'+h+'</div>';
 }
 
 // ── 建筑参数统一视图 ── 合并 buildings + building_levels + trade_center + merc_camp，每栋一张折叠卡片。
@@ -687,6 +719,7 @@ function render(){
   var html = '';
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
+  html += sectionReputation();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
     if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染

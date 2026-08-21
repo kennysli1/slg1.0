@@ -437,6 +437,18 @@ export interface GameConstants {
   ritualBuffDurationSec: number;
   /** 祭祀台（ritualBuff）使用时扣除的劳动人口数（不足则扣除士兵）。 */
   ritualBuffPopCost: number;
+  /** 声望：S4 释放被囚禁的娜塔莉们时的善恶值变化。 */
+  reputationS4ReleaseDelta: number;
+  /** 声望：S4 将被囚禁的娜塔莉们收入宝库时的善恶值变化。 */
+  reputationS4KeepDelta: number;
+  reputationGoodPvpTargetThreshold: number;
+  reputationGoodPvpReward: number;
+  reputationEvilPvpTargetThreshold: number;
+  reputationEvilPvpReward: number;
+  reputationGoodPopGrowthPerPoint: number;
+  reputationGoodPopGrowthCap: number;
+  reputationEvilPveDropRatePerPoint: number;
+  reputationEvilPveDropRateCap: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -928,6 +940,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     treasureCarryMaxSlots: cn('treasure_carry_max_slots', 10),
     ritualBuffDurationSec: cn('ritual_buff_duration_sec', 7200),
     ritualBuffPopCost: cn('ritual_buff_pop_cost', 5),
+    reputationS4ReleaseDelta: cn('reputation_s4_release_delta', 2),
+    reputationS4KeepDelta: cn('reputation_s4_keep_delta', -2),
+    reputationGoodPvpTargetThreshold: cn('reputation_good_pvp_target_threshold', 10),
+    reputationGoodPvpReward: cn('reputation_good_pvp_reward', 2),
+    reputationEvilPvpTargetThreshold: cn('reputation_evil_pvp_target_threshold', 10),
+    reputationEvilPvpReward: cn('reputation_evil_pvp_reward', 2),
+    reputationGoodPopGrowthPerPoint: cn('reputation_good_pop_growth_per_point', 0.005),
+    reputationGoodPopGrowthCap: cn('reputation_good_pop_growth_cap', 0.5),
+    reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
+    reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
     raw,
   };
 

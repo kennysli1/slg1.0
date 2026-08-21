@@ -84,10 +84,11 @@ async function refreshAll() {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     const R = mapViewRadius();
     const fetchR = R + 6; // 拉取比视野稍大一圈，方向键移动后无需等待
-    const [res, vil, army, area, moves, pop] = await Promise.all([
+    const [res, vil, army, area, moves, pop, reputation] = await Promise.all([
       req('GetResources'), req('GetVillageLayout'), req('GetArmy'),
       req('GetArea', { cq: center.q, cr: center.r, r: fetchR }), req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
+      req('GetReputation').catch(() => ({ ok: false } as any)),
     ]);
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
     if (failed) {
@@ -96,7 +97,7 @@ async function refreshAll() {
       else addReport(`刷新失败：${errText(code)}`);
       return;
     }
-    setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload });
+    setCache({ res: res.payload, vil: vil.payload, army: army.payload, area: area.payload, moves: moves.payload, reputation: reputation.ok ? reputation.payload : null });
     // 更新人口快照（GetPopulation 失败时静默忽略，旧快照保留）
     if (pop.ok) {
       // GetPopulation 返回 v3 完整快照（publicPayload）：currentPop/soldierPop/totalPop/trainingPop/

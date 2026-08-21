@@ -217,6 +217,8 @@
 > 加目标点 = 加一行。
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
+
+声望模块参数也在此表维护：`reputation_s4_*` 控制 S4 抉择，`reputation_*_pvp_*` 控制善恶玩家攻击奖励与目标门槛，`reputation_good_pop_growth_*` 控制善值对人口增长的倍率及上限，`reputation_evil_pve_drop_rate_*` 控制恶值对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“善恶 / 声望参数”板块；保存后热重载即可生效，无需刷档。
 | 列 | 含义 |
 |----|------|
 | key | 常量键（代码按它读取，**勿改**） |

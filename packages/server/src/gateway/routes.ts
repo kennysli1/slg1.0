@@ -298,6 +298,13 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'reputation',
+    publicActions: {
+      GetReputation: { command: 'reputation.GetByVillage', ownVillage: true, needAuth: true, schema: {} },
+    },
+    eventPushMap: { 'reputation.Changed': 'ReputationChanged' },
+    },
+  {
     moduleName: 'pve',
     publicActions: {
       GetTarget: {
