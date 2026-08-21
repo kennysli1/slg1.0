@@ -17,7 +17,7 @@
 
 ### 新增
 
-- 行军系统全面改进（Wire v4，最低兼容 v4，旧客户端强制刷新）：共享 `Movement`/`ForeignArmy` 类型；新增 `RecallMarch` 主动撤回在途军队；新增 `StopMarch` / `ResumeMarch`，可令正在出征的部队在当前位置待命、继续原路线或撤回；地图右上角行军面板按每支部队状态显示停止、继续、撤回、召回或续行操作（`found` 类型撤回会 forfeits 开城包，需确认）；来袭告警改为部队进入守方视野后触发（不再出征瞬间通知）；`ListForeign` 脱敏视图改为仅 `pos`+`heading`（隐藏完整路径与目的地）；行军逐格增量推送（`MarchStep`/`MarchRemoved`/`ForeignArmyStep`/`ForeignArmyRemoved`）替代 3.5s 外国军队轮询；空间索引优化同格相遇检测；途中相遇战统一走 Combat 模块逐 tick 结算（双方均可收到 `BattleStarted`/`BattleTick`）。
+- 行军系统全面改进（Wire v4，最低兼容 v4，旧客户端强制刷新）：共享 `Movement`/`ForeignArmy` 类型；新增 `RecallMarch` 主动撤回在途军队；地图右上角行军面板按每支部队状态显示撤回、召回或续行操作（`found` 类型撤回会 forfeits 开城包，需确认）；来袭告警改为部队进入守方视野后触发（不再出征瞬间通知）；`ListForeign` 脱敏视图改为仅 `pos`+`heading`（隐藏完整路径与目的地）；行军逐格增量推送（`MarchStep`/`MarchRemoved`/`ForeignArmyStep`/`ForeignArmyRemoved`）替代 3.5s 外国军队轮询；空间索引优化同格相遇检测；途中相遇战统一走 Combat 模块逐 tick 结算（双方均可收到 `BattleStarted`/`BattleTick`）。
 
 ### 变更
 
@@ -26,6 +26,10 @@
 - `ListForeign` 响应删除 `path`/`to`/`arriveAt` 字段（破坏性协议变更，Wire v3→v4）。
 
 ### 修复
+
+- 修复行军操控规则：商队不再显示或接受地图面板的停止/撤回命令；军队移除停止命令，且仅在派出后 90 秒内允许撤回，服务端与客户端同时执行窗口校验。
+
+- 修复「正直的心」科技页显示基础判定间隔的问题：`research.GetState` 现在下发宝物倍率后的实际间隔，页面显示与后台科研调度一致。
 
 - 修复 GM 平衡覆盖在旧生产目录迁移时可能丢失的问题：`balance_overrides.json` 与 `game.json` 独立迁移到 `shared/data`，删档只重置游戏存档；已有活动覆盖时不被旧副本覆盖，且修正兵种覆盖主键，使 GM 调整跨删档与部署持续生效。
 

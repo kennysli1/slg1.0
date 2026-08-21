@@ -103,6 +103,23 @@ test('academy 参数表解析正确', () => {
   assert.ok(a[10].maxProbability >= 0.7, 'Lv10 保底概率应≥0.7');
 });
 
+test('正直的心：科研状态下发实际缩短后的判定间隔', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '正直之心间隔', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId;
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [], treasureTechIntervalMult: 1,
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+
+  const applied = await send(app, 'research.SetTreasureTechInterval', { villageId: va, mult: 0.9 });
+  assert.equal(applied.ok, true);
+  const state = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(state.ok, true);
+  assert.equal((state.payload as any).intervalSec, 3240, 'Lv1 基础 3600 秒应按 0.9 倍显示为 3240 秒');
+});
+
 // ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────
 test('研究：注册时初始 RP=0（不回溯赠送）', async () => {
   const app = freshApp();

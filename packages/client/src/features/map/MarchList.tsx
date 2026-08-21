@@ -111,21 +111,9 @@ export function MarchList() {
               }}>行军</Btn>
             </span>
           );
-        } else if (marching && !inDir) {
+        } else if (marching && !inDir && type !== 'caravan') {
           actions = (
             <span class="march-item-actions">
-              {m.stoppable && <Btn size="sm" onClick={async () => {
-                await act(req('StopMarch', { movementId: m.id }), { okToast: '部队已在当前位置停止' });
-              }}>停止</Btn>}
-              {m.recallable && <Btn size="sm" variant="danger" onClick={() => doRecall(m)}>撤回</Btn>}
-            </span>
-          );
-        } else if (stopped && !inDir) {
-          actions = (
-            <span class="march-item-actions">
-              <Btn size="sm" variant="primary" onClick={async () => {
-                await act(req('ResumeMarch', { movementId: m.id }), { okToast: '部队继续行军' });
-              }}>继续</Btn>
               {m.recallable && <Btn size="sm" variant="danger" onClick={() => doRecall(m)}>撤回</Btn>}
             </span>
           );
