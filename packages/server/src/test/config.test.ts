@@ -46,6 +46,26 @@ test('校验器：合法配置不抛错', () => {
   assert.doesNotThrow(() => validateGameConfig(cfg));
 });
 
+test('任务图：六表编译后保留任务线、目标、效果与关系', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.equal(cfg.questGraph.lines.main_foundation.entryQuest, 'm1');
+  assert.equal(cfg.questGraph.quests.s2.lineCode, 'show_of_force');
+  assert.ok(cfg.questGraph.objectives.some((x) => x.questCode === 's2' && x.kind === 'carry_flag'));
+  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm2' && x.params === 'iron:200|gold:150'));
+  assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm1' && x.toQuest === 'm2' && x.relation === 'requires'));
+  // 旧运行时仍从编译后的兼容定义取得完全相同的实际奖励。
+  assert.deepEqual(cfg.quests.m2.rewards.resources, { iron: 200, gold: 150 });
+});
+
+test('任务图校验：关系边引用不存在任务应拒绝', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = {
+    ...cfg,
+    questGraph: { ...cfg.questGraph, edges: [...cfg.questGraph.edges, { id: 'bad', fromQuest: 'm1', toQuest: 'missing', relation: 'requires', order: 99 }] },
+  };
+  assert.throws(() => validateGameConfig(bad), /终点任务不存在/);
+});
+
 test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', () => {
   const cfg = loadGameConfig(configDir);
   for (const b of Object.values(cfg.buildings)) {

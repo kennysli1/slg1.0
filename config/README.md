@@ -51,8 +51,13 @@
 | 表15 | `research.csv` | **科技树目录**（分支/层级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
 | 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
-| 表17 | `quests.csv` | **任务目录**（主线/随机任务的目标·奖励·前置） | 加任务、调奖励、加随机任务、改任务前置 |
-| 表18 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
+| 表17 | `quest_lines.csv` | **任务线目录**（入口与展示顺序） | 增加/调整独立任务线 |
+| 表18 | `quests.csv` | **任务节点目录**（归属任务线、类型与重复规则） | 增加任务、改名称/描述和刷新属性 |
+| 表19 | `quest_conditions.csv` | **任务条件**（何时出现、可接取或失败） | 调触发条件与门槛 |
+| 表20 | `quest_objectives.csv` | **任务目标**（可逐行审查） | 调完成目标与参数 |
+| 表21 | `quest_effects.csv` | **任务效果**（接取/完成/交付/失败） | 调奖励、分支效果与顺序 |
+| 表22 | `quest_edges.csv` | **任务关系边**（前置与分支解锁） | 调任务依赖、成功/失败后续 |
+| 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -312,24 +317,62 @@
 
 ---
 
-## quests.csv — 任务目录
+## 任务图配置（`quest_*.csv`）
+
+任务系统以 **任务线 → 任务节点 → 条件 / 目标 / 效果 → 关系边** 为唯一配置事实源。`tasks.ts` 只持有玩家任务实例、事件推进和任务营地；不得再把任务定义散落进运行时代码。GM 的“任务模块编辑”和“任务关系图”分别用于修改与审查这六张表。
+
+### quest_lines.csv — 任务线
 | 列 | 含义 |
 |----|------|
-| id | **数字主键**（主线 m1…m5、随机 r1…r3 各自排序，**勿改**） |
-| code | **英文代码**（如 `m1`/`r1`，程序与存档用，**勿改**） |
+| code | 稳定任务线代码（不可随意改名） |
 | name | 任务显示名 |
-| desc | 任务描述（客户端弹窗展示） |
-| type | 任务类型：`main`（主线，按 requires 串成链）/ `random`（随机，酒馆刷新时按 weight 抽取） |
-| requires | 前置任务 code（主线链用，如 `m1`；首任务留空） |
-| objKind | 任务目标类型：`submit_resources`（上交资源）/ `clear_camp`（清掉一个任务营地） |
-| objParam | 目标参数：`submit_resources` 填 `资源:数量|资源:数量`（如 `wood:200|clay:200`）；`clear_camp` 填 `task_camp:N`（N 为营地等级/目标编号） |
-| rewardRes | 完成奖励资源 `资源:数量|…`（留空表示无资源奖励） |
-| rewardTreasure | 完成奖励宝物 code（如 `warrior_token`，留空表示无宝物） |
-| weight | 随机任务抽取权重（主线填 0；随机任务填正整数，越大越容易被酒馆刷出） |
-| repeatable / cooldownSec | 是否可重复 / 完成后再次进入池的冷却秒数 |
-| abandonCooldownSec | 放弃后再次进入池的冷却秒数 |
-| dailyRewardGroup / dailyRewardValue | 每日奖励预算分组 / 本任务消耗额度 |
-| campSearchRadius / campRetrySec / campMaxRadius | 任务营地初始搜索半径 / 重试间隔 / 最大搜索半径 |
+| kind | `main` / `daily` / `side`，用于展示与刷新策略 |
+| entryQuest | 此任务线入口任务的 `code` |
+| order | GM 图和客户端目录的显示顺序 |
+
+### quests.csv — 任务节点
+| 列 | 含义 |
+|----|------|
+| id | 数字主键，仅用于稳定排序 |
+| code | 稳定任务代码；存档实例引用它，勿改名 |
+| lineCode | 所属 `quest_lines.csv` 的 `code` |
+| name / desc | 玩家可见名称与描述 |
+| type | `main` / `daily` / `side`，与任务线用途一致 |
+| weight | 每日任务抽取权重；主线/支线填 0 |
+| repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
+
+### quest_conditions.csv — 条件
+| 列 | 含义 |
+|----|------|
+| id | 稳定条件 ID |
+| questCode | 所属任务代码 |
+| phase | 当前支持 `offer`（出现条件）；预留 `accept` / `success` / `failure` 供条件审查 |
+| group | 同组条件的组合语义；当前填 `all` |
+| kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20` |
+
+### quest_objectives.csv — 目标
+| 列 | 含义 |
+|----|------|
+| id / questCode | 稳定目标 ID / 所属任务 |
+| kind | 目标类型，如 `submit_resources`、`task_camp`、`clear_pve`、`rare_treasure`、`war_flag` |
+| params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
+| order | 同任务多目标时的顺序 |
+
+### quest_effects.csv — 效果
+| 列 | 含义 |
+|----|------|
+| id / questCode | 稳定效果 ID / 所属任务 |
+| phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token` |
+| order | 同阶段的执行顺序 |
+
+### quest_edges.csv — 关系边
+| 列 | 含义 |
+|----|------|
+| id | 稳定边 ID |
+| fromQuest / toQuest | 起点与终点任务代码 |
+| relation | `requires`（前置完成）/ `success_unlock` / `failure_unlock` |
+| order | 多条入边的稳定顺序 |
 
 ## pvp_power_curve.csv — PvP 强弱差掠夺衰减
 | 列 | 含义 |
@@ -337,7 +380,7 @@
 | maxRatio | 攻击方与防守方出征初始战力比的区间上限；最后一档留空表示无上限 |
 | lootMult | 该区间最终可掠夺量倍率 |
 
-> 主线靠 `requires` 串成链：前一个完成才出现后一个（如 m2/m3 都要求 m1）。随机任务只在酒馆建好后由服务端按 weight 刷新，接取占用酒馆 `taskMaxTasks` 名额。
+> 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在 GM 关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
 
 ---
 

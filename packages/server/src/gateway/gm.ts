@@ -79,7 +79,8 @@ button.sm{padding:3px 7px;font-size:11px}
     <div class="ops-row">
       <button class="warn sm" onclick="window.open('/gm/balance','_blank')">平衡调参</button>
       <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务管理</button>
-      <button class="warn sm" onclick="window.open('/gm/quests','_blank')">任务目录</button>
+      <button class="warn sm" onclick="window.open('/gm/quest-modules','_blank')">任务模块编辑</button>
+      <button class="warn sm" onclick="window.open('/gm/quest-graph','_blank')">任务关系图</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -321,6 +322,16 @@ interface BalanceTable {
   numericByType?: boolean;
   labels: string[];
 }
+
+/** 任务图的六张配置表；顺序即 GM 编辑器与人工审查的阅读顺序。 */
+const QUEST_MODULE_TABLES = [
+  'quest_lines.csv',
+  'quests.csv',
+  'quest_conditions.csv',
+  'quest_objectives.csv',
+  'quest_effects.csv',
+  'quest_edges.csv',
+] as const;
 
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
@@ -922,6 +933,75 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.type('text/html; charset=utf-8').send(GM_QUESTS_HTML);
   });
 
+  // GET /gm/quest-modules — 任务图模块化编辑器。六张表必须作为一个事务校验后才写回。
+  fastify.get('/gm/quest-modules', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_QUEST_MODULES_HTML);
+  });
+
+  fastify.get('/gm/quest-modules/data', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const dir = gameApp.configDir;
+    const tables: Record<string, { header: string[]; rows: CsvRow[] }> = {};
+    for (const file of QUEST_MODULE_TABLES) {
+      const doc = parseCsvStructured(readFileSync(join(dir, file), 'utf-8'));
+      tables[file] = { header: doc.header, rows: doc.rows };
+    }
+    void reply.send({ ok: true, tables });
+  });
+
+  fastify.post('/gm/quest-modules/save', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const body = (req.body ?? {}) as { tables?: Record<string, { rows?: CsvRow[] }> };
+    if (!body.tables) {
+      void reply.code(400).send({ ok: false, reason: 'tables 必填' });
+      return;
+    }
+    const dir = gameApp.configDir;
+    const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
+    try {
+      const csvByFile: Record<string, string> = {};
+      for (const file of QUEST_MODULE_TABLES) {
+        const rows = body.tables[file]?.rows;
+        if (!Array.isArray(rows)) throw new Error(`${file} 缺少 rows`);
+        const doc = parseCsvStructured(readFileSync(join(dir, file), 'utf-8'));
+        // 去掉旧数据行、保留表头/注释/空行，再按本次 rows 重建数据行；支持增删行。
+        const oldDataIndices = new Set(doc.rowIndices);
+        const raw = doc.raw.filter((_, i) => !oldDataIndices.has(i));
+        doc.headerIndex = raw.findIndex((line) => line.split(',').map((x) => x.trim()).join(',') === doc.header.join(','));
+        doc.raw = raw;
+        doc.rows = rows.map((row) => Object.fromEntries(doc.header.map((h) => [h, row[h] ?? ''])));
+        doc.rowIndices = [];
+        for (let i = 0; i < doc.rows.length; i++) {
+          doc.raw.push('');
+          doc.rowIndices.push(doc.raw.length - 1);
+        }
+        csvByFile[file] = serializeCsv(doc);
+      }
+      cpSync(dir, tmp, { recursive: true });
+      for (const file of QUEST_MODULE_TABLES) writeFileSync(join(tmp, file), csvByFile[file], 'utf-8');
+      loadGameConfig(tmp); // 整图校验失败时绝不写入线上 configDir。
+      for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
+      gameApp.reloadConfig();
+      void reply.send({ ok: true });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      void reply.code(400).send({ ok: false, reason: msg });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // GET /gm/quest-graph — 按任务线/节点/条件/目标/效果/边展示声明式任务图。
+  fastify.get('/gm/quest-graph', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_QUEST_GRAPH_HTML);
+  });
+
+  // GM 只读审查数据：配置仍以 config/quest_*.csv 为唯一事实源，避免线上覆盖漂移。
+  fastify.get('/gm/quest-graph/data', (req, reply) => {
+    if (!auth(req, reply)) return;
+    void reply.send({ ok: true, graph: gameApp.config.questGraph });
+  });
+
   // GET /gm/quests/data — 返回 quests.csv 解析后的行 + 表头（供编辑器渲染）
   fastify.get('/gm/quests/data', (req, reply) => {
     if (!auth(req, reply)) return;
@@ -1042,6 +1122,43 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
   });
 }
+
+const GM_QUEST_MODULES_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>任务模块编辑</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}.tab.active{background:#315b7b;color:#fff}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;white-space:nowrap}th{position:sticky;top:0;background:#20354c;color:#8ed5ff}input{width:150px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}td:first-child input{width:70px}.row-actions{min-width:46px}a{color:#79cfff}
+</style></head><body>
+<h1>任务模块编辑</h1><p class="hint">编辑顺序：任务线 → 任务 → 条件 / 目标 / 效果 → 关系边。六张表会作为一个整体校验：引用不存在的任务、无效目标或循环依赖都会被拒绝。<a href="/gm/quest-graph">查看关系图</a></p>
+<div class="bar" id="tabs"></div><div class="bar"><button onclick="addRow()">+ 新增行</button><button class="save" onclick="save()">保存全部模块</button><span id="status">加载中…</span></div><div class="table-wrap"><table id="grid"></table></div>
+<script>
+const TABLES=['quest_lines.csv','quests.csv','quest_conditions.csv','quest_objectives.csv','quest_effects.csv','quest_edges.csv'];let data={},active=TABLES[0],token=sessionStorage.getItem('gmToken')??'';
+const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},token?{'X-GM-Token':token}:{},opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();sessionStorage.setItem('gmToken',token);return api(url,opt)}}let j=await r.json();if(!r.ok||!j.ok)throw Error(j.reason||'请求失败');return j}
+function tabs(){document.getElementById('tabs').innerHTML=TABLES.map(f=>'<button class="tab '+(f===active?'active':'')+'" onclick="selectTab(\''+f+'\')">'+f+'</button>').join('')}
+function selectTab(f){active=f;tabs();render()}
+function render(){let t=data[active],h=t.header;let html='<thead><tr>'+h.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<t.rows.length;i++){html+='<tr>'+h.map(k=>'<td><input data-r="'+i+'" data-k="'+esc(k)+'" value="'+esc(t.rows[i][k])+'" oninput="edit(this)"></td>').join('')+'<td class="row-actions"><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=html+'</tbody>';document.getElementById('status').textContent=active+'：'+t.rows.length+' 行'}
+function edit(el){data[active].rows[Number(el.dataset.r)][el.dataset.k]=el.value}
+function addRow(){let r={};for(let h of data[active].header)r[h]='';data[active].rows.push(r);render()}
+function removeRow(i){if(confirm('删除这一行？')){data[active].rows.splice(i,1);render()}}
+async function save(){try{document.getElementById('status').textContent='整图校验中…';await api('/gm/quest-modules/save',{method:'POST',body:JSON.stringify({tables:data})});document.getElementById('status').textContent='已保存并热重载';}catch(e){document.getElementById('status').textContent='保存失败：'+e.message}}
+api('/gm/quest-modules/data').then(x=>{data=x.tables;tabs();render()}).catch(e=>document.getElementById('status').textContent='加载失败：'+e.message);
+</script></body></html>`;
+
+const GM_QUEST_GRAPH_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>任务关系图</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 5px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 16px;line-height:1.6}.line{border:1px solid #33506f;border-radius:8px;margin:12px 0;background:#172333}.line>h2{margin:0;padding:9px 12px;font-size:15px;background:#20354c;color:#8ed5ff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:10px;padding:10px}.quest{border:1px solid #304c69;border-radius:6px;padding:9px;background:#121d2b}.quest h3{margin:0 0 5px;color:#fff;font-size:14px}.code{color:#6fc8ff}.desc{color:#b9c7d6;margin:4px 0 8px;line-height:1.45}.section{border-top:1px solid #2a4058;padding-top:6px;margin-top:6px}.label{color:#f2be71}.tag{display:inline-block;margin:2px 4px 2px 0;padding:2px 5px;border-radius:3px;background:#263c54;color:#cfe6ff}.edge{color:#a9db95}.warn{color:#f2be71}.empty{color:#71849a}a{color:#79cfff}#status{color:#9bb0c9}
+</style></head><body>
+<h1>任务关系图</h1><p class="hint">定义按 <b>任务线 → 任务 → 条件 / 目标 / 效果 → 关系边</b> 拆分。<a href="/gm/quest-modules">打开模块编辑器</a>；每次保存都会整图校验并热重载。</p>
+<p id="status">加载中…</p><main id="app"></main>
+<script>
+const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+let token=sessionStorage.getItem('gmToken')??'';
+async function load(){let h={};if(token)h['X-GM-Token']=token;let r=await fetch('/gm/quest-graph/data',{headers:h});if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();sessionStorage.setItem('gmToken',token);return load();}}let d=await r.json();if(!d.ok)throw Error(d.reason||'加载失败');return d.graph;}
+function tags(rows,fmt){return rows.length?rows.map(x=>'<span class="tag">'+esc(fmt(x))+'</span>').join(''):'<span class="empty">无</span>';}
+function render(g){let out='';let lines=Object.values(g.lines).sort((a,b)=>a.order-b.order);for(let line of lines){let qs=Object.values(g.quests).filter(q=>q.lineCode===line.code).sort((a,b)=>a.id-b.id);out+='<section class="line"><h2>'+esc(line.name)+' <span class="code">'+esc(line.code)+'</span> · 入口 '+esc(line.entryQuest)+'</h2><div class="grid">';for(let q of qs){let cs=g.conditions.filter(x=>x.questCode===q.code);let os=g.objectives.filter(x=>x.questCode===q.code).sort((a,b)=>a.order-b.order);let es=g.effects.filter(x=>x.questCode===q.code).sort((a,b)=>a.order-b.order);let incoming=g.edges.filter(x=>x.toQuest===q.code);let outgoing=g.edges.filter(x=>x.fromQuest===q.code);out+='<article class="quest"><h3>'+esc(q.name)+' <span class="code">'+esc(q.code)+'</span></h3><div class="desc">'+esc(q.desc)+'</div><div class="section"><span class="label">条件：</span>'+tags(cs,x=>x.phase+' / '+x.kind+':'+x.value)+'</div><div class="section"><span class="label">目标：</span>'+tags(os,x=>x.kind+' '+x.params)+'</div><div class="section"><span class="label">效果：</span>'+tags(es,x=>x.phase+' / '+x.kind+' '+x.params)+'</div><div class="section edge"><span class="label">关系：</span>'+tags(incoming,x=>x.fromQuest+' —'+x.relation+'→ 本任务')+tags(outgoing,x=>'本任务 —'+x.relation+'→ '+x.toQuest)+'</div></article>';}out+='</div></section>';}document.getElementById('app').innerHTML=out;document.getElementById('status').textContent='已加载 '+Object.keys(g.quests).length+' 个任务、'+g.conditions.length+' 个条件、'+g.objectives.length+' 个目标、'+g.effects.length+' 个效果、'+g.edges.length+' 条关系。';}
+load().then(render).catch(e=>document.getElementById('status').textContent='加载失败：'+e.message);
+</script></body></html>`;
 
 const GM_TASKS_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>任务管理</title>

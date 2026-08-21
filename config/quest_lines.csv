@@ -1,0 +1,7 @@
+code,name,kind,entryQuest,order
+#稳定任务线代码,显示名称,类型,入口任务代码,展示顺序
+main_foundation,主线建设,main,m1,1
+tavern_commissions,酒馆委托,daily,d1,2
+ritual_altar,祭祀台,side,s1,3
+show_of_force,耀武扬威,side,s2,4
+villager_story,村民与娜塔莉,side,villager_request,5
