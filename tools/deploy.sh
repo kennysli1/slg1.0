@@ -33,7 +33,8 @@ WORKTREE="$DEPLOY_TMP/main"
 ARCHIVE="$DEPLOY_TMP/deploy.tgz"
 REMOTE_ARCHIVE="/tmp/kow-deploy-$$.tgz"
 REMOTE_STATE="/tmp/kow-deploy-$$.state"
-SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no)
+# 明确使用吞吐型 QoS；部分公网链路会将交互式 SSH QoS 限速到几 KB/s，导致发布包上传长时间停滞。
+SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o IPQoS=throughput)
 DEPLOY_PENDING=0
 
 # 在耗时的隔离验证前确认发布通道。失败时绝不切换生产 current。
@@ -80,7 +81,9 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$ARCHIVE" -C "$WORKTREE" \
   package.json package-lock.json ecosystem.config.cjs PROJECT.md README.md CLAUDE.md AGENTS.md CHANGELOG.md
 
 echo "==> 上传并构建不可变 release"
-scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:$REMOTE_ARCHIVE"
+# OpenSSH 新版默认走 SFTP；该服务器链路在 SFTP 大包传输时会在 255KB 窗口后停滞，
+# 使用兼容的 legacy SCP 数据通道可保持发布包连续上传。
+scp -O "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:$REMOTE_ARCHIVE"
 remote_release deploy "$DEPLOY_REMOTE" "$REMOTE_STATE" "$REMOTE_ARCHIVE" "$MAIN_SHA"
 DEPLOY_PENDING=1
 
