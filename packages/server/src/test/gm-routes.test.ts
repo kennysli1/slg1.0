@@ -168,6 +168,25 @@ test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任�
   }
 });
 
+test('/gm/quest-modules 页面脚本可解析并生成可切换标签', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const page = await fastify.inject({ method: 'GET', url: '/gm/quest-modules' });
+    assert.equal(page.statusCode, 200);
+    const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script, '编辑器页面应包含初始化脚本');
+    assert.doesNotThrow(() => new Function(script), '编辑器脚本必须是合法 JavaScript');
+    assert.match(page.body, /data-tab=/, '标签按钮必须使用安全的数据属性绑定');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
