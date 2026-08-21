@@ -70,6 +70,7 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   // 交付完成任务
   const dv = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
   assert.equal(dv.ok, true, '交付应成功: ' + (dv.reason ?? ''));
+  assert.deepEqual((dv.payload as any).rewards.resources, { gold: 500 }, 'S4 释放路径领奖返回值应明确包含 500 金币');
   const st3 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });

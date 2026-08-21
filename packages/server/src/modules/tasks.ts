@@ -559,6 +559,7 @@ export class TasksModule {
     // natalieDecision 仅在 captured_natalies 任务被释放裁决时置为 'release'（见 onNatalieDecision）。
     if (inst.natalieDecision === 'release') {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: { gold: 500 } } });
+      granted.resources = { ...(granted.resources ?? {}), gold: ((granted.resources ?? {}).gold ?? 0) + 500 };
       const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'honest_heart', pendingIfFull: true } });
       if (gh.ok) granted.treasures.push('honest_heart');
     }

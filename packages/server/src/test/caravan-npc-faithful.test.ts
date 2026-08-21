@@ -77,6 +77,71 @@ test('真实链路：幸福村(pve.Spawn id=happy-X)消失后，发往它的商�
   assert.notEqual(mv.arriveAt, clock + 100000, 'arriveAt 不应仍是原送达倒计时（证明已重置为返程）');
 });
 
+test('真实战斗链路：清空幸福村会移除目标并让途中的商队从当前进度返程', async () => {
+  const app = freshApp();
+  const A = await register(app, '村A-摧毁');
+  const npcId = `happy-${A.villageId}`;
+  const npcXY = { q: A.q + 8, r: A.r + 8 };
+  const spawn = await send(app, 'pve.Spawn', {
+    id: npcId, type: 'happy_village', q: npcXY.q, r: npcXY.r,
+    task: false, ownerVillageId: A.villageId, noRespawn: true,
+  });
+  assert.equal(spawn.ok, true, `幸福村生成应成功: ${spawn.reason ?? ''}`);
+  const car = await send(app, 'movement.SendCaravan', {
+    fromVillage: A.villageId, targetVillage: npcId, cargo: { crop: 1 }, homeVillage: A.villageId, routesFreed: 1,
+  });
+  assert.equal(car.ok, true, `商队派出应成功: ${car.reason ?? ''}`);
+  const caravanId = (car.payload as any).id;
+  const caravan = app.store.get('movement', caravanId) as any;
+  const midIndex = Math.max(1, Math.floor(caravan.path.length / 2));
+  caravan.stepIndex = midIndex;
+  caravan.pos = caravan.path[midIndex];
+  caravan.nextStepAt = clock + caravan.perStepMs;
+  app.store.set('movement', caravanId, caravan);
+
+  // 幸福村是 0 守军 NPC，第一战斗 tick 即可判定清空。
+  const engaged = await send(app, 'combat.Engage', {
+    targetKind: 'pve', targetId: npcId, targetXY: npcXY,
+    movementId: 'attack-happy', fromVillage: A.villageId, fromXY: { q: A.q, r: A.r },
+    troops: { legionnaire: 1 },
+    attackerSnapshot: { legionnaire: { count: 1, form: 'melee', meleeAtk: 40, rangedAtk: 0, meleeDef: 35, rangedDef: 50, carry: 10 } },
+  });
+  assert.equal(engaged.ok, true, `攻击幸福村应成功: ${engaged.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + app.config.constants.combatTickMs, (t) => { clock = t; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal((await send(app, 'pve.GetTarget', { id: npcId })).ok, false, '幸福村清空后应移除 PvE 实体');
+  const returned = app.store.get('movement', caravanId) as any;
+  assert.equal(returned.returning, true, '途中的商队应自动进入返程');
+  assert.deepEqual(returned.toXY, { q: A.q, r: A.r }, '商队应返回原出发村');
+  assert.ok(returned.arriveAt > clock, '自动返程应有新的到达时间');
+});
+
+test('手动撤回商队：返程 ETA 按当前行军进度计算而非重置为整段去程', async () => {
+  const app = freshApp();
+  const A = await register(app, '村A-撤回');
+  const npcId = `happy-${A.villageId}`;
+  const npcXY = { q: A.q + 8, r: A.r + 8 };
+  await send(app, 'pve.Spawn', { id: npcId, type: 'happy_village', q: npcXY.q, r: npcXY.r, noRespawn: true });
+  const car = await send(app, 'movement.SendCaravan', {
+    fromVillage: A.villageId, targetVillage: npcId, cargo: { crop: 1 }, homeVillage: A.villageId, routesFreed: 1,
+  });
+  assert.equal(car.ok, true);
+  const caravanId = (car.payload as any).id;
+  const caravan = app.store.get('movement', caravanId) as any;
+  const midIndex = Math.max(1, Math.floor(caravan.path.length / 2));
+  caravan.stepIndex = midIndex;
+  caravan.pos = caravan.path[midIndex];
+  caravan.nextStepAt = clock + caravan.perStepMs;
+  app.store.set('movement', caravanId, caravan);
+  const oldTotalMs = caravan.arriveAt - caravan.departAt;
+  const recall = await send(app, 'movement.RecallMarch', { villageId: A.villageId, movementId: caravanId });
+  assert.equal(recall.ok, true, `撤回应成功: ${recall.reason ?? ''}`);
+  const returned = app.store.get('movement', caravanId) as any;
+  assert.ok(returned.arriveAt - clock < oldTotalMs, '从半路撤回的 ETA 不应重新等于整段去程');
+  assert.equal(returned.returning, true);
+});
+
 function hexDist(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
 }
