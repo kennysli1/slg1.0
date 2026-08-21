@@ -117,7 +117,7 @@ test('真实战斗链路：清空幸福村会移除目标并让途中的商队�
   assert.ok(returned.arriveAt > clock, '自动返程应有新的到达时间');
 });
 
-test('手动撤回商队：返程 ETA 按当前行军进度计算而非重置为整段去程', async () => {
+test('商队：不允许通过行军命令手动撤回', async () => {
   const app = freshApp();
   const A = await register(app, '村A-撤回');
   const npcId = `happy-${A.villageId}`;
@@ -134,12 +134,13 @@ test('手动撤回商队：返程 ETA 按当前行军进度计算而非重置为
   caravan.pos = caravan.path[midIndex];
   caravan.nextStepAt = clock + caravan.perStepMs;
   app.store.set('movement', caravanId, caravan);
-  const oldTotalMs = caravan.arriveAt - caravan.departAt;
   const recall = await send(app, 'movement.RecallMarch', { villageId: A.villageId, movementId: caravanId });
-  assert.equal(recall.ok, true, `撤回应成功: ${recall.reason ?? ''}`);
-  const returned = app.store.get('movement', caravanId) as any;
-  assert.ok(returned.arriveAt - clock < oldTotalMs, '从半路撤回的 ETA 不应重新等于整段去程');
-  assert.equal(returned.returning, true);
+  assert.equal(recall.ok, false);
+  assert.equal(recall.reason, 'caravan_uncontrollable');
+  const listed = await send(app, 'movement.List', { villageId: A.villageId });
+  const listedCaravan = (listed.payload as any).movements.find((m: any) => m.id === caravanId);
+  assert.equal(listedCaravan.recallable, false, '商队地图面板不应显示撤回按钮');
+  assert.equal(listedCaravan.stoppable, false, '商队地图面板不应显示停止按钮');
 });
 
 function hexDist(a: { q: number; r: number }, b: { q: number; r: number }): number {

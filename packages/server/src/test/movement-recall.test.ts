@@ -91,32 +91,30 @@ test('RecallMarch：返程中不可再次撤回', async () => {
   assert.equal(recall2.reason, 'already_returning');
 });
 
-test('StopMarch：停止后可继续原路线或撤回，过期步进不得推进', async () => {
+test('军队：派出超过 90 秒后不可撤回，且不再提供停止命令', async () => {
   const app = freshApp();
-  const A = await register(app, '停止甲');
-  const B = await register(app, '停止乙');
+  const A = await register(app, '撤回窗口甲');
+  const B = await register(app, '撤回窗口乙');
   await send(app, 'military.AdjustTroops', { villageId: A.villageId, delta: { legionnaire: 20 } });
 
   const attack = await send(app, 'movement.SendAttack', {
     villageId: A.villageId, targetVillage: B.villageId, troops: { legionnaire: 10 },
   });
   const movementId = (attack.payload as any).id as string;
-  const before = app.store.get<any>('movement', movementId);
+  const initial = await send(app, 'movement.List', { villageId: A.villageId });
+  const initialMove = (initial.payload as any).movements.find((m: any) => m.id === movementId);
+  assert.equal(initialMove.recallable, true, '派出后 90 秒内应可撤回');
+  assert.equal(initialMove.stoppable, false, '军队不应提供停止命令');
+
   const stopped = await send(app, 'movement.StopMarch', { villageId: A.villageId, movementId });
-  assert.equal(stopped.ok, true);
-  assert.equal(app.store.get<any>('movement', movementId)?.status, 'stopped');
+  assert.equal(stopped.ok, false);
+  assert.equal(stopped.reason, 'not_stoppable');
 
-  // 原先登记的 Scheduler 回调即使到点也会被 stepToken 拦住。
-  await app.scheduler.advanceTo(clock + before.perStepMs + 1_000, setClock);
-  assert.equal(app.store.get<any>('movement', movementId)?.stepIndex, before.stepIndex);
-
-  const resumed = await send(app, 'movement.ResumeMarch', { villageId: A.villageId, movementId });
-  assert.equal(resumed.ok, true);
-  const resumedRecord = app.store.get<any>('movement', movementId);
-  assert.equal(resumedRecord?.status, 'marching');
-  assert.ok(resumedRecord?.arriveAt > clock);
-
-  const recalled = await send(app, 'movement.RecallMarch', { villageId: A.villageId, movementId });
-  assert.equal(recalled.ok, true);
-  assert.equal(app.store.get<any>('movement', movementId)?.type, 'return');
+  clock += 90_001;
+  const expired = await send(app, 'movement.List', { villageId: A.villageId });
+  const expiredMove = (expired.payload as any).movements.find((m: any) => m.id === movementId);
+  assert.equal(expiredMove.recallable, false, '派出超过 90 秒后撤回按钮应消失');
+  const recall = await send(app, 'movement.RecallMarch', { villageId: A.villageId, movementId });
+  assert.equal(recall.ok, false);
+  assert.equal(recall.reason, 'not_recallable');
 });

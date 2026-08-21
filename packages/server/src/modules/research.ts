@@ -178,7 +178,11 @@ export class ResearchModule {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
     const params = s.academy.highestLevel > 0 ? this.config.academy[s.academy.highestLevel] : null;
-    const intervalSec = s.academy.academyCount > 0 && params ? Math.max(1, Math.round(params.checkIntervalSec / s.academy.academyCount)) : 0;
+    // 与 settleRp/tickRp 使用同一倍率，确保「正直的心」在科研页显示实际判定间隔，
+    // 而不是只在后台调度器中生效、页面仍显示基础间隔。
+    const intervalSec = s.academy.academyCount > 0 && params
+      ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1)))
+      : 0;
     return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
   }
 

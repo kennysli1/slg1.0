@@ -60,6 +60,8 @@ interface MovementRecord {
   /** 拓荒发起玩家（found 到达建村用） */
   founderPlayerId?: string;
   departAt: number;
+  /** 首次派出时刻；撤回窗口以此为准，不因内部转向/返程重置。 */
+  launchedAt?: number;
   arriveAt: number;
   // ── 逐格推进状态 ──
   /** 逐格路径（含首尾），相邻两格恒为六边形邻居。 */
@@ -200,13 +202,20 @@ export class MovementModule {
     if (m.type === 'return') return false;
     if (m.status === 'paused') return false;
     if (m.status === 'stationed') return false;
+    // 商队由贸易路线自动运行，玩家不能在地图面板手动停止或撤回。
+    if (m.type === 'caravan') return false;
+    // 军队仅在派出后的 90 秒内允许撤回；兼容旧存档时退回 departAt。
+    if (this.isArmyMovement(m) && this.now() - (m.launchedAt ?? m.departAt) >= 90_000) return false;
     return m.status === 'marching' || m.status === 'stopped';
   }
 
   private stoppable(m: MovementRecord, viewerVillageId: string): boolean {
-    return m.fromVillage === viewerVillageId
-      && m.type !== 'return'
-      && m.status === 'marching';
+    // 行军系统不再提供原地停止/继续命令；保留旧 Command 仅用于兼容旧客户端，始终拒绝。
+    return false;
+  }
+
+  private isArmyMovement(m: MovementRecord): boolean {
+    return m.type === 'raid' || m.type === 'attack' || m.type === 'found' || m.type === 'explore' || m.type === 'garrison';
   }
 
   private toWire(m: MovementRecord, viewerVillageId: string): MovementWire {
@@ -707,6 +716,7 @@ export class MovementModule {
       if (mv.status === 'paused') return { ok: false, payload: {}, reason: 'in_combat' };
       if (mv.status === 'stationed') return { ok: false, payload: {}, reason: 'use_garrison_commands' };
       if (mv.type === 'return') return { ok: false, payload: {}, reason: 'already_returning' };
+      if (mv.type === 'caravan') return { ok: false, payload: {}, reason: 'caravan_uncontrollable' };
       if (mv.status === 'stopped') return { ok: false, payload: {}, reason: 'already_stopped' };
       if (!this.stoppable(mv, villageId)) return { ok: false, payload: {}, reason: 'not_stoppable' };
       mv.status = 'stopped';
@@ -759,6 +769,7 @@ export class MovementModule {
       if (mv.status === 'paused') return { ok: false, payload: {}, reason: 'in_combat' };
       if (mv.status === 'stationed') return { ok: false, payload: {}, reason: 'use_recall_garrison' };
       if (mv.type === 'return') return { ok: false, payload: {}, reason: 'already_returning' };
+      if (mv.type === 'caravan') return { ok: false, payload: {}, reason: 'caravan_uncontrollable' };
       if (!this.recallable(mv, villageId)) return { ok: false, payload: {}, reason: 'not_recallable' };
       mv.abandonedToXY = mv.toXY;
       await this.startReturn(mv);
@@ -816,6 +827,7 @@ export class MovementModule {
     mv.perStepMs = perStepMs;
     mv.nextStepAt = this.now() + perStepMs;
     mv.arriveAt = this.now() + perStepMs * steps;
+    mv.launchedAt = this.now();
     mv.status = 'marching';
     mv.stepToken += 1;
     this.save(mv);
@@ -844,6 +856,7 @@ export class MovementModule {
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
     const full: MovementRecord = {
       ...base,
+      launchedAt: base.departAt,
       originalFromXY: base.originalFromXY ?? base.fromXY,
       path,
       stepIndex: 0,
