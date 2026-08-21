@@ -979,7 +979,6 @@ export class MovementModule {
       id, type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
-    await this.commands.send({ name: 'reputation.ProcessPvpAttack', from: MovementModule.NAME, payload: { attackerVillageId: villageId, targetVillageId: targetVillage } });
 
     log('出征(attack)', { id: mv.id, from: villageId, targetVillage, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
@@ -1063,7 +1062,6 @@ export class MovementModule {
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) { await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } }); return { ok: false, payload: {}, reason: carry.reason }; }
     const mv = await this.launch({ id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
-    await this.commands.send({ name: 'reputation.ProcessPvpAttack', from: MovementModule.NAME, payload: { attackerVillageId: villageId, targetVillageId: targetVillage } });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }

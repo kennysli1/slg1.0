@@ -19,6 +19,7 @@ export interface TreasureInfo {
   name: string; icon: string;
   category: string; rarity: string;
   effectType: string; effectValue: number;
+  reputationValue?: number;
   priceGold: number; dropRate: number; applyType: string;
   equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean;
 }
@@ -31,7 +32,7 @@ interface ServerConfig {
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   /** 宝物目录（服务端下发）：code → 展示与数值信息。 */
-  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; priceGold: number; dropRate: number; applyType: string; equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean }[];
+  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; reputationValue?: number; priceGold: number; dropRate: number; applyType: string; equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean }[];
   constants: {
     mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
@@ -156,9 +157,11 @@ export function treasureRarityName(rarity: string): string {
 /** 宝物效果类型 → 中文描述（含数值，value 单位：rate 类为 %，instantGold 为金币）。 */
 export function treasureEffectText(info: TreasureInfo): string {
   const v = info.effectValue;
+  const reputation = Number(info.reputationValue ?? 0);
+  const reputationText = reputation ? `、声望值 ${reputation > 0 ? '+' : ''}${reputation}` : '';
   // 正直的心：复合效果（value=百分比，统一作用于四项）
   if (info.effectType === 'honestHeart') {
-    return `全军攻击 +${v}%、全军防御 +${v}%、金币收入 +${v}%、科技点判定间隔 -${v}%`;
+    return `全军攻击 +${v}%、全军防御 +${v}%、金币收入 +${v}%、科技点判定间隔 -${v}%${reputationText}`;
   }
   const map: Record<string, string> = {
     woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,
@@ -170,7 +173,7 @@ export function treasureEffectText(info: TreasureInfo): string {
     soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
     victoryFlag: `全军攻击、防御 +${v}%；每次携旗清营或成功掠夺并归城，额外 +2%`,
   };
-  return map[info.effectType] ?? info.effectType;
+  return (map[info.effectType] ?? info.effectType) + reputationText;
 }
 /** 已知全部资源 key（服务端优先，回退木泥铁粮）。 */
 export function resourceKeys(): string[] {

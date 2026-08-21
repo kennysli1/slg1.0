@@ -16,6 +16,7 @@ import type { GameConfig, TreasureDef } from '../infra/config.js';
  *  - 效果不在此模块内直接改经济/军事/人口，而是「推送」给各 owner 模块（铁律#4）：
  *      · 经济产出倍率 → economy.SetRateModifier(source='treasure')
  *      · 人口增长倍率 → population.SetTreasureGrowthMult
+ *      · 声望被动修正 → reputation.SetTreasureDelta
  *      · 攻防倍率     → military.SetTreasureCombatMult（作用于防守快照）
  *  - 宝物存放分三处：城镇中心主栏(town, 基础1格)、宝库主栏(treasury, 等级提供额外格)与宝库备用栏(treasuryReserve, 同等容量)。
  *    新宝物优先入宝库主栏，其次城镇中心，最后备用栏；备用栏不会自动装载。
@@ -42,6 +43,8 @@ export interface TreasureEffects {
   defMult: number;
   /** 人口增长倍率（乘数）。 */
   popGrowthMult: number;
+  /** 主宝物栏被动提供的声望值修正（可为负）。 */
+  reputationDelta: number;
   /** 骑兵训练速率倍率（乘数，默认 1；伯乐提供，training time 乘此值）。 */
   cavalryTrainMult: number;
   /** 精神食粮：每兵粮耗减免绝对值（加性累加，effectValue 直接累加，非百分比）。 */
@@ -474,12 +477,14 @@ export class TreasureModule {
     let atkMult = 1;
     let defMult = 1;
     let popGrowthMult = 1;
+    let reputationDelta = 0;
     let cavalryTrainMult = 1;
     let soldierFoodReduce = 0;
     let techIntervalMult = 1;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
+      reputationDelta += Number.isFinite(t.reputationValue) ? (t.reputationValue ?? 0) : 0;
       const frac = t.effectValue / 100; // effectValue 为百分比
       switch (t.effectType) {
         case 'woodRate': resMult.wood = (resMult.wood ?? 0) + frac; break;
@@ -499,6 +504,7 @@ export class TreasureModule {
         case 'atkMult': atkMult = 1 + (atkMult - 1) + frac; break;
         case 'defMult': defMult = 1 + (defMult - 1) + frac; break;
         case 'popGrowth': popGrowthMult = 1 + (popGrowthMult - 1) + frac; break;
+        case 'reputation': reputationDelta += t.effectValue; break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'soldierFoodReduce': soldierFoodReduce += t.effectValue; break; // 精神食粮：每兵减粮绝对值（非百分比，直接累加）
         case 'honestHeart': {
@@ -523,7 +529,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, cavalryTrainMult, soldierFoodReduce, techIntervalMult };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
@@ -544,6 +550,11 @@ export class TreasureModule {
       name: 'population.SetTreasureGrowthMult', from: TreasureModule.NAME,
       payload: { villageId, mult: eff.popGrowthMult, goldMult: eff.goldMult },
     });
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: TreasureModule.NAME, payload: { villageId } });
+    const playerId = (owner.payload as any)?.player?.id;
+    if (owner.ok && playerId) {
+      await this.commands.send({ name: 'reputation.SetTreasureDelta', from: TreasureModule.NAME, payload: { playerId, delta: eff.reputationDelta } });
+    }
     // 军事攻防倍率（作用于防守快照）
     await this.commands.send({
       name: 'military.SetTreasureCombatMult', from: TreasureModule.NAME,

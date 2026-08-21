@@ -29,17 +29,19 @@ export function ResourceBar() {
 function ReputationCell() {
   const rep = getCache().reputation as any;
   const value = Math.trunc(Number(rep?.value) || 0);
-  const alignment = value > 0 ? '善' : value < 0 ? '恶' : '中立';
+  const alignment = value > 0 ? '正声望' : value < 0 ? '负声望' : '中立';
   const popBonus = Math.round((Number(rep?.populationGrowthBonus) || 0) * 100);
   const pveBonus = Math.round((Number(rep?.pveTreasureDropBonus) || 0) * 100);
+  const popPenalty = Math.round((Number(rep?.populationGrowthPenalty) || 0) * 100);
+  const taxReduction = Math.round((Number(rep?.goldTaxReduction) || 0) * 100);
   const title = rep
-    ? `善恶值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${popBonus >= 0 ? '+' : ''}${popBonus}%；PvE宝物掉落 ${pveBonus >= 0 ? '+' : ''}${pveBonus}%`
-    : '善恶值：正在加载';
+    ? `声望值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${value < 0 ? '-' + popPenalty : '+' + popBonus}%；金币税收 ${value > 0 ? '-' + taxReduction : '无修正'}；PvE宝物掉落 ${pveBonus >= 0 ? '+' : ''}${pveBonus}%`
+    : '声望值：正在加载';
   return (
     <div class={`res res--reputation res--${value > 0 ? 'good' : value < 0 ? 'evil' : 'neutral'}`} title={title}>
       <Icon icon="ui_icon_pop" label="" decorative size="sm" />
       <div class="res-value">
-        <span class="res-label">善恶</span>
+        <span class="res-label">声望</span>
         <span class="res-num">{value >= 0 ? '+' : ''}{value}</span>
       </div>
       <div class="res-meta"><span class="res-rate">{alignment}</span></div>

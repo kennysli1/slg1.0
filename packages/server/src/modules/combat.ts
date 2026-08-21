@@ -492,8 +492,19 @@ export class CombatModule {
       campCleared,
     };
 
+    // 多支军队共同攻击同一玩家村庄时，按各支出征兵力占比分摊被消灭的守军，
+    // 让声望奖励按实际归属结算而不是每支军队重复领取整场击杀数。
+    const contributionEntries = Object.entries(b.contributions);
+    const contributionSize = new Map<string, number>();
+    const totalContributionSize = contributionEntries.reduce((sum, [cid, c]) => {
+      const size = Object.values(c.troops).reduce((n, count) => n + Math.max(0, Math.floor(count)), 0);
+      contributionSize.set(cid, size);
+      return sum + size;
+    }, 0);
+    const remainingDefenderLosses = { ...defenderLosses };
+
     // 每支来攻部队：算各自幸存兵力 + 按载货比例分战利品 → 发结束事件（Movement 据此返程）
-    for (const [cid, contrib] of Object.entries(b.contributions)) {
+    for (const [index, [cid, contrib]] of contributionEntries.entries()) {
       const survivors: Record<string, number> = {};
       const attackerLossesForVillage: Record<string, number> = {};
       let carry = 0;
@@ -532,13 +543,24 @@ export class CombatModule {
         });
       }
 
+      const defenderLossesAttributed: Record<string, number> = {};
+      for (const [code, lost] of Object.entries(remainingDefenderLosses)) {
+        const allocated = index === contributionEntries.length - 1
+          ? lost
+          : Math.min(lost, Math.floor(lost * (contributionSize.get(cid) ?? 0) / Math.max(1, totalContributionSize)));
+        if (allocated > 0) {
+          defenderLossesAttributed[code] = allocated;
+          remainingDefenderLosses[code] = lost - allocated;
+        }
+      }
+
       void this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
-          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, ...reportBase,
+          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, ...reportBase,
         },
       } as DomainEvent);
     }
