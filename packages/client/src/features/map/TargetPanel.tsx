@@ -131,6 +131,15 @@ function Assessment({
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
     : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
+  const preparationLabel: Record<DispatchMode, string> = {
+    attack: '编组攻城部队',
+    raid: '编组掠夺部队',
+    transport: '编组转移部队',
+    transfer: '编组转移部队',
+    reinforce: '编组增援部队',
+    garrison: '编组驻扎部队',
+    explore: '编组探索部队',
+  };
 
   return (
     <div class="target-body expedition-body">
@@ -156,7 +165,7 @@ function Assessment({
 
       <div class="target-foot expedition-foot">
         <Btn variant={meta.mode === 'attack' ? 'danger' : 'primary'} size="lg" block onClick={onNext}>
-          继续：{isTransport ? '编队与装载' : '编队'}
+          {preparationLabel[meta.mode]}
         </Btn>
       </div>
     </div>
@@ -314,14 +323,14 @@ function Preparation({
   const troopCount = total(troops);
   const cargoCount = total(cargo);
   const isTransfer = meta.mode === 'transport' || meta.mode === 'transfer';
-  const canContinue = troopCount > 0 && (!isTransfer || cargoCount > 0);
+  const canDispatch = troopCount > 0 && (!isTransfer || cargoCount > 0);
   return (
     <div class="target-body expedition-body">
       <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} />
       {isTransfer && <CargoPlanner cargo={cargo} setCargo={setCargo} />}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
       <div class="expedition-validation" aria-live="polite">
-        {canContinue
+        {canDispatch
           ? `已选择 ${fmt(troopCount)} 名部队${isTransfer ? `，装载 ${fmt(cargoCount)} 单位物资` : ''}。`
           : isTransfer
             ? '运输需要至少选择一支部队和一种货物。'
@@ -329,7 +338,7 @@ function Preparation({
       </div>
       <div class="target-foot expedition-foot expedition-foot--split">
         <Btn onClick={onBack}>上一步</Btn>
-        <Btn variant={meta.mode === 'attack' ? 'danger' : 'primary'} size="lg" disabled={!canContinue} onClick={onNext}>继续：确认</Btn>
+        <Btn variant={meta.mode === 'attack' ? 'danger' : 'primary'} size="lg" disabled={!canDispatch} onClick={onNext}>进入行军确认</Btn>
       </div>
     </div>
   );
@@ -440,7 +449,7 @@ function ModeSelectPanel({ base, kind, onClose, onSwitch, onAbandon }: { base: T
   useEffect(() => {
     let live = true;
     void req('GetMarchOptions', { q: base.q, r: base.r, kind, refId: base.refId || undefined })
-      .then((res) => { if (live && res.ok) { const next = (res.payload.modes ?? []) as ModeOption[]; setOptions(next); if (next.length === 1) setChoice(next[0]); } })
+      .then((res) => { if (live && res.ok) setOptions((res.payload.modes ?? []) as ModeOption[]); })
       .catch(() => { if (live) setOptions([]); });
     return () => { live = false; };
   }, [base.q, base.r, base.refId, kind]);
@@ -462,7 +471,6 @@ function ModeSelectPanel({ base, kind, onClose, onSwitch, onAbandon }: { base: T
 }
 
 function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: number; dist: number; visibility?: string; onClose: () => void }) {
-  const [step, setStep] = useState<WorkflowStep>(1);
   const [garrison, setGarrison] = useState(false);
   const [founding, setFounding] = useState(false);
   async function found() {
@@ -484,17 +492,9 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   }
   return (
     <Panel variant="gold" corners class="map-target-panel">
-      <WorkflowHeader meta={meta} step={step} onClose={onClose} />
+      <WorkflowHeader meta={meta} step={1} onClose={onClose} />
       <div class="target-body expedition-body">
-        {step === 1 && <section class="expedition-assessment"><div class="expedition-kicker">目标评估</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，可派军探索，军队抵达后会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可派军队驻扎；拥有拓荒者时才可选择拓荒。驻扎军抵达时会再次确认格子仍为空地。'}</p>{allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '派军探索' : '派军队驻扎'}</Btn>}{visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>派拓荒者拓荒</Btn>}</section>}
-        {step === 2 && <section class="expedition-assessment"><div class="expedition-kicker">拓荒准备</div><div class="expedition-assessment-title">由服务器复核条件</div><p>提交后将由服务器校验拓荒者、资源、人口和村庄数量限制。</p></section>}
-        {step === 3 && <section class="expedition-confirm-card"><div class="expedition-kicker">确认命令</div><h3>拓荒至 ({q},{r})</h3><p>确认后将消耗开城资源并派遣拓荒者。</p></section>}
-        <div class="target-foot expedition-foot expedition-foot--split">
-          {step > 1 && <Btn onClick={() => setStep((step - 1) as WorkflowStep)}>上一步</Btn>}
-          <Btn variant="primary" size="lg" block={step === 1} onClick={() => step < 3 ? setStep((step + 1) as WorkflowStep) : found()}>
-            {step < 3 ? '继续' : '确认拓荒'}
-          </Btn>
-        </div>
+        <section class="expedition-assessment"><div class="expedition-kicker">选择行军模式</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，选择探索后军队抵达会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可选择驻扎；拥有拓荒者时才显示拓荒模式。驻扎军抵达时会再次确认格子仍为空地。'}</p>{allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}{visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}</section>
       </div>
     </Panel>
   );
@@ -522,8 +522,8 @@ function GarrisonContinuation({ movementId, target, onClose }: {
   }
   return (
     <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
-      <div class="target-head"><IconPlate icon={mode === 'garrison' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">驻扎军下一道命令</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消续行">×</button></div>
-      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>继续{label}至「{target.name}」</h3><p>{allowExplore ? '该军队会从当前驻扎地继续行军，保持所携部队和宝物，并继续占用原有的一个行军点。' : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
+      <div class="target-head"><IconPlate icon={mode === 'garrison' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">选择行军模式</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消行军模式">×</button></div>
+      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>{label}至「{target.name}」</h3><p>{allowExplore ? '该军队会从当前驻扎地出发，保持所携部队和宝物，并继续占用原有的一个行军点。' : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
     </Panel>
   );
 }
@@ -545,7 +545,7 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
       <div class="target-body expedition-body">
         <section class="expedition-assessment">
           <div class="expedition-kicker">驻扎中</div>
-          <p>该格有你的驻扎军。可召回返城，或在地图上选择下一处目标继续行军（编队与宝物保持原样）。</p>
+          <p>该格有你的驻扎军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
         </section>
         <div class="target-foot expedition-foot expedition-foot--split">
           <Btn onClick={async () => {
@@ -554,9 +554,9 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
           <Btn variant="primary" onClick={() => {
             garrisonContinue.value = { movementId: move.id };
             selected.value = null;
-            showToast('请在地图上选择驻扎军的下一处目标');
+            showToast('请在地图上选择驻扎军的下一处行军目标');
             onClose();
-          }}>行军</Btn>
+          }}>选择行军模式</Btn>
         </div>
       </div>
     </Panel>
@@ -606,22 +606,22 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
   );
 }
 
-/** 驻扎续行等待选格：行军列表点了「行军」后，在点地图目标前显示。 */
+/** 驻扎军选择行军模式后，在地图上点选下一处目标。 */
 function GarrisonWaitPanel({ onCancel }: { onCancel: () => void }) {
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <div class="target-head">
-        <IconPlate icon="pve_bandits" label="驻扎续行" size="sm" plate="gold" />
+        <IconPlate icon="pve_bandits" label="行军模式" size="sm" plate="gold" />
         <div class="target-heading-copy">
           <div class="target-title">选择下一处目标</div>
           <div class="target-coord">点击地图上的空地、野怪或玩家村庄</div>
         </div>
-        <button type="button" class="target-close" onClick={onCancel} aria-label="取消续行">×</button>
+        <button type="button" class="target-close" onClick={onCancel} aria-label="取消行军模式">×</button>
       </div>
       <div class="target-body expedition-body">
         <p class="expedition-modal-copy">编队与宝物保持在原驻扎军中，不会重新扣兵或多占行军点。</p>
         <div class="target-foot expedition-foot">
-          <Btn onClick={onCancel}>取消续行</Btn>
+          <Btn onClick={onCancel}>取消选择</Btn>
         </div>
       </div>
     </Panel>
