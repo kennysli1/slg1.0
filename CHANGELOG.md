@@ -21,6 +21,8 @@
 
 ### 变更
 
+- 支线任务稳定代码统一为短编号：`villager_request` 改为 `s3`，`investigate_coords` 改为 `s4`；任务图、GM、运行时分支和测试同步更新。读取旧存档时自动迁移活动任务、完成/放弃/可接取记录和冷却键，无需再次刷档。
+
 - `ListForeign` 响应删除 `path`/`to`/`arriveAt` 字段（破坏性协议变更，Wire v3→v4）。
 
 ### 修复

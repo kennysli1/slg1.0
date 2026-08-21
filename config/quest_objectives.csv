@@ -10,5 +10,5 @@ o-d2,d2,clear_camp,task_camp:1,1
 o-d3,d3,submit_resources,crop:300,1
 o-s1,s1,sell_discard_treasure,rare:2,1
 o-s2,s2,carry_flag,war_flag:20,1
-o-villager,villager_request,deliver_to_npc,crop:500,1
-o-investigate,investigate_coords,clear_camp,rats:3,1
+o-villager,s3,deliver_to_npc,crop:500,1
+o-investigate,s4,clear_camp,rats:3,1

@@ -264,8 +264,12 @@ export class TasksModule {
       }
       s.offered = remaining;
     }
-    // 迁移旧任务 code（r1→d1, r2→d2, r3→d3, r4→s1）
-    const CODE_MAP: Record<string, string> = { r1: 'd1', r2: 'd2', r3: 'd3', r4: 's1' };
+    // 迁移旧任务 code（r1→d1, r2→d2, r3→d3, r4→s1；长支线代码→s3/s4）。
+    // 任务 ID 是存档引用，改名时必须在读取路径完成惰性迁移，不能让旧实例变成“未知任务”。
+    const CODE_MAP: Record<string, string> = {
+      r1: 'd1', r2: 'd2', r3: 'd3', r4: 's1',
+      villager_request: 's3', investigate_coords: 's4',
+    };
     const remapCode = (c: string) => CODE_MAP[c] ?? c;
     s.completedSide = s.completedSide.map(remapCode);
     s.abandonedSide = s.abandonedSide.map(remapCode);
@@ -273,9 +277,16 @@ export class TasksModule {
     s.offeredSide = s.offeredSide.map(remapCode);
     for (const old of Object.keys(s.active)) {
       const neu = remapCode(old);
-      if (neu !== old) { s.active[neu] = s.active[old]; delete s.active[old]; }
+      if (neu !== old) {
+        s.active[neu] = { ...s.active[old], code: neu, lineCode: this.config.questGraph.quests[neu]?.lineCode };
+        delete s.active[old];
+      }
     }
     s.cooldownUntil ??= {};
+    for (const old of Object.keys(s.cooldownUntil)) {
+      const neu = remapCode(old);
+      if (neu !== old) { s.cooldownUntil[neu] = s.cooldownUntil[old]; delete s.cooldownUntil[old]; }
+    }
     return s;
   }
 
@@ -783,7 +794,7 @@ export class TasksModule {
           name: 'treasure.RollDrop', from: TasksModule.NAME,
           payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
         });
-        if (code === 'investigate_coords') {
+        if (code === 's4') {
           inst.awaitingNatalieDecision = true;
           inst.awaitingNatalieCode = 'captured_natalies';
           this.store.set(COLLECTION, villageId, s);
