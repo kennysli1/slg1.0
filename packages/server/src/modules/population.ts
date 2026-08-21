@@ -49,12 +49,14 @@ interface PopulationState {
   inFamine?: boolean;
   /** 宝物人口增长倍率（乘数，默认 1；由 treasure 模块推送，无环）。 */
   treasureGrowthMult?: number;
-  /** 善恶声望人口增长倍率（乘数，默认 1；由 reputation 模块推送，无环）。 */
+  /** 声望人口增长倍率（乘数，默认 1；由 reputation 模块推送，无环）。 */
   reputationGrowthMult?: number;
   /** 科技人口增长倍率（乘数，默认 1；由 research 模块推送，无环）。 */
   techGrowthMult?: number;
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
   treasureGoldMult?: number;
+  /** 正负声望对金币税的最终倍率（正声望会降低税收，默认 1）。 */
+  reputationGoldTaxMult?: number;
   /** 存储溢出扣减系数（0=无溢出；1=全部100%溢出），由 settle 更新后供 publicPayload 显示用。旧存档无此字段默认 0。 */
   storedOverflowRatio?: number;
   /** 动员加成（默认 0；全民皆兵 +0.15）。mobilizeCap = base + conscriptionBonus。旧存档无此字段默认 0。 */
@@ -105,6 +107,7 @@ export class PopulationModule {
     this.commands.register('population.SetTreasureGrowthMult', (c) => this.setTreasureGrowthMult(c));
     this.commands.register('population.SetTechGrowthMult', (c) => this.setTechGrowthMult(c));
     this.commands.register('population.SetReputationGrowthMult', (c) => this.setReputationGrowthMult(c));
+    this.commands.register('population.SetReputationGoldTaxMult', (c) => this.setReputationGoldTaxMult(c));
     this.commands.register('population.SetConscriptionMult', (c) => this.setConscriptionMult(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
@@ -140,6 +143,7 @@ export class PopulationModule {
       if (s.reputationGrowthMult === undefined) s.reputationGrowthMult = 1;
       if (s.techGrowthMult === undefined) s.techGrowthMult = 1;
       if (s.treasureGoldMult === undefined) s.treasureGoldMult = 1;
+      if (s.reputationGoldTaxMult === undefined) s.reputationGoldTaxMult = 1;
       if (s.tribe === undefined) s.tribe = 'romans';
       if (s.mainLevel === undefined) s.mainLevel = 1;
       if (s.hardCap === undefined) s.hardCap = 0;
@@ -365,9 +369,9 @@ export class PopulationModule {
     }
     s.currentPop = Math.max(0, s.currentPop);
 
-    // 交税：仅劳动人口(currentPop)按税率交金币，绑定城镇中心、不受繁荣度影响。
+    // 交税：仅劳动人口(currentPop)按税率交金币，绑定城镇中心，不受繁荣度影响但受宝物/声望税收倍率影响。
     // 单向 Grant 到 economy（不读回，无环）；与资源惰性结算同节奏，按 Δt 累加。
-    const goldGained = s.currentPop * c.goldTaxPerCivilianPerHour * dtHours * (s.treasureGoldMult ?? 1);
+    const goldGained = s.currentPop * c.goldTaxPerCivilianPerHour * dtHours * (s.treasureGoldMult ?? 1) * (s.reputationGoldTaxMult ?? 1);
     if (goldGained > 0) {
       await this.commands.send({
         name: 'economy.Grant', from: PopulationModule.NAME,
@@ -423,8 +427,8 @@ export class PopulationModule {
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,
-      /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
-      goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour * (s.treasureGoldMult ?? 1)),
+      /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响；受宝物/声望倍率影响）。供资源条展示金币速率。 */
+      goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour * (s.treasureGoldMult ?? 1) * (s.reputationGoldTaxMult ?? 1)),
       /** 存储溢出扣减系数（0~1）。前端据此显示人口增长被扣减的原因。 */
       overflowRatio: Math.round((s.storedOverflowRatio ?? 0) * 100) / 100,
     };
@@ -814,6 +818,16 @@ export class PopulationModule {
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.reputationGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: {} };
+  }
+
+  /** 声望模块推送的金币税收倍率（乘数，默认 1；正声望会降低税收）。 */
+  private async setReputationGoldTaxMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.reputationGoldTaxMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }

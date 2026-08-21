@@ -218,7 +218,7 @@
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_*` 控制 S4 抉择，`reputation_*_pvp_*` 控制善恶玩家攻击奖励与目标门槛，`reputation_good_pop_growth_*` 控制善值对人口增长的倍率及上限，`reputation_evil_pve_drop_rate_*` 控制恶值对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“善恶 / 声望参数”板块；保存后热重载即可生效，无需刷档。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
 | 列 | 含义 |
 |----|------|
 | key | 常量键（代码按它读取，**勿改**） |
@@ -261,6 +261,7 @@
 | name / icon | 显示名 / 图标基名 |
 | category / rarity | 宝物类别 / 稀有度 |
 | effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写） |
+| reputationValue | 主宝物栏被动声望修正（可为负；备用栏和军队携带中不生效） |
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
 | applyType | `passive` 持续生效或即时消费类型 |

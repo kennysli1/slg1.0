@@ -115,12 +115,15 @@ export interface TreasureDef {
    *  - woodRate/clayRate/ironRate/cropRate/goldRate/allResRate：资源产出倍率加成（value=百分比，如 5=+5%）
    *  - atkMult/defMult：全军攻/防倍率加成（value=百分比）
    *  - popGrowth：人口增速倍率加成（value=百分比）
+   *  - reputation：主宝物栏被动声望修正（value=整数，可为负）
    *  - instantGold：获得时立即结算一次的金币数（value=数量）
    *  - ritualBuff：使用后扣除劳动人口，全资源产量加成持续一段时间（value=百分比；时长/人口见 game_constants）
    *  - honestHeart：复合效果（value=百分比，统一作用于以下四项）：全军攻击+value%、全军防御+value%、金币收入+value%、科技点判定间隔×(1-value/100)（更快）
    */
   effectType: string;
   effectValue: number;
+  /** 主宝物栏被动声望修正；独立于主效果，允许为负。 */
+  reputationValue?: number;
   /** NPC 售卖价（金币）。 */
   priceGold: number;
   /** 掉落/出现概率（0-1）：清理野外营地、贸易中心刷新时按此概率出现。 */
@@ -437,16 +440,22 @@ export interface GameConstants {
   ritualBuffDurationSec: number;
   /** 祭祀台（ritualBuff）使用时扣除的劳动人口数（不足则扣除士兵）。 */
   ritualBuffPopCost: number;
-  /** 声望：S4 释放被囚禁的娜塔莉们时的善恶值变化。 */
+  /** 声望：S4 释放被囚禁的娜塔莉们时的声望值变化。 */
   reputationS4ReleaseDelta: number;
-  /** 声望：S4 将被囚禁的娜塔莉们收入宝库时的善恶值变化。 */
-  reputationS4KeepDelta: number;
+  /** 声望：正声望攻击负声望目标的门槛（目标声望严格小于负门槛）。 */
   reputationGoodPvpTargetThreshold: number;
+  /** 声望：正声望玩家每消灭十点敌方士兵人口获得的声望值。 */
   reputationGoodPvpReward: number;
+  /** 声望：负声望攻击正声望目标的门槛（目标声望严格大于门槛）。 */
   reputationEvilPvpTargetThreshold: number;
+  /** 声望：负声望玩家每消灭十点敌方士兵人口增加的负声望绝对值。 */
   reputationEvilPvpReward: number;
   reputationGoodPopGrowthPerPoint: number;
   reputationGoodPopGrowthCap: number;
+  reputationEvilPopGrowthPenaltyPerPoint: number;
+  reputationEvilPopGrowthPenaltyCap: number;
+  reputationGoodGoldTaxPenaltyPerPoint: number;
+  reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
@@ -941,13 +950,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     ritualBuffDurationSec: cn('ritual_buff_duration_sec', 7200),
     ritualBuffPopCost: cn('ritual_buff_pop_cost', 5),
     reputationS4ReleaseDelta: cn('reputation_s4_release_delta', 2),
-    reputationS4KeepDelta: cn('reputation_s4_keep_delta', -2),
     reputationGoodPvpTargetThreshold: cn('reputation_good_pvp_target_threshold', 10),
-    reputationGoodPvpReward: cn('reputation_good_pvp_reward', 2),
+    reputationGoodPvpReward: cn('reputation_good_pvp_reward', 1),
     reputationEvilPvpTargetThreshold: cn('reputation_evil_pvp_target_threshold', 10),
-    reputationEvilPvpReward: cn('reputation_evil_pvp_reward', 2),
+    reputationEvilPvpReward: cn('reputation_evil_pvp_reward', 1),
     reputationGoodPopGrowthPerPoint: cn('reputation_good_pop_growth_per_point', 0.005),
     reputationGoodPopGrowthCap: cn('reputation_good_pop_growth_cap', 0.5),
+    reputationEvilPopGrowthPenaltyPerPoint: cn('reputation_evil_pop_growth_penalty_per_point', 0.005),
+    reputationEvilPopGrowthPenaltyCap: cn('reputation_evil_pop_growth_penalty_cap', 0.5),
+    reputationGoodGoldTaxPenaltyPerPoint: cn('reputation_good_gold_tax_penalty_per_point', 0.005),
+    reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
     raw,
@@ -966,12 +978,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
-  // 宝物目录（treasures.csv）：code → TreasureDef。覆盖层 key='id'，numeric=effectValue/priceGold/dropRate。
+  // 宝物目录（treasures.csv）：code → TreasureDef。覆盖层 key='id'，numeric=effectValue/reputationValue/priceGold/dropRate。
   let treasureRows = loadCsv(p('treasures.csv'));
   if (overrides?.treasures) {
     treasureRows = mergeOverridesIntoRows(treasureRows, {
       file: 'treasures.csv', key: 'id',
-      numeric: ['effectValue', 'priceGold', 'dropRate'],
+      numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
     }, overrides.treasures);
   }
   assertUniqueRows(treasureRows, 'treasures.csv');
@@ -988,6 +1000,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       rarity: r.rarity ?? 'common',
       effectType: r.effectType ?? '',
       effectValue: num(r.effectValue, 0),
+      reputationValue: num(r.reputationValue, 0),
       priceGold: num(r.priceGold, 0),
       dropRate: num(r.dropRate, 0),
       applyType: r.applyType ?? 'passive',
@@ -1312,7 +1325,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1322,7 +1335,7 @@ export function validateGameConfig(config: GameConfig): void {
     if (!TREASURE_RARITIES.has(t.rarity)) errors.push(`treasures.csv[${t.code}] rarity=${t.rarity} 必须是 common/rare/epic/legendary`);
     if (!TREASURE_EFFECTS.has(t.effectType)) errors.push(`treasures.csv[${t.code}] effectType=${t.effectType} 不是已知效果`);
     if (!TREASURE_APPLY.has(t.applyType)) errors.push(`treasures.csv[${t.code}] applyType=${t.applyType} 必须是 passive/instant`);
-    if (t.effectValue < 0) errors.push(`treasures.csv[${t.code}] effectValue 必须≥0（当前${t.effectValue}）`);
+    if (t.effectValue < 0 && t.effectType !== 'reputation') errors.push(`treasures.csv[${t.code}] effectValue 必须≥0（当前${t.effectValue}）`);
     if (t.priceGold < 0) errors.push(`treasures.csv[${t.code}] priceGold 必须≥0（当前${t.priceGold}）`);
     if (t.dropRate < 0 || t.dropRate > 1) errors.push(`treasures.csv[${t.code}] dropRate 必须在[0,1]（当前${t.dropRate}）`);
   }

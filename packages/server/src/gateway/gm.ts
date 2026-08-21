@@ -368,10 +368,10 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['tradeRoutes', 'tradeViewRadius', 'npcOrderCount', 'npcRefreshSec', 'npcStoredRefreshes'],
     labels: ['level'],
   },
-  // 宝物目录（treasures.csv）：id → {effectValue, priceGold, dropRate} 可编辑；其余为展示标签
+  // 宝物目录（treasures.csv）：id → {effectValue, reputationValue, priceGold, dropRate} 可编辑；其余为展示标签
   treasures: {
     file: 'treasures.csv', key: 'id',
-    numeric: ['effectValue', 'priceGold', 'dropRate'],
+    numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
     labels: ['id', 'code', 'name', 'category', 'rarity', 'effectType', 'applyType'],
   },
   constants: {
@@ -537,23 +537,26 @@ function sectionGeneric(table){
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
 }
 
-// ── 善恶/声望专用视图：把行为、门槛和城镇/PvE效果集中展示，避免在庞大的全局常量表中遗漏。 ──
+// ── 声望专用视图：把行为、门槛和城镇/PvE效果集中展示，避免在庞大的全局常量表中遗漏。 ──
 var REP_ROWS = [
-  ['reputation_s4_release_delta','S4释放娜塔莉们','选择释放时的善恶值变化'],
-  ['reputation_s4_keep_delta','S4收纳娜塔莉们','选择将宝物收入宝库时的善恶值变化'],
-  ['reputation_good_pvp_target_threshold','善攻恶目标门槛','目标善恶值必须严格小于负门槛'],
-  ['reputation_good_pvp_reward','善攻恶奖励','符合门槛时每次攻击增加善值'],
-  ['reputation_evil_pvp_target_threshold','恶攻善目标门槛','目标善恶值必须严格大于门槛'],
-  ['reputation_evil_pvp_reward','恶攻善奖励','符合门槛时每次攻击增加恶值绝对值'],
-  ['reputation_good_pop_growth_per_point','善值人口增长/点','每点善值带来的人口增长倍率'],
-  ['reputation_good_pop_growth_cap','善值人口增长上限','善值人口增长倍率上限'],
-  ['reputation_evil_pve_drop_rate_per_point','恶值PvE掉宝/点','每点恶值带来的PvE宝物掉落概率倍率'],
-  ['reputation_evil_pve_drop_rate_cap','恶值PvE掉宝上限','恶值PvE宝物掉落概率倍率上限'],
+  ['reputation_s4_release_delta','S4释放娜塔莉们','选择释放时的声望值变化'],
+  ['reputation_good_pvp_target_threshold','正声望攻击目标门槛','目标声望必须严格小于负门槛'],
+  ['reputation_good_pvp_reward','正声望击杀奖励','每消灭十点敌方士兵人口增加的声望值'],
+  ['reputation_evil_pvp_target_threshold','负声望攻击目标门槛','目标声望必须严格大于门槛'],
+  ['reputation_evil_pvp_reward','负声望击杀奖励','每消灭十点敌方士兵人口增加的负声望绝对值'],
+  ['reputation_good_pop_growth_per_point','正声望人口增长/点','每点正声望带来的人口增长倍率'],
+  ['reputation_good_pop_growth_cap','正声望人口增长上限','正声望人口增长倍率上限'],
+  ['reputation_evil_pop_growth_penalty_per_point','负声望人口下降/点','每点负声望带来的人口增长下降倍率'],
+  ['reputation_evil_pop_growth_penalty_cap','负声望人口下降上限','负声望人口增长下降倍率上限'],
+  ['reputation_good_gold_tax_penalty_per_point','正声望税收下降/点','每点正声望带来的金币税收下降倍率'],
+  ['reputation_good_gold_tax_penalty_cap','正声望税收下降上限','正声望金币税收下降倍率上限'],
+  ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
+  ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
 ];
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">正数为善、负数为恶、初始值为 0。人口增长和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。</div>';
+  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉宝物的被动声望修正可在宝物表的 reputationValue 列调整。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<REP_ROWS.length;j++){
     var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -562,7 +565,7 @@ function sectionReputation(){
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
-  return '<div class="sec"><h2>善恶 / 声望参数</h2>'+h+'</div>';
+  return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
 }
 
 // ── 建筑参数统一视图 ── 合并 buildings + building_levels + trade_center + merc_camp，每栋一张折叠卡片。
