@@ -49,6 +49,10 @@ interface TaskCamp {
 /** 一个进行中的任务实例。 */
 interface TaskInstance {
   code: string;
+  /** 声明式任务图中的所属任务线；运行时只存引用，不复制配置。 */
+  lineCode?: string;
+  /** 接取时采用的任务图版本，GM 审查时可识别旧实例与新定义。 */
+  definitionRevision?: string;
   type: 'main' | 'daily' | 'side';
   acceptedAt: number;
   /** submit_resources：已上交的资源累计。 */
@@ -442,8 +446,11 @@ export class TasksModule {
     if (s.active[code]) return; // 幂等
     const q = this.quest(code);
     if (!q) return;
+    const graphQuest = this.config.questGraph.quests[code];
     const inst: TaskInstance = {
       code,
+      lineCode: graphQuest?.lineCode,
+      definitionRevision: 'task-graph-v1',
       type: q.type,
       acceptedAt: this.now(),
       submitted: {},
@@ -1228,6 +1235,8 @@ export class TasksModule {
     const objective = q ? this.serializeObjective(q) : { kind: 'unknown' };
     return {
       code: inst.code,
+      lineCode: inst.lineCode ?? this.config.questGraph.quests[inst.code]?.lineCode ?? null,
+      definitionRevision: inst.definitionRevision ?? 'legacy-v2',
       type: inst.type,
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',

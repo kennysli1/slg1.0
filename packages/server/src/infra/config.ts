@@ -188,6 +188,74 @@ export interface QuestDef {
   campMaxRadius: number;
 }
 
+/**
+ * 声明式任务图。CSV 是策划事实源；QuestDef 是为旧任务运行时编译出的兼容快照。
+ * 任务 owner 不保存定义，存档只保存玩家进度与已绑定的目标实体。
+ */
+export interface QuestLineDef {
+  code: string;
+  name: string;
+  kind: 'main' | 'daily' | 'side';
+  entryQuest: string;
+  order: number;
+}
+
+export interface QuestGraphQuestDef {
+  id: number;
+  code: string;
+  lineCode: string;
+  name: string;
+  desc: string;
+  type: QuestType;
+  weight: number;
+  repeatable: boolean;
+  cooldownSec: number;
+  abandonCooldownSec: number;
+}
+
+export interface QuestConditionDef {
+  id: string;
+  questCode: string;
+  phase: 'offer' | 'accept' | 'success' | 'failure';
+  group: string;
+  kind: string;
+  value: string;
+}
+
+export interface QuestObjectiveDef {
+  id: string;
+  questCode: string;
+  kind: QuestObjectiveKind;
+  params: string;
+  order: number;
+}
+
+export interface QuestEffectDef {
+  id: string;
+  questCode: string;
+  phase: 'accept' | 'success' | 'failure' | 'deliver';
+  kind: string;
+  params: string;
+  order: number;
+}
+
+export interface QuestEdgeDef {
+  id: string;
+  fromQuest: string;
+  toQuest: string;
+  relation: 'requires' | 'success_unlock' | 'failure_unlock';
+  order: number;
+}
+
+export interface QuestGraphDef {
+  lines: Record<string, QuestLineDef>;
+  quests: Record<string, QuestGraphQuestDef>;
+  conditions: QuestConditionDef[];
+  objectives: QuestObjectiveDef[];
+  effects: QuestEffectDef[];
+  edges: QuestEdgeDef[];
+}
+
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
 export interface TownCenterSlotTier {
   inner: number;
@@ -472,6 +540,8 @@ export interface GameConfig {
   academy: Record<number, AcademyDef>;
   /** 任务目录（quests.csv）：code → QuestDef。 */
   quests: Record<string, QuestDef>;
+  /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
+  questGraph: QuestGraphDef;
   pvpPowerCurve: { maxRatio: number; lootMult: number }[];
 }
 
@@ -1010,62 +1080,79 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     }
   }
 
-  // 任务目录（quests.csv）：code → QuestDef。覆盖层暂不支持（任务为固定设计内容）。
-  const questRows = loadCsv(p('quests.csv'));
-  assertUniqueRows(questRows, 'quests.csv');
-  const quests: Record<string, QuestDef> = {};
-  for (const r of questRows) {
-    const code = r.code?.trim();
-    if (!code) continue;
-    const objKind = (r.objKind as QuestObjectiveKind) || 'submit_resources';
-    let objective: QuestObjective;
-    if (objKind === 'clear_camp') {
-      const [tmpl, cnt] = (r.objParam || '').split(':');
-      objective = { kind: 'clear_camp', campTemplate: tmpl?.trim(), count: Math.max(1, num(cnt, 1)) };
-    } else if (objKind === 'sell_discard_treasure') {
-      // objParam 形如 `rare:2`：minRarity=稀有及以上，count=2
-      const [rar, cnt] = (r.objParam || '').split(':');
-      objective = { kind: 'sell_discard_treasure', minRarity: (rar?.trim() || 'rare'), count: Math.max(1, num(cnt, 1)) };
-    } else if (objKind === 'carry_flag') {
-      const [flagCode, minTroops] = (r.objParam || '').split(':');
-      objective = { kind: 'carry_flag', flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) };
-    } else if (objKind === 'deliver_to_npc') {
-      // objParam 形如 `crop:500`：deliverResource=资源种类，deliverAmount=数量
-      const [res, amt] = (r.objParam || '').split(':');
-      objective = { kind: 'deliver_to_npc', deliverResource: (res?.trim() || 'crop'), deliverAmount: Math.max(1, num(amt, 1)) };
-    } else {
-      objective = { kind: 'submit_resources', resources: parseResourceList(r.objParam) ?? {} };
+  // 声明式任务图：每层独立 CSV，加载时编译成当前运行时兼容的 QuestDef。
+  // 这样任务线、条件、目标、效果与关系边可单独审查，旧玩家玩法不变。
+  const unique = (rows: Record<string, string>[], file: string, key = 'id') => {
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const value = (row[key] ?? '').trim();
+      if (!value) throw new Error(`${file} 缺少 ${key}`);
+      if (seen.has(value)) throw new Error(`${file} 的 ${key} 重复：${value}`);
+      seen.add(value);
     }
-    quests[code] = {
-      id: num(r.id),
-      code,
-      name: r.name ?? code,
-      desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'daily',
-      requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
-      objective,
-      rewards: {
-        resources: parseResourceList(r.rewardRes) ?? undefined,
-        treasures: r.rewardTreasure ? r.rewardTreasure.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
-      },
-      weight: num(r.weight, 1),
-      trigger: r.trigger ? String(r.trigger).trim() : undefined,
-      repeatable: num(r.repeatable, 0) === 1,
-      cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
+  };
+  const lineRows = loadCsv(p('quest_lines.csv'));
+  const graphQuestRows = loadCsv(p('quests.csv'));
+  const conditionRows = loadCsv(p('quest_conditions.csv'));
+  const objectiveRows = loadCsv(p('quest_objectives.csv'));
+  const effectRows = loadCsv(p('quest_effects.csv'));
+  const edgeRows = loadCsv(p('quest_edges.csv'));
+  unique(lineRows, 'quest_lines.csv', 'code');
+  unique(graphQuestRows, 'quests.csv', 'code');
+  unique(conditionRows, 'quest_conditions.csv');
+  unique(objectiveRows, 'quest_objectives.csv');
+  unique(effectRows, 'quest_effects.csv');
+  unique(edgeRows, 'quest_edges.csv');
+
+  const questGraph: QuestGraphDef = { lines: {}, quests: {}, conditions: [], objectives: [], effects: [], edges: [] };
+  for (const r of lineRows) {
+    const code = r.code.trim();
+    questGraph.lines[code] = { code, name: r.name ?? code, kind: (r.kind as QuestType) || 'side', entryQuest: r.entryQuest?.trim() || '', order: num(r.order) };
+  }
+  for (const r of graphQuestRows) {
+    const code = r.code.trim();
+    questGraph.quests[code] = {
+      id: num(r.id), code, lineCode: r.lineCode?.trim() || '', name: r.name ?? code, desc: r.desc ?? '',
+      type: (r.type as QuestType) || 'side', weight: Math.max(0, num(r.weight, 0)),
+      repeatable: num(r.repeatable, 0) === 1, cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
       abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
-      dailyRewardGroup: r.dailyRewardGroup?.trim() || undefined,
-      dailyRewardValue: Math.max(0, num(r.dailyRewardValue, 0)),
-      campSearchRadius: Math.max(1, num(r.campSearchRadius, 8)),
-      campRetrySec: Math.max(1, num(r.campRetrySec, 60)),
-      campMaxRadius: Math.max(1, num(r.campMaxRadius, 40)),
     };
+  }
+  for (const r of conditionRows) questGraph.conditions.push({ id: r.id.trim(), questCode: r.questCode.trim(), phase: (r.phase as QuestConditionDef['phase']) || 'offer', group: r.group?.trim() || 'all', kind: r.kind?.trim() || '', value: r.value?.trim() || '' });
+  for (const r of objectiveRows) questGraph.objectives.push({ id: r.id.trim(), questCode: r.questCode.trim(), kind: r.kind as QuestObjectiveKind, params: r.params?.trim() || '', order: num(r.order) });
+  for (const r of effectRows) questGraph.effects.push({ id: r.id.trim(), questCode: r.questCode.trim(), phase: (r.phase as QuestEffectDef['phase']) || 'deliver', kind: r.kind?.trim() || '', params: r.params?.trim() || '', order: num(r.order) });
+  for (const r of edgeRows) questGraph.edges.push({ id: r.id.trim(), fromQuest: r.fromQuest?.trim() || '', toQuest: r.toQuest?.trim() || '', relation: (r.relation as QuestEdgeDef['relation']) || 'requires', order: num(r.order) });
+
+  const objectiveOf = (row: QuestObjectiveDef): QuestObjective => {
+    if (row.kind === 'clear_camp') { const [campTemplate, count] = row.params.split(':'); return { kind: row.kind, campTemplate: campTemplate?.trim(), count: Math.max(1, num(count, 1)) }; }
+    if (row.kind === 'sell_discard_treasure') { const [minRarity, count] = row.params.split(':'); return { kind: row.kind, minRarity: minRarity?.trim() || 'rare', count: Math.max(1, num(count, 1)) }; }
+    if (row.kind === 'carry_flag') { const [flagCode, minTroops] = row.params.split(':'); return { kind: row.kind, flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) }; }
+    if (row.kind === 'deliver_to_npc') { const [deliverResource, deliverAmount] = row.params.split(':'); return { kind: row.kind, deliverResource: deliverResource?.trim() || 'crop', deliverAmount: Math.max(1, num(deliverAmount, 1)) }; }
+    return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
+  };
+  const quests: Record<string, QuestDef> = {};
+  for (const def of Object.values(questGraph.quests)) {
+    if (!questGraph.lines[def.lineCode]) throw new Error(`quests.csv 任务 ${def.code} 引用了不存在的任务线：${def.lineCode}`);
+    const objectives = questGraph.objectives.filter((x) => x.questCode === def.code).sort((a, b) => a.order - b.order);
+    if (objectives.length !== 1) throw new Error(`任务 ${def.code} 当前兼容引擎要求恰好一个目标，实际 ${objectives.length}`);
+    const effects = questGraph.effects.filter((x) => x.questCode === def.code && (x.phase === 'deliver' || x.phase === 'success')).sort((a, b) => a.order - b.order);
+    const resourceEffects = effects.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
+    const rewards = resourceEffects.length ? Object.fromEntries(resourceEffects) : undefined;
+    const treasures = effects.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
+    const requires = questGraph.edges.filter((x) => x.toQuest === def.code && x.relation === 'requires').sort((a, b) => a.order - b.order).map((x) => x.fromQuest);
+    const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
+    if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
+    const trigger = offer[0]
+      ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
+      : undefined;
+    quests[def.code] = { id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, requires, objective: objectiveOf(objectives[0]), rewards: { resources: rewards, treasures }, weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec, abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12 };
   }
   const pvpPowerCurve = loadCsv(p('pvp_power_curve.csv'))
     .map((r) => ({ maxRatio: Math.max(0, num(r.maxRatio, Number.MAX_SAFE_INTEGER)), lootMult: Math.max(0, Math.min(1, num(r.lootMult, 1))) }))
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests, questGraph, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;
@@ -1386,6 +1473,31 @@ export function validateGameConfig(config: GameConfig): void {
   }
   const questCycle = findQuestCycle(config.quests);
   if (questCycle) errors.push(`quests.csv 主线前置存在循环依赖: ${questCycle.join(' → ')}`);
+
+  // 声明式任务图校验：每个部件独立可审查，但所有引用必须闭合。
+  for (const line of Object.values(config.questGraph.lines)) {
+    if (!config.questGraph.quests[line.entryQuest]) errors.push(`quest_lines.csv[${line.code}] 入口任务不存在：${line.entryQuest}`);
+  }
+  for (const q of Object.values(config.questGraph.quests)) {
+    if (!config.questGraph.lines[q.lineCode]) errors.push(`quests.csv[${q.code}] 任务线不存在：${q.lineCode}`);
+  }
+  const graphQuestCodes = new Set(Object.keys(config.questGraph.quests));
+  for (const row of config.questGraph.conditions) {
+    if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_conditions.csv[${row.id}] 任务不存在：${row.questCode}`);
+    if (!row.kind) errors.push(`quest_conditions.csv[${row.id}] 缺少 kind`);
+  }
+  for (const row of config.questGraph.objectives) {
+    if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_objectives.csv[${row.id}] 任务不存在：${row.questCode}`);
+    if (!QUEST_OBJECTIVE_KINDS.has(row.kind)) errors.push(`quest_objectives.csv[${row.id}] 未知目标类型：${row.kind}`);
+  }
+  for (const row of config.questGraph.effects) {
+    if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_effects.csv[${row.id}] 任务不存在：${row.questCode}`);
+    if (!row.kind) errors.push(`quest_effects.csv[${row.id}] 缺少 kind`);
+  }
+  for (const row of config.questGraph.edges) {
+    if (!graphQuestCodes.has(row.fromQuest)) errors.push(`quest_edges.csv[${row.id}] 起点任务不存在：${row.fromQuest}`);
+    if (!graphQuestCodes.has(row.toQuest)) errors.push(`quest_edges.csv[${row.id}] 终点任务不存在：${row.toQuest}`);
+  }
 
   if (errors.length) {
     throw new Error(`配置校验失败（共${errors.length}项）：\n  - ${errors.join('\n  - ')}`);

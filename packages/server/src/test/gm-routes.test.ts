@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
@@ -18,8 +18,8 @@ import { createGameApp } from '../app.js';
 
 const SECRET = 'test-gm-token-xyz';
 
-function buildFastify(storePath?: string) {
-  const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath });
+function buildFastify(storePath?: string, configDir?: string) {
+  const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath, configDir });
   const fastify = Fastify({ logger: false });
   registerGmRoutes(fastify, app.store, app);
   return { fastify, app };
@@ -140,6 +140,61 @@ test('/gm/balance/data 返回 ok:true + meta 字段', async () => {
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
+  }
+});
+
+test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任务图', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const modulesRes = await fastify.inject({ method: 'GET', url: '/gm/quest-modules/data' });
+    assert.equal(modulesRes.statusCode, 200);
+    const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
+    assert.equal(modules.ok, true);
+    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 5);
+    assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
+    const graphRes = await fastify.inject({ method: 'GET', url: '/gm/quest-graph/data' });
+    assert.equal(graphRes.statusCode, 200);
+    const graph = JSON.parse(graphRes.body) as { ok: boolean; graph?: { quests: Record<string, unknown>; edges: unknown[] } };
+    assert.equal(graph.ok, true);
+    assert.ok(graph.graph?.quests.s2, '关系图必须包含耀武扬威');
+    assert.ok((graph.graph?.edges.length ?? 0) >= 5);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const tempRoot = mkdtempSync(join(tmpdir(), 'kow-quest-modules-'));
+  const tempConfig = join(tempRoot, 'config');
+  const seed = buildFastify();
+  cpSync(seed.app.configDir, tempConfig, { recursive: true });
+  await seed.fastify.close();
+  try {
+    const { fastify, app } = buildFastify(undefined, tempConfig);
+    await fastify.ready();
+    const get = await fastify.inject({ method: 'GET', url: '/gm/quest-modules/data' });
+    const data = JSON.parse(get.body) as { tables: Record<string, { rows: Array<Record<string, string>> }> };
+    data.tables['quests.csv'].rows[0].desc = 'GM 可编辑描述';
+    const ok = await fastify.inject({ method: 'POST', url: '/gm/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.equal(app.config.quests.m1.desc, 'GM 可编辑描述', '校验通过后必须热重载');
+    const before = app.config.quests.m1.desc;
+    data.tables['quest_edges.csv'].rows[0].toQuest = 'does_not_exist';
+    const bad = await fastify.inject({ method: 'POST', url: '/gm/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
+    assert.equal(bad.statusCode, 400, '非法关系边必须被拒绝');
+    assert.equal(app.config.quests.m1.desc, before, '失败不能留下半截配置或重载');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 

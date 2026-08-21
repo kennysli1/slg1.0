@@ -1,0 +1,16 @@
+id,questCode,phase,kind,params,order
+#稳定效果ID,任务代码,触发阶段,效果类型,参数,同阶段顺序
+e-m1-res,m1,deliver,grant_resources,wood:100|gold:50,1
+e-m2-res,m2,deliver,grant_resources,iron:200|gold:150,1
+e-m3-res,m3,deliver,grant_resources,gold:200,1
+e-m3-token,m3,deliver,grant_treasure,warrior_token,2
+e-m4-res,m4,deliver,grant_resources,gold:400|crop:500,1
+e-m5-res,m5,deliver,grant_resources,gold:600,1
+e-d1-res,d1,deliver,grant_resources,gold:40,1
+e-d2-res,d2,deliver,grant_resources,gold:80,1
+e-d3-res,d3,deliver,grant_resources,gold:60,1
+e-s1-altar,s1,deliver,grant_treasure,ritual_altar,1
+e-s2-flag,s2,deliver,grant_treasure,victory_flag,1
+e-villager-natalie,villager_request,deliver,grant_treasure,natalie,1
+e-villager-note,villager_request,failure,grant_treasure,secret_note,1
+e-investigate-choice,investigate_coords,success,natalie_choice,captured_natalies|store:natalie|release:honest_heart|gold:500,1
