@@ -804,6 +804,19 @@
   flex-direction: column;
   gap: var(--s-3);
 }
+.trs-empty-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  padding: var(--s-3);
+  border: 1px dashed var(--line-strong, var(--line));
+  border-radius: var(--r-md);
+  color: var(--c-ink-dim);
+  background: rgba(0, 0, 0, .10);
+  font-size: var(--f-xs);
+  letter-spacing: .04em;
+}
 .trs-mgmt-card {
   display: flex;
   gap: var(--s-3);

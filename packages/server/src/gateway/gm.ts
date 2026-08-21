@@ -559,7 +559,7 @@ function sectionBuildings(){
   // 根据建筑类型决定额外奖励列
   function bonusCols(code){
     var c = [];
-    if (code === 'treasury') c.push({k:'treasureSlots',l:'+宝物格'});
+    if (code === 'treasury') c.push({k:'treasureSlots',l:'每级主/备用槽'});
     if (code === 'warehouse' || code === 'granary') c.push({k:'storagePerLevel',l:'+容量'});
     if (code === 'wall') c.push({k:'defensePerLevel',l:'+防御'});
     if (code === 'main') c.push({k:'buildSpeedupPerLevel',l:'-建造耗时'});
@@ -571,7 +571,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地功能参数(如有)</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地功能参数(如有)。宝库的「每级主/备用槽」可直接修改；每级填写的数值会同时增加主宝物栏和备用宝物栏容量。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
