@@ -74,8 +74,8 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
 
-// ② 变体：入库 → 完成任务
-test('② 变体：放入宝库 -> natalieDecision=store 并可完成任务', async () => {
+// ② 变体：入库 → 任务失败（只保留宝物）
+test('② 变体：放入宝库 -> 调查坐标失败且不可领取奖励', async () => {
   const app = freshApp();
   const va = await reg(app, 'natalie2');
   app.store.set('task', va, baseState(va, {
@@ -94,9 +94,8 @@ test('② 变体：放入宝库 -> natalieDecision=store 并可完成任务', as
   await emit(app, 'treasure.PendingClaimed', { villageId: va, code: 'captured_natalies', released: false, stored: true });
   await tick();
   const st = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  const t = st.active.find((a: any) => a.code === 's4');
-  assert.equal(t.ready, true, '入库后任务应就绪');
-  assert.equal(t.natalieDecision, 'store', '入库应记 natalieDecision=store');
+  assert.equal(st.active.find((a: any) => a.code === 's4'), undefined, '入库后任务应结束');
+  assert.ok(st.abandonedSide.includes('s4'), '入库后应记为失败支线');
 });
 
 // ③ GM 重新触发已放弃支线 -> 移出 abandonedSide 并重新可接取

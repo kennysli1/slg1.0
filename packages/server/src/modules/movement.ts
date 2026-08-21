@@ -1746,7 +1746,7 @@ export class MovementModule {
       if (mv.type === 'return' || (mv.type === 'caravan' && mv.returning)) continue; // 已在返程，避免重复触发
       // 出征按 targetId 匹配；商队送 NPC 村按 targetVillage(=pve id) 匹配
       if (mv.targetId !== id && mv.targetVillage !== id) continue;
-      if (mv.type !== 'raid' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
+      if (mv.type !== 'raid' && mv.type !== 'attack' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
       await this.startReturn(mv);
     }
   }
@@ -1758,7 +1758,7 @@ export class MovementModule {
       if (mv.status !== 'marching') continue;
       if (mv.type === 'return' || (mv.type === 'caravan' && mv.returning)) continue; // 已在返程，避免重复触发
       if (mv.targetVillage !== villageId) continue;
-      if (mv.type !== 'attack' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
+      if (mv.type !== 'attack' && mv.type !== 'raid' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
       await this.startReturn(mv);
     }
   }
