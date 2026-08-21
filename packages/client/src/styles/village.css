@@ -818,6 +818,15 @@
 .trs-mgmt-card.rarity-rare     { border-left-color: var(--rarity-rare); }
 .trs-mgmt-card.rarity-epic     { border-left-color: var(--rarity-epic); }
 .trs-mgmt-card.rarity-legendary { border-left-color: var(--rarity-legend); }
+.trs-mgmt-card--reserve { opacity: .82; background: rgba(96, 110, 128, .15); }
+.trs-load-warning {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-md);
+  color: var(--c-gold);
+  background: rgba(216, 177, 104, .08);
+  font-size: var(--f-xs);
+}
 .trs-mgmt-body { flex: 1; min-width: 0; }
 .trs-mgmt-actions {
   display: flex;

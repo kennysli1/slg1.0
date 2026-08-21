@@ -1,5 +1,5 @@
 /**
- * Treasure panel — shows all treasures stored in the village, aggregate effects,
+ * Treasure panel — shows only treasures whose passive effects are active in the village,
  * and lets the player navigate to the building holding a specific treasure.
  * Port of renderTreasurePanel() from village.ts.
  */
@@ -44,22 +44,23 @@ export function TreasurePanel() {
   dataVersion.value; // subscribe
 
   const data = getCache().treasures as
-    | { codes: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
+    | { codes: string[]; slots: number; mainSlots?: number; activeCodes?: string[]; activeTreasures?: any[]; treasuryReserve?: string[]; effect: any; town?: string[]; treasury?: string[] }
     | null;
 
   if (!data) return null;
 
-  const totalCodes = (data.codes ?? []).length;
-  const slots = data.slots ?? 1;
-  const list: any[] = data.treasures ?? [];
+  const list: any[] = data.activeTreasures ?? (data.activeCodes ?? []).map((code) => treasureInfo(code)).filter(Boolean);
+  const totalCodes = (data.activeCodes ?? list.map((t: any) => t.code)).length;
+  const slots = data.mainSlots ?? 1;
+  const reserveCount = (data.treasuryReserve ?? []).length;
   const eff = data.effect ?? {};
 
   if (!list.length) {
     return (
       <div class="trs-panel">
         <p class="trs-empty-hint">
-          暂无宝物。清理野营、击败敌军或在贸易中心向 NPC 购买；
-          城镇中心提供基础槽位，建造宝库可扩展。（{totalCodes}/{slots}）
+          暂无生效宝物。清理野营、击败敌军或在贸易中心向 NPC 购买；
+          城镇中心提供基础主栏，建造宝库可扩展。（{totalCodes}/{slots}）{reserveCount > 0 ? ` 另有 ${reserveCount} 件宝物在备用栏` : ''}
         </p>
         <div>
           <span style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)', marginRight: 'var(--s-2)' }}>本村加成</span>
@@ -131,7 +132,7 @@ export function TreasurePanel() {
         })}
       </div>
 
-      <p class="trs-jump-hint">城镇中心与宝库中的每件被动宝物都会同时生效；同名宝物也会叠加。点击卡片可前往管理。</p>
+      <p class="trs-jump-hint">这里只显示主宝物栏中正在生效的宝物；备用栏宝物不会生效，但可在宝库内手动装载。点击卡片可前往管理。</p>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s-2)', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>本村宝物加成</span>

@@ -152,25 +152,62 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
   dataVersion.value; // subscribe so it refreshes when treasures change
 
   const data = getCache().treasures as
-    | { codes: string[]; slots: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[] }
+    | { codes: string[]; slots: number; mainSlots?: number; reserveSlots?: number; treasures: any[]; effect: any; town?: string[]; treasury?: string[]; treasuryReserve?: string[]; needsLoad?: boolean }
     | null;
 
   if (!data) return <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>宝物数据加载中…</p>;
 
   const locCodes: string[] = kind === 'treasury' ? (data.treasury ?? []) : (data.town ?? []);
-  const seen = new Set<string>();
-  const allTreasures: any[] = (data.treasures ?? []).filter((t: any) => {
-    if (seen.has(t.code)) return false;
-    seen.add(t.code);
-    return true;
-  });
-  const list = allTreasures.filter((t: any) => locCodes.includes(t.code));
+  const reserveCodes: string[] = kind === 'treasury' ? (data.treasuryReserve ?? []) : [];
   const totalCodes = (data.codes ?? []).length;
-  const slots = data.slots ?? 1;
+  const slots = kind === 'treasury' ? (data.mainSlots ?? 0) : 1;
 
   const locLabel = kind === 'treasury' ? '宝库' : '城镇中心';
 
-  if (!list.length) {
+  const renderCard = (code: string, index: number, location: 'town' | 'treasury' | 'reserve') => {
+    const info = treasureInfo(code) ?? (data.treasures ?? []).find((t: any) => t.code === code);
+    if (!info) return null;
+    const effectTxt = treasureEffectText(info as any);
+    const cat = treasureCategoryName(info.category ?? '');
+    const rar = treasureRarityName(info.rarity ?? '');
+    const isInstant = (info.applyType ?? '') === 'instant';
+    const isReserve = location === 'reserve';
+    return (
+      <div key={`${location}-${code}-${index}`} class={`trs-mgmt-card rarity-${info.rarity ?? 'common'}${isReserve ? ' trs-mgmt-card--reserve' : ''}`}>
+        <IconPlate icon={info.icon} label={info.name} size="md" plate="stone" />
+        <div class="trs-mgmt-body">
+          <div style={{ fontWeight: 700, fontSize: 'var(--f-sm)' }}>{info.name}</div>
+          <div style={{ display: 'flex', gap: 'var(--s-1)', margin: '3px 0', flexWrap: 'wrap' }}>
+            <Tag kind="steel">{isReserve ? '备用栏 · 不生效' : locLabel}</Tag><Tag>{cat}</Tag><Tag>{rar}</Tag>
+          </div>
+          <div style={{ fontSize: 'var(--f-xs)', color: isReserve ? 'var(--c-ink-dim)' : 'var(--c-jade)' }}>{effectTxt}</div>
+          <div class="trs-mgmt-actions">
+            {isReserve ? (
+              <Btn size="sm" variant="primary" onClick={async () => { await act(req('LoadTreasure', { code })); }}>装载</Btn>
+            ) : (
+              <Btn size="sm" onClick={async () => { await act(req('UnloadTreasure', { code, from: location })); }}>卸下</Btn>
+            )}
+            {isInstant && (
+              <Btn size="sm" variant="primary" onClick={async () => {
+                const effectType = (info as any)?.effectType ?? '';
+                const useToast = effectType === 'ritualBuff'
+                  ? `已使用「${info.name}」，全资源产出 +${fmt(info.effectValue ?? 0)}%（持续2小时）`
+                  : `已使用「${info.name}」，获得 ${fmt(info.effectValue ?? 0)} 金币`;
+                await act(req('UseTreasure', { code, location }), { okToast: useToast });
+              }}>使用</Btn>
+            )}
+            <Btn size="sm" onClick={async () => { await act(req('SellTreasure', { code, location }), { okToast: `已出售「${info.name}」` }); }}>出售</Btn>
+            <Btn size="sm" variant="danger" onClick={async () => {
+              const ok = await confirmDanger({ title: `丢弃${info.name}`, body: '丢弃后宝物会永久消失，且不会获得金币。', confirmText: '确认丢弃' });
+              if (ok) await act(req('DiscardTreasure', { code, location }), { okToast: `已丢弃「${info.name}」` });
+            }}>丢弃</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (!locCodes.length && !reserveCodes.length) {
     return (
       <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)' }}>
         {locLabel}为空（{totalCodes}/{slots}）。清理野营、击败敌军或在贸易中心购买可获得宝物。
@@ -180,83 +217,10 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
 
   return (
     <div class="trs-mgmt-list">
-      {list.map((t: any) => {
-        const info = treasureInfo(t.code) ?? t;
-        const effectTxt = treasureEffectText(info as any);
-        const cat = treasureCategoryName(t.category ?? '');
-        const rar = treasureRarityName(t.rarity ?? '');
-        const isInstant = (t.applyType ?? '') === 'instant';
-
-        return (
-          <div key={t.code} class={`trs-mgmt-card rarity-${t.rarity ?? 'common'}`}>
-            <IconPlate icon={t.icon} label={t.name} size="md" plate="stone" />
-            <div class="trs-mgmt-body">
-              <div style={{ fontWeight: 700, fontSize: 'var(--f-sm)' }}>{t.name}</div>
-              <div style={{ display: 'flex', gap: 'var(--s-1)', margin: '3px 0', flexWrap: 'wrap' }}>
-                <Tag kind="steel">{cat}</Tag><Tag>{rar}</Tag>
-              </div>
-              <div style={{ fontSize: 'var(--f-xs)', color: 'var(--c-jade)' }}>{effectTxt}</div>
-              <div class="trs-mgmt-actions">
-                {isInstant && (
-                  <Btn size="sm" variant="primary" onClick={async () => {
-                    const effectType = (info as any)?.effectType ?? '';
-                    if (effectType === 'cavalryTrainSpeed') {
-                      // 伯乐：翻倍骑兵，toast 展示实际增加/消耗
-                      const res = await req('UseTreasure', { code: t.code });
-                      if (!res.ok) { showToast('使用失败', 'bad'); return; }
-                      const p = res.payload as any;
-                      const count = p.count ?? 0;
-                      const ratio = p.ratio ?? 1;
-                      const spent = p.spent ?? {};
-                      const popCost = p.popCost ?? 0;
-                      const added = p.added ?? {};
-                      const parts: string[] = [`已使用「${t.name}」`];
-                      if (count > 0) {
-                        const unitStrs = Object.entries(added).map(([c, n]) => `${c} +${n}`);
-                        if (unitStrs.length) parts.push(unitStrs.join('、'));
-                        parts.push(`共 ${count} 骑兵`);
-                      }
-                      if (ratio < 1) parts.push(`(仅 ${(ratio * 100).toFixed(0)}% 翻倍)`);
-                      const resStrs = Object.entries(spent).filter(([, v]) => (v as number) > 0).map(([r, v]) => `${r}=${v}`);
-                      if (resStrs.length) parts.push(`消耗资源: ${resStrs.join('、')}`);
-                      if (popCost > 0) parts.push(`劳动人口 -${popCost}`);
-                      showToast(parts.join(' · '), 'ok');
-                      return;
-                    }
-                    const useToast = effectType === 'ritualBuff'
-                      ? `已使用「${t.name}」，全资源产出 +${fmt(info?.effectValue ?? 0)}%（持续2小时）`
-                      : `已使用「${t.name}」，获得 ${fmt(info?.effectValue ?? 0)} 金币`;
-                    const ok = await act(req('UseTreasure', { code: t.code }), { okToast: useToast });
-                    if (!ok) return;
-                  }}>
-                    使用
-                  </Btn>
-                )}
-                <Btn size="sm" onClick={async () => {
-                  await act(req('SellTreasure', { code: t.code }), {
-                    okToast: `已出售「${t.name}」`,
-                  });
-                }}>
-                  出售
-                </Btn>
-                <Btn size="sm" variant="danger" onClick={async () => {
-                  const ok = await confirmDanger({
-                    title: `丢弃${t.name}`,
-                    body: '丢弃后宝物会永久消失，且不会获得金币。',
-                    confirmText: '确认丢弃',
-                  });
-                  if (!ok) return;
-                  await act(req('DiscardTreasure', { code: t.code }), {
-                    okToast: `已丢弃「${t.name}」`,
-                  });
-                }}>
-                  丢弃
-                </Btn>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {kind === 'treasury' && data.needsLoad && <div class="trs-load-warning">备用栏有宝物且主宝物栏有空位，可点击「装载」使其生效。</div>}
+      {locCodes.map((code, index) => renderCard(code, index, kind === 'treasury' ? 'treasury' : 'town'))}
+      {reserveCodes.length > 0 && kind === 'treasury' && <SectionHead sub={`${reserveCodes.length}/${data.reserveSlots ?? 0}`}>备用宝物栏 · 不生效</SectionHead>}
+      {reserveCodes.map((code, index) => renderCard(code, index, 'reserve'))}
     </div>
   );
 }
@@ -462,7 +426,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       {showTreasureMgmt && (
         <>
           <Divider ornate />
-          <SectionHead sub={kind === 'main' ? '城镇中心基础栏' : '宝库存储'}>
+          <SectionHead sub={kind === 'main' ? '主宝物栏 · 1格' : '主栏 + 备用栏'}>
             宝物管理
           </SectionHead>
           <TreasureMgmtSection kind={kind as 'main' | 'treasury'} />

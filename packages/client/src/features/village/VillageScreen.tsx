@@ -147,7 +147,7 @@ export function VillageScreen() {
 
         {hasTreasures && (
           <section class="vil-detail-section">
-            <SectionHead sub={`${(getCache().treasures?.codes?.length ?? 0)}/${getCache().treasures?.slots ?? 0}`}>
+            <SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>
               宝物栏
             </SectionHead>
             <Panel variant="flat" pad>

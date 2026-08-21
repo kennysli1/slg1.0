@@ -2,7 +2,8 @@
  * Building card — list-view representation of a single placed building or empty slot.
  * Shows art, name, level badge, production rate, next-level CostRow, status tags, and upgrade button.
  */
-import { tick } from '../../app/store.js';
+import { tick, dataVersion } from '../../app/store.js';
+import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { buildingInfo } from '../../app/config.js';
@@ -37,6 +38,7 @@ interface BuildingCardProps {
 
 export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
   tick.value; // for TimerBar updates
+  dataVersion.value; // treasure reserve warning updates with TreasureChanged
 
   const info = buildingInfo(b.kind);
   const isConstructing = (b.level < 1) && !b.demolishing;
@@ -50,6 +52,14 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
     : `Lv${b.level}`;
 
   const hasCostRow = !isDemolishing && !isConstructing && !isMax && !isBusy && b.nextCost;
+  const treasures = getCache().treasures as any;
+  const reserveCount = (treasures?.treasuryReserve ?? []).length;
+  const mainFree = isCenter
+    ? Math.max(0, 1 - (treasures?.town?.length ?? 0))
+    : b.kind === 'treasury'
+      ? Math.max(0, (treasures?.treasury?.length ?? 0) < (treasures?.reserveSlots ?? treasures?.slotBreakdown?.treasury ?? 0) ? 1 : 0)
+      : 0;
+  const needsLoad = reserveCount > 0 && mainFree > 0 && (isCenter || b.kind === 'treasury');
 
   // Pop cap increment for next level (shown in cost row context)
   const bInfo = buildingInfo(b.kind);
@@ -81,6 +91,7 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
           <div class="vil-card-title">
             {b.name}
             {isMax && <Tag kind="gold">满级</Tag>}
+            {needsLoad && <Tag kind="jade">备用宝物可装载</Tag>}
             {isDemolishing && <Tag kind="crimson">拆除中</Tag>}
             {isConstructing && <Tag kind="ember">建造中</Tag>}
             {isBusy && !isConstructing && !isDemolishing && <Tag kind="ember">升级中</Tag>}
