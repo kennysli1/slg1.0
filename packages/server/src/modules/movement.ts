@@ -1093,6 +1093,7 @@ export class MovementModule {
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
     const full: MovementRecord = {
       id: opts.id, type: 'caravan', fromVillage: opts.fromVillage, fromXY: opts.fromXY, toXY: opts.toXY,
+      originalFromXY: opts.fromXY,
       targetVillage: opts.targetVillage, troops: {}, cargo: opts.cargo, departAt: this.now(),
       path, stepIndex: 0, pos: path[0], perStepMs, nextStepAt: this.now() + perStepMs,
       arriveAt: this.now() + perStepMs * steps, status: 'marching', stepToken: 1,
@@ -1776,12 +1777,16 @@ export class MovementModule {
     const path = linePathWrapped(cur, home, W, H);
     const steps = Math.max(1, path.length - 1);
     let totalMs: number;
+    // 行军列表中的当前位置可能仍处于当前两格之间：服务端 pos 是已抵达的格子，
+    // nextStepAt/perStepMs 则保留了这一格的真实进度。撤回应从这个进度点返程，
+    // 不能把整条原路线当成尚未出发。若路径被外部测试/旧档改写，则回退到坐标距离。
+    const routeProgressMs = this.outboundReturnMs(mv);
     if (mv.type === 'caravan') {
       const dist = hexDistanceWrapped(cur, home, W, H);
       const mult = this.config.constants.tradeCaravanSpeed ?? 12;
-      totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
+      totalMs = routeProgressMs ?? (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000);
     } else {
-      totalMs = await this.travelSec(mv.fromVillage, cur, home, mv.troops) * 1000;
+      totalMs = routeProgressMs ?? (await this.travelSec(mv.fromVillage, cur, home, mv.troops) * 1000);
     }
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
 
@@ -1810,6 +1815,24 @@ export class MovementModule {
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
       payload: { id: mv.id, type: mv.type, villageId: mv.fromVillage, q: mv.toXY.q, r: mv.toXY.r, arriveAt: mv.arriveAt },
     } as DomainEvent);
+  }
+
+  /**
+   * 计算从当前行军进度反向回到原点所需的毫秒数。
+   * 仅适用于仍沿原始路径行进/停止的记录；路径不匹配时返回 undefined，
+   * 由调用方按当前坐标重新计算，兼容旧存档和手工构造记录。
+   */
+  private outboundReturnMs(mv: MovementRecord): number | undefined {
+    const home = mv.originalFromXY ?? mv.path[0] ?? mv.fromXY;
+    const first = mv.path[0];
+    if (!first || first.q !== home.q || first.r !== home.r) return undefined;
+    if (!Number.isFinite(mv.perStepMs) || mv.perStepMs <= 0) return undefined;
+    const index = Math.max(0, Math.min(mv.stepIndex, mv.path.length - 1));
+    // stopped/非 marching 状态下位置已经固定在当前格，不应带入过期的段内进度。
+    if (mv.status !== 'marching') return Math.max(0, Math.round(index * mv.perStepMs));
+    const segmentStart = mv.nextStepAt - mv.perStepMs;
+    const elapsed = Math.max(0, Math.min(mv.perStepMs, this.now() - segmentStart));
+    return Math.max(0, Math.round(index * mv.perStepMs + elapsed));
   }
 
   /** 返程到达：兵力归队 + 战利品入库。 */

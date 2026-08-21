@@ -435,6 +435,12 @@ export class CombatModule {
       campCleared = !!((apply.payload as any)?.cleared);
       isTaskCamp = !!((apply.payload as any)?.task);
       isNoRespawn = !!((apply.payload as any)?.noRespawn);
+      // 不重生的 NPC（当前为幸福村）被清空后即代表实体被摧毁：移除地图地块并
+      // 发出 pve.TargetRemoved，让所有仍在前往该目标的商队/军队立即从当前位置返程。
+      // 任务营地仍由 TasksModule 在推进任务后显式清理，不能在这里提前移除。
+      if (campCleared && attackerWins && isNoRespawn) {
+        await this.commands.send({ name: 'pve.Remove', from: CombatModule.NAME, payload: { id: b.targetId } });
+      }
     } else {
       // PvP：扣防守方兵力
       if (Object.keys(defenderLosses).length) {
