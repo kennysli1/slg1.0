@@ -103,6 +103,13 @@ function TrainQueueBanner({ slot }: { slot: any }) {
   const trainSec = (unitEntry?.trainSec ?? 30) * 1000;
   const startAt = tr.nextDoneAt - trainSec;
 
+  async function cancelTraining() {
+    await act(
+      req('CancelTraining', { slotId: slot.slotId }),
+      { okToast: '训练已取消，尚未产出的兵力和资源已返还' },
+    );
+  }
+
   return (
     <div class="train-queue-banner">
       <IconPlate
@@ -122,6 +129,9 @@ function TrainQueueBanner({ slot }: { slot: any }) {
             全部完成约需 {fmtSecDur((unitEntry?.trainSec ?? 30) * tr.remaining)}
           </div>
         )}
+        <div style="margin-top: var(--s-2);">
+          <Btn size="sm" variant="danger" onClick={cancelTraining}>取消训练</Btn>
+        </div>
       </div>
     </div>
   );

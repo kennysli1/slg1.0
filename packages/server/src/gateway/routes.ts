@@ -109,6 +109,10 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           count: { type: 'integer', min: 1, max: 10000 },
         },
       },
+      CancelTraining: {
+        command: 'military.CancelTraining', ownVillage: true, needAuth: true,
+        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32, optional: true } },
+      },
       DisbandTroops: {
         command: 'military.DisbandTroops', ownVillage: true, needAuth: true,
         schema: { units: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },

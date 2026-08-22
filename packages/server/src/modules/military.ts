@@ -27,6 +27,8 @@ interface TrainOrder {
   taskId: string;
   /** 每个兵的实际训练时长(ms)，含人口加速与建筑等级提速（训练开始时快照，整批一致）。 */
   trainMsEach: number;
+  /** 训练开始时快照的单兵资源成本；取消时仅退还尚未产出的兵。 */
+  costPerUnit?: Record<string, number>;
 }
 
 interface MilitaryState {
@@ -144,6 +146,7 @@ export class MilitaryModule {
   init(): void {
     this.commands.register('military.GetArmy', (c) => this.getArmy(c));
     this.commands.register('military.TrainTroops', (c) => this.trainTroops(c));
+    this.commands.register('military.CancelTraining', (c) => this.cancelTraining(c));
     this.commands.register('military.DisbandTroops', (c) => this.disbandTroops(c));
     // 供 Combat/Movement 取"参战快照"：对外只给算好的最终三维（派生管线对外口径）
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
@@ -718,11 +721,74 @@ export class MilitaryModule {
       nextDoneAt: this.now() + firstDoneMs,
       taskId,
       trainMsEach,
+      costPerUnit: { ...perUnit },
     };
     this.store.set(COLLECTION, villageId, s);
     // v5：训练中士兵立刻按 unit.upkeep 计入 cropUpkeep（不必等 produceOne）。
     this.reportUpkeep(s);
     return { ok: true, payload: { unit, count, slotId: targetSlot } };
+  }
+
+  /**
+   * 取消指定建筑实例中的训练队列。
+   * 已产出的士兵不会被撤回；尚未产出的部分返还预留人口和训练资源。
+   * 旧存档没有 costPerUnit 时仍可取消，但只能返还人口（无法可靠重建当时的建筑等级折扣）。
+   */
+  private async cancelTraining(cmd: Command): Promise<CommandResult> {
+    const { villageId, slotId } = cmd.payload as { villageId: string; slotId?: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    s.trainingBySlot = s.trainingBySlot || {};
+    let order: TrainOrder | undefined;
+    let orderSlotId: string | undefined;
+    if (slotId) {
+      order = s.trainingBySlot[slotId];
+      orderSlotId = slotId;
+    } else if (s.training) {
+      // 兼容旧版单队列存档；新客户端总是带 slotId，避免多队列歧义。
+      order = s.training;
+    } else {
+      const active = Object.entries(s.trainingBySlot).filter(([, value]) => !!value);
+      if (active.length === 1) {
+        orderSlotId = active[0][0];
+        order = active[0][1];
+      }
+    }
+    if (!order) return { ok: false, payload: {}, reason: 'training_not_found' };
+
+    if (order.taskId) this.scheduler.cancel(order.taskId);
+    const remaining = Math.max(0, Math.floor(order.remaining));
+    const def = this.config.units[order.unit];
+    const returnedPop = def ? Math.max(0, def.popCost * remaining) : 0;
+    const refund: Record<string, number> = {};
+    for (const [resource, amount] of Object.entries(order.costPerUnit ?? {})) {
+      const value = Math.max(0, Number(amount) || 0) * remaining;
+      if (value > 0) refund[resource] = value;
+    }
+
+    if (orderSlotId) delete s.trainingBySlot[orderSlotId];
+    else s.training = null;
+    this.store.set(COLLECTION, villageId, s);
+
+    if (returnedPop > 0) {
+      await this.commands.send({
+        name: 'population.ReleaseTrainingPop',
+        from: MilitaryModule.NAME,
+        payload: { villageId, amount: returnedPop, restoreCivilian: true },
+      });
+    }
+    let refunded: Record<string, number> = {};
+    if (Object.keys(refund).length > 0) {
+      const grant = await this.commands.send({
+        name: 'economy.Grant',
+        from: MilitaryModule.NAME,
+        payload: { villageId, gain: refund },
+      });
+      refunded = ((grant.payload as any)?.applied ?? {}) as Record<string, number>;
+    }
+    this.reportUpkeep(s);
+    return { ok: true, payload: { unit: order.unit, remaining, returnedPop, refunded, refund } };
   }
 
   /**
