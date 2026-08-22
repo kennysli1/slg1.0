@@ -526,6 +526,8 @@ test('村民的请求：接单送粮完成 → 获得娜塔莉，幸福村与订
   const treasure = app.store.get<any>('treasure', va);
   const codes = [...(treasure?.town ?? []), ...(treasure?.treasury ?? [])];
   assert.ok(codes.includes('natalie'), '完成应获得娜塔莉');
+  const reputation = await send(app, 'reputation.GetByVillage', { villageId: va });
+  assert.equal((reputation.payload as any).value, -1, 'S3 完成获得娜塔莉时应结算 -1 声望');
   const npc = await send(app, 'pve.GetTarget', { id: npcId });
   assert.equal(npc.ok, false, '幸福村应随任务完成消失');
 });

@@ -556,7 +556,7 @@ var REP_ROWS = [
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉宝物的被动声望修正可在宝物表的 reputationValue 列调整。</div>';
+  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉任务的声望结算可在任务效果表的 adjust_reputation 行调整，宝物本身不再扣除声望。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<REP_ROWS.length;j++){
     var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;

@@ -48,7 +48,7 @@ test('声望：正负声望按每十点敌方士兵人口结算击杀奖励并�
   assert.equal((evil.payload as any).value, -12);
 });
 
-test('声望：S4释放增加声望，收纳由宝物被动产生负声望', async () => {
+test('声望：娜塔莉宝物不再被动扣声望，任务线负责结算', async () => {
   const app = createGameApp({ manualScheduler: true }); app.setupWorld();
   const reg = (await send(app, 'player.Register', { name: '声望丙', password: 'p1234', tribe: 'romans' })).payload as any;
   const villageId = reg.player.villageId;
@@ -57,7 +57,7 @@ test('声望：S4释放增加声望，收纳由宝物被动产生负声望', asy
   assert.equal((released.payload as any).value, 2);
   await send(app, 'treasure.Grant', { villageId, code: 'captured_natalies' });
   const stored = await send(app, 'reputation.GetByVillage', { villageId });
-  assert.equal((stored.payload as any).value, 0);
+  assert.equal((stored.payload as any).value, 2);
 });
 
 test('声望：PvP BattleEnded 事件按实际消灭的士兵人口结算', async () => {

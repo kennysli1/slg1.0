@@ -158,6 +158,20 @@ export interface QuestObjective {
   deliverAmount?: number;
 }
 
+/** 任务一个结局可获得的物品、资源和声望。 */
+export interface QuestRewards {
+  resources?: Record<string, number>;
+  treasures?: string[];
+  reputation?: number;
+}
+
+/** 多阶段任务的分支结局奖励（例如 S4 释放/收纳）。 */
+export interface QuestChoiceReward {
+  key: string;
+  label: string;
+  rewards: QuestRewards;
+}
+
 /** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
 export type QuestType = 'main' | 'daily' | 'side';
 
@@ -173,10 +187,11 @@ export interface QuestDef {
   /** 目标（v1 单目标）。 */
   objective: QuestObjective;
   /** 奖励：资源(含金币)与/或任务专属宝物(强制 locked，不可出售/遗弃/丢失/超时)。 */
-  rewards: {
-    resources?: Record<string, number>;
-    treasures?: string[];
-  };
+  rewards: QuestRewards;
+  /** 任务失败时保留/获得的资源、宝物和声望。 */
+  failureRewards?: QuestRewards;
+  /** 多阶段任务各分支的结局奖励预览。 */
+  choiceRewards?: QuestChoiceReward[];
   /** 随机任务刷新权重（越大越常出现）；主线忽略。 */
   weight: number;
   /** 触发条件（仅随机任务）：如 `building_built:treasury`=建造完成宝库后出现在酒馆；空=无触发（常驻可刷）。 */
@@ -1167,22 +1182,68 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'deliver_to_npc') { const [deliverResource, deliverAmount] = row.params.split(':'); return { kind: row.kind, deliverResource: deliverResource?.trim() || 'crop', deliverAmount: Math.max(1, num(deliverAmount, 1)) }; }
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
+  const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
+    const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
+    const treasures = rows.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
+    const reputation = rows.filter((x) => x.kind === 'adjust_reputation').reduce((sum, x) => sum + num(x.params, 0), 0);
+    const out: QuestRewards = {};
+    if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
+    if (treasures.length) out.treasures = treasures;
+    if (reputation !== 0) out.reputation = reputation;
+    return out;
+  };
+  const choiceRewardsOf = (rows: QuestEffectDef[]): QuestChoiceReward[] => {
+    const choice = rows.find((x) => x.kind === 'natalie_choice');
+    if (!choice) return [];
+    const parts = choice.params.split('|').map((v) => v.trim()).filter(Boolean);
+    const capturedCode = parts[0] || 'captured_natalies';
+    const choices: QuestChoiceReward[] = [];
+    for (const part of parts.slice(1)) {
+      const separator = part.indexOf(':');
+      if (separator <= 0) continue;
+      const key = part.slice(0, separator);
+      const value = part.slice(separator + 1);
+      if (key !== 'store' && key !== 'release') continue;
+      const rewards: QuestRewards = {};
+      if (key === 'store') rewards.treasures = [capturedCode];
+      if (key === 'release' && value) rewards.treasures = [value];
+      if (key === 'release') {
+        const gold = parts.find((x) => x.startsWith('gold:'));
+        if (gold) rewards.resources = { gold: num(gold.slice(5), 0) };
+        rewards.reputation = constants.reputationS4ReleaseDelta;
+      }
+      const phase = key === 'store' ? 'failure' : 'success';
+      const phaseRows = rows.filter((x) => x.phase === phase && x.kind === 'adjust_reputation');
+      const phaseRep = phaseRows.reduce((sum, x) => sum + num(x.params, 0), 0);
+      if (phaseRep !== 0) rewards.reputation = phaseRep;
+      choices.push({ key, label: key === 'store' ? '放入宝库（任务失败）' : '释放（完成任务）', rewards });
+    }
+    return choices;
+  };
   const quests: Record<string, QuestDef> = {};
   for (const def of Object.values(questGraph.quests)) {
     if (!questGraph.lines[def.lineCode]) throw new Error(`quests.csv 任务 ${def.code} 引用了不存在的任务线：${def.lineCode}`);
     const objectives = questGraph.objectives.filter((x) => x.questCode === def.code).sort((a, b) => a.order - b.order);
     if (objectives.length !== 1) throw new Error(`任务 ${def.code} 当前兼容引擎要求恰好一个目标，实际 ${objectives.length}`);
-    const effects = questGraph.effects.filter((x) => x.questCode === def.code && (x.phase === 'deliver' || x.phase === 'success')).sort((a, b) => a.order - b.order);
-    const resourceEffects = effects.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
-    const rewards = resourceEffects.length ? Object.fromEntries(resourceEffects) : undefined;
-    const treasures = effects.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
+    const allEffects = questGraph.effects.filter((x) => x.questCode === def.code).sort((a, b) => a.order - b.order);
+    const effects = allEffects.filter((x) => x.phase === 'deliver' || x.phase === 'success');
+    const choiceRewards = choiceRewardsOf(allEffects);
+    const genericEffects = effects.filter((x) => x.kind !== 'natalie_choice');
+    const rewards = rewardsOf(genericEffects);
+    const failureRows = allEffects.filter((x) => x.phase === 'failure');
+    const failureRewards = rewardsOf(failureRows);
     const requires = questGraph.edges.filter((x) => x.toQuest === def.code && x.relation === 'requires').sort((a, b) => a.order - b.order).map((x) => x.fromQuest);
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
     if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
     const trigger = offer[0]
       ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
-    quests[def.code] = { id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, requires, objective: objectiveOf(objectives[0]), rewards: { resources: rewards, treasures }, weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec, abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12 };
+    quests[def.code] = {
+      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, requires,
+      objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
+      weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
+      abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12,
+    };
   }
   const pvpPowerCurve = loadCsv(p('pvp_power_curve.csv'))
     .map((r) => ({ maxRatio: Math.max(0, num(r.maxRatio, Number.MAX_SAFE_INTEGER)), lootMult: Math.max(0, Math.min(1, num(r.lootMult, 1))) }))

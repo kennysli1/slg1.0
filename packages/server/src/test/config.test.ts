@@ -55,6 +55,11 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm1' && x.toQuest === 'm2' && x.relation === 'requires'));
   // 旧运行时仍从编译后的兼容定义取得完全相同的实际奖励。
   assert.deepEqual(cfg.quests.m2.rewards.resources, { iron: 200, gold: 150 });
+  assert.equal(cfg.quests.s3.rewards.reputation, -1, 'S3 完成应从任务效果结算 -1 声望');
+  assert.deepEqual(cfg.quests.s3.failureRewards?.treasures, ['secret_note'], 'S3 失败应显示秘密字条');
+  assert.equal(cfg.quests.s4.failureRewards?.reputation, -2, 'S4 收纳失败应从任务效果结算 -2 声望');
+  assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
+  assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {
