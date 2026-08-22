@@ -511,9 +511,11 @@ function sectionGeneric(table){
   var rows = DATA[table] || [];
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && r.key !== 'alchemy_refine_sec'; });
+    var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && r.key !== 'alchemy_refine_sec'; });
   } else if (table === 'constants') {
-    rows = rows.filter(function(r){ return r.key !== 'alchemy_refine_sec'; });
+    var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -555,6 +557,29 @@ var REP_ROWS = [
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
 ];
+
+// ── 拓荒专用视图：把开城包的真实成本集中展示，避免在全局常量长表中漏看。 ──
+// 每个键仍然写入同一张 game_constants.csv，并沿用 balance_overrides.json 的持久化覆盖机制。
+var FOUND_ROWS = [
+  ['found_resource_cost_base','第2座城每种资源成本','木材、泥土、钢、粮食各需多少；第2座城（N=2）使用此值'],
+  ['found_resource_cost_growth','后续城成本增长倍率','第N座城每种资源 = base × growth^(N-2)，按最终结果四舍五入'],
+  ['found_settler_count','所需拓荒者数量','每名拓荒者占用5人口；成功建城后由出发城转移'],
+  ['found_min_main_level','出发城主基地最低等级','达到此等级后才允许发起拓荒'],
+];
+function sectionFounding(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会热重载，并写入持久化 balance_overrides.json；删档不会清除。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<FOUND_ROWS.length;j++){
+    var item = FOUND_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>拓荒参数</h2>'+h+'</div>';
+}
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
@@ -742,6 +767,7 @@ function render(){
   var html = '';
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
+  html += sectionFounding();
   html += sectionReputation();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
