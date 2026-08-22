@@ -62,6 +62,8 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   // 释放 → 领取奖励
   await emit(app, 'treasure.PendingClaimed', { villageId: va, code: 'captured_natalies', released: true, stored: false });
   await tick();
+  const repBeforeClaim = await send(app, 'reputation.GetByVillage', { villageId: va });
+  assert.equal((repBeforeClaim.payload as any).value, 0, '释放选择阶段不应提前结算声望');
   const st2 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   const t2 = st2.active.find((a: any) => a.code === 's4');
   assert.equal(t2.ready, true, '释放后任务应就绪');
@@ -72,6 +74,8 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   assert.equal(dv.ok, true, '交付应成功: ' + (dv.reason ?? ''));
   assert.deepEqual((dv.payload as any).rewards.resources, { gold: 500 }, 'S4 释放路径领奖返回值应明确包含 500 金币');
   assert.equal((dv.payload as any).rewards.reputation, 2, 'S4 释放路径领奖返回值应包含 +2 声望');
+  const repAfterClaim = await send(app, 'reputation.GetByVillage', { villageId: va });
+  assert.equal((repAfterClaim.payload as any).value, 2, '领取 S4 奖励后才应结算 +2 声望');
   const st3 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
