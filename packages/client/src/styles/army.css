@@ -364,6 +364,32 @@
   line-height: 1.4;
 }
 
+/* ---------- 掠夺防守配置 ---------- */
+.raid-defense-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.raid-defense-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-ink);
+  font-size: var(--f-sm);
+}
+.raid-defense-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px auto;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-ink-dim);
+  font-size: var(--f-sm);
+}
+.raid-defense-row input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* ---------- UnitDetail 弹窗 ---------- */
 .unit-detail-body {
   display: flex;

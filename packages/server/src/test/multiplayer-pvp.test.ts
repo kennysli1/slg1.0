@@ -115,6 +115,30 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   assert.ok((army.troops.legionnaire ?? 0) > 0, 'A 幸存兵应返回');
 });
 
+test('PvP 掠夺：守方可关闭防守，战后只拆城外建筑且不拿仓储存量', async () => {
+  const app = freshApp();
+  const a = (await reg(app, '掠夺方', 'p1234')).payload as any;
+  const b = (await reg(app, '被掠夺方', 'p1234')).payload as any;
+  const va = a.player.villageId, vb = b.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 5 } });
+  const defense = await send(app, 'military.SetRaidDefense', { villageId: vb, enabled: false, troops: {} });
+  assert.equal(defense.ok, true);
+  const army = (await send(app, 'military.GetArmy', { villageId: vb })).payload as any;
+  assert.equal(army.raidDefense.enabled, false);
+
+  let report: any = null;
+  app.bus.on('combat.BattleEnded', (e: any) => { if (e.payload.side === 'attacker') report = e.payload; });
+  const raid = await send(app, 'movement.SendVillageRaid', {
+    villageId: va, targetVillage: vb, troops: { legionnaire: 5 }, declareWar: true,
+  });
+  assert.equal(raid.ok, true);
+  await drain(app);
+  assert.ok(report, '应有掠夺战报');
+  assert.equal(report.battleType, 'raid');
+  assert.ok(Array.isArray(report.buildingDamage), '战报应带建筑损坏');
+  assert.deepEqual(report.storedLoot, {}, '掠夺战不应拿仓库/粮仓存量');
+});
+
 test('PvP：战后攻守双方人口快照结构有效（v3 无伤兵池，战死即时回收）', async () => {
   const app = freshApp();
   const a = (await reg(app, 'A伤兵', 'p1234')).payload as any;

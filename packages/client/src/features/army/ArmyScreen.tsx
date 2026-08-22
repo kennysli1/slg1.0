@@ -15,7 +15,7 @@
  *  目前在 form 层面均归为 melee，与步兵共组，等未来有专属 category 字段
  *  时再细分。雇佣兵因无人口/耗粮消耗，单独成区并使用金色样式区分。
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { dataVersion, tab } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { openModal } from '../../app/store.js';
@@ -49,9 +49,58 @@ export function ArmyScreen() {
   return (
     <div class="army-page">
       <GarrisonSection army={army} />
+      <RaidDefenseSection army={army} />
       <TrainingCenterSection army={army} />
       <DisbandSection army={army} />
     </div>
+  );
+}
+
+/** 掠夺防守配置：攻城战仍使用全部驻军，只有掠夺战读取这里的选择。 */
+function RaidDefenseSection({ army }: { army: any }) {
+  const troops: Record<string, number> = army.troops ?? {};
+  const entries = Object.entries(troops).filter(([key, n]) => Number(n) > 0 && !unitInfo(key).isMercenary);
+  const config = army.raidDefense ?? { enabled: true, troops };
+  const [enabled, setEnabled] = useState(config.enabled !== false);
+  const [selected, setSelected] = useState<Record<string, number>>({ ...(config.troops ?? troops) });
+  const signature = JSON.stringify({ troops, config });
+  useEffect(() => {
+    setEnabled(config.enabled !== false);
+    setSelected({ ...(config.troops ?? troops) });
+    // 服务端快照变更时同步当前编辑器，避免兵力变化后沿用旧数量。
+  }, [signature]);
+
+  if (entries.length === 0) return null;
+  const save = () => act(req('SetRaidDefense', { enabled, troops: selected }), { okToast: '掠夺防守配置已保存' });
+  return (
+    <Panel pad class="raid-defense-panel">
+      <SectionHead sub="掠夺战不启用城墙、宝物和科技加成；攻城战不受此配置影响">
+        掠夺防守
+      </SectionHead>
+      <label class="raid-defense-toggle">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled((e.currentTarget as HTMLInputElement).checked)} />
+        <span>启用掠夺防守</span>
+      </label>
+      {enabled ? entries.map(([key, count]) => {
+        const info = unitInfo(key);
+        const amount = Math.max(0, Math.min(Number(count), Number(selected[key] ?? 0)));
+        return (
+          <div class="raid-defense-row" key={key}>
+            <span>{info.name ?? key}</span>
+            <input
+              type="number" min={0} max={Number(count)} value={amount}
+              aria-label={`${info.name ?? key}掠夺防守数量`}
+              onInput={(e) => {
+                const n = Math.max(0, Math.min(Number(count), Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0)));
+                setSelected((prev) => ({ ...prev, [key]: n }));
+              }}
+            />
+            <Btn size="sm" variant="ghost" onClick={() => setSelected((prev) => ({ ...prev, [key]: Number(count) }))}>全军</Btn>
+          </div>
+        );
+      }) : <p class="muted">关闭后，敌方掠夺战不会与驻军交战；攻城仍会面对全部守军。</p>}
+      <Btn size="sm" variant="primary" onClick={save}>保存掠夺防守配置</Btn>
+    </Panel>
   );
 }
 // ============================================================

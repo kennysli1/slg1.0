@@ -35,6 +35,8 @@ interface MilitaryState {
   tribe: string;
   /** 驻村兵力：兵种 -> 数量 */
   troops: Record<string, number>;
+  /** 掠夺防守配置；未设置的旧存档按“全军防守”兼容。 */
+  raidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
   marching?: Record<string, number>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
@@ -145,6 +147,7 @@ export class MilitaryModule {
     this.commands.register('military.DisbandTroops', (c) => this.disbandTroops(c));
     // 供 Combat/Movement 取"参战快照"：对外只给算好的最终三维（派生管线对外口径）
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
+    this.commands.register('military.SetRaidDefense', (c) => this.setRaidDefense(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
     // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
@@ -616,6 +619,10 @@ export class MilitaryModule {
       payload: {
         tribe: s.tribe,
         troops: { ...s.troops },
+        raidDefense: {
+          enabled: s.raidDefense?.enabled !== false,
+          troops: { ...(s.raidDefense?.troops ?? s.troops) },
+        },
         trainable,
         training,
         slots: slotsOut,
@@ -807,19 +814,43 @@ export class MilitaryModule {
    * Combat/Movement 拿这个去结算，不知道铁匠养成怎么算的（派生管线对外口径）。
    */
   private getCombatSnapshot(cmd: Command): CommandResult {
-    const { villageId, units } = cmd.payload as { villageId: string; units?: Record<string, number> };
+    const { villageId, units, purpose } = cmd.payload as { villageId: string; units?: Record<string, number>; purpose?: 'raid' | 'siege' };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
+    if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
     // units 指定参战兵力；缺省取全部驻军
-    const source = units ?? s.troops;
+    const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
-      if (!this.config.units[unit] || n <= 0) continue;
-      const tm = this.techCombatMult(s, unit);
-      const stats = this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
-      snapshot[unit] = { count: n, ...stats };
+      const available = Math.min(Math.max(0, Math.floor(Number(n) || 0)), s.troops[unit] ?? 0);
+      if (!this.config.units[unit] || available <= 0) continue;
+      // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
+      const stats = purpose === 'raid'
+        ? this.finalStats(unit, 1, 1)
+        : (() => {
+          const tm = this.techCombatMult(s, unit);
+          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+        })();
+      snapshot[unit] = { count: available, ...stats };
     }
     return { ok: true, payload: { snapshot } };
+  }
+
+  /** 设置守方参与掠夺战的兵力；enabled=false 表示放弃防守掠夺。 */
+  private setRaidDefense(cmd: Command): CommandResult {
+    const { villageId, enabled, troops } = cmd.payload as { villageId: string; enabled: boolean; troops?: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const selected: Record<string, number> = {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      if (!this.config.units[unit]) continue;
+      const count = Math.min(Math.max(0, Math.floor(Number(raw) || 0)), s.troops[unit] ?? 0);
+      if (count > 0) selected[unit] = count;
+    }
+    s.raidDefense = { enabled: enabled !== false, troops: selected };
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { raidDefense: { ...s.raidDefense, troops: { ...selected } } } };
   }
 
   /**

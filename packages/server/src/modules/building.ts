@@ -78,6 +78,7 @@ export class BuildingModule {
     this.commands.register('building.Build', (c) => this.build(c));
     this.commands.register('building.Upgrade', (c) => this.upgrade(c));
     this.commands.register('building.Demolish', (c) => this.demolish(c));
+    this.commands.register('building.ApplyBattleDamage', (c) => this.applyBattleDamage(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
@@ -621,6 +622,59 @@ export class BuildingModule {
     let wallLevel = 0;
     for (const p of s.placed) if (p.kind === 'wall' && p.level > wallLevel) wallLevel = p.level;
     return { ok: true, payload: { wallLevel } };
+  }
+
+  /** 战斗后的即时建筑破坏：每消耗一个战力阈值拆除一级，最高等级优先。 */
+  private applyBattleDamage(cmd: Command): CommandResult {
+    const { villageId, zone, power, powerPerLevel } = cmd.payload as {
+      villageId: string; zone: Zone; power: number; powerPerLevel: number;
+    };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
+    const threshold = Math.max(1, Number(powerPerLevel) || 1);
+    let remainingPower = Math.max(0, Number(power) || 0);
+    const destroyed: Array<{ slotId: string; kind: string; zone: Zone; fromLevel: number; toLevel: number; loot: Record<string, number> }> = [];
+    const loot: Record<string, number> = {};
+    let step = 0;
+    while (remainingPower >= threshold) {
+      const candidates = s.placed.filter((p) => p.zone === zone && p.level > 0 && p.kind !== CENTER_KIND);
+      if (candidates.length === 0) break;
+      const maxLevel = Math.max(...candidates.map((p) => p.level));
+      const tied = candidates.filter((p) => p.level === maxLevel);
+      // 用稳定种子在同等级建筑中作伪随机选择，保证战报/测试可复现。
+      const seed = [...villageId].reduce((n, ch) => n + ch.charCodeAt(0), 0) + this.now() + step * 7919;
+      const p = tied[Math.abs(seed) % tied.length]!;
+      const def = this.config.buildings[p.kind];
+      if (!def) break;
+      const fromLevel = p.level;
+      const cost = def.cost(fromLevel);
+      for (const [resource, amount] of Object.entries(cost)) {
+        const value = Number(amount);
+        if (Number.isFinite(value) && value > 0) loot[resource] = (loot[resource] ?? 0) + value;
+      }
+      p.level -= 1;
+      const toLevel = p.level;
+      destroyed.push({ slotId: p.slotId, kind: p.kind, zone, fromLevel, toLevel, loot: { ...cost } });
+      if (p.level <= 0) s.placed = s.placed.filter((x) => x !== p);
+      remainingPower -= threshold;
+      step += 1;
+    }
+    if (destroyed.length > 0) {
+      this.store.set(COLLECTION, villageId, s);
+      this.reportCapacity(s);
+      for (const resource of ['wood', 'clay', 'iron', 'crop'] as const) this.reportFieldRate(s, resource);
+      this.reportTreasureSlots(s);
+      this.reportTradeCenter(s);
+      void this.bus.emit({
+        name: 'building.BattleDamaged', source: BuildingModule.NAME, ts: this.now(),
+        payload: { villageId, zone, destroyed, loot, levelsDestroyed: destroyed.length },
+      } as DomainEvent);
+    }
+    return {
+      ok: true,
+      payload: { zone, destroyed, loot, levelsDestroyed: destroyed.length, powerSpent: step * threshold, remainingPower },
+    };
   }
 
   private async emit(name: string, villageId: string, slotId: string, kind: string, level: number): Promise<void> {

@@ -34,6 +34,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'building.Upgraded': 'BuildingUpgraded',
       'building.Demolishing': 'BuildingDemolishing',
       'building.Demolished': 'BuildingDemolished',
+      'building.BattleDamaged': 'BuildingBattleDamaged',
     },
     },
   {
@@ -93,6 +94,13 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     moduleName: 'military',
     publicActions: {
       GetArmy: { command: 'military.GetArmy', ownVillage: true, needAuth: true, schema: {} },
+      SetRaidDefense: {
+        command: 'military.SetRaidDefense', ownVillage: true, needAuth: true,
+        schema: {
+          enabled: { type: 'boolean' },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 0, maxVal: 100000 },
+        },
+      },
       TrainTroops: {
         command: 'military.TrainTroops', ownVillage: true, needAuth: true,
         schema: {
