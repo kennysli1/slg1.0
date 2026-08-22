@@ -42,7 +42,7 @@ export async function refreshAll(): Promise<void> {
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, pop, treasures, reputation] = await Promise.all([
+    const [res, vil, army, area, moves, pop, treasures, reputation, alchemy] = await Promise.all([
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
@@ -51,6 +51,7 @@ export async function refreshAll(): Promise<void> {
       req('GetPopulation').catch(() => ({ ok: false } as any)),
       req('ListTreasures').catch(() => ({ ok: false } as any)),
       req('GetReputation').catch(() => ({ ok: false } as any)),
+      req('GetAlchemy').catch(() => ({ ok: false } as any)),
     ]);
 
     const failed = [res, vil, army, area, moves].find((x) => !x.ok);
@@ -66,6 +67,7 @@ export async function refreshAll(): Promise<void> {
       area: area.payload, moves: moves.payload,
       treasures: treasures.ok ? treasures.payload : null,
       reputation: reputation.ok ? reputation.payload : null,
+      alchemy: alchemy.ok ? alchemy.payload : null,
     });
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();
@@ -257,6 +259,7 @@ export function handlePush(event: string, payload: any): void {
 
   if (event === 'MercenaryCampUpdated') { void reloadMercCamp(); return; }
   if (event === 'TradeCenterUpdated') { void reloadTrade(); return; }
+  if (event === 'AlchemyUpdated') { void refreshAll(); return; }
   // 科研点每次判定都会推 RpChanged，频率高：只重拉科研快照，不做整体刷新
   if (event === 'RpChanged') { void reloadResearch(); return; }
   if (event === 'TechCompleted') { void reloadResearch(); }
