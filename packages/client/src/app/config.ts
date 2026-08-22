@@ -11,7 +11,8 @@ import * as fallback from '../info.js';
 
 export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
-export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[] }
+export interface VaultProtection { wood: number; clay: number; iron: number; crop: number; gold: number }
+export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[]; vaultProtectionByLevel?: VaultProtection[] }
 export interface UnitInfo { name: string; icon: string; form: string; popCost: number; upkeep?: number; isMercenary?: boolean }
 export interface MercenaryInfo { name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }
 export interface PveInfo { name?: string; icon: string }
@@ -26,7 +27,7 @@ export interface TreasureInfo {
 
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
-  buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[] }[];
+  buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[]; vaultProtectionByLevel?: VaultProtection[] }[];
   units: { key: string; tribe: string; name: string; icon: string; form: string; popCost?: number; upkeep?: number; isMercenary?: boolean }[];
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; form: string; meleeAtk: number; rangedAtk: number; meleeDef: number; rangedDef: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }[];
@@ -73,7 +74,7 @@ export async function loadGameConfig(): Promise<void> {
     cfg = r.payload as unknown as ServerConfig;
     for (const x of cfg.resources) res[x.key] = { name: x.name, icon: x.icon };
     for (const x of cfg.buildings) {
-      buildings[x.kind] = { name: x.name, icon: x.icon, zone: x.zone, resource: x.resource ?? undefined, desc: x.desc, effect: x.effect, popCapPerLevel: x.popCapPerLevel, popCapByLevel: x.popCapByLevel };
+      buildings[x.kind] = { name: x.name, icon: x.icon, zone: x.zone, resource: x.resource ?? undefined, desc: x.desc, effect: x.effect, popCapPerLevel: x.popCapPerLevel, popCapByLevel: x.popCapByLevel, vaultProtectionByLevel: x.vaultProtectionByLevel };
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }

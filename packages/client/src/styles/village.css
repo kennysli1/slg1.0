@@ -584,6 +584,12 @@
   color: var(--c-jade);
   margin-top: 2px;
 }
+.vil-card-vault {
+  font-size: var(--f-xs);
+  color: var(--c-gold-dim);
+  line-height: 1.35;
+  margin-top: 3px;
+}
 .vil-card-progress { margin-top: var(--s-1); }
 .vil-card-foot {
   display: flex;

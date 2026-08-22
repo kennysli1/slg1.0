@@ -44,6 +44,21 @@ export class MetaModule {
           // 每级人口增量（反映覆盖）：下标 i = 等级 (i+1) 的 popCap；用于升级卡显示「本次升级获得的人口」与详情累计求和。
           // 当 GM 通过 /gm/balance 把不同等级改成不同 popCap 时，旧字段 popCapPerLevel（=levels[1].popCap）不足以表达，故新增。
           popCapByLevel: Array.from({ length: b.maxLevel }, (_, i) => b.levels[i + 1]?.popCap ?? 0),
+          // 保险库按等级下发「累计保护量」，建筑卡片可直接显示当前等级实际生效的保护额。
+          ...(b.kind === 'vault' ? {
+            vaultProtectionByLevel: Array.from({ length: b.maxLevel }, (_, i) => {
+              const protection = { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 };
+              for (let level = 1; level <= i + 1; level += 1) {
+                const row = b.levels[level];
+                protection.wood += Math.max(0, row?.vaultProtectWood ?? 0);
+                protection.clay += Math.max(0, row?.vaultProtectClay ?? 0);
+                protection.iron += Math.max(0, row?.vaultProtectIron ?? 0);
+                protection.crop += Math.max(0, row?.vaultProtectCrop ?? 0);
+                protection.gold += Math.max(0, row?.vaultProtectGold ?? 0);
+              }
+              return protection;
+            }),
+          } : {}),
         })),
         units: Object.values(c.units).map((u) => ({
           key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,
