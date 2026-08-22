@@ -455,6 +455,8 @@ export interface GameConstants {
   ritualBuffDurationSec: number;
   /** 祭祀台（ritualBuff）使用时扣除的劳动人口数（不足则扣除士兵）。 */
   ritualBuffPopCost: number;
+  /** 炼金炉：三个同品质宝物炼化所需时间（秒）。 */
+  alchemyRefineSec: number;
   /** 声望：S4 释放被囚禁的娜塔莉们时的声望值变化。 */
   reputationS4ReleaseDelta: number;
   /** 声望：正声望攻击负声望目标的门槛（目标声望严格小于负门槛）。 */
@@ -964,6 +966,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     treasureCarryMaxSlots: cn('treasure_carry_max_slots', 10),
     ritualBuffDurationSec: cn('ritual_buff_duration_sec', 7200),
     ritualBuffPopCost: cn('ritual_buff_pop_cost', 5),
+    alchemyRefineSec: cn('alchemy_refine_sec', 3600),
     reputationS4ReleaseDelta: cn('reputation_s4_release_delta', 2),
     reputationGoodPvpTargetThreshold: cn('reputation_good_pvp_target_threshold', 10),
     reputationGoodPvpReward: cn('reputation_good_pvp_reward', 1),
@@ -1440,6 +1443,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
   if (c.treasureCarryTroopsPerSlot <= 0) errors.push(`game_constants.csv treasure_carry_troops_per_slot 必须>0（当前${c.treasureCarryTroopsPerSlot}）`);
   if (c.treasureCarryMaxSlots <= 0) errors.push(`game_constants.csv treasure_carry_max_slots 必须>0（当前${c.treasureCarryMaxSlots}）`);
+  if (c.alchemyRefineSec <= 0) errors.push(`game_constants.csv alchemy_refine_sec 必须>0（当前${c.alchemyRefineSec}）`);
   if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);

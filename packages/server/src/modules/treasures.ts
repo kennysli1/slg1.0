@@ -193,6 +193,8 @@ export class TreasureModule {
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
     this.commands.register('treasure.ExchangeQuestFlag', (c) => this.exchangeQuestFlag(c));
+    // 炼金炉消耗宝物：由 alchemy owner 通过命令请求，避免跨模块直读 treasure 存档。
+    this.commands.register('treasure.RemoveForAlchemy', (c) => this.removeForAlchemy(c));
     this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
   }
 
@@ -625,6 +627,18 @@ export class TreasureModule {
     ];
     for (const [loc, arr] of order) if ((!location || location === loc) && removeFrom(arr)) return true;
     return false;
+  }
+
+  /** 炼金炉专用：精确消耗一件已存宝物，并重新推送被动效果。 */
+  private async removeForAlchemy(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, location } = cmd.payload as { villageId: string; code: string; location?: TreasureLocation };
+    const s = this.ensureState(villageId);
+    if (!this.config.treasures[code]) return { ok: false, payload: {}, reason: 'unknown_treasure' };
+    if (!this.removeStored(s, code, location)) return { ok: false, payload: {}, reason: 'not_held' };
+    this.store.set(COLLECTION, villageId, s);
+    await this.recomputeAndPush(villageId);
+    await this.emitChanged(villageId);
+    return { ok: true, payload: { code, location, codes: this.storedCodes(s) } };
   }
 
   /** 主栏卸载到备用栏。 */

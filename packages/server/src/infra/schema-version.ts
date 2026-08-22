@@ -12,4 +12,4 @@
  * 规矩全文见 docs/00_变更契约.md R6。
  */
 // 任务图重构将任务定义引用与实例版本写入 task 集合；发布需按 R6 刷档。
-export const SAVE_SCHEMA_VERSION = 4;
+export const SAVE_SCHEMA_VERSION = 5;

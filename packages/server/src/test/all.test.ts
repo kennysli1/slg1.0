@@ -61,3 +61,4 @@ import './task-flows.test.js';
 import './register-spot.test.js';
 import './diplomacy-movement.test.js';
 import './reputation.test.js';
+import './alchemy.test.js';
