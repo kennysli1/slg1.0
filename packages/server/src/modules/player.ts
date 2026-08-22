@@ -126,7 +126,7 @@ export class PlayerModule {
     private now: () => number,
     private config: GameConfig,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military/population + 放地图）。 */
-    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
+    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string, initialPop?: number) => void | Promise<void>,
     /** 环绕平行四边形世界尺寸（axial q 周期 W、r 周期 H），用于随机分配出生坐标。 */
     private worldW: number = 41,
     private worldH: number = 41,
@@ -458,7 +458,8 @@ export class PlayerModule {
     const vName = (name && name.trim()) || `${p.name}的分城`;
 
     try {
-      await this.createVillage(villageId, q, r, vName, p.tribe);
+      // 拓荒成功后新城以 5 名初始人口开局；人口模块仍负责计算硬上限。
+      await this.createVillage(villageId, q, r, vName, p.tribe, 5);
     } catch (err) {
       console.error(`[Player] createOwnedVillage failed`, err);
       return { ok: false, payload: {}, reason: 'village_creation_failed' };

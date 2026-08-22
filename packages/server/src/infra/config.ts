@@ -311,8 +311,6 @@ export interface UnitDef {
   traits: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
-  /** 是否永久消耗人口（拓荒者=true：解散/死亡时人口不返还）。 */
-  popPermanent: boolean;
   /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买、永久拥有；不进训练队列。 */
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
@@ -797,7 +795,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: num(r.popCost, 1),
-      popPermanent: num(r.popPermanent, 0) === 1,
     };
   }
 
@@ -826,7 +823,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: 0,
-      popPermanent: false,
       isMercenary: true,
       goldCost: num(r.goldCost, 0),
       commandCost: Math.max(1, num(r.commandCost, 1)),
@@ -963,7 +959,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
     foundMinMainLevel: cn('found_min_main_level', 10),
     foundMinSoftLimit: cn('found_min_soft_limit', 350),
-    foundSettlerCount: cn('found_settler_count', 3),
+    foundSettlerCount: cn('found_settler_count', 1),
     foundResourceCostBase: cn('found_resource_cost_base', 3000),
     foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
     foundMinTileDistance: cn('found_min_tile_distance', 3),

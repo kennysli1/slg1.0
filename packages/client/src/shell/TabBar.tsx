@@ -8,6 +8,7 @@ const tabs: { key: TabKey; name: string; icon: string }[] = [
   { key: 'army', name: '军队', icon: 'ui_tab_army' },
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
   { key: 'tech', name: '科技', icon: 'bld_academy' },
+  { key: 'tasks', name: '任务', icon: 'ui_tab_reports' },
   { key: 'reports', name: '报告', icon: 'ui_tab_reports' },
 ];
 

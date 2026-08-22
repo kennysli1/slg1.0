@@ -197,7 +197,7 @@ export class PopulationModule {
    * 人口随后按 main.popGrowthPerLevel × mainLevel /h 慢慢增长至 hardCap。
    * 必须在 economy/building/military 已初始化之后调用。
    */
-  async createVillage(villageId: string, tribe = 'romans'): Promise<void> {
+  async createVillage(villageId: string, tribe = 'romans', initialPop?: number): Promise<void> {
     const capRes = await this.commands.send({
       name: 'building.GetPopCap',
       from: PopulationModule.NAME,
@@ -209,7 +209,7 @@ export class PopulationModule {
 
     const s: PopulationState = {
       villageId,
-      currentPop: mainPopCap,
+      currentPop: Math.min(hardCap, Math.max(0, initialPop ?? mainPopCap)),
       hardCap,
       mainLevel,
       garrisonPopCost: 0,
@@ -689,7 +689,6 @@ export class PopulationModule {
       if (cnt <= 0) continue;
       const udef = this.config.units[unit];
       if (!udef) continue;
-      if (udef.popPermanent) continue; // 拓荒者等永久人口：解散/返程不返还平民
       returned += udef.popCost * cnt;
     }
     s.currentPop = Math.min(this.popCeiling(s), s.currentPop + returned);
@@ -750,11 +749,6 @@ export class PopulationModule {
       const udef = this.config.units[unit];
       if (!udef) continue;
       const deadPop = lostCount * udef.popCost;
-      // 拓荒者等永久人口：死亡不回收（直接计永久损失）
-      if (udef.popPermanent) {
-        permanentDead += deadPop;
-        continue;
-      }
       const rec = deadPop * recoveryRatio;
       recovered += rec;
       permanentDead += deadPop - rec;

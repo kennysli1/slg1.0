@@ -5,14 +5,15 @@
  * 服务端推 `RpChanged` / `TechCompleted` 时自动重拉，界面无需手动刷新。
  */
 import { useEffect, useState } from 'preact/hooks';
-import { techTree, researchState, tick } from '../../app/store.js';
+import { techTree, researchState, tick, sessionVersion, dataVersion } from '../../app/store.js';
 import { reloadResearch, act } from '../../app/refresh.js';
-import { req } from '../../api.js';
+import { req, me } from '../../api.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import {
   Panel, SectionHead, Btn, Tag, Bar, Empty, Icon, IconPlate, TimerBar,
 } from '../../ui/index.js';
 import '../../styles/research.css';
+import { VillageList } from '../../shared/ui/VillageList.js';
 
 type Branch = 'military' | 'production' | 'social';
 
@@ -24,9 +25,12 @@ const BRANCHES: { key: Branch; name: string; icon: string; desc: string }[] = [
 
 export function TechTreeScreen() {
   const [branch, setBranch] = useState<Branch>('military');
+  sessionVersion.value;
+  dataVersion.value;
+  const currentVillageId = me?.villageId ?? '';
 
-  // 进页面先拉一次；之后靠 RpChanged / TechCompleted 推送自动更新
-  useEffect(() => { void reloadResearch(); }, []);
+  // 进页面及切换村庄后拉取当前村科技树；科研推送仍会触发 refresh。
+  useEffect(() => { void reloadResearch(); }, [currentVillageId]);
 
   const tree = techTree.value;
   const state = researchState.value;
@@ -40,6 +44,7 @@ export function TechTreeScreen() {
 
   return (
     <>
+      <VillageList />
       <SectionHead sub={academyCount > 0 ? `${academyCount} 座学院` : '尚未建造学院'}>
         科研
       </SectionHead>

@@ -142,6 +142,30 @@ test('Gateway：SelectVillage 后 ownVillage 打到新当前村', async () => {
   assert.ok((eco.payload as any).resources);
 });
 
+test('任务板：GetPlayerState 聚合玩家所有村庄并标注来源村', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: 'mvtask', password: 'pass1', tribe: 'romans' });
+  assert.equal(reg.ok, true, reg.reason);
+  const player = (reg.payload as any).player;
+  const capital = player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: player.id });
+  const branch = (alloc.payload as any).villageId as string;
+  await app.createVillage(branch, 12, -8, '任务分城');
+  const attach = await send(app, 'player.AttachVillage', {
+    playerId: player.id, villageId: branch, q: 12, r: -8, name: '任务分城',
+  });
+  assert.equal(attach.ok, true, attach.reason);
+  await Promise.resolve();
+
+  const board = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  assert.equal(board.ok, true, board.reason);
+  const payload = board.payload as any;
+  assert.deepEqual(new Set(payload.villageIds), new Set([capital, branch]));
+  assert.equal(payload.villages.length, 2);
+  assert.equal(payload.active.length, 1, '玩家任务板应按任务 code 去重，不能因分城重复显示 m1');
+  assert.ok([capital, branch].includes(payload.active[0].villageId), '聚合任务应保留一个可执行的来源村');
+});
+
 test('deletePlayer 清除全部村庄进度', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', {

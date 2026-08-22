@@ -106,13 +106,15 @@ test('拓荒：成功建第二村', async () => {
   assert.equal(branch.q, tq);
   assert.equal(branch.r, tr);
 
-  // 拓荒者不应回村
+  // 成功建城后拓荒者已转移，不应回到出发城
   const army = (await send(app, 'military.GetArmy', { villageId: vid })).payload as any;
   assert.equal(army.troops?.settler ?? 0, 0);
 
-  // 新村有经济
+  // 新村有经济且以 5 人口开局
   const eco = await send(app, 'economy.GetResources', { villageId: branch.id });
   assert.equal(eco.ok, true);
+  const branchPop = (await send(app, 'population.GetSnapshot', { villageId: branch.id })).payload as any;
+  assert.equal(Math.round(branchPop.currentPop), 5, '新城初始人口应为5');
 });
 
 test('拓荒：距离过近拒绝', async () => {

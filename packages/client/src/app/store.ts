@@ -23,7 +23,7 @@ export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 
 /** 当前页签。 */
-export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'reports';
+export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports';
 export const tab = signal<TabKey>('village');
 
 /** 登录态版本号（登录/切村后自增，驱动整壳重渲）。 */
@@ -126,6 +126,8 @@ export function dropForeignArmy(id: string): void {
 
 /** 任务完整快照：villageId → task.GetState 的 payload（active/offered/completed）。 */
 export const taskStates = signal<Record<string, any>>({});
+/** 玩家任务页聚合快照；任务执行仍通过每条记录携带的 villageId 定位来源村庄。 */
+export const playerTaskState = signal<any | null>(null);
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
 
@@ -140,6 +142,13 @@ export function setTaskState(payload: any): void {
     .flatMap((a: any) => (a.camps ?? []))
     .filter((camp: any) => !camp?.cleared);
   taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
+}
+
+export function setPlayerTaskState(payload: any): void {
+  if (!payload) return;
+  playerTaskState.value = payload;
+  // 聚合响应也回填按村缓存，地图任务标记和旧组件仍能正常工作。
+  for (const village of (payload.villages ?? [])) setTaskState(village);
 }
 
 /** 单独推送的地图标记更新（TaskMapUpdated）。 */
