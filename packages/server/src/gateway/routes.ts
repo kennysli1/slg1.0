@@ -24,6 +24,10 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'building.Upgrade', ownVillage: true, needAuth: true,
         schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
       },
+      RepairBuilding: {
+        command: 'building.Repair', ownVillage: true, needAuth: true,
+        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
+      },
       DemolishBuilding: {
         command: 'building.Demolish', ownVillage: true, needAuth: true,
         schema: { slotId: { type: 'string', minLen: 1, maxLen: 32 } },
@@ -32,6 +36,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     eventPushMap: {
       'building.Built': 'BuildingBuilt',
       'building.Upgraded': 'BuildingUpgraded',
+      'building.Repaired': 'BuildingRepaired',
       'building.Demolishing': 'BuildingDemolishing',
       'building.Demolished': 'BuildingDemolished',
       'building.BattleDamaged': 'BuildingBattleDamaged',

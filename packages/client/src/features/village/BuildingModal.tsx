@@ -256,6 +256,10 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   let maxLevel = 0;
   let nextCost: Record<string, number> | null = null;
   let nextTimeSec: number | null = null;
+  let repairCost: Record<string, number> | null = null;
+  let repairTimeSec: number | null = null;
+  let repairTargetLevel: number | undefined;
+  let damaged = false;
   let producing: { ratePerHour: number } | null = null;
   let isBuild = false;
   let demolishing = false;
@@ -284,6 +288,10 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
             maxLevel = p.maxLevel ?? 0;
             nextCost = p.nextCost ?? null;
             nextTimeSec = p.nextTimeSec ?? null;
+            repairCost = p.repairCost ?? null;
+            repairTimeSec = p.repairTimeSec ?? null;
+            repairTargetLevel = p.repairTargetLevel;
+            damaged = !!p.damaged || repairTargetLevel != null;
             producing = p.producing ?? null;
             isBuild = (p.level ?? 0) < 1;
             demolishing = !!p.demolishing;
@@ -310,6 +318,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   const info = buildingInfo(kind);
   const isMain = kind === 'main';
   const isMax = maxLevel > 0 && level >= maxLevel;
+  const isDamaged = damaged || repairTargetLevel != null;
 
   // Treasure management: main or treasury
   const showTreasureMgmt = kind === 'treasury' || kind === 'main';
@@ -317,6 +326,8 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   // ── Level label ──
   const lvStr = demolishing
     ? '拆除中'
+    : isDamaged
+      ? `已破坏 · 可修复至 Lv${repairTargetLevel}`
     : isBuild
       ? '未建造'
       : `Lv${level}${maxLevel ? ` / ${maxLevel}` : ''}`;
@@ -330,10 +341,24 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
   let upgradeBtn: preact.JSX.Element | null = null;
   if (demolishing) {
     upgradeBtn = <Tag kind="crimson">拆除中</Tag>;
+  } else if (isDamaged && !building && repairTargetLevel && repairCost) {
+    upgradeBtn = (
+      <Btn
+        variant={canAfford(repairCost) ? 'primary' : 'default'}
+        size="sm"
+        disabled={!canAfford(repairCost)}
+        title={!canAfford(repairCost) ? '修复所需资源不足' : `修复至 Lv${repairTargetLevel}`}
+        onClick={async () => {
+          await act(req('RepairBuilding', { slotId }), { okToast: `开始修复 ${info.name} 至 Lv${repairTargetLevel}` });
+        }}
+      >
+        修复至 Lv{repairTargetLevel}
+      </Btn>
+    );
   } else if (isMax) {
     upgradeBtn = <Tag kind="gold">已满级</Tag>;
   } else if (building) {
-    upgradeBtn = <Tag kind="ember">{isBuild ? '建造中' : '升级中'}</Tag>;
+    upgradeBtn = <Tag kind="ember">{isDamaged ? '修复中' : isBuild ? '建造中' : '升级中'}</Tag>;
   } else {
     const label = isBuild ? '建造' : `升级至 Lv${level + 1}`;
     upgradeBtn = (
@@ -361,7 +386,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       onClose={close}
       wide={showTreasureMgmt}
       foot={
-        (!demolishing && !isMax && !building) ? (
+        (!demolishing && (!isMax || isDamaged) && !building) ? (
           <div style={{ display: 'flex', gap: 'var(--s-2)', flex: 1 }}>
             {upgradeBtn}
           </div>
@@ -404,7 +429,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
       )}
 
       {/* Upgrade cost block */}
-      {!demolishing && !isMax && nextCost && (
+      {!demolishing && !isDamaged && !isMax && nextCost && (
         <>
           <Divider />
           <div class="bld-upgrade-block">
@@ -412,6 +437,15 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
               {isBuild ? '建造消耗' : `升级到 Lv${level + 1} 消耗`}
             </span>
             <CostRow cost={nextCost} timeSec={nextTimeSec} />
+          </div>
+        </>
+      )}
+      {!demolishing && isDamaged && repairCost && repairTargetLevel && (
+        <>
+          <Divider />
+          <div class="bld-upgrade-block">
+            <span class="bld-upgrade-label">修复至 Lv{repairTargetLevel} 消耗（时间为累计建造时间的 1/3）</span>
+            <CostRow cost={repairCost} timeSec={repairTimeSec} />
           </div>
         </>
       )}
@@ -431,7 +465,7 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
           <TimerBar
             startAt={buildingStartAt}
             finishAt={buildingFinishAt}
-            label={isBuild ? '建造进度' : '升级进度'}
+            label={isDamaged ? '修复进度' : isBuild ? '建造进度' : '升级进度'}
           />
         </>
       )}

@@ -23,9 +23,10 @@ function OccupiedPad({ building: b, pos, isCenter }: {
 
   const info = buildingInfo(b.kind);
   const isDemolishing = !!b.demolishing;
+  const isDamaged = !!b.damaged || (!!b.repairTargetLevel && !b.demolishing);
   const isBusy = !!b.building;
   const isMax = b.maxLevel > 0 && b.level >= b.maxLevel;
-  const isNew = b.level < 1 && !isDemolishing;
+  const isNew = b.level < 1 && !isDemolishing && !isDamaged;
 
   return (
     <div
@@ -55,15 +56,16 @@ function OccupiedPad({ building: b, pos, isCenter }: {
 
           {isNew ? <span class="vil-lvl">建造中</span>
             : isDemolishing ? <span class="vil-lvl vil-lvl--demo">拆除中</span>
+              : isDamaged ? <span class="vil-lvl vil-lvl--demo">受损 Lv{b.level}</span>
               : <span class={`vil-lvl${isMax ? ' max' : ''}`}>Lv{b.level}</span>}
         </span>
 
         <div class="vil-tooltip">
           <b>{b.name}</b>
           {' · '}
-          {isDemolishing ? '拆除中' : isNew ? '建造中' : `Lv${b.level}${isMax ? '（满级）' : ` / ${b.maxLevel}`}`}
+          {isDemolishing ? '拆除中' : isDamaged ? `受损 · 可修复至 Lv${b.repairTargetLevel}` : isNew ? '建造中' : `Lv${b.level}${isMax ? '（满级）' : ` / ${b.maxLevel}`}`}
           {b.producing && !isDemolishing && <><br /><small>产出 +{b.producing.ratePerHour}/时</small></>}
-          {isBusy && !isDemolishing && <><br /><small>升级进行中</small></>}
+          {isBusy && !isDemolishing && <><br /><small>{isDamaged ? '修复进行中' : '升级进行中'}</small></>}
         </div>
       </div>
     </div>

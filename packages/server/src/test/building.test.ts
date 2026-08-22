@@ -311,6 +311,43 @@ test('战斗拆除：按最高等级逐级拆除并返回对应升级资源', as
   assert.ok(Object.values((damaged.payload as any).loot).some((x: any) => Number(x) > 0), '应返回拆除对应升级资源');
 });
 
+test('战斗破坏：建筑保留在槽位、不可升级，可按累计成本三分之一时间一次性修复', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 999999, clay: 999999, iron: 999999, crop: 999999, gold: 999999 } });
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(wood);
+  wood.level = 3;
+  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  app.store.set('building', 'v1', raw);
+
+  const hit = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 300, powerPerLevel: 100, mode: 'damage',
+  });
+  assert.equal(hit.ok, true);
+  const rows = (hit.payload as any).destroyed;
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((x: any) => x.mode === 'damage' && x.loot && Object.keys(x.loot).length === 0));
+  const during = await layout(app);
+  const damaged = during.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(damaged, '破坏到0级仍应保留建筑槽位');
+  assert.equal(damaged.level, 0);
+  assert.equal(damaged.damaged, true);
+  assert.equal(damaged.repairTargetLevel, 3);
+  assert.equal(damaged.nextCost, null, '受损建筑不能继续升级');
+  assert.ok(damaged.repairCost && Object.values(damaged.repairCost).some((n: any) => n > 0));
+
+  const repair = await send(app, 'building.Repair', { villageId: 'v1', slotId: damaged.slotId });
+  assert.equal(repair.ok, true, `修复应成功: ${repair.reason ?? ''}`);
+  assert.ok((repair.payload as any).timeSec >= 1);
+  await app.scheduler.advanceTo((repair.payload as any).finishAt + 1, setClock);
+  const restored = (await layout(app)).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(restored);
+  assert.equal(restored.level, 3);
+  assert.equal(restored.damaged, false);
+  assert.equal(restored.repairTargetLevel, undefined);
+});
+
 test('保险库：保护量按等级累加，攻城拆除后立即减少', async () => {
   const app = freshApp();
   const raw = app.store.get('building', 'v1') as any;

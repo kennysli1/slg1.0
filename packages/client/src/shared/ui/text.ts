@@ -17,6 +17,8 @@ const ERR_MSG: Record<string, string> = {
   slot_empty: '该建筑槽位为空',
   slot_busy: '该建筑正在建造或升级',
   still_constructing: '建筑尚未完成',
+  building_damaged: '建筑已受损，请先修复后再升级',
+  not_damaged: '该建筑没有可修复的损坏等级',
   no_free_slot: '该区域没有空槽',
   bad_zone: '建筑区域不合法',
   zone_mismatch: '不能建在这个区域',
@@ -47,7 +49,6 @@ const ERR_MSG: Record<string, string> = {
   message_too_large: '消息体过大，请减少数据量',
   // 分城 / 运输
   main_level_too_low: '主基地等级不足，无法拓荒',
-  soft_limit_too_low: '人口规模不足，无法拓荒',
   found_inflight_limit: '已有拓荒队伍在途',
   tile_occupied: '目标地块已被占用',
   too_close_to_village: '距离其他村庄过近',

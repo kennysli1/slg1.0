@@ -23,8 +23,10 @@ interface PlacedBuilding {
   slotId: string; // 村内唯一：'center' / 'inner-0' / 'outer-3'
   zone: Zone;
   kind: string; // 建筑 code（含资源田）
-  level: number; // 0=建造中(占位)，>=1=已建成
+  level: number; // 0=建造中(无 repairTargetLevel)或被战斗破坏到0，>=1=已建成/受损
   demolishing?: boolean; // 拆除进行中：期间不提供任何加成（level 已置 0），完成后整栋移除
+  /** 普通部队战斗破坏后的修复目标；存在时建筑仍在槽位但不可升级。 */
+  repairTargetLevel?: number;
 }
 
 interface QueueItem {
@@ -33,6 +35,7 @@ interface QueueItem {
   toLevel: number; // 新建=1，升级=当前+1
   isNew: boolean; // true=新建(完成发 Built)，false=升级(完成发 Upgraded)
   demolish?: boolean; // true=拆除（完成整栋移除，发 Demolished），完成后释放槽位
+  repair?: boolean; // true=战斗损坏建筑的修复队列
   startAt: number;
   finishAt: number;
   taskId: string;
@@ -77,6 +80,7 @@ export class BuildingModule {
     this.commands.register('building.GetBuildOptions', (c) => this.getBuildOptions(c));
     this.commands.register('building.Build', (c) => this.build(c));
     this.commands.register('building.Upgrade', (c) => this.upgrade(c));
+    this.commands.register('building.Repair', (c) => this.repair(c));
     this.commands.register('building.Demolish', (c) => this.demolish(c));
     this.commands.register('building.ApplyBattleDamage', (c) => this.applyBattleDamage(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
@@ -326,6 +330,37 @@ export class BuildingModule {
     return def.levels[level]?.prod ?? 0;
   }
 
+  /** 从当前等级升到目标等级的累计资源成本（def.cost(level) 表示升入该级）。 */
+  private costBetween(def: BuildingDef, fromLevel: number, toLevel: number): Record<string, number> {
+    const total: Record<string, number> = {};
+    for (let level = Math.max(1, fromLevel + 1); level <= toLevel; level++) {
+      for (const [resource, amount] of Object.entries(def.cost(level))) {
+        const n = Number(amount);
+        if (Number.isFinite(n) && n > 0) total[resource] = (total[resource] ?? 0) + n;
+      }
+    }
+    return total;
+  }
+
+  /** 修复面板的同步耗时估算；实际修复命令会按劳动力倍率重新计算。 */
+  private repairTimeEstimate(s: BuildingState, def: BuildingDef, fromLevel: number, toLevel: number): number {
+    const c = this.config.constants;
+    const mainLv = this.tcLevel(s);
+    const mainDef = this.config.buildings.main;
+    let totalSpeedup = 0;
+    for (let lv = 1; lv <= mainLv; lv++) {
+      totalSpeedup += mainDef.levels[lv]?.buildSpeedupPerLevel ?? (lv === 1 ? 0 : c.mainBuildSpeedupPerLevel);
+    }
+    const speedMult = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
+    let total = 0;
+    for (let level = Math.max(1, fromLevel + 1); level <= toLevel; level++) {
+      let sec = Math.max(1, Math.round(def.timeSec(level) * speedMult));
+      if (s.techBuildSpeed && s.techBuildSpeed > 0) sec = Math.max(1, Math.round(sec / (1 + s.techBuildSpeed)));
+      total += sec;
+    }
+    return Math.max(1, Math.floor(total / 3));
+  }
+
   private hasPendingOp(s: BuildingState, slotId: string): boolean {
     return s.queue.some((q) => q.slotId === slotId);
   }
@@ -392,6 +427,7 @@ export class BuildingModule {
               toLevel: q.toLevel,
               isNew: q.isNew,
               demolishing: !!q.demolish,
+              repairing: !!q.repair,
               startAt: q.startAt,
               finishAt: q.finishAt,
             })),
@@ -418,9 +454,17 @@ export class BuildingModule {
       .filter((p) => p.zone === zone)
       .map((p) => {
         const def = this.config.buildings[p.kind];
-        const constructing = p.level < 1;
+        const constructing = p.level < 1 && !p.repairTargetLevel;
+        const damaged = !!p.repairTargetLevel && !p.demolishing;
         const pending = this.pendingOp(s, p.slotId);
-        const canUp = !constructing && !p.demolishing && p.level < (def?.maxLevel ?? 1);
+        const canUp = !constructing && !damaged && !p.demolishing && p.level < (def?.maxLevel ?? 1);
+        const repairTargetLevel = damaged ? p.repairTargetLevel : undefined;
+        const repairCost = damaged && def && repairTargetLevel && p.level < repairTargetLevel
+          ? this.costBetween(def, p.level, repairTargetLevel)
+          : null;
+        const repairTimeSec = damaged && def && repairTargetLevel && p.level < repairTargetLevel
+          ? this.repairTimeEstimate(s, def, p.level, repairTargetLevel)
+          : null;
         return {
           slotId: p.slotId,
           kind: p.kind,
@@ -429,11 +473,16 @@ export class BuildingModule {
           level: p.level,
           maxLevel: def?.maxLevel ?? 1,
           demolishing: !!p.demolishing,
+          damaged,
+          repairTargetLevel,
           building: constructing || !!pending,
+          repairing: !!pending?.repair,
           buildingStartAt: pending?.startAt,
           buildingFinishAt: pending?.finishAt,
           nextCost: canUp ? def!.cost(p.level + 1) : null,
           nextTimeSec: canUp ? buildTimeSyncEstimate(def!.timeSec(p.level + 1)) : null,
+          repairCost,
+          repairTimeSec,
           // 拆除期间不展示产量（已无加成）
           producing: def?.resource && !p.demolishing
             ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, p.level)) }
@@ -519,6 +568,7 @@ export class BuildingModule {
     const p = s.placed.find((x) => x.slotId === slotId);
     if (!p) return { ok: false, payload: {}, reason: 'slot_empty' };
     if (p.level < 1) return { ok: false, payload: {}, reason: 'still_constructing' };
+    if (p.repairTargetLevel) return { ok: false, payload: {}, reason: 'building_damaged' };
     if (this.hasPendingOp(s, slotId)) return { ok: false, payload: {}, reason: 'slot_busy' };
     const def = this.config.buildings[p.kind];
     if (!def) return { ok: false, payload: {}, reason: `unknown_building:${p.kind}` };
@@ -543,6 +593,39 @@ export class BuildingModule {
     return { ok: true, payload: { slotId, toLevel, finishAt } };
   }
 
+  /** 一次性修复普通部队造成的损坏，恢复到首次受损前的最高等级。 */
+  private async repair(cmd: Command): Promise<CommandResult> {
+    const { villageId, slotId } = cmd.payload as { villageId: string; slotId: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const p = s.placed.find((x) => x.slotId === slotId);
+    if (!p) return { ok: false, payload: {}, reason: 'slot_empty' };
+    if (!p.repairTargetLevel) return { ok: false, payload: {}, reason: 'not_damaged' };
+    if (p.demolishing) return { ok: false, payload: {}, reason: 'already_demolishing' };
+    if (this.hasPendingOp(s, slotId)) return { ok: false, payload: {}, reason: 'slot_busy' };
+    const def = this.config.buildings[p.kind];
+    if (!def) return { ok: false, payload: {}, reason: `unknown_building:${p.kind}` };
+    const target = Math.min(def.maxLevel, p.repairTargetLevel);
+    if (p.level >= target) {
+      delete p.repairTargetLevel;
+      this.store.set(COLLECTION, villageId, s);
+      return { ok: true, payload: { slotId, toLevel: p.level, finishAt: this.now() } };
+    }
+    if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
+    const cost = this.costBetween(def, p.level, target);
+    const spend = await this.commands.send({ name: 'economy.TrySpend', from: BuildingModule.NAME, payload: { villageId, cost } });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
+    let totalSec = 0;
+    for (let level = p.level + 1; level <= target; level++) totalSec += await this.buildTime(s, def.timeSec(level));
+    const durSec = Math.max(1, Math.floor(totalSec / 3));
+    const startAt = this.now();
+    const finishAt = startAt + durSec * 1000;
+    const taskId = this.scheduler.schedule(durSec * 1000, () => this.complete(villageId, slotId), `building:${villageId}`, `village:${villageId}`);
+    s.queue.push({ slotId, kind: p.kind, toLevel: target, isNew: false, repair: true, startAt, finishAt, taskId });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { slotId, toLevel: target, finishAt, cost, timeSec: durSec } };
+  }
+
   /**
    * 拆除已建建筑：耗时 = 该建筑建造到 1 级所需时间（与新建同源加速公式），不消耗也不返还资源；
    * 期间立即置 level=0 + demolishing，所有派生（人口上限/仓储/产率/繁荣/防御…因 level<1 自动跳过）即时失效；
@@ -556,7 +639,7 @@ export class BuildingModule {
     if (!p) return { ok: false, payload: {}, reason: 'slot_empty' };
     if (p.kind === CENTER_KIND) return { ok: false, payload: {}, reason: 'cannot_demolish_center' };
     if (p.demolishing) return { ok: false, payload: {}, reason: 'already_demolishing' };
-    if (p.level < 1) return { ok: false, payload: {}, reason: 'still_constructing' };
+    if (p.level < 1 && !p.repairTargetLevel) return { ok: false, payload: {}, reason: 'still_constructing' };
     if (this.hasPendingOp(s, slotId)) return { ok: false, payload: {}, reason: 'slot_busy' };
     if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
     const def = this.config.buildings[p.kind];
@@ -600,6 +683,7 @@ export class BuildingModule {
       s.placed = s.placed.filter((x) => x.slotId !== slotId);
     } else if (p) {
       p.level = qi.toLevel;
+      if (qi.repair) delete p.repairTargetLevel;
     }
     s.queue = s.queue.filter((q) => q !== qi);
     this.store.set(COLLECTION, villageId, s);
@@ -607,7 +691,7 @@ export class BuildingModule {
     if (qi.demolish) {
       await this.emit('building.Demolished', villageId, slotId, kind, 0);
     } else {
-      await this.emit(qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
+      await this.emit(qi.repair ? 'building.Repaired' : qi.isNew ? 'building.Built' : 'building.Upgraded', villageId, slotId, kind, qi.toLevel);
     }
 
     // 刷新派生：人口/容量始终；资源田刷该资源产率；宝物栏槽位随宝库变动
@@ -651,17 +735,22 @@ export class BuildingModule {
     return { ok: true, payload: { protection } };
   }
 
-  /** 战斗后的即时建筑破坏：每消耗一个战力阈值拆除一级，最高等级优先。 */
+  /**
+   * 战斗后的即时建筑损伤：
+   *  - damage：普通部队破坏等级，建筑保留在槽位（最低 0 级），记录首次受损前等级供一次性修复；不产生拆除战利品。
+   *  - demolish：攻城武器拆除等级，降到 0 级时整栋移除并按被拆等级产出建筑战利品。
+   */
   private applyBattleDamage(cmd: Command): CommandResult {
-    const { villageId, zone, power, powerPerLevel } = cmd.payload as {
-      villageId: string; zone: Zone; power: number; powerPerLevel: number;
+    const { villageId, zone, power, powerPerLevel, mode = 'demolish' } = cmd.payload as {
+      villageId: string; zone: Zone; power: number; powerPerLevel: number; mode?: 'damage' | 'demolish';
     };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
     const threshold = Math.max(1, Number(powerPerLevel) || 1);
     let remainingPower = Math.max(0, Number(power) || 0);
-    const destroyed: Array<{ slotId: string; kind: string; zone: Zone; fromLevel: number; toLevel: number; loot: Record<string, number> }> = [];
+    const operation = mode === 'damage' ? 'damage' : 'demolish';
+    const destroyed: Array<{ slotId: string; kind: string; zone: Zone; fromLevel: number; toLevel: number; mode: 'damage' | 'demolish'; operation: 'damage' | 'demolish'; loot: Record<string, number> }> = [];
     const loot: Record<string, number> = {};
     let step = 0;
     while (remainingPower >= threshold) {
@@ -675,15 +764,17 @@ export class BuildingModule {
       const def = this.config.buildings[p.kind];
       if (!def) break;
       const fromLevel = p.level;
-      const cost = def.cost(fromLevel);
+      const cost = operation === 'demolish' ? def.cost(fromLevel) : {};
       for (const [resource, amount] of Object.entries(cost)) {
         const value = Number(amount);
         if (Number.isFinite(value) && value > 0) loot[resource] = (loot[resource] ?? 0) + value;
       }
+      if (operation === 'damage') p.repairTargetLevel = p.repairTargetLevel ?? fromLevel;
       p.level -= 1;
       const toLevel = p.level;
-      destroyed.push({ slotId: p.slotId, kind: p.kind, zone, fromLevel, toLevel, loot: { ...cost } });
-      if (p.level <= 0) s.placed = s.placed.filter((x) => x !== p);
+      destroyed.push({ slotId: p.slotId, kind: p.kind, zone, fromLevel, toLevel, mode: operation, operation, loot: { ...cost } });
+      // 普通部队造成的 0 级建筑仍保留，可修复或手动拆除；攻城武器降到 0 级才完全移除。
+      if (operation === 'demolish' && p.level <= 0) s.placed = s.placed.filter((x) => x !== p);
       remainingPower -= threshold;
       step += 1;
     }
@@ -695,12 +786,12 @@ export class BuildingModule {
       this.reportTradeCenter(s);
       void this.bus.emit({
         name: 'building.BattleDamaged', source: BuildingModule.NAME, ts: this.now(),
-        payload: { villageId, zone, destroyed, loot, levelsDestroyed: destroyed.length },
+        payload: { villageId, zone, destroyed, loot, levelsDestroyed: destroyed.length, mode: operation },
       } as DomainEvent);
     }
     return {
       ok: true,
-      payload: { zone, destroyed, loot, levelsDestroyed: destroyed.length, powerSpent: step * threshold, remainingPower },
+      payload: { zone, destroyed, loot, levelsDestroyed: destroyed.length, mode: operation, powerSpent: step * threshold, remainingPower },
     };
   }
 

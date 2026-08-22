@@ -38,12 +38,6 @@ async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
   // 等待 refreshHardCap 异步完成
   for (let i = 0; i < 10; i++) await Promise.resolve();
 
-  const pop = (await send(app, 'population.GetSnapshot', { villageId })).payload as any;
-  assert.ok(
-    pop.softLimit >= app.config.constants.foundMinSoftLimit,
-    `softLimit=${pop.softLimit} 应≥${app.config.constants.foundMinSoftLimit}`,
-  );
-
   const per = app.config.constants.foundResourceCostBase;
   // 抬高容量，避免「无露天仓库超额丢弃」把拓荒开城包钳到容量（测试聚焦拓荒流程，非溢出）
   await send(app, 'economy.SetCapacity', {

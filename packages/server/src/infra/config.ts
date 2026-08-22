@@ -417,8 +417,6 @@ export interface GameConstants {
   popHospitalRecoveryMax: number;
   /** 拓荒：出发村主基地最低等级。 */
   foundMinMainLevel: number;
-  /** 拓荒：出发村人口软上限最低门槛。 */
-  foundMinSoftLimit: number;
   /** 拓荒：所需拓荒者数量。 */
   foundSettlerCount: number;
   /** 拓荒：第2村开城包（单资源）。 */
@@ -958,7 +956,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
     foundMinMainLevel: cn('found_min_main_level', 10),
-    foundMinSoftLimit: cn('found_min_soft_limit', 350),
     foundSettlerCount: cn('found_settler_count', 1),
     foundResourceCostBase: cn('found_resource_cost_base', 3000),
     foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
