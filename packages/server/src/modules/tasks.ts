@@ -569,7 +569,14 @@ export class TasksModule {
       granted.resources = { ...(granted.resources ?? {}), gold: ((granted.resources ?? {}).gold ?? 0) + 500 };
       const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'honest_heart', pendingIfFull: true } });
       if (gh.ok) granted.treasures.push('honest_heart');
-      granted.reputation = this.config.constants.reputationS4ReleaseDelta;
+      const releaseReputation = this.config.constants.reputationS4ReleaseDelta;
+      if (releaseReputation !== 0) {
+        await this.commands.send({
+          name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+          payload: { villageId, delta: releaseReputation, reason: 's4_release_natalies' },
+        });
+        granted.reputation = releaseReputation;
+      }
     }
 
     delete s.active[code];
@@ -657,16 +664,6 @@ export class TasksModule {
     if (!inst) return;
     inst.awaitingNatalieDecision = false;
     inst.natalieDecision = p.released ? 'release' : 'store';
-    if (p.released) {
-      await this.commands.send({
-        name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
-        payload: {
-          villageId: p.villageId,
-          delta: this.config.constants.reputationS4ReleaseDelta,
-          reason: 's4_release_natalies',
-        },
-      });
-    }
     if (!p.released) {
       const failureReputation = this.quest(inst.code)?.failureRewards?.reputation ?? 0;
       if (failureReputation !== 0) {
