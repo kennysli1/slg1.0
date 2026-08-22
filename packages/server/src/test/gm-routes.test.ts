@@ -159,6 +159,10 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
     assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
+    assert.match(res.body, /拓荒参数/, 'GM 页面应包含拓荒专用调参板块');
+    assert.match(res.body, /found_resource_cost_base/, 'GM 页面应提供第2座城每种资源成本参数');
+    assert.match(res.body, /found_resource_cost_growth/, 'GM 页面应提供后续城成本增长倍率参数');
+    assert.match(res.body, /第2座城为木材\/泥土\/钢\/粮食各 3000/, 'GM 页面应说明当前默认拓荒成本');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -330,6 +334,26 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     };
     const alchemyConstant = (constantsData.constants ?? []).find((r) => r.key === 'alchemy_refine_sec');
     assert.equal(Number(alchemyConstant?.value), 42, 'balance/data 应返回修改后的炼金时间');
+
+    const foundingSave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: {
+        found_resource_cost_base: { value: '4321' },
+        found_resource_cost_growth: { value: '1.5' },
+      } }),
+    });
+    assert.equal(foundingSave.statusCode, 200, `拓荒成本覆盖应成功：${foundingSave.body}`);
+    assert.equal(app.config.constants.foundResourceCostBase, 4321, '第2座城每种资源成本应热重载');
+    assert.equal(app.config.constants.foundResourceCostGrowth, 1.5, '后续城成本增长倍率应热重载');
+    const foundingData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    const foundingBase = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_base');
+    const foundingGrowth = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_growth');
+    assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
+    assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
 
     await fastify.close();
   } finally {

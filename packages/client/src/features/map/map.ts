@@ -248,7 +248,7 @@ function renderTargetPanel(): string {
           <small class="coord">坐标 (${selected.q},${selected.r}) · 距离 ${dist} 格 · 可拓荒建村</small></div>
         <button class="target-close" id="closeTarget">✕</button>
       </div>
-      <p class="muted">需主基地与人口规模达标，并备齐 3 名拓荒者与开城资源。失败不退开城包。</p>
+      <p class="muted">需主基地与人口规模达标，并备齐配置数量的拓荒者与开城资源。具体成本由服务器 GM 参数决定；失败不退开城包。</p>
       <div class="target-actions"><button class="btn-sm btn-raid" id="doFound">🚩 拓荒建村</button></div>
     </div>`;
   }
