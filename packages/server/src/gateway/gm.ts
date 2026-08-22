@@ -511,7 +511,9 @@ function sectionGeneric(table){
   var rows = DATA[table] || [];
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key]; });
+    rows = rows.filter(function(r){ return !repKeys[r.key] && r.key !== 'alchemy_refine_sec'; });
+  } else if (table === 'constants') {
+    rows = rows.filter(function(r){ return r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -606,7 +608,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地功能参数(如有)。宝库的「每级主/备用槽」可直接修改；每级填写的数值会同时增加主宝物栏和备用宝物栏容量。</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；每级填写的数值会同时增加主宝物栏和备用宝物栏容量。炼金炉固定最高 1 级，炼化时间与其升级消耗集中在炼金炉卡片内。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -703,6 +705,17 @@ function sectionBuildings(){
         }
         h += '</tr>';
       }
+      h += '</tbody></table></div>';
+    }
+    if (code === 'alchemy'){
+      var constRows = DATA.constants || [], refineRow = null;
+      for (var cr=0;cr<constRows.length;cr++) if (constRows[cr].key === 'alchemy_refine_sec') { refineRow = constRows[cr]; break; }
+      var refineValue = refineRow && refineRow.value != null ? refineRow.value : '';
+      h += '<div style="margin-top:8px"><span style="color:#f0b070;font-size:12px">炼金炉功能参数（合并在升级消耗栏）</span>';
+      h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+      h += '<tr><td class="lbl">炼化时间（秒）<small style="color:#7a86a8">(alchemy_refine_sec)</small></td>';
+      h += '<td><input type="number" min="1" step="1" value="'+esc(refineValue)+'" data-t="constants" data-k="alchemy_refine_sec" data-f="value" oninput="onEdit(this)"></td>';
+      h += '<td class="lbl">三个同品质宝物炼化所需时间；修改后新炼化立即使用</td></tr>';
       h += '</tbody></table></div>';
     }
     h += '</div></div>';

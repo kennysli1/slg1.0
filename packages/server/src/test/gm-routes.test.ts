@@ -152,6 +152,8 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
+    assert.match(res.body, /炼金炉功能参数（合并在升级消耗栏）/, 'GM 页面应把炼金炉参数合并到炼金炉升级消耗卡片');
+    assert.match(res.body, /alchemy_refine_sec/, 'GM 页面应提供炼金时间参数');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
     assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
@@ -296,6 +298,20 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     };
     const treasuryLevel = (levelData.building_levels ?? []).find((r) => r.code === 'treasury' && String(r.level) === '1');
     assert.equal(Number(treasuryLevel?.treasureSlots), 7, 'balance/data 应返回修改后的宝库槽位');
+
+    const alchemySave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: { alchemy_refine_sec: { value: '42' } } }),
+    });
+    assert.equal(alchemySave.statusCode, 200, `炼金时间覆盖应成功：${alchemySave.body}`);
+    assert.equal(app.config.constants.alchemyRefineSec, 42, '炼金炉炼化时间应热重载为 42 秒');
+    const constantsData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    const alchemyConstant = (constantsData.constants ?? []).find((r) => r.key === 'alchemy_refine_sec');
+    assert.equal(Number(alchemyConstant?.value), 42, 'balance/data 应返回修改后的炼金时间');
 
     await fastify.close();
   } finally {

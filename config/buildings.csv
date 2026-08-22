@@ -20,4 +20,4 @@ id,code,name,icon,zone,resource,maxLevel,requires,prosperityPerLevel,popGrowthPe
 18,tradecenter,贸易中心,bld_tradecenter,outer,,10,1:1,3,0,玩家之间与 NPC 的贸易枢纽 派商队运送货物换取资源或金币 等级越高贸易路线越多看得越远 NPC 订单越频繁,每级增加贸易路线数/可见交易距离/NPC订单频率与数量
 19,treasury,宝库,bld_treasury,inner,,10,1:1,3,0,储存宝物的专用建筑 等级越高宝物栏槽位越多 让清理野营与贸易刷新掉落的宝物有更多安身之处,每级增加宝物栏槽位数
 20,tavern,酒馆,bld_tavern,inner,,5,1:1,2,0,接取任务的中枢 等级越高随机任务刷新越频繁可接取数量越多,每级加快随机任务刷新并增加可接取任务数
-21,alchemy,炼金炉,bld_alchemy,inner,,5,1:1,3,0,将三个相同品质的宝物炼化为一个更高品质的随机宝物,每次炼化消耗三个宝物并按掉率抽取更高品质宝物
+21,alchemy,炼金炉,bld_alchemy,inner,,1,1:1,3,0,将三个相同品质的宝物炼化为一个更高品质的随机宝物,每次炼化消耗三个宝物并按掉率抽取更高品质宝物
