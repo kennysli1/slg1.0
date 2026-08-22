@@ -19,6 +19,8 @@ export interface Movement {
   status: MovementStatus;
   targetId?: string;
   targetVillage?: string;
+  /** 玩家村战斗模式：掠夺或攻城。 */
+  battleType?: 'raid' | 'siege';
   from: Hex;
   originalFrom: Hex;
   to: Hex;

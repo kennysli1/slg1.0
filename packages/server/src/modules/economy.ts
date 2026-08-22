@@ -294,12 +294,13 @@ export class EconomyModule {
     this.settle(s);
     this.store.set(COLLECTION, s.villageId, s);
     const mainLevel = Math.max(0, Number((cmd.payload as any).mainLevel) || 0);
+    const ignoreSafe = (cmd.payload as any).ignoreSafe === true;
     const lootable = zero();
     for (const t of RESOURCE_TYPES) {
       const safeRatio = Number(this.config.constants.raw.pvp_safe_resource_capacity_ratio) || 0.2;
       const safeGoldBase = Number(this.config.constants.raw.pvp_safe_gold_base) || 200;
       const safeGoldPerLevel = Number(this.config.constants.raw.pvp_safe_gold_per_main_level) || 50;
-      const safe = t === 'gold' ? safeGoldBase + mainLevel * safeGoldPerLevel : s.capacity[t] * safeRatio;
+      const safe = ignoreSafe ? 0 : (t === 'gold' ? safeGoldBase + mainLevel * safeGoldPerLevel : s.capacity[t] * safeRatio);
       lootable[t] = Math.max(0, s.resources[t] - safe);
     }
     return { ok: true, payload: { lootable } };

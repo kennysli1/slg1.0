@@ -43,6 +43,8 @@ interface Contribution {
 interface Battle {
   id: string;
   targetKind: 'village' | 'pve' | 'field';
+  /** 玩家村战斗模式；PvE/野战没有该字段。 */
+  battleType?: 'raid' | 'siege';
   targetId: string; // 防守方村 id、PvE 目标 id 或野战时的 defender movement id
   targetXY: { q: number; r: number }; // 六边形轴坐标（不透明透传）
   wallLevel: number;
@@ -157,6 +159,7 @@ export class CombatModule {
   private async engage(cmd: Command): Promise<CommandResult> {
     const p = cmd.payload as {
       targetKind: 'village' | 'pve' | 'field';
+      battleType?: 'raid' | 'siege';
       targetId: string;
       targetXY: { q: number; r: number };
       movementId: string;
@@ -230,6 +233,7 @@ export class CombatModule {
       const battle: Battle = {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
+        battleType: undefined,
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
@@ -250,7 +254,7 @@ export class CombatModule {
 
     let fetchedDefender: { defender: Snapshot; wallLevel: number } | null = null;
     try {
-      fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId);
+      fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId, p.battleType);
     } finally {
       this.claiming.delete(p.targetId);
     }
@@ -283,6 +287,7 @@ export class CombatModule {
     const battle: Battle = {
       id,
       targetKind: p.targetKind,
+      battleType: p.battleType ?? (p.targetKind === 'village' ? 'siege' : undefined),
       targetId: p.targetId,
       targetXY: p.targetXY,
       wallLevel,
@@ -319,15 +324,19 @@ export class CombatModule {
   }
 
   /** 拉取防守方快照 + 城墙等级。PvP 找 military+building；PvE 找 pve。 */
-  private async fetchDefender(kind: 'village' | 'pve', targetId: string): Promise<{ defender: Snapshot; wallLevel: number }> {
+  private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege'): Promise<{ defender: Snapshot; wallLevel: number }> {
     if (kind === 'pve') {
       const res = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: CombatModule.NAME, payload: { id: targetId } });
       return { defender: ((res.payload as any)?.snapshot ?? {}) as Snapshot, wallLevel: 0 };
     }
-    const defRes = await this.commands.send({ name: 'military.GetCombatSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
+    const defRes = await this.commands.send({
+      name: 'military.GetCombatSnapshot', from: CombatModule.NAME,
+      payload: battleType === 'raid' ? { villageId: targetId, purpose: 'raid' } : { villageId: targetId },
+    });
     const defender = ((defRes.payload as any)?.snapshot ?? {}) as Snapshot;
     const build = await this.commands.send({ name: 'building.GetDefenseSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
-    const wallLevel = (build.payload as any)?.wallLevel ?? 0;
+    // 掠夺战即使守方派兵也不启用城墙；攻城战才取城墙加成。
+    const wallLevel = battleType === 'raid' ? 0 : ((build.payload as any)?.wallLevel ?? 0);
     return { defender, wallLevel };
   }
 
@@ -423,6 +432,9 @@ export class CombatModule {
 
     // 应用防守方损失 + 取战利品
     let looted: Record<string, number> = {};
+    let storedLoot: Record<string, number> = {};
+    let buildingLoot: Record<string, number> = {};
+    let buildingDamage: unknown[] = [];
     let campCleared = false;
     let isTaskCamp = false;
     let isNoRespawn = false;
@@ -448,35 +460,62 @@ export class CombatModule {
         for (const [code, dead] of Object.entries(defenderLosses)) delta[code] = -dead;
         await this.commands.send({ name: 'military.AdjustTroops', from: CombatModule.NAME, payload: { villageId: b.targetId, delta } });
       }
-      // 掠夺（攻方胜且有载货）
-      if (attackerWins && totalCarry > 0) {
-        const main = await this.commands.send({ name: 'building.GetBuildingLevel', from: CombatModule.NAME, payload: { villageId: b.targetId, kind: 'main' } });
-        const pvp = await this.commands.send({ name: 'player.GetPvpContext', from: CombatModule.NAME, payload: { villageId: b.targetId } });
-        const lootRes = await this.commands.send({ name: 'economy.GetLootable', from: CombatModule.NAME, payload: { villageId: b.targetId, mainLevel: Number((main.payload as any)?.level) || 0 } });
-        const lootable: Record<string, number> = (lootRes.payload as any)?.lootable ?? {};
-        const total = Object.values(lootable).reduce((a, v) => a + v, 0);
-        const want: Record<string, number> = {};
-        if (total > 0) {
-          const powerRatio = b.attackPower0 / Math.max(1, b.defensePower0);
-          const powerMult = this.config.pvpPowerCurve.find((x) => powerRatio <= x.maxRatio)?.lootMult ?? 0;
-          const hitMult = Number((pvp.payload as any)?.hitMult ?? 1);
-          const ratio = Math.min(1, totalCarry / total) * powerMult * hitMult;
-          for (const [t, v] of Object.entries(lootable)) want[t] = Math.floor(v * ratio);
+      const battleType = b.battleType ?? 'siege';
+      const survivorsPower = totalPower(b.attacker);
+      // 只有战后仍有进攻方幸存者才拆建筑；攻城武器的内城破坏单独按其战力计算。
+      if (attackerWins && totalCount(b.attacker) > 0) {
+        const outerThreshold = battleType === 'raid'
+          ? this.config.constants.pvpRaidPowerPerBuildingLevel
+          : this.config.constants.pvpSiegePowerPerBuildingLevel;
+        const outer = await this.commands.send({
+          name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
+          payload: { villageId: b.targetId, zone: 'outer', power: survivorsPower, powerPerLevel: outerThreshold },
+        });
+        const outerDamage = (outer.payload as any)?.destroyed ?? [];
+        buildingDamage = [...outerDamage];
+        buildingLoot = mergeResources(buildingLoot, (outer.payload as any)?.loot ?? {});
+
+        if (battleType === 'siege') {
+          const siegePower = totalPower(filterSiegeWeapons(b.attacker));
+          if (siegePower > 0) {
+            const inner = await this.commands.send({
+              name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
+              payload: { villageId: b.targetId, zone: 'inner', power: siegePower, powerPerLevel: this.config.constants.pvpSiegeWeaponPowerPerBuildingLevel },
+            });
+            buildingDamage = [...buildingDamage, ...((inner.payload as any)?.destroyed ?? [])];
+            buildingLoot = mergeResources(buildingLoot, (inner.payload as any)?.loot ?? {});
+          }
         }
-        log('PvP 掠夺前', { target: b.targetId, lootable, totalCarry, ratio: total > 0 ? Math.min(1, totalCarry / total).toFixed(3) : 0, want });
-        const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: want } });
-        looted = (taken.payload as any)?.taken ?? {};
-        const hasLoot = Object.values(looted).some((amount) => amount > 0);
-        let recovered = false;
-        if ((pvp.payload as any)?.recoveryAvailable) {
-          const recovery = await this.commands.send({ name: 'economy.ApplyPvpRecovery', from: CombatModule.NAME, payload: { villageId: b.targetId } });
-          recovered = Boolean((recovery.payload as any)?.triggered);
+
+        // 先搬运建筑拆除收益，剩余运力才用于攻城战的仓库/粮仓存量。
+        let remainingCarry = totalCarry;
+        const buildingCarried = capLoot(buildingLoot, remainingCarry);
+        remainingCarry -= sumResources(buildingCarried);
+        looted = mergeResources(looted, buildingCarried);
+        if (battleType === 'siege' && remainingCarry > 0 && this.config.constants.pvpSiegeStorageLootRatio > 0) {
+          const lootRes = await this.commands.send({
+            name: 'economy.GetLootable', from: CombatModule.NAME,
+            payload: { villageId: b.targetId, ignoreSafe: true },
+          });
+          const available = (lootRes.payload as any)?.lootable ?? {};
+          const want = capLoot(scaleResources(available, this.config.constants.pvpSiegeStorageLootRatio), remainingCarry);
+          const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: want } });
+          storedLoot = (taken.payload as any)?.taken ?? {};
+          looted = mergeResources(looted, storedLoot);
         }
-        if (hasLoot || recovered) {
-          await this.commands.send({ name: 'player.RecordPvpHit', from: CombatModule.NAME, payload: { villageId: b.targetId, recovered, recordHit: hasLoot } });
-        }
-        log('PvP 掠夺后', { target: b.targetId, looted });
       }
+
+      const pvp = await this.commands.send({ name: 'player.GetPvpContext', from: CombatModule.NAME, payload: { villageId: b.targetId } });
+      const hasLoot = Object.values(looted).some((amount) => amount > 0);
+      let recovered = false;
+      if ((pvp.payload as any)?.recoveryAvailable) {
+        const recovery = await this.commands.send({ name: 'economy.ApplyPvpRecovery', from: CombatModule.NAME, payload: { villageId: b.targetId } });
+        recovered = Boolean((recovery.payload as any)?.triggered);
+      }
+      if (hasLoot || recovered) {
+        await this.commands.send({ name: 'player.RecordPvpHit', from: CombatModule.NAME, payload: { villageId: b.targetId, recovered, recordHit: hasLoot } });
+      }
+      log('PvP 结算', { target: b.targetId, battleType, buildingDamage, buildingLoot, storedLoot, looted });
     }
 
     const totalLootCarry = totalCarry || 1;
@@ -488,6 +527,11 @@ export class CombatModule {
       defenderLosses,
       targetKind: b.targetKind,
       targetId: b.targetId,
+      battleType: b.battleType,
+      battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : undefined,
+      buildingDamage,
+      buildingLoot,
+      storedLoot,
       // 任务结算需要区分“击败部分守军”和“真正清空营地”；必须随 BattleEnded 透传。
       campCleared,
     };
@@ -696,6 +740,51 @@ function totalPower(snap: Snapshot): number {
   let p = 0;
   for (const u of Object.values(snap)) p += u.count * (u.meleeAtk + u.rangedAtk);
   return p;
+}
+
+/** 只保留攻城武器（兵种表以 workshop 为训练建筑；代码命名兼容三族器械）。 */
+function filterSiegeWeapons(snap: Snapshot): Snapshot {
+  const out: Snapshot = {};
+  for (const [key, unit] of Object.entries(snap)) {
+    const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
+    if (/ram|catapult|trebuchet/i.test(code)) out[key] = unit;
+  }
+  return out;
+}
+
+function mergeResources(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const out = { ...a };
+  for (const [key, value] of Object.entries(b)) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) out[key] = (out[key] ?? 0) + n;
+  }
+  return out;
+}
+
+function sumResources(resources: Record<string, number>): number {
+  return Object.values(resources).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+}
+
+/** 按总运力等比例截断资源，避免单一资源顺序决定掠夺结果。 */
+function capLoot(resources: Record<string, number>, carry: number): Record<string, number> {
+  const total = sumResources(resources);
+  if (total <= 0 || carry <= 0) return {};
+  const ratio = Math.min(1, carry / total);
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(resources)) {
+    const n = Math.floor(Math.max(0, Number(value) || 0) * ratio);
+    if (n > 0) out[key] = n;
+  }
+  return out;
+}
+
+function scaleResources(resources: Record<string, number>, ratio: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(resources)) {
+    const n = Math.floor(Math.max(0, Number(value) || 0) * Math.max(0, ratio));
+    if (n > 0) out[key] = n;
+  }
+  return out;
 }
 
 /** 按 code 聚合数量（去掉贡献命名空间前缀），用于推送/展示。 */

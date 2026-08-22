@@ -475,6 +475,12 @@ export interface GameConstants {
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
+  /** PvP 掠夺/攻城：每拆除建筑一级所需的战力阈值。 */
+  pvpRaidPowerPerBuildingLevel: number;
+  pvpSiegePowerPerBuildingLevel: number;
+  pvpSiegeWeaponPowerPerBuildingLevel: number;
+  /** 攻城可从仓库/粮仓取走的存量比例。 */
+  pvpSiegeStorageLootRatio: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -980,6 +986,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
+    pvpRaidPowerPerBuildingLevel: Math.max(1, cn('pvp_raid_power_per_building_level', 100)),
+    pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
+    pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
+    pvpSiegeStorageLootRatio: Math.max(0, Math.min(1, cn('pvp_siege_storage_loot_ratio', 1))),
     raw,
   };
 

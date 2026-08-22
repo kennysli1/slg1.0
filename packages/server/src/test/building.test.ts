@@ -287,3 +287,27 @@ test('拆除：重复拆除同一建筑应被拒（already_demolishing）', asyn
   assert.equal(d2.reason, 'already_demolishing');
 });
 
+test('战斗拆除：按最高等级逐级拆除并返回对应升级资源', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  const clay = raw.placed.find((p: any) => p.kind === 'claypit');
+  assert.ok(wood && clay);
+  wood.level = 5;
+  clay.level = 5;
+  app.store.set('building', 'v1', raw);
+
+  const damaged = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 300, powerPerLevel: 100,
+  });
+  assert.equal(damaged.ok, true);
+  const rows = (damaged.payload as any).destroyed;
+  assert.equal(rows.length, 3, '300 战力应拆 3 级');
+  assert.ok(rows.every((x: any) => x.fromLevel >= 4), '应从最高等级建筑开始拆');
+  const after = await layout(app);
+  const afterWood = after.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  const afterClay = after.zones.outer.placed.find((p: any) => p.kind === 'claypit');
+  assert.equal((afterWood?.level ?? 0) + (afterClay?.level ?? 0), 7, '总等级应从10降到7');
+  assert.ok(Object.values((damaged.payload as any).loot).some((x: any) => Number(x) > 0), '应返回拆除对应升级资源');
+});
+

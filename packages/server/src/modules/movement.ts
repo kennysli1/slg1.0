@@ -37,6 +37,8 @@ const log = makeLogger('movement');
 interface MovementRecord {
   id: string;
   type: 'raid' | 'attack' | 'return' | 'found' | 'transport' | 'caravan' | 'garrison' | 'explore';
+  /** 玩家村战斗类型：raid=掠夺，siege=攻城；PvE/旧存档为空。 */
+  battleType?: 'raid' | 'siege';
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -232,6 +234,7 @@ export class MovementModule {
       dir,
       targetId: m.targetId,
       targetVillage: m.targetVillage,
+      battleType: m.battleType,
       from: m.fromXY,
       originalFrom: m.originalFromXY ?? m.fromXY,
       to: m.toXY,
@@ -852,7 +855,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'battleType' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
   ): Promise<MovementRecord> {
     const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
@@ -976,7 +979,7 @@ export class MovementModule {
     }
 
     const mv = await this.launch({
-      id, type: 'attack', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
+      id, type: 'attack', battleType: 'siege', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
 
@@ -1061,7 +1064,7 @@ export class MovementModule {
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) { await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } }); return { ok: false, payload: {}, reason: carry.reason }; }
-    const mv = await this.launch({ id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
@@ -1663,6 +1666,7 @@ export class MovementModule {
       name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
         targetKind, targetId, targetXY: mv.toXY,
+        battleType: mv.battleType,
         movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
         originalFromXY: mv.originalFromXY ?? mv.fromXY,
         troops: mv.troops, attackerSnapshot: await this.attackerSnapshot(mv),

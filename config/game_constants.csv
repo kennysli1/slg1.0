@@ -66,6 +66,10 @@ pvp_recovery_cooldown_sec,86400,number,战败恢复冷却秒数
 pvp_recovery_trigger_total_ratio,0.20,number,战后四资源总量低于总容量此比例才触发恢复
 pvp_recovery_resource_ratio,0.10,number,战败恢复把每种基础资源补到容量比例
 pvp_recovery_gold_floor,100,number,战败恢复金币下限
+pvp_raid_power_per_building_level,100,number,玩家掠夺战每消耗多少进攻战力拆除外围建筑一级
+pvp_siege_power_per_building_level,100,number,玩家攻城战每消耗多少总进攻战力拆除外围建筑一级
+pvp_siege_weapon_power_per_building_level,100,number,玩家攻城战每消耗多少攻城武器战力拆除城内建筑一级
+pvp_siege_storage_loot_ratio,1,number,玩家攻城战可掠夺仓库与粮仓资源的比例
 villager_request_trigger_chance,0.3,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
 villager_request_order_resource,crop,string,幸福村贸易订单所需资源种类（key∈resources.csv）
 villager_request_order_amount,500,number,幸福村贸易订单所需资源数量
