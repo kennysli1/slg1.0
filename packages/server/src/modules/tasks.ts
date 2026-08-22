@@ -34,7 +34,7 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
-import type { GameConfig, QuestDef } from '../infra/config.js';
+import type { GameConfig, QuestDef, QuestRewards } from '../infra/config.js';
 
 const COLLECTION = 'task';
 
@@ -526,7 +526,7 @@ export class TasksModule {
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[] } | null> {
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number } | null> {
     const s = this.ensureState(villageId);
     const inst = s.active[code];
     if (!inst) return null;
@@ -539,11 +539,18 @@ export class TasksModule {
     }
     this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
 
-    const granted: { resources: Record<string, number> | null; treasures: string[] } = { resources: null, treasures: [] };
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number } = { resources: null, treasures: [] };
     // 资源奖励
     if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
       granted.resources = { ...q.rewards.resources };
+    }
+    if (q.rewards.reputation) {
+      await this.commands.send({
+        name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+        payload: { villageId, delta: q.rewards.reputation, reason: `task_${code}_success` },
+      });
+      granted.reputation = q.rewards.reputation;
     }
     // 任务专属宝物：被动(持续)类强制锁定；即时(一次性，如祭祀台)类不锁定，供玩家主动使用。
     for (const t of q.rewards.treasures ?? []) {
@@ -562,6 +569,7 @@ export class TasksModule {
       granted.resources = { ...(granted.resources ?? {}), gold: ((granted.resources ?? {}).gold ?? 0) + 500 };
       const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'honest_heart', pendingIfFull: true } });
       if (gh.ok) granted.treasures.push('honest_heart');
+      granted.reputation = this.config.constants.reputationS4ReleaseDelta;
     }
 
     delete s.active[code];
@@ -660,6 +668,13 @@ export class TasksModule {
       });
     }
     if (!p.released) {
+      const failureReputation = this.quest(inst.code)?.failureRewards?.reputation ?? 0;
+      if (failureReputation !== 0) {
+        await this.commands.send({
+          name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+          payload: { villageId: p.villageId, delta: failureReputation, reason: 's4_store_natalies' },
+        });
+      }
       const code = inst.code;
       delete s.active[code];
       if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
@@ -1299,11 +1314,20 @@ export class TasksModule {
     };
   }
 
-  /** 任务奖励：资源(含金币)与任务专属宝物 code 列表，供客户端卡片展示。 */
+  /** 任务结局奖励：资源(含金币)、宝物和声望，供客户端卡片与领奖弹窗展示。 */
+  private serializeOutcome(rewards?: QuestRewards): Record<string, unknown> {
+    return {
+      resources: rewards?.resources ?? null,
+      treasures: rewards?.treasures ?? [],
+      reputation: rewards?.reputation ?? 0,
+    };
+  }
+
   private serializeRewards(q: QuestDef): Record<string, unknown> {
     return {
-      resources: q.rewards?.resources ?? null,
-      treasures: q.rewards?.treasures ?? [],
+      ...this.serializeOutcome(q.rewards),
+      failure: q.failureRewards ? this.serializeOutcome(q.failureRewards) : null,
+      choices: (q.choiceRewards ?? []).map((choice) => ({ key: choice.key, label: choice.label, ...this.serializeOutcome(choice.rewards) })),
     };
   }
 

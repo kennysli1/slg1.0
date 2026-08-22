@@ -12,5 +12,7 @@ e-d3-res,d3,deliver,grant_resources,gold:60,1
 e-s1-altar,s1,deliver,grant_treasure,ritual_altar,1
 e-s2-flag,s2,deliver,grant_treasure,victory_flag,1
 e-villager-natalie,s3,deliver,grant_treasure,natalie,1
+e-villager-natalie-reputation,s3,deliver,adjust_reputation,-1,2
 e-villager-note,s3,failure,grant_treasure,secret_note,1
 e-investigate-choice,s4,success,natalie_choice,captured_natalies|store:natalie|release:honest_heart|gold:500,1
+e-investigate-store-reputation,s4,failure,adjust_reputation,-2,2

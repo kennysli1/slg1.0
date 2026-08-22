@@ -37,15 +37,16 @@ function typeTag(type: string) {
 }
 
 // ── 奖励展示（资源 + 任务专属宝物）────────────────────────────────────────────
-function RewardRow({ rewards }: { rewards: any }) {
+function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string }) {
   if (!rewards) return null;
   const res: Record<string, number> = rewards.resources ?? {};
   const tres: string[] = rewards.treasures ?? [];
+  const reputation = Number(rewards.reputation) || 0;
   const resEntries = Object.entries(res);
-  if (resEntries.length === 0 && tres.length === 0) return null;
+  if (resEntries.length === 0 && tres.length === 0 && reputation === 0) return null;
   return (
     <div class="task-card-reward">
-      <span class="task-reward-label">奖励</span>
+      <span class="task-reward-label">{label}</span>
       <div class="task-reward-list">
         {resEntries.map(([k, v]: any) => {
           const info = resInfo(k);
@@ -65,8 +66,26 @@ function RewardRow({ rewards }: { rewards: any }) {
             </span>
           );
         })}
+        {reputation !== 0 && (
+          <span class="task-reward-chip task-reward-chip--reputation">
+            声望 {reputation > 0 ? '+' : ''}{reputation}
+          </span>
+        )}
       </div>
     </div>
+  );
+}
+
+function OutcomeRows({ rewards }: { rewards: any }) {
+  if (!rewards) return null;
+  return (
+    <>
+      <RewardRow rewards={rewards} label="完成可得" />
+      {rewards.failure && <RewardRow rewards={rewards.failure} label="任务失败可得" />}
+      {(rewards.choices ?? []).map((choice: any) => (
+        <RewardRow key={choice.key} rewards={choice} label={choice.label ?? '分支结果'} />
+      ))}
+    </>
   );
 }
 
@@ -138,7 +157,7 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
       {hasRes || hasTres
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres }} />
+      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation }} label="本次获得" />
       <div class="modal-foot">
         <Btn variant="primary" onClick={close}>收下</Btn>
       </div>
@@ -253,7 +272,7 @@ function TaskCard({ task }: { task: any }) {
         </div>
       )}
 
-      <RewardRow rewards={task.rewards} />
+      <OutcomeRows rewards={task.rewards} />
 
       <div class="task-card-actions">
         {task.ready ? (
@@ -287,7 +306,7 @@ function OfferCard({ q, onAccept }: { q: any; onAccept: (code: string) => void }
         <span class="task-offer-name">{q.name}</span>
         <span class="task-offer-desc">{q.desc}</span>
         <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
-        <RewardRow rewards={q.rewards} />
+        <OutcomeRows rewards={q.rewards} />
       </div>
       <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
     </div>

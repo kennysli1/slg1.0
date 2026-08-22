@@ -154,7 +154,7 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
-    assert.match(res.body, /reputationValue/, 'GM 宝物表应可编辑被动声望修正');
+    assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;

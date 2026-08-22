@@ -71,6 +71,7 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   const dv = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
   assert.equal(dv.ok, true, '交付应成功: ' + (dv.reason ?? ''));
   assert.deepEqual((dv.payload as any).rewards.resources, { gold: 500 }, 'S4 释放路径领奖返回值应明确包含 500 金币');
+  assert.equal((dv.payload as any).rewards.reputation, 2, 'S4 释放路径领奖返回值应包含 +2 声望');
   const st3 = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
@@ -94,6 +95,8 @@ test('② 变体：放入宝库 -> 调查坐标失败且不可领取奖励', asy
   await tick();
   await emit(app, 'treasure.PendingClaimed', { villageId: va, code: 'captured_natalies', released: false, stored: true });
   await tick();
+  const reputation = await send(app, 'reputation.GetByVillage', { villageId: va });
+  assert.equal((reputation.payload as any).value, -2, 'S4 收纳失败应结算 -2 声望');
   const st = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   assert.equal(st.active.find((a: any) => a.code === 's4'), undefined, '入库后任务应结束');
   assert.ok(st.abandonedSide.includes('s4'), '入库后应记为失败支线');

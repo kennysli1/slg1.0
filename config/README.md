@@ -362,6 +362,8 @@
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果
+
+除资源与宝物效果外，`adjust_reputation` 用于把声望变化绑定到任务结算阶段；`failure` 阶段会显示为任务失败结果，`success`/`deliver` 阶段显示为完成结果。多阶段 `natalie_choice` 会在任务卡片展开各分支获得的宝物、资源和声望。
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
