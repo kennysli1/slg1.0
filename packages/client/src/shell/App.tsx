@@ -69,9 +69,10 @@ export function App() {
       </>
     );
   }
+  const currentTab = tab.value;
   return (
     <>
-      <div class="shell">
+      <div class={`shell${currentTab === 'map' ? ' shell--map' : ''}`}>
         <TopBar />
         <TabBar />
         <Page />
