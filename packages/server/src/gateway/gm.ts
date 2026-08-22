@@ -342,7 +342,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
     labels: ['code', 'level', 'name'],
   },
   units: {
@@ -597,6 +597,13 @@ function sectionBuildings(){
   function bonusCols(code){
     var c = [];
     if (code === 'treasury') c.push({k:'treasureSlots',l:'每级主/备用槽'});
+    if (code === 'vault') {
+      c.push({k:'vaultProtectWood',l:'保木材/级'});
+      c.push({k:'vaultProtectClay',l:'保泥土/级'});
+      c.push({k:'vaultProtectIron',l:'保钢铁/级'});
+      c.push({k:'vaultProtectCrop',l:'保粮食/级'});
+      c.push({k:'vaultProtectGold',l:'保金币/级'});
+    }
     if (code === 'warehouse' || code === 'granary') c.push({k:'storagePerLevel',l:'+容量'});
     if (code === 'wall') c.push({k:'defensePerLevel',l:'+防御'});
     if (code === 'main') c.push({k:'buildSpeedupPerLevel',l:'-建造耗时'});
@@ -608,7 +615,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；每级填写的数值会同时增加主宝物栏和备用宝物栏容量。炼金炉固定最高 1 级，炼化时间与其升级消耗集中在炼金炉卡片内。</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。GM 保存的覆盖值写入持久化 balance_overrides.json，删档不会清除。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){

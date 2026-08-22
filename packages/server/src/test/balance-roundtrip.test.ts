@@ -63,6 +63,20 @@ test('GM 面板：building_levels 复合主键编辑 round-trip（改 main|1 pop
   });
 });
 
+test('GM 面板：保险库每级保护量写回 CSV 并由删档后的配置继续加载', () => {
+  const table = BALANCE_TABLES['building_levels'];
+  assert.ok((table.numeric ?? []).includes('vaultProtectGold'), '保险库保护字段必须列入 GM 数值白名单');
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { 'vault|1': { vaultProtectWood: '777', vaultProtectGold: '8888' } });
+    const cfg = loadGameConfig(tmp);
+    assert.doesNotThrow(() => validateGameConfig(cfg));
+    assert.equal(cfg.buildings.vault.levels[1].vaultProtectWood, 777);
+    assert.equal(cfg.buildings.vault.levels[1].vaultProtectGold, 8888);
+    const raw = readFileSync(join(tmp, 'building_levels.csv'), 'utf8');
+    assert.match(raw, /vault,1,[^\n]*,777,100,100,100,8888(?:,|\r?$)/m, '保险库保护量应写入 CSV 末列');
+  });
+});
+
 test('GM 面板：非法数值（popCap=-5）应被校验拦截，绝不写半截', () => {
   const table = BALANCE_TABLES['building_levels'];
   withTmp((tmp) => {

@@ -80,6 +80,7 @@ export class BuildingModule {
     this.commands.register('building.Demolish', (c) => this.demolish(c));
     this.commands.register('building.ApplyBattleDamage', (c) => this.applyBattleDamage(c));
     this.commands.register('building.GetDefenseSnapshot', (c) => this.getDefenseSnapshot(c));
+    this.commands.register('building.GetVaultProtection', (c) => this.getVaultProtection(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
@@ -622,6 +623,32 @@ export class BuildingModule {
     let wallLevel = 0;
     for (const p of s.placed) if (p.kind === 'wall' && p.level > wallLevel) wallLevel = p.level;
     return { ok: true, payload: { wallLevel } };
+  }
+
+  /**
+   * 查询攻城战当前生效的保险库保护量。
+   * vaultProtect* 是逐级增量，且多个保险库可叠加；调用方应在建筑破坏结算后查询，
+   * 因而保险库刚被拆掉的等级不会继续保护资源。
+   */
+  private getVaultProtection(cmd: Command): CommandResult {
+    const s = this.load((cmd.payload as any).villageId);
+    const protection = { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 };
+    if (!s) return { ok: true, payload: { protection } };
+    for (const p of s.placed) {
+      if (p.kind !== 'vault' || p.level <= 0) continue;
+      const def = this.config.buildings.vault;
+      if (!def) continue;
+      for (let lv = 1; lv <= p.level; lv++) {
+        const row = def.levels[lv];
+        if (!row) continue;
+        protection.wood += Math.max(0, row.vaultProtectWood ?? 0);
+        protection.clay += Math.max(0, row.vaultProtectClay ?? 0);
+        protection.iron += Math.max(0, row.vaultProtectIron ?? 0);
+        protection.crop += Math.max(0, row.vaultProtectCrop ?? 0);
+        protection.gold += Math.max(0, row.vaultProtectGold ?? 0);
+      }
+    }
+    return { ok: true, payload: { protection } };
   }
 
   /** 战斗后的即时建筑破坏：每消耗一个战力阈值拆除一级，最高等级优先。 */

@@ -311,3 +311,24 @@ test('战斗拆除：按最高等级逐级拆除并返回对应升级资源', as
   assert.ok(Object.values((damaged.payload as any).loot).some((x: any) => Number(x) > 0), '应返回拆除对应升级资源');
 });
 
+test('保险库：保护量按等级累加，攻城拆除后立即减少', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  raw.placed.push({ slotId: 'inner-vault-test', zone: 'inner', kind: 'vault', level: 2 });
+  app.store.set('building', 'v1', raw);
+
+  const before = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((before.payload as any).protection, { wood: 250, clay: 250, iron: 250, crop: 250, gold: 2500 });
+
+  const damaged = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'inner', power: 100, powerPerLevel: 100,
+  });
+  assert.equal(damaged.ok, true);
+  const afterOne = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((afterOne.payload as any).protection, { wood: 100, clay: 100, iron: 100, crop: 100, gold: 1000 });
+
+  await send(app, 'building.ApplyBattleDamage', { villageId: 'v1', zone: 'inner', power: 100, powerPerLevel: 100 });
+  const afterDestroyed = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((afterDestroyed.payload as any).protection, { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 });
+});
+

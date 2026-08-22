@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
-import { planPvpLoot } from '../modules/combat.js';
+import { planPvpLoot, subtractProtected } from '../modules/combat.js';
 
 /**
  * 战斗引擎测试（有状态逐 tick）：直接驱动 combat.Engage，用假时钟跑完整场，
@@ -30,6 +30,16 @@ test('PvP 战利品规划：金币优先于所有基础资源', () => {
   assert.deepEqual(plan.stored, { gold: 2 }, '应先带回仓储金币');
   assert.deepEqual(plan.building, { gold: 8 }, '仓储金币不足时继续带回建筑收益中的金币');
   assert.deepEqual(plan.looted, { gold: 10 });
+});
+
+test('攻城保险库：保护额从拆建筑后的仓储可掠夺量中扣除', () => {
+  assert.deepEqual(
+    subtractProtected(
+      { wood: 1000, clay: 800, iron: 200, crop: 0, gold: 2500 },
+      { wood: 100, clay: 900, iron: 0, crop: 100, gold: 500 },
+    ),
+    { wood: 900, clay: 0, iron: 200, crop: 0, gold: 2000 },
+  );
 });
 
 test('PvP 战利品规划：四种资源平均且仓储来源优先', () => {

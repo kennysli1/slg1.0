@@ -68,6 +68,12 @@ export interface BuildingLevelDef {
   taskRefreshSec?: number;
   /** 仅酒馆(tavern)：该等级酒馆同时可展示的随机任务数上限。 */
   taskMaxTasks?: number;
+  /** 仅保险库(vault)：该等级新增的各资源保护量；按等级累加，攻城拆除后重新计算。 */
+  vaultProtectWood?: number;
+  vaultProtectClay?: number;
+  vaultProtectIron?: number;
+  vaultProtectCrop?: number;
+  vaultProtectGold?: number;
 }
 
 export interface BuildingDef {
@@ -686,7 +692,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -708,6 +714,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
       taskRefreshSec: r.taskRefreshSec ? num(r.taskRefreshSec) : undefined,
       taskMaxTasks: r.taskMaxTasks ? num(r.taskMaxTasks) : undefined,
+      vaultProtectWood: r.vaultProtectWood ? num(r.vaultProtectWood) : undefined,
+      vaultProtectClay: r.vaultProtectClay ? num(r.vaultProtectClay) : undefined,
+      vaultProtectIron: r.vaultProtectIron ? num(r.vaultProtectIron) : undefined,
+      vaultProtectCrop: r.vaultProtectCrop ? num(r.vaultProtectCrop) : undefined,
+      vaultProtectGold: r.vaultProtectGold ? num(r.vaultProtectGold) : undefined,
     };
   }
 
@@ -1315,6 +1326,14 @@ export function validateGameConfig(config: GameConfig): void {
         continue;
       }
       if (ld.popCap < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} popCap 不能为负`);
+      for (const [field, value] of [
+        ['vaultProtectWood', ld.vaultProtectWood], ['vaultProtectClay', ld.vaultProtectClay],
+        ['vaultProtectIron', ld.vaultProtectIron], ['vaultProtectCrop', ld.vaultProtectCrop],
+        ['vaultProtectGold', ld.vaultProtectGold],
+      ] as const) {
+        if (value !== undefined && value < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} ${field} 不能为负`);
+        if (b.kind !== 'vault' && value !== undefined && value !== 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} ${field} 仅允许用于 vault`);
+      }
       if (b.resource !== undefined) {
         if (ld.prod === undefined || ld.prod < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} 资源田 prod 必须≥0`);
       } else if (ld.prod !== undefined) {
