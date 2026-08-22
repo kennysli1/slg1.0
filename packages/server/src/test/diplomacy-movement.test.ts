@@ -14,11 +14,11 @@ test('外交与行军模式：默认中立、选项由关系决定、显式宣�
   const rel = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal((rel.payload as any).relation, 'neutral');
   const opts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: b.player.q, r: b.player.r });
-  assert.deepEqual((opts.payload as any).modes.map((m: any) => m.mode), ['reinforce', 'raid', 'attack']);
+  assert.deepEqual((opts.payload as any).modes.map((m: any) => m.mode), ['reinforce', 'scout', 'raid', 'attack']);
   const war = await send(app, 'diplomacy.DeclareWar', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal(war.ok, true);
   const hostile = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal((hostile.payload as any).relation, 'hostile');
   const hostileOpts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: b.player.q, r: b.player.r });
-  assert.deepEqual((hostileOpts.payload as any).modes.map((m: any) => m.mode), ['raid', 'attack']);
+  assert.deepEqual((hostileOpts.payload as any).modes.map((m: any) => m.mode), ['scout', 'raid', 'attack']);
 });

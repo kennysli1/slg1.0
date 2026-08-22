@@ -61,6 +61,8 @@ const ERR_MSG: Record<string, string> = {
   declare_war_required: '该玩家目前为中立，必须确认宣战后才能掠夺或攻城',
   allied_target: '盟军村庄不能掠夺或攻城，请改用增援',
   hostile_target: '敌对村庄不能执行增援',
+  scout_units_only: '侦察行军只能携带侦察兵',
+  not_enemy_village: '侦察目标必须是其他玩家的村庄',
   cannot_abandon_capital: '不能放弃主城',
   abandon_locked: '新建分城冷却中，暂不可放弃',
   village_not_owned: '不是你的村庄',

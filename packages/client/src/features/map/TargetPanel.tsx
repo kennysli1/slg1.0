@@ -17,7 +17,7 @@ import { foreignArmyAt, foreignArmyName, ownStationedMoveAt } from './map-target
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
-type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore';
+type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'scout';
 type NumberMap = Record<string, number>;
 
 interface TargetMeta {
@@ -35,7 +35,7 @@ interface TargetMeta {
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
-const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索' }[mode]);
+const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', scout: '侦察' }[mode]);
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -130,7 +130,7 @@ function Assessment({
     ? '选择运输部队、物资与随队宝物。运输需要同时携带部队和货物。'
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
-    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
+    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? '只允许携带侦察兵。抵达后获得目标情报，幸存部队会立即返城；携带宝物会随军返回，若全军覆没则被守方缴获。' : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
   const preparationLabel: Record<DispatchMode, string> = {
     attack: '编组攻城部队',
     raid: '编组掠夺部队',
@@ -139,6 +139,7 @@ function Assessment({
     reinforce: '编组增援部队',
     garrison: '编组驻扎部队',
     explore: '编组探索部队',
+    scout: '编组侦察部队',
   };
 
   return (
@@ -188,10 +189,11 @@ function NumberInput({
 }
 
 function TroopPlanner({
-  troops, setTroops, transport,
-}: { troops: NumberMap; setTroops: (troops: NumberMap) => void; transport: boolean }) {
+  troops, setTroops, transport, scoutOnly,
+}: { troops: NumberMap; setTroops: (troops: NumberMap) => void; transport: boolean; scoutOnly?: boolean }) {
   const army = getCache().army;
-  const entries = Object.entries(army?.troops ?? {}).filter(([, amount]) => Number(amount) > 0);
+  const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout']);
+  const entries = Object.entries(army?.troops ?? {}).filter(([code, amount]) => Number(amount) > 0 && (!scoutOnly || scoutCodes.has(code)));
   if (!entries.length) return <p class="expedition-empty">无可用兵力，先去军队页训练。</p>;
 
   const maxTroops = Object.fromEntries(entries.map(([unitKey, raw]) => [
@@ -308,7 +310,7 @@ function TreasurePlanner({
 }
 
 function Preparation({
-  meta, troops, setTroops, cargo, setCargo, treasures, setTreasures, onBack, onNext,
+  meta, troops, setTroops, cargo, setCargo, treasures, setTreasures, scoutType, setScoutType, onBack, onNext,
 }: {
   meta: TargetMeta;
   troops: NumberMap;
@@ -317,6 +319,8 @@ function Preparation({
   setCargo: (cargo: NumberMap) => void;
   treasures: string[];
   setTreasures: (codes: string[]) => void;
+  scoutType: 'scout_resources' | 'scout_buildings';
+  setScoutType: (value: 'scout_resources' | 'scout_buildings') => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -326,7 +330,8 @@ function Preparation({
   const canDispatch = troopCount > 0 && (!isTransfer || cargoCount > 0);
   return (
     <div class="target-body expedition-body">
-      <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} />
+      <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} scoutOnly={meta.mode === 'scout'} />
+      {meta.mode === 'scout' && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
       {isTransfer && <CargoPlanner cargo={cargo} setCargo={setCargo} />}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
       <div class="expedition-validation" aria-live="polite">
@@ -384,6 +389,7 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
   const [troops, setTroops] = useState<NumberMap>({});
   const [cargo, setCargo] = useState<NumberMap>({});
   const [treasures, setTreasures] = useState<string[]>([]);
+  const [scoutType, setScoutType] = useState<'scout_resources' | 'scout_buildings'>('scout_resources');
 
   async function dispatch() {
     const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, amount]) => amount > 0));
@@ -391,7 +397,9 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
     const cap = treasureCarryCap(total(selectedTroops));
     const selectedTreasures = treasures.slice(0, cap);
     let ok = false;
-    if (meta.mode === 'transport' || meta.mode === 'transfer') {
+    if (meta.mode === 'scout') {
+      ok = await act(req('SendScout', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, scoutType }), { okToast: '侦察部队出发' });
+    } else if (meta.mode === 'transport' || meta.mode === 'transfer') {
       ok = await act(req('SendTransport', {
         targetVillage: meta.refId, troops: selectedTroops, cargo: selectedCargo, treasures: selectedTreasures,
       }), { okToast: '转移部队出发' });
@@ -436,7 +444,7 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
     <Panel variant={meta.mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
       {step === 1 && <Assessment meta={meta} onNext={() => setStep(2)} onSwitch={switchVillage} onAbandon={confirmAbandon} />}
-      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} cargo={cargo} setCargo={setCargo} treasures={treasures} setTreasures={setTreasures} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} cargo={cargo} setCargo={setCargo} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && <Confirmation meta={meta} troops={troops} cargo={cargo} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
   );

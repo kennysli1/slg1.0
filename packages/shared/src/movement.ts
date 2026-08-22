@@ -6,7 +6,7 @@ export interface Hex {
 
 export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
-  | 'transport' | 'caravan' | 'garrison' | 'explore';
+  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'scout';
 
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
@@ -19,6 +19,7 @@ export interface Movement {
   status: MovementStatus;
   targetId?: string;
   targetVillage?: string;
+  scoutType?: 'scout_resources' | 'scout_buildings';
   /** 玩家村战斗模式：掠夺或攻城。 */
   battleType?: 'raid' | 'siege';
   from: Hex;
