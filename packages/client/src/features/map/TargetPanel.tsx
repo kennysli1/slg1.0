@@ -130,7 +130,7 @@ function Assessment({
     ? '选择运输部队、物资与随队宝物。运输需要同时携带部队和货物。'
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
-    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? '只允许携带侦察兵。抵达后获得目标情报，幸存部队会立即返城；携带宝物会随军返回，若全军覆没则被守方缴获。' : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
+    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 营地只能侦察资源与守军。只允许携带侦察兵；幸存部队会立即返城，若全军覆没则按 PvE 防守方规则处理携带宝物。' : '只允许携带侦察兵。抵达后获得目标情报，幸存部队会立即返城；携带宝物会随军返回，若全军覆没则被守方缴获。') : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
   const preparationLabel: Record<DispatchMode, string> = {
     attack: '编组攻城部队',
     raid: '编组掠夺部队',
@@ -147,7 +147,7 @@ function Assessment({
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
-          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : '敌对村庄'}
+          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
         </div>
         <p>{copy}</p>
         <div class="expedition-facts">
@@ -331,7 +331,7 @@ function Preparation({
   return (
     <div class="target-body expedition-body">
       <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} scoutOnly={meta.mode === 'scout'} />
-      {meta.mode === 'scout' && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
+      {meta.mode === 'scout' && meta.targetKind !== 'pve' && meta.targetKind !== 'taskcamp' && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
       {isTransfer && <CargoPlanner cargo={cargo} setCargo={setCargo} />}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
       <div class="expedition-validation" aria-live="polite">
@@ -398,7 +398,8 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
     const selectedTreasures = treasures.slice(0, cap);
     let ok = false;
     if (meta.mode === 'scout') {
-      ok = await act(req('SendScout', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, scoutType }), { okToast: '侦察部队出发' });
+      const isPve = meta.targetKind === 'pve' || meta.targetKind === 'taskcamp';
+      ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve ? 'scout_resources' : scoutType }), { okToast: '侦察部队出发' });
     } else if (meta.mode === 'transport' || meta.mode === 'transfer') {
       ok = await act(req('SendTransport', {
         targetVillage: meta.refId, troops: selectedTroops, cargo: selectedCargo, treasures: selectedTreasures,

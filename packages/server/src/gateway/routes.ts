@@ -141,7 +141,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       SendScout: {
         command: 'movement.SendScout', ownVillage: true, needAuth: true,
         schema: {
-          targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
+          targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+          targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           scoutType: { type: 'enum', optional: true, values: ['scout_resources', 'scout_buildings'] },
