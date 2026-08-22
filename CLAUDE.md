@@ -34,6 +34,14 @@
 
 全文（含逃生阀用法）：`docs/00_变更契约.md`。
 
+### 生产存档安全闸门（强制）
+
+- `npm run deploy:prod` 只部署，不自动调用任何 reset；部署完成只做只读健康检查。
+- `[需刷档]` 只表示要制定迁移/重置方案，不等于已授权执行破坏性操作；能用可选字段、默认值、惰性初始化或迁移兼容旧存档时不刷档。
+- `season` 清进度并保留地图位置；`respawn` 仅用于地图尺寸/布局必须重生成；`wipe` 删除账号。地图布局未变禁止使用 `respawn`。
+- 执行任一 reset 前，必须向用户说明模式、保留/清除内容和原因，并获得针对该模式的明确批准。
+- reset 前必须创建并验证带时间戳的非空可解析存档备份；备份失败立即停止。GM HTTP reset 不自带备份，不能绕过此闸门。
+
 ---
 
 ## 任务路由表（按需下钻，别通读全仓）
@@ -52,8 +60,8 @@
 | 加·换美术资源 | `docs/美术生成规范.md` | `tools/art_manifest.json` 加一条 → 出洋红幕布图 → `python tools/art_pipeline.py` |
 | 改通信接口 / 加 action | `docs/2_2.0设计/04_通信格式规范.md` | `packages/shared` 信封 + gateway；破坏性改动升 `WIRE_VERSION` |
 | 改战斗 / 地图行军 / 建筑 / 人口 | PROJECT.md §三 + 对应模块测试 | 对应 owner 模块；历史设计只在考古时读 archive |
-| 改存档结构 / 排查存档 | `docs/服务器/01_数据存储结构.md` | 升 `SAVE_SCHEMA_VERSION`，部署带刷档 |
-| 刷档 / 重置 / GM 调试 | `docs/服务器/02_数据库操作手册.md`、`03_GM调试手册.md` | `npm run reset:season` / `reset:respawn` / `wipe:all`（自动备份） |
+| 改存档结构 / 排查存档 | `docs/服务器/01_数据存储结构.md` | 升 `SAVE_SCHEMA_VERSION`，先制定迁移方案；未经授权不得刷档 |
+| 刷档 / 重置 / GM 调试 | `docs/服务器/02_数据库操作手册.md`、`03_GM调试手册.md` | 本地 `reset:*` 命令会备份；GM HTTP reset 必须先手动备份并获授权 |
 | 第一次读代码 | `docs/2_2.0设计/06_代码导读.md` | — |
 | 想知道最近改了什么 | `CHANGELOG.md` | 别去翻 `git log` 猜 |
 
