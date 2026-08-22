@@ -214,4 +214,3 @@ export class AlchemyModule {
     await this.bus.emit({ name: 'alchemy.Updated', source: AlchemyModule.NAME, ts: this.now(), payload: { villageId } } as DomainEvent);
   }
 }
-
