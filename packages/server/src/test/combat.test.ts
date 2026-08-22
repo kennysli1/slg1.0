@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { planPvpLoot } from '../modules/combat.js';
 
 /**
  * 战斗引擎测试（有状态逐 tick）：直接驱动 combat.Engage，用假时钟跑完整场，
@@ -19,6 +20,31 @@ function freshApp(): GameApp {
   return app;
 }
 const send = (app: GameApp, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
+
+test('PvP 战利品规划：金币优先于所有基础资源', () => {
+  const plan = planPvpLoot(
+    { gold: 2, wood: 1, clay: 1, iron: 1, crop: 1 },
+    { gold: 50, wood: 100, clay: 100, iron: 100, crop: 100 },
+    10,
+  );
+  assert.deepEqual(plan.stored, { gold: 2 }, '应先带回仓储金币');
+  assert.deepEqual(plan.building, { gold: 8 }, '仓储金币不足时继续带回建筑收益中的金币');
+  assert.deepEqual(plan.looted, { gold: 10 });
+});
+
+test('PvP 战利品规划：四种资源平均且仓储来源优先', () => {
+  const plan = planPvpLoot(
+    { gold: 0, wood: 1, clay: 1, iron: 1, crop: 1 },
+    { gold: 0, wood: 100, clay: 100, iron: 100, crop: 100 },
+    8,
+  );
+  assert.deepEqual(plan.stored, { wood: 1, clay: 1, iron: 1, crop: 1 }, '应先带回仓库/粮仓中的四种资源');
+  assert.deepEqual(
+    { wood: plan.building.wood, clay: plan.building.clay, iron: plan.building.iron, crop: plan.building.crop },
+    { wood: 1, clay: 1, iron: 1, crop: 1 },
+  );
+  assert.equal(Object.values(plan.looted).reduce((sum, n) => sum + n, 0), 8);
+});
 
 /** 大步快进直到没有待处理任务（战斗跑完）。返回迭代次数（≈tick 数，用于比较战斗时长）。 */
 async function drain(app: GameApp): Promise<number> {

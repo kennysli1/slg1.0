@@ -487,22 +487,25 @@ export class CombatModule {
           }
         }
 
-        // 先搬运建筑拆除收益，剩余运力才用于攻城战的仓库/粮仓存量。
-        let remainingCarry = totalCarry;
-        const buildingCarried = capLoot(buildingLoot, remainingCarry);
-        remainingCarry -= sumResources(buildingCarried);
-        looted = mergeResources(looted, buildingCarried);
-        if (battleType === 'siege' && remainingCarry > 0 && this.config.constants.pvpSiegeStorageLootRatio > 0) {
+        // 战利品装载顺序：金币优先；木/泥/铁/粮尽量平均装载。
+        // 攻城时四种基础资源优先来自仓库/粮仓，只有仓储战利品装满后才装建筑拆除收益。
+        // 规划在一次纯函数中完成，随后只把仓储来源的部分交给 Economy 扣除。
+        let storedAvailable: Record<string, number> = {};
+        if (battleType === 'siege' && totalCarry > 0 && this.config.constants.pvpSiegeStorageLootRatio > 0) {
           const lootRes = await this.commands.send({
             name: 'economy.GetLootable', from: CombatModule.NAME,
             payload: { villageId: b.targetId, ignoreSafe: true },
           });
           const available = (lootRes.payload as any)?.lootable ?? {};
-          const want = capLoot(scaleResources(available, this.config.constants.pvpSiegeStorageLootRatio), remainingCarry);
-          const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: want } });
-          storedLoot = (taken.payload as any)?.taken ?? {};
-          looted = mergeResources(looted, storedLoot);
+          storedAvailable = scaleResources(available, this.config.constants.pvpSiegeStorageLootRatio);
         }
+        const lootPlan = planPvpLoot(storedAvailable, buildingLoot, totalCarry);
+        if (Object.keys(lootPlan.stored).length > 0) {
+          const taken = await this.commands.send({ name: 'economy.TakeLoot', from: CombatModule.NAME, payload: { villageId: b.targetId, amount: lootPlan.stored } });
+          storedLoot = (taken.payload as any)?.taken ?? {};
+        }
+        looted = mergeResources(looted, lootPlan.building);
+        looted = mergeResources(looted, storedLoot);
       }
 
       const pvp = await this.commands.send({ name: 'player.GetPvpContext', from: CombatModule.NAME, payload: { villageId: b.targetId } });
@@ -761,21 +764,104 @@ function mergeResources(a: Record<string, number>, b: Record<string, number>): R
   return out;
 }
 
-function sumResources(resources: Record<string, number>): number {
-  return Object.values(resources).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+const BASIC_LOOT_RESOURCES = ['wood', 'clay', 'iron', 'crop'] as const;
+
+type LootPlan = {
+  /** 从仓库/粮仓实际扣除的战利品。 */
+  stored: Record<string, number>;
+  /** 从被拆建筑收益中带回的战利品（建筑状态本身不扣资源）。 */
+  building: Record<string, number>;
+  /** 两种来源合计，供战报/返程使用。 */
+  looted: Record<string, number>;
+};
+
+/**
+ * 规划 PvP 战利品装载：金币优先，四种基础资源在各自来源内尽量平均。
+ *
+ * 仓储来源优先于建筑来源只针对四种基础资源；仓储不足时才用建筑拆除收益补齐。
+ * 返回值中的 stored 只能传给 economy.TakeLoot，避免把建筑收益误扣到守方库存。
+ */
+export function planPvpLoot(
+  storedAvailable: Record<string, number>,
+  buildingLoot: Record<string, number>,
+  carry: number,
+): LootPlan {
+  const stored: Record<string, number> = {};
+  const building: Record<string, number> = {};
+  let remaining = Math.max(0, Math.floor(Number(carry) || 0));
+
+  // 金币无仓储上限，但仍占用部队的单位运力；仓库金币优先于建筑拆除所得金币。
+  const storedGold = positiveInt(storedAvailable.gold);
+  const storedGoldTake = Math.min(storedGold, remaining);
+  if (storedGoldTake > 0) stored.gold = storedGoldTake;
+  remaining -= storedGoldTake;
+
+  const buildingGold = positiveInt(buildingLoot.gold);
+  const buildingGoldTake = Math.min(buildingGold, remaining);
+  if (buildingGoldTake > 0) building.gold = buildingGoldTake;
+  remaining -= buildingGoldTake;
+
+  // 四种资源先平均取仓储战利品，再用剩余运力平均取建筑拆除收益。
+  const storedBasic = allocateAverage(storedAvailable, remaining);
+  mergeInto(stored, storedBasic);
+  remaining -= sumResources(storedBasic);
+
+  const buildingBasic = allocateAverage(buildingLoot, remaining);
+  mergeInto(building, buildingBasic);
+
+  return {
+    stored,
+    building,
+    looted: mergeResources(building, stored),
+  };
 }
 
-/** 按总运力等比例截断资源，避免单一资源顺序决定掠夺结果。 */
-function capLoot(resources: Record<string, number>, carry: number): Record<string, number> {
-  const total = sumResources(resources);
-  if (total <= 0 || carry <= 0) return {};
-  const ratio = Math.min(1, carry / total);
+function positiveInt(value: unknown): number {
+  const n = Math.floor(Number(value) || 0);
+  return Math.max(0, n);
+}
+
+/** 在给定来源中按四种资源尽量等量分配有限运力，短缺资源会让位给其他资源。 */
+function allocateAverage(source: Record<string, number>, carry: number): Record<string, number> {
+  const available: Record<string, number> = {};
+  for (const key of BASIC_LOOT_RESOURCES) available[key] = positiveInt(source[key]);
   const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(resources)) {
-    const n = Math.floor(Math.max(0, Number(value) || 0) * ratio);
-    if (n > 0) out[key] = n;
+  let remaining = Math.max(0, Math.floor(Number(carry) || 0));
+
+  while (remaining > 0) {
+    const active = BASIC_LOOT_RESOURCES.filter((key) => (available[key] ?? 0) > (out[key] ?? 0));
+    if (active.length === 0) break;
+    const share = Math.floor(remaining / active.length);
+    if (share <= 0) {
+      // 不足一轮时逐个补齐，结果仍保持四种资源数量差不超过 1（受库存短缺约束）。
+      for (const key of active) {
+        if (remaining <= 0) break;
+        if ((out[key] ?? 0) < (available[key] ?? 0)) {
+          out[key] = (out[key] ?? 0) + 1;
+          remaining -= 1;
+        }
+      }
+      continue;
+    }
+    for (const key of active) {
+      if (remaining <= 0) break;
+      const room = (available[key] ?? 0) - (out[key] ?? 0);
+      const take = Math.min(room, share);
+      if (take > 0) {
+        out[key] = (out[key] ?? 0) + take;
+        remaining -= take;
+      }
+    }
   }
   return out;
+}
+
+function mergeInto(target: Record<string, number>, source: Record<string, number>): void {
+  for (const [key, value] of Object.entries(source)) target[key] = (target[key] ?? 0) + value;
+}
+
+function sumResources(resources: Record<string, number>): number {
+  return Object.values(resources).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
 }
 
 function scaleResources(resources: Record<string, number>, ratio: number): Record<string, number> {
