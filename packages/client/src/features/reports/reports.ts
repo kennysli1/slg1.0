@@ -50,6 +50,16 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       const mode = payload.battleLabel ? `·${payload.battleLabel}` : '';
       return `${time}🛡️ 被进攻结束（${mode}${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜建筑损坏：${damage || '无'}｜被抢：${loot || '无'}`;
     }
+  } else if (event === 'ScoutReport') {
+    const losses = Number(payload.attackerLosses ?? 0);
+    if (payload.scoutType === 'scout_buildings') {
+      const b = payload.buildings ?? {};
+      const list = [...(b.center ?? []), ...(b.inner ?? []), ...(b.outer ?? [])].map((x: any) => `${x.name ?? x.kind}${x.level}级`).join('、') || '无';
+      return `${time}🔭 侦察报告：发现城内外建筑 ${list}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+    }
+    const resources = Object.entries(payload.resources ?? {}).map(([k, n]: any) => `${resInfo(k).name}${fmt(Number(n) || 0)}`).join(' ') || '无';
+    const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
+    return `${time}🔭 侦察报告：资源 ${resources}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
   } else if (event === 'BuildingBattleDamaged') {
     const damage = (payload.destroyed ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.fromLevel}→${d.toLevel}`).join('、');
     return `${time}🏚️ 战斗建筑损坏：${damage || '无'}`;
