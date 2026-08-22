@@ -750,11 +750,15 @@ export class BuildingModule {
     const threshold = Math.max(1, Number(powerPerLevel) || 1);
     let remainingPower = Math.max(0, Number(power) || 0);
     const operation = mode === 'damage' ? 'damage' : 'demolish';
-    const destroyed: Array<{ slotId: string; kind: string; zone: Zone; fromLevel: number; toLevel: number; mode: 'damage' | 'demolish'; operation: 'damage' | 'demolish'; loot: Record<string, number> }> = [];
+    const destroyed: Array<{ slotId: string; kind: string; zone: Zone; fromLevel: number; toLevel: number; mode: 'damage' | 'demolish'; operation: 'damage' | 'demolish'; removed?: boolean; loot: Record<string, number> }> = [];
     const loot: Record<string, number> = {};
     let step = 0;
     while (remainingPower >= threshold) {
-      const candidates = s.placed.filter((p) => p.zone === zone && p.level > 0 && p.kind !== CENTER_KIND);
+      // 普通部队只能继续破坏仍有等级的建筑；攻城武器还可以清除已经被
+      // 普通部队打到 0 级、但仍保留 repairTargetLevel 的建筑“空壳”。
+      const candidates = s.placed.filter((p) => p.zone === zone && p.kind !== CENTER_KIND && (
+        p.level > 0 || (operation === 'demolish' && !!p.repairTargetLevel)
+      ));
       if (candidates.length === 0) break;
       const maxLevel = Math.max(...candidates.map((p) => p.level));
       const tied = candidates.filter((p) => p.level === maxLevel);
@@ -770,11 +774,12 @@ export class BuildingModule {
         if (Number.isFinite(value) && value > 0) loot[resource] = (loot[resource] ?? 0) + value;
       }
       if (operation === 'damage') p.repairTargetLevel = p.repairTargetLevel ?? fromLevel;
-      p.level -= 1;
+      if (p.level > 0) p.level -= 1;
       const toLevel = p.level;
-      destroyed.push({ slotId: p.slotId, kind: p.kind, zone, fromLevel, toLevel, mode: operation, operation, loot: { ...cost } });
+      const removed = operation === 'demolish' && p.level <= 0;
+      destroyed.push({ slotId: p.slotId, kind: p.kind, zone, fromLevel, toLevel, mode: operation, operation, removed, loot: { ...cost } });
       // 普通部队造成的 0 级建筑仍保留，可修复或手动拆除；攻城武器降到 0 级才完全移除。
-      if (operation === 'demolish' && p.level <= 0) s.placed = s.placed.filter((x) => x !== p);
+      if (removed) s.placed = s.placed.filter((x) => x !== p);
       remainingPower -= threshold;
       step += 1;
     }

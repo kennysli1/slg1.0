@@ -348,6 +348,32 @@ test('战斗破坏：建筑保留在槽位、不可升级，可按累计成本�
   assert.equal(restored.repairTargetLevel, undefined);
 });
 
+test('战斗拆除：攻城武器可以移除已经被普通部队打到0级的建筑空壳', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(wood);
+  wood.level = 1;
+  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  app.store.set('building', 'v1', raw);
+
+  await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 100, powerPerLevel: 100, mode: 'damage',
+  });
+  const damaged = (await layout(app)).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.equal(damaged?.level, 0);
+  assert.equal(damaged?.repairTargetLevel, 1);
+
+  const removed = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 100, powerPerLevel: 100, mode: 'demolish',
+  });
+  assert.equal(removed.ok, true);
+  assert.equal((removed.payload as any).destroyed[0].fromLevel, 0);
+  assert.equal((removed.payload as any).destroyed[0].toLevel, 0);
+  assert.equal((removed.payload as any).destroyed[0].removed, true);
+  assert.equal((await layout(app)).zones.outer.placed.some((p: any) => p.kind === 'woodcutter'), false);
+});
+
 test('保险库：保护量按等级累加，攻城拆除后立即减少', async () => {
   const app = freshApp();
   const raw = app.store.get('building', 'v1') as any;
