@@ -152,6 +152,8 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
+    assert.match(res.body, /保木材\/级/, 'GM 页面应显示保险库木材保护量字段');
+    assert.match(res.body, /保金币\/级/, 'GM 页面应显示保险库金币保护量字段');
     assert.match(res.body, /炼金炉功能参数（合并在升级消耗栏）/, 'GM 页面应把炼金炉参数合并到炼金炉升级消耗卡片');
     assert.match(res.body, /alchemy_refine_sec/, 'GM 页面应提供炼金时间参数');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
@@ -298,6 +300,22 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     };
     const treasuryLevel = (levelData.building_levels ?? []).find((r) => r.code === 'treasury' && String(r.level) === '1');
     assert.equal(Number(treasuryLevel?.treasureSlots), 7, 'balance/data 应返回修改后的宝库槽位');
+
+    const vaultSave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ building_levels: { 'vault|1': { vaultProtectWood: '777', vaultProtectGold: '8888' } } }),
+    });
+    assert.equal(vaultSave.statusCode, 200, `保险库保护量覆盖应成功：${vaultSave.body}`);
+    assert.equal(app.config.buildings.vault.levels[1].vaultProtectWood, 777, '保险库木材保护量应热重载');
+    assert.equal(app.config.buildings.vault.levels[1].vaultProtectGold, 8888, '保险库金币保护量应热重载');
+
+    const vaultData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const vaultLevel = (vaultData.building_levels ?? []).find((r) => r.code === 'vault' && String(r.level) === '1');
+    assert.equal(Number(vaultLevel?.vaultProtectWood), 777, 'balance/data 应返回修改后的保险库木材保护量');
 
     const alchemySave = await fastify.inject({
       method: 'POST',

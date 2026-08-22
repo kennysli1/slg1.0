@@ -497,7 +497,15 @@ export class CombatModule {
             payload: { villageId: b.targetId, ignoreSafe: true },
           });
           const available = (lootRes.payload as any)?.lootable ?? {};
-          storedAvailable = scaleResources(available, this.config.constants.pvpSiegeStorageLootRatio);
+          // 保险库保护在建筑拆除后查询：攻城器械若先拆掉保险库，保护量立即下降，
+          // 随后读取的仓储战利品才按新的保护量计算。
+          const vaultRes = await this.commands.send({
+            name: 'building.GetVaultProtection', from: CombatModule.NAME,
+            payload: { villageId: b.targetId },
+          });
+          const protectedAmount = (vaultRes.payload as any)?.protection ?? {};
+          const afterVault = subtractProtected(available, protectedAmount);
+          storedAvailable = scaleResources(afterVault, this.config.constants.pvpSiegeStorageLootRatio);
         }
         const lootPlan = planPvpLoot(storedAvailable, buildingLoot, totalCarry);
         if (Object.keys(lootPlan.stored).length > 0) {
@@ -760,6 +768,20 @@ function mergeResources(a: Record<string, number>, b: Record<string, number>): R
   for (const [key, value] of Object.entries(b)) {
     const n = Number(value);
     if (Number.isFinite(n) && n > 0) out[key] = (out[key] ?? 0) + n;
+  }
+  return out;
+}
+
+/** 从攻城战可掠夺存量中扣除保险库保护额；保护额不会形成负数库存。 */
+export function subtractProtected(
+  resources: Record<string, number>,
+  protectedAmount: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(resources)) {
+    const available = Math.max(0, Number(value) || 0);
+    const safe = Math.max(0, Number(protectedAmount[key]) || 0);
+    out[key] = Math.max(0, available - safe);
   }
   return out;
 }

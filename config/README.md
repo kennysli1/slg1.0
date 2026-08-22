@@ -43,7 +43,7 @@
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
-| 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量或宝库槽位 |
+| 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量、宝库槽位或保险库资源保护量 |
 | 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
@@ -108,6 +108,8 @@
 | popCap | 该级相对上一级新增的人口硬上限 |
 | prod | 仅资源田填写：该级每小时产量 |
 | treasureSlots | 仅宝库填写：该级相对上一级新增的宝物栏槽位 |
+| storagePerLevel / defensePerLevel | 仅仓库/粮仓或城墙填写：该级仓储容量或城墙防御增量 |
+| vaultProtectWood/vaultProtectClay/vaultProtectIron/vaultProtectCrop/vaultProtectGold | 仅保险库填写：该级新增保护量，按等级累加；攻城拆除后按剩余等级生效 |
 
 ## town_center_slots.csv — 城镇中心槽位曲线
 | 列 | 含义 |
