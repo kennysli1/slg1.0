@@ -71,7 +71,7 @@ function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapsho
         <span class="res-num">{fmt(have)}<small>/{fmt(capacity)}</small></span>
       </div>
       <div class="res-meta">
-        <span class="res-rate">{paused ? <span style="opacity:0.55">停产（本可 {rawRate >= 0 ? '+' : ''}{rawRate.toFixed(0)}/时）</span> : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/时`}</span>
+        <span class="res-rate">{paused ? <span style="opacity:0.55">停产（{rawRate >= 0 ? '+' : ''}{rawRate.toFixed(0)}/时）</span> : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/时`}</span>
         <span class="res-cap">
           <Bar pct={percent} thin kind={paused || nearFull ? 'ember' : low ? 'crimson' : 'steel'} />
         </span>
