@@ -7,8 +7,16 @@ import { Panel } from '../../ui/index.js';
 export function VillageList() {
   sessionVersion.value;
   dataVersion.value;
-  const villages = me?.villages ?? [];
-  if (villages.length <= 1) return null;
+  // 即使当前只有一座村庄也显示列表：玩家需要明确知道这些页面按村庄
+  // 隔离，拓荒出第二座村庄后可直接在同一位置切换。旧版会在 <=1 座时
+  // 整块隐藏，导致新账号误以为村庄切换没有落地；没有 villages 数组时
+  // 用当前村庄兼容旧登录响应。
+  const villages = me?.villages?.length
+    ? me.villages
+    : me
+      ? [{ id: me.villageId, q: me.q, r: me.r, name: '当前村庄', isCapital: true }]
+      : [];
+  if (villages.length === 0) return null;
 
   async function pick(villageId: string) {
     if (!villageId || villageId === me?.villageId) return;
