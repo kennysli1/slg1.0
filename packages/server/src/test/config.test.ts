@@ -88,6 +88,8 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
   assert.equal(sumL10, 200, '主城 10 级每级 20，总和应为 200');
   const res = cfg.buildings['residence'];
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
+  assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
+  assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {
