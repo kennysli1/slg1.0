@@ -10,6 +10,7 @@ import { buildingInfo } from '../../app/config.js';
 import {
   Panel, IconPlate, Btn, Tag, CostRow, canAfford, TimerBar,
 } from '../../ui/index.js';
+import { fmt } from '../../shared/utils/format.js';
 import { openBuilding } from './BuildingModal.js';
 import { openBuildModal } from './BuildModal.js';
 
@@ -66,6 +67,9 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
   const nextPopCap = bInfo.popCapByLevel
     ? (bInfo.popCapByLevel[b.level] ?? 0)
     : (bInfo.popCapPerLevel ?? 0);
+  const vaultProtection = b.kind === 'vault' && b.level > 0
+    ? bInfo.vaultProtectionByLevel?.[b.level - 1]
+    : undefined;
 
   return (
     <Panel
@@ -99,6 +103,11 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
           <div class="vil-card-meta">{lvLabel}{b.maxLevel ? ` / Lv${b.maxLevel}` : ''}</div>
           {b.producing && !isDemolishing && (
             <div class="vil-card-prod">+{b.producing.ratePerHour}/h</div>
+          )}
+          {vaultProtection && !isDemolishing && (
+            <div class="vil-card-vault" aria-label="当前等级保险库保护量">
+              保护：木材 {fmt(vaultProtection.wood)} · 泥土 {fmt(vaultProtection.clay)} · 钢铁 {fmt(vaultProtection.iron)} · 粮食 {fmt(vaultProtection.crop)} · 金币 {fmt(vaultProtection.gold)}
+            </div>
           )}
         </div>
       </div>
