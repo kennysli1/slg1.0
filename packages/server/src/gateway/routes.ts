@@ -434,6 +434,23 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'alchemy',
+    publicActions: {
+      GetAlchemy: { command: 'alchemy.Get', ownVillage: true, needAuth: true, schema: {} },
+      SelectAlchemyTreasure: {
+        command: 'alchemy.Select', ownVillage: true, needAuth: true,
+        schema: {
+          slot: { type: 'integer', min: 0, max: 2 },
+          code: { type: 'string', minLen: 1, maxLen: 64 },
+          location: { type: 'enum', values: ['town', 'treasury', 'reserve'] },
+        },
+      },
+      StartAlchemy: { command: 'alchemy.Start', ownVillage: true, needAuth: true, schema: {} },
+      ClaimAlchemy: { command: 'alchemy.Claim', ownVillage: true, needAuth: true, schema: {} },
+    },
+    eventPushMap: { 'alchemy.Updated': 'AlchemyUpdated' },
+    },
+  {
     moduleName: 'world',
     publicActions: {
       GetArea: {

@@ -25,6 +25,7 @@ import { TasksModule } from './modules/tasks.js';
 import { VisionModule } from './modules/vision.js';
 import { DiplomacyModule } from './modules/diplomacy.js';
 import { ReputationModule } from './modules/reputation.js';
+import { AlchemyModule } from './modules/alchemy.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -57,6 +58,7 @@ const PROGRESS_COLLECTIONS = [
   'vision',
   'diplomacy',
   'reputation',
+  'alchemy',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -101,6 +103,7 @@ export interface GameApp {
   vision: VisionModule;
   diplomacy: DiplomacyModule;
   reputation: ReputationModule;
+  alchemy: AlchemyModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
   setupWorld(): void;
@@ -179,6 +182,7 @@ export function createGameApp(opts?: {
       // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
       await population.createVillage(villageId, tribe);
       treasure.createVillage(villageId);
+      alchemy.createVillage(villageId);
       task.createVillage(villageId);
       const placeRes = await commands.send({
         name: 'world.PlaceVillage', from: 'app',
@@ -192,6 +196,7 @@ export function createGameApp(opts?: {
       store.delete('military', villageId);
       store.delete('population', villageId);
       store.delete('treasure', villageId);
+      store.delete('alchemy', villageId);
       store.delete('task', villageId);
       throw err;
     }
@@ -216,15 +221,16 @@ export function createGameApp(opts?: {
     return owner?.id ?? null;
   });
   const reputation = new ReputationModule(store, bus, commands, now, config);
+  const alchemy = new AlchemyModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, task, vision, reputation,
+    player, meta, notifications, mercenary, trade, treasure, research, task, vision, reputation, alchemy,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
-    mercenary, trade, treasure, research, task, reputation,
+    mercenary, trade, treasure, research, task, reputation, alchemy,
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -237,11 +243,13 @@ export function createGameApp(opts?: {
       `trade:${villageId}`,
       `research:${villageId}`,
       `task-refresh:${villageId}`,
+      `alchemy:${villageId}`,
     ]) {
       scheduler.cancelByOwner(prefix);
     }
     trade.wipeSingleVillage(villageId);
     treasure.wipeSingleVillage(villageId);
+    alchemy.wipeSingleVillage(villageId);
     task.wipeSingleVillage(villageId);
     // 通知行军模块：来向该村的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
     // 必须在删除行军记录之前发出，并保留「来向本村」的行军，留给 onVillageRemoved→startReturn
@@ -259,7 +267,7 @@ export function createGameApp(opts?: {
         Object.values(b.contributions ?? {}).some((c) => c.fromVillage === villageId);
       if (involves && b.id) scheduler.cancelByOwner(`combat:${b.id}`);
     }
-    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task'] as const) {
+    for (const c of ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task', 'alchemy'] as const) {
       store.delete(c, villageId);
     }
     for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
@@ -288,7 +296,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
       return doCreateVillage(villageId, q, r, name, 'romans');
     },
@@ -367,11 +375,13 @@ export function createGameApp(opts?: {
           `population:starve:${villageId}`,
           `mercenary:${villageId}`,
           `trade:${villageId}`,
+          `alchemy:${villageId}`,
         ]) {
           scheduler.cancelByOwner(prefix);
         }
         trade.wipeSingleVillage(villageId);
         treasure.wipeSingleVillage(villageId);
+        alchemy.wipeSingleVillage(villageId);
         task.wipeSingleVillage(villageId);
       }
       for (const mv of store.all<{ id?: string; fromVillage?: string }>('movement')) {
@@ -390,7 +400,7 @@ export function createGameApp(opts?: {
       store.delete('player_byname', name);
       for (const villageId of villageIds) store.delete('player_byvillage', villageId);
 
-      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task'] as const;
+      const progressByVillage = ['economy', 'building', 'military', 'population', 'notifications', 'merc', 'trade', 'treasure', 'treasure_pending', 'task', 'alchemy'] as const;
       for (const villageId of villageIds) {
         for (const c of progressByVillage) store.delete(c, villageId);
       }
