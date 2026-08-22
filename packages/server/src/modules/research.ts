@@ -208,7 +208,8 @@ export class ResearchModule {
     if (!tech) return { ok: false, payload: {}, reason: 'unknown_tech' };
     if (s.academy.academyCount < 1) return { ok: false, payload: {}, reason: 'academy_required' };
     if (s.researching) return { ok: false, payload: {}, reason: 'already_researching' };
-    if (s.completed.includes(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
+    // scope=player 科技的完成记录来自玩家全部村庄；避免在分城重复研发全局科技。
+    if (this.effectiveCompleted(villageId).has(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
     if (!this.prereqsMet(villageId, tech.requires)) return { ok: false, payload: {}, reason: 'prerequisites_not_met' };
     if (s.rp < tech.rpCost) return { ok: false, payload: {}, reason: 'insufficient_rp' };
     s.rp -= tech.rpCost;

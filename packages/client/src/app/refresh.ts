@@ -19,7 +19,7 @@ import {
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setTaskMarkers, foreignMoves, mapCenter, patchForeignArmy, dropForeignArmy,
+  setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, patchForeignArmy, dropForeignArmy,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
@@ -75,12 +75,17 @@ export async function refreshAll(): Promise<void> {
     bumpData();
     void refreshForeignMoves();
 
-    // 任务快照（任务条常驻村庄页，登录/刷新即拉取）
-    const taskRes = await req('task.GetState').catch(() => null);
-    if (taskRes?.ok) setTaskState(taskRes.payload);
+    // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
+    await reloadPlayerTasks();
   } catch {
     pushReport('刷新失败：网络连接异常');
   }
+}
+
+/** 轻量刷新玩家任务板，供任务推送使用。 */
+export async function reloadPlayerTasks(): Promise<void> {
+  const taskRes = await req('task.GetPlayerState').catch(() => null);
+  if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
 }
 
 /**
@@ -265,7 +270,7 @@ export function handlePush(event: string, payload: any): void {
   if (event === 'TechCompleted') { void reloadResearch(); }
 
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
-  if (event === 'TaskListChanged') { setTaskState(payload); return; }
+  if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
 
   // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野

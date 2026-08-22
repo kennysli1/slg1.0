@@ -33,6 +33,7 @@ import {
   Icon, IconPlate, Stat, Modal, SecondaryActions,
 } from '../../ui/index.js';
 import '../../styles/army.css';
+import { VillageList } from '../../shared/ui/VillageList.js';
 
 export function ArmyScreen() {
   dataVersion.value; // 订阅快照刷新
@@ -48,6 +49,7 @@ export function ArmyScreen() {
 
   return (
     <div class="army-page">
+      <VillageList />
       <GarrisonSection army={army} />
       <RaidDefenseSection army={army} />
       <TrainingCenterSection army={army} />

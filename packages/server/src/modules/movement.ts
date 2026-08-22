@@ -1543,7 +1543,8 @@ export class MovementModule {
 
   private settlerUnitCode(tribe: string): string | undefined {
     for (const [code, def] of Object.entries(this.config.units)) {
-      if (def.tribe === tribe && def.popPermanent) return code;
+      // 拓荒者是唯一每兵占用 5 人口且代码含 settler 的单位；不再依赖永久人口标记。
+      if (def.tribe === tribe && def.popCost === 5 && code.toLowerCase().includes('settler')) return code;
     }
     return undefined;
   }
@@ -1571,7 +1572,7 @@ export class MovementModule {
     return { ok: true };
   }
 
-  /** 拓荒到达：合法则建村；否则拓荒者返程（开城包已扣不退）。 */
+  /** 拓荒到达：合法则建村；否则拓荒者返程并按普通兵种返还人口。 */
   private async arriveFound(mv: MovementRecord): Promise<void> {
     const c = this.config.constants;
     const site = await this.validateFoundSite(mv.toXY, c.foundMinTileDistance);
@@ -1603,7 +1604,7 @@ export class MovementModule {
 
     const newVillageId = (created.payload as any).villageId as string;
     log('拓荒建村成功', { id: mv.id, newVillageId, at: mv.toXY });
-    // 拓荒者消耗在建村（popPermanent，不归队）
+    // 成功建村后，出发城失去随军的 5 人口；新城由 PlayerModule 以 5 人口初始化。
     void this.bus.emit({
       name: 'movement.VillageFounded', source: MovementModule.NAME, ts: this.now(),
       payload: {

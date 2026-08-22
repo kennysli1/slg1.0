@@ -1,13 +1,13 @@
 /**
- * 任务条（常驻村庄页）：
+ * 玩家任务页（历史文件名保留 TaskBar 以兼容旧入口）：
  *  - 进行中任务（主线不可放弃 / 随机可放弃）
  *  - 上交资源类任务 → 弹窗提交
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
 import { useState } from 'preact/hooks';
-import { dataVersion, taskStates, tab, openModal, selected } from '../../app/store.js';
-import { me, req } from '../../api.js';
+import { dataVersion, taskStates, playerTaskState, tab, openModal, selected, showToast } from '../../app/store.js';
+import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
 import { Panel, SectionHead, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
@@ -18,6 +18,22 @@ import { openTradeCenter } from '../trade/TradeModal.js';
 
 function vid(): string {
   return me?.villageId ?? '';
+}
+
+function villageName(villageId?: string): string {
+  if (!villageId) return '';
+  return me?.villages?.find((v) => v.id === villageId)?.name ?? villageId;
+}
+
+/** 聚合任务卡操作前切换到任务来源村，保证 ownVillage 路由落到正确状态。 */
+async function ensureTaskVillage(villageId?: string): Promise<boolean> {
+  if (!villageId || villageId === me?.villageId) return true;
+  const result = await selectVillage(villageId);
+  if (!result.ok) {
+    showToast('无法切换到任务所属村庄', 'bad');
+    return false;
+  }
+  return true;
 }
 
 function objText(task: any): string {
@@ -111,6 +127,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
   const confirm = async () => {
     const resources: Record<string, number> = {};
     for (const [k, v] of Object.entries(vals)) if (v > 0) resources[k] = v;
+    if (!await ensureTaskVillage(task.villageId)) return;
     await act(req('task.SubmitResources', { code: task.code, resources }), {
       okToast: '已上交资源',
       onOk: () => close(),
@@ -181,25 +198,33 @@ function TaskCard({ task }: { task: any }) {
       confirmText: '确认放弃',
     });
     if (!ok) return;
+    if (!await ensureTaskVillage(task.villageId)) return;
     await act(req('task.Abandon', { code: task.code }), { okToast: '已放弃任务' });
   };
   const onSubmit = () => {
     openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
   };
-  const onGoMap = (camp = camps[0]) => {
+  const onGoMap = async (camp = camps[0]) => {
     if (!camp) return;
+    if (!await ensureTaskVillage(task.villageId)) return;
     // 设置地图初始视角与选中目标：地图挂载后会显示既有的金色选中环和目标面板。
     setMapCenter({ q: camp.q, r: camp.r });
     selected.value = { refId: camp.id, kind: 'pve', q: camp.q, r: camp.r, name: '任务营地', icon: 'pve_bandits' };
     tab.value = 'map';
   };
   const onDeliver = () => {
-    void act(req('task.Deliver', { code: task.code }), {
+    void (async () => {
+      if (!await ensureTaskVillage(task.villageId)) return;
+      await act(req('task.Deliver', { code: task.code }), {
       okToast: '任务完成',
       onOk: (payload) => {
         openModal((close) => <RewardModal task={task} rewards={payload?.rewards} close={close} />, `task-reward-${task.code}`);
       },
-    });
+      });
+    })();
+  };
+  const onOpenTrade = async () => {
+    if (await ensureTaskVillage(task.villageId)) openTradeCenter();
   };
 
   return (
@@ -207,6 +232,7 @@ function TaskCard({ task }: { task: any }) {
       <div class="task-card-head">
         <span class="task-card-name">{task.name}</span>
         {typeTag(task.type)}
+        {task.villageId && <span class="task-card-village">{villageName(task.villageId)}</span>}
       </div>
       <div class="task-card-desc">{task.desc}</div>
 
@@ -286,7 +312,7 @@ function TaskCard({ task }: { task: any }) {
               <Btn size="sm" variant="ghost" onClick={() => onGoMap()}>前往地图</Btn>
             )}
             {o.kind === 'deliver_to_npc' && !task.npcPending && (
-              <Btn size="sm" variant="primary" onClick={() => openTradeCenter()}>前往贸易中心</Btn>
+              <Btn size="sm" variant="primary" onClick={() => void onOpenTrade()}>前往贸易中心</Btn>
             )}
           </>
         )}
@@ -299,24 +325,26 @@ function TaskCard({ task }: { task: any }) {
 }
 
 // ── 可接取任务（支线 + 酒馆日常委托）─────────────────────────────────────────
-function OfferCard({ q, onAccept }: { q: any; onAccept: (code: string) => void }) {
+function OfferCard({ q, onAccept }: { q: any; onAccept: (q: any) => void }) {
   return (
     <div class="task-offer" key={q.code}>
       <div class="task-offer-info">
         <span class="task-offer-name">{q.name}</span>
+        {q.villageId && <span class="task-offer-village">{villageName(q.villageId)}</span>}
         <span class="task-offer-desc">{q.desc}</span>
         <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
         <OutcomeRows rewards={q.rewards} />
       </div>
-      <Btn size="sm" variant="primary" onClick={() => onAccept(q.code)}>接取</Btn>
+      <Btn size="sm" variant="primary" onClick={() => onAccept(q)}>接取</Btn>
     </div>
   );
 }
 
 export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
   const side = offeredSide ?? [];
-  const onAccept = async (code: string) => {
-    await act(req('task.Accept', { code }), { okToast: '已接取任务' });
+  const onAccept = async (q: any) => {
+    if (!await ensureTaskVillage(q.villageId)) return;
+    await act(req('task.Accept', { code: q.code }), { okToast: '已接取任务' });
   };
   if (!offered?.length && !side.length) return null;
   return (
@@ -325,7 +353,7 @@ export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSi
         <>
           <SectionHead sub={`${side.length} 个任务`}>支线任务</SectionHead>
           <div class="task-offer-list">
-            {side.map((q) => <OfferCard q={q} onAccept={onAccept} />)}
+            {side.map((q) => <OfferCard key={`${q.villageId ?? ''}:${q.code}`} q={q} onAccept={onAccept} />)}
           </div>
         </>
       )}
@@ -333,7 +361,7 @@ export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSi
         <>
           <SectionHead sub={`${offered.length} 个委托`}>酒馆日常委托</SectionHead>
           <div class="task-offer-list">
-            {offered.map((q) => <OfferCard q={q} onAccept={onAccept} />)}
+            {offered.map((q) => <OfferCard key={`${q.villageId ?? ''}:${q.code}`} q={q} onAccept={onAccept} />)}
           </div>
         </>
       )}
@@ -341,26 +369,37 @@ export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSi
   );
 }
 
-// ── 任务条主体 ────────────────────────────────────────────────────────────────
-export function TaskBar() {
-  dataVersion.value; // 资源/任务数据刷新时重渲
-  taskStates.value;  // 任务推送时重渲
-  const ts = taskStates.value[vid()] ?? null;
-  const active: any[] = ts?.active ?? [];
-  const offered: any[] = ts?.offered ?? [];
-  const offeredSide: any[] = ts?.offeredSide ?? [];
-
+// ── 任务页主体 ────────────────────────────────────────────────────────────────
+function TaskBoard({ state, playerWide = false }: { state: any; playerWide?: boolean }) {
+  const active: any[] = state?.active ?? [];
+  const offered: any[] = state?.offered ?? [];
+  const offeredSide: any[] = state?.offeredSide ?? [];
   return (
     <section class="task-bar">
-      <SectionHead>任务</SectionHead>
+      <SectionHead sub={playerWide ? '跨村统一显示；每张任务卡标注所属村庄' : undefined}>任务</SectionHead>
       {active.length === 0 && offered.length === 0 && offeredSide.length === 0 ? (
         <Panel variant="flat" pad class="task-empty">暂无可进行的任务。</Panel>
       ) : (
         <div class="task-active-list">
-          {active.map((t) => <TaskCard task={t} key={t.code} />)}
+          {active.map((t) => <TaskCard task={t} key={`${t.villageId ?? ''}:${t.code}`} />)}
         </div>
       )}
       <TaskOffers offered={offered} offeredSide={offeredSide} />
     </section>
   );
+}
+
+/** 玩家绑定的独立任务页。 */
+export function TasksScreen() {
+  dataVersion.value;
+  playerTaskState.value;
+  return <TaskBoard state={playerTaskState.value} playerWide />;
+}
+
+/** 兼容旧嵌入点：村庄页不再渲染，但保留按当前村读取的组件供旧入口使用。 */
+export function TaskBar() {
+  dataVersion.value; // 资源/任务数据刷新时重渲
+  taskStates.value;  // 任务推送时重渲
+  const ts = taskStates.value[vid()] ?? null;
+  return <TaskBoard state={ts} />;
 }

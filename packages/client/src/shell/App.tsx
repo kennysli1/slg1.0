@@ -13,6 +13,7 @@ import { ArmyScreen } from '../features/army/ArmyScreen.js';
 import { MapScreen } from '../features/map/MapScreen.js';
 import { TechTreeScreen } from '../features/research/TechTreeScreen.js';
 import { ReportsScreen } from '../features/reports/ReportsScreen.js';
+import { TasksScreen } from '../features/village/TaskBar.js';
 
 type Phase = 'boot' | 'login' | 'game';
 
@@ -96,6 +97,7 @@ function Page() {
       {currentTab === 'army' && <ArmyScreen />}
       {currentTab === 'map' && <MapScreen />}
       {currentTab === 'tech' && <TechTreeScreen />}
+      {currentTab === 'tasks' && <TasksScreen />}
       {currentTab === 'reports' && <ReportsScreen />}
     </main>
   );

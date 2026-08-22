@@ -1,7 +1,7 @@
 /**
  * 领域模块 · 任务（TasksModule）
  *
- * 状态归属：task 集合（每村任务进度：已完成主线、进行中任务实例、酒馆展示的随机任务）。
+ * 状态归属：task 集合（每村任务进度）；客户端任务页通过 GetPlayerState 聚合玩家所有村庄。
  *
  * 设计要点（来自策划）：
  *  - 任务会给接了该任务的玩家在地图上显示专属内容；任务专属宝物不可出售/遗弃/丢失/超时。
@@ -134,6 +134,7 @@ export class TasksModule {
   constructor(
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
     now: () => number, config: GameConfig, rng: () => number = Math.random,
+    private playerVillages: (playerId: string) => string[] = () => [],
   ) {
     this.config = config;
     this.store = store;
@@ -151,6 +152,7 @@ export class TasksModule {
 
   async init(): Promise<void> {
     this.commands.register('task.GetState', (c: Command) => this.getState(c));
+    this.commands.register('task.GetPlayerState', (c: Command) => this.getPlayerState(c));
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
@@ -303,6 +305,53 @@ export class TasksModule {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
     return { ok: true, payload: this.snapshot(villageId, s) };
+  }
+
+  /** 玩家任务板：聚合该玩家全部村庄的任务；执行动作仍携带来源村庄并走原有村庄状态。 */
+  private getPlayerState(cmd: Command): CommandResult {
+    const { playerId } = cmd.payload as { playerId?: string };
+    if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
+    const villageIds = [...new Set(this.playerVillages(playerId))];
+    const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId)));
+    const activeByCode = new Map<string, Record<string, unknown>>();
+    const offeredByCode = new Map<string, Record<string, unknown>>();
+    const offeredSideByCode = new Map<string, Record<string, unknown>>();
+    const completedMain = new Set<string>();
+    const completedSide = new Set<string>();
+    const abandonedSide = new Set<string>();
+    for (const snap of villages) {
+      for (const item of (snap.active as Record<string, unknown>[])) {
+        const code = String(item.code ?? '');
+        const prev = activeByCode.get(code);
+        // 旧存档可能已在多村各有一份同 code 任务；统一任务板只展示一份，优先保留已就绪实例。
+        if (!prev || (item.ready === true && prev.ready !== true)) activeByCode.set(code, item);
+      }
+      for (const item of (snap.offered as Record<string, unknown>[])) {
+        const code = String(item.code ?? '');
+        if (!offeredByCode.has(code)) offeredByCode.set(code, item);
+      }
+      for (const item of (snap.offeredSide as Record<string, unknown>[])) {
+        const code = String(item.code ?? '');
+        if (!offeredSideByCode.has(code)) offeredSideByCode.set(code, item);
+      }
+      for (const code of (snap.completedMain as string[])) completedMain.add(code);
+      for (const code of (snap.completedSide as string[])) completedSide.add(code);
+      for (const code of (snap.abandonedSide as string[])) abandonedSide.add(code);
+    }
+    return {
+      ok: true,
+      payload: {
+        playerId,
+        villageIds,
+        villages,
+        active: [...activeByCode.values()],
+        offered: [...offeredByCode.values()],
+        offeredSide: [...offeredSideByCode.values()],
+        completedMain: [...completedMain],
+        completedSide: [...completedSide],
+        abandonedSide: [...abandonedSide],
+      },
+    };
   }
 
   // ── 命令：Accept（接取日常/支线任务）──
@@ -1230,15 +1279,15 @@ export class TasksModule {
 
   // ── 序列化 + 推送 ──
   private snapshot(villageId: string, s: TaskState): Record<string, unknown> {
-    const active = Object.values(s.active).map((inst) => this.serializeInstance(inst));
+    const active = Object.values(s.active).map((inst) => this.serializeInstance(inst, villageId));
     const offered = s.offered
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
-      .map((q) => this.serializeOffer(q));
+      .map((q) => this.serializeOffer(q, villageId));
     const offeredSide = s.offeredSide
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
-      .map((q) => this.serializeOffer(q));
+      .map((q) => this.serializeOffer(q, villageId));
     return {
       villageId,
       active,
@@ -1250,8 +1299,9 @@ export class TasksModule {
     };
   }
 
-  private serializeOffer(q: QuestDef): Record<string, unknown> {
+  private serializeOffer(q: QuestDef, villageId?: string): Record<string, unknown> {
     return {
+      villageId: villageId ?? null,
       code: q.code,
       name: q.name,
       desc: q.desc,
@@ -1276,10 +1326,11 @@ export class TasksModule {
     };
   }
 
-  private serializeInstance(inst: TaskInstance): Record<string, unknown> {
+  private serializeInstance(inst: TaskInstance, villageId?: string): Record<string, unknown> {
     const q = this.quest(inst.code);
     const objective = q ? this.serializeObjective(q) : { kind: 'unknown' };
     return {
+      villageId: villageId ?? null,
       code: inst.code,
       lineCode: inst.lineCode ?? this.config.questGraph.quests[inst.code]?.lineCode ?? null,
       definitionRevision: inst.definitionRevision ?? 'legacy-v2',

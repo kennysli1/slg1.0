@@ -105,7 +105,7 @@ export interface GameApp {
   reputation: ReputationModule;
   alchemy: AlchemyModule;
   now: () => number;
-  createVillage(villageId: string, q?: number, r?: number, name?: string): void | Promise<void>;
+  createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
@@ -174,13 +174,13 @@ export function createGameApp(opts?: {
   const combat = new CombatModule(store, bus, commands, scheduler, now, config);
 
   // 实际建村的函数（供 Player 注册时调用）。坐标为六边形轴坐标 (q,r)。
-  const doCreateVillage = async (villageId: string, q: number, r: number, name: string, tribe = 'romans') => {
+  const doCreateVillage = async (villageId: string, q: number, r: number, name: string, tribe = 'romans', initialPop?: number) => {
     try {
       economy.createVillage(villageId);
       building.createVillage(villageId, tribe);
       military.createVillage(villageId, tribe);
       // population 必须在 economy/building/military 之后创建（需要产率/维护已上报）
-      await population.createVillage(villageId, tribe);
+      await population.createVillage(villageId, tribe, initialPop);
       treasure.createVillage(villageId);
       alchemy.createVillage(villageId);
       task.createVillage(villageId);
@@ -207,17 +207,17 @@ export function createGameApp(opts?: {
   const mercenary = new MercenaryModule(store, bus, commands, scheduler, now, config);
   const trade = new TradeModule(store, bus, commands, scheduler, now, config);
   const treasure = new TreasureModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
-  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
-  const vision = new VisionModule(store, commands, config);
-  // playerVillages: 轻量跨村查询（research/academy 需要知道某玩家所有村庄，用于 scope=player 科技）
+  // playerVillages: 轻量跨村查询（任务聚合与 scope=player 科技共用）。
   const playerVillages = (playerId: string): string[] => {
-    const owner = store.all<{ id?: string; ownedVillages?: string[] }>('player')
+    const owner = store.all<{ id?: string; ownedVillages?: ({ id: string } | string)[] }>('player')
       .find((p) => p.id === playerId);
-    return owner?.ownedVillages?.filter((id): id is string => typeof id === 'string') ?? [];
+    return owner?.ownedVillages?.map((v) => typeof v === 'string' ? v : v.id).filter((id): id is string => typeof id === 'string') ?? [];
   };
+  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random, playerVillages);
+  const vision = new VisionModule(store, commands, config);
   const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {
-    const owner = store.all<{ id?: string; ownedVillages?: string[] }>('player')
-      .find((p) => p.ownedVillages?.includes(vid));
+    const owner = store.all<{ id?: string; ownedVillages?: ({ id: string } | string)[] }>('player')
+      .find((p) => p.ownedVillages?.some((v) => (typeof v === 'string' ? v : v.id) === vid));
     return owner?.id ?? null;
   });
   const reputation = new ReputationModule(store, bus, commands, now, config);
@@ -297,8 +297,8 @@ export function createGameApp(opts?: {
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, now,
-    createVillage(villageId, q = 0, r = 0, name = '我的村庄') {
-      return doCreateVillage(villageId, q, r, name, 'romans');
+    createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
+      return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
     setupWorld() {
       world.setup(config.constants.worldW, config.constants.worldH);

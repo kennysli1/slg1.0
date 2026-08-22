@@ -1036,6 +1036,12 @@
   gap: var(--s-2);
   justify-content: space-between;
 }
+.task-card-village, .task-offer-village {
+  margin-left: auto;
+  color: var(--c-gold);
+  font-size: var(--f-2xs);
+  white-space: nowrap;
+}
 .task-card-name {
   font-weight: 700;
   font-size: var(--f-md);
@@ -1163,6 +1169,7 @@
   font-weight: 600;
   font-size: var(--f-sm);
 }
+.task-offer-village { margin-left: 0; }
 .task-offer-desc {
   font-size: var(--f-2xs);
   color: var(--c-ink-soft);

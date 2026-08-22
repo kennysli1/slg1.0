@@ -840,7 +840,7 @@ export class MilitaryModule {
   /**
    * 解散驻村军队（DisbandTroops）：减兵力 + 归还人口 + 更新维护。
    * 只能解散驻村部队（出征中的军队不在 troops 里，归 movement 管辖）。
-   * 100% 归还人口（但拓荒者 popPermanent=true，由 population.ReturnPop 跳过）。
+   * 100% 归还训练时占用的人口。
    * 资源不返还。
    */
   private async disbandTroops(cmd: Command): Promise<CommandResult> {
@@ -864,7 +864,7 @@ export class MilitaryModule {
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
 
-    // 归还人口（population.ReturnPop 自行跳过 popPermanent 单位）
+    // 归还人口（population.ReturnPop 按各兵种 popCost 计算）
     const returnResult = await this.commands.send({
       name: 'population.ReturnPop',
       from: MilitaryModule.NAME,

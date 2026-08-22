@@ -7,8 +7,8 @@ import { createGameApp, type GameApp } from '../app.js';
  * - 增长收敛（复现设计§4.2 迭代表）
  * - 超限减员（粮仓触底后减员）
  * - 战死处理（v5 原子转化：士兵=转化出去的平民，战死按医院等级回收为平民，其余计永久损失）
- * - 解散驻村军队返还平民（士兵=退役归田，普通兵 ReturnPop 返还、settler 因 popPermanent 不返还）
- * - 拓荒者配置（popPermanent=true）；v5 下 ReturnPop 仅对 popPermanent 单位返回 0
+ * - 解散驻村军队返还平民（所有兵种按 popCost 返还）
+ * - 拓荒者配置占用 5 人口；普通返程也按 popCost 返还
  * - 劳动力饱和加权收敛（effMult 随人口增加趋向 1.0）
  *
  * 注意：population.createVillage 是异步的（内部有多个 await commands.send），
@@ -141,7 +141,7 @@ test('人口：v5 解散军队返还平民（士兵=转化出去的平民，退�
   const popBefore = snapBefore.currentPop;
   const soldierBefore = snapBefore.soldierPop;
 
-  // 解散 2 个军团兵（普通兵，非 popPermanent）→ 返还 2 平民
+  // 解散 2 个军团兵 → 返还 2 平民
   const disbandR = await send(app, 'military.DisbandTroops', { villageId: 'v1', units: { legionnaire: 2 } });
   assert.equal(disbandR.ok, true, `解散应成功: ${disbandR.reason ?? ''}`);
   assert.equal((disbandR.payload as any).returnedPop, 2, 'v5 解散应返还 2 人口（legionnaire popCost=1×2）');
@@ -153,14 +153,13 @@ test('人口：v5 解散军队返还平民（士兵=转化出去的平民，退�
   assert.ok(snapAfter.soldierPop <= soldierBefore - 2 + 1e-6, `解散后 soldierPop 应下降（${soldierBefore}→${snapAfter.soldierPop}）`);
 });
 
-test('人口：v5 ReturnPop——普通兵返还平民、settler(popPermanent)不返还', async () => {
+test('人口：ReturnPop——所有兵种按 popCost 返还人口', async () => {
   const app = freshApp();
   await flushMicrotasks();
 
   // 验证 settler 配置
   const settlerDef = app.config.units['settler'];
   assert.ok(settlerDef, 'settler 应存在');
-  assert.ok(settlerDef.popPermanent, 'settler 应是 popPermanent=true');
   assert.equal(settlerDef.popCost, 5, 'settler popCost 应为5');
 
   // v5：普通兵（legionnaire）ReturnPop 返还其 popCost×count 平民
@@ -171,13 +170,13 @@ test('人口：v5 ReturnPop——普通兵返还平民、settler(popPermanent)�
   assert.equal(returnR2.ok, true);
   assert.equal((returnR2.payload as any).returned, 2, 'v5 普通兵 ReturnPop 应返还 2 人口（popCost=1×2）');
 
-  // v5：settler 为 popPermanent → 解散/返程不返还平民
+  // 拓荒者返程同样按 popCost 返还 5 人口
   const returnR = await send(app, 'population.ReturnPop', {
     villageId: 'v1',
     units: { settler: 1 },
   });
   assert.equal(returnR.ok, true);
-  assert.equal((returnR.payload as any).returned, 0, 'v5 settler(popPermanent) ReturnPop 应返还0人口');
+  assert.equal((returnR.payload as any).returned, 5, 'settler ReturnPop 应返还5人口');
 });
 
 test('人口：解散返还人口钳到 popCeiling，totalPop 不超 hardCap（满员时解散）', async () => {
