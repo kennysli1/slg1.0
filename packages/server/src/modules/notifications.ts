@@ -30,6 +30,7 @@ export const EVENT_MAP: Record<string, string> = {
   'combat.BattleStarted':     'BattleStarted',
   'building.Built':           'BuildingBuilt',
   'building.Upgraded':        'BuildingUpgraded',
+  'building.Repaired':        'BuildingRepaired',
   'building.BattleDamaged':   'BuildingBattleDamaged',
   'military.TroopTrained':    'TroopTrained',
   'movement.Sent':            'MarchSent',

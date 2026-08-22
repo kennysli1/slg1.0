@@ -461,30 +461,42 @@ export class CombatModule {
         await this.commands.send({ name: 'military.AdjustTroops', from: CombatModule.NAME, payload: { villageId: b.targetId, delta } });
       }
       const battleType = b.battleType ?? 'siege';
-      const survivorsPower = totalPower(b.attacker);
-      // 只有战后仍有进攻方幸存者才拆建筑；攻城武器的内城破坏单独按其战力计算。
+      const siegeWeapons = filterSiegeWeapons(b.attacker);
+      const regularTroops = filterNonSiegeWeapons(b.attacker);
+      const siegePower = totalPower(siegeWeapons);
+      const regularPower = totalPower(regularTroops);
+      // 只有战后仍有进攻方幸存者才结算建筑：攻城武器先拆除，普通部队随后破坏。
+      // 掠夺战普通部队只造成可修复的等级破坏；攻城武器才会真正拆除并产生建筑拆除战利品。
       if (attackerWins && totalCount(b.attacker) > 0) {
         const outerThreshold = battleType === 'raid'
           ? this.config.constants.pvpRaidPowerPerBuildingLevel
           : this.config.constants.pvpSiegePowerPerBuildingLevel;
-        const outer = await this.commands.send({
-          name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
-          payload: { villageId: b.targetId, zone: 'outer', power: survivorsPower, powerPerLevel: outerThreshold },
-        });
-        const outerDamage = (outer.payload as any)?.destroyed ?? [];
-        buildingDamage = [...outerDamage];
-        buildingLoot = mergeResources(buildingLoot, (outer.payload as any)?.loot ?? {});
 
-        if (battleType === 'siege') {
-          const siegePower = totalPower(filterSiegeWeapons(b.attacker));
-          if (siegePower > 0) {
-            const inner = await this.commands.send({
-              name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
-              payload: { villageId: b.targetId, zone: 'inner', power: siegePower, powerPerLevel: this.config.constants.pvpSiegeWeaponPowerPerBuildingLevel },
-            });
-            buildingDamage = [...buildingDamage, ...((inner.payload as any)?.destroyed ?? [])];
-            buildingLoot = mergeResources(buildingLoot, (inner.payload as any)?.loot ?? {});
-          }
+        // 武器先处理外围拆除，保证随后普通部队的破坏以最新等级为准。
+        if (siegePower > 0) {
+          const weaponOuter = await this.commands.send({
+            name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
+            payload: { villageId: b.targetId, zone: 'outer', power: siegePower, powerPerLevel: outerThreshold, mode: 'demolish' },
+          });
+          buildingDamage = [...buildingDamage, ...((weaponOuter.payload as any)?.destroyed ?? [])];
+          buildingLoot = mergeResources(buildingLoot, (weaponOuter.payload as any)?.loot ?? {});
+        }
+        if (regularPower > 0) {
+          const regularOuter = await this.commands.send({
+            name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
+            payload: { villageId: b.targetId, zone: 'outer', power: regularPower, powerPerLevel: outerThreshold, mode: 'damage' },
+          });
+          buildingDamage = [...buildingDamage, ...((regularOuter.payload as any)?.destroyed ?? [])];
+        }
+
+        // 攻城时内城只能被攻城武器拆除，普通部队不能对内城造成破坏。
+        if (battleType === 'siege' && siegePower > 0) {
+          const inner = await this.commands.send({
+            name: 'building.ApplyBattleDamage', from: CombatModule.NAME,
+            payload: { villageId: b.targetId, zone: 'inner', power: siegePower, powerPerLevel: this.config.constants.pvpSiegeWeaponPowerPerBuildingLevel, mode: 'demolish' },
+          });
+          buildingDamage = [...buildingDamage, ...((inner.payload as any)?.destroyed ?? [])];
+          buildingLoot = mergeResources(buildingLoot, (inner.payload as any)?.loot ?? {});
         }
 
         // 战利品装载顺序：金币优先；木/泥/铁/粮尽量平均装载。
@@ -759,6 +771,16 @@ function filterSiegeWeapons(snap: Snapshot): Snapshot {
   for (const [key, unit] of Object.entries(snap)) {
     const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
     if (/ram|catapult|trebuchet/i.test(code)) out[key] = unit;
+  }
+  return out;
+}
+
+/** 去除攻城武器，供普通部队建筑破坏结算；攻城武器不能重复计入破坏战力。 */
+function filterNonSiegeWeapons(snap: Snapshot): Snapshot {
+  const out: Snapshot = {};
+  for (const [key, unit] of Object.entries(snap)) {
+    const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
+    if (!/ram|catapult|trebuchet/i.test(code)) out[key] = unit;
   }
   return out;
 }

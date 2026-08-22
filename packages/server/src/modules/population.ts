@@ -409,8 +409,7 @@ export class PopulationModule {
       hardCap: Math.floor(s.hardCap),
       /** 可用劳动人口 = 平民(currentPop)，用于生产/建造/练兵。 */
       availableLabor: Math.floor(avail),
-      // 兼容别名：movement.ts 拓荒门槛(foundMinSoftLimit)读 softLimit。拓荒门槛衡量村庄规模/人口容量，
-      // 取硬上限 hardCap（与 v3 语义一致：v3 availableLabor=hardCap−士兵≈hardCap）。
+      // 兼容旧客户端的 softLimit 字段：人口饥荒/容量展示仍以硬上限为基准。
       softLimit: Math.floor(s.hardCap),
       /** 平民增长上限（占 housing 余量）= 硬上限 − 士兵足迹；客户端外插增长用。 */
       popCeiling: Math.floor(ceiling),

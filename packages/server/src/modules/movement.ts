@@ -1471,17 +1471,6 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'main_level_too_low' };
     }
 
-    // 门控：人口软上限
-    const popRes = await this.commands.send({
-      name: 'population.GetSnapshot', from: MovementModule.NAME,
-      payload: { villageId },
-    });
-    if (!popRes.ok) return { ok: false, payload: {}, reason: 'population_unavailable' };
-    const softLimit = (popRes.payload as any).softLimit as number;
-    if (softLimit < c.foundMinSoftLimit) {
-      return { ok: false, payload: {}, reason: 'soft_limit_too_low' };
-    }
-
     // 落点预检
     const site = await this.validateFoundSite(toXY, c.foundMinTileDistance);
     if (!site.ok) return { ok: false, payload: {}, reason: site.reason };
