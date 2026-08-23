@@ -275,6 +275,47 @@ test('任务归属：全局主线可在分城执行，奖励发给最后执行�
   assert.ok(branchState.global.completedMain.includes('m1'), '任意村读取都应看到全局完成状态');
 });
 
+test('村庄级任务可由同玩家分城清营，但进度与任务掉落仍归接取村', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: 'mv-cross-task', password: 'pass1', tribe: 'romans' });
+  assert.equal(reg.ok, true, reg.reason);
+  const player = (reg.payload as any).player;
+  const capital = player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: player.id });
+  const branch = (alloc.payload as any).villageId as string;
+  await app.createVillage(branch, 12, -8, '跨村出兵');
+  const attached = await send(app, 'player.AttachVillage', { playerId: player.id, villageId: branch, q: 12, r: -8, name: '跨村出兵' });
+  assert.equal(attached.ok, true, attached.reason);
+
+  const campId = 'taskcamp-cross-s4';
+  const capitalState = app.store.get<any>('task', capital)!;
+  capitalState.active.s4 = {
+    code: 's4', type: 'side', spawnVillageId: capital, acceptedAt: clock,
+    submitted: {}, camps: [{ id: campId, q: 11, r: 11, cleared: false }], campCleared: 0, progress: 0,
+  };
+  app.store.set('task', capital, capitalState);
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'rats', q: 11, r: 11, task: true, ownerVillageId: capital });
+  assert.equal(spawned.ok, true, spawned.reason);
+  await send(app, 'military.AdjustTroops', { villageId: branch, delta: { legionnaire: 1 } });
+  const raid = await send(app, 'movement.SendRaid', { villageId: branch, targetId: campId, troops: { legionnaire: 1 } });
+  assert.equal(raid.ok, true, `同玩家分城应可攻击任务营地: ${raid.reason ?? ''}`);
+  const movementId = (raid.payload as any).id as string;
+
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: branch, side: 'attacker', targetKind: 'pve', targetId: campId, attackerWins: true, campCleared: true, movementId },
+  } as any);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const ownerState = (await send(app, 'task.GetState', { villageId: capital })).payload as any;
+  const s4 = ownerState.active.find((item: any) => item.code === 's4');
+  assert.equal(s4.awaitingNatalieDecision, true, '分城出兵清理后任务所属村应等待处理任务宝物');
+  const branchState = (await send(app, 'task.GetState', { villageId: branch })).payload as any;
+  assert.ok(!branchState.active.some((item: any) => item.code === 's4'), '分城不应生成/接管另一村的村庄任务');
+  const pending = app.store.get<any>('treasure_pending', movementId);
+  assert.equal(pending?.villageId, capital, '任务营地掉落报告应归任务所属村');
+});
+
 test('deletePlayer 清除全部村庄进度', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', {

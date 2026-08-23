@@ -207,8 +207,10 @@ export class TasksModule {
       for (const inst of Object.values(s.active)) {
         if (this.quest(inst.code)?.objective.kind !== 'clear_camp') continue;
         for (const camp of inst.camps) {
-          if (!camp.cleared) await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId: inst.spawnVillageId ?? s.villageId } });
+          if (!camp.cleared) await this.syncTaskCamp(inst, camp, inst.spawnVillageId ?? s.villageId);
         }
+        // syncTaskCamp 可能根据现存实体回写坐标；即使没有变化，重复 set 也保持恢复路径幂等。
+        this.store.set(COLLECTION, s.villageId, s);
         if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
       // 补生成挂起的幸福村（贸易中心在任务接取后才建成的情况）
       for (const inst of Object.values(s.active)) {
@@ -336,6 +338,46 @@ export class TasksModule {
     const owner = this.villageOwner(villageId);
     const ids = owner ? this.playerVillages(owner) : [];
     return [...new Set([...ids, villageId])];
+  }
+
+  /**
+   * 查找玩家名下、仍在进行中的任务营地。
+   *
+   * 任务营地的 ownerVillageId 是“接取任务的村”，而不是实际出兵的村；
+   * 因此不能只在 taskCandidates(attackerVillageId) 中查找。尤其是村庄级
+   * 任务允许玩家从另一座己方村庄出兵，但进度、报告和奖励必须仍写回任务村。
+   */
+  private findTaskCamp(villageId: string, targetId: string): {
+    storageVillageId: string;
+    state: TaskState;
+    inst: TaskInstance;
+    quest: QuestDef;
+    taskVillageId: string;
+  } | undefined {
+    const seen = new Set<string>();
+    for (const taskVillageId of this.playerVillageIds(villageId)) {
+      for (const q of Object.values(this.config.quests)) {
+        if (q.objective.kind !== 'clear_camp') continue;
+        const storageVillageId = this.storageVillageForQuest(taskVillageId, q.code);
+        const key = `${storageVillageId}:${q.code}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const state = this.ensureState(storageVillageId);
+        const inst = state.active[q.code];
+        if (!inst) continue;
+        const camp = inst.camps.find((item) => item.id === targetId && !item.cleared);
+        if (!camp) continue;
+        return {
+          storageVillageId,
+          state,
+          inst,
+          quest: q,
+          // global 任务的营地仍绑定激活时村庄；旧档缺失时退回扫描到的村。
+          taskVillageId: inst.spawnVillageId ?? taskVillageId,
+        };
+      }
+    }
+    return undefined;
   }
 
   /** 一个任务在玩家维度实际使用的存储村集合（global 任务通常只会得到主城锚点）。 */
@@ -828,6 +870,86 @@ export class TasksModule {
     });
   }
 
+  /** 清理任务营地并将进度写回任务所属村。实际出兵村只负责提供战斗结果。 */
+  private async applyTaskCampBattle(
+    attackerVillageId: string,
+    match: NonNullable<ReturnType<TasksModule['findTaskCamp']>>,
+    payload: { targetId: string; movementId?: string },
+  ): Promise<void> {
+    const { storageVillageId, state, inst, quest: q, taskVillageId } = match;
+    const camp = inst.camps.find((item) => item.id === payload.targetId && !item.cleared);
+    if (!camp) return;
+    camp.cleared = true;
+    // 全局任务沿用“最后实际执行村”奖励口径；村庄任务永远锁定接取村。
+    const updateVillageId = q.scope === 'global' ? attackerVillageId : taskVillageId;
+    inst.executionVillageId = updateVillageId;
+    inst.campCleared = (inst.campCleared ?? 0) + 1;
+    this.store.set(COLLECTION, storageVillageId, state);
+
+    if (inst.campCleared >= inst.camps.length) {
+      // 任务营地的待领取报告也归任务村；普通战利品仍由 Movement 按出兵村返还。
+      await this.commands.send({
+        name: 'treasure.RollDrop', from: TasksModule.NAME,
+        payload: {
+          villageId: updateVillageId,
+          source: 'camp',
+          movementId: payload.movementId,
+          forceCode: 'captured_natalies',
+        },
+      });
+      if (q.code === 's4') {
+        inst.awaitingNatalieDecision = true;
+        inst.awaitingNatalieCode = 'captured_natalies';
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.pushList(updateVillageId);
+        await this.pushMap(updateVillageId);
+      } else {
+        await this.markReady(updateVillageId, q.code);
+      }
+    } else {
+      await this.pushList(updateVillageId);
+      await this.pushMap(updateVillageId);
+    }
+  }
+
+  /**
+   * 恢复时校准任务状态与 PvE 实体的坐标。
+   * 旧版本曾把同一任务的地图实体写在另一座村庄附近，导致任务卡和地图各显示一套坐标；
+   * 任务实例保存的坐标是接取时的权威快照，空地可用时把实体搬回该坐标，否则采用现有实体
+   * 坐标并回写任务快照，保证之后所有端都只读同一份坐标。
+   */
+  private async syncTaskCamp(inst: TaskInstance, camp: TaskCamp, ownerVillageId: string): Promise<void> {
+    const q = this.quest(inst.code);
+    const template = q?.objective.kind === 'clear_camp' ? q.objective.campTemplate : undefined;
+    if (!template || !this.config.pveTemplates[template]) return;
+    const target = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: camp.id } });
+    if (!target.ok) {
+      await this.commands.send({
+        name: 'pve.Spawn', from: TasksModule.NAME,
+        payload: { id: camp.id, type: template, q: camp.q, r: camp.r, task: true, ownerVillageId },
+      });
+      return;
+    }
+    const current = target.payload as { q?: number; r?: number };
+    if (Number(current.q) === camp.q && Number(current.r) === camp.r) {
+      await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId } });
+      return;
+    }
+    const tile = await this.commands.send({ name: 'world.GetTile', from: TasksModule.NAME, payload: { q: camp.q, r: camp.r } });
+    const tileKind = (tile.payload as any)?.tile?.kind;
+    if (tile.ok && (!tileKind || tileKind === 'empty')) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
+      await this.commands.send({
+        name: 'pve.Spawn', from: TasksModule.NAME,
+        payload: { id: camp.id, type: template, q: camp.q, r: camp.r, task: true, ownerVillageId },
+      });
+      return;
+    }
+    // 目标坐标已被其它设施占用，不能覆盖它；把任务快照改为现有实体坐标，避免双重标记。
+    camp.q = Number(current.q);
+    camp.r = Number(current.r);
+  }
+
   /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
   private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
@@ -921,6 +1043,19 @@ export class TasksModule {
           }
         }
         await this.unlockSideQuests(villageId);
+      }
+    }
+
+    // 任务营地属于接取任务的村庄，但可以由玩家其它村庄出兵清理。
+    // 先走这条跨村路径，避免后面的 taskCandidates(villageId) 把进度写到出兵村。
+    if (p.targetKind === 'pve' && p.campCleared === true) {
+      const match = this.findTaskCamp(villageId, targetId);
+      if (match) {
+        await this.applyTaskCampBattle(villageId, match, {
+          targetId,
+          movementId: p.movementId,
+        });
+        return;
       }
     }
 
