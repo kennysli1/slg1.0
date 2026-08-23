@@ -9,12 +9,13 @@ import { useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
-import { Panel, SectionHead, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
+import { Panel, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
 import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
+import { VillageList } from '../../shared/ui/VillageList.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -191,7 +192,7 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
     </Modal>
   );
 }
-function TaskCard({ task }: { task: any }) {
+function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolean }) {
   const o = task.objective;
   const isMain = task.type === 'main';
   const camps = o.kind === 'clear_camp'
@@ -239,13 +240,15 @@ function TaskCard({ task }: { task: any }) {
 
   return (
     <div class={`task-card task-card--${task.type}`}>
-      <div class="task-card-head">
-        <span class="task-card-name">{task.name}</span>
-        {typeTag(task.type)}
-        {task.scope === 'global'
-          ? <Tag kind="steel">全局</Tag>
-          : task.villageId && <span class="task-card-village">{villageName(task.villageId)}</span>}
-      </div>
+      {!hideHeader && (
+        <div class="task-card-head">
+          <span class="task-card-name">{task.name}</span>
+          {typeTag(task.type)}
+          {task.scope === 'global'
+            ? <Tag kind="steel">全局</Tag>
+            : task.villageId && <span class="task-card-village">{villageName(task.villageId)}</span>}
+        </div>
+      )}
       <div class="task-card-desc">{task.desc}</div>
 
       {o.kind === 'submit_resources' && (
@@ -337,12 +340,16 @@ function TaskCard({ task }: { task: any }) {
 }
 
 // ── 可接取任务（支线 + 酒馆日常委托）─────────────────────────────────────────
-function OfferCard({ q, onAccept }: { q: any; onAccept: (q: any) => void }) {
+function OfferCard({ q, onAccept, hideHeader = false }: { q: any; onAccept: (q: any) => void; hideHeader?: boolean }) {
   return (
     <div class="task-offer" key={q.code}>
       <div class="task-offer-info">
-        <span class="task-offer-name">{q.name}</span>
-        {q.scope === 'global' ? <Tag kind="steel">全局</Tag> : q.villageId && <span class="task-offer-village">{villageName(q.villageId)}</span>}
+        {!hideHeader && (
+          <div class="task-offer-head">
+            <span class="task-offer-name">{q.name}</span>
+            {q.scope === 'global' ? <Tag kind="steel">全局</Tag> : q.villageId && <span class="task-offer-village">{villageName(q.villageId)}</span>}
+          </div>
+        )}
         <span class="task-offer-desc">{q.desc}</span>
         <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
         <OutcomeRows rewards={q.rewards} />
@@ -352,31 +359,103 @@ function OfferCard({ q, onAccept }: { q: any; onAccept: (q: any) => void }) {
   );
 }
 
-export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
-  const side = offeredSide ?? [];
+type TaskCategory = 'main' | 'side' | 'daily';
+
+function categoryName(type: TaskCategory): string {
+  if (type === 'main') return '主线任务';
+  if (type === 'side') return '支线任务';
+  return '日常任务';
+}
+
+function categoryItems(state: any, type: TaskCategory): { active: any[]; offers: any[] } {
+  const active = (state?.active ?? []).filter((task: any) => task.type === type);
+  const offers = [
+    ...(type === 'daily' ? (state?.offered ?? []) : []),
+    ...(type === 'side' ? (state?.offeredSide ?? []) : []),
+  ].filter((task: any) => task.type === type);
+  return { active, offers };
+}
+
+function TaskEntry({ task, offer, defaultOpen = false }: { task?: any; offer?: any; defaultOpen?: boolean }) {
+  const item = task ?? offer;
+  if (!item) return null;
+  const isOffer = !task;
   const onAccept = async (q: any) => {
     if (!await ensureTaskExecution(q)) return;
     await act(req('task.Accept', { code: q.code }), { okToast: '已接取任务' });
   };
+  return (
+    <details class="task-menu task-menu--task" open={defaultOpen}>
+      <summary>
+        <span class="task-menu-summary-name">{item.name}</span>
+        {typeTag(item.type)}
+        {item.scope === 'global'
+          ? <Tag kind="steel">全局</Tag>
+          : item.villageId && <span class="task-card-village">{villageName(item.villageId)}</span>}
+        <span class="task-menu-summary-state">{isOffer ? '可接取' : item.ready ? '待领取' : '进行中'}</span>
+      </summary>
+      <div class="task-menu-task-body">
+        {isOffer
+          ? <OfferCard q={item} onAccept={onAccept} hideHeader />
+          : <TaskCard task={item} hideHeader />}
+      </div>
+    </details>
+  );
+}
+
+function TaskCategoryMenu({ type, state }: { type: TaskCategory; state: any }) {
+  const { active, offers } = categoryItems(state, type);
+  const count = active.length + offers.length;
+  return (
+    <details class="task-menu task-menu--category" open={count > 0}>
+      <summary>
+        <span>{categoryName(type)}</span>
+        <span class="task-menu-count">{count}</span>
+      </summary>
+      <div class="task-menu-body">
+        {count === 0
+          ? <Panel variant="flat" pad class="task-empty">暂无{categoryName(type)}。</Panel>
+          : <>
+            {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} defaultOpen />)}
+            {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} />)}
+          </>}
+      </div>
+    </details>
+  );
+}
+
+function TaskScopeMenu({ scope, state, currentVillageId }: { scope: 'global' | 'village'; state: any; currentVillageId?: string }) {
+  const categories: TaskCategory[] = scope === 'global' ? ['main', 'side', 'daily'] : ['side', 'daily'];
+  const count = categories.reduce((total, type) => {
+    const { active, offers } = categoryItems(state, type);
+    return total + active.length + offers.length;
+  }, 0);
+  const label = scope === 'global' ? '全局任务' : '村庄任务';
+  const sub = scope === 'global'
+    ? '主线、全局支线与全局日常；可从任意村庄执行'
+    : `${currentVillageId ? villageName(currentVillageId) : '当前村庄'} · 仅显示本村支线与日常任务`;
+  return (
+    <details class="task-menu task-menu--scope" open>
+      <summary>
+        <span class="task-menu-scope-title">{label}</span>
+        <span class="task-menu-scope-sub">{sub}</span>
+        <span class="task-menu-count">{count}</span>
+      </summary>
+      <div class="task-menu-body task-menu-scope-body">
+        {categories.map((type) => <TaskCategoryMenu key={type} type={type} state={state} />)}
+      </div>
+    </details>
+  );
+}
+
+/** 兼容旧入口：按单个村庄快照渲染任务分类。 */
+export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
+  const side = offeredSide ?? [];
   if (!offered?.length && !side.length) return null;
   return (
     <div class="task-offers">
-      {side.length > 0 && (
-        <>
-          <SectionHead sub={`${side.length} 个任务`}>支线任务</SectionHead>
-          <div class="task-offer-list">
-            {side.map((q) => <OfferCard key={`${q.villageId ?? ''}:${q.code}`} q={q} onAccept={onAccept} />)}
-          </div>
-        </>
-      )}
-      {offered?.length > 0 && (
-        <>
-          <SectionHead sub={`${offered.length} 个委托`}>酒馆日常委托</SectionHead>
-          <div class="task-offer-list">
-            {offered.map((q) => <OfferCard key={`${q.villageId ?? ''}:${q.code}`} q={q} onAccept={onAccept} />)}
-          </div>
-        </>
-      )}
+      {side.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} />)}
+      {(offered ?? []).map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} />)}
     </div>
   );
 }
@@ -392,23 +471,7 @@ function legacyScopeState(state: any, scope: 'global' | 'village', villageId?: s
   };
 }
 
-function TaskGroup({ state }: { state: any }) {
-  const active: any[] = state?.active ?? [];
-  const offered: any[] = state?.offered ?? [];
-  const offeredSide: any[] = state?.offeredSide ?? [];
-  return active.length === 0 && offered.length === 0 && offeredSide.length === 0 ? (
-    <Panel variant="flat" pad class="task-empty">暂无可进行的任务。</Panel>
-  ) : (
-    <>
-      <div class="task-active-list">
-        {active.map((t) => <TaskCard task={t} key={`${t.villageId ?? ''}:${t.code}`} />)}
-      </div>
-      <TaskOffers offered={offered} offeredSide={offeredSide} />
-    </>
-  );
-}
-
-function TaskBoard({ state }: { state: any; playerWide?: boolean }) {
+function TaskBoard({ state }: { state: any }) {
   const currentVillageId = me?.villageId;
   const globalState = state?.global ?? legacyScopeState(state, 'global');
   const villageState = state?.villages?.find((v: any) => v.villageId === currentVillageId)
@@ -416,10 +479,8 @@ function TaskBoard({ state }: { state: any; playerWide?: boolean }) {
     ?? legacyScopeState(state, 'village', currentVillageId);
   return (
     <section class="task-bar">
-      <SectionHead sub="从任意村庄执行；奖励发放到最后执行的村庄">全局任务</SectionHead>
-      <TaskGroup state={globalState} />
-      <SectionHead sub={currentVillageId ? `${villageName(currentVillageId)} · 切换村庄后更新` : '当前操作村庄'}>村庄任务</SectionHead>
-      <TaskGroup state={villageState} />
+      <TaskScopeMenu scope="global" state={globalState} currentVillageId={currentVillageId} />
+      <TaskScopeMenu scope="village" state={villageState} currentVillageId={currentVillageId} />
     </section>
   );
 }
@@ -428,7 +489,12 @@ function TaskBoard({ state }: { state: any; playerWide?: boolean }) {
 export function TasksScreen() {
   dataVersion.value;
   playerTaskState.value;
-  return <TaskBoard state={playerTaskState.value} />;
+  return (
+    <>
+      <VillageList />
+      <TaskBoard state={playerTaskState.value} />
+    </>
+  );
 }
 
 /** 兼容旧嵌入点：村庄页不再渲染，但保留按当前村读取的组件供旧入口使用。 */
