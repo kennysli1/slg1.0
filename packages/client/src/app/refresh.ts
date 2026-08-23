@@ -233,8 +233,8 @@ function applyPopPayload(p: any, merge = false): void {
   });
 }
 
-function pushReport(line: string, kind: ReportKind = 'info'): void {
-  addReport(line, kind);
+function pushReport(line: string, kind: ReportKind = 'info', details?: Record<string, any>): void {
+  addReport(line, kind, Date.now(), details);
   bumpReports();
 }
 
@@ -314,7 +314,10 @@ export async function hydrateReports(): Promise<void> {
     const seeded: StoredReport[] = [];
     for (const n of list) {
       const text = notificationText(n.event, n.payload);
-      if (text) seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts });
+      if (text) {
+        const details = n.event === 'BattleStarted' || n.event === 'BattleEnded' ? n.payload : undefined;
+        seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts, ...(details ? { details } : {}) });
+      }
     }
     seedReports(seeded);
     bumpReports();
@@ -327,7 +330,10 @@ export async function hydrateReports(): Promise<void> {
 export function handlePush(event: string, payload: any): void {
   // 战报文案 + 语义分类（分类来自事件名，不靠猜文案）
   const text = notificationText(event, payload);
-  if (text) pushReport(text, notificationKind(event, payload));
+  if (text) {
+    const details = event === 'BattleStarted' || event === 'BattleEnded' ? payload : undefined;
+    pushReport(text, notificationKind(event, payload), details);
+  }
 
   // 战斗实时快照
   if (event === 'BattleTick' || event === 'BattleStarted') putBattle(payload);

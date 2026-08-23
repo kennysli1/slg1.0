@@ -61,6 +61,11 @@ test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
 
   assert.ok(atkEvents.includes('BattleEnded'), `攻方应有 BattleEnded，实际: ${JSON.stringify(atkEvents)}`);
   assert.ok(defEvents.includes('BattleEnded'), `守方应有 BattleEnded，实际: ${JSON.stringify(defEvents)}`);
+  const attackerReport = (atkRes.notifications as any[]).find((n: any) => n.event === 'BattleEnded');
+  assert.ok(Object.keys(attackerReport.payload.attackerLineup ?? {}).length > 0, '战斗结束战报应包含进攻方阵容');
+  assert.ok(Object.hasOwn(attackerReport.payload, 'defenderLineup'), '战斗结束战报应包含防守方阵容字段（即使为空）');
+  assert.ok(Array.isArray(attackerReport.payload.rounds) && attackerReport.payload.rounds.length > 0, '战斗结束战报应包含逐轮回放');
+  assert.equal(attackerReport.payload.rounds.at(-1).round, attackerReport.payload.rounds.length, '逐轮回放应按轮次连续记录');
   assert.ok(atkEvents.includes('MarchReturned'), `攻方应有 MarchReturned，实际: ${JSON.stringify(atkEvents)}`);
   assert.ok(defEvents.includes('IncomingAttack'), `守方应有 IncomingAttack，实际: ${JSON.stringify(defEvents)}`);
 });

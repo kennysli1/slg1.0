@@ -40,6 +40,14 @@ interface Contribution {
   treasures: string[];
 }
 
+interface BattleRound {
+  round: number;
+  attackerLosses: Record<string, number>;
+  defenderLosses: Record<string, number>;
+  attacker: Record<string, number>;
+  defender: Record<string, number>;
+}
+
 interface Battle {
   id: string;
   targetKind: 'village' | 'pve' | 'field';
@@ -60,6 +68,11 @@ interface Battle {
   /** 分数击杀累加（不足1个的伤害留到下tick，保证战斗必然推进）。 */
   attackerPending: number;
   defenderPending: number;
+  /** 开战时双方阵容（包含之后并入的进攻部队），用于战报回放。 */
+  initialAttacker: Record<string, number>;
+  initialDefender: Record<string, number>;
+  /** 每轮结算后的兵力快照，战斗结束后写入 BattleEnded。 */
+  rounds: BattleRound[];
   attackPower0: number; // 开战时总攻(战报展示)
   defensePower0: number;
   startedAt: number;
@@ -113,7 +126,9 @@ export class CombatModule {
   }
 
   private load(id: string): Battle | undefined {
-    return this.store.get<Battle>(COLLECTION, id);
+    const battle = this.store.get<Battle>(COLLECTION, id);
+    if (battle) this.ensureBattleLog(battle);
+    return battle;
   }
 
   private nextId(): string {
@@ -124,7 +139,16 @@ export class CombatModule {
 
   /** 找到目标格上进行中的战场（一地一场战）。 */
   private findActive(targetId: string): Battle | undefined {
-    return this.store.all<Battle>(COLLECTION).find((b) => b.targetId === targetId && b.status === 'active');
+    const battle = this.store.all<Battle>(COLLECTION).find((b) => b.targetId === targetId && b.status === 'active');
+    if (battle) this.ensureBattleLog(battle);
+    return battle;
+  }
+
+  /** 兼容上线前已落盘的进行中战斗，首次访问时补齐战报回放字段。 */
+  private ensureBattleLog(b: Battle): void {
+    b.initialAttacker ??= aggregateCounts(b.attacker);
+    b.initialDefender ??= aggregateCounts(b.defender);
+    b.rounds ??= [];
   }
 
   // ---- Commands ----
@@ -190,6 +214,7 @@ export class CombatModule {
         existing.attacker[`${contribId}#${code}`] = existing.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
       }
       existing.attackPower0 += totalPower(existing.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
+      mergeCounts(existing.initialAttacker, aggregateCounts(p.attackerSnapshot));
       this.store.set(COLLECTION, existing.id, existing);
       log('援军并入', { battleId: existing.id, from: p.fromVillage, troops: p.troops, newAtkPower: Math.round(existing.attackPower0) });
       return { ok: true, payload: { battleId: existing.id, merged: true } };
@@ -240,6 +265,7 @@ export class CombatModule {
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
+        initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
         attackPower0: totalPower(attacker), defensePower0: totalPower(defender),
         startedAt: this.now(), ticks: 0, status: 'active',
       };
@@ -248,6 +274,7 @@ export class CombatModule {
       this.emitToParties(battle, 'combat.BattleStarted', (villageId, side) => ({
         villageId, side, battleId: id, targetKind: 'field', targetId: p.targetId,
         attackPower: Math.round(battle.attackPower0), defensePower: Math.round(battle.defensePower0),
+        attacker: battle.initialAttacker, defender: battle.initialDefender, round: 0,
       }));
       this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
       return { ok: true, payload: { battleId: id, merged: false } };
@@ -273,6 +300,7 @@ export class CombatModule {
         raceExisting.attacker[`${contribId}#${code}`] = raceExisting.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
       }
       raceExisting.attackPower0 += totalPower(raceExisting.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
+      mergeCounts(raceExisting.initialAttacker, aggregateCounts(p.attackerSnapshot));
       this.store.set(COLLECTION, raceExisting.id, raceExisting);
       log('二次检查并入', { battleId: raceExisting.id, from: p.fromVillage });
       return { ok: true, payload: { battleId: raceExisting.id, merged: true } };
@@ -300,6 +328,7 @@ export class CombatModule {
       contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
       attackerPending: 0,
       defenderPending: 0,
+      initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
       attackPower0: totalPower(attacker),
       defensePower0: totalPower(defender),
       startedAt: this.now(),
@@ -320,6 +349,7 @@ export class CombatModule {
     this.emitToParties(battle, 'combat.BattleStarted', (villageId, side) => ({
       villageId, side, battleId: id, targetKind: p.targetKind, targetId: p.targetId,
       attackPower: Math.round(battle.attackPower0), defensePower: Math.round(battle.defensePower0),
+      attacker: battle.initialAttacker, defender: battle.initialDefender, round: 0,
     }));
 
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
@@ -361,6 +391,9 @@ export class CombatModule {
       return 1 + totalDef;
     })();
 
+    const attackerBefore = aggregateCounts(b.attacker);
+    const defenderBefore = aggregateCounts(b.defender);
+
     // 双方同时用 tick 开始时的兵力互算（避免先手偏差）
     const killsToDef = computeKills(b.attacker, b.defender, k, dt, wallMult);
     const killsToAtk = computeKills(b.defender, b.attacker, k, dt, 1);
@@ -370,6 +403,16 @@ export class CombatModule {
 
     const atkAlive = totalCount(b.attacker);
     const defAlive = totalCount(b.defender);
+
+    const attackerAfter = aggregateCounts(b.attacker);
+    const defenderAfter = aggregateCounts(b.defender);
+    b.rounds.push({
+      round: b.ticks,
+      attackerLosses: countDelta(attackerBefore, attackerAfter),
+      defenderLosses: countDelta(defenderBefore, defenderAfter),
+      attacker: attackerAfter,
+      defender: defenderAfter,
+    });
 
     // 每10 tick 记录一次兵力变化（避免刷屏）
     if (b.ticks % 10 === 0) {
@@ -388,7 +431,10 @@ export class CombatModule {
     if (b.ticks % pushEvery === 0) {
       this.emitToParties(b, 'combat.BattleTick', (villageId, side) => ({
         villageId, side, battleId: id,
-        attacker: aggregateCounts(b.attacker), defender: aggregateCounts(b.defender),
+        attacker: attackerAfter, defender: defenderAfter,
+        attackerLosses: b.rounds[b.rounds.length - 1].attackerLosses,
+        defenderLosses: b.rounds[b.rounds.length - 1].defenderLosses,
+        round: b.ticks,
       }));
     }
 
@@ -557,6 +603,9 @@ export class CombatModule {
       targetId: b.targetId,
       battleType: b.battleType,
       battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : b.battleType === 'ambush' ? '伏击' : undefined,
+      attackerLineup: b.initialAttacker,
+      defenderLineup: b.initialDefender,
+      rounds: b.rounds,
       buildingDamage,
       buildingLoot,
       storedLoot,
@@ -661,6 +710,9 @@ export class CombatModule {
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
       attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, battleType: b.battleType,
       battleLabel: b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
+      attackerLineup: b.initialAttacker,
+      defenderLineup: b.initialDefender,
+      rounds: b.rounds,
     };
 
     // 进攻方（各贡献村）幸存者 → BattleEnded(attacker)
@@ -941,6 +993,21 @@ function aggregateCounts(snap: Snapshot): Record<string, number> {
     if (u.count <= 0) continue;
     const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
     out[code] = (out[code] ?? 0) + u.count;
+  }
+  return out;
+}
+
+/** 把一支增援部队的兵种数量并入战报阵容。 */
+function mergeCounts(target: Record<string, number>, source: Record<string, number>): void {
+  for (const [code, count] of Object.entries(source)) target[code] = (target[code] ?? 0) + count;
+}
+
+/** 计算一轮中各兵种实际减少的数量（只记录正数）。 */
+function countDelta(before: Record<string, number>, after: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const code of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const lost = (before[code] ?? 0) - (after[code] ?? 0);
+    if (lost > 0) out[code] = lost;
   }
   return out;
 }

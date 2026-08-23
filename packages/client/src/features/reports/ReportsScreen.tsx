@@ -11,6 +11,7 @@ import { reportsVersion, dataVersion, battles } from '../../app/store.js';
 import { getReports, type ReportKind, type StoredReport } from '../../app/state.js';
 import { Empty, Icon, Panel, SectionHead } from '../../ui/index.js';
 import { BattleLive } from './BattleLive.js';
+import { BattleReportCard } from './BattleReport.js';
 import { PendingTreasures } from './PendingTreasures.js';
 
 // ── 过滤配置 ─────────────────────────────────────────────────
@@ -79,6 +80,8 @@ function FilterChips({
 }
 
 function ReportCard({ report }: { report: StoredReport }) {
+  if (report.kind === 'battle' && report.details) return <BattleReportCard report={report} />;
+
   const meta = KIND_META[report.kind] ?? KIND_META.info;
   const time = new Date(report.ts).toLocaleTimeString();
 
