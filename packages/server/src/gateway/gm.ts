@@ -811,6 +811,34 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     return false;
   };
 
+  /**
+   * GM 面板允许直接编辑 player 文档。村庄坐标同时存在于 Player 快照和
+   * World 地图地块中，写入前通过 World owner 命令同步地图，避免行军使用旧坐标。
+   */
+  const syncPlayerVillageTiles = async (body: unknown): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!body || typeof body !== 'object') return { ok: true };
+    const raw = body as Record<string, unknown>;
+    const rows = Array.isArray(raw.ownedVillages)
+      ? raw.ownedVillages
+      : (typeof raw.villageId === 'string' && Number.isFinite(Number(raw.q)) && Number.isFinite(Number(raw.r)))
+        ? [{ id: raw.villageId, q: raw.q, r: raw.r, name: raw.name }]
+        : [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') return { ok: false, reason: 'bad_village_coordinates' };
+      const village = row as Record<string, unknown>;
+      const refId = typeof village.id === 'string' ? village.id.trim() : '';
+      const q = Number(village.q), r = Number(village.r);
+      if (!refId || !Number.isFinite(q) || !Number.isFinite(r)) return { ok: false, reason: 'bad_village_coordinates' };
+      const moved = await gameApp.commands.send({
+        name: 'world.MoveVillage',
+        from: 'gm',
+        payload: { refId, q, r, name: typeof village.name === 'string' ? village.name : undefined },
+      });
+      if (!moved.ok) return { ok: false, reason: moved.reason ?? 'village_coordinate_sync_failed' };
+    }
+    return { ok: true };
+  };
+
   // GET /gm — Web 面板
   fastify.get('/gm', (_req, reply) => {
     void reply.type('text/html; charset=utf-8').send(GM_PANEL_HTML);
@@ -851,13 +879,20 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // PUT /gm/:collection/:key
-  fastify.put('/gm/:collection/:key', (req, reply) => {
+  fastify.put('/gm/:collection/:key', async (req, reply) => {
     if (!auth(req, reply)) return;
     const { collection, key } = req.params as { collection: string; key: string };
     const body = req.body;
     if (body === undefined || body === null) {
       void reply.code(400).send({ ok: false, reason: '请求 body 不能为空（发送 JSON 文档）' });
       return;
+    }
+    if (collection === 'player') {
+      const sync = await syncPlayerVillageTiles(body);
+      if (!sync.ok) {
+        void reply.code(sync.reason === 'tile_occupied' ? 409 : 400).send({ ok: false, reason: sync.reason });
+        return;
+      }
     }
     store.set(collection, key, body);
     store.flush();

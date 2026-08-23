@@ -1,5 +1,8 @@
 /** 常驻资源 HUD：同时呈现库存、容量与每小时变化。 */
-import { tick, dataVersion } from '../app/store.js';
+import { me, selectVillage } from '../api.js';
+import { tick, dataVersion, sessionVersion, showToast } from '../app/store.js';
+import { refreshAll } from '../app/refresh.js';
+import { errText } from '../shared/ui/text.js';
 import { getCache, getPopState, liveResource, interpolatePop, interpolateTotalPop, type PopSnapshot } from '../app/state.js';
 import { resInfo, resourceKeys } from '../app/config.js';
 import { fmt } from '../shared/utils/format.js';
@@ -10,10 +13,12 @@ type ResourceSnapshot = ReturnType<typeof getCache>['res'];
 export function ResourceBar() {
   tick.value;
   dataVersion.value;
+  const villagePicker = <VillagePicker />;
   const resource = getCache().res;
-  if (!resource) return <div class="resbar" aria-label="资源概览" />;
+  if (!resource) return <div class="resbar" aria-label="资源概览">{villagePicker}</div>;
   return (
     <div class="resbar" aria-label="资源概览">
+      {villagePicker}
       <ReputationCell />
       {resourceKeys().map((type) => (
         type === 'gold'
@@ -22,6 +27,48 @@ export function ResourceBar() {
       ))}
       <UpkeepCell crop={resource.cropUpkeep} />
       <PopCell />
+    </div>
+  );
+}
+
+/** 全局村庄选择器：资源栏属于应用壳，因此在任意页签都能看到当前操作村并切换。 */
+function VillagePicker() {
+  sessionVersion.value;
+  if (!me) return null;
+  const villages = me.villages ?? [];
+  const current = villages.find((v) => v.id === me?.villageId);
+  const fallback = current ?? { id: me.villageId, q: me.q, r: me.r, name: '当前村庄', isCapital: false };
+
+  async function onPick(e: Event) {
+    const select = e.currentTarget as HTMLSelectElement;
+    const id = select.value;
+    if (!id || id === me?.villageId) return;
+    const result = await selectVillage(id);
+    if (!result.ok) {
+      showToast(`切换村庄失败：${errText(result.error)}`, 'bad');
+      select.value = me?.villageId ?? '';
+      return;
+    }
+    sessionVersion.value++;
+    await refreshAll();
+  }
+
+  return (
+    <div class="res res--village-picker" title={`当前操作村庄：${fallback.name}（${fallback.q},${fallback.r}）`}>
+      <div class="res-village-heading">当前村庄</div>
+      <select
+        class="village-picker-select"
+        value={me.villageId}
+        onChange={onPick}
+        disabled={villages.length < 2}
+        aria-label="切换当前村庄"
+      >
+        {(villages.length ? villages : [fallback]).map((village) => (
+          <option key={village.id} value={village.id}>
+            {village.name}{village.isCapital ? '（主城）' : ''} ({village.q},{village.r})
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

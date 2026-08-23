@@ -107,6 +107,8 @@ export interface GameApp {
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
+  /** 启动时用 Player 的村庄快照校准 World 地块，修复旧 GM 直写造成的坐标漂移。 */
+  syncWorldVillages(): Promise<{ synced: number; failed: number }>;
   /** 重启后恢复所有在途定时任务（建造/训练/行军/重生）。 */
   resume(): void;
   /**
@@ -304,6 +306,29 @@ export function createGameApp(opts?: {
       world.setup(config.constants.worldW, config.constants.worldH);
       // PvE 目标点位由 config/pve_spawns.csv 决定
       for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+    },
+    async syncWorldVillages() {
+      let synced = 0, failed = 0;
+      for (const raw of store.all<{ ownedVillages?: Array<{ id?: string; q?: number; r?: number; name?: string }> }>('player')) {
+        for (const village of raw.ownedVillages ?? []) {
+          if (!village.id || !Number.isFinite(Number(village.q)) || !Number.isFinite(Number(village.r))) {
+            failed++;
+            continue;
+          }
+          const result = await commands.send({
+            name: 'world.MoveVillage',
+            from: 'app',
+            payload: { refId: village.id, q: village.q, r: village.r, name: village.name },
+          });
+          if (result.ok) synced++;
+          else {
+            failed++;
+            console.warn(`[world-sync] 村庄 ${village.id} 坐标同步失败：${result.reason ?? 'unknown'}`);
+          }
+        }
+      }
+      if (synced > 0) store.flush();
+      return { synced, failed };
     },
     resume() {
       for (const module of resumableModules) void module.resume();

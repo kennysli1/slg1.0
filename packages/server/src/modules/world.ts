@@ -79,6 +79,7 @@ export class WorldModule {
     this.commands.register('world.GetArea', (c) => this.getArea(c));
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
+    this.commands.register('world.MoveVillage', (c) => this.moveVillage(c));
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
     this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
     this.commands.register('world.FindFreeTile', (c) => this.findFreeTile(c));
@@ -178,6 +179,48 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
     this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name });
     return { ok: true, payload: { q: w.q, r: w.r } };
+  }
+
+  /**
+   * 把已有村庄的地图地块移动到新的坐标。
+   *
+   * 玩家模块拥有村庄坐标快照，World 模块拥有地图地块；GM 直接编辑玩家档案
+   * 时必须通过这个命令同步两份状态，否则行军仍会从旧 world_tile 计算路径。
+   * 该命令只移动地图地块，不修改 Player 档案本身。
+   */
+  private moveVillage(cmd: Command): CommandResult {
+    const payload = cmd.payload as { refId?: string; q?: number; r?: number; name?: string };
+    const refId = typeof payload.refId === 'string' ? payload.refId.trim() : '';
+    const q = Number(payload.q), r = Number(payload.r);
+    if (!refId || !Number.isFinite(q) || !Number.isFinite(r)) {
+      return { ok: false, payload: {}, reason: 'bad_village_coordinates' };
+    }
+    const target = wrapHex({ q: Math.trunc(q), r: Math.trunc(r) }, this.worldW, this.worldH);
+    const source = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === refId);
+    const targetKey = hexKey(target.q, target.r);
+    const targetTile = this.store.get<Tile>(COLLECTION_TILE, targetKey);
+    const sourceKey = source ? hexKey(source.q, source.r) : null;
+    if (targetTile && targetTile.kind !== 'empty' && targetKey !== sourceKey) {
+      return { ok: false, payload: {}, reason: 'tile_occupied' };
+    }
+
+    const name = typeof payload.name === 'string' && payload.name.trim()
+      ? payload.name
+      : source?.name ?? targetTile?.name ?? refId;
+    if (sourceKey && sourceKey !== targetKey) {
+      this.store.set<Tile>(COLLECTION_TILE, sourceKey, { q: source!.q, r: source!.r, kind: 'empty' });
+    }
+    this.store.set<Tile>(COLLECTION_TILE, targetKey, {
+      q: target.q, r: target.r, kind: 'village', refId, name,
+    });
+    return {
+      ok: true,
+      payload: {
+        q: target.q,
+        r: target.r,
+        previous: source ? { q: source.q, r: source.r } : undefined,
+      },
+    };
   }
 
   /** 查询 (q,r) 到最近村庄的六边形距离；无村庄时 distance=Infinity 用 -1 表示。 */
