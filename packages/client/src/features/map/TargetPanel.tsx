@@ -140,27 +140,9 @@ function Assessment({
     scout: '编组侦察部队',
   };
 
-  const taskTypeLabel = meta.taskInfo?.scope === 'global'
-    ? '全局任务'
-    : meta.taskInfo?.type === 'daily'
-      ? '村庄日常任务'
-      : '村庄任务';
-
   return (
     <div class="target-body expedition-body">
-      {meta.taskInfo && (
-        <section class="task-camp-info" aria-label="关联任务信息">
-          <div class="expedition-kicker">关联任务</div>
-          <div class="task-camp-info-title">{meta.taskInfo.name}</div>
-          <p>{meta.taskInfo.desc || '该营地属于当前任务目标。'}</p>
-          <div class="task-camp-info-facts">
-            <span>任务类型 <b>{taskTypeLabel}</b></span>
-            {Number(meta.taskInfo.campTotal) > 0 && (
-              <span>营地进度 <b>{Number(meta.taskInfo.campCleared ?? 0)}/{Number(meta.taskInfo.campTotal)}</b></span>
-            )}
-          </div>
-        </section>
-      )}
+      {meta.taskInfo && <TaskCampInfoCard taskInfo={meta.taskInfo} />}
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
@@ -179,6 +161,78 @@ function Assessment({
           {preparationLabel[meta.mode]}
         </Btn>
       </div>
+    </div>
+  );
+}
+
+function targetAssessmentTitle(meta: TargetMeta): string {
+  if (meta.targetKind === 'empty') return '可拓荒空地';
+  if (meta.targetKind === 'unexplored') return '未探索区域';
+  if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return 'PvE 营地';
+  if (meta.targetKind === 'own_village' || meta.isOwn) return '己方村庄';
+  return '玩家村庄';
+}
+
+function targetAssessmentCopy(meta: TargetMeta): string {
+  if (meta.targetKind === 'empty') return '这是可行动的空地。可驻扎；拥有拓荒者时还可拓荒建村。';
+  if (meta.targetKind === 'unexplored') return '该格尚未探索。只能执行探索，军队抵达后会立即返城。';
+  if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return '这是地图上的 PvE 营地。可侦察资源与守军，或派兵掠夺。';
+  if (meta.targetKind === 'own_village' || meta.isOwn) return '这是己方村庄。可将部队和随队宝物转移过去。';
+  return '服务端会根据双方外交状态提供可用行动；中立目标的攻击行为会同时宣战。';
+}
+
+function TaskCampInfoCard({ taskInfo }: { taskInfo: TaskCampInfo }) {
+  const taskTypeLabel = taskInfo.scope === 'global'
+    ? '全局任务'
+    : taskInfo.type === 'daily'
+      ? '村庄日常任务'
+      : '村庄任务';
+  return (
+    <section class="task-camp-info" aria-label="关联任务信息">
+      <div class="expedition-kicker">关联任务</div>
+      <div class="task-camp-info-title">{taskInfo.name}</div>
+      <p>{taskInfo.desc || '该营地属于当前任务目标。'}</p>
+      <div class="task-camp-info-facts">
+        <span>任务类型 <b>{taskTypeLabel}</b></span>
+        {Number(taskInfo.campTotal) > 0 && (
+          <span>营地进度 <b>{Number(taskInfo.campCleared ?? 0)}/{Number(taskInfo.campTotal)}</b></span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TargetAssessment({
+  meta, options, onChoose,
+}: {
+  meta: TargetMeta;
+  options: ModeOption[] | null;
+  onChoose: (option: ModeOption) => void;
+}) {
+  return (
+    <div class="target-body expedition-body">
+      {meta.taskInfo && <TaskCampInfoCard taskInfo={meta.taskInfo} />}
+      <section class="expedition-assessment">
+        <div class="expedition-kicker">目标评估</div>
+        <div class="expedition-assessment-title">{targetAssessmentTitle(meta)}</div>
+        <p>{targetAssessmentCopy(meta)}</p>
+        <div class="expedition-facts">
+          <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
+          <span>行军距离 <b>{meta.dist} 格</b></span>
+        </div>
+        <div class="expedition-kicker expedition-mode-kicker">可用行军模式</div>
+        {options === null ? (
+          <p class="expedition-empty">正在读取外交关系与可用行动…</p>
+        ) : options.length ? (
+          <div class="target-actions target-actions--management expedition-mode-options">
+            {options.map((option) => (
+              <Btn key={option.mode} variant={option.requiresDeclaration ? 'danger' : 'primary'} block onClick={() => onChoose(option)}>
+                {option.label}
+              </Btn>
+            ))}
+          </div>
+        ) : <p class="expedition-empty">当前目标没有可用的行军模式。</p>}
+      </section>
     </div>
   );
 }
@@ -358,8 +412,16 @@ function Confirmation({
   );
 }
 
-function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () => void }) {
-  const [step, setStep] = useState<WorkflowStep>(1);
+function ExpeditionWorkflow({
+  meta, onClose, initialStep = 1, modeOptions, onSelectMode,
+}: {
+  meta: TargetMeta;
+  onClose: () => void;
+  initialStep?: WorkflowStep;
+  modeOptions?: ModeOption[];
+  onSelectMode?: (option: ModeOption) => void;
+}) {
+  const [step, setStep] = useState<WorkflowStep>(initialStep);
   const [troops, setTroops] = useState<NumberMap>({});
   const [treasures, setTreasures] = useState<string[]>([]);
   const [scoutType, setScoutType] = useState<'scout_resources' | 'scout_buildings'>('scout_resources');
@@ -395,7 +457,9 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
   return (
     <Panel variant={meta.mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
-      {step === 1 && <Assessment meta={meta} onNext={() => setStep(2)} />}
+      {step === 1 && (modeOptions
+        ? <TargetAssessment meta={meta} options={modeOptions} onChoose={(option) => onSelectMode?.(option)} />
+        : <Assessment meta={meta} onNext={() => setStep(2)} />)}
       {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
@@ -425,18 +489,20 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
       .catch(() => { if (live) setOptions([]); });
     return () => { live = false; };
   }, [base.q, base.r, base.refId, kind]);
-  if (choice) return <ExpeditionWorkflow meta={{ ...resolvedBase, mode: choice.mode, declareWar: choice.requiresDeclaration }} onClose={onClose} />;
+  if (choice) return (
+    <ExpeditionWorkflow
+      meta={{ ...resolvedBase, mode: choice.mode, declareWar: choice.requiresDeclaration }}
+      initialStep={2}
+      modeOptions={options ?? []}
+      onSelectMode={setChoice}
+      onClose={onClose}
+    />
+  );
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <WorkflowHeader meta={resolvedBase} step={1} onClose={onClose} />
-      <div class="target-body expedition-body">
-        <section class="expedition-assessment"><div class="expedition-kicker">选择行军模式</div><div class="expedition-assessment-title">{resolvedBase.name}</div><p>{options ? '请选择对该目标执行的行动。所有模式使用同一编队、宝物和确认流程。' : '正在读取外交关系与可用行动…'}</p></section>
-        <div class="target-actions target-actions--management expedition-mode-options">
-          {(options ?? []).map((option) => <Btn key={option.mode} variant={option.requiresDeclaration ? 'danger' : 'primary'} block onClick={() => setChoice(option)}>{option.label}</Btn>)}
-        </div>
-        {options && options.length === 0 && <p class="expedition-empty">当前目标没有可用的行军模式。</p>}
-        <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消</Btn></div>
-      </div>
+      <TargetAssessment meta={resolvedBase} options={options} onChoose={setChoice} />
+      <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消</Btn></div>
     </Panel>
   );
 }
@@ -459,13 +525,27 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   );
   if (garrison) {
     const exploring = visibility === 'unexplored';
-    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : 'garrison' }} onClose={onClose} />;
+    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : 'garrison' }} initialStep={2} onClose={onClose} />;
   }
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={1} onClose={onClose} />
       <div class="target-body expedition-body">
-        <section class="expedition-assessment"><div class="expedition-kicker">选择行军模式</div><div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div><p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，选择探索后军队抵达会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可选择驻扎；拥有拓荒者时才显示拓荒模式。驻扎军抵达时会再次确认格子仍为空地。'}</p>{allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}{visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}</section>
+        <section class="expedition-assessment">
+          <div class="expedition-kicker">目标评估</div>
+          <div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div>
+          <p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，选择探索后军队抵达会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可选择驻扎；拥有拓荒者时才显示拓荒模式。驻扎军抵达时会再次确认格子仍为空地。'}</p>
+          <div class="expedition-facts">
+            <span>目标坐标 <b>{q},{r}</b></span>
+            <span>行军距离 <b>{dist} 格</b></span>
+          </div>
+          <div class="expedition-kicker expedition-mode-kicker">可用行军模式</div>
+          <div class="target-actions target-actions--management expedition-mode-options">
+            {allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}
+            {visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}
+          </div>
+          {!allowExplore && visibility === 'unexplored' && <p class="expedition-empty">当前没有可用的行军模式。</p>}
+        </section>
       </div>
     </Panel>
   );
