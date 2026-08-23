@@ -1014,7 +1014,11 @@ export class MovementModule {
     else if (kind === 'village' || kind === 'own_village') {
       const owner = refId ? await this.ownerOf(refId) : '';
       const mine = await this.ownerOf(villageId);
-      if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
+      // 当前操作村没有任何行军行为：不能向自己转移，也没有重复切换/增援。
+      if (refId === villageId) {
+        relation = 'self';
+      // 当前操作村不能向自己发送转移行军；只有其他己方村庄才显示转移。
+      } else if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
       else {
         targetPlayerId = owner;
         const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
