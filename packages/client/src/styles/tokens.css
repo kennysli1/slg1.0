@@ -52,6 +52,24 @@
   --border-strong: rgb(234 214 164 / 52%);
   --focus-ring: rgb(234 214 164 / 88%);
 
+  /* World map terrain: semantic colors for the continuous SVG landscape. */
+  --map-canvas: #17201c;
+  --map-canvas-edge: #101815;
+  --map-vignette: rgb(6 9 13 / 55%);
+  --map-vignette-soft: rgb(6 9 13 / 45%);
+  --terrain-plain: #35463a;
+  --terrain-plain-explored: #35403a;
+  --terrain-forest: #263a2d;
+  --terrain-forest-explored: #2b3730;
+  --terrain-forest-canopy: rgb(15 43 27 / 48%);
+  --terrain-hills: #594d3a;
+  --terrain-hills-explored: #49453e;
+  --terrain-ridge: rgb(226 205 160 / 32%);
+  --terrain-contour: rgb(221 212 174 / 12%);
+  --terrain-fog-explored: rgb(64 77 82 / 48%);
+  --terrain-fog-unexplored: rgb(9 14 16 / 96%);
+  --terrain-hover-edge: var(--accent-strong);
+
   /* Backwards-compatible aliases for feature-owned styles. */
   --c-void: var(--surface-sunken);
   --c-bg: var(--surface-canvas);

@@ -19,6 +19,7 @@ import { notificationText, notificationKind } from '../features/reports/notifica
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
+import { terrainFromTile } from '../features/map/HexMap.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -29,6 +30,14 @@ describe('modalLayerZ', () => {
 });
 
 describe('地图定位', () => {
+  it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {
+    assert.equal(terrainFromTile({ terrain: 'forest' }, 'visible'), 'forest');
+    assert.equal(terrainFromTile({ terrain: 'hills' }, 'explored'), 'hills');
+    assert.equal(terrainFromTile(undefined, 'visible'), 'plain');
+    assert.equal(terrainFromTile({ terrain: 'water' }, 'visible'), 'plain');
+    assert.equal(terrainFromTile({ terrain: 'forest' }, 'unexplored'), null);
+  });
+
   it('任务营地导航只保留未清理的营地', () => {
     assert.deepEqual(pendingTaskCamps([
       { id: 'camp-cleared', q: 1, r: 2, cleared: true },

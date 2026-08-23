@@ -1,6 +1,6 @@
 /**
  * HexMap — SVG 六边形地图渲染器。
- * 职责：相机（平移/缩放/复位）、视口剔除、地形纹理、行军路径动画、悬停提示、点击选格。
+ * 职责：相机（平移/缩放/复位）、视口剔除、连续地貌、行军路径动画、悬停提示、点击选格。
  * 状态规则：相机值存 useRef（避免拖拽重渲），只在需要重算剔除时 bump cullVer 触发渲染。
  */
 import * as preact from 'preact';
@@ -31,29 +31,23 @@ const HEX_CORNER_STR = hexCorners()
 
 // ─── terrain helpers ─────────────────────────────────────────────────────────
 
-/** 按坐标做确定性哈希，返回 0-3 号地形变体（空地格区分草地纹理）。 */
-function terrainVariant(q: number, r: number): number {
-  return ((Math.imul(q * 73856093 ^ r * 19349663, 0x45d9f3b)) >>> 0) % 4;
-}
+export type Terrain = 'plain' | 'forest' | 'hills';
+type Visibility = 'unexplored' | 'explored' | 'visible';
 
 /**
- * 按坐标确定性生成地形类型（有聚类效果：大块森林/水域/丘陵，而非均匀噪声）。
- * PvE / 村庄格由服务端数据决定，此函数只用于空地格的美术背景。
+ * 地形只认服务端事实；旧响应缺字段时安全降级平原，未探索格不读取也不保留地形。
+ * 导出纯函数供协议兼容回归测试使用。
  */
-function terrainFor(q: number, r: number): string {
-  // 粗粒度生物群系（每 5 格一块）
-  const bq = ((q >> 2) + 128) & 0xff;
-  const br = ((r >> 2) + 128) & 0xff;
-  const biome = ((Math.imul(bq * 73856093 ^ br * 83492791, 0x45d9f3b)) >>> 0) % 100;
-  // 细粒度变体
-  const fine = ((Math.imul(q * 17364091 ^ r * 83492791, 0x9c4f6b3)) >>> 0) % 100;
+export function terrainFromTile(tile: { terrain?: unknown } | undefined, visibility: Visibility): Terrain | null {
+  if (visibility === 'unexplored') return null;
+  return tile?.terrain === 'forest' || tile?.terrain === 'hills' || tile?.terrain === 'plain'
+    ? tile.terrain
+    : 'plain';
+}
 
-  if (biome < 9)  return 'water';
-  if (biome < 18) return 'hills';
-  if (biome < 32) return fine < 65 ? 'forest' : 'grass3';
-  if (biome < 42) return fine < 45 ? 'ruins'  : 'grass2';
-  // 大多数是草地
-  return fine < 58 ? 'grass2' : 'grass3';
+/** 仅用于地貌装饰的稳定世界坐标散点，不参与决定地形类型。 */
+function terrainNoise(q: number, r: number, salt: number): number {
+  return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
 }
 
 /** 已占据格根据 tile.kind + 是否是自己，确定描边颜色 key。 */
@@ -373,8 +367,8 @@ export function HexMap() {
     refId: string;
     name: string;
     icon: string | null;
-    terrain: string;
-    visibility: 'unexplored' | 'explored' | 'visible';
+    terrain: Terrain | null;
+    visibility: Visibility;
     isSelected: boolean;
     isSelf: boolean;
   }
@@ -417,40 +411,36 @@ export function HexMap() {
             const isSelf = !!(me && me.q === q && me.r === r);
             const ownV = ownVillageAt(q, r);
             const t = tileAt(q, r);
-            const visibility = (t?.visibility ?? 'visible') as HexCell['visibility'];
+            const visibility = (t?.visibility ?? 'visible') as Visibility;
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined
               : (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
-            let terrain = terrainFor(q, r);
+            const terrain = terrainFromTile(t, visibility);
 
             if (visibility === 'unexplored') {
-              name = '未探索区域'; terrain = 'empty';
+              name = '未探索区域';
             } else if (isSelf) {
               // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
               kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
-              icon = 'bld_main'; terrain = 'village';
+              icon = 'bld_main';
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
-              icon = 'bld_main'; terrain = 'village';
+              icon = 'bld_main';
             } else if (taskCamp) {
               kind = 'pve'; refId = taskCamp.id; name = '任务营地';
-              icon = pveIcon('任务营地'); terrain = 'ruins';
+              icon = pveIcon('任务营地');
             } else if (t?.kind === 'village') {
               kind = 'village'; refId = t.refId; name = t.name;
-              icon = 'bld_main'; terrain = 'village';
+              icon = 'bld_main';
             } else if (t?.kind === 'pve') {
               kind = 'pve'; refId = t.refId; name = t.name;
-              icon = t.icon ?? pveIcon(t.name); terrain = 'ruins';
+              icon = t.icon ?? pveIcon(t.name);
             } else if (t?.kind === 'taskcamp') {
               // 任务营地通常由 taskMarkers 注入；保留真实地块兜底，避免详情丢失时退化为空地。
               kind = 'pve'; refId = t.refId; name = t.name ?? '任务营地';
-              icon = t.icon ?? pveIcon('任务营地'); terrain = 'ruins';
-            } else if (t?.kind === 'empty') {
-              // server says empty with variant
-              const v = terrainVariant(q, r);
-              terrain = v < 2 ? 'grass2' : v === 2 ? 'grass3' : 'forest';
+              icon = t.icon ?? pveIcon('任务营地');
             }
 
             cells.push({
@@ -463,6 +453,92 @@ export function HexMap() {
       }
     }
     return cells;
+  }
+
+  function hexPath(c: HexCell, scale = 1.02): string {
+    const points = hexCorners().map((corner) => ({
+      x: c.camX + corner.x * scale,
+      y: c.camY + corner.y * scale,
+    }));
+    return `M${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join('L')}Z`;
+  }
+
+  function circlePath(cx: number, cy: number, radius: number): string {
+    return `M${(cx - radius).toFixed(1)},${cy.toFixed(1)}a${radius},${radius} 0 1,0 ${(radius * 2).toFixed(1)},0a${radius},${radius} 0 1,0 ${(-radius * 2).toFixed(1)},0`;
+  }
+
+  /**
+   * 地形按种类与视野态聚合成少量 path。相邻同类六边形因轻微重叠自然合并，
+   * 交互格仍独立存在，但不再为每格创建贴图或常驻描边。
+   */
+  function buildTerrainLayers(cells: HexCell[]) {
+    const surfaces = new Map<string, string[]>();
+    const plainTexture = new Map<Visibility, string[]>();
+    const forestCanopy = new Map<Visibility, string[]>();
+    const hillRidges = new Map<Visibility, string[]>();
+    const fog = new Map<Exclude<Visibility, 'visible'>, string[]>();
+    const cellsByWorldCoordinate = new Map<string, HexCell[]>();
+
+    for (const c of cells) {
+      const coordinateKey = `${c.q},${c.r}`;
+      const coordinateCells = cellsByWorldCoordinate.get(coordinateKey) ?? [];
+      coordinateCells.push(c);
+      cellsByWorldCoordinate.set(coordinateKey, coordinateCells);
+
+      if (c.terrain) {
+        const surfaceKey = `${c.terrain}-${c.visibility}`;
+        const surface = surfaces.get(surfaceKey) ?? [];
+        surface.push(hexPath(c));
+        surfaces.set(surfaceKey, surface);
+
+        if (c.terrain === 'plain') {
+          const texture = plainTexture.get(c.visibility) ?? [];
+          texture.push(hexPath(c, 1));
+          plainTexture.set(c.visibility, texture);
+        }
+
+        if (c.terrain === 'forest') {
+          const canopy = forestCanopy.get(c.visibility) ?? [];
+          const offsetX = (terrainNoise(c.q, c.r, 17) - 0.5) * HEX_SIZE * 0.42;
+          const offsetY = (terrainNoise(c.q, c.r, 31) - 0.5) * HEX_SIZE * 0.34;
+          const radius = HEX_SIZE * (0.48 + terrainNoise(c.q, c.r, 47) * 0.12);
+          canopy.push(circlePath(c.camX + offsetX, c.camY + offsetY, radius));
+          canopy.push(circlePath(c.camX - offsetX * 0.72, c.camY - offsetY * 0.55, radius * 0.72));
+          forestCanopy.set(c.visibility, canopy);
+        }
+      }
+
+      if (c.visibility !== 'visible') {
+        const paths = fog.get(c.visibility) ?? [];
+        paths.push(hexPath(c, 1.025));
+        fog.set(c.visibility, paths);
+      }
+    }
+
+    // 只沿相邻丘陵格中心连线；同一视觉副本的线段会跨过格边形成连续山脊。
+    const ridgeDirections = [{ q: 1, r: 0 }, { q: 0, r: 1 }, { q: 1, r: -1 }];
+    for (const c of cells) {
+      if (c.terrain !== 'hills') continue;
+      for (const direction of ridgeDirections) {
+        const target = wrapCoord(c.q + direction.q, c.r + direction.r, W, H);
+        let neighbor: HexCell | undefined;
+        let nearest = Infinity;
+        for (const candidate of cellsByWorldCoordinate.get(`${target.q},${target.r}`) ?? []) {
+          if (candidate.terrain !== 'hills') continue;
+          const distance = Math.hypot(candidate.camX - c.camX, candidate.camY - c.camY);
+          if (distance < nearest) { neighbor = candidate; nearest = distance; }
+        }
+        if (!neighbor || nearest > HEX_SIZE * 2) continue;
+        const visibility: Visibility = c.visibility === 'explored' || neighbor.visibility === 'explored'
+          ? 'explored'
+          : 'visible';
+        const paths = hillRidges.get(visibility) ?? [];
+        paths.push(`M${c.camX.toFixed(1)},${c.camY.toFixed(1)}L${neighbor.camX.toFixed(1)},${neighbor.camY.toFixed(1)}`);
+        hillRidges.set(visibility, paths);
+      }
+    }
+
+    return { surfaces, plainTexture, forestCanopy, hillRidges, fog };
   }
 
   // ─── march path + marker rendering ────────────────────────────────────────
@@ -979,6 +1055,7 @@ export function HexMap() {
 
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
+  const terrainLayers = buildTerrainLayers(visibleCells);
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
   const foreignMarkers = buildForeignMarkers();
@@ -1005,42 +1082,44 @@ export function HexMap() {
         onTouchMove={onTouchMove as any}
         onTouchEnd={onTouchEnd as any}
       >
-        {/* Clip path: one hex at origin, used by all terrain images */}
         <defs>
-          <clipPath id="hex-clip">
-            <polygon points={HEX_CORNER_STR} />
-          </clipPath>
-          {/* Fallback colour rect for the clip mask */}
+          <pattern id="plain-contours" width="180" height="140" patternUnits="userSpaceOnUse">
+            <path class="terrain-plain-contour" d="M-24 36 C18 10 52 12 94 34 S166 62 206 28" />
+            <path class="terrain-plain-contour terrain-plain-contour--soft" d="M-18 104 C30 78 74 84 112 106 S174 128 204 98" />
+          </pattern>
         </defs>
 
         <rect class="map-bg" x="0" y="0" width="100%" height="100%" />
 
         <g ref={camEl} class="layer-camera">
-          {/* ── Terrain + entity cells ── */}
-          <g class="layer-hexes">
+          {/* ── 连续地貌：同类地块聚合为 path，装饰由世界坐标稳定生成 ── */}
+          <g class="layer-terrain" aria-hidden="true">
+            {Array.from(terrainLayers.surfaces.entries()).map(([key, paths]) => {
+              const [terrain, visibility] = key.split('-') as [Terrain, Visibility];
+              return <path key={key} class={`terrain-surface terrain-surface--${terrain} terrain-surface--${visibility}`} d={paths.join('')} />;
+            })}
+            {Array.from(terrainLayers.plainTexture.entries()).map(([visibility, paths]) => (
+              <path key={`plain-${visibility}`} class={`terrain-plain-texture terrain-detail--${visibility}`} d={paths.join('')} />
+            ))}
+            {Array.from(terrainLayers.forestCanopy.entries()).map(([visibility, paths]) => (
+              <path key={`forest-${visibility}`} class={`terrain-forest-canopy terrain-detail--${visibility}`} d={paths.join('')} />
+            ))}
+            {Array.from(terrainLayers.hillRidges.entries()).map(([visibility, paths]) => (
+              <path key={`hills-${visibility}`} class={`terrain-hill-ridge terrain-detail--${visibility}`} d={paths.join('')} />
+            ))}
+          </g>
+
+          {/* ── POI 与地貌解耦，不再改写底层 terrain ── */}
+          <g class="layer-pois">
             {visibleCells.map((c) => {
               const rk = ringKind(c.kind, c.isSelf);
+              if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
               return (
                 <g
-                  key={`${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                  class={`hex-cell hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.isSelected ? ' hex-cell--selected' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
+                  key={`poi-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
+                  class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                  {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
                 >
-                  {/* Base fill (token-derived, always visible) */}
-                  <polygon class={`hex-base hex-fill-${c.terrain}`} points={HEX_CORNER_STR} />
-                  {/* Terrain texture (PNG, clipped to hex shape) */}
-                  {c.visibility !== 'unexplored' && (
-                    <image
-                      href={artPath(`map_tile_${c.terrain}`)}
-                      x={-HEX_SIZE}
-                      y={-HEX_SIZE}
-                      width={HEX_SIZE * 2}
-                      height={HEX_SIZE * 2}
-                      class="hex-terrain-img"
-                      preserveAspectRatio="xMidYMid slice"
-                    />
-                  )}
                   {/* Entity ring */}
                   {rk && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
@@ -1061,15 +1140,30 @@ export function HexMap() {
                       {c.name.slice(0, 5)}
                     </text>
                   )}
-                  {/* 服务器下发的探索快照仍可读，但必须与实时可见格区分。 */}
-                  {c.visibility !== 'visible' && (
-                    <polygon class={`hex-fog hex-fog--${c.visibility}`} points={HEX_CORNER_STR} />
-                  )}
-                  {/* Selection ring */}
-                  {c.isSelected && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
                 </g>
               );
             })}
+          </g>
+
+          {/* 服务器权威迷雾覆盖地貌与快照 POI；未探索层为统一暗雾。 */}
+          <g class="layer-fog" aria-hidden="true">
+            {terrainLayers.fog.get('explored') && <path class="terrain-fog terrain-fog--explored" d={terrainLayers.fog.get('explored')!.join('')} />}
+            {terrainLayers.fog.get('unexplored') && <path class="terrain-fog terrain-fog--unexplored" d={terrainLayers.fog.get('unexplored')!.join('')} />}
+          </g>
+
+          {/* 独立透明命中层：默认不画格线，只在 hover / 选中时显出六边边界。 */}
+          <g class="layer-hexes">
+            {visibleCells.map((c) => (
+              <g
+                key={`hit-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
+                class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}`}
+                transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
+                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+              >
+                <polygon class="hex-hit" points={HEX_CORNER_STR} />
+                {c.isSelected && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
+              </g>
+            ))}
           </g>
 
           {/* ── March paths ── */}
