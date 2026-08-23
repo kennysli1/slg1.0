@@ -43,6 +43,42 @@ test('GM_TOKEN 未设时 /gm/collections 无需鉴权', async () => {
   }
 });
 
+test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify, app } = buildFastify();
+    const old = await app.commands.send({
+      name: 'world.PlaceVillage',
+      from: 'test',
+      payload: { q: 12, r: 14, refId: 'v-gm-sync', name: '测试村' },
+    });
+    assert.equal(old.ok, true);
+    await fastify.ready();
+    const response = await fastify.inject({
+      method: 'PUT',
+      url: '/gm/player/p-gm-sync',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'p-gm-sync',
+        name: '测试玩家',
+        ownedVillages: [{ id: 'v-gm-sync', q: 17, r: 35, name: '测试村' }],
+      }),
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
+    assert.equal(moved.ok, true);
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村' });
+    const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
+    assert.equal(previous.ok, true);
+    assert.equal((previous.payload as any).tile.kind, 'empty');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 // ─── 2. 设 GM_TOKEN + 无 header → 401 ────────────────────────────────
 test('GM_TOKEN 设置后无 X-GM-Token header → 401', async () => {
   const prev = process.env.GM_TOKEN;
