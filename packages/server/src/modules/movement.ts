@@ -916,8 +916,8 @@ export class MovementModule {
     const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
     if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
     const tp = target.payload as any;
-    // 私有 PvE（任务营地 / 幸福村等带 ownerVillageId 的目标）：仅拥有者本村可攻击，其余情况静默拒绝
-    if (tp.ownerVillageId && tp.ownerVillageId !== villageId) {
+    // 任务营地归接取村所有，但同一玩家的其它村也可以派兵清理；幸福村等私有 NPC 仍限本村。
+    if (tp.ownerVillageId && tp.ownerVillageId !== villageId && !(tp.task === true && await this.samePlayerVillage(villageId, tp.ownerVillageId))) {
       return { ok: false, payload: {}, reason: 'not_task_owner' };
     }
     const toXY: Hex = { q: tp.q, r: tp.r };
@@ -1140,7 +1140,9 @@ export class MovementModule {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
       if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
       const pve = target.payload as any;
-      if (pve.ownerVillageId && pve.ownerVillageId !== villageId) return { ok: false, payload: {}, reason: 'not_task_owner' };
+      if (pve.ownerVillageId && pve.ownerVillageId !== villageId && !(pve.task === true && await this.samePlayerVillage(villageId, pve.ownerVillageId))) {
+        return { ok: false, payload: {}, reason: 'not_task_owner' };
+      }
       toXY = { q: Number(pve.q), r: Number(pve.r) };
     } else {
       toXY = await this.villageXY(targetVillage!);
@@ -1932,6 +1934,14 @@ export class MovementModule {
   private async ownerOf(villageId: string): Promise<string> {
     const res = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
     return res.ok ? ((res.payload as any).player?.id ?? villageId) : villageId;
+  }
+
+  /** 两座村庄是否属于同一玩家；用于跨村攻击该玩家自己的任务营地。 */
+  private async samePlayerVillage(leftVillageId: string, rightVillageId: string): Promise<boolean> {
+    if (!leftVillageId || !rightVillageId) return false;
+    if (leftVillageId === rightVillageId) return true;
+    const [left, right] = await Promise.all([this.ownerOf(leftVillageId), this.ownerOf(rightVillageId)]);
+    return left === right;
   }
 
   /** 途中相遇：双方暂停 → combat.Engage(field) 逐 tick 结算 → BattleEnded 后 onBattleEnded 恢复行军。 */

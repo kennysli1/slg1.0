@@ -148,7 +148,22 @@ export function setPlayerTaskState(payload: any): void {
   if (!payload) return;
   playerTaskState.value = payload;
   // 聚合响应也回填按村缓存，地图任务标记和旧组件仍能正常工作。
-  for (const village of (payload.villages ?? [])) setTaskState(village);
+  // 全局任务只持久化在玩家锚点村，但其营地对玩家名下所有村庄都可见；
+  // 旧实现只写 villages，切换村庄后地图会继续显示另一村的旧营地坐标。
+  const globalCamps: any[] = (payload.global?.active ?? [])
+    .flatMap((a: any) => (a.camps ?? []))
+    .filter((camp: any) => !camp?.cleared);
+  for (const village of (payload.villages ?? [])) {
+    setTaskState(village);
+    const vid = village?.villageId as string | undefined;
+    if (!vid) continue;
+    const localCamps = taskMarkers.value[vid] ?? [];
+    const byId = new Map<string, any>();
+    for (const camp of [...globalCamps, ...localCamps]) {
+      if (camp?.id) byId.set(String(camp.id), camp);
+    }
+    taskMarkers.value = { ...taskMarkers.value, [vid]: [...byId.values()] };
+  }
 }
 
 /** 单独推送的地图标记更新（TaskMapUpdated）。 */

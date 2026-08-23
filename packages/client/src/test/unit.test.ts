@@ -13,7 +13,7 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
-import { setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
+import { setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
@@ -308,6 +308,19 @@ describe('任务营地地图标记', () => {
 
     setTaskMarkers({ villageId, camps });
     assert.deepEqual(taskMarkers.value[villageId].map((camp: any) => camp.id), ['camp-live']);
+  });
+
+  it('玩家任务快照把全局营地同步到每个村庄，并清除旧坐标标记', () => {
+    setTaskMarkers({ villageId: 'task-global-capital', camps: [{ id: 'stale', q: 16, r: 40, cleared: false }] });
+    setPlayerTaskState({
+      global: { active: [{ camps: [{ id: 'global-camp', q: 12, r: 0, cleared: false }] }] },
+      villages: [
+        { villageId: 'task-global-capital', active: [] },
+        { villageId: 'task-global-branch', active: [] },
+      ],
+    });
+    assert.deepEqual(taskMarkers.value['task-global-capital'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
+    assert.deepEqual(taskMarkers.value['task-global-branch'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
   });
 });
 

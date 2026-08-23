@@ -99,6 +99,15 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const target = await send(app, 'pve.GetTarget', { id: campId });
   assert.equal((target.payload as any).ownerVillageId, va, '新任务营地必须绑定所属村庄');
 
+  // 回归：旧版本可能把 PvE 实体落在另一坐标，任务卡仍保存接取时坐标；恢复时应以任务快照统一实体。
+  const mismatched = { ...(target.payload as any), q: camp.q + 1, r: camp.r + 1 };
+  app.store.set('pve', campId, mismatched);
+  await send(app, 'world.RemoveTile', { q: camp.q, r: camp.r, refId: campId });
+  await app.task.resume();
+  const syncedTarget = await send(app, 'pve.GetTarget', { id: campId });
+  assert.equal((syncedTarget.payload as any).q, camp.q, '恢复后 PvE 营地 q 必须与任务卡一致');
+  assert.equal((syncedTarget.payload as any).r, camp.r, '恢复后 PvE 营地 r 必须与任务卡一致');
+
   // 模拟旧存档：任务营地缺 owner，且地块曾被错误保存为全局 pve。
   const legacy = { ...(target.payload as any), ownerVillageId: undefined };
   app.store.set('pve', campId, legacy);
