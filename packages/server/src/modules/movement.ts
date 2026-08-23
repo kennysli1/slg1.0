@@ -389,14 +389,21 @@ export class MovementModule {
     return { ok: true, troops: cleaned };
   }
 
-  private async villageXY(villageId: string): Promise<Hex | null> {
+  private async villageTile(villageId: string): Promise<{ q: number; r: number; name?: string } | null> {
     const res = await this.commands.send({
       name: 'world.GetTileByRef',
       from: MovementModule.NAME,
       payload: { refId: villageId, kind: 'village' },
     });
     const tile = (res.payload as any)?.tile;
-    return res.ok && tile ? { q: tile.q, r: tile.r } : null;
+    return res.ok && tile && Number.isFinite(Number(tile.q)) && Number.isFinite(Number(tile.r))
+      ? { q: Number(tile.q), r: Number(tile.r), name: typeof tile.name === 'string' ? tile.name : undefined }
+      : null;
+  }
+
+  private async villageXY(villageId: string): Promise<Hex | null> {
+    const tile = await this.villageTile(villageId);
+    return tile ? { q: tile.q, r: tile.r } : null;
   }
 
   /** 解析任意地块坐标：先试玩家村庄，再试 PvE / 任务营地（用于商队向幸福村等 NPC 村庄送货）。 */
@@ -1005,6 +1012,14 @@ export class MovementModule {
     const modes: Array<{ mode: string; label: string; requiresDeclaration?: boolean }> = [];
     let relation: string | undefined;
     let targetPlayerId: string | undefined;
+    const originTile = await this.villageTile(villageId);
+    const targetTile = refId && (kind === 'village' || kind === 'own_village')
+      ? await this.villageTile(refId)
+      : null;
+    // 客户端可能缓存了 GM 修改前的坐标/名称；己方村目标必须回传 World 的权威值。
+    const targetQ = targetTile?.q ?? q;
+    const targetR = targetTile?.r ?? r;
+    const targetName = targetTile?.name;
     if (kind === 'empty') modes.push({ mode: 'garrison', label: '驻扎' });
     else if (kind === 'pve' || kind === 'taskcamp') {
       // PvE 营地也可侦察，但 NPC 营地没有城内/城外建筑报告，只提供资源与守军情报。
@@ -1015,7 +1030,7 @@ export class MovementModule {
       const owner = refId ? await this.ownerOf(refId) : '';
       const mine = await this.ownerOf(villageId);
       // 当前操作村没有任何行军行为：不能向自己转移，也没有重复切换/增援。
-      if (refId === villageId) {
+      if (refId === villageId || (originTile && targetTile && originTile.q === targetTile.q && originTile.r === targetTile.r)) {
         relation = 'self';
       // 当前操作村不能向自己发送转移行军；只有其他己方村庄才显示转移。
       } else if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
@@ -1036,7 +1051,20 @@ export class MovementModule {
         }
       }
     } else if (kind === 'unexplored') modes.push({ mode: 'explore', label: '探索' });
-    return { ok: true, payload: { q, r, relation: relation ?? 'neutral', targetPlayerId, modes, rallyPointLevel: await this.getRallyLevel(villageId), marchPoints: await this.marchPointState(villageId) } };
+    return {
+      ok: true,
+      payload: {
+        q: targetQ,
+        r: targetR,
+        name: targetName,
+        refId,
+        relation: relation ?? 'neutral',
+        targetPlayerId,
+        modes,
+        rallyPointLevel: await this.getRallyLevel(villageId),
+        marchPoints: await this.marchPointState(villageId),
+      },
+    };
   }
 
   /** 最终确认页的权威预览：行军时长、可派兵快照、行军点与集结点等级。 */
@@ -1048,6 +1076,9 @@ export class MovementModule {
     if (!from) return { ok: false, payload: {}, reason: 'origin_not_found' };
     const target = targetVillage ? await this.villageXY(targetVillage) : wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     if (!target) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (targetVillage && target.q === from.q && target.r === from.r) {
+      return { ok: false, payload: {}, reason: 'same_village' };
+    }
     const army = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId } });
     const availableTroops = army.ok ? ((army.payload as any).troops ?? {}) : {};
     const point = await this.marchPointState(villageId);
@@ -1220,6 +1251,7 @@ export class MovementModule {
     if (point) return point;
     const toXY = await this.villageXY(targetVillage);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (toXY.q === fromXY.q && toXY.r === fromXY.r) return { ok: false, payload: {}, reason: 'same_village' };
 
     const spend: { ok: boolean; reason?: string } = isReinforce || isTransfer ? { ok: true } : await this.commands.send({
       name: 'economy.TrySpend', from: MovementModule.NAME,
