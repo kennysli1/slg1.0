@@ -54,8 +54,8 @@ function VillagePicker() {
   }
 
   return (
-    <div class="res res--village-picker" title={`当前操作村庄：${fallback.name}（${fallback.q},${fallback.r}）`}>
-      <div class="res-village-heading">当前村庄</div>
+    <label class="res res--village-picker" title={`当前操作村庄：${fallback.name}（${fallback.q},${fallback.r}）`}>
+      <span class="res-village-heading">当前村庄</span>
       <select
         class="village-picker-select"
         value={me.villageId}
@@ -69,7 +69,7 @@ function VillagePicker() {
           </option>
         ))}
       </select>
-    </div>
+    </label>
   );
 }
 
