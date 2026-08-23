@@ -6,7 +6,7 @@
   position: relative; min-height: 100dvh;
   display: grid; place-items: center;
   padding: var(--s-5) var(--s-4);
-  overflow: hidden;
+  overflow-x: hidden; overflow-y: auto;
 }
 
 /* 史诗背景图：缓慢推近，给静态图一点生气 */
@@ -45,6 +45,29 @@
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .login-tagline { text-align: center; font-size: var(--f-sm); color: var(--c-ink-soft); letter-spacing: 1px; }
+
+/* 服务器选择：像两面军旗，当前世界以金色边框标记。 */
+.server-pick { display: flex; flex-direction: column; gap: var(--s-2); }
+.server-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+.server-card {
+  position: relative; display: flex; flex-direction: column; justify-content: center; gap: var(--s-1);
+  min-height: calc(var(--s-7) + var(--s-5)); padding: var(--s-3);
+  text-decoration: none; background: var(--surface-sunken); border: 1px solid var(--line);
+  border-radius: var(--r-md); color: var(--c-ink-soft);
+  transition: border-color var(--t-fast), transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+.server-card::before {
+  content: ''; position: absolute; inset: var(--s-2) auto var(--s-2) 0;
+  width: var(--s-1); border-radius: 0 var(--r-pill) var(--r-pill) 0; background: var(--c-gold-dim);
+}
+.server-card--test-01::before { background: var(--c-steel); }
+.server-card:hover { transform: translateY(calc(var(--s-1) * -1)); border-color: var(--line-strong); background: var(--surface-panel); }
+.server-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: var(--s-1); }
+.server-card b { font-family: var(--ff-han); font-size: var(--f-md); letter-spacing: 1px; color: var(--c-ink); }
+.server-card small { font-size: var(--f-2xs); color: var(--c-ink-dim); }
+.server-card-status { position: absolute; top: var(--s-2); right: var(--s-2); font-size: var(--f-2xs); color: var(--c-ink-dim); }
+.server-card.picked { border-color: var(--c-gold); background: var(--surface-interactive); box-shadow: var(--glow-gold); }
+.server-card.picked .server-card-status { color: var(--c-gold-hi); }
 
 /* 登录 / 注册 切换 */
 .login-tabs {
