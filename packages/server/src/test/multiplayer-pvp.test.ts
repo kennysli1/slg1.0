@@ -136,6 +136,8 @@ test('PvP 掠夺：守方可关闭防守，战后只拆城外建筑且不拿仓�
   assert.ok(report, '应有掠夺战报');
   assert.equal(report.battleType, 'raid');
   assert.ok(Array.isArray(report.buildingDamage), '战报应带建筑损坏');
+  assert.ok(Object.values(report.buildingLoot ?? {}).some((n: any) => Number(n) > 0), '掠夺破坏建筑应产生建筑战利品');
+  assert.ok(Object.values(report.loot ?? {}).some((n: any) => Number(n) > 0), '掠夺方应带回建筑战利品');
   assert.deepEqual(report.storedLoot, {}, '掠夺战不应拿仓库/粮仓存量');
 });
 

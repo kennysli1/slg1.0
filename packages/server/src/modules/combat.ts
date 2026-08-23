@@ -466,7 +466,8 @@ export class CombatModule {
       const siegePower = totalPower(siegeWeapons);
       const regularPower = totalPower(regularTroops);
       // 只有战后仍有进攻方幸存者才结算建筑：攻城武器先拆除，普通部队随后破坏。
-      // 掠夺战普通部队只造成可修复的等级破坏；攻城武器才会真正拆除并产生建筑拆除战利品。
+      // 两种操作都产生对应建筑等级的战利品；区别在于普通部队的破坏可修复，
+      // 攻城武器的拆除在降到 0 级时会移除建筑。
       if (attackerWins && totalCount(b.attacker) > 0) {
         const outerThreshold = battleType === 'raid'
           ? this.config.constants.pvpRaidPowerPerBuildingLevel
@@ -487,6 +488,7 @@ export class CombatModule {
             payload: { villageId: b.targetId, zone: 'outer', power: regularPower, powerPerLevel: outerThreshold, mode: 'damage' },
           });
           buildingDamage = [...buildingDamage, ...((regularOuter.payload as any)?.destroyed ?? [])];
+          buildingLoot = mergeResources(buildingLoot, (regularOuter.payload as any)?.loot ?? {});
         }
 
         // 攻城时内城只能被攻城武器拆除，普通部队不能对内城造成破坏。
