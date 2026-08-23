@@ -6,8 +6,10 @@ import { hexDistanceWrapped } from '../infra/hex.js';
 
 type TileSnapshot = { q: number; r: number; kind: string; refId?: string; name?: string; icon?: string };
 interface VisionState { playerId: string; explored: Record<string, TileSnapshot>; }
+interface RevealReceipt { playerId: string; revealId: string; newlyRevealed: TileSnapshot[]; }
 interface Source { q: number; r: number; radius: number; }
 const COLLECTION = 'vision';
+const RECEIPT_COLLECTION = 'vision_reveal';
 
 /** 玩家战争迷雾 owner：只保存已经探索过的地图快照，不保存实时地图内容。 */
 export class VisionModule {
@@ -18,6 +20,7 @@ export class VisionModule {
     this.commands.register('vision.FilterArea', (c) => this.filterArea(c));
     this.commands.register('vision.GetVisibility', (c) => this.getVisibility(c));
     this.commands.register('vision.Reveal', (c) => this.reveal(c));
+    this.commands.register('vision.ForgetReveal', (c) => this.forgetReveal(c));
     this.commands.register('vision.GetVisibleTiles', (c) => this.getVisibleTiles(c));
     this.commands.register('vision.GetObservers', (c) => this.getObservers(c));
   }
@@ -68,7 +71,12 @@ export class VisionModule {
 
   /** 行军每到一格即把它当刻视野内的地块写为已探索，保证玩家不打开地图也不会丢探索进度。 */
   private async reveal(cmd: Command): Promise<CommandResult> {
-    const { playerId, q, r, radius } = cmd.payload as { playerId: string; q: number; r: number; radius: number };
+    const { playerId, q, r, radius, revealId } = cmd.payload as { playerId: string; q: number; r: number; radius: number; revealId?: string };
+    const receiptKey = revealId ? `${playerId}:${revealId}` : undefined;
+    if (receiptKey) {
+      const receipt = this.store.get<RevealReceipt>(RECEIPT_COLLECTION, receiptKey);
+      if (receipt) return { ok: true, payload: { newlyRevealed: receipt.newlyRevealed } };
+    }
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const raw = await this.commands.send({ name: 'world.GetArea', from: VisionModule.NAME, payload: { cq: q, cr: r, full: true } });
     if (!raw.ok) return { ok: false, payload: {}, reason: raw.reason };
@@ -76,11 +84,22 @@ export class VisionModule {
     for (const tile of ((raw.payload as any)?.tiles ?? [])) nowTiles.set(`${tile.q},${tile.r}`, tile);
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
     const sight = Math.max(0, Math.floor(Number(radius) || 0));
+    const newlyRevealed: TileSnapshot[] = [];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       if (hexDistanceWrapped({ q, r }, { q: x, r: y }, W, H) > sight) continue;
-      state.explored[`${x},${y}`] = nowTiles.get(`${x},${y}`) ?? { q: x, r: y, kind: 'empty' };
+      const key = `${x},${y}`;
+      const tile = nowTiles.get(key) ?? { q: x, r: y, kind: 'empty' };
+      if (!state.explored[key]) newlyRevealed.push(tile);
+      state.explored[key] = tile;
     }
     this.store.set(COLLECTION, playerId, state);
+    if (receiptKey && revealId) this.store.set<RevealReceipt>(RECEIPT_COLLECTION, receiptKey, { playerId, revealId, newlyRevealed });
+    return { ok: true, payload: { newlyRevealed } };
+  }
+
+  private forgetReveal(cmd: Command): CommandResult {
+    const { playerId, revealId } = cmd.payload as { playerId: string; revealId: string };
+    if (playerId && revealId) this.store.delete(RECEIPT_COLLECTION, `${playerId}:${revealId}`);
     return { ok: true, payload: {} };
   }
 
