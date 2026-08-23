@@ -16,6 +16,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TIMEOUT_MS = 30_000;
 const urlAt = process.argv.indexOf('--url');
 const externalUrl = urlAt >= 0 ? process.argv[urlAt + 1] : null;
+const FETCH_TIMEOUT_MS = externalUrl ? 30_000 : 10_000;
+const FETCH_ATTEMPTS = externalUrl ? 3 : 1;
 const expectCommitAt = process.argv.indexOf('--expect-commit');
 const expectedCommit = expectCommitAt >= 0 ? process.argv[expectCommitAt + 1] : null;
 if (urlAt >= 0 && !externalUrl) throw new Error('[deploy-smoke] --url 后必须提供部署地址');
@@ -39,19 +41,28 @@ async function freePort() {
 }
 
 async function fetchOk(url, expectedType) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
-  try {
-    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-    assert(res.ok, `${url} 返回 HTTP ${res.status}`);
-    const type = res.headers.get('content-type') ?? '';
-    if (expectedType) assert(type.includes(expectedType), `${url} Content-Type 异常：${type || '缺失'}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    assert(bytes.byteLength > 0, `${url} 返回空内容`);
-    return { bytes, type };
-  } finally {
-    clearTimeout(timer);
+  let lastError;
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      assert(res.ok, `${url} 返回 HTTP ${res.status}`);
+      const type = res.headers.get('content-type') ?? '';
+      if (expectedType) assert(type.includes(expectedType), `${url} Content-Type 异常：${type || '缺失'}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      assert(bytes.byteLength > 0, `${url} 返回空内容`);
+      return { bytes, type };
+    } catch (error) {
+      lastError = error;
+      if (attempt < FETCH_ATTEMPTS) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, attempt * 500));
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw lastError;
 }
 
 async function waitForHealth(baseUrl, child) {
