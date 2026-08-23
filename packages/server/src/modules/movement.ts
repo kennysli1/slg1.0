@@ -61,6 +61,8 @@ interface MovementRecord {
   loot?: Record<string, number>;
   /** 运输货物（transport） */
   cargo?: Record<string, number>;
+  /** 村间运输的语义：transfer=仅部队/宝物转移；旧 transport=兼容资源运输。 */
+  transportMode?: 'transfer' | 'transport' | 'reinforce';
   /** 拓荒发起玩家（found 到达建村用） */
   founderPlayerId?: string;
   departAt: number;
@@ -859,7 +861,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
   ): Promise<MovementRecord> {
     const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
@@ -1169,13 +1171,14 @@ export class MovementModule {
       troops: Record<string, number>;
       cargo?: Record<string, number>;
       treasures?: string[];
-      mode?: 'transfer' | 'reinforce';
+      mode?: 'transfer' | 'transport' | 'reinforce';
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'same_village' };
 
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
 
+    const isTransfer = mode === 'transfer';
     const isReinforce = mode === 'reinforce';
     // 转移只允许己方村；增援允许盟军/中立村，不会改变关系。
     const fromOwner = await this.ownerOf(villageId);
@@ -1189,19 +1192,23 @@ export class MovementModule {
       if (relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }
 
+    // 地图“转移”只允许携带部队和宝物；物资转运走贸易中心商队。
+    if (isTransfer && Object.values(cargo ?? {}).some((v) => Number(v) > 0)) {
+      return { ok: false, payload: {}, reason: 'transfer_no_cargo' };
+    }
     const cleanedCargo: Record<string, number> = {};
     let cargoTotal = 0;
     for (const t of ['wood', 'clay', 'iron', 'crop'] as const) {
       const n = Math.max(0, Math.floor(cargo?.[t] ?? 0));
       if (n > 0) { cleanedCargo[t] = n; cargoTotal += n; }
     }
-    if (!isReinforce && cargoTotal <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
+    if (!isReinforce && !isTransfer && cargoTotal <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
 
     let capacity = 0;
     for (const [u, n] of Object.entries(valid.troops)) {
       capacity += (this.config.units[u]?.carry ?? 0) * n;
     }
-    if (!isReinforce && cargoTotal > capacity) return { ok: false, payload: {}, reason: 'cargo_exceeds_carry' };
+    if (!isReinforce && !isTransfer && cargoTotal > capacity) return { ok: false, payload: {}, reason: 'cargo_exceeds_carry' };
 
     const fromXY = await this.villageXY(villageId);
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
@@ -1210,7 +1217,7 @@ export class MovementModule {
     const toXY = await this.villageXY(targetVillage);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
 
-    const spend: { ok: boolean; reason?: string } = isReinforce ? { ok: true } : await this.commands.send({
+    const spend: { ok: boolean; reason?: string } = isReinforce || isTransfer ? { ok: true } : await this.commands.send({
       name: 'economy.TrySpend', from: MovementModule.NAME,
       payload: { villageId, cost: cleanedCargo },
     });
@@ -1223,7 +1230,7 @@ export class MovementModule {
       payload: { villageId, delta },
     });
     if (!adj.ok) {
-      await this.commands.send({
+      if (!isTransfer) await this.commands.send({
         name: 'economy.Grant', from: MovementModule.NAME,
         payload: { villageId, gain: cleanedCargo },
       });
@@ -1235,13 +1242,13 @@ export class MovementModule {
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
-      await this.commands.send({ name: 'economy.Grant', from: MovementModule.NAME, payload: { villageId, gain: cleanedCargo } });
+      if (!isTransfer) await this.commands.send({ name: 'economy.Grant', from: MovementModule.NAME, payload: { villageId, gain: cleanedCargo } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
     const mv = await this.launch({
       id, type: 'transport', fromVillage: villageId, fromXY, toXY,
-      targetVillage, troops: valid.troops, cargo: cleanedCargo, treasures: carry.codes, departAt: this.now(),
+      targetVillage, troops: valid.troops, cargo: cleanedCargo, treasures: carry.codes, transportMode: mode ?? 'transport', departAt: this.now(),
     });
 
     log('出征(transport)', {
@@ -1251,7 +1258,7 @@ export class MovementModule {
     void this.bus.emit({
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
       payload: {
-        id: mv.id, type: 'transport', villageId, targetVillage,
+        id: mv.id, type: 'transport', mode: mv.transportMode, villageId, targetVillage,
         arriveAt: mv.arriveAt, cargo: cleanedCargo,
       },
     } as DomainEvent);
@@ -1408,9 +1415,14 @@ export class MovementModule {
     });
     // 携带宝物抵达「另一个村庄」→ 转为该村庄玩家的待处理报告（deliver）
     if (mv.treasures && mv.treasures.length > 0) {
+      const sourceTile = await this.commands.send({
+        name: 'world.GetTileByRef', from: MovementModule.NAME,
+        payload: { refId: mv.fromVillage, kind: 'village' },
+      });
+      const sourceVillageName = (sourceTile.payload as any)?.tile?.name ?? mv.fromVillage;
       await this.commands.send({
         name: 'treasure.OffloadForeign', from: MovementModule.NAME,
-        payload: { villageId: target, codes: mv.treasures, fromMovementId: mv.id },
+        payload: { villageId: target, codes: mv.treasures, fromMovementId: mv.id, fromVillageId: mv.fromVillage, fromVillageName: sourceVillageName },
       });
     }
     log('运输到达', { id: mv.id, to: target, troops: mv.troops, cargo: mv.cargo });
@@ -1424,6 +1436,7 @@ export class MovementModule {
         troops: mv.troops,
         loot: mv.cargo,
         type: 'transport',
+        mode: mv.transportMode,
       },
     } as DomainEvent);
   }

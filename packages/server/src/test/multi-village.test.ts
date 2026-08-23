@@ -170,6 +170,10 @@ test('Gateway：SelectVillage 后 ownVillage 打到新当前村', async () => {
   assert.equal(renameRes.ok, true, renameRes.error?.msg);
   assert.equal(session.villageId, vid2, '重命名不应改变当前操作村');
   assert.equal(app.store.get<any>('player', pid).ownedVillages.find((v: any) => v.id === vid2).name, '新分城乙');
+  const renamePush = replies.find((m: any) => m.type === 'push' && m.event === 'VillageRenamed') as any;
+  assert.ok(renamePush, '重命名应向玩家会话推送刷新事件');
+  assert.equal(renamePush.payload.villageId, vid2);
+  assert.equal(renamePush.payload.name, '新分城乙');
 
   // ownVillage 的 GetResources 应读到分城经济
   const eco = await gw.handleRequest(req('GetResources', {}, 'e1'), session);

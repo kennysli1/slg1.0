@@ -178,3 +178,34 @@ test('Trade: CreateTradeOrder 占用路线 CancelTradeOrder 回收路线', async
   const routesAfterCancel = (afterCancel.payload as any).tradeRoutesUsed as number;
   assert.ok(routesAfterCancel <= routesAfterCreate - 1, '撤销挂单后路线占用应减少');
 });
+
+test('Trade: 己方村资源转移在半径内可选并消耗路线，商队抵达后入库', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'transfer_owner');
+  assert.equal(regRes.ok, true);
+  const player = (regRes.payload as any).player;
+  const source = player.villageId as string;
+  const target = 'v-transfer-target';
+  // 选一个出生城附近的空格，确保命中贸易中心半径。
+  const candidates = [{ q: player.q + 2, r: player.r }, { q: player.q - 2, r: player.r }, { q: player.q, r: player.r + 2 }];
+  const tile = candidates.find((x) => !app.store.get<any>('world_tile', `${x.q},${x.r}`));
+  assert.ok(tile, '应找到附近空地');
+  await app.createVillage(target, tile!.q, tile!.r, '近邻分城');
+  const attach = await send(app, 'player.AttachVillage', { playerId: player.id, villageId: target, q: tile!.q, r: tile!.r, name: '近邻分城' });
+  assert.equal(attach.ok, true, attach.reason);
+  assert.equal(await buildInZone(app, source, 'outer', 'tradecenter'), true);
+  assert.equal(await buildInZone(app, target, 'outer', 'tradecenter'), true);
+  await send(app, 'economy.SetCapacity', { villageId: target, capacity: { wood: 2_000, clay: 2_000, iron: 2_000, crop: 2_000, gold: Number.MAX_SAFE_INTEGER } });
+  await send(app, 'economy.Grant', { villageId: source, gain: { wood: 200 } });
+  const before = (await send(app, 'economy.GetResources', { villageId: target })).payload as any;
+  const center = await send(app, 'trade.GetCenter', { villageId: source });
+  const targets = (center.payload as any).transferTargets as any[];
+  assert.equal(targets.some((x) => x.villageId === target && x.relation === 'own'), true);
+  const sent = await send(app, 'trade.TransferResources', { villageId: source, targetVillage: target, cargo: { wood: 100 } });
+  assert.equal(sent.ok, true, sent.reason);
+  const afterSend = await send(app, 'trade.GetCenter', { villageId: source });
+  assert.equal((afterSend.payload as any).tradeRoutesUsed, 1);
+  await drain(app);
+  const after = (await send(app, 'economy.GetResources', { villageId: target })).payload as any;
+  assert.ok(after.resources.wood >= before.resources.wood + 100 - 0.01, '资源商队抵达后应进入目标村');
+});

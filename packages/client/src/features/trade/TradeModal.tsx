@@ -7,6 +7,7 @@
  */
 import { useState, useEffect } from 'preact/hooks';
 import { openModal, tradeCenter, tick, showToast } from '../../app/store.js';
+import { getCache } from '../../app/state.js';
 import { act, reloadTrade } from '../../app/refresh.js';
 import { req } from '../../api.js';
 import {
@@ -24,6 +25,8 @@ import '../../styles/trade.css';
 
 const TRADE_RES = ['wood', 'clay', 'iron', 'crop', 'gold'] as const;
 type TradeRes = typeof TRADE_RES[number];
+const TRANSFER_RES = ['wood', 'clay', 'iron', 'crop'] as const;
+type TransferRes = typeof TRANSFER_RES[number];
 
 /** 剩余时长格式化统一走 fmtDur（时长语义），别再各页自己实现一份。 */
 const fmtRemaining = fmtDur;
@@ -52,6 +55,9 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
   const [give, setGive] = useState<Record<TradeRes, string>>(emptyAmounts);
   const [want, setWant] = useState<Record<TradeRes, string>>(emptyAmounts);
   const [createBusy, setCreateBusy] = useState(false);
+  const [transferTarget, setTransferTarget] = useState('');
+  const [transfer, setTransfer] = useState<Record<TransferRes, string>>(() => Object.fromEntries(TRANSFER_RES.map((k) => [k, ''])) as Record<TransferRes, string>);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   // 宝物栏满时的溢出对话状态（内嵌 sub-panel 方案）
   const [overflow, setOverflow] = useState<{
@@ -108,6 +114,12 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
   const routeOver = routesNeeded > routeAvail;
   const giveEmpty = TRADE_RES.every((k) => !(Number(give[k]) > 0));
   const wantEmpty = TRADE_RES.every((k) => !(Number(want[k]) > 0));
+
+  const transferTargets: any[] = c.transferTargets ?? [];
+  const transferUnits = TRANSFER_RES.reduce((sum, key) => sum + Math.max(0, Math.floor(Number(transfer[key]) || 0)), 0);
+  const transferRoutes = Math.ceil(transferUnits / Math.max(1, cap));
+  const transferRouteOver = transferRoutes > routeAvail;
+  const transferEmpty = transferUnits <= 0;
 
   // ---- 动作 ----
 
@@ -203,6 +215,19 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function handleTransferResources() {
+    if (transferBusy || !transferTarget || transferEmpty || transferRouteOver) return;
+    const cargo: Record<string, number> = {};
+    TRANSFER_RES.forEach((key) => { const value = Math.floor(Number(transfer[key]) || 0); if (value > 0) cargo[key] = value; });
+    setTransferBusy(true);
+    const ok = await act(req('TransferResources', { targetVillage: transferTarget, cargo }), { okToast: '资源转移商队已出发' });
+    setTransferBusy(false);
+    if (ok) {
+      setTransfer(Object.fromEntries(TRANSFER_RES.map((k) => [k, ''])) as Record<TransferRes, string>);
+      void reloadTrade();
+    }
+  }
+
   // ---- 渲染 ----
 
   return (
@@ -255,6 +280,26 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
+
+      {/* 己方/盟友资源转移：与地图部队转移分开，物资只由商队运输并占用贸易路线。 */}
+      <SectionHead sub={`己方/盟友 · 半径 ${c.viewRadius ?? '?'} 格 · 仅基础资源`}>转移资源</SectionHead>
+      {transferTargets.length === 0 ? (
+        <Empty icon="📦" title="暂无可转移目标">只有本贸易中心半径内的己方或盟友村庄可以接收资源。</Empty>
+      ) : (
+        <div class="trade-create-form trade-resource-transfer">
+          <label class="trade-create-field"><span>目的村庄</span><select value={transferTarget} onChange={(e) => setTransferTarget((e.currentTarget as HTMLSelectElement).value)}>
+            <option value="">请选择村庄</option>
+            {transferTargets.map((target: any) => <option key={target.villageId} value={target.villageId}>{target.name} · {target.relation === 'allied' ? '盟友' : '己方'} · {target.distance}格</option>)}
+          </select></label>
+          <div class="trade-create-grid">
+            {TRANSFER_RES.map((key) => {
+              const max = Math.floor(getCache().res?.resources?.[key] ?? 0);
+              return <label key={key} class="trade-create-field"><span>{resInfo(key).name}（最多 {fmt(max)}）</span><input type="number" min="0" max={max} value={transfer[key]} onInput={(e) => setTransfer((prev) => ({ ...prev, [key]: (e.currentTarget as HTMLInputElement).value }))} /></label>;
+            })}
+          </div>
+          <div class="trade-create-foot"><span>运力 {transferUnits}/{Math.max(1, cap)} · 需路线 {transferRoutes} · 可用 {routeAvail}</span><Btn variant="primary" disabled={!transferTarget || transferEmpty || transferRouteOver || transferBusy} onClick={handleTransferResources}>{transferRouteOver ? '路线不足' : '派出资源商队'}</Btn></div>
+        </div>
+      )}
 
       {/* NPC 订单 */}
       <SectionHead sub="即时交付 · 含宝物出售">NPC 订单</SectionHead>

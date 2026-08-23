@@ -6,6 +6,7 @@
  * 之类就会误判。
  */
 import { useState } from 'preact/hooks';
+import { me } from '../../api.js';
 import { reportsVersion, dataVersion, battles } from '../../app/store.js';
 import { getReports, type ReportKind, type StoredReport } from '../../app/state.js';
 import { Empty, Icon, Panel, SectionHead } from '../../ui/index.js';
@@ -155,7 +156,7 @@ export function ReportsScreen() {
       {/* ③ 战报流水 */}
       <section>
         <SectionHead sub={allReports.length ? `共 ${allReports.length} 条` : undefined}>
-          战报记录
+          {me?.villages?.find((v) => v.id === me?.villageId)?.name ?? '当前村'} · 战报记录
         </SectionHead>
 
         {isEmpty ? (

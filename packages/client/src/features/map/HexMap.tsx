@@ -13,7 +13,7 @@ import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refre
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
-import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, parseMapCoordinate } from './map-navigation.js';
 import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -335,9 +335,9 @@ export function HexMap() {
   }
 
   function isHomeCentered(): boolean {
-    const capital = capitalCoordinate(me);
-    if (!capital || zoom.current <= 0 || cw.current <= 0) return true;
-    const hp = hexToPixel(capital);
+    const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+    if (!current || zoom.current <= 0 || cw.current <= 0) return true;
+    const hp = hexToPixel(current);
     const hx = hp.x + ox.current, hy = hp.y + oy.current;
     const cx = (cw.current / 2 - panX.current) / zoom.current;
     const cy = (ch.current / 2 - panY.current) / zoom.current;
@@ -855,10 +855,11 @@ export function HexMap() {
   }
 
   function doHome() {
-    const capital = capitalCoordinate(me);
-    if (!capital) return;
-    setMapCenter(capital);
-    centerViewOn(capital.q, capital.r);
+    // 地图视角跟随当前操作村，而不是固定跳回主城。
+    const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+    if (!current) return;
+    setMapCenter(current);
+    centerViewOn(current.q, current.r);
     syncNavUI();
   }
   function doJump() {
@@ -1113,8 +1114,8 @@ export function HexMap() {
                 />
               </label>
               <Btn type="submit" size="sm" variant="primary" class="map-locator-jump">跳转</Btn>
-              <Btn size="sm" class="map-locator-home" onClick={doHome} title="将地图居中到自己的主城">
-                <span aria-hidden="true">◎</span> 回主城
+              <Btn size="sm" class="map-locator-home" onClick={doHome} title="将地图回正并居中到当前操作村">
+                <span aria-hidden="true">◎</span> 回正并回当前村
               </Btn>
             </div>
             {jumpError
@@ -1170,17 +1171,17 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   homeCentered: boolean;
   onGoHome: () => void;
 }) {
-  const capital = capitalCoordinate(me);
-  if (!capital) return null;
-  const atHome = homeCentered || (navCoord.q === capital.q && navCoord.r === capital.r);
+  const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+  if (!current) return null;
+  const atHome = homeCentered || (navCoord.q === current.q && navCoord.r === current.r);
   return (
     <div class="map-infobar">
       {!homeCentered && !atHome ? (
-        <>全图模式 · 视角偏离主城 · <a onClick={onGoHome}>回主城</a></>
-      ) : homeCentered && (navCoord.q === capital.q && navCoord.r === capital.r) ? (
-        <>全图模式 · 主城 <b>X={capital.q} Y={capital.r}</b>（已居中）</>
+        <>全图模式 · 视角偏离当前村 · <a onClick={onGoHome}>回正并回当前村</a></>
+      ) : homeCentered && (navCoord.q === current.q && navCoord.r === current.r) ? (
+        <>全图模式 · 当前村 <b>X={current.q} Y={current.r}</b>（已居中）</>
       ) : (
-        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回主城</a></>
+        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回正并回当前村</a></>
       )}
     </div>
   );
