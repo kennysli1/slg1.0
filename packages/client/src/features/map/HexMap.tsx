@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, foreignMoves, tab } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
@@ -443,6 +443,10 @@ export function HexMap() {
             } else if (t?.kind === 'pve') {
               kind = 'pve'; refId = t.refId; name = t.name;
               icon = t.icon ?? pveIcon(t.name); terrain = 'ruins';
+            } else if (t?.kind === 'taskcamp') {
+              // 任务营地通常由 taskMarkers 注入；保留真实地块兜底，避免详情丢失时退化为空地。
+              kind = 'pve'; refId = t.refId; name = t.name ?? '任务营地';
+              icon = t.icon ?? pveIcon('任务营地'); terrain = 'ruins';
             } else if (t?.kind === 'empty') {
               // server says empty with variant
               const v = terrainVariant(q, r);
@@ -727,7 +731,13 @@ export function HexMap() {
     const name = cell.getAttribute('data-name') ?? '空地';
     const icon = cell.getAttribute('data-icon') ?? undefined;
     const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
-    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}), ...(visibility ? { visibility } : {}) };
+    const taskCamp = findTaskCampMarker(refId, q, r);
+    selected.value = {
+      refId, kind, q, r, name,
+      ...(icon ? { icon } : {}),
+      ...(visibility ? { visibility } : {}),
+      ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
+    };
   }
 
   // ─── event handlers ────────────────────────────────────────────────────────

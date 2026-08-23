@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { getCache, type SelectedTarget } from '../../app/state.js';
-import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast } from '../../app/store.js';
+import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast, type TaskCampInfo } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo,
@@ -31,6 +31,7 @@ interface TargetMeta {
   isOwn?: boolean;
   declareWar?: boolean;
   targetKind?: string;
+  taskInfo?: TaskCampInfo;
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
@@ -139,8 +140,27 @@ function Assessment({
     scout: '编组侦察部队',
   };
 
+  const taskTypeLabel = meta.taskInfo?.scope === 'global'
+    ? '全局任务'
+    : meta.taskInfo?.type === 'daily'
+      ? '村庄日常任务'
+      : '村庄任务';
+
   return (
     <div class="target-body expedition-body">
+      {meta.taskInfo && (
+        <section class="task-camp-info" aria-label="关联任务信息">
+          <div class="expedition-kicker">关联任务</div>
+          <div class="task-camp-info-title">{meta.taskInfo.name}</div>
+          <p>{meta.taskInfo.desc || '该营地属于当前任务目标。'}</p>
+          <div class="task-camp-info-facts">
+            <span>任务类型 <b>{taskTypeLabel}</b></span>
+            {Number(meta.taskInfo.campTotal) > 0 && (
+              <span>营地进度 <b>{Number(meta.taskInfo.campCleared ?? 0)}/{Number(meta.taskInfo.campTotal)}</b></span>
+            )}
+          </div>
+        </section>
+      )}
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
@@ -624,6 +644,7 @@ export function TargetPanel() {
     mode: isOwn ? 'transfer' : sel.kind === 'pve' ? 'raid' : 'attack',
     isOwn,
     targetKind: sel.kind,
+    taskInfo: sel.taskInfo,
   };
 
   return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />;
