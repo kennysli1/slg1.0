@@ -56,6 +56,7 @@ const PROGRESS_COLLECTIONS = [
   'research',
   'task',
   'vision',
+  'vision_reveal',
   'diplomacy',
   'reputation',
   'alchemy',
