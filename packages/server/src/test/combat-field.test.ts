@@ -29,7 +29,7 @@ test('野战：双方村庄均收到 BattleStarted，且均可 GetBattle', async
   const bAtk = await send(app, 'movement.SendAttack', {
     villageId: B.villageId, targetVillage: A.villageId, troops: { legionnaire: 15 },
   });
-  const defenderMvId = (bAtk.payload as any).id as string;
+  assert.ok((bAtk.payload as any).id, '反向行军应成功创建');
 
   const started: string[] = [];
   app.bus.on('combat.BattleStarted', (e) => {
@@ -44,8 +44,10 @@ test('野战：双方村庄均收到 BattleStarted，且均可 GetBattle', async
   assert.ok(started.includes(A.villageId), '进攻方村应收到 BattleStarted');
   assert.ok(started.includes(B.villageId), '野战防守方村应收到 BattleStarted');
 
-  const viewA = await send(app, 'combat.GetBattle', { targetId: defenderMvId, villageId: A.villageId });
-  const viewB = await send(app, 'combat.GetBattle', { targetId: defenderMvId, villageId: B.villageId });
+  const fieldBattle = app.store.all<any>('battle').find((battle) => battle.targetKind === 'field');
+  assert.ok(fieldBattle, '应存在进行中的野战');
+  const viewA = await send(app, 'combat.GetBattle', { targetId: fieldBattle.targetId, villageId: A.villageId });
+  const viewB = await send(app, 'combat.GetBattle', { targetId: fieldBattle.targetId, villageId: B.villageId });
   assert.equal(viewA.ok, true);
   assert.equal(viewB.ok, true);
   assert.equal((viewA.payload as any).battle?.targetKind, 'field');

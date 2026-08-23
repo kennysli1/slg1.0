@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
-import { hexDistance } from '../infra/hex.js';
+import { hexDistance, hexDistanceWrapped } from '../infra/hex.js';
 
 /**
  * 行军路径与相遇单元测试（假时钟）。
@@ -37,7 +37,10 @@ test('逐格推进：raid 部队 pos 随时间沿路径前移，到达前不结�
   // pve-0 在 (3,1)。派兵掠夺。
   const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
   const tq = (target.payload as any).q, tr = (target.payload as any).r;
-  const dist = hexDistance({ q: p.q, r: p.r }, { q: tq, r: tr });
+  const dist = hexDistanceWrapped(
+    { q: p.q, r: p.r }, { q: tq, r: tr },
+    app.config.constants.worldW, app.config.constants.worldH,
+  );
   assert.ok(dist >= 1, '目标应与出发点有距离');
 
   const raid = await send(app, 'movement.SendRaid', {

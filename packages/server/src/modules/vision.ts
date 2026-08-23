@@ -4,7 +4,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
 import { hexDistanceWrapped } from '../infra/hex.js';
 
-type TileSnapshot = { q: number; r: number; kind: string; refId?: string; name?: string; icon?: string };
+type TileSnapshot = { q: number; r: number; kind: string; refId?: string; name?: string; icon?: string; terrain?: 'plain' | 'forest' | 'hills' };
 interface VisionState { playerId: string; explored: Record<string, TileSnapshot>; }
 interface RevealReceipt { playerId: string; revealId: string; newlyRevealed: TileSnapshot[]; }
 interface Source { q: number; r: number; radius: number; }
@@ -25,6 +25,15 @@ export class VisionModule {
     this.commands.register('vision.GetObservers', (c) => this.getObservers(c));
   }
 
+  private async worldDimensions(): Promise<{ W: number; H: number }> {
+    const meta = await this.commands.send({ name: 'world.GetMeta', from: VisionModule.NAME, payload: {} });
+    const p = meta.payload as { worldW?: number; worldH?: number };
+    return {
+      W: Number(p.worldW) || this.config.constants.worldW || 41,
+      H: Number(p.worldH) || this.config.constants.worldH || 41,
+    };
+  }
+
   private async sourcesFor(playerId: string): Promise<Source[] | null> {
     const playerRes = await this.commands.send({ name: 'player.Get', from: VisionModule.NAME, payload: { playerId } });
     if (!playerRes.ok) return null;
@@ -41,7 +50,7 @@ export class VisionModule {
     const { playerId, q, r } = cmd.payload as { playerId: string; q: number; r: number };
     const sources = await this.sourcesFor(playerId);
     if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
-    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const { W, H } = await this.worldDimensions();
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
     const visible = (x: number, y: number) => sources.some((s) => hexDistanceWrapped({ q: x, r: y }, s, W, H) <= s.radius);
     if (visible(q, r)) return { ok: true, payload: { visibility: 'visible', unexploredDepth: 0 } };
@@ -59,7 +68,7 @@ export class VisionModule {
     const { playerId } = cmd.payload as { playerId: string };
     const sources = await this.sourcesFor(playerId);
     if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
-    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const { W, H } = await this.worldDimensions();
     const tiles: string[] = [];
     for (let r = 0; r < H; r++) {
       for (let q = 0; q < W; q++) {
@@ -77,8 +86,8 @@ export class VisionModule {
       const receipt = this.store.get<RevealReceipt>(RECEIPT_COLLECTION, receiptKey);
       if (receipt) return { ok: true, payload: { newlyRevealed: receipt.newlyRevealed } };
     }
-    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
-    const raw = await this.commands.send({ name: 'world.GetArea', from: VisionModule.NAME, payload: { cq: q, cr: r, full: true } });
+    const { W, H } = await this.worldDimensions();
+    const raw = await this.commands.send({ name: 'world.GetArea', from: VisionModule.NAME, payload: { cq: q, cr: r, full: true, includeEmpty: true } });
     if (!raw.ok) return { ok: false, payload: {}, reason: raw.reason };
     const nowTiles = new Map<string, TileSnapshot>();
     for (const tile of ((raw.payload as any)?.tiles ?? [])) nowTiles.set(`${tile.q},${tile.r}`, tile);
@@ -111,7 +120,7 @@ export class VisionModule {
     const { q, r } = cmd.payload as { q: number; r: number };
     const allRes = await this.commands.send({ name: 'player.ListAll', from: VisionModule.NAME, payload: {} });
     if (!allRes.ok) return { ok: true, payload: { playerIds: [] } };
-    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const { W, H } = await this.worldDimensions();
     const cityRadius = Math.max(0, Number(this.config.constants.raw.city_vision ?? 4));
     const playerIds: string[] = [];
     for (const player of ((allRes.payload as any).players ?? [])) {
@@ -128,7 +137,7 @@ export class VisionModule {
     const sources = await this.sourcesFor(playerId);
     if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
 
-    const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
+    const { W, H } = await this.worldDimensions();
     const current = new Map<string, TileSnapshot>();
     for (const t of tiles) current.set(`${t.q},${t.r}`, t);
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };

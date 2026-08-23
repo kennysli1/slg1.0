@@ -159,8 +159,17 @@ export function createGameApp(opts?: {
   // 启动时加载一次覆盖，灌进初始 config
   const initialOverrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
   let config = loadGameConfig(configDir, initialOverrides);
+  let configuredWorldW = config.constants.worldW;
+  let configuredWorldH = config.constants.worldH;
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
+  const existingWorldMeta = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
+  if (Number.isFinite(existingWorldMeta?.w) && Number.isFinite(existingWorldMeta?.h)) {
+    config = {
+      ...config,
+      constants: { ...config.constants, worldW: existingWorldMeta!.w!, worldH: existingWorldMeta!.h! },
+    };
+  }
   const bus = new EventBus();
   const commands = new CommandBus();
   const serialQueue = new KeyedSerialQueue();
@@ -300,6 +309,17 @@ export function createGameApp(opts?: {
 
   for (const module of modules) module.init();
 
+  /** 建立派生世界计划，并只补齐缺失的固定/生成 PvE；已有战损与重生状态不覆盖。 */
+  const ensureWorldPlan = (useConfiguredSize = false): void => {
+    const plan = world.setup(
+      useConfiguredSize ? configuredWorldW : config.constants.worldW,
+      useConfiguredSize ? configuredWorldH : config.constants.worldH,
+    );
+    for (const s of plan.pveSpawns) {
+      if (!store.get('pve', s.id)) pve.create(s.id, s.type, s.q, s.r);
+    }
+  };
+
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, now,
@@ -307,9 +327,7 @@ export function createGameApp(opts?: {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
     setupWorld() {
-      world.setup(config.constants.worldW, config.constants.worldH);
-      // PvE 目标点位由 config/pve_spawns.csv 决定
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+      ensureWorldPlan();
     },
     async syncWorldVillages() {
       let synced = 0, failed = 0;
@@ -335,12 +353,23 @@ export function createGameApp(opts?: {
       return { synced, failed };
     },
     resume() {
+      // 兼容既有 41×41 世界：尺寸取持久化 world_meta，只补派生计划中新缺失的 PvE。
+      ensureWorldPlan();
       for (const module of resumableModules) void module.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
       const overrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
-      const newConfig = loadGameConfig(configDir, overrides);
+      let newConfig = loadGameConfig(configDir, overrides);
+      configuredWorldW = newConfig.constants.worldW;
+      configuredWorldH = newConfig.constants.worldH;
+      const actualWorld = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
+      if (Number.isFinite(actualWorld?.w) && Number.isFinite(actualWorld?.h)) {
+        newConfig = {
+          ...newConfig,
+          constants: { ...newConfig.constants, worldW: actualWorld!.w!, worldH: actualWorld!.h! },
+        };
+      }
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
       for (const module of modules) module.setConfig(newConfig);
       // app 的世界重建/新村创建闭包也必须切到新配置，不能继续引用启动时的 config。
@@ -371,14 +400,12 @@ export function createGameApp(opts?: {
       if (!keepAccounts) {
         const n = store.all('player').length;
         for (const c of ACCOUNT_COLLECTIONS) store.clear(c);
-        world.setup(config.constants.worldW, config.constants.worldH);
-        for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+        ensureWorldPlan(true);
         return { accounts: n };
       }
 
       // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
-      world.setup(config.constants.worldW, config.constants.worldH);
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+      ensureWorldPlan(reassignSpots);
       player.rebuildVillages(reassignSpots);
       return { accounts: store.all('player').length };
     },

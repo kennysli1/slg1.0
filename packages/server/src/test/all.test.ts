@@ -63,3 +63,4 @@ import './diplomacy-movement.test.js';
 import './reputation.test.js';
 import './alchemy.test.js';
 import './vision-multivillage.test.js';
+import './world-generation.test.js';
