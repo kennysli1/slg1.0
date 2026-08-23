@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-08-14
+updated: 2026-08-24
 owner: server
 summary: 服务端事件定向推送与客户端按需刷新机制
 ---
@@ -135,6 +135,7 @@ push(PopulationChanged) → refreshAll → 重新 settle 结算 → emit Populat
 
 ## 5. 与具体模块的关系
 
+- 来袭预警：`movement.IncomingWarningChanged → IncomingWarningChanged` 只调用客户端 `refreshMovements()` 重拉 `ListMovements` / `ListPlayerMovements`，不做 `refreshAll()`，也不加入 `notifications.EVENT_MAP`。这是实时可见性 UI 状态，不是历史战报；真正的途中侦察结算使用持久化的 `movement.ScoutReport → ScoutReport`。
 - `贸易模块.md` §5/§9：贸易特有事件 `trade.CenterUpdated → TradeCenterUpdated` 与 `refreshTradeIfOpen()`。
 - `经济与金币模块.md` §4：`economy.CropDeficit → CropDeficit`（触发客户端减员提示，走默认 `refreshAll`）。
 - 任何新建筑/兵种详情页（如用户要求「以后都放中间」的居中抽屉）接入推送时，均按本文 §4 接线即可复用 `refreshXIfOpen` 模式。

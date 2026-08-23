@@ -31,7 +31,14 @@ const CLASS_BUDGET = { index: 300, reference: 400, design: Infinity };
 const DESIGN_CAP = 8;
 
 const REQUIRED_KEYS = ['class', 'status', 'updated', 'owner', 'summary'];
-const TODAY = new Date().toISOString().slice(0, 10);
+// 文档日期遵循开发机本地日历。toISOString() 使用 UTC，会在 UTC+ 时区的凌晨
+// 错把“今天”判成前一天，导致正确的 updated 日期无法通过提交闸门。
+const now = new Date();
+const TODAY = [
+  now.getFullYear(),
+  String(now.getMonth() + 1).padStart(2, '0'),
+  String(now.getDate()).padStart(2, '0'),
+].join('-');
 const CLASSES = ['index', 'reference', 'design'];
 const STATUSES = ['active', 'draft', 'archived'];
 const OWNERS = ['design', 'server', 'client', 'ops', 'art'];

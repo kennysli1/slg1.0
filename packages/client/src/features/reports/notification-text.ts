@@ -63,6 +63,24 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}被进攻结束（${mode}${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜建筑损坏：${damage || '无'}｜被抢：${loot || '无'}`;
     }
   } else if (event === 'ScoutReport') {
+    if (payload.context === 'incoming_intercept') {
+      const ownLosses = payload.side === 'attacker' ? payload.attackerLosses : payload.defenderLosses;
+      const enemyLosses = payload.side === 'attacker' ? payload.defenderLosses : payload.attackerLosses;
+      const ownLossText = Object.entries(ownLosses ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
+      const enemyLossText = Object.entries(enemyLosses ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
+      const at = payload.at ? `(${payload.at.q},${payload.at.r})` : '途中';
+      if (payload.side === 'defender') {
+        const enemyScouts = Object.entries(payload.attackerTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
+        return `${time}反侦察报告：来袭途中 ${at} 遭遇敌方侦察兵 ${enemyScouts}｜我方侦察兵损失 ${ownLossText}｜敌方损失 ${enemyLossText}`;
+      }
+      const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
+      const treasures = Array.isArray(payload.treasures)
+        ? payload.treasures.length > 0
+          ? payload.treasures.map((code: string) => treasureInfo(code)?.name ?? code).join('、')
+          : '未携带'
+        : '未识别（需侦察完胜）';
+      return `${time}途中侦察${payload.perfectVictory ? '完胜' : '报告'}：${at} 发现来袭兵力 ${troops}｜我方损失 ${ownLossText}｜敌方侦察兵损失 ${enemyLossText}｜宝物 ${treasures}`;
+    }
     const losses = Number(payload.attackerLosses ?? 0);
     const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
     if (payload.scoutType === 'scout_buildings') {

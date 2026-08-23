@@ -9,6 +9,7 @@ import { HexMap } from './HexMap.js';
 import { TargetPanel } from './TargetPanel.js';
 import { MarchList } from './MarchList.js';
 import { refreshMapArea } from '../../app/refresh.js';
+import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 export function MapScreen() {
   void selected.value;
@@ -24,6 +25,7 @@ export function MapScreen() {
       <HexMap />
 
       <aside class="map-tactical-stack" aria-label="地图战术面板">
+        <IncomingWarnings />
         {showPanel && <TargetPanel />}
         <MarchList />
       </aside>

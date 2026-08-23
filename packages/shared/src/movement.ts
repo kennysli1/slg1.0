@@ -6,7 +6,7 @@ export interface Hex {
 
 export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
-  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'ambush';
+  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'incoming_scout' | 'ambush';
 
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
@@ -21,6 +21,8 @@ export interface Movement {
   status: MovementStatus;
   targetId?: string;
   targetVillage?: string;
+  /** 途中侦察锁定的来袭行军 id；仅己方视图下发。 */
+  targetMovementId?: string;
   scoutType?: 'scout_resources' | 'scout_buildings';
   /** 玩家村战斗模式：掠夺或攻城。 */
   battleType?: 'raid' | 'siege' | 'ambush';
@@ -69,8 +71,43 @@ export interface MarchPointState {
   cap: number;
 }
 
+/** 侦察来袭成功后保存在该来袭行军上的最新情报。 */
+export interface IncomingIntelligence {
+  /** 侦察战结束后的来袭军当前兵种与数量。 */
+  troops: Record<string, number>;
+  /** 仅进攻侦察方完胜（零损失且有幸存者）时公开。 */
+  treasures?: string[];
+  scoutedAt: number;
+  perfectVictory: boolean;
+}
+
+/**
+ * 当前处于目标玩家视野内的来袭军。它是服务端按实时视野派生的临时快照，
+ * 不进入通知/战报；默认不含兵力和携带物。
+ */
+export interface IncomingWarning {
+  id: string;
+  type: 'raid' | 'attack';
+  battleType?: 'raid' | 'siege';
+  targetVillage: string;
+  targetVillageName: string;
+  fromVillage: string;
+  fromVillageName: string;
+  from: Hex;
+  to: Hex;
+  path: Hex[];
+  pos: Hex;
+  stepIndex: number;
+  perStepMs: number;
+  nextStepAt: number;
+  arriveAt: number;
+  intelligence?: IncomingIntelligence;
+}
+
 export interface ListMovementsPayload {
   movements: Movement[];
+  /** 只包含此刻仍在视野中的来袭军；离开视野后下一次快照立即消失。 */
+  incomingWarnings: IncomingWarning[];
   marchPoints: MarchPointState;
 }
 

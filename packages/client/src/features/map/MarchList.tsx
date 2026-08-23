@@ -33,6 +33,7 @@ const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   explore:   (_) => '探索返程',
   auto_explore: (_) => '自动探索',
   ambush:    (_) => '伏击军',
+  incoming_scout: (_) => '途中侦察',
 };
 
 async function doRecall(m: Movement): Promise<void> {

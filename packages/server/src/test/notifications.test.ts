@@ -67,7 +67,7 @@ test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
   assert.ok(Array.isArray(attackerReport.payload.rounds) && attackerReport.payload.rounds.length > 0, '战斗结束战报应包含逐轮回放');
   assert.equal(attackerReport.payload.rounds.at(-1).round, attackerReport.payload.rounds.length, '逐轮回放应按轮次连续记录');
   assert.ok(atkEvents.includes('MarchReturned'), `攻方应有 MarchReturned，实际: ${JSON.stringify(atkEvents)}`);
-  assert.ok(defEvents.includes('IncomingAttack'), `守方应有 IncomingAttack，实际: ${JSON.stringify(defEvents)}`);
+  assert.ok(!defEvents.includes('IncomingAttack'), `实时来袭预警不得写入战报，实际: ${JSON.stringify(defEvents)}`);
 });
 
 test('notifications: 超过上限时丢最旧条目', async () => {

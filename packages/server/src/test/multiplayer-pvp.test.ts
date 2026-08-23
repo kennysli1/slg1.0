@@ -93,7 +93,7 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
 
   let atkReport: any = null, defReport: any = null, incoming: any = null;
   app.bus.on('combat.BattleEnded', (e: any) => { if (e.payload.side === 'attacker') atkReport = e.payload; else defReport = e.payload; });
-  app.bus.on('movement.IncomingAttack', (e: any) => (incoming = e.payload));
+  app.bus.on('movement.IncomingWarningChanged', (e: any) => { if (e.payload.visible) incoming = e.payload; });
 
   const atk = await send(app, 'movement.SendAttack', {
     villageId: va, fromXY: { q: px(a.player), r: py(a.player) },
@@ -103,7 +103,7 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
 
   // 来袭告警改为进入守方视野后触发（非出征瞬间）
   await drain(app);
-  assert.ok(incoming, 'B 应在部队进入视野后收到来袭警报');
+  assert.ok(incoming, 'B 应在部队进入视野后收到实时来袭预警刷新');
   assert.ok(atkReport && defReport, '双方都应收到战报');
   assert.equal(atkReport.attackerWins, true);
 

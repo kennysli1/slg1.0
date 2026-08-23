@@ -552,7 +552,13 @@ export function HexMap() {
 
   // ─── march path + marker rendering ────────────────────────────────────────
   function buildMarchPaths() {
-    const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+    const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+    const incoming = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []).map((warning: any) => ({
+      ...warning,
+      type: 'incoming_warning',
+      status: 'marching',
+    }));
+    const moves: any[] = [...ownMoves, ...incoming];
     const paths: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
@@ -569,6 +575,8 @@ export function HexMap() {
         : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
         : m.type === 'auto_explore' ? 'explore'
+        : m.type === 'incoming_scout' ? 'incoming-scout'
+        : m.type === 'incoming_warning' ? 'incoming-warning'
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
         : 'return';
@@ -599,6 +607,7 @@ export function HexMap() {
         : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
         : m.type === 'auto_explore' ? '🔭'
+        : m.type === 'incoming_scout' ? '🔎'
         : '🏠';
       const t = m.type ?? 'return';
       markers.push(

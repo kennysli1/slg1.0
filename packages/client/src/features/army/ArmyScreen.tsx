@@ -28,6 +28,7 @@ import {
 } from '../../ui/index.js';
 import '../../styles/army.css';
 import { VillageList } from '../../shared/ui/VillageList.js';
+import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 export function ArmyScreen() {
   dataVersion.value; // 订阅快照刷新
@@ -44,6 +45,7 @@ export function ArmyScreen() {
   return (
     <div class="army-page">
       <VillageList />
+      <IncomingWarnings />
       <GarrisonSection army={army} />
       <TrainingCenterSection />
     </div>
