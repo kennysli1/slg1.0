@@ -9,7 +9,7 @@ import { useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
-import { Panel, Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
+import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
@@ -376,7 +376,7 @@ function categoryItems(state: any, type: TaskCategory): { active: any[]; offers:
   return { active, offers };
 }
 
-function TaskEntry({ task, offer, defaultOpen = false }: { task?: any; offer?: any; defaultOpen?: boolean }) {
+function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: any; defaultOpen?: boolean }) {
   const item = task ?? offer;
   if (!item) return null;
   const isOffer = !task;
@@ -406,6 +406,7 @@ function TaskEntry({ task, offer, defaultOpen = false }: { task?: any; offer?: a
 function TaskCategoryMenu({ type, state }: { type: TaskCategory; state: any }) {
   const { active, offers } = categoryItems(state, type);
   const count = active.length + offers.length;
+  if (count === 0) return null;
   return (
     <details class="task-menu task-menu--category" open={count > 0}>
       <summary>
@@ -413,12 +414,8 @@ function TaskCategoryMenu({ type, state }: { type: TaskCategory; state: any }) {
         <span class="task-menu-count">{count}</span>
       </summary>
       <div class="task-menu-body">
-        {count === 0
-          ? <Panel variant="flat" pad class="task-empty">暂无{categoryName(type)}。</Panel>
-          : <>
-            {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} defaultOpen />)}
-            {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} />)}
-          </>}
+        {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} />)}
+        {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} />)}
       </div>
     </details>
   );

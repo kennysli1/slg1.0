@@ -205,6 +205,43 @@ test('任务板：GetPlayerState 聚合玩家所有村庄并标注来源村', as
   assert.ok([capital, branch].includes(payload.active[0].villageId), '聚合任务应保留一个可执行的来源村');
 });
 
+test('支线接取：同一支线被一个村接取后从玩家其他村的列表移除', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: 'mvsideclaim', password: 'pass1', tribe: 'romans' });
+  assert.equal(reg.ok, true, reg.reason);
+  const player = (reg.payload as any).player;
+  const capital = player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: player.id });
+  const branch = (alloc.payload as any).villageId as string;
+  await app.createVillage(branch, 14, -10, '支线分城');
+  const attached = await send(app, 'player.AttachVillage', {
+    playerId: player.id, villageId: branch, q: 14, r: -10, name: '支线分城',
+  });
+  assert.equal(attached.ok, true, attached.reason);
+
+  // 模拟同一一次性支线因两个村分别满足触发条件而同时出现在两边。
+  for (const villageId of [capital, branch]) {
+    const state = app.store.get<any>('task', villageId) ?? {
+      villageId, completedMain: [], completedSide: [], abandonedSide: [],
+      active: {}, offered: [], offeredSide: [], firedTriggers: [],
+    };
+    state.offeredSide = ['s1'];
+    app.store.set('task', villageId, state);
+  }
+
+  const accepted = await send(app, 'task.Accept', { villageId: branch, code: 's1' });
+  assert.equal(accepted.ok, true, accepted.reason);
+  const capState = (await send(app, 'task.GetState', { villageId: capital })).payload as any;
+  const branchState = (await send(app, 'task.GetState', { villageId: branch })).payload as any;
+  assert.ok(!capState.offeredSide.some((item: any) => item.code === 's1'), '主城不应继续显示已被分城接取的支线');
+  assert.ok(!branchState.offeredSide.some((item: any) => item.code === 's1'), '接取村也不应继续显示 offer');
+  assert.ok(branchState.active.some((item: any) => item.code === 's1'), '支线实例应归接取村');
+
+  const board = (await send(app, 'task.GetPlayerState', { playerId: player.id })).payload as any;
+  assert.ok(board.villages.every((v: any) => !v.offeredSide.some((item: any) => item.code === 's1')),
+    '玩家任务板不应在任何村庄列表保留已接取支线');
+});
+
 test('任务归属：全局主线可在分城执行，奖励发给最后执行村；村庄区不重复显示', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', { name: 'mvtaskscope', password: 'pass1', tribe: 'romans' });
