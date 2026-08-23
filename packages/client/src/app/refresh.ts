@@ -8,7 +8,7 @@
  *  3) 标签页从后台切回 → 补一次；
  *  纯 UI 推进（资源数字/倒计时/人口外插）由 1 秒心跳本地完成，不访问服务器。
  */
-import { req, me, selectVillage, applyVillageRename } from '../api.js';
+import { req, me, selectVillage, applyMe, applyVillageRename } from '../api.js';
 import { errText } from '../shared/ui/text.js';
 import { worldW, worldH } from './config.js';
 import type { StoredNotification } from '@slg/shared';
@@ -25,6 +25,44 @@ import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyR
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
 let mapCenterLegacy: { q: number; r: number } | null = null;
+
+/**
+ * GM 可直接调整村庄坐标/名称；玩家快照不会主动推送这些字段。
+ * 地图区域中自己的村庄由 World 实时下发，因此每次完整刷新都用它校准本地村庄列表，
+ * 避免旧标签和旧坐标让玩家误以为两个村在同一格。
+ */
+function reconcileVillagesFromArea(areaPayload: any): void {
+  if (!me?.villages?.length) return;
+  const tiles = Array.isArray(areaPayload?.tiles) ? areaPayload.tiles : [];
+  const byId = new Map<string, { q: number; r: number; name?: string }>();
+  for (const tile of tiles) {
+    if (tile?.kind !== 'village' || typeof tile.refId !== 'string') continue;
+    if (tile.visibility === 'unexplored') continue;
+    const q = Number(tile.q), r = Number(tile.r);
+    if (Number.isFinite(q) && Number.isFinite(r)) byId.set(tile.refId, { q, r, name: typeof tile.name === 'string' ? tile.name : undefined });
+  }
+  let changed = false;
+  const villages = me.villages.map((v) => {
+    const tile = byId.get(v.id);
+    if (!tile) return v;
+    const next = {
+      ...v,
+      q: tile.q,
+      r: tile.r,
+      ...(tile.name ? { name: tile.name } : {}),
+    };
+    if (next.q !== v.q || next.r !== v.r || next.name !== v.name) changed = true;
+    return next;
+  });
+  if (!changed) return;
+  const current = villages.find((v) => v.id === me?.villageId);
+  applyMe({
+    ...me,
+    villages,
+    ...(current ? { q: current.q, r: current.r } : {}),
+  });
+}
+
 export function getMapCenter(): { q: number; r: number } | null {
   return mapCenter.value ?? mapCenterLegacy;
 }
@@ -62,6 +100,7 @@ export async function refreshAll(): Promise<void> {
       return;
     }
 
+    reconcileVillagesFromArea(area.payload);
     setCache({
       res: res.payload, vil: vil.payload, army: army.payload,
       area: area.payload, moves: moves.payload,

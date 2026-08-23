@@ -17,6 +17,9 @@ test('外交与行军模式：默认中立、选项由关系决定、显式宣�
   assert.equal((rel.payload as any).relation, 'neutral');
   const opts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: b.player.q, r: b.player.r });
   assert.deepEqual((opts.payload as any).modes.map((m: any) => m.mode), ['reinforce', 'scout', 'raid', 'attack']);
+  const staleCoords = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: a.player.q, r: a.player.r });
+  assert.equal((staleCoords.payload as any).q, b.player.q, '行军模式应返回 World 权威目标 q，而不是客户端旧坐标');
+  assert.equal((staleCoords.payload as any).r, b.player.r, '行军模式应返回 World 权威目标 r，而不是客户端旧坐标');
   const war = await send(app, 'diplomacy.DeclareWar', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal(war.ok, true);
   const hostile = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });

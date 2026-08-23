@@ -386,19 +386,31 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
 function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: string; onClose: () => void }) {
   const [options, setOptions] = useState<ModeOption[] | null>(null);
   const [choice, setChoice] = useState<ModeOption | null>(null);
+  const [resolvedBase, setResolvedBase] = useState(base);
   useEffect(() => {
     let live = true;
+    setResolvedBase(base);
     void req('GetMarchOptions', { q: base.q, r: base.r, kind, refId: base.refId || undefined })
-      .then((res) => { if (live && res.ok) setOptions((res.payload.modes ?? []) as ModeOption[]); })
+      .then((res) => {
+        if (!live || !res.ok) return;
+        const payload = res.payload as any;
+        setResolvedBase((prev) => ({
+          ...prev,
+          q: Number.isFinite(Number(payload.q)) ? Number(payload.q) : prev.q,
+          r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
+          name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
+        }));
+        setOptions((payload.modes ?? []) as ModeOption[]);
+      })
       .catch(() => { if (live) setOptions([]); });
     return () => { live = false; };
   }, [base.q, base.r, base.refId, kind]);
-  if (choice) return <ExpeditionWorkflow meta={{ ...base, mode: choice.mode, declareWar: choice.requiresDeclaration }} onClose={onClose} />;
+  if (choice) return <ExpeditionWorkflow meta={{ ...resolvedBase, mode: choice.mode, declareWar: choice.requiresDeclaration }} onClose={onClose} />;
   return (
     <Panel variant="gold" corners class="map-target-panel">
-      <WorkflowHeader meta={base} step={1} onClose={onClose} />
+      <WorkflowHeader meta={resolvedBase} step={1} onClose={onClose} />
       <div class="target-body expedition-body">
-        <section class="expedition-assessment"><div class="expedition-kicker">选择行军模式</div><div class="expedition-assessment-title">{base.name}</div><p>{options ? '请选择对该目标执行的行动。所有模式使用同一编队、宝物和确认流程。' : '正在读取外交关系与可用行动…'}</p></section>
+        <section class="expedition-assessment"><div class="expedition-kicker">选择行军模式</div><div class="expedition-assessment-title">{resolvedBase.name}</div><p>{options ? '请选择对该目标执行的行动。所有模式使用同一编队、宝物和确认流程。' : '正在读取外交关系与可用行动…'}</p></section>
         <div class="target-actions target-actions--management expedition-mode-options">
           {(options ?? []).map((option) => <Btn key={option.mode} variant={option.requiresDeclaration ? 'danger' : 'primary'} block onClick={() => setChoice(option)}>{option.label}</Btn>)}
         </div>
