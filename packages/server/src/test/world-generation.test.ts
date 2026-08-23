@@ -113,11 +113,19 @@ test('视野只向 visible/explored 格下发地貌，unexplored 不泄露', asy
   });
   assert.equal(registered.ok, true, registered.reason);
   const player = (registered.payload as any).player;
+  const legacyQ = (player.q + 10) % 96;
+  const legacyR = player.r;
+  app.store.set('vision', player.id, {
+    playerId: player.id,
+    explored: { [`${legacyQ},${legacyR}`]: { q: legacyQ, r: legacyR, kind: 'empty' } },
+  });
   const area = await app.commands.send({
     name: 'world.GetArea', from: 'test', payload: { cq: player.q, cr: player.r, r: 1, full: true, playerId: player.id },
   });
   assert.equal(area.ok, true, area.reason);
   const tiles = (area.payload as any).tiles as any[];
   assert.ok(tiles.some((t) => t.visibility === 'visible' && t.terrain));
+  assert.ok(tiles.some((t) => t.q === legacyQ && t.r === legacyR && t.visibility === 'explored' && t.terrain),
+    '旧探索快照缺 terrain 时必须从 World 确定性地貌补齐');
   assert.ok(tiles.some((t) => t.visibility === 'unexplored' && t.terrain === undefined));
 });
