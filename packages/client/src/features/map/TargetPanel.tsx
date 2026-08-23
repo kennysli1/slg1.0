@@ -559,13 +559,13 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
 }
 
 /** 驻扎军“行军”后的目标确认：兵力与宝物保持在原军中，不会重新扣兵或多占行军点。 */
-function GarrisonContinuation({ movementId, target, onClose }: {
-  movementId: string; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string }; onClose: () => void;
+function GarrisonContinuation({ movementId, movementType, target, onClose }: {
+  movementId: string; movementType?: 'garrison' | 'ambush'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string }; onClose: () => void;
 }) {
-  const mode: 'garrison' | 'explore' | 'raid' | 'attack' = target.kind === 'pve'
+  const mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush' = target.kind === 'pve'
     ? 'raid'
-    : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : 'garrison';
-  const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : '驻扎';
+    : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : movementType === 'ambush' ? 'ambush' : 'garrison';
+  const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : mode === 'ambush' ? '伏击' : '驻扎';
   const depth = mode === 'explore' ? unexploredDepth(target.q, target.r) : 0;
   const maxExploreDepth = rallypointLevel();
   const allowExplore = mode !== 'explore' || (depth >= 1 && depth <= maxExploreDepth);
@@ -573,29 +573,30 @@ function GarrisonContinuation({ movementId, target, onClose }: {
     const payload: Record<string, unknown> = { movementId, q: target.q, r: target.r, mode };
     if (mode === 'raid') payload.targetId = target.refId;
     if (mode === 'attack') payload.targetVillage = target.refId;
-    if (await act(req('ContinueGarrison', payload), { okToast: `驻扎军开始${label}` })) {
+    if (await act(req('ContinueGarrison', payload), { okToast: `${movementType === 'ambush' ? '伏击军' : '驻扎军'}开始${label}` })) {
       garrisonContinue.value = null;
       onClose();
     }
   }
   return (
     <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
-      <div class="target-head"><IconPlate icon={mode === 'garrison' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">选择行军模式</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消行军模式">×</button></div>
-      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>{label}至「{target.name}」</h3><p>{allowExplore ? '该军队会从当前驻扎地出发，保持所携部队和宝物，并继续占用原有的一个行军点。' : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
+      <div class="target-head"><IconPlate icon={mode === 'garrison' || mode === 'ambush' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">选择行军模式</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消行军模式">×</button></div>
+      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>{label}至「{target.name}」</h3><p>{allowExplore ? `该军队会从当前${movementType === 'ambush' ? '伏击' : '驻扎'}地出发，保持所携部队和宝物，并继续占用原有的一个行军点。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
     </Panel>
   );
 }
 
 /** 点击地图上己方驻扎军所在格：召回 / 续行，与行军列表一致。 */
 function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => void }) {
+  const ambush = move.type === 'ambush';
   const q = move.pos?.q ?? 0;
   const r = move.pos?.r ?? 0;
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <div class="target-head">
-        <IconPlate icon="pve_bandits" label="野外驻扎" size="sm" plate="gold" />
+        <IconPlate icon="pve_bandits" label={ambush ? '野外伏击' : '野外驻扎'} size="sm" plate="gold" />
         <div class="target-heading-copy">
-          <div class="target-title">己方驻扎军</div>
+          <div class="target-title">己方{ambush ? '伏击' : '驻扎'}军</div>
           <div class="target-coord">({q},{r})</div>
         </div>
         <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
@@ -603,16 +604,16 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
       <div class="target-body expedition-body">
         <section class="expedition-assessment">
           <div class="expedition-kicker">驻扎中</div>
-          <p>该格有你的驻扎军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
+          <p>该格有你的{ambush ? '伏击' : '驻扎'}军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
         </section>
         <div class="target-foot expedition-foot expedition-foot--split">
           <Btn onClick={async () => {
-            if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: '驻扎军开始返程' })) onClose();
+            if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: `${ambush ? '伏击军' : '驻扎军'}开始返程` })) onClose();
           }}>召回</Btn>
           <Btn variant="primary" onClick={() => {
-            garrisonContinue.value = { movementId: move.id };
+            garrisonContinue.value = { movementId: move.id, movementType: ambush ? 'ambush' : 'garrison' };
             selected.value = null;
-            showToast('请在地图上选择驻扎军的下一处行军目标');
+            showToast(`请在地图上选择${ambush ? '伏击军' : '驻扎军'}的下一处行军目标`);
             onClose();
           }}>选择行军模式</Btn>
         </div>
@@ -666,11 +667,12 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
 }
 
 /** 驻扎军选择行军模式后，在地图上点选下一处目标。 */
-function GarrisonWaitPanel({ onCancel }: { onCancel: () => void }) {
+function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garrison' | 'ambush'; onCancel: () => void }) {
+  const ambush = movementType === 'ambush';
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <div class="target-head">
-        <IconPlate icon="pve_bandits" label="行军模式" size="sm" plate="gold" />
+        <IconPlate icon="pve_bandits" label={ambush ? '伏击模式' : '驻扎模式'} size="sm" plate="gold" />
         <div class="target-heading-copy">
           <div class="target-title">选择下一处目标</div>
           <div class="target-coord">点击地图上的空地、野怪或玩家村庄</div>
@@ -678,7 +680,7 @@ function GarrisonWaitPanel({ onCancel }: { onCancel: () => void }) {
         <button type="button" class="target-close" onClick={onCancel} aria-label="取消行军模式">×</button>
       </div>
       <div class="target-body expedition-body">
-        <p class="expedition-modal-copy">编队与宝物保持在原驻扎军中，不会重新扣兵或多占行军点。</p>
+        <p class="expedition-modal-copy">编队与宝物保持在原{ambush ? '伏击' : '驻扎'}军中，不会重新扣兵或多占行军点。</p>
         <div class="target-foot expedition-foot">
           <Btn onClick={onCancel}>取消选择</Btn>
         </div>
@@ -693,7 +695,7 @@ export function TargetPanel() {
   const sel = selected.value;
   const pending = garrisonContinue.value;
   if (!me) return null;
-  if (pending && !sel) return <GarrisonWaitPanel onCancel={() => { garrisonContinue.value = null; }} />;
+  if (pending && !sel) return <GarrisonWaitPanel movementType={pending.movementType} onCancel={() => { garrisonContinue.value = null; }} />;
   if (!sel) return null;
 
   const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
@@ -715,7 +717,7 @@ export function TargetPanel() {
     return <OwnStationedPanel move={stationed} onClose={clearSelection} />;
   }
 
-  if (pending) return <GarrisonContinuation movementId={pending.movementId} target={sel} onClose={cancelAll} />;
+  if (pending) return <GarrisonContinuation movementId={pending.movementId} movementType={pending.movementType} target={sel} onClose={cancelAll} />;
   if (sel.kind === 'enemy_army') {
     return <EnemyArmyPanel sel={sel} onClose={clearSelection} />;
   }

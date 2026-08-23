@@ -31,7 +31,7 @@ const log = makeLogger('movement');
  *    战斗结束 Combat 发 `combat.BattleEnded`，本模块据此安排幸存者带战利品返程。
  *  - 坐标对 Combat 为不透明透传（字段名 fromXY/toXY/targetXY 沿用，值为 {q,r}）。
  *
- * 支持类型：raid(打PvE)、attack(打玩家村)、scout(侦察玩家村)、return(返程)、found(拓荒建村)、transport(村间运输)、garrison(野外驻扎)、explore(探索后返程)。
+ * 支持类型：raid(打PvE)、attack(打玩家村)、scout(侦察玩家村)、return(返程)、found(拓荒建村)、transport(村间运输)、garrison(野外驻扎)、ambush(野外伏击)、explore(探索后返程)。
  */
 
 interface MovementRecord {
@@ -864,13 +864,13 @@ export class MovementModule {
     return { ok: true, payload: { id } };
   }
 
-  /** 让已驻扎军继续走向新坐标，可选择驻扎、探索、掠夺或攻城；不再扣兵也不增加行军点。 */
+  /** 让已驻扎军继续走向新坐标，可选择保持伏击、驻扎、探索、掠夺或攻城；不再扣兵也不增加行军点。 */
   private async continueGarrison(cmd: Command): Promise<CommandResult> {
     const { villageId, movementId, q, r, mode, targetId, targetVillage } = cmd.payload as {
       villageId: string; movementId: string; q: number; r: number; mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush'; targetId?: string; targetVillage?: string;
     };
     const mv = this.load(movementId);
-    if (!mv || mv.fromVillage !== villageId || mv.type !== 'garrison' || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
+    if (!mv || mv.fromVillage !== villageId || (mv.type !== 'garrison' && mv.type !== 'ambush') || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
     const toXY = wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     if (toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
     if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack') {

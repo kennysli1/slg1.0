@@ -106,7 +106,7 @@ export function MarchList() {
                 await act(req('RecallGarrison', { movementId: m.id }), { okToast: '驻扎军开始返程' });
               }}>召回</Btn>
               <Btn size="sm" variant="primary" onClick={() => {
-                garrisonContinue.value = { movementId: m.id };
+                garrisonContinue.value = { movementId: m.id, movementType: type === 'ambush' ? 'ambush' : 'garrison' };
                 selected.value = null;
                 showToast('请在地图上选择驻扎军的下一处目标');
               }}>行军</Btn>

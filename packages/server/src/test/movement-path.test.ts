@@ -294,6 +294,44 @@ test('未探索格只能探索：1级集结点可探索一格深，抵达后返�
   assert.equal((visible.payload as any).visibility, 'explored', '行军视野覆盖过的目标格应保留为已探索');
 });
 
+test('伏击军续行：从已驻扎伏击点出发仍保持 ambush 类型', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '伏击续行', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 30 });
+  const firstTarget = { q: p.q + 2, r: p.r + 2 };
+  const nextTarget = { q: p.q + 4, r: p.r + 3 };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...firstTarget, radius: 0 });
+  await send(app, 'vision.Reveal', { playerId: p.id, ...nextTarget, radius: 0 });
+
+  const sent = await send(app, 'movement.SendAmbush', { villageId: p.villageId, ...firstTarget, troops: { legionnaire: 20 } });
+  assert.equal(sent.ok, true, `伏击派遣应成功: ${sent.reason ?? ''}`);
+  const id = (sent.payload as any).id as string;
+  let current: any;
+  for (let i = 0; i < 20; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    current = movements(app).find((m) => m.id === id);
+    if (current?.status === 'stationed') break;
+  }
+  assert.equal(current?.status, 'stationed', '伏击军应先在第一处目标驻扎');
+
+  const continued = await send(app, 'movement.ContinueGarrison', {
+    villageId: p.villageId, movementId: id, ...nextTarget, mode: 'ambush',
+  });
+  assert.equal(continued.ok, true, `伏击军续行应成功: ${continued.reason ?? ''}`);
+  current = movements(app).find((m) => m.id === id);
+  assert.equal(current?.type, 'ambush', '伏击军续行不能退化为普通驻扎');
+  assert.equal(current?.status, 'marching', '续行后应重新进入行军状态');
+
+  for (let i = 0; i < 20; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    current = movements(app).find((m) => m.id === id);
+    if (current?.status === 'stationed') break;
+  }
+  assert.equal(current?.status, 'stationed', '续行到第二处目标后仍应进入驻扎状态');
+  assert.deepEqual(current?.pos, current?.toXY, '续行后的伏击点应是第二处目标');
+});
+
 test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均返城', async () => {
   const app = freshApp();
   assert.equal(app.config.constants.ambushAttackBonus, 0.5, '伏击攻击加成应来自 GM 常量');
