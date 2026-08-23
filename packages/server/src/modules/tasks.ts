@@ -331,6 +331,38 @@ export class TasksModule {
     return ids.map((storageVillageId) => ({ storageVillageId, state: this.ensureState(storageVillageId) }));
   }
 
+  /** 返回玩家名下的所有村庄；旧档或测试没有归属索引时至少保留调用村。 */
+  private playerVillageIds(villageId: string): string[] {
+    const owner = this.villageOwner(villageId);
+    const ids = owner ? this.playerVillages(owner) : [];
+    return [...new Set([...ids, villageId])];
+  }
+
+  /** 一个任务在玩家维度实际使用的存储村集合（global 任务通常只会得到主城锚点）。 */
+  private playerTaskStorageIds(villageId: string, code: string): string[] {
+    return [...new Set(this.playerVillageIds(villageId).map((id) => this.storageVillageForQuest(id, code)))];
+  }
+
+  /** 一次性支线只允许玩家名下一个村持有；防止另一村重新解锁或保留旧列表。 */
+  private sideClaimedByPlayer(villageId: string, code: string): boolean {
+    return this.playerTaskStorageIds(villageId, code).some((storageVillageId) => {
+      const state = this.ensureState(storageVillageId);
+      return Boolean(state.active[code])
+        || state.completedSide.includes(code)
+        || state.abandonedSide.includes(code);
+    });
+  }
+
+  /** 接取支线时清除玩家其他村仍显示的同一可接取项。 */
+  private clearPlayerSideOffers(villageId: string, code: string): void {
+    for (const storageVillageId of this.playerTaskStorageIds(villageId, code)) {
+      const state = this.ensureState(storageVillageId);
+      if (!state.offeredSide.includes(code)) continue;
+      state.offeredSide = state.offeredSide.filter((item) => item !== code);
+      this.store.set(COLLECTION, storageVillageId, state);
+    }
+  }
+
   // ── 命令：GetState ──
   private getState(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
@@ -406,7 +438,11 @@ export class TasksModule {
       s.offered = s.offered.filter((c) => c !== code);
     } else if (q.type === 'side') {
       if (!s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
-      s.offeredSide = s.offeredSide.filter((c) => c !== code);
+      if (this.sideClaimedByPlayer(villageId, code)) {
+        return { ok: false, payload: {}, reason: 'already_claimed' };
+      }
+      // 先从所有村庄移除 offer，再异步生成任务营地，避免同一玩家多村重复接取。
+      this.clearPlayerSideOffers(villageId, code);
     } else {
       // 主线自动激活，不走接取
       return { ok: false, payload: {}, reason: 'main_auto_activated' };
@@ -837,6 +873,7 @@ export class TasksModule {
       if (s.completedSide.includes(q.code)) continue;
       if (s.abandonedSide.includes(q.code)) continue; // 放弃过 → 永久不再出现
       if (s.active[q.code]) continue;
+      if (this.sideClaimedByPlayer(villageId, q.code)) continue;
       if (s.offeredSide.includes(q.code)) continue;
       if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(villageId, q.requires)) {
         s.offeredSide.push(q.code);

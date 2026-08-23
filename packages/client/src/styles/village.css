@@ -1083,7 +1083,7 @@
   padding: var(--s-2);
 }
 .task-menu--task {
-  border-style: dashed;
+  border: 0;
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--c-panel-2) 75%, black);
 }
