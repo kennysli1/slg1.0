@@ -10,3 +10,8 @@
 8,bone_king,骷髅王营地,pve_bone_king,86400,28000,28000,20000,14000
 99,task_camp,任务营地,quest_camp,999999,0,0,0,0
 100,happy_village,幸福村,pve_happy,999999,200,200,200,100
+101,royal_capital,王都,pve_fortress,86400,30000,30000,30000,30000
+102,royal_fief_ne,东北封地,pve_fortress,43200,12000,12000,12000,12000
+103,royal_fief_se,东南封地,pve_fortress,43200,12000,12000,12000,12000
+104,royal_fief_sw,西南封地,pve_fortress,43200,12000,12000,12000,12000
+105,royal_fief_nw,西北封地,pve_fortress,43200,12000,12000,12000,12000

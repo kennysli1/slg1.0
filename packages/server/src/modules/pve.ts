@@ -61,6 +61,7 @@ export class PveModule {
   init(): void {
     this.normalizeCoords();
     this.commands.register('pve.GetTarget', (c) => this.getTarget(c));
+    this.commands.register('pve.ListTargets', () => this.listTargets());
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
     // 任务模块运行时生成/移除任务营地（内部命令）
@@ -165,6 +166,19 @@ export class PveModule {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
     return { ok: true, payload: { ...s } };
+  }
+
+  /** 内部目录：供王国等系统从地图已有普通 PvE 中选择目标，不暴露守军详情给客户端。 */
+  private listTargets(): CommandResult {
+    return {
+      ok: true,
+      payload: {
+        targets: this.store.all<PveState>(COLLECTION).map((s) => ({
+          id: s.id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
+          task: !!s.task, noRespawn: !!s.noRespawn,
+        })),
+      },
+    };
   }
 
   /** 给 Movement/Combat：当前守军快照。 */

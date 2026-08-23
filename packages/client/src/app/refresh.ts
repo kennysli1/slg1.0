@@ -21,6 +21,7 @@ import {
   techTree, researchState, putBattle, dropBattle, modals, tab,
   setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, mapAreaStale,
   beginVillageSwitch, endVillageSwitch, patchForeignArmy, dropForeignArmy,
+  kingdomState,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
@@ -82,7 +83,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy] = await Promise.all([
+    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom] = await Promise.all([
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
@@ -95,6 +96,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
       req('ListTreasures').catch(() => ({ ok: false } as any)),
       req('GetReputation').catch(() => ({ ok: false } as any)),
       req('GetAlchemy').catch(() => ({ ok: false } as any)),
+      req('GetKingdomState').catch(() => ({ ok: false } as any)),
     ]);
 
     const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
@@ -113,7 +115,9 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
       treasures: treasures.ok ? treasures.payload : null,
       reputation: reputation.ok ? reputation.payload : null,
       alchemy: alchemy.ok ? alchemy.payload : null,
+      kingdom: kingdom.ok ? kingdom.payload : null,
     });
+    kingdomState.value = kingdom.ok ? kingdom.payload : null;
     if (area.ok) mapAreaStale.value = false;
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();
@@ -170,6 +174,14 @@ export async function switchVillage(villageId: string): Promise<{ ok: boolean; e
 export async function reloadPlayerTasks(): Promise<void> {
   const taskRes = await req('task.GetPlayerState').catch(() => null);
   if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
+}
+
+export async function reloadKingdom(): Promise<void> {
+  const result = await req('GetKingdomState').catch(() => null);
+  if (!result?.ok) return;
+  kingdomState.value = result.payload;
+  setCache({ ...getCache(), kingdom: result.payload });
+  bumpData();
 }
 
 /**
@@ -368,6 +380,7 @@ export function handlePush(event: string, payload: any): void {
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
+  if (event === 'KingdomUpdated') { void reloadKingdom(); return; }
 
   // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野
   if (event === 'MarchStep') {

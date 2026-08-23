@@ -519,6 +519,24 @@ export interface TradeCenterLevel {
   npcStoredRefreshes: number;
 }
 
+export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure';
+
+/** 议会厅可购买服务；所有价格、门槛、数量与延迟来自 kingdom_services.csv。 */
+export interface KingdomServiceDef {
+  id: number;
+  code: string;
+  name: string;
+  category: KingdomServiceCategory;
+  minCouncilLevel: number;
+  reputationCost: number;
+  unitCode?: string;
+  unitCount: number;
+  resources: Record<string, number>;
+  treasureCode?: string;
+  delaySec: number;
+  desc: string;
+}
+
 // ── 科研系统 ──
 
 export type TechBranch = 'military' | 'production' | 'social';
@@ -579,6 +597,8 @@ export interface GameConfig {
   mercCamp: Record<number, MercCampLevel>;
   /** 贸易中心逐级参数（trade_center.csv）：level → 参数。 */
   tradeCenter: Record<number, TradeCenterLevel>;
+  /** 议会厅服务目录（kingdom_services.csv）：code → 服务定义。 */
+  kingdomServices: Record<string, KingdomServiceDef>;
   /** 兵种特性表（unit_traits.csv），按 code 索引。 */
   unitTraits: Record<string, UnitTraitDef>;
   pveTemplates: Record<string, PveTemplate>;
@@ -878,7 +898,13 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   }
 
   // PvE：主表 + 守军表 + 分布点，三表用数字目标ID互相引用，解析回 code
-  const pveRows = loadCsv(p('pve_targets.csv'));
+  let pveRows = loadCsv(p('pve_targets.csv'));
+  if (overrides?.pve_targets) {
+    pveRows = mergeOverridesIntoRows(pveRows, {
+      file: 'pve_targets.csv', key: 'id',
+      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop'],
+    }, overrides.pve_targets);
+  }
   assertUniqueRows(pveRows, 'pve_targets.csv');
   const pveTemplates: Record<string, PveTemplate> = {};
   const pveIdToCode = new Map<number, string>();
@@ -890,7 +916,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
     };
   }
-  for (const r of loadCsv(p('pve_defenders.csv'))) {
+  let pveDefenderRows = loadCsv(p('pve_defenders.csv'));
+  if (overrides?.pve_defenders) {
+    pveDefenderRows = mergeOverridesIntoRows(pveDefenderRows, {
+      file: 'pve_defenders.csv', keyComposite: ['targetId','unitCode'],
+      numeric: ['count','meleeAtk','rangedAtk','meleeDef','rangedDef','carry'],
+    }, overrides.pve_defenders);
+  }
+  for (const r of pveDefenderRows) {
     const code = pveIdToCode.get(num(r.targetId));
     const tpl = code ? pveTemplates[code] : undefined;
     if (!tpl) throw new Error(`pve_defenders.csv targetId=${r.targetId} 不在 pve_targets.csv`);
@@ -910,6 +943,32 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     type: pveIdToCode.get(num(r.targetId)) ?? r.targetId, // 数字目标ID → code
     q: num(r.q), r: num(r.r),
   }));
+
+  let kingdomServiceRows = loadCsv(p('kingdom_services.csv'));
+  assertUniqueRows(kingdomServiceRows, 'kingdom_services.csv');
+  if (overrides?.kingdom_services) {
+    kingdomServiceRows = mergeOverridesIntoRows(kingdomServiceRows, {
+      file: 'kingdom_services.csv', key: 'id',
+      numeric: ['minCouncilLevel','reputationCost','unitCount','wood','clay','iron','crop','gold','delaySec'],
+    }, overrides.kingdom_services);
+  }
+  const kingdomServices: Record<string, KingdomServiceDef> = {};
+  for (const r of kingdomServiceRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    kingdomServices[code] = {
+      id: num(r.id), code, name: r.name,
+      category: r.category as KingdomServiceCategory,
+      minCouncilLevel: Math.max(1, num(r.minCouncilLevel, 1)),
+      reputationCost: Math.max(0, num(r.reputationCost)),
+      unitCode: r.unitCode?.trim() || undefined,
+      unitCount: Math.max(0, Math.floor(num(r.unitCount))),
+      resources: { wood: num(r.wood), clay: num(r.clay), iron: num(r.iron), crop: num(r.crop), gold: num(r.gold) },
+      treasureCode: r.treasureCode?.trim() || undefined,
+      delaySec: Math.max(0, num(r.delaySec)),
+      desc: r.desc ?? '',
+    };
+  }
 
   // 全局常量表
   const raw: Record<string, number | boolean | string> = {};
@@ -1277,7 +1336,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, treasures, research, academy, quests, questGraph, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, quests, questGraph, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;
@@ -1301,6 +1360,18 @@ export function validateGameConfig(config: GameConfig): void {
   const errors: string[] = [];
   const resourceKeys = new Set(config.resources.map((r) => r.key));
   const knownTribes = new Set(['romans', 'gauls', 'teutons']);
+
+  for (const service of Object.values(config.kingdomServices)) {
+    if (!['reinforcement', 'attack', 'supplies', 'treasure'].includes(service.category)) {
+      errors.push(`kingdom_services.csv[${service.code}] category 非法：${service.category}`);
+    }
+    if ((service.category === 'reinforcement' || service.category === 'attack') && (!service.unitCode || !config.units[service.unitCode])) {
+      errors.push(`kingdom_services.csv[${service.code}] 兵种 ${service.unitCode ?? '(空)'} 不在 units.csv`);
+    }
+    if (service.category === 'treasure' && (!service.treasureCode || !config.treasures[service.treasureCode])) {
+      errors.push(`kingdom_services.csv[${service.code}] 宝物 ${service.treasureCode ?? '(空)'} 不在 treasures.csv`);
+    }
+  }
 
   // resources：必须含 economy 依赖的 4 种结构字段
   for (const need of ['wood', 'clay', 'iron', 'crop']) {

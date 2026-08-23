@@ -112,6 +112,15 @@ const ERR_MSG: Record<string, string> = {
   target_already_explored: '该格已被探索，请改用驻扎、掠夺或攻城命令',
   explore_too_deep: '目标未探索深度超过集结点允许范围；升级集结点后再试',
   vision_unavailable: '无法确认地图视野，请稍后重试',
+  insufficient_reputation: '声望不足，无法购买该王国服务',
+  council_level_too_low: '议会厅等级不足',
+  kingdom_service_not_found: '王国服务不存在或配置已更新',
+  kingdom_attack_target_required: '请先选择王国军队的攻击目标',
+  cannot_attack_kingdom_landmark: '王国军队不会攻击王都或封地',
+  kingdom_attack_target_unavailable: '该目标不接受王国代打服务',
+  kingdom_task_not_submittable: '当前没有可上贡的王国任务',
+  kingdom_task_not_ready: '王国任务目标尚未完成',
+  kingdom_task_expired: '王国任务已经过期',
 };
 
 /** 把服务器错误码翻译成中文，处理带后缀的码（insufficient:wood、insufficient_troops:xx）。 */

@@ -26,6 +26,20 @@ const PVE_TYPES = ['rats', 'wolves', 'bandits', 'mercenaries', 'barbarians', 'fo
 const PVE_WEIGHTS = [28, 20, 14, 9, 6, 4, 2, 1] as const;
 const PLAN_CACHE = new Map<string, GeneratedWorldPlan>();
 
+/** 王都与四封地的确定性锚点。中心/象限位置随世界尺寸变化，比例由 GM 常量控制。 */
+export function kingdomLandmarkAnchors(w: number, h: number, offsetRatio = 0.25): WorldAnchor[] {
+  const cq = Math.floor(w / 2), cr = Math.floor(h / 2);
+  const oq = Math.max(1, Math.round(w * Math.max(0.05, Math.min(0.45, offsetRatio))));
+  const or = Math.max(1, Math.round(h * Math.max(0.05, Math.min(0.45, offsetRatio))));
+  return [
+    { id: 'kingdom-capital', type: 'royal_capital', q: cq, r: cr },
+    { id: 'kingdom-fief-ne', type: 'royal_fief_ne', q: cq + oq, r: cr - or },
+    { id: 'kingdom-fief-se', type: 'royal_fief_se', q: cq + oq, r: cr + or },
+    { id: 'kingdom-fief-sw', type: 'royal_fief_sw', q: cq - oq, r: cr + or },
+    { id: 'kingdom-fief-nw', type: 'royal_fief_nw', q: cq - oq, r: cr - or },
+  ].map((anchor) => ({ ...anchor, ...wrapHex(anchor, w, h) }));
+}
+
 function hash32(text: string): number {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
