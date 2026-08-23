@@ -99,6 +99,12 @@ test('跨村地图视野：切换当前村不应丢失其他己方军队视野',
   const branchView = (areaAtBranch.payload as any).tiles.find((t: any) => t.q === target!.q && t.r === target!.r);
   assert.equal(branchView?.visibility, 'visible', '分城地图也必须保留全部己方军队视野');
 
+  const playerMoves = await gw.handleRequest(request('ListPlayerMovements', {}, 'player-moves'), session);
+  assert.equal(playerMoves.ok, true, playerMoves.error?.msg);
+  const listed = (playerMoves.payload as any).movements.find((m: any) => m.id === movementId);
+  assert.equal(listed?.fromVillage, branch, '玩家级地图军队快照必须标出军队来源村庄');
+  assert.equal(listed?.status, 'stationed');
+
   // 避免“只看到了当前村自身”的假阳性：目标必须确实不在任一城池默认视野内。
   assert.ok(hexDistanceWrapped(target!, { q: player.q, r: player.r }, W, H) > 4);
   assert.ok(hexDistanceWrapped(target!, branchXY!, W, H) > 4);

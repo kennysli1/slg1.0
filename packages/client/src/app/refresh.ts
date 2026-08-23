@@ -82,7 +82,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, pop, treasures, reputation, alchemy] = await Promise.all([
+    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy] = await Promise.all([
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
@@ -90,13 +90,14 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
         ? req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true })
         : Promise.resolve({ ok: false, skipped: true } as any),
       req('ListMovements'),
+      req('ListPlayerMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
       req('ListTreasures').catch(() => ({ ok: false } as any)),
       req('GetReputation').catch(() => ({ ok: false } as any)),
       req('GetAlchemy').catch(() => ({ ok: false } as any)),
     ]);
 
-    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves].find((x) => !x.ok);
+    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
     if (failed) {
       const code = failed.error?.code ?? 'failed';
       if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
@@ -108,7 +109,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     setCache({
       ...getCache(),
       res: res.payload, vil: vil.payload, army: army.payload,
-      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload,
+      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload, playerMoves: playerMoves.payload,
       treasures: treasures.ok ? treasures.payload : null,
       reputation: reputation.ok ? reputation.payload : null,
       alchemy: alchemy.ok ? alchemy.payload : null,
@@ -233,8 +234,8 @@ function applyPopPayload(p: any, merge = false): void {
   });
 }
 
-function pushReport(line: string, kind: ReportKind = 'info'): void {
-  addReport(line, kind);
+function pushReport(line: string, kind: ReportKind = 'info', details?: Record<string, any>): void {
+  addReport(line, kind, Date.now(), details);
   bumpReports();
 }
 
@@ -314,7 +315,10 @@ export async function hydrateReports(): Promise<void> {
     const seeded: StoredReport[] = [];
     for (const n of list) {
       const text = notificationText(n.event, n.payload);
-      if (text) seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts });
+      if (text) {
+        const details = n.event === 'BattleStarted' || n.event === 'BattleEnded' ? n.payload : undefined;
+        seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts, ...(details ? { details } : {}) });
+      }
     }
     seedReports(seeded);
     bumpReports();
@@ -327,7 +331,10 @@ export async function hydrateReports(): Promise<void> {
 export function handlePush(event: string, payload: any): void {
   // 战报文案 + 语义分类（分类来自事件名，不靠猜文案）
   const text = notificationText(event, payload);
-  if (text) pushReport(text, notificationKind(event, payload));
+  if (text) {
+    const details = event === 'BattleStarted' || event === 'BattleEnded' ? payload : undefined;
+    pushReport(text, notificationKind(event, payload), details);
+  }
 
   // 战斗实时快照
   if (event === 'BattleTick' || event === 'BattleStarted') putBattle(payload);

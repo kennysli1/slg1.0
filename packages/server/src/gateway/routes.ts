@@ -225,6 +225,15 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
+      SendAutoExplore: {
+        command: 'movement.SendAutoExplore', ownVillage: true, needAuth: true,
+        schema: {
+          q: { type: 'integer', min: -100, max: 100 },
+          r: { type: 'integer', min: -100, max: 100 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
       StopMarch: {
         command: 'movement.StopMarch', ownVillage: true, needAuth: true,
         schema: { movementId: { type: 'string', minLen: 1, maxLen: 64 } },
@@ -253,6 +262,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
+      ListPlayerMovements: { command: 'movement.ListPlayer', needAuth: true, injectPlayerId: true, schema: {} },
       ListForeign: { command: 'movement.ListForeign', needAuth: true, injectPlayerId: true, schema: {} },
     },
     eventPushMap: {
@@ -264,6 +274,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.Garrisoned': 'Garrisoned',
       'movement.GarrisonRecalled': 'GarrisonRecalled',
       'movement.Explored': 'Explored',
+      'movement.AutoExploreStopped': 'AutoExploreStopped',
       'movement.ScoutReport': 'ScoutReport',
       'movement.VisionUpdated': 'VisionUpdated',
       'movement.Recalled': 'MarchRecalled',

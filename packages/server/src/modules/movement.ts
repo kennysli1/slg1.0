@@ -36,7 +36,7 @@ const log = makeLogger('movement');
 
 interface MovementRecord {
   id: string;
-  type: 'raid' | 'attack' | 'scout' | 'return' | 'found' | 'transport' | 'caravan' | 'garrison' | 'explore' | 'ambush';
+  type: 'raid' | 'attack' | 'scout' | 'return' | 'found' | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'ambush';
   /** 战斗类型：玩家村 raid=掠夺、siege=攻城；ambush=伏击；PvE/旧存档为空。 */
   battleType?: 'raid' | 'siege' | 'ambush';
   fromVillage: string;
@@ -84,6 +84,13 @@ interface MovementRecord {
   status: 'marching' | 'paused' | 'stationed' | 'stopped';
   /** 驻扎命令原本指定的落点；若落点后来被占据，部队会停在前一格而保留此记录供 UI 说明。 */
   requestedXY?: Hex;
+  /** 自动探索的终止信息；返程军保留该字段以便断线恢复后仍能说明返程原因。 */
+  autoExplore?: {
+    reason?: 'pve' | 'village' | 'foreign_army' | 'path_end';
+    foundAt?: Hex;
+    foundName?: string;
+    pendingReveal?: { revealId: string; q: number; r: number; radius: number };
+  };
   /**
    * 步进令牌：每次登记"下一格"任务时自增并记录。step 回调携带登记时的令牌，
    * 只有令牌匹配才执行——作废因相遇/暂停而遗留的过期定时任务，防止重复推进。
@@ -136,6 +143,7 @@ export class MovementModule {
     this.commands.register('movement.SendGarrison', (c) => this.sendGarrison(c));
     this.commands.register('movement.SendAmbush', (c) => this.sendAmbush(c));
     this.commands.register('movement.SendExplore', (c) => this.sendExplore(c));
+    this.commands.register('movement.SendAutoExplore', (c) => this.sendAutoExplore(c));
     this.commands.register('movement.StopMarch', (c) => this.stopMarch(c));
     this.commands.register('movement.ResumeMarch', (c) => this.resumeMarch(c));
     this.commands.register('movement.RecallMarch', (c) => this.recallMarch(c));
@@ -143,6 +151,7 @@ export class MovementModule {
     this.commands.register('movement.ContinueGarrison', (c) => this.continueGarrison(c));
     this.commands.register('movement.SendCaravan', (c) => this.sendCaravan(c));
     this.commands.register('movement.List', (c) => this.list(c));
+    this.commands.register('movement.ListPlayer', (c) => this.listPlayer(c));
     this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
     this.commands.register('movement.ListVisionSources', (c) => this.listVisionSources(c));
     this.commands.register('movement.ListForeign', (c) => this.listForeign(c));
@@ -227,7 +236,7 @@ export class MovementModule {
   }
 
   private isArmyMovement(m: MovementRecord): boolean {
-    return m.type === 'raid' || m.type === 'attack' || m.type === 'scout' || m.type === 'found' || m.type === 'explore' || m.type === 'garrison' || m.type === 'ambush';
+    return m.type === 'raid' || m.type === 'attack' || m.type === 'scout' || m.type === 'found' || m.type === 'explore' || m.type === 'auto_explore' || m.type === 'garrison' || m.type === 'ambush';
   }
 
   private toWire(m: MovementRecord, viewerVillageId: string): MovementWire {
@@ -236,6 +245,7 @@ export class MovementModule {
     const canStop = dir === 'out' && this.stoppable(m, viewerVillageId);
     return {
       id: m.id,
+      fromVillage: m.fromVillage,
       type: m.type,
       dir,
       targetId: m.targetId,
@@ -258,6 +268,7 @@ export class MovementModule {
       treasures: m.treasures,
       arriveAt: m.arriveAt,
       requested: m.requestedXY,
+      autoExplore: m.autoExplore,
       recallable: canRecall,
       stoppable: canStop,
       recallForfeits: canRecall && m.type === 'found' ? true : undefined,
@@ -331,7 +342,11 @@ export class MovementModule {
       const token = mv.stepToken;
       this.save(mv);
       const delay = Math.max(0, mv.nextStepAt - this.now());
-      this.scheduler.schedule(delay, () => this.step(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
+      if (mv.type === 'auto_explore' && mv.autoExplore?.pendingReveal) {
+        this.scheduler.schedule(0, () => this.resumeAutoExploreReveal(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
+      } else {
+        this.scheduler.schedule(delay, () => this.step(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
+      }
     }
   }
 
@@ -463,6 +478,23 @@ export class MovementModule {
         marchPoints,
       },
     };
+  }
+
+  /**
+   * 列出玩家从所有己方村庄派出的军队，供地图跨村展示。
+   * 该查询只返回当前 playerId 所拥有的 fromVillage，不能被客户端伪造村庄范围；
+   * 需要对某支军队下令时，客户端必须先切换到 fromVillage，继续走 ownVillage 路由。
+   */
+  private async listPlayer(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    if (!playerId) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const playerRes = await this.commands.send({ name: 'player.Get', from: MovementModule.NAME, payload: { playerId } });
+    if (!playerRes.ok) return { ok: false, payload: {}, reason: playerRes.reason ?? 'player_not_found' };
+    const villageIds = new Set<string>(((playerRes.payload as any)?.player?.villages ?? []).map((v: any) => String(v.id)));
+    const movements = this.store.all<MovementRecord>(COLLECTION)
+      .filter((m) => villageIds.has(m.fromVillage))
+      .map((m) => this.toWire(m, ''));
+    return { ok: true, payload: { movements } };
   }
 
   /** 查询某行军是否仍存在（供其他模块跨模块查询，避免直接读 movement 集合，违反铁律#1）。 */
@@ -610,6 +642,16 @@ export class MovementModule {
     return null;
   }
 
+  /** 自动探索以集结点为解锁条件，但可沿指定长路线推进；终点必须尚未探索。 */
+  private async ensureAutoExplorable(villageId: string, target: Hex): Promise<CommandResult | null> {
+    const info = await this.targetVisibility(villageId, target);
+    if (!info) return { ok: false, payload: {}, reason: 'vision_unavailable' };
+    if (info.visibility !== 'unexplored') return { ok: false, payload: { ...info }, reason: 'target_already_explored' };
+    const levelRes = await this.commands.send({ name: 'building.GetBuildingLevel', from: MovementModule.NAME, payload: { villageId, kind: 'rallypoint' } });
+    const level = levelRes.ok ? Math.max(0, Number((levelRes.payload as any)?.level) || 0) : 0;
+    return level >= 1 ? null : { ok: false, payload: { ...info, maxDepth: level }, reason: 'rallypoint_required' };
+  }
+
   private async ensureKnown(villageId: string, target: Hex): Promise<CommandResult | null> {
     const info = await this.targetVisibility(villageId, target);
     if (!info) return { ok: false, payload: {}, reason: 'vision_unavailable' };
@@ -617,19 +659,21 @@ export class MovementModule {
   }
 
   /** 行军起步与每一步都将当时视野写入探索历史；无需依赖客户端刷新地图。 */
-  private async revealVision(mv: MovementRecord): Promise<void> {
+  private async revealVision(mv: MovementRecord, revealId?: string): Promise<Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>> {
     const radius = mv.type === 'ambush' ? 1 : this.visionRadius(mv.troops);
-    if (radius <= 0) return;
+    if (radius <= 0) return [];
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
-    if (!playerId) return;
-    const revealed = await this.commands.send({ name: 'vision.Reveal', from: MovementModule.NAME, payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius } });
+    if (!playerId) return [];
+    const revealed = await this.commands.send({ name: 'vision.Reveal', from: MovementModule.NAME, payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius, revealId } });
     if (revealed.ok) {
       void this.bus.emit({
         name: 'movement.VisionUpdated', source: MovementModule.NAME, ts: this.now(),
         payload: { villageId: mv.fromVillage, movementId: mv.id, q: mv.pos.q, r: mv.pos.r },
       } as DomainEvent);
+      return ((revealed.payload as any)?.newlyRevealed ?? []) as Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>;
     }
+    return [];
   }
 
   /** 目标终点被设施或其他军队占据时，驻扎在最后一格之前。 */
@@ -673,6 +717,76 @@ export class MovementModule {
       name: 'movement.Explored', source: MovementModule.NAME, ts: this.now(),
       payload: { id: mv.id, villageId: mv.fromVillage, q: landing.q, r: landing.r, blocked: landing.q !== mv.toXY.q || landing.r !== mv.toXY.r },
     } as DomainEvent);
+  }
+
+  /** 自动探索只对本次首次揭示的公共地块和外军判定，避免旧情报反复触发返程。 */
+  private async autoExploreStop(
+    mv: MovementRecord,
+    newlyRevealed: Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>,
+  ): Promise<boolean> {
+    if (mv.type !== 'auto_explore') return false;
+    const mine = await this.ownerOf(mv.fromVillage);
+    for (const tile of newlyRevealed) {
+      if (tile.kind === 'pve') {
+        await this.returnAutoExplore(mv, { reason: 'pve', foundAt: { q: tile.q, r: tile.r }, foundName: tile.name });
+        return true;
+      }
+      if (tile.kind === 'village' && tile.refId && await this.ownerOf(tile.refId) !== mine) {
+        await this.returnAutoExplore(mv, { reason: 'village', foundAt: { q: tile.q, r: tile.r }, foundName: tile.name });
+        return true;
+      }
+    }
+    const newlyKeys = new Set(newlyRevealed.map((tile) => this.posKey(tile.q, tile.r)));
+    for (const other of this.store.all<MovementRecord>(COLLECTION)) {
+      const hasTroops = Object.values(other.troops ?? {}).some((count) => Number(count) > 0);
+      if (other.id === mv.id || other.type === 'caravan' || !hasTroops || !newlyKeys.has(this.posKey(other.pos.q, other.pos.r))) continue;
+      if (await this.ownerOf(other.fromVillage) === mine) continue;
+      await this.returnAutoExplore(mv, { reason: 'foreign_army', foundAt: other.pos });
+      return true;
+    }
+    return false;
+  }
+
+  private async returnAutoExplore(
+    mv: MovementRecord,
+    autoExplore: NonNullable<MovementRecord['autoExplore']>,
+  ): Promise<void> {
+    this.remove(mv.id);
+    this.updateEnRoutePop(mv.fromVillage);
+    await this.scheduleReturn(mv.fromVillage, mv.pos, mv.originalFromXY ?? mv.fromXY, mv.troops, {}, mv.treasures, mv.id, mv.originalFromXY ?? mv.fromXY, autoExplore);
+    void this.bus.emit({
+      name: 'movement.AutoExploreStopped', source: MovementModule.NAME, ts: this.now(),
+      payload: { id: mv.id, villageId: mv.fromVillage, at: autoExplore.foundAt ?? mv.pos, reason: autoExplore.reason },
+    } as DomainEvent);
+  }
+
+  /** 自动探索步进在写入位置后先持久化 reveal 标记，重启后可从同一回执恢复判定。 */
+  private async finishAutoExploreReveal(mv: MovementRecord): Promise<boolean> {
+    const revealId = mv.autoExplore?.pendingReveal?.revealId ?? `${mv.id}:${mv.stepIndex}`;
+    const newlyRevealed = await this.revealVision(mv, revealId);
+    const owner = await this.ownerOf(mv.fromVillage);
+    if (await this.autoExploreStop(mv, newlyRevealed)) {
+      await this.commands.send({ name: 'vision.ForgetReveal', from: MovementModule.NAME, payload: { playerId: owner, revealId } });
+      return true;
+    }
+    await this.commands.send({ name: 'vision.ForgetReveal', from: MovementModule.NAME, payload: { playerId: owner, revealId } });
+    if (mv.autoExplore) {
+      delete mv.autoExplore.pendingReveal;
+      this.save(mv);
+    }
+    return false;
+  }
+
+  private async resumeAutoExploreReveal(id: string, token: number): Promise<void> {
+    const mv = this.load(id);
+    if (!mv || mv.type !== 'auto_explore' || mv.status !== 'marching' || mv.stepToken !== token || !mv.autoExplore?.pendingReveal) return;
+    if (await this.finishAutoExploreReveal(mv)) return;
+    void this.bus.emit({
+      name: 'movement.Stepped', source: MovementModule.NAME, ts: this.now(),
+      payload: { villageId: mv.fromVillage, id: mv.id, pos: mv.pos, stepIndex: mv.stepIndex, nextStepAt: mv.nextStepAt, perStepMs: mv.perStepMs, status: mv.status, arriveAt: mv.arriveAt },
+    } as DomainEvent);
+    if (mv.stepIndex >= mv.path.length - 1) { await this.arrive(mv); return; }
+    this.scheduler.schedule(Math.max(0, mv.nextStepAt - this.now()), () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
   }
 
   /** 派兵至已知空地，抵达时在野外驻扎。未探索格必须改用 SendExplore。 */
@@ -772,6 +886,36 @@ export class MovementModule {
     this.save(mv);
     await this.revealVision(mv);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  /** 自动探索沿指定终点逐格推进，首次在新视野中发现公共营地、他人村庄或外军即返程。 */
+  private async sendAutoExplore(cmd: Command): Promise<CommandResult> {
+    const { villageId, q, r, troops, treasures } = cmd.payload as { villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[] };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const fromXY = await this.villageXY(villageId);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const toXY = wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if (toXY.q === fromXY.q && toXY.r === fromXY.r) return { ok: false, payload: {}, reason: 'same_tile' };
+    const exploration = await this.ensureAutoExplorable(villageId, toXY);
+    if (exploration) return exploration;
+    const point = await this.ensureMarchPoint(villageId);
+    if (point) return point;
+    const delta = Object.fromEntries(Object.entries(valid.troops).map(([unit, n]) => [unit, -n]));
+    const adjusted = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    if (!adjusted.ok) return { ok: false, payload: {}, reason: adjusted.reason ?? 'no_troops' };
+    const id = this.nextId();
+    const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
+    if (!carry.ok) {
+      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      return { ok: false, payload: {}, reason: carry.reason };
+    }
+    const mv = await this.launch({ id, type: 'auto_explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now(), autoExplore: {} });
+    mv.requestedXY = toXY;
+    this.save(mv);
+    await this.revealVision(mv);
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'auto_explore', villageId, q: toXY.q, r: toXY.r, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), marchPoints: await this.marchPointState(villageId) } };
   }
 
   /**
@@ -918,7 +1062,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore'>>,
   ): Promise<MovementRecord> {
     const path = linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const steps = Math.max(1, path.length - 1);
@@ -1722,8 +1866,19 @@ export class MovementModule {
     mv.stepIndex += 1;
     if (mv.stepIndex < mv.path.length) mv.pos = mv.path[mv.stepIndex];
     mv.nextStepAt = this.now() + mv.perStepMs;
+    if (mv.type === 'auto_explore') {
+      const radius = this.visionRadius(mv.troops);
+      mv.autoExplore = {
+        ...mv.autoExplore,
+        pendingReveal: { revealId: `${mv.id}:${mv.stepIndex}`, q: mv.pos.q, r: mv.pos.r, radius },
+      };
+    }
     this.save(mv);
-    await this.revealVision(mv);
+    if (mv.type === 'auto_explore') {
+      if (await this.finishAutoExploreReveal(mv)) return;
+    } else {
+      await this.revealVision(mv);
+    }
     await this.maybeAlertIncoming(mv);
     // 增量推送：己方行军步进
     void this.bus.emit({
@@ -1818,6 +1973,7 @@ export class MovementModule {
     if (mv.type === 'transport') { await this.arriveTransport(mv); return; }
     if (mv.type === 'garrison' || mv.type === 'ambush') { await this.arriveGarrison(mv); return; }
     if (mv.type === 'explore') { await this.arriveExplore(mv); return; }
+    if (mv.type === 'auto_explore') { await this.returnAutoExplore(mv, { reason: 'path_end' }); return; }
     if (mv.type === 'scout' && (mv.targetVillage || mv.targetId)) { await this.arriveScout(mv); return; }
     if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
     if (mv.type === 'raid' && mv.targetVillage) { await this.arriveEngage(mv, 'village', mv.targetVillage); return; }
@@ -2173,12 +2329,13 @@ export class MovementModule {
     treasures?: string[],
     outwardId?: string,
     originalFromXY?: Hex,
+    autoExplore?: MovementRecord['autoExplore'],
   ): Promise<string | undefined> {
     const id = this.nextId();
     await this.launch({
       id, type: 'return', fromVillage, fromXY, toXY,
       originalFromXY: originalFromXY ?? toXY,
-      troops, loot, treasures, departAt: this.now(), outwardId,
+      troops, loot, treasures, departAt: this.now(), outwardId, autoExplore,
     });
     return id;
   }

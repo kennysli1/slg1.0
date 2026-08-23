@@ -294,6 +294,38 @@ test('未探索格只能探索：1级集结点可探索一格深，抵达后返�
   assert.equal((visible.payload as any).visibility, 'explored', '行军视野覆盖过的目标格应保留为已探索');
 });
 
+test('自动探索：新视野发现公共营地即返程，不驻扎也不触发战斗', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '自动探索甲', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 20 });
+  const camp = app.store.all<any>('pve').find((target) => {
+    const d = hexDistance({ q: p.q, r: p.r }, { q: target.q, r: target.r });
+    return d > 4;
+  });
+  assert.ok(camp, '测试地图应有城池视野外的公共营地');
+
+  const sent = await send(app, 'movement.SendAutoExplore', {
+    villageId: p.villageId, q: camp.q, r: camp.r, troops: { legionnaire: 10 },
+  });
+  assert.equal(sent.ok, true, `自动探索应可出发: ${sent.reason ?? ''}`);
+  const outbound = movements(app).find((m) => m.id === (sent.payload as any).id);
+  assert.equal(outbound?.type, 'auto_explore');
+
+  for (let step = 0; step < outbound.path.length + 2; step++) {
+    await app.scheduler.advanceTo(clock + outbound.perStepMs + 1, setClock);
+    const returning = movements(app).find((m) => m.type === 'return' && m.autoExplore?.reason === 'pve');
+    if (returning) {
+      const found = returning.autoExplore.foundAt;
+      assert.ok(app.store.all<any>('pve').some((target) => target.q === found?.q && target.r === found?.r), '返程坐标应是首次发现的公共营地');
+      assert.equal(app.store.all<any>('battle').length, 0, '自动探索发现营地时不得开战');
+      assert.equal(movements(app).some((m) => m.status === 'stationed'), false, '自动探索不得驻扎');
+      return;
+    }
+  }
+  assert.fail('自动探索应在发现公共营地后返程');
+});
+
 test('伏击军续行：从已驻扎伏击点出发仍保持 ambush 类型', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', { name: '伏击续行', password: 'pass123', tribe: 'romans' });

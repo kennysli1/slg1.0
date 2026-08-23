@@ -6,7 +6,7 @@ export interface Hex {
 
 export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
-  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'scout' | 'ambush';
+  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'ambush';
 
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
@@ -14,6 +14,8 @@ export type MovementDir = 'in' | 'out';
 /** 己方视图：movement.List 下发的完整行军。 */
 export interface Movement {
   id: string;
+  /** 该军队实际出发的己方村庄；地图跨村展示与切换操作使用。 */
+  fromVillage?: string;
   type: MovementType;
   dir: MovementDir;
   status: MovementStatus;
@@ -37,6 +39,8 @@ export interface Movement {
   loot?: Record<string, number>;
   treasures?: string[];
   requested?: Hex;
+  /** 自动探索的返程原因；仅自动探索的去程和由其转化的返程军携带。 */
+  autoExplore?: { reason?: 'pve' | 'village' | 'foreign_army' | 'path_end'; foundAt?: Hex; foundName?: string };
   /** 服务端权威判定：本军当前是否可被玩家撤回。 */
   recallable: boolean;
   /** 服务端权威判定：本军当前是否可被玩家原地停止。 */
