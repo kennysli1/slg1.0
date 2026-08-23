@@ -1,7 +1,7 @@
 /** 常驻资源 HUD：同时呈现库存、容量与每小时变化。 */
-import { me, selectVillage } from '../api.js';
-import { tick, dataVersion, sessionVersion, showToast } from '../app/store.js';
-import { refreshAll } from '../app/refresh.js';
+import { me } from '../api.js';
+import { tick, dataVersion, sessionVersion, villageSwitching, showToast } from '../app/store.js';
+import { switchVillage } from '../app/refresh.js';
 import { errText } from '../shared/ui/text.js';
 import { getCache, getPopState, liveResource, interpolatePop, interpolateTotalPop, type PopSnapshot } from '../app/state.js';
 import { resInfo, resourceKeys } from '../app/config.js';
@@ -34,6 +34,7 @@ export function ResourceBar() {
 /** 全局村庄选择器：资源栏属于应用壳，因此在任意页签都能看到当前操作村并切换。 */
 function VillagePicker() {
   sessionVersion.value;
+  const switching = villageSwitching.value;
   if (!me) return null;
   const villages = me.villages ?? [];
   const current = villages.find((v) => v.id === me?.villageId);
@@ -43,14 +44,12 @@ function VillagePicker() {
     const select = e.currentTarget as HTMLSelectElement;
     const id = select.value;
     if (!id || id === me?.villageId) return;
-    const result = await selectVillage(id);
+    const result = await switchVillage(id);
     if (!result.ok) {
       showToast(`切换村庄失败：${errText(result.error)}`, 'bad');
       select.value = me?.villageId ?? '';
       return;
     }
-    sessionVersion.value++;
-    await refreshAll();
   }
 
   return (
@@ -60,7 +59,7 @@ function VillagePicker() {
         class="village-picker-select"
         value={me.villageId}
         onChange={onPick}
-        disabled={villages.length < 2}
+        disabled={villages.length < 2 || !!switching}
         aria-label="切换当前村庄"
       >
         {(villages.length ? villages : [fallback]).map((village) => (

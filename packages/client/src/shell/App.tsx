@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
-import { tab, tick, sessionVersion } from '../app/store.js';
+import { tab, tick, sessionVersion, villageSwitching } from '../app/store.js';
 import { refreshAll, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
@@ -78,9 +78,24 @@ export function App() {
         <TabBar />
         <Page />
       </div>
+      <VillageSwitchOverlay />
       <ModalHost />
       <ToastHost />
     </>
+  );
+}
+
+function VillageSwitchOverlay() {
+  const switching = villageSwitching.value;
+  if (!switching) return null;
+  return (
+    <div class="village-switch-overlay" role="status" aria-live="polite" aria-busy="true">
+      <div class="village-switch-card">
+        <span class="village-switch-spinner" aria-hidden="true" />
+        <strong>正在切换村庄…</strong>
+        <span>正在加载「{switching.targetVillageName}」的数据，请稍候</span>
+      </div>
+    </div>
   );
 }
 

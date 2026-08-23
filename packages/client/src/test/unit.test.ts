@@ -13,7 +13,7 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
-import { findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
+import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
@@ -66,6 +66,17 @@ describe('地图定位', () => {
     assert.equal(parseMapCoordinate('', '7', 10, 10).ok, false);
     assert.equal(parseMapCoordinate('1.5', '7', 10, 10).ok, false);
     assert.equal(parseMapCoordinate('10', '7', 10, 10).ok, false);
+  });
+});
+
+describe('村庄切换互斥状态', () => {
+  it('同一时间只允许一个切换，并能在完成后解除锁定', () => {
+    endVillageSwitch();
+    assert.equal(beginVillageSwitch('v2', '分城'), true);
+    assert.deepEqual(villageSwitching.value, { targetVillageId: 'v2', targetVillageName: '分城' });
+    assert.equal(beginVillageSwitch('v3', '另一座村'), false);
+    endVillageSwitch();
+    assert.equal(villageSwitching.value, null);
   });
 });
 

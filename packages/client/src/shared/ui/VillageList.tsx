@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
-import { me, applyMe, req, selectVillage } from '../../api.js';
-import { refreshAll } from '../../app/refresh.js';
+import { me, applyMe, req } from '../../api.js';
+import { switchVillage } from '../../app/refresh.js';
 import { act } from '../../app/refresh.js';
-import { dataVersion, openModal, sessionVersion, showToast } from '../../app/store.js';
+import { dataVersion, openModal, sessionVersion, villageSwitching, showToast } from '../../app/store.js';
 import { Btn, Modal, Panel } from '../../ui/index.js';
 import type { MeVillage } from '../../api.js';
 
@@ -57,6 +57,7 @@ function RenameVillageModal({ village, close }: { village: MeVillage; close: () 
 export function VillageList() {
   sessionVersion.value;
   dataVersion.value;
+  const switching = villageSwitching.value;
   // 即使当前只有一座村庄也显示列表：玩家需要明确知道这些页面按村庄
   // 隔离，拓荒出第二座村庄后可直接在同一位置切换。旧版会在 <=1 座时
   // 整块隐藏，导致新账号误以为村庄切换没有落地；没有 villages 数组时
@@ -69,14 +70,12 @@ export function VillageList() {
   if (villages.length === 0) return null;
 
   async function pick(villageId: string) {
-    if (!villageId || villageId === me?.villageId) return;
-    const result = await selectVillage(villageId);
+    if (switching || !villageId || villageId === me?.villageId) return;
+    const result = await switchVillage(villageId);
     if (!result.ok) {
       showToast('切换村庄失败，请稍后重试', 'bad');
       return;
     }
-    sessionVersion.value++;
-    await refreshAll();
   }
 
   function rename(village: MeVillage) {
@@ -92,7 +91,7 @@ export function VillageList() {
             key={village.id}
             role="listitem"
             tabIndex={0}
-            class={`village-list-item${village.id === me?.villageId ? ' active' : ''}`}
+            class={`village-list-item${village.id === me?.villageId ? ' active' : ''}${switching ? ' is-switching' : ''}`}
             onClick={() => void pick(village.id)}
             onKeyDown={(event) => {
               if (event.target !== event.currentTarget) return;
@@ -116,6 +115,7 @@ export function VillageList() {
                 size="sm"
                 variant="ghost"
                 class="village-list-rename"
+                disabled={!!switching}
                 onClick={(event) => { event.stopPropagation(); rename(village); }}
               >修改名称</Btn>
             </div>
