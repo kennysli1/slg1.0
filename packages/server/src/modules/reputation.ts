@@ -38,6 +38,7 @@ export class ReputationModule {
     this.commands.register('reputation.Get', (c) => this.get(c));
     this.commands.register('reputation.GetByVillage', (c) => this.getByVillage(c));
     this.commands.register('reputation.Adjust', (c) => this.adjust(c));
+    this.commands.register('reputation.TrySpend', (c) => this.trySpend(c));
     this.commands.register('reputation.AdjustByVillage', (c) => this.adjustByVillage(c));
     this.commands.register('reputation.SetTreasureDelta', (c) => this.setTreasureDelta(c));
     this.commands.register('reputation.ProcessPvpBattle', (c) => this.processPvpBattle(c));
@@ -140,6 +141,17 @@ export class ReputationModule {
     const payload = { ...this.payload(state), delta: state.value - before, reason: reason ?? 'gameplay', playerIds: [playerId] };
     await this.bus.emit({ name: 'reputation.Changed', source: ReputationModule.NAME, ts: this.now(), payload } as DomainEvent);
     return { ok: true, payload };
+  }
+
+  /** 议会厅消费等用途的原子扣除：声望是道德值，购买不能把正声望透支成负声望。 */
+  private async trySpend(cmd: Command): Promise<CommandResult> {
+    const { playerId, amount, reason } = cmd.payload as { playerId: string; amount: number; reason?: string };
+    const cost = Math.max(0, Math.floor(Number(amount)));
+    if (!playerId || !Number.isFinite(cost)) return { ok: false, payload: {}, reason: 'invalid_reputation_cost' };
+    const state = this.ensure(playerId);
+    if (cost === 0) return { ok: true, payload: { ...this.payload(state), delta: 0, reason: reason ?? 'kingdom_service' } };
+    if (state.value < cost) return { ok: false, payload: this.payload(state), reason: 'insufficient_reputation' };
+    return this.adjust({ ...cmd, payload: { playerId, delta: -cost, reason: reason ?? 'kingdom_service' } });
   }
 
   private async adjustByVillage(cmd: Command): Promise<CommandResult> {

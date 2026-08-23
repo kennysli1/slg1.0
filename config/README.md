@@ -58,6 +58,7 @@
 | 表21 | `quest_effects.csv` | **任务效果**（接取/完成/交付/失败） | 调奖励、分支效果与顺序 |
 | 表22 | `quest_edges.csv` | **任务关系边**（前置与分支解锁） | 调任务依赖、成功/失败后续 |
 | 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
+| 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -226,6 +227,8 @@
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
 声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+
+王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
 |----|------|
 | key | 常量键（代码按它读取，**勿改**） |
@@ -398,6 +401,19 @@
 | lootMult | 该区间最终可掠夺量倍率 |
 
 > 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在 GM 关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
+
+## kingdom_services.csv — 议会厅服务
+
+| 列 | 含义 |
+|----|------|
+| id / code / name | 数字主键、稳定代码与显示名 |
+| category | `reinforcement` 增援 / `attack` 代打 / `supplies` 物资 / `treasure` 宝物 |
+| minCouncilLevel / reputationCost | 最低议会厅等级 / 声望价格 |
+| unitCode / unitCount | 增援或代打使用的 `units.csv` 兵种代码与数量 |
+| wood/clay/iron/crop/gold | 物资服务发放量 |
+| treasureCode | 宝物服务发放的 `treasures.csv` 代码 |
+| delaySec | 代打服务购买后出发延迟；即时服务填 0 |
+| desc | 玩家可见说明 |
 
 ---
 

@@ -26,6 +26,7 @@ import { VisionModule } from './modules/vision.js';
 import { DiplomacyModule } from './modules/diplomacy.js';
 import { ReputationModule } from './modules/reputation.js';
 import { AlchemyModule } from './modules/alchemy.js';
+import { KingdomModule } from './modules/kingdom.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -60,6 +61,7 @@ const PROGRESS_COLLECTIONS = [
   'diplomacy',
   'reputation',
   'alchemy',
+  'kingdom',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -105,6 +107,7 @@ export interface GameApp {
   diplomacy: DiplomacyModule;
   reputation: ReputationModule;
   alchemy: AlchemyModule;
+  kingdom: KingdomModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
@@ -237,15 +240,16 @@ export function createGameApp(opts?: {
   });
   const reputation = new ReputationModule(store, bus, commands, now, config);
   const alchemy = new AlchemyModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  const kingdom = new KingdomModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, task, vision, reputation, alchemy,
+    player, meta, notifications, mercenary, trade, treasure, research, task, vision, reputation, alchemy, kingdom,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
-    mercenary, trade, treasure, research, task, reputation, alchemy,
+    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom,
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -340,7 +344,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, kingdom, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
@@ -491,6 +495,7 @@ export function createGameApp(opts?: {
         for (const c of progressByVillage) store.delete(c, villageId);
       }
       store.delete('reputation', playerId);
+      kingdom.deletePlayer(playerId);
       for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
         if (
           (m.fromVillage && villageSet.has(m.fromVillage)) ||

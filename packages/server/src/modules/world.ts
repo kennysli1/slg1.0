@@ -5,7 +5,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
 import { hexKey, wrapHex, hexDistanceWrapped } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
-import { generateWorldPlan, terrainAt, type GeneratedWorldPlan, type Terrain } from '../infra/world-generation.js';
+import { generateWorldPlan, kingdomLandmarkAnchors, terrainAt, type GeneratedWorldPlan, type Terrain } from '../infra/world-generation.js';
 
 /**
  * 领域模块 · World（地图 / 坐标 / 地块）
@@ -134,7 +134,10 @@ export class WorldModule {
 
   private rebuildPlan(): void {
     const seed = String(this.config.constants.raw.world_seed ?? 'kow-world-v1');
-    this.plan = generateWorldPlan(this.worldW, this.worldH, seed, this.config.pveSpawns);
+    const ratio = Number(this.config.constants.raw.kingdom_fief_offset_ratio ?? 0.25);
+    const landmarks = kingdomLandmarkAnchors(this.worldW, this.worldH, Number.isFinite(ratio) ? ratio : 0.25);
+    // 王国锚点优先占位；人工 PvE 与自动 PvE 遇到它们时走确定性替代格。
+    this.plan = generateWorldPlan(this.worldW, this.worldH, seed, [...landmarks, ...this.config.pveSpawns]);
   }
 
   private getMeta(_cmd: Command): CommandResult {

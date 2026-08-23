@@ -145,6 +145,8 @@ export function dropForeignArmy(id: string): void {
 export const taskStates = signal<Record<string, any>>({});
 /** 玩家任务页聚合快照；任务执行仍通过每条记录携带的 villageId 定位来源村庄。 */
 export const playerTaskState = signal<any | null>(null);
+/** 玩家级王国任务与当前村议会厅服务快照。 */
+export const kingdomState = signal<any | null>(null);
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
 

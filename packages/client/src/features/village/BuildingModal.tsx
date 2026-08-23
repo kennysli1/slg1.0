@@ -43,6 +43,7 @@ import { openMercCamp } from '../army/MercCampModal.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { openAcademy } from '../research/AcademyModal.js';
 import { openAlchemy } from './AlchemyModal.js';
+import { openCouncil } from './CouncilModal.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -541,6 +542,7 @@ export function openBuilding(slotId: string): void {
   if (kind === 'tradecenter') { openTradeCenter(); return; }
   if (kind === 'academy') { openAcademy(slotId); return; }
   if (kind === 'alchemy') { openAlchemy(slotId); return; }
+  if (kind === 'council') { openCouncil(); return; }
 
   // Open generic detail modal
   openModal(
