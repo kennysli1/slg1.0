@@ -348,6 +348,7 @@
 | lineCode | 所属 `quest_lines.csv` 的 `code` |
 | name / desc | 玩家可见名称与描述 |
 | type | `main` / `daily` / `side`，与任务线用途一致 |
+| scope | `global` 或 `village`；主线必须为 `global`，日常必须为 `village`，支线按任务设计配置 |
 | weight | 每日任务抽取权重；主线/支线填 0 |
 | repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
 

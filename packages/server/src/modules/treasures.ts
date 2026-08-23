@@ -107,6 +107,8 @@ interface PendingTreasure {
   /** 转移军队送达时的来源村，供报告按来源/目的村清晰区分。 */
   fromVillageId?: string;
   fromVillageName?: string;
+  /** 任务奖励的最终收件村；与 pending villageId 一致时也保留，供报告明确显示。 */
+  rewardVillageId?: string;
 }
 
 /** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
@@ -133,6 +135,7 @@ interface PendingTreasureView {
   fromCarry?: boolean;
   fromVillageId?: string;
   fromVillageName?: string;
+  rewardVillageId?: string;
 }
 
 /**
@@ -678,7 +681,7 @@ export class TreasureModule {
   }
 
   /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
-  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false, fromVillageId?: string, fromVillageName?: string): void {
+  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false, fromVillageId?: string, fromVillageName?: string, rewardVillageId?: string): void {
     const t = this.config.treasures[code];
     if (!t) return;
     const now = this.now();
@@ -689,7 +692,7 @@ export class TreasureModule {
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
       priceGold: t.priceGold, kind: 'deliver', createdAt: now, expiresAt: now + timeoutMs,
-      fromCarry, victoryFlagQualified, fromVillageId, fromVillageName,
+      fromCarry, victoryFlagQualified, fromVillageId, fromVillageName, rewardVillageId,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
     this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
@@ -710,18 +713,18 @@ export class TreasureModule {
 
   /** 授予宝物到村庄宝物栏；任务奖励满栏时可转为待处理报告。 */
   private async grant(cmd: Command): Promise<CommandResult> {
-    const { villageId, code, pendingIfFull, alwaysPending } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean; alwaysPending?: boolean };
+    const { villageId, code, pendingIfFull, alwaysPending, rewardVillageId } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean; alwaysPending?: boolean; rewardVillageId?: string };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
     if (alwaysPending) {
-      this.createDeliverPending(villageId, code);
+      this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
       await this.emitChanged(villageId);
       return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
     }
     if (!this.storeIfRoom(s, code)) {
       if (pendingIfFull) {
-        this.createDeliverPending(villageId, code);
+        this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
         await this.emitChanged(villageId);
         return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
       }
@@ -1372,7 +1375,7 @@ export class TreasureModule {
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
         kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
         expectedArrivalAt: p.expectedArrivalAt,
-        hasTradeCenter, fromCarry: p.fromCarry, fromVillageId: p.fromVillageId, fromVillageName: p.fromVillageName,
+        hasTradeCenter, fromCarry: p.fromCarry, fromVillageId: p.fromVillageId, fromVillageName: p.fromVillageName, rewardVillageId: p.rewardVillageId,
       }));
   }
 

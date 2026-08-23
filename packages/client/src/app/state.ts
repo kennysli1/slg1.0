@@ -35,6 +35,8 @@ export interface PendingTreasureView {
   /** 转移军队送达的来源村庄，报告卡片据此标识来源。 */
   fromVillageId?: string;
   fromVillageName?: string;
+  /** 任务奖励的最终收件村（报告页明确显示）。 */
+  rewardVillageId?: string;
 }
 
 /** 人口面板快照（来自 GetPopulation 响应 + PopulationChanged push 校正）。v3 硬上限模型 + 劳动→士兵原子转化。 */

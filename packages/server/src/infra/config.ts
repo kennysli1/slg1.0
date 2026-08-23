@@ -178,8 +178,10 @@ export interface QuestChoiceReward {
   rewards: QuestRewards;
 }
 
-/** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
+/** 任务类型：main=主线；daily=日常；side=支线。 */
 export type QuestType = 'main' | 'daily' | 'side';
+/** 任务归属：global=玩家全局；village=绑定某一座村庄。 */
+export type QuestScope = 'global' | 'village';
 
 /** 任务定义（来自 quests.csv）。 */
 export interface QuestDef {
@@ -188,6 +190,8 @@ export interface QuestDef {
   name: string;
   desc: string;
   type: QuestType;
+  /** 主线固定为 global；日常固定为 village；支线可由 CSV 配置。 */
+  scope: QuestScope;
   /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
   requires: string[];
   /** 目标（v1 单目标）。 */
@@ -231,6 +235,7 @@ export interface QuestGraphQuestDef {
   name: string;
   desc: string;
   type: QuestType;
+  scope: QuestScope;
   weight: number;
   repeatable: boolean;
   cooldownSec: number;
@@ -1182,7 +1187,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const code = r.code.trim();
     questGraph.quests[code] = {
       id: num(r.id), code, lineCode: r.lineCode?.trim() || '', name: r.name ?? code, desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'side', weight: Math.max(0, num(r.weight, 0)),
+      type: (r.type as QuestType) || 'side',
+      scope: ((r.scope?.trim() || ((r.type as QuestType) === 'main' ? 'global' : 'village')) as QuestScope),
+      weight: Math.max(0, num(r.weight, 0)),
       repeatable: num(r.repeatable, 0) === 1, cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
       abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
     };
@@ -1256,7 +1263,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
-      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, requires,
+      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
       abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12,
@@ -1559,6 +1566,9 @@ export function validateGameConfig(config: GameConfig): void {
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
     if (q.type !== 'main' && q.type !== 'daily' && q.type !== 'side') errors.push(`quests.csv[${q.code}] type 必须是 main/daily/side`);
+    if (q.scope !== 'global' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] scope 必须是 global/village`);
+    if (q.type === 'main' && q.scope !== 'global') errors.push(`quests.csv[${q.code}] 主线任务必须是 global`);
+    if (q.type === 'daily' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] 日常任务必须是 village`);
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {

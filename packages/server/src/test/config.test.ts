@@ -50,6 +50,9 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   const cfg = loadGameConfig(configDir);
   assert.equal(cfg.questGraph.lines.main_foundation.entryQuest, 'm1');
   assert.equal(cfg.questGraph.quests.s2.lineCode, 'show_of_force');
+  assert.equal(cfg.quests.m1.scope, 'global', '主线必须是全局任务');
+  assert.equal(cfg.quests.d1.scope, 'village', '每日任务必须绑定村庄');
+  assert.equal(cfg.quests.s4.scope, 'village', '当前支线默认绑定村庄');
   assert.ok(cfg.questGraph.objectives.some((x) => x.questCode === 's2' && x.kind === 'carry_flag'));
   assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm2' && x.params === 'iron:200|gold:150'));
   assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm1' && x.toQuest === 'm2' && x.relation === 'requires'));

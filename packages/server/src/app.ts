@@ -215,7 +215,10 @@ export function createGameApp(opts?: {
       .find((p) => p.id === playerId);
     return owner?.ownedVillages?.map((v) => typeof v === 'string' ? v : v.id).filter((id): id is string => typeof id === 'string') ?? [];
   };
-  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random, playerVillages);
+  const villageOwner = (villageId: string): string | null => {
+    return store.get<string>('player_byvillage', villageId) ?? null;
+  };
+  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random, playerVillages, villageOwner);
   const vision = new VisionModule(store, commands, config);
   const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {
     const owner = store.all<{ id?: string; ownedVillages?: ({ id: string } | string)[] }>('player')
