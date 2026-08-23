@@ -30,6 +30,22 @@ export const tab = signal<TabKey>('village');
 export const sessionVersion = signal(0);
 export function bumpSession(): void { sessionVersion.value++; }
 
+/** 当前村庄正在切换时的全局互斥状态；切换完成前禁止向旧村庄发起操作。 */
+export interface VillageSwitchState {
+  targetVillageId: string;
+  targetVillageName: string;
+}
+export const villageSwitching = signal<VillageSwitchState | null>(null);
+export function beginVillageSwitch(targetVillageId: string, targetVillageName: string): boolean {
+  if (villageSwitching.value) return false;
+  villageSwitching.value = { targetVillageId, targetVillageName };
+  return true;
+}
+export function endVillageSwitch(): void { villageSwitching.value = null; }
+
+/** 非地图页切村时暂不拉整张地图，进入地图页再补拉。 */
+export const mapAreaStale = signal(false);
+
 // ---------- 弹层栈 ----------
 
 let modalSeq = 0;
