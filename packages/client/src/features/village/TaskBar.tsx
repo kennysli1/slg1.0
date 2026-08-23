@@ -36,6 +36,12 @@ async function ensureTaskVillage(villageId?: string): Promise<boolean> {
   return true;
 }
 
+/** 全局任务由当前选中的村执行；村庄任务才需要切换到任务绑定村。 */
+async function ensureTaskExecution(task: any): Promise<boolean> {
+  if (task?.scope === 'global') return Boolean(me?.villageId);
+  return ensureTaskVillage(task?.villageId);
+}
+
 function objText(task: any): string {
   const o = task.objective;
   if (o.kind === 'submit_resources') return '上交资源';
@@ -127,7 +133,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
   const confirm = async () => {
     const resources: Record<string, number> = {};
     for (const [k, v] of Object.entries(vals)) if (v > 0) resources[k] = v;
-    if (!await ensureTaskVillage(task.villageId)) return;
+    if (!await ensureTaskExecution(task)) return;
     await act(req('task.SubmitResources', { code: task.code, resources }), {
       okToast: '已上交资源',
       onOk: () => close(),
@@ -169,12 +175,16 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
   const tres: string[] = rewards?.treasures ?? [];
   const hasRes = res && Object.keys(res).length > 0;
   const hasTres = tres.length > 0;
+  const hasReputation = Number(rewards?.reputation) !== 0;
   return (
     <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres
+      {hasRes || hasTres || hasReputation
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
       <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation }} label="本次获得" />
+      {(rewards?.rewardVillageId || task?.rewardVillageId) && (
+        <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
+      )}
       <div class="modal-foot">
         <Btn variant="primary" onClick={close}>收下</Btn>
       </div>
@@ -198,7 +208,7 @@ function TaskCard({ task }: { task: any }) {
       confirmText: '确认放弃',
     });
     if (!ok) return;
-    if (!await ensureTaskVillage(task.villageId)) return;
+    if (!await ensureTaskExecution(task)) return;
     await act(req('task.Abandon', { code: task.code }), { okToast: '已放弃任务' });
   };
   const onSubmit = () => {
@@ -206,7 +216,7 @@ function TaskCard({ task }: { task: any }) {
   };
   const onGoMap = async (camp = camps[0]) => {
     if (!camp) return;
-    if (!await ensureTaskVillage(task.villageId)) return;
+    if (!await ensureTaskExecution(task)) return;
     // 设置地图初始视角与选中目标：地图挂载后会显示既有的金色选中环和目标面板。
     setMapCenter({ q: camp.q, r: camp.r });
     selected.value = { refId: camp.id, kind: 'pve', q: camp.q, r: camp.r, name: '任务营地', icon: 'pve_bandits' };
@@ -214,7 +224,7 @@ function TaskCard({ task }: { task: any }) {
   };
   const onDeliver = () => {
     void (async () => {
-      if (!await ensureTaskVillage(task.villageId)) return;
+      if (!await ensureTaskExecution(task)) return;
       await act(req('task.Deliver', { code: task.code }), {
       okToast: '任务完成',
       onOk: (payload) => {
@@ -224,7 +234,7 @@ function TaskCard({ task }: { task: any }) {
     })();
   };
   const onOpenTrade = async () => {
-    if (await ensureTaskVillage(task.villageId)) openTradeCenter();
+    if (await ensureTaskExecution(task)) openTradeCenter();
   };
 
   return (
@@ -232,7 +242,9 @@ function TaskCard({ task }: { task: any }) {
       <div class="task-card-head">
         <span class="task-card-name">{task.name}</span>
         {typeTag(task.type)}
-        {task.villageId && <span class="task-card-village">{villageName(task.villageId)}</span>}
+        {task.scope === 'global'
+          ? <Tag kind="steel">全局</Tag>
+          : task.villageId && <span class="task-card-village">{villageName(task.villageId)}</span>}
       </div>
       <div class="task-card-desc">{task.desc}</div>
 
@@ -330,7 +342,7 @@ function OfferCard({ q, onAccept }: { q: any; onAccept: (q: any) => void }) {
     <div class="task-offer" key={q.code}>
       <div class="task-offer-info">
         <span class="task-offer-name">{q.name}</span>
-        {q.villageId && <span class="task-offer-village">{villageName(q.villageId)}</span>}
+        {q.scope === 'global' ? <Tag kind="steel">全局</Tag> : q.villageId && <span class="task-offer-village">{villageName(q.villageId)}</span>}
         <span class="task-offer-desc">{q.desc}</span>
         <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
         <OutcomeRows rewards={q.rewards} />
@@ -343,7 +355,7 @@ function OfferCard({ q, onAccept }: { q: any; onAccept: (q: any) => void }) {
 export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
   const side = offeredSide ?? [];
   const onAccept = async (q: any) => {
-    if (!await ensureTaskVillage(q.villageId)) return;
+    if (!await ensureTaskExecution(q)) return;
     await act(req('task.Accept', { code: q.code }), { okToast: '已接取任务' });
   };
   if (!offered?.length && !side.length) return null;
@@ -370,21 +382,44 @@ export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSi
 }
 
 // ── 任务页主体 ────────────────────────────────────────────────────────────────
-function TaskBoard({ state, playerWide = false }: { state: any; playerWide?: boolean }) {
+function legacyScopeState(state: any, scope: 'global' | 'village', villageId?: string): any {
+  const matches = (task: any) => (task.scope ?? (task.type === 'main' ? 'global' : 'village')) === scope
+    && (!villageId || scope === 'global' || task.villageId === villageId);
+  return {
+    active: (state?.active ?? []).filter(matches),
+    offered: (state?.offered ?? []).filter(matches),
+    offeredSide: (state?.offeredSide ?? []).filter(matches),
+  };
+}
+
+function TaskGroup({ state }: { state: any }) {
   const active: any[] = state?.active ?? [];
   const offered: any[] = state?.offered ?? [];
   const offeredSide: any[] = state?.offeredSide ?? [];
+  return active.length === 0 && offered.length === 0 && offeredSide.length === 0 ? (
+    <Panel variant="flat" pad class="task-empty">暂无可进行的任务。</Panel>
+  ) : (
+    <>
+      <div class="task-active-list">
+        {active.map((t) => <TaskCard task={t} key={`${t.villageId ?? ''}:${t.code}`} />)}
+      </div>
+      <TaskOffers offered={offered} offeredSide={offeredSide} />
+    </>
+  );
+}
+
+function TaskBoard({ state }: { state: any; playerWide?: boolean }) {
+  const currentVillageId = me?.villageId;
+  const globalState = state?.global ?? legacyScopeState(state, 'global');
+  const villageState = state?.villages?.find((v: any) => v.villageId === currentVillageId)
+    ?? state?.village
+    ?? legacyScopeState(state, 'village', currentVillageId);
   return (
     <section class="task-bar">
-      <SectionHead sub={playerWide ? '跨村统一显示；每张任务卡标注所属村庄' : undefined}>任务</SectionHead>
-      {active.length === 0 && offered.length === 0 && offeredSide.length === 0 ? (
-        <Panel variant="flat" pad class="task-empty">暂无可进行的任务。</Panel>
-      ) : (
-        <div class="task-active-list">
-          {active.map((t) => <TaskCard task={t} key={`${t.villageId ?? ''}:${t.code}`} />)}
-        </div>
-      )}
-      <TaskOffers offered={offered} offeredSide={offeredSide} />
+      <SectionHead sub="从任意村庄执行；奖励发放到最后执行的村庄">全局任务</SectionHead>
+      <TaskGroup state={globalState} />
+      <SectionHead sub={currentVillageId ? `${villageName(currentVillageId)} · 切换村庄后更新` : '当前操作村庄'}>村庄任务</SectionHead>
+      <TaskGroup state={villageState} />
     </section>
   );
 }
@@ -393,7 +428,7 @@ function TaskBoard({ state, playerWide = false }: { state: any; playerWide?: boo
 export function TasksScreen() {
   dataVersion.value;
   playerTaskState.value;
-  return <TaskBoard state={playerTaskState.value} playerWide />;
+  return <TaskBoard state={playerTaskState.value} />;
 }
 
 /** 兼容旧嵌入点：村庄页不再渲染，但保留按当前村读取的组件供旧入口使用。 */

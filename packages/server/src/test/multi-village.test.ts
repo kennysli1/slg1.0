@@ -205,6 +205,39 @@ test('任务板：GetPlayerState 聚合玩家所有村庄并标注来源村', as
   assert.ok([capital, branch].includes(payload.active[0].villageId), '聚合任务应保留一个可执行的来源村');
 });
 
+test('任务归属：全局主线可在分城执行，奖励发给最后执行村；村庄区不重复显示', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: 'mvtaskscope', password: 'pass1', tribe: 'romans' });
+  assert.equal(reg.ok, true, reg.reason);
+  const player = (reg.payload as any).player;
+  const capital = player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: player.id });
+  const branch = (alloc.payload as any).villageId as string;
+  await app.createVillage(branch, 13, -9, '执行分城');
+  const attached = await send(app, 'player.AttachVillage', { playerId: player.id, villageId: branch, q: 13, r: -9, name: '执行分城' });
+  assert.equal(attached.ok, true, attached.reason);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const board0 = (await send(app, 'task.GetPlayerState', { playerId: player.id })).payload as any;
+  assert.equal(board0.global.active.filter((x: any) => x.code === 'm1').length, 1);
+  assert.ok(board0.villages.every((v: any) => !v.active.some((x: any) => x.code === 'm1')), '全局任务不应进入村庄任务区');
+
+  await send(app, 'economy.Grant', { villageId: branch, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  const submit = await send(app, 'task.SubmitResources', { villageId: branch, code: 'm1', resources: { wood: 200, clay: 200 } });
+  assert.equal(submit.ok, true, submit.reason);
+  const branchBefore = (await send(app, 'economy.GetResources', { villageId: branch })).payload as any;
+  const deliver = await send(app, 'task.Deliver', { villageId: branch, code: 'm1' });
+  assert.equal(deliver.ok, true, deliver.reason);
+  assert.equal((deliver.payload as any).rewards.rewardVillageId, branch);
+  const branchAfter = (await send(app, 'economy.GetResources', { villageId: branch })).payload as any;
+  assert.ok(branchAfter.resources.gold >= branchBefore.resources.gold + 50, '全局任务奖励必须发给最后执行村');
+
+  const capState = (await send(app, 'task.GetState', { villageId: capital })).payload as any;
+  assert.ok(capState.completedMain.includes('m1'), '全局任务完成记录应在主城锚点');
+  const branchState = (await send(app, 'task.GetState', { villageId: branch })).payload as any;
+  assert.ok(branchState.global.completedMain.includes('m1'), '任意村读取都应看到全局完成状态');
+});
+
 test('deletePlayer 清除全部村庄进度', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', {

@@ -99,7 +99,8 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     return `${time}清理野营获得宝物「${d.name}」(${rare})，已收入宝物栏`;
   } else if (event === 'TreasurePendingDropped') {
     const rare = treasureRarityName(payload.rarity) || payload.rarity || '';
-    return `${time}军队带回宝物「${payload.name}」(${rare})，待你前往报告页确认领取`;
+    const target = payload.rewardVillageId ? `，任务奖励将发放至村庄 ${payload.rewardVillageId}` : '';
+    return `${time}军队带回宝物「${payload.name}」(${rare})${target}，待你前往报告页确认领取`;
   } else if (event === 'TreasurePendingExpired') {
     const rare = treasureRarityName(payload.rarity) || payload.rarity || '';
     return `${time}宝物「${payload.name}」(${rare}) 确认超时，已自动遗弃`;

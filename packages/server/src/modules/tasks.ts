@@ -1,7 +1,8 @@
 /**
  * 领域模块 · 任务（TasksModule）
  *
- * 状态归属：task 集合（每村任务进度）；客户端任务页通过 GetPlayerState 聚合玩家所有村庄。
+ * 状态归属：task 集合按任务 scope 保存（global 锚定玩家主城，village 绑定具体村）；
+ * 客户端任务页通过 GetPlayerState 分成全局区与当前村区。
  *
  * 设计要点（来自策划）：
  *  - 任务会给接了该任务的玩家在地图上显示专属内容；任务专属宝物不可出售/遗弃/丢失/超时。
@@ -34,7 +35,7 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
-import type { GameConfig, QuestDef, QuestRewards } from '../infra/config.js';
+import type { GameConfig, QuestDef, QuestRewards, QuestScope } from '../infra/config.js';
 
 const COLLECTION = 'task';
 
@@ -54,6 +55,10 @@ interface TaskInstance {
   /** 接取时采用的任务图版本，GM 审查时可识别旧实例与新定义。 */
   definitionRevision?: string;
   type: 'main' | 'daily' | 'side';
+  /** global 任务的逻辑实例存于玩家主城，但记录最后实际执行目标的村庄。 */
+  executionVillageId?: string;
+  /** 任务营地/NPC 生成时所在村庄；用于跨村事件和清理。 */
+  spawnVillageId?: string;
   acceptedAt: number;
   /** submit_resources：已上交的资源累计。 */
   submitted: Record<string, number>;
@@ -135,6 +140,7 @@ export class TasksModule {
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
     now: () => number, config: GameConfig, rng: () => number = Math.random,
     private playerVillages: (playerId: string) => string[] = () => [],
+    private villageOwner: (villageId: string) => string | null = () => null,
   ) {
     this.config = config;
     this.store = store;
@@ -201,7 +207,7 @@ export class TasksModule {
       for (const inst of Object.values(s.active)) {
         if (this.quest(inst.code)?.objective.kind !== 'clear_camp') continue;
         for (const camp of inst.camps) {
-          if (!camp.cleared) await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId: s.villageId } });
+          if (!camp.cleared) await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId: inst.spawnVillageId ?? s.villageId } });
         }
         if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
       // 补生成挂起的幸福村（贸易中心在任务接取后才建成的情况）
@@ -300,11 +306,35 @@ export class TasksModule {
     return this.config.quests[code];
   }
 
+  private questScope(code: string): QuestScope {
+    const q = this.quest(code);
+    return q?.scope ?? (q?.type === 'main' ? 'global' : 'village');
+  }
+
+  /** 全局任务以玩家第一座（主城）为持久化锚点；没有玩家索引的旧档退回调用村。 */
+  private anchorVillage(villageId: string): string {
+    const owner = this.villageOwner(villageId);
+    if (!owner) return villageId;
+    return this.playerVillages(owner)[0] ?? villageId;
+  }
+
+  private storageVillageForQuest(villageId: string, code: string): string {
+    return this.questScope(code) === 'global' ? this.anchorVillage(villageId) : villageId;
+  }
+
+  private stateForQuest(villageId: string, code: string): TaskState {
+    return this.ensureState(this.storageVillageForQuest(villageId, code));
+  }
+
+  private taskCandidates(villageId: string): { storageVillageId: string; state: TaskState }[] {
+    const ids = [...new Set([villageId, this.anchorVillage(villageId)])];
+    return ids.map((storageVillageId) => ({ storageVillageId, state: this.ensureState(storageVillageId) }));
+  }
+
   // ── 命令：GetState ──
   private getState(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
-    const s = this.ensureState(villageId);
-    return { ok: true, payload: this.snapshot(villageId, s) };
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /** 玩家任务板：聚合该玩家全部村庄的任务；执行动作仍携带来源村庄并走原有村庄状态。 */
@@ -312,14 +342,16 @@ export class TasksModule {
     const { playerId } = cmd.payload as { playerId?: string };
     if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
     const villageIds = [...new Set(this.playerVillages(playerId))];
-    const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId)));
+    const anchor = villageIds[0];
+    const global = anchor ? this.snapshot(anchor, this.ensureState(anchor), 'global') : this.emptySnapshot(anchor ?? null);
+    const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId), 'village'));
     const activeByCode = new Map<string, Record<string, unknown>>();
     const offeredByCode = new Map<string, Record<string, unknown>>();
     const offeredSideByCode = new Map<string, Record<string, unknown>>();
     const completedMain = new Set<string>();
     const completedSide = new Set<string>();
     const abandonedSide = new Set<string>();
-    for (const snap of villages) {
+    for (const snap of [global, ...villages]) {
       for (const item of (snap.active as Record<string, unknown>[])) {
         const code = String(item.code ?? '');
         const prev = activeByCode.get(code);
@@ -344,6 +376,7 @@ export class TasksModule {
         playerId,
         villageIds,
         villages,
+        global,
         active: [...activeByCode.values()],
         offered: [...offeredByCode.values()],
         offeredSide: [...offeredSideByCode.values()],
@@ -357,9 +390,10 @@ export class TasksModule {
   // ── 命令：Accept（接取日常/支线任务）──
   private async accept(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.ensureState(villageId);
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     if (s.active[code]) return { ok: false, payload: {}, reason: 'already_active' };
     if ((s.cooldownUntil?.[code] ?? 0) > this.now()) return { ok: false, payload: { cooldownUntil: s.cooldownUntil?.[code] }, reason: 'quest_cooldown' };
 
@@ -378,7 +412,7 @@ export class TasksModule {
       return { ok: false, payload: {}, reason: 'main_auto_activated' };
     }
 
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, storageVillageId, s);
     await this.activateQuest(villageId, code);
     return { ok: true, payload: { code } };
   }
@@ -386,7 +420,8 @@ export class TasksModule {
   // ── 命令：Abandon（放弃日常/支线任务；主线不可放弃）──
   private async abandon(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.ensureState(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
     const q = this.quest(code);
@@ -396,8 +431,8 @@ export class TasksModule {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
     // 移除幸福村（deliver_to_npc 目标）
-    if (inst.npcVillageId) await this.removeNpc(villageId, inst);
-    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
+    if (inst.npcVillageId) await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
+    this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
     delete s.active[code];
     // 支线任务：放弃后永久不再出现（记入 abandonedSide，并从可接取移除）
     if (q.type === 'side') {
@@ -408,7 +443,7 @@ export class TasksModule {
       s.cooldownUntil ??= {};
       s.cooldownUntil[code] = this.now() + q.abandonCooldownSec * 1000;
     }
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
     return { ok: true, payload: { code, type: q.type } };
@@ -417,7 +452,8 @@ export class TasksModule {
   // ── 命令：SubmitResources（上交资源）──
   private async submitResources(cmd: Command): Promise<CommandResult> {
     const { villageId, code, resources } = cmd.payload as { villageId: string; code: string; resources: Record<string, number> };
-    const s = this.ensureState(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
     const q = this.quest(code);
@@ -447,7 +483,8 @@ export class TasksModule {
     for (const [res, amt] of Object.entries(toSpend)) {
       inst.submitted[res] = (inst.submitted[res] ?? 0) + amt;
     }
-    this.store.set(COLLECTION, villageId, s);
+    inst.executionVillageId = villageId;
+    this.store.set(COLLECTION, storageVillageId, s);
 
     const complete = this.submitMet(inst, required);
     if (complete) {
@@ -461,7 +498,8 @@ export class TasksModule {
   // ── 命令：Deliver（手动交付就绪任务，领取奖励）──
   private async deliver(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.ensureState(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
     if (!inst.readyToDeliver) return { ok: false, payload: {}, reason: 'not_ready' };
@@ -474,12 +512,12 @@ export class TasksModule {
       const picked = returned[Math.floor(this.rng() * returned.length)];
       const exchange = await this.commands.send({
         name: 'treasure.ExchangeQuestFlag', from: TasksModule.NAME,
-        payload: { villageId, fromCode: q.objective.flagCode ?? '', toCode: 'victory_flag' },
+        payload: { villageId: inst.executionVillageId ?? villageId, fromCode: q.objective.flagCode ?? '', toCode: 'victory_flag' },
       });
       if (!exchange.ok) {
         inst.qualifiedFlagMovements = [];
         inst.readyToDeliver = false;
-        this.store.set(COLLECTION, villageId, s);
+        this.store.set(COLLECTION, storageVillageId, s);
         await this.pushList(villageId);
         return { ok: false, payload: {}, reason: 'qualifying_flag_not_stored' };
       }
@@ -491,18 +529,21 @@ export class TasksModule {
 
   /** 目标已达成 → 标记就绪可交付（不自动发奖），并推送给客户端。 */
   private async markReady(villageId: string, code: string): Promise<void> {
-    const s = this.ensureState(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst || inst.readyToDeliver) return; // 幂等
     inst.readyToDeliver = true;
-    this.store.set(COLLECTION, villageId, s);
+    inst.executionVillageId ??= villageId;
+    this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }
 
   // ── 激活任务（主线自动 / 随机接取共用）──
   private async activateQuest(villageId: string, code: string): Promise<void> {
-    const s = this.ensureState(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     if (s.active[code]) return; // 幂等
     const q = this.quest(code);
     if (!q) return;
@@ -512,6 +553,8 @@ export class TasksModule {
       lineCode: graphQuest?.lineCode,
       definitionRevision: 'task-graph-v1',
       type: q.type,
+      executionVillageId: villageId,
+      spawnVillageId: villageId,
       acceptedAt: this.now(),
       submitted: {},
       camps: [],
@@ -519,9 +562,9 @@ export class TasksModule {
       progress: 0,
     };
     s.active[code] = inst;
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, storageVillageId, s);
     if (q.objective.kind === 'clear_camp') {
-      await this.spawnCamps(villageId, inst);
+      await this.spawnCamps(villageId, inst, storageVillageId);
     } else if (q.objective.kind === 'deliver_to_npc') {
       await this.spawnNpcVillage(villageId, s, inst);
     }
@@ -530,7 +573,7 @@ export class TasksModule {
   }
 
   /** 在村内找空地生成任务营地（task=true，不掉落/不自动重生）。 */
-  private async spawnCamps(villageId: string, inst: TaskInstance): Promise<void> {
+  private async spawnCamps(villageId: string, inst: TaskInstance, storageVillageId = villageId): Promise<void> {
     const q = this.quest(inst.code);
     if (!q || q.objective.kind !== 'clear_camp') return;
     const template = q.objective.campTemplate;
@@ -559,8 +602,8 @@ export class TasksModule {
       }
     }
     inst.spawnAttempts = (inst.spawnAttempts ?? 0) + 1;
-    this.store.set(COLLECTION, villageId, this.ensureState(villageId));
-    if (placed < want) this.scheduleCampRetry(villageId, inst);
+    this.store.set(COLLECTION, storageVillageId, this.ensureState(storageVillageId));
+    if (placed < want) this.scheduleCampRetry(storageVillageId, inst);
   }
 
   private scheduleCampRetry(villageId: string, inst: TaskInstance): void {
@@ -570,34 +613,36 @@ export class TasksModule {
     this.scheduler.cancelByOwner(owner);
     this.scheduler.schedule(q.campRetrySec * 1000, () => {
       const current = this.ensureState(villageId).active[inst.code];
-      if (current) void this.spawnCamps(villageId, current);
+      if (current) void this.spawnCamps(current.spawnVillageId ?? villageId, current, villageId);
     }, owner, `village:${villageId}`);
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number } | null> {
-    const s = this.ensureState(villageId);
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; rewardVillageId?: string } | null> {
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return null;
     const q = this.quest(code);
     if (!q) return null;
+    const rewardVillageId = q.scope === 'global' ? (inst.executionVillageId ?? villageId) : villageId;
 
     // 移除残留营地
     for (const c of inst.camps) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
     }
-    this.scheduler.cancelByOwner(`task-camp:${villageId}:${code}`);
+    this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
 
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number } = { resources: null, treasures: [] };
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
     // 资源奖励
     if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
-      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: q.rewards.resources } });
+      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: q.rewards.resources } });
       granted.resources = { ...q.rewards.resources };
     }
     if (q.rewards.reputation) {
       await this.commands.send({
         name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
-        payload: { villageId, delta: q.rewards.reputation, reason: `task_${code}_success` },
+        payload: { villageId: rewardVillageId, delta: q.rewards.reputation, reason: `task_${code}_success` },
       });
       granted.reputation = q.rewards.reputation;
     }
@@ -607,22 +652,22 @@ export class TasksModule {
       if (q.objective.kind === 'carry_flag' && t === 'victory_flag') continue;
       const def = this.config.treasures[t];
       // 任务奖励与其他宝物一样占用栏位；满栏时进入待处理报告，由玩家决定领取/出售/丢弃。
-      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: t, pendingIfFull: true } });
+      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, code: t, pendingIfFull: true, rewardVillageId } });
       granted.treasures.push(t);
     }
 
     // captured_natalies 释放替代丢弃：玩家点「领取奖励」时才发放 500 金币 + 宝物「正直的心」。
     // natalieDecision 仅在 captured_natalies 任务被释放裁决时置为 'release'（见 onNatalieDecision）。
     if (inst.natalieDecision === 'release') {
-      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId, gain: { gold: 500 } } });
+      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: { gold: 500 } } });
       granted.resources = { ...(granted.resources ?? {}), gold: ((granted.resources ?? {}).gold ?? 0) + 500 };
-      const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'honest_heart', pendingIfFull: true } });
+      const gh = await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, code: 'honest_heart', pendingIfFull: true, rewardVillageId } });
       if (gh.ok) granted.treasures.push('honest_heart');
       const releaseReputation = this.config.constants.reputationS4ReleaseDelta;
       if (releaseReputation !== 0) {
         await this.commands.send({
           name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
-          payload: { villageId, delta: releaseReputation, reason: 's4_release_natalies' },
+          payload: { villageId: rewardVillageId, delta: releaseReputation, reason: 's4_release_natalies' },
         });
         granted.reputation = releaseReputation;
       }
@@ -638,7 +683,7 @@ export class TasksModule {
       s.cooldownUntil ??= {};
       s.cooldownUntil[code] = this.now() + q.cooldownSec * 1000;
     }
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, storageVillageId, s);
 
     await this.pushList(villageId);
     await this.pushMap(villageId);
@@ -655,10 +700,10 @@ export class TasksModule {
   private async gmComplete(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
-    const s = this.ensureState(villageId);
+    const s = this.stateForQuest(villageId, code);
     if (!s.active[code]) return { ok: false, payload: {}, reason: 'not_active' };
     await this.completeQuest(villageId, code);
-    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /** 把已完成的一次性支线恢复为未完成，并要求再次满足触发条件才可接取。 */
@@ -668,19 +713,19 @@ export class TasksModule {
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
     if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_completed_side_supported' };
-    const s = this.ensureState(villageId);
+    const s = this.stateForQuest(villageId, code);
     if (!s.completedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_completed_side' };
 
     s.completedSide = s.completedSide.filter((x) => x !== code);
     s.offeredSide = s.offeredSide.filter((x) => x !== code);
     // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
     if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
     // 没有触发条件的支线可立刻重新出现；有触发条件的由下一次领域事件解锁。
     if (!q.trigger) await this.unlockSideQuests(villageId);
-    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /** ③ 把已放弃的支线任务恢复为可接取：移出 abandonedSide 并清空触发/冷却，重新进入可接取列表。 */
@@ -690,7 +735,7 @@ export class TasksModule {
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
     if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_side_supported' };
-    const s = this.ensureState(villageId);
+    const s = this.stateForQuest(villageId, code);
     if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
     s.abandonedSide = s.abandonedSide.filter((c) => c !== code);
     // 重新触发：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
@@ -698,9 +743,9 @@ export class TasksModule {
     //   这里是已放弃→GM 强制重新出现，故补回触发标记。）
     if (q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
     if (s.cooldownUntil) delete s.cooldownUntil[code];
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
     await this.unlockSideQuests(villageId);
-    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /** ② captured_natalies 报告被玩家抉择（入库/释放）→ 标记调查坐标任务就绪。 */
@@ -768,12 +813,13 @@ export class TasksModule {
 
   // ── 主线自动解锁（科技树式前置）──
   private async unlockMainQuests(villageId: string): Promise<void> {
-    const s = this.ensureState(villageId);
     for (const q of Object.values(this.config.quests)) {
       if (q.type !== 'main') continue;
+      const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+      const s = this.ensureState(storageVillageId);
       if (s.completedMain.includes(q.code)) continue;
       if (s.active[q.code]) continue;
-      if (this.prereqsMet(s, q.requires)) {
+      if (this.prereqsMet(villageId, q.requires)) {
         try {
           await this.activateQuest(villageId, q.code);
         } catch { /* 忽略单条失败，继续其它 */ }
@@ -783,28 +829,31 @@ export class TasksModule {
 
   /** 支线任务解锁（一次性 + 触发条件 + 前置链）：满足条件的支线进入可接取列表。 */
   private async unlockSideQuests(villageId: string): Promise<void> {
-    const s = this.ensureState(villageId);
-    let changed = false;
     for (const q of Object.values(this.config.quests)) {
       if (q.type !== 'side') continue;
+      const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+      const s = this.ensureState(storageVillageId);
+      let changed = false;
       if (s.completedSide.includes(q.code)) continue;
       if (s.abandonedSide.includes(q.code)) continue; // 放弃过 → 永久不再出现
       if (s.active[q.code]) continue;
       if (s.offeredSide.includes(q.code)) continue;
-      if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(s, q.requires)) {
+      if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(villageId, q.requires)) {
         s.offeredSide.push(q.code);
         changed = true;
       }
+      if (changed) this.store.set(COLLECTION, storageVillageId, s);
     }
-    if (changed) {
-      this.store.set(COLLECTION, villageId, s);
-      await this.pushList(villageId);
-    }
+    await this.pushList(villageId);
   }
 
-  private prereqsMet(s: TaskState, requires: string[]): boolean {
+  private prereqsMet(villageId: string, requires: string[]): boolean {
     if (!requires.length) return true;
-    const done = new Set([...s.completedMain, ...s.completedSide]);
+    const done = new Set<string>();
+    for (const { state } of this.taskCandidates(villageId)) {
+      for (const code of state.completedMain) done.add(code);
+      for (const code of state.completedSide) done.add(code);
+    }
     for (const req of requires) {
       // 每个 require 是「OR 组」：以 ' OR ' 分隔，组内任一完成即满足
       const orParts = req.split(' OR ');
@@ -822,73 +871,81 @@ export class TasksModule {
     const targetId = p.targetId;
     if (!villageId || !targetId) return;
 
-    const s = this.load(villageId);
-    if (!s) return;
-
-    // 村民的请求：成功掠夺(清空)普通 PvE 营地后，按 GM 概率触发支线任务
+    // 村民的请求：成功掠夺(清空)普通 PvE 营地后，按 GM 概率触发支线任务。
     if (p.targetKind === 'pve' && p.campCleared === true && !targetId.startsWith('happy-')) {
       const chance = this.gmNum('villager_request_trigger_chance', 0.3);
-      if (this.rng() < chance && !s.firedTriggers.includes('pve_camp_cleared')) {
-        s.firedTriggers.push('pve_camp_cleared');
-        this.store.set(COLLECTION, villageId, s);
+      if (this.rng() < chance) {
+        for (const q of Object.values(this.config.quests).filter((x) => x.trigger === 'pve_camp_cleared')) {
+          const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+          const state = this.ensureState(storageVillageId);
+          if (!state.firedTriggers.includes('pve_camp_cleared')) {
+            state.firedTriggers.push('pve_camp_cleared');
+            this.store.set(COLLECTION, storageVillageId, state);
+          }
+        }
         await this.unlockSideQuests(villageId);
       }
     }
 
-    for (const [code, inst] of Object.entries(s.active)) {
-      // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 任务失败，改发「秘密字条」
-      if (p.targetKind === 'pve' && inst.npcVillageId && targetId === inst.npcVillageId && p.attackerWins) {
-        await this.removeNpc(villageId, inst);
-        await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId, code: 'secret_note', pendingIfFull: true, alwaysPending: true } });
-        if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
-        delete s.active[code];
-        this.store.set(COLLECTION, villageId, s);
-        await this.pushList(villageId);
-        await this.pushMap(villageId);
-        return;
-      }
-      const q = this.quest(code);
-      if (q?.objective.kind === 'carry_flag' && p.movementId && p.treasures?.includes(q.objective.flagCode ?? '')) {
-        const troopCount = Object.values(p.deployedTroops ?? {}).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
-        if (troopCount < (q.objective.minTroops ?? 1)) continue;
-        const qualifies = (p.targetKind === 'pve' && p.campCleared === true)
-          || (p.targetKind === 'village' && Object.values(p.looted ?? {}).some((n) => n > 0));
-        if (qualifies) {
-          inst.qualifiedMovements ??= [];
-          if (!inst.qualifiedMovements.includes(p.movementId)) inst.qualifiedMovements.push(p.movementId);
-          this.store.set(COLLECTION, villageId, s);
-          await this.pushList(villageId);
-        }
-        continue;
-      }
-      // 既有 clear_camp 任务只统计 PvE 的专属营地，PvP 仅能推进携旗任务。
-      if (p.targetKind !== 'pve') continue;
-      const camp = inst.camps.find((c) => c.id === targetId && !c.cleared);
-      if (!camp) continue;
-      camp.cleared = true;
-      inst.campCleared = (inst.campCleared ?? 0) + 1;
-      this.store.set(COLLECTION, villageId, s);
-      if (inst.campCleared >= inst.camps.length) {
-        // 最后一处营地清剿：掉落「被囚禁的娜塔莉们」（走标准待领取报告流程，需军队归村后才可领取）。
-        // ② 仅调查坐标：在玩家抉择前不标记可交付；置 awaitingNatalieDecision，待 treasure.PendingClaimed 后再 markReady。
-        await this.commands.send({
-          name: 'treasure.RollDrop', from: TasksModule.NAME,
-          payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
-        });
-        if (code === 's4') {
-          inst.awaitingNatalieDecision = true;
-          inst.awaitingNatalieCode = 'captured_natalies';
-          this.store.set(COLLECTION, villageId, s);
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q) continue;
+        if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 任务失败，改发「秘密字条」
+        if (p.targetKind === 'pve' && q.objective.kind === 'deliver_to_npc' && inst.npcVillageId && targetId === inst.npcVillageId && p.attackerWins) {
+          const rewardVillageId = inst.spawnVillageId ?? villageId;
+          await this.removeNpc(rewardVillageId, inst);
+          await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, code: 'secret_note', pendingIfFull: true, alwaysPending: true, rewardVillageId } });
+          if (!state.abandonedSide.includes(code)) state.abandonedSide.push(code);
+          delete state.active[code];
+          this.store.set(COLLECTION, storageVillageId, state);
           await this.pushList(villageId);
           await this.pushMap(villageId);
-        } else {
-          await this.markReady(villageId, code);
+          return;
         }
-      } else {
-        await this.pushList(villageId);
-        await this.pushMap(villageId);
+        if (q.objective.kind === 'carry_flag' && p.movementId && p.treasures?.includes(q.objective.flagCode ?? '')) {
+          const troopCount = Object.values(p.deployedTroops ?? {}).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
+          if (troopCount < (q.objective.minTroops ?? 1)) continue;
+          const qualifies = (p.targetKind === 'pve' && p.campCleared === true)
+            || (p.targetKind === 'village' && Object.values(p.looted ?? {}).some((n) => n > 0));
+          if (qualifies) {
+            inst.executionVillageId = villageId;
+            inst.qualifiedMovements ??= [];
+            if (!inst.qualifiedMovements.includes(p.movementId)) inst.qualifiedMovements.push(p.movementId);
+            this.store.set(COLLECTION, storageVillageId, state);
+            await this.pushList(villageId);
+          }
+          continue;
+        }
+        // clear_camp 只统计 PvE 的专属营地，PvP 仅能推进携旗任务。
+        if (p.targetKind !== 'pve') continue;
+        const camp = inst.camps.find((c) => c.id === targetId && !c.cleared);
+        if (!camp) continue;
+        camp.cleared = true;
+        inst.executionVillageId = villageId;
+        inst.campCleared = (inst.campCleared ?? 0) + 1;
+        this.store.set(COLLECTION, storageVillageId, state);
+        if (inst.campCleared >= inst.camps.length) {
+          await this.commands.send({
+            name: 'treasure.RollDrop', from: TasksModule.NAME,
+            payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
+          });
+          if (code === 's4') {
+            inst.awaitingNatalieDecision = true;
+            inst.awaitingNatalieCode = 'captured_natalies';
+            this.store.set(COLLECTION, storageVillageId, state);
+            await this.pushList(villageId);
+            await this.pushMap(villageId);
+          } else {
+            await this.markReady(villageId, code);
+          }
+        } else {
+          await this.pushList(villageId);
+          await this.pushMap(villageId);
+        }
+        return;
       }
-      return;
     }
   }
 
@@ -904,34 +961,38 @@ export class TasksModule {
     const army = await this.commands.send({ name: 'military.GetArmy', from: TasksModule.NAME, payload: { villageId } });
     const troops = ((army.payload as { troops?: Record<string, number> } | undefined)?.troops) ?? {};
     const total = Object.values(troops).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
-    const s = this.ensureState(villageId);
-    let changed = false;
     for (const q of Object.values(this.config.quests)) {
       if (q.type !== 'side' || !q.trigger?.startsWith('troops_reached:')) continue;
+      const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+      const s = this.ensureState(storageVillageId);
       const need = Number(q.trigger.split(':')[1]) || 0;
-      if (total >= need && !s.firedTriggers.includes(q.trigger)) { s.firedTriggers.push(q.trigger); changed = true; }
+      if (total >= need && !s.firedTriggers.includes(q.trigger)) {
+        s.firedTriggers.push(q.trigger);
+        this.store.set(COLLECTION, storageVillageId, s);
+        await this.unlockSideQuests(villageId);
+      }
     }
-    if (changed) { this.store.set(COLLECTION, villageId, s); await this.unlockSideQuests(villageId); }
   }
 
   /** 合格军队把军旗存回本村后，只标记为可手动交付，绝不自动发奖。 */
   private async onCarriedStored(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId?: string; movementId?: string; codes?: string[] };
     if (!p.villageId || !p.movementId) return;
-    const s = this.load(p.villageId);
-    if (!s) return;
-    for (const [code, inst] of Object.entries(s.active)) {
-      const q = this.quest(code);
-      if (q?.objective.kind !== 'carry_flag' || !inst.qualifiedMovements?.includes(p.movementId)) continue;
-      const flag = q.objective.flagCode ?? '';
-      if (!p.codes?.includes(flag)) continue;
-      inst.qualifiedMovements = inst.qualifiedMovements.filter((id) => id !== p.movementId);
-      inst.qualifiedFlagMovements ??= [];
-      if (!inst.qualifiedFlagMovements.includes(p.movementId)) inst.qualifiedFlagMovements.push(p.movementId);
-      this.store.set(COLLECTION, p.villageId, s);
-      await this.markReady(p.villageId, code);
-      await this.pushList(p.villageId);
-      return;
+    for (const { storageVillageId, state } of this.taskCandidates(p.villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (q?.objective.kind !== 'carry_flag' || !inst.qualifiedMovements?.includes(p.movementId)) continue;
+        const flag = q.objective.flagCode ?? '';
+        if (!p.codes?.includes(flag)) continue;
+        inst.executionVillageId = p.villageId;
+        inst.qualifiedMovements = inst.qualifiedMovements.filter((id) => id !== p.movementId);
+        inst.qualifiedFlagMovements ??= [];
+        if (!inst.qualifiedFlagMovements.includes(p.movementId)) inst.qualifiedFlagMovements.push(p.movementId);
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.markReady(p.villageId, code);
+        await this.pushList(p.villageId);
+        return;
+      }
     }
   }
 
@@ -939,20 +1000,20 @@ export class TasksModule {
   private async onStoredRemoved(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId?: string; code?: string; remainingCount?: number };
     if (!p.villageId || !p.code) return;
-    const s = this.load(p.villageId);
-    if (!s) return;
-    let changed = false;
-    for (const [code, inst] of Object.entries(s.active)) {
-      const q = this.quest(code);
-      if (q?.objective.kind !== 'carry_flag' || q.objective.flagCode !== p.code) continue;
-      const eligible = inst.qualifiedFlagMovements ?? [];
-      const keep = Math.min(eligible.length, Math.max(0, Number(p.remainingCount) || 0));
-      if (keep === eligible.length) continue;
-      inst.qualifiedFlagMovements = eligible.slice(0, keep);
-      if (keep === 0) inst.readyToDeliver = false;
-      changed = true;
+    for (const { storageVillageId, state } of this.taskCandidates(p.villageId)) {
+      let changed = false;
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (q?.objective.kind !== 'carry_flag' || q.objective.flagCode !== p.code) continue;
+        const eligible = inst.qualifiedFlagMovements ?? [];
+        const keep = Math.min(eligible.length, Math.max(0, Number(p.remainingCount) || 0));
+        if (keep === eligible.length) continue;
+        inst.qualifiedFlagMovements = eligible.slice(0, keep);
+        if (keep === 0) inst.readyToDeliver = false;
+        changed = true;
+      }
+      if (changed) { this.store.set(COLLECTION, storageVillageId, state); await this.pushList(p.villageId); }
     }
-    if (changed) { this.store.set(COLLECTION, p.villageId, s); await this.pushList(p.villageId); }
   }
 
   /** 建筑建成 → 标记已触发的支线任务触发条件，并解锁满足条件的支线任务。 */
@@ -969,14 +1030,15 @@ export class TasksModule {
       }
     }
     const triggerKey = `building_built:${kind}`;
-    // 是否存在以此为触发条件的任务
-    const matched = Object.values(this.config.quests).some((q) => q.trigger === triggerKey);
-    if (!matched) return;
-    const s = this.ensureState(villageId);
-    if (s.firedTriggers.includes(triggerKey)) return; // 已触发过，不重复
-    s.firedTriggers.push(triggerKey);
-    this.store.set(COLLECTION, villageId, s);
-    // 触发条件满足 → 解锁对应支线任务（进入可接取）
+    const matched = Object.values(this.config.quests).filter((q) => q.trigger === triggerKey);
+    if (!matched.length) return;
+    for (const q of matched) {
+      const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+      const s = this.ensureState(storageVillageId);
+      if (s.firedTriggers.includes(triggerKey)) continue;
+      s.firedTriggers.push(triggerKey);
+      this.store.set(COLLECTION, storageVillageId, s);
+    }
     await this.unlockSideQuests(villageId);
   }
 
@@ -986,21 +1048,22 @@ export class TasksModule {
     const villageId = p.villageId;
     const rarity = p.rarity;
     if (!villageId || !rarity) return;
-    const s = this.load(villageId);
-    if (!s) return;
-    for (const [code, inst] of Object.entries(s.active)) {
-      const q = this.quest(code);
-      if (!q || q.objective.kind !== 'sell_discard_treasure') continue;
-      const minRank = rarityRank(q.objective.minRarity ?? 'rare');
-      if (rarityRank(rarity) < minRank) continue; // 品质不达标，不计入
-      inst.progress = (inst.progress ?? 0) + 1;
-      this.store.set(COLLECTION, villageId, s);
-      if (inst.progress >= (q.objective.count ?? 1)) {
-        await this.markReady(villageId, code);
-      } else {
-        await this.pushList(villageId);
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || q.objective.kind !== 'sell_discard_treasure') continue;
+        const minRank = rarityRank(q.objective.minRarity ?? 'rare');
+        if (rarityRank(rarity) < minRank) continue; // 品质不达标，不计入
+        inst.executionVillageId = villageId;
+        inst.progress = (inst.progress ?? 0) + 1;
+        this.store.set(COLLECTION, storageVillageId, state);
+        if (inst.progress >= (q.objective.count ?? 1)) {
+          await this.markReady(villageId, code);
+        } else {
+          await this.pushList(villageId);
+        }
+        return;
       }
-      return;
     }
   }
 
@@ -1232,20 +1295,20 @@ export class TasksModule {
   private async onCaravanArrivedNpc(evt: DomainEvent): Promise<void> {
     const { villageId, npcId, cargo } = evt.payload as { villageId: string; npcId: string; cargo?: Record<string, number> };
     if (!villageId || !npcId) return;
-    const s = this.load(villageId);
-    if (!s) return;
-    for (const [code, inst] of Object.entries(s.active)) {
-      const q = this.quest(code);
-      if (q?.objective.kind !== 'deliver_to_npc') continue;
-      if (inst.npcVillageId !== npcId) continue;
-      const res = q.objective.deliverResource ?? 'crop';
-      const amount = q.objective.deliverAmount ?? 1;
-      const have = Math.floor(Number(cargo?.[res]) || 0);
-      if (have < amount) continue; // 货量不足：忽略本次，等待后续送达
-      // 先清幸福村与订单，再走通用完成流程发娜塔莉
-      await this.removeNpc(villageId, inst);
-      await this.completeQuest(villageId, code);
-      return;
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (q?.objective.kind !== 'deliver_to_npc') continue;
+        if (this.storageVillageForQuest(villageId, code) !== storageVillageId || inst.npcVillageId !== npcId) continue;
+        const res = q.objective.deliverResource ?? 'crop';
+        const amount = q.objective.deliverAmount ?? 1;
+        const have = Math.floor(Number(cargo?.[res]) || 0);
+        if (have < amount) continue; // 货量不足：忽略本次，等待后续送达
+        inst.executionVillageId = villageId;
+        await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
+        await this.completeQuest(villageId, code);
+        return;
+      }
     }
   }
 
@@ -1278,13 +1341,38 @@ export class TasksModule {
   }
 
   // ── 序列化 + 推送 ──
-  private snapshot(villageId: string, s: TaskState): Record<string, unknown> {
-    const active = Object.values(s.active).map((inst) => this.serializeInstance(inst, villageId));
+  private emptySnapshot(villageId: string | null): Record<string, unknown> {
+    return { villageId, active: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [] };
+  }
+
+  /** 当前村任务页快照：本村 village 任务 + 玩家锚点上的 global 任务。 */
+  private snapshotForVillage(villageId: string): Record<string, unknown> {
+    const local = this.snapshot(villageId, this.ensureState(villageId), 'village');
+    const anchor = this.anchorVillage(villageId);
+    const global = this.snapshot(anchor, this.ensureState(anchor), 'global');
+    return {
+      villageId,
+      active: [...(global.active as unknown[]), ...(local.active as unknown[])],
+      offered: [...(global.offered as unknown[]), ...(local.offered as unknown[])],
+      offeredSide: [...(global.offeredSide as unknown[]), ...(local.offeredSide as unknown[])],
+      completedMain: [...(global.completedMain as string[])],
+      completedSide: [...(global.completedSide as string[]), ...(local.completedSide as string[])],
+      abandonedSide: [...(global.abandonedSide as string[]), ...(local.abandonedSide as string[])],
+      global,
+      village: local,
+    };
+  }
+
+  private snapshot(villageId: string, s: TaskState, scopeFilter?: QuestScope): Record<string, unknown> {
+    const include = (code: string) => !scopeFilter || this.questScope(code) === scopeFilter;
+    const active = Object.values(s.active).filter((inst) => include(inst.code)).map((inst) => this.serializeInstance(inst, villageId));
     const offered = s.offered
+      .filter(include)
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
       .map((q) => this.serializeOffer(q, villageId));
     const offeredSide = s.offeredSide
+      .filter(include)
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
       .map((q) => this.serializeOffer(q, villageId));
@@ -1293,9 +1381,9 @@ export class TasksModule {
       active,
       offered,
       offeredSide,
-      completedMain: [...s.completedMain],
-      completedSide: [...s.completedSide],
-      abandonedSide: [...s.abandonedSide],
+      completedMain: s.completedMain.filter(include),
+      completedSide: s.completedSide.filter(include),
+      abandonedSide: s.abandonedSide.filter(include),
     };
   }
 
@@ -1306,6 +1394,7 @@ export class TasksModule {
       name: q.name,
       desc: q.desc,
       type: q.type,
+      scope: q.scope,
       objective: this.serializeObjective(q),
       rewards: this.serializeRewards(q),
       trigger: q.trigger ?? null,
@@ -1335,6 +1424,9 @@ export class TasksModule {
       lineCode: inst.lineCode ?? this.config.questGraph.quests[inst.code]?.lineCode ?? null,
       definitionRevision: inst.definitionRevision ?? 'legacy-v2',
       type: inst.type,
+      scope: q?.scope ?? (inst.type === 'main' ? 'global' : 'village'),
+      executionVillageId: inst.executionVillageId ?? villageId ?? null,
+      storageVillageId: villageId ?? null,
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',
       objective,
@@ -1380,21 +1472,22 @@ export class TasksModule {
   }
 
   private async pushList(villageId: string): Promise<void> {
-    const s = this.ensureState(villageId);
     await this.bus.emit({
       name: 'task.ListChanged', source: TasksModule.NAME, ts: this.now(),
-      payload: this.snapshot(villageId, s),
+      payload: this.snapshotForVillage(villageId),
     });
   }
 
   private async pushMap(villageId: string): Promise<void> {
-    const s = this.load(villageId) ?? this.ensureState(villageId);
     const camps: { id: string; q: number; r: number; cleared: boolean }[] = [];
-    for (const inst of Object.values(s.active)) {
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const inst of Object.values(state.active)) {
+        if (this.storageVillageForQuest(villageId, inst.code) !== storageVillageId) continue;
       // 地图标记只表示仍可交互的任务营地；已清理的营地保留在任务快照中用于进度展示，
       // 但绝不能再次推给地图，否则客户端会在已还原的空地上留下幽灵任务标。
       for (const c of inst.camps) {
         if (!c.cleared) camps.push({ id: c.id, q: c.q, r: c.r, cleared: false });
+      }
       }
     }
     await this.bus.emit({

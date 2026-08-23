@@ -118,6 +118,9 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
         </div>
 
         <div class="tcard-effect">{effectText}</div>
+        {p.rewardVillageId && (
+          <div class="tcard-effect">任务奖励收件村：{me?.villages?.find((v) => v.id === p.rewardVillageId)?.name ?? p.rewardVillageId}</div>
+        )}
 
         <div class="tcard-expiry">
           <span>⏳ 超时遗弃：</span>
