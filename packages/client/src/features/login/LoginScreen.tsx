@@ -11,6 +11,20 @@ const TRIBE_ART: Record<string, { icon: string; traits: string[] }> = {
   teutons: { icon: 'unit_clubswinger', traits: ['造价低廉', '掠夺凶猛', '前期压制'] },
 };
 
+const SERVERS = [
+  { id: 'main', name: '主服', description: '正式世界 · 8080', port: '8080' },
+  { id: 'test-01', name: 'AI 测试服 01', description: '独立测试世界 · 8081', port: '8081' },
+] as const;
+
+function serverUrl(port: string): string {
+  const url = new URL(window.location.href);
+  url.port = port;
+  url.pathname = '/';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
 export function LoginScreen({ booting, notice, onSuccess }: {
   booting: boolean;
   notice: string;
@@ -22,6 +36,7 @@ export function LoginScreen({ booting, notice, onSuccess }: {
   const [tribe, setTribe] = useState('romans');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const currentServerId = window.location.port === '8081' ? 'test-01' : 'main';
 
   async function submit() {
     if (busy || booting) return;
@@ -48,6 +63,28 @@ export function LoginScreen({ booting, notice, onSuccess }: {
         </div>
         <h1 class="login-title">世界之王</h1>
         <p class="login-tagline">罗马 · 高卢 · 条顿 —— 在同一张地图上称雄</p>
+
+        <section class="server-pick" aria-labelledby="server-pick-title">
+          <div class="field-label" id="server-pick-title">选择服务器</div>
+          <div class="server-grid">
+            {SERVERS.map((server) => {
+              const selected = server.id === currentServerId;
+              return (
+                <a
+                  key={server.id}
+                  class={`server-card server-card--${server.id}${selected ? ' picked' : ''}`}
+                  href={serverUrl(server.port)}
+                  aria-current={selected ? 'page' : undefined}
+                  onClick={(event) => { if (selected) event.preventDefault(); }}
+                >
+                  <span class="server-card-status">{selected ? '当前' : '前往'}</span>
+                  <b>{server.name}</b>
+                  <small>{server.description}</small>
+                </a>
+              );
+            })}
+          </div>
+        </section>
 
         <div class="login-tabs" role="tablist">
           <button role="tab" aria-selected={mode === 'login'} class={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setMsg(''); }}>登录</button>
