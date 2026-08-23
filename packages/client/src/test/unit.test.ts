@@ -18,7 +18,7 @@ import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
-import { capitalCoordinate, currentVillageCoordinate, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -51,6 +51,14 @@ describe('地图定位', () => {
   it('地图回正使用当前操作村坐标，而不是主城坐标', () => {
     const player = { id: 'p1', name: '领主', tribe: 't1', villageId: 'v2', capitalVillageId: 'v1', q: 8, r: 9, villages: [] };
     assert.deepEqual(currentVillageCoordinate(player), { q: 8, r: 9 });
+  });
+
+  it('地图当前村标签使用村名而不是玩家名', () => {
+    const player = {
+      id: 'p1', name: '玩家名', tribe: 't1', villageId: 'v2', q: 8, r: 9,
+      villages: [{ id: 'v2', q: 8, r: 9, name: '新村名', isCapital: false }],
+    };
+    assert.equal(currentVillageName(player), '新村名');
   });
 
   it('坐标跳转只接受地图范围内的完整整数', () => {
