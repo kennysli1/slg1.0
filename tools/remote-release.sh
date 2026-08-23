@@ -28,17 +28,34 @@ state_value() {
   sed -n "s/^${key}=//p" "$STATE" | head -n 1
 }
 
+has_test_server() {
+  local config="$1"
+  grep -Fq "name: 'kow-test-01'" "$config"
+}
+
+start_servers() {
+  local config="$1"
+  # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
+  # 每次发布都重建主服与存在于该 release 中的测试服，确保二者均运行构建产物。
+  "$PM2_BIN" delete kow >/dev/null 2>&1 || true
+  "$PM2_BIN" delete kow-test-01 >/dev/null 2>&1 || true
+  "$PM2_BIN" start "$config" --only kow --update-env
+  if has_test_server "$config"; then
+    "$PM2_BIN" start "$config" --only kow-test-01 --update-env
+  fi
+  sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
+  "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
+  if has_test_server "$config"; then
+    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8081/health >/dev/null
+  fi
+}
+
 activate() {
   local target="$1"
   local next="$BASE/.current-$$"
   ln -s "$target" "$next"
   node -e "require('node:fs').renameSync(process.argv[1], process.argv[2])" "$next" "$CURRENT"
-  # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
-  # 先重建同名进程，确保它真正运行 current release 的 dist 产物。
-  "$PM2_BIN" delete kow >/dev/null 2>&1 || true
-  "$PM2_BIN" start "$CURRENT/ecosystem.config.cjs" --only kow --update-env
-  sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
-  "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
+  start_servers "$CURRENT/ecosystem.config.cjs"
 }
 
 restore_previous() {
@@ -50,10 +67,7 @@ restore_previous() {
     activate "$previous"
   elif [[ "$mode" == legacy && -f "$BASE/ecosystem.config.cjs" ]]; then
     rm -f "$CURRENT"
-    "$PM2_BIN" delete kow >/dev/null 2>&1 || true
-    "$PM2_BIN" start "$BASE/ecosystem.config.cjs" --only kow --update-env
-    sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
-    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
+    start_servers "$BASE/ecosystem.config.cjs"
   fi
 }
 
