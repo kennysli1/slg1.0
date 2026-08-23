@@ -13,12 +13,12 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
-import { setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
+import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
-import { capitalCoordinate, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -48,11 +48,35 @@ describe('地图定位', () => {
     assert.deepEqual(capitalCoordinate(player), { q: 2, r: 3 });
   });
 
+  it('地图回正使用当前操作村坐标，而不是主城坐标', () => {
+    const player = { id: 'p1', name: '领主', tribe: 't1', villageId: 'v2', capitalVillageId: 'v1', q: 8, r: 9, villages: [] };
+    assert.deepEqual(currentVillageCoordinate(player), { q: 8, r: 9 });
+  });
+
+  it('地图当前村标签使用村名而不是玩家名', () => {
+    const player = {
+      id: 'p1', name: '玩家名', tribe: 't1', villageId: 'v2', q: 8, r: 9,
+      villages: [{ id: 'v2', q: 8, r: 9, name: '新村名', isCapital: false }],
+    };
+    assert.equal(currentVillageName(player), '新村名');
+  });
+
   it('坐标跳转只接受地图范围内的完整整数', () => {
     assert.deepEqual(parseMapCoordinate('4', '7', 10, 10), { ok: true, coordinate: { q: 4, r: 7 } });
     assert.equal(parseMapCoordinate('', '7', 10, 10).ok, false);
     assert.equal(parseMapCoordinate('1.5', '7', 10, 10).ok, false);
     assert.equal(parseMapCoordinate('10', '7', 10, 10).ok, false);
+  });
+});
+
+describe('村庄切换互斥状态', () => {
+  it('同一时间只允许一个切换，并能在完成后解除锁定', () => {
+    endVillageSwitch();
+    assert.equal(beginVillageSwitch('v2', '分城'), true);
+    assert.deepEqual(villageSwitching.value, { targetVillageId: 'v2', targetVillageName: '分城' });
+    assert.equal(beginVillageSwitch('v3', '另一座村'), false);
+    endVillageSwitch();
+    assert.equal(villageSwitching.value, null);
   });
 });
 
@@ -296,6 +320,36 @@ describe('任务营地地图标记', () => {
     setTaskMarkers({ villageId, camps });
     assert.deepEqual(taskMarkers.value[villageId].map((camp: any) => camp.id), ['camp-live']);
   });
+
+  it('玩家任务快照把全局营地同步到每个村庄，并清除旧坐标标记', () => {
+    setTaskMarkers({ villageId: 'task-global-capital', camps: [{ id: 'stale', q: 16, r: 40, cleared: false }] });
+    setPlayerTaskState({
+      global: { active: [{ camps: [{ id: 'global-camp', q: 12, r: 0, cleared: false }] }] },
+      villages: [
+        { villageId: 'task-global-capital', active: [] },
+        { villageId: 'task-global-branch', active: [] },
+      ],
+    });
+    assert.deepEqual(taskMarkers.value['task-global-capital'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
+    assert.deepEqual(taskMarkers.value['task-global-branch'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
+  });
+
+  it('任务营地标记携带任务名称与说明，地图推送不会丢失关联信息', () => {
+    const villageId = 'task-detail-test';
+    setTaskState({
+      villageId,
+      active: [{
+        code: 'm3', name: '清剿野兽', desc: '清理一处骚扰村落的营地', type: 'main', scope: 'global',
+        campCleared: 0, campTotal: 1, camps: [{ id: 'detail-camp', q: 4, r: 5, cleared: false }],
+      }],
+    });
+    assert.equal(taskMarkers.value[villageId][0].taskInfo.name, '清剿野兽');
+    assert.equal(taskMarkers.value[villageId][0].taskInfo.desc, '清理一处骚扰村落的营地');
+    assert.equal(findTaskCampMarker('detail-camp', 4, 5)?.taskInfo.scope, 'global');
+
+    setTaskMarkers({ villageId, camps: [{ id: 'detail-camp', q: 4, r: 5, cleared: false }] });
+    assert.equal(findTaskCampMarker('detail-camp', 4, 5)?.taskInfo.name, '清剿野兽');
+  });
 });
 
 // ─── PopulationChanged 事件文案 ────────────────────────────────────
@@ -339,6 +393,18 @@ describe('notificationText - PopulationChanged v3 硬上限', () => {
     const result = notificationText('PopulationChanged', { event: 'returned', returned: 50, currentPop: 150 });
     assert.ok(result != null, '返回事件应有文案');
     assert.ok(result?.includes('50') || result?.includes('150'), `应含数量，实际：${result}`);
+  });
+});
+
+describe('notificationText - 建筑侦察报告', () => {
+  it('城内外建筑侦察同时显示守军兵力', () => {
+    const result = notificationText('ScoutReport', {
+      scoutType: 'scout_buildings',
+      buildings: { center: [{ kind: 'townhall', name: '城镇中心', level: 1 }], inner: [], outer: [] },
+      defenderTroops: { legionnaire: 4 },
+    });
+    assert.ok(result?.includes('城镇中心1级'), `应含建筑快照，实际：${result}`);
+    assert.ok(result?.includes('军团兵4'), `应含守军兵力，实际：${result}`);
   });
 });
 

@@ -24,9 +24,9 @@ export function renderReports(): string {
  */
 export function notificationText(event: string, payload: any, ts?: number): string | null {
   const time = ts ? `[${new Date(ts).toLocaleTimeString()}] ` : '';
-  if (event === 'BuildingBuilt' || event === 'BuildingUpgraded') {
+  if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingRepaired') {
     const name = fieldInfo(payload.kind).name ?? buildingInfo(payload.kind).name ?? payload.kind;
-    const verb = event === 'BuildingBuilt' ? '建造完成' : '升级完成';
+    const verb = event === 'BuildingBuilt' ? '建造完成' : event === 'BuildingRepaired' ? '修复完成' : '升级完成';
     return `${time}✅ ${verb}：${name} → ${payload.level}级`;
   } else if (event === 'TroopTrained') {
     return `${time}🎯 训练出 ${unitName(payload.unit)}（共${payload.total}）`;
@@ -41,11 +41,29 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     const lossStr = Object.entries(mine || {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
     if (payload.side === 'attacker') {
       const win = payload.attackerWins ? '🎉 胜利' : '💀 失败';
-      return `${time}⚔️ 战斗结束（${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜我方损失：${lossStr}｜战利品：${loot || '无'}`;
+      const damage = (payload.buildingDamage ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.mode === 'demolish' ? (d.removed ? '拆除（建筑移除）' : '拆除') : '破坏'}${d.fromLevel}→${d.toLevel}`).join('、');
+      const mode = payload.battleLabel ? `·${payload.battleLabel}` : '';
+      return `${time}⚔️ 战斗结束（${mode}${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜我方损失：${lossStr}｜建筑损坏：${damage || '无'}｜战利品：${loot || '无'}`;
     } else {
       const win = payload.attackerWins ? '💀 城破' : '🎉 守住';
-      return `${time}🛡️ 被进攻结束（${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜被抢：${loot || '无'}`;
+      const damage = (payload.buildingDamage ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.mode === 'demolish' ? (d.removed ? '拆除（建筑移除）' : '拆除') : '破坏'}${d.fromLevel}→${d.toLevel}`).join('、');
+      const mode = payload.battleLabel ? `·${payload.battleLabel}` : '';
+      return `${time}🛡️ 被进攻结束（${mode}${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜建筑损坏：${damage || '无'}｜被抢：${loot || '无'}`;
     }
+  } else if (event === 'ScoutReport') {
+    const losses = Number(payload.attackerLosses ?? 0);
+    if (payload.scoutType === 'scout_buildings') {
+      const b = payload.buildings ?? {};
+      const list = [...(b.center ?? []), ...(b.inner ?? []), ...(b.outer ?? [])].map((x: any) => `${x.name ?? x.kind}${x.level}级`).join('、') || '无';
+      const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
+      return `${time}🔭 侦察报告：发现城内外建筑 ${list}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+    }
+    const resources = Object.entries(payload.resources ?? {}).map(([k, n]: any) => `${resInfo(k).name}${fmt(Number(n) || 0)}`).join(' ') || '无';
+    const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
+    return `${time}🔭 侦察报告：资源 ${resources}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+  } else if (event === 'BuildingBattleDamaged') {
+    const damage = (payload.destroyed ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.mode === 'demolish' ? (d.removed ? '拆除（建筑移除）' : '拆除') : '破坏'} ${d.fromLevel}→${d.toLevel}`).join('、');
+    return `${time}🏚️ 战斗建筑${payload.mode === 'demolish' ? '拆除' : '损坏'}：${damage || '无'}`;
   } else if (event === 'IncomingAttack') {
     return `${time}🚨 警报！有敌军来袭，预计 ${secStr(payload.arriveAt)} 后抵达！`;
   } else if (event === 'MarchIntercepted') {

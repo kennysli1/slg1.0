@@ -293,3 +293,77 @@ test('未探索格只能探索：1级集结点可探索一格深，抵达后返�
   const visible = await send(app, 'vision.GetVisibility', { playerId: p.id, ...target });
   assert.equal((visible.payload as any).visibility, 'explored', '行军视野覆盖过的目标格应保留为已探索');
 });
+
+test('伏击军续行：从已驻扎伏击点出发仍保持 ambush 类型', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '伏击续行', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 30 });
+  const firstTarget = { q: p.q + 2, r: p.r + 2 };
+  const nextTarget = { q: p.q + 4, r: p.r + 3 };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...firstTarget, radius: 0 });
+  await send(app, 'vision.Reveal', { playerId: p.id, ...nextTarget, radius: 0 });
+
+  const sent = await send(app, 'movement.SendAmbush', { villageId: p.villageId, ...firstTarget, troops: { legionnaire: 20 } });
+  assert.equal(sent.ok, true, `伏击派遣应成功: ${sent.reason ?? ''}`);
+  const id = (sent.payload as any).id as string;
+  let current: any;
+  for (let i = 0; i < 20; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    current = movements(app).find((m) => m.id === id);
+    if (current?.status === 'stationed') break;
+  }
+  assert.equal(current?.status, 'stationed', '伏击军应先在第一处目标驻扎');
+
+  const continued = await send(app, 'movement.ContinueGarrison', {
+    villageId: p.villageId, movementId: id, ...nextTarget, mode: 'ambush',
+  });
+  assert.equal(continued.ok, true, `伏击军续行应成功: ${continued.reason ?? ''}`);
+  current = movements(app).find((m) => m.id === id);
+  assert.equal(current?.type, 'ambush', '伏击军续行不能退化为普通驻扎');
+  assert.equal(current?.status, 'marching', '续行后应重新进入行军状态');
+
+  for (let i = 0; i < 20; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    current = movements(app).find((m) => m.id === id);
+    if (current?.status === 'stationed') break;
+  }
+  assert.equal(current?.status, 'stationed', '续行到第二处目标后仍应进入驻扎状态');
+  assert.deepEqual(current?.pos, current?.toXY, '续行后的伏击点应是第二处目标');
+});
+
+test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均返城', async () => {
+  const app = freshApp();
+  assert.equal(app.config.constants.ambushAttackBonus, 0.5, '伏击攻击加成应来自 GM 常量');
+  const ra = await send(app, 'player.Register', { name: '伏击甲', password: 'pass123', tribe: 'romans' });
+  const rb = await send(app, 'player.Register', { name: '伏击乙', password: 'pass123', tribe: 'romans' });
+  const A = (ra.payload as any).player;
+  const B = (rb.payload as any).player;
+  const target = { q: (A.q + 2) % 41, r: A.r };
+  await giveTroops(app, A.villageId, { legionnaire: 30 });
+  await giveTroops(app, B.villageId, { legionnaire: 30 });
+  await send(app, 'vision.Reveal', { playerId: A.id, ...target, radius: 0 });
+  await send(app, 'vision.Reveal', { playerId: B.id, ...target, radius: 0 });
+  const ambush = await send(app, 'movement.SendAmbush', { villageId: A.villageId, ...target, troops: { legionnaire: 20 } });
+  assert.equal(ambush.ok, true, `伏击派遣应成功: ${ambush.reason ?? ''}`);
+  const ambushId = (ambush.payload as any).id as string;
+  let stationed = false;
+  for (let i = 0; i < 20; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    stationed = movements(app).find((m) => m.id === ambushId)?.status === 'stationed';
+    if (stationed) break;
+  }
+  assert.equal(stationed, true, '伏击军抵达后应驻扎');
+
+  let triggered = false;
+  app.bus.on('movement.Intercepted', (e) => { if ((e.payload as any).battleType === 'ambush') triggered = true; });
+  const enemy = await send(app, 'movement.SendGarrison', { villageId: B.villageId, ...target, troops: { legionnaire: 20 } });
+  assert.equal(enemy.ok, true, `诱饵军派遣应成功: ${enemy.reason ?? ''}`);
+  let iters = 0;
+  while (app.scheduler.pending > 0 && iters < 20_000) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    iters++;
+  }
+  assert.equal(triggered, true, '敌方进入一格内应触发伏击');
+  assert.equal(movements(app).some((m) => m.type === 'ambush' && m.status === 'stationed'), false, '伏击战后伏击记录应转为返程或结束');
+});

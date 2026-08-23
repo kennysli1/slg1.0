@@ -36,7 +36,7 @@ function renderQueue(queue: any): string {
   if (!queue?.items?.length) return '';
   const items = queue.items.map((q: any) => {
     const name = buildingInfo(q.kind).name ?? q.kind;
-    const verb = q.isNew ? '建造' : '升级';
+    const verb = q.repair ? '修复' : q.isNew ? '建造' : '升级';
     return `<div class="banner banner-build">🔨 ${verb}：<b>${name}</b> → ${q.toLevel} 级
       ${progressBar(q.startAt, q.finishAt, verb)}</div>`;
   }).join('');
@@ -80,27 +80,31 @@ function renderZone(zone: 'inner' | 'outer', title: string, z: any): string {
 
 /** 单个已建建筑卡（含资源田；建造中显示进度占位）。整卡可点开详情；升级按钮点击不冒泡。 */
 function renderPlaced(p: any): string {
-  const constructing = p.level < 1;
+  const damaged = !!p.repairTargetLevel || !!p.damaged;
+  const constructing = p.level < 1 && !damaged;
   const busy = p.building;
   const max = p.level >= p.maxLevel;
   const afford = canAfford(p.nextCost);
+  const repairAfford = canAfford(p.repairCost ?? null);
   const prod = p.producing
     ? `<div class="hint-sm prod">+${p.producing.ratePerHour}/h</div>`
     : '';
   let btn: string;
   if (constructing) btn = '<small class="tag">建造中</small>';
+  else if (damaged && busy) btn = '<small class="tag">修复中</small>';
+  else if (damaged) btn = `<button class="btn-sm" data-repair-slot="${p.slotId}" ${!repairAfford ? 'disabled' : ''}>修复至 Lv${p.repairTargetLevel}</button>`;
   else if (max) btn = '<small class="tag">已满级</small>';
   else if (busy) btn = '<small class="tag">建造中</small>';
   else btn = `<button class="btn-sm" data-up-slot="${p.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
-  const lv = constructing ? '建造中' : `Lv${p.level}`;
+  const lv = damaged ? `已破坏 · Lv${p.level}` : constructing ? '建造中' : `Lv${p.level}`;
   const progress = busy && p.buildingStartAt && p.buildingFinishAt
-    ? progressBar(p.buildingStartAt, p.buildingFinishAt, constructing ? '建造中' : '升级中')
+    ? progressBar(p.buildingStartAt, p.buildingFinishAt, damaged ? '修复中' : constructing ? '建造中' : '升级中')
     : '';
   return `<div class="card" data-bld-slot="${p.slotId}" title="点击查看 ${escapeAttr(p.name)} 详情">${art(p.icon, p.name, 'md')}
     <div class="cardbody"><div class="card-title">${escapeHtml(p.name)} <b class="lv">${lv}</b>
       <small class="bld-detail-hint">详情 ›</small></div>
       ${prod}
-      ${progress}${constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
+      ${progress}${damaged && !busy ? costPreview(p.repairCost, p.repairTimeSec) : constructing || max || busy ? '' : costPreview(p.nextCost, p.nextTimeSec)}${btn}</div></div>`;
 }
 
 /** 侧边栏抽屉：某区可建建筑清单。整条选项可点开详情；建造按钮点击不冒泡。 */
@@ -138,6 +142,10 @@ interface BldDetailCtx {
   maxLevel?: number;
   cost?: Record<string, number> | null; // 下一级(或建造)消耗
   timeSec?: number | null;
+  repairCost?: Record<string, number> | null;
+  repairTimeSec?: number | null;
+  repairTargetLevel?: number;
+  damaged?: boolean;
   producing?: { ratePerHour: number } | null;
   isBuild?: boolean; // true=尚未建造(建造消耗)；false=升级消耗
 }
@@ -155,7 +163,7 @@ function ctxFromSlot(slotId: string): { kind: string; ctx: BldDetailCtx } | null
     if (p) {
       return {
         kind: p.kind,
-        ctx: { level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec, producing: p.producing, isBuild: p.level < 1 },
+        ctx: { level: p.level, maxLevel: p.maxLevel, cost: p.nextCost, timeSec: p.nextTimeSec, repairCost: p.repairCost, repairTimeSec: p.repairTimeSec, repairTargetLevel: p.repairTargetLevel, damaged: !!p.damaged || p.repairTargetLevel != null, producing: p.producing, isBuild: p.level < 1 },
       };
     }
   }
@@ -169,7 +177,9 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
   const max = ctx.maxLevel != null && ctx.level >= ctx.maxLevel;
 
   // 等级行
-  const lvStr = ctx.isBuild
+  const lvStr = ctx.damaged
+    ? `已破坏 · 可修复至 Lv${ctx.repairTargetLevel}`
+    : ctx.isBuild
     ? '尚未建造'
     : `Lv${ctx.level}${ctx.maxLevel ? ` / ${ctx.maxLevel}` : ''}`;
 
@@ -177,6 +187,8 @@ function openBuildingDetail(kind: string, ctx: BldDetailCtx): void {
   let costSec = '';
   if (max) {
     costSec = `<div class="drawer-sec-title">已满级</div><div class="hint-sm">该建筑已达最高等级，无需继续升级。</div>`;
+  } else if (ctx.damaged && ctx.repairCost) {
+    costSec = `<div class="drawer-sec-title">修复至 Lv${ctx.repairTargetLevel} 消耗</div>${costPreview(ctx.repairCost, ctx.repairTimeSec)}`;
   } else if (ctx.cost) {
     const label = ctx.isBuild ? '建造消耗' : `升级到 Lv${ctx.level + 1} 消耗`;
     costSec = `<div class="drawer-sec-title">${label}</div>${costPreview(ctx.cost, ctx.timeSec)}`;
@@ -230,6 +242,8 @@ export function bindVillage(act: (p: Promise<any>) => void): void {
   // 升级（城镇中心/已建建筑/资源田，统一走 slotId）
   document.querySelectorAll<HTMLButtonElement>('[data-up-slot]').forEach((b) =>
     b.onclick = () => act(req('UpgradeBuilding', { slotId: b.dataset.upSlot })));
+  document.querySelectorAll<HTMLButtonElement>('[data-repair-slot]').forEach((b) =>
+    b.onclick = () => act(req('RepairBuilding', { slotId: b.dataset.repairSlot })));
 
   // 整卡可点开建筑详情（点到卡内按钮不触发）
   document.querySelectorAll<HTMLElement>('[data-bld-slot]').forEach((el) =>

@@ -29,6 +29,17 @@ export function capitalCoordinate(player: Me | null): MapCoordinate | null {
   return capital ? { q: capital.q, r: capital.r } : { q: player.q, r: player.r };
 }
 
+/** 地图当前村定位：跟随会话当前操作村，不受主城位置影响。 */
+export function currentVillageCoordinate(player: Me | null): MapCoordinate | null {
+  return player ? { q: player.q, r: player.r } : null;
+}
+
+/** 当前操作村的显示名称；地图标签必须使用村名，而不是玩家名。 */
+export function currentVillageName(player: Me | null): string | null {
+  if (!player) return null;
+  return player.villages?.find((v) => v.id === player.villageId)?.name ?? null;
+}
+
 /** 坐标跳转只接受地图内的整数，避免空值被 Number('') 误判成 0。 */
 export function parseMapCoordinate(
   qRaw: string,

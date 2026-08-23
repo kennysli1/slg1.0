@@ -98,6 +98,29 @@ test('运输：拒绝运给非己方村', async () => {
   assert.equal(r.reason, 'not_own_village');
 });
 
+test('转移行军：只能携带部队/宝物，禁止携带物资', async () => {
+  const app = freshApp();
+  const { capital, vid2 } = await makeTwoVillages(app);
+  const self = await send(app, 'movement.SendTransport', {
+    villageId: capital, targetVillage: capital, troops: {}, cargo: {}, mode: 'transfer',
+  });
+  assert.equal(self.ok, false);
+  assert.equal(self.reason, 'same_village');
+  await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 2 } });
+
+  const ok = await send(app, 'movement.SendTransport', {
+    villageId: capital, targetVillage: vid2, troops: { legionnaire: 1 }, cargo: {}, mode: 'transfer',
+  });
+  assert.equal(ok.ok, true, ok.reason);
+
+  await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 1 } });
+  const blocked = await send(app, 'movement.SendTransport', {
+    villageId: capital, targetVillage: vid2, troops: { legionnaire: 1 }, cargo: { wood: 1 }, mode: 'transfer',
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, 'transfer_no_cargo');
+});
+
 test('放弃：主城不可弃；锁定期内不可弃；解锁后可弃', async () => {
   const app = freshApp();
   const { player, capital, vid2 } = await makeTwoVillages(app);

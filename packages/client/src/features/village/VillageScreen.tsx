@@ -11,7 +11,7 @@ import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
-import { TaskBar } from './TaskBar.js';
+import { VillageList } from '../../shared/ui/VillageList.js';
 
 import '../../styles/village.css';
 
@@ -126,6 +126,7 @@ export function VillageScreen() {
 
   return (
     <div class="vil-dashboard">
+      <VillageList />
       <div class="vil-primary-column">
         <header class="vil-dashboard-head">
           <span class="vil-eyebrow">城务总览</span>
@@ -170,7 +171,6 @@ export function VillageScreen() {
         )}
 
         <VillageListView vil={vil} />
-        <TaskBar />
       </aside>
     </div>
   );

@@ -342,12 +342,12 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
     labels: ['code', 'level', 'name'],
   },
   units: {
     file: 'units.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'popPermanent'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
   // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
@@ -511,7 +511,11 @@ function sectionGeneric(table){
   var rows = DATA[table] || [];
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key]; });
+    var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+  } else if (table === 'constants') {
+    var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -553,6 +557,29 @@ var REP_ROWS = [
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
 ];
+
+// ── 拓荒专用视图：把开城包的真实成本集中展示，避免在全局常量长表中漏看。 ──
+// 每个键仍然写入同一张 game_constants.csv，并沿用 balance_overrides.json 的持久化覆盖机制。
+var FOUND_ROWS = [
+  ['found_resource_cost_base','第2座城每种资源成本','木材、泥土、钢、粮食各需多少；第2座城（N=2）使用此值'],
+  ['found_resource_cost_growth','后续城成本增长倍率','第N座城每种资源 = base × growth^(N-2)，按最终结果四舍五入'],
+  ['found_settler_count','所需拓荒者数量','每名拓荒者占用5人口；成功建城后由出发城转移'],
+  ['found_min_main_level','出发城主基地最低等级','达到此等级后才允许发起拓荒'],
+];
+function sectionFounding(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会热重载，并写入持久化 balance_overrides.json；删档不会清除。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<FOUND_ROWS.length;j++){
+    var item = FOUND_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>拓荒参数</h2>'+h+'</div>';
+}
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
@@ -566,6 +593,19 @@ function sectionReputation(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
+}
+
+// ── 伏击专用视图：与普通战斗常量分开，便于调试伏击强度。 ──
+function sectionAmbush(){
+  var rows = DATA.constants || [], row = null;
+  for (var i=0;i<rows.length;i++) if (rows[i].key === 'ambush_attack_bonus') { row = rows[i]; break; }
+  var value = row && row.value != null ? row.value : '';
+  var h = '<div class="hint">伏击军抵达空地后进入隐蔽驻扎；敌方军队进入一格内触发伏击战。该攻击加成只作用于伏击方，不影响行军中的普通野战。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  h += '<tr><td class="lbl">伏击攻击加成 <small style="color:#7a86a8">(ambush_attack_bonus)</small></td>';
+  h += '<td><input type="number" min="0" step="0.01" value="'+esc(value)+'" data-t="constants" data-k="ambush_attack_bonus" data-f="value" oninput="onEdit(this)"></td>';
+  h += '<td class="lbl">0.5 表示 +50%；仅伏击战攻击方生效</td></tr></tbody></table>';
+  return '<div class="sec"><h2>伏击参数</h2>'+h+'</div>';
 }
 
 // ── 建筑参数统一视图 ── 合并 buildings + building_levels + trade_center + merc_camp，每栋一张折叠卡片。
@@ -595,6 +635,13 @@ function sectionBuildings(){
   function bonusCols(code){
     var c = [];
     if (code === 'treasury') c.push({k:'treasureSlots',l:'每级主/备用槽'});
+    if (code === 'vault') {
+      c.push({k:'vaultProtectWood',l:'保木材/级'});
+      c.push({k:'vaultProtectClay',l:'保泥土/级'});
+      c.push({k:'vaultProtectIron',l:'保钢铁/级'});
+      c.push({k:'vaultProtectCrop',l:'保粮食/级'});
+      c.push({k:'vaultProtectGold',l:'保金币/级'});
+    }
     if (code === 'warehouse' || code === 'granary') c.push({k:'storagePerLevel',l:'+容量'});
     if (code === 'wall') c.push({k:'defensePerLevel',l:'+防御'});
     if (code === 'main') c.push({k:'buildSpeedupPerLevel',l:'-建造耗时'});
@@ -606,7 +653,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地功能参数(如有)。宝库的「每级主/备用槽」可直接修改；每级填写的数值会同时增加主宝物栏和备用宝物栏容量。</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。GM 保存的覆盖值写入持久化 balance_overrides.json，删档不会清除。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -705,6 +752,17 @@ function sectionBuildings(){
       }
       h += '</tbody></table></div>';
     }
+    if (code === 'alchemy'){
+      var constRows = DATA.constants || [], refineRow = null;
+      for (var cr=0;cr<constRows.length;cr++) if (constRows[cr].key === 'alchemy_refine_sec') { refineRow = constRows[cr]; break; }
+      var refineValue = refineRow && refineRow.value != null ? refineRow.value : '';
+      h += '<div style="margin-top:8px"><span style="color:#f0b070;font-size:12px">炼金炉功能参数（合并在升级消耗栏）</span>';
+      h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+      h += '<tr><td class="lbl">炼化时间（秒）<small style="color:#7a86a8">(alchemy_refine_sec)</small></td>';
+      h += '<td><input type="number" min="1" step="1" value="'+esc(refineValue)+'" data-t="constants" data-k="alchemy_refine_sec" data-f="value" oninput="onEdit(this)"></td>';
+      h += '<td class="lbl">三个同品质宝物炼化所需时间；修改后新炼化立即使用</td></tr>';
+      h += '</tbody></table></div>';
+    }
     h += '</div></div>';
   }
   h += '</div>';
@@ -722,7 +780,9 @@ function render(){
   var html = '';
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
+  html += sectionFounding();
   html += sectionReputation();
+  html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
     if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染
@@ -765,6 +825,34 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     return false;
   };
 
+  /**
+   * GM 面板允许直接编辑 player 文档。村庄坐标同时存在于 Player 快照和
+   * World 地图地块中，写入前通过 World owner 命令同步地图，避免行军使用旧坐标。
+   */
+  const syncPlayerVillageTiles = async (body: unknown): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!body || typeof body !== 'object') return { ok: true };
+    const raw = body as Record<string, unknown>;
+    const rows = Array.isArray(raw.ownedVillages)
+      ? raw.ownedVillages
+      : (typeof raw.villageId === 'string' && Number.isFinite(Number(raw.q)) && Number.isFinite(Number(raw.r)))
+        ? [{ id: raw.villageId, q: raw.q, r: raw.r, name: raw.name }]
+        : [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') return { ok: false, reason: 'bad_village_coordinates' };
+      const village = row as Record<string, unknown>;
+      const refId = typeof village.id === 'string' ? village.id.trim() : '';
+      const q = Number(village.q), r = Number(village.r);
+      if (!refId || !Number.isFinite(q) || !Number.isFinite(r)) return { ok: false, reason: 'bad_village_coordinates' };
+      const moved = await gameApp.commands.send({
+        name: 'world.MoveVillage',
+        from: 'gm',
+        payload: { refId, q, r, name: typeof village.name === 'string' ? village.name : undefined },
+      });
+      if (!moved.ok) return { ok: false, reason: moved.reason ?? 'village_coordinate_sync_failed' };
+    }
+    return { ok: true };
+  };
+
   // GET /gm — Web 面板
   fastify.get('/gm', (_req, reply) => {
     void reply.type('text/html; charset=utf-8').send(GM_PANEL_HTML);
@@ -805,13 +893,20 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // PUT /gm/:collection/:key
-  fastify.put('/gm/:collection/:key', (req, reply) => {
+  fastify.put('/gm/:collection/:key', async (req, reply) => {
     if (!auth(req, reply)) return;
     const { collection, key } = req.params as { collection: string; key: string };
     const body = req.body;
     if (body === undefined || body === null) {
       void reply.code(400).send({ ok: false, reason: '请求 body 不能为空（发送 JSON 文档）' });
       return;
+    }
+    if (collection === 'player') {
+      const sync = await syncPlayerVillageTiles(body);
+      if (!sync.ok) {
+        void reply.code(sync.reason === 'tile_occupied' ? 409 : 400).send({ ok: false, reason: sync.reason });
+        return;
+      }
     }
     store.set(collection, key, body);
     store.flush();

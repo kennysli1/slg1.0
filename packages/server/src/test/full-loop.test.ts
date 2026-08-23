@@ -81,6 +81,31 @@ test('军队：训练消耗资源并产兵，军队耗粮上报', async () => {
   assert.ok(popSnap.currentPop >= 0, '人口应存在');
 });
 
+test('军队：取消训练停止队列并返还尚未产出的资源与人口', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
+  await buildBarracks(app);
+
+  const started = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 2 });
+  assert.equal(started.ok, true, `训练应成功: ${started.reason ?? ''}`);
+  const afterStart = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  const army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  const activeSlot = (army.slots ?? []).find((slot: any) => slot.training);
+  assert.ok(activeSlot?.slotId, '应能找到正在训练的建筑队列');
+
+  const cancelled = await send(app, 'military.CancelTraining', { villageId: 'v1', slotId: activeSlot.slotId });
+  assert.equal(cancelled.ok, true, `取消训练应成功: ${cancelled.reason ?? ''}`);
+  assert.equal((cancelled.payload as any).remaining, 2, '尚未产出的数量应全部返还');
+  assert.ok(((cancelled.payload as any).refunded?.wood ?? 0) > 0, '应返还未产出士兵的木材成本');
+
+  await app.scheduler.advanceTo(clock + 120_000, setClock);
+  const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
+  const finalArmy = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  assert.equal(finalArmy.troops.legionnaire ?? 0, 0, '取消后不应继续产出士兵');
+  assert.equal((finalArmy.slots ?? []).some((slot: any) => slot.training), false, '取消后队列应为空');
+  assert.ok(after.resources.wood >= afterStart.resources.wood, '取消后未产出部分资源应回到村庄');
+});
+
 test('军队：未建所需建筑时拒绝训练', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });

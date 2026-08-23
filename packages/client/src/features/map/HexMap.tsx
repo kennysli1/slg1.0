@@ -8,12 +8,12 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, foreignMoves, tab } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
-import { capitalCoordinate, parseMapCoordinate } from './map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
 import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -335,9 +335,9 @@ export function HexMap() {
   }
 
   function isHomeCentered(): boolean {
-    const capital = capitalCoordinate(me);
-    if (!capital || zoom.current <= 0 || cw.current <= 0) return true;
-    const hp = hexToPixel(capital);
+    const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+    if (!current || zoom.current <= 0 || cw.current <= 0) return true;
+    const hp = hexToPixel(current);
     const hx = hp.x + ox.current, hy = hp.y + oy.current;
     const cx = (cw.current / 2 - panX.current) / zoom.current;
     const cy = (ch.current / 2 - panY.current) / zoom.current;
@@ -428,7 +428,8 @@ export function HexMap() {
             if (visibility === 'unexplored') {
               name = '未探索区域'; terrain = 'empty';
             } else if (isSelf) {
-              kind = 'own_village'; refId = me!.id; name = me!.name;
+              // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
+              kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
               icon = 'bld_main'; terrain = 'village';
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
@@ -442,6 +443,10 @@ export function HexMap() {
             } else if (t?.kind === 'pve') {
               kind = 'pve'; refId = t.refId; name = t.name;
               icon = t.icon ?? pveIcon(t.name); terrain = 'ruins';
+            } else if (t?.kind === 'taskcamp') {
+              // 任务营地通常由 taskMarkers 注入；保留真实地块兜底，避免详情丢失时退化为空地。
+              kind = 'pve'; refId = t.refId; name = t.name ?? '任务营地';
+              icon = t.icon ?? pveIcon('任务营地'); terrain = 'ruins';
             } else if (t?.kind === 'empty') {
               // server says empty with variant
               const v = terrainVariant(q, r);
@@ -476,6 +481,7 @@ export function HexMap() {
         : m.type === 'found'     ? 'found'
         : m.type === 'caravan'   ? 'caravan'
         : m.type === 'garrison'  ? 'garrison'
+        : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
@@ -505,6 +511,7 @@ export function HexMap() {
         : m.type === 'transport' ? '📦'
         : m.type === 'caravan'   ? '💰'
         : m.type === 'garrison'  ? '⚑'
+        : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
@@ -536,6 +543,7 @@ export function HexMap() {
         : m.type === 'transport' ? '📦'
         : m.type === 'caravan'   ? '💰'
         : m.type === 'garrison'  ? '⚑'
+        : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
@@ -726,7 +734,13 @@ export function HexMap() {
     const name = cell.getAttribute('data-name') ?? '空地';
     const icon = cell.getAttribute('data-icon') ?? undefined;
     const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
-    selected.value = { refId, kind, q, r, name, ...(icon ? { icon } : {}), ...(visibility ? { visibility } : {}) };
+    const taskCamp = findTaskCampMarker(refId, q, r);
+    selected.value = {
+      refId, kind, q, r, name,
+      ...(icon ? { icon } : {}),
+      ...(visibility ? { visibility } : {}),
+      ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
+    };
   }
 
   // ─── event handlers ────────────────────────────────────────────────────────
@@ -855,10 +869,11 @@ export function HexMap() {
   }
 
   function doHome() {
-    const capital = capitalCoordinate(me);
-    if (!capital) return;
-    setMapCenter(capital);
-    centerViewOn(capital.q, capital.r);
+    // 地图视角跟随当前操作村，而不是固定跳回主城。
+    const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+    if (!current) return;
+    setMapCenter(current);
+    centerViewOn(current.q, current.r);
     syncNavUI();
   }
   function doJump() {
@@ -1113,8 +1128,8 @@ export function HexMap() {
                 />
               </label>
               <Btn type="submit" size="sm" variant="primary" class="map-locator-jump">跳转</Btn>
-              <Btn size="sm" class="map-locator-home" onClick={doHome} title="将地图居中到自己的主城">
-                <span aria-hidden="true">◎</span> 回主城
+              <Btn size="sm" class="map-locator-home" onClick={doHome} title="将地图回正并居中到当前操作村">
+                <span aria-hidden="true">◎</span> 回正并回当前村
               </Btn>
             </div>
             {jumpError
@@ -1170,17 +1185,17 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   homeCentered: boolean;
   onGoHome: () => void;
 }) {
-  const capital = capitalCoordinate(me);
-  if (!capital) return null;
-  const atHome = homeCentered || (navCoord.q === capital.q && navCoord.r === capital.r);
+  const current = currentVillageCoordinate(me) ?? capitalCoordinate(me);
+  if (!current) return null;
+  const atHome = homeCentered || (navCoord.q === current.q && navCoord.r === current.r);
   return (
     <div class="map-infobar">
       {!homeCentered && !atHome ? (
-        <>全图模式 · 视角偏离主城 · <a onClick={onGoHome}>回主城</a></>
-      ) : homeCentered && (navCoord.q === capital.q && navCoord.r === capital.r) ? (
-        <>全图模式 · 主城 <b>X={capital.q} Y={capital.r}</b>（已居中）</>
+        <>全图模式 · 视角偏离当前村 · <a onClick={onGoHome}>回正并回当前村</a></>
+      ) : homeCentered && (navCoord.q === current.q && navCoord.r === current.r) ? (
+        <>全图模式 · 当前村 <b>X={current.q} Y={current.r}</b>（已居中）</>
       ) : (
-        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回主城</a></>
+        <>全图模式 · 查看 <b>X={navCoord.q} Y={navCoord.r}</b> · <a onClick={onGoHome}>回正并回当前村</a></>
       )}
     </div>
   );

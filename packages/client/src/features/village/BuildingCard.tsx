@@ -10,6 +10,7 @@ import { buildingInfo } from '../../app/config.js';
 import {
   Panel, IconPlate, Btn, Tag, CostRow, canAfford, TimerBar,
 } from '../../ui/index.js';
+import { fmt } from '../../shared/utils/format.js';
 import { openBuilding } from './BuildingModal.js';
 import { openBuildModal } from './BuildModal.js';
 
@@ -22,6 +23,10 @@ export interface PlacedBuilding {
   maxLevel: number;
   nextCost: Record<string, number> | null;
   nextTimeSec: number | null;
+  repairCost?: Record<string, number> | null;
+  repairTimeSec?: number | null;
+  repairTargetLevel?: number;
+  damaged?: boolean;
   producing?: { ratePerHour: number } | null;
   popCapByLevel?: number[];
   building?: boolean;
@@ -42,16 +47,20 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
 
   const info = buildingInfo(b.kind);
   const isConstructing = (b.level < 1) && !b.demolishing;
+  const isDamaged = !!b.damaged || (!!b.repairTargetLevel && !b.demolishing);
   const isDemolishing = !!b.demolishing;
   const isBusy = !!b.building; // upgrading or constructing in progress
   const isMax = b.maxLevel > 0 && b.level >= b.maxLevel;
   const afford = canAfford(b.nextCost);
 
   const lvLabel = isDemolishing ? '拆除中'
+    : isDamaged ? `已破坏 · 可修复至 Lv${b.repairTargetLevel}`
     : isConstructing ? '建造中'
     : `Lv${b.level}`;
 
-  const hasCostRow = !isDemolishing && !isConstructing && !isMax && !isBusy && b.nextCost;
+  const repairAfford = canAfford(b.repairCost ?? null);
+  const hasRepairRow = isDamaged && !isDemolishing && !isBusy && b.repairCost && b.repairTargetLevel;
+  const hasCostRow = !isDemolishing && !isDamaged && !isConstructing && !isMax && !isBusy && b.nextCost;
   const treasures = getCache().treasures as any;
   const reserveCount = (treasures?.treasuryReserve ?? []).length;
   const mainFree = isCenter
@@ -66,6 +75,9 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
   const nextPopCap = bInfo.popCapByLevel
     ? (bInfo.popCapByLevel[b.level] ?? 0)
     : (bInfo.popCapPerLevel ?? 0);
+  const vaultProtection = b.kind === 'vault' && b.level > 0
+    ? bInfo.vaultProtectionByLevel?.[b.level - 1]
+    : undefined;
 
   return (
     <Panel
@@ -93,12 +105,18 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
             {isMax && <Tag kind="gold">满级</Tag>}
             {needsLoad && <Tag kind="jade">备用宝物可装载</Tag>}
             {isDemolishing && <Tag kind="crimson">拆除中</Tag>}
-            {isConstructing && <Tag kind="ember">建造中</Tag>}
-            {isBusy && !isConstructing && !isDemolishing && <Tag kind="ember">升级中</Tag>}
+            {isDamaged && <Tag kind="crimson">建筑受损</Tag>}
+            {isConstructing && !isDamaged && <Tag kind="ember">建造中</Tag>}
+            {isBusy && !isConstructing && !isDamaged && !isDemolishing && <Tag kind="ember">升级中</Tag>}
           </div>
           <div class="vil-card-meta">{lvLabel}{b.maxLevel ? ` / Lv${b.maxLevel}` : ''}</div>
           {b.producing && !isDemolishing && (
             <div class="vil-card-prod">+{b.producing.ratePerHour}/h</div>
+          )}
+          {vaultProtection && !isDemolishing && (
+            <div class="vil-card-vault" aria-label="当前等级保险库保护量">
+              保护：木材 {fmt(vaultProtection.wood)} · 泥土 {fmt(vaultProtection.clay)} · 钢铁 {fmt(vaultProtection.iron)} · 粮食 {fmt(vaultProtection.crop)} · 金币 {fmt(vaultProtection.gold)}
+            </div>
           )}
         </div>
       </div>
@@ -109,7 +127,7 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
           <TimerBar
             startAt={b.buildingStartAt}
             finishAt={b.buildingFinishAt}
-            label={isDemolishing ? '拆除' : isConstructing ? '建造' : '升级'}
+            label={isDemolishing ? '拆除' : isDamaged ? '修复' : isConstructing ? '建造' : '升级'}
             kind={isDemolishing ? 'crimson' : 'ember'}
           />
         </div>
@@ -132,6 +150,25 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
             }}
           >
             升级
+          </Btn>
+        </div>
+      )}
+      {hasRepairRow && (
+        <div class="vil-card-foot" onClick={(e) => e.stopPropagation()}>
+          <CostRow cost={b.repairCost!} timeSec={b.repairTimeSec ?? null} />
+          <Btn
+            size="sm"
+            variant={repairAfford ? 'primary' : 'default'}
+            disabled={!repairAfford}
+            title={!repairAfford ? '修复所需资源不足' : `修复至 Lv${b.repairTargetLevel}`}
+            onClick={async (e: MouseEvent) => {
+              e.stopPropagation();
+              await act(req('RepairBuilding', { slotId: b.slotId }), {
+                okToast: `${b.name} 开始修复至 Lv${b.repairTargetLevel}`,
+              });
+            }}
+          >
+            修复至 Lv{b.repairTargetLevel}
           </Btn>
         </div>
       )}

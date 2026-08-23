@@ -43,7 +43,7 @@
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
-| 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量或宝库槽位 |
+| 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量、宝库槽位或保险库资源保护量 |
 | 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
@@ -108,6 +108,8 @@
 | popCap | 该级相对上一级新增的人口硬上限 |
 | prod | 仅资源田填写：该级每小时产量 |
 | treasureSlots | 仅宝库填写：该级相对上一级新增的宝物栏槽位 |
+| storagePerLevel / defensePerLevel | 仅仓库/粮仓或城墙填写：该级仓储容量或城墙防御增量 |
+| vaultProtectWood/vaultProtectClay/vaultProtectIron/vaultProtectCrop/vaultProtectGold | 仅保险库填写：该级新增保护量，按等级累加；攻城拆除后按剩余等级生效 |
 
 ## town_center_slots.csv — 城镇中心槽位曲线
 | 列 | 含义 |
@@ -136,6 +138,7 @@
 | speed | 速度（格/小时，决定行军快慢） |
 | vision | 视野（六边形格数；军队取数量最多兵种的视野，并列时取较大值） |
 | carry | 单兵载货（搬战利品） |
+| popCost | 训练/在途/驻军占用的人口；所有兵种返程、解散都会按此值返还。拓荒者每名占用 5 人口，成功建城后由出发城永久转移，新城以 5 人口开局 |
 | upkeep | 每兵每小时耗粮 |
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
@@ -157,7 +160,7 @@
 | upkeep | 每小时耗粮；雇佣兵当前固定为 0 |
 | costWood/costClay/costIron/costCrop | 普通训练资源成本；雇佣兵固定为 0 |
 | trainSec / building / traits | 训练秒数 / 所需建筑 / 特性；当前均留空或为 0 |
-| popCost / popPermanent | 人口消耗 / 是否永久占人口；当前均为 0 |
+| popCost | 训练/在途/驻军占用的人口；所有兵种返程、解散都会按此值返还。拓荒者每名占用 5 人口，成功建城后由出发城永久转移，新城以 5 人口开局 |
 | goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
 | commandCost | 单份合同占用的佣兵统御容量 |
 | contractSec | 合同服役秒数；离线继续计时 |
@@ -225,6 +228,10 @@
 | value | 值 |
 | type | 类型：`number`/`bool`/`string`（决定怎么解析 value） |
 | note | 中文说明 |
+
+### 拓荒成本参数
+
+拓荒开城包按每种资源（木材、泥土、钢、粮食）分别收取：第 `N` 座城（`N≥2`）每种资源的需求量为 `round(found_resource_cost_base × found_resource_cost_growth^(N-2))`。当前默认第 2 座城每种资源 3000（四种资源合计 12000），第 3 座城每种资源 6000（合计 24000）。GM 平衡面板的“拓荒参数”板块可直接修改并持久化这两个值，删档不会清除覆盖。
 
 当前常量（改完重启即生效，默认值与重构前行为一致）：
 
@@ -341,6 +348,7 @@
 | lineCode | 所属 `quest_lines.csv` 的 `code` |
 | name / desc | 玩家可见名称与描述 |
 | type | `main` / `daily` / `side`，与任务线用途一致 |
+| scope | `global` 或 `village`；主线必须为 `global`，日常必须为 `village`，支线按任务设计配置 |
 | weight | 每日任务抽取权重；主线/支线填 0 |
 | repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
 

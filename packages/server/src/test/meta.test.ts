@@ -44,4 +44,18 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   const mainMeta = p.buildings.find((b: any) => b.kind === 'main');
   const mainCfg = app.config.buildings.main;
   assert.deepEqual(mainMeta.popCapByLevel, Array.from({ length: mainCfg.maxLevel }, (_, i) => mainCfg.levels[i + 1].popCap), 'main.popCapByLevel 应等于 levels[].popCap');
+
+  const vaultMeta = p.buildings.find((b: any) => b.kind === 'vault');
+  const vaultCfg = app.config.buildings.vault;
+  const vaultL1 = vaultCfg.levels[1]!;
+  const vaultL2 = vaultCfg.levels[2]!;
+  assert.ok(vaultMeta && Array.isArray(vaultMeta.vaultProtectionByLevel), '保险库应下发逐级累计保护量');
+  assert.equal(vaultMeta.vaultProtectionByLevel.length, vaultCfg.maxLevel);
+  assert.deepEqual(vaultMeta.vaultProtectionByLevel[1], {
+    wood: (vaultL1.vaultProtectWood ?? 0) + (vaultL2.vaultProtectWood ?? 0),
+    clay: (vaultL1.vaultProtectClay ?? 0) + (vaultL2.vaultProtectClay ?? 0),
+    iron: (vaultL1.vaultProtectIron ?? 0) + (vaultL2.vaultProtectIron ?? 0),
+    crop: (vaultL1.vaultProtectCrop ?? 0) + (vaultL2.vaultProtectCrop ?? 0),
+    gold: (vaultL1.vaultProtectGold ?? 0) + (vaultL2.vaultProtectGold ?? 0),
+  }, '保险库卡片应显示当前等级累计保护量');
 });

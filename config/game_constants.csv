@@ -15,6 +15,7 @@ map_size,20,number,地图半径(六边形网格,以原点为中心的环数,hexD
 map_view_radius,6,number,前端地图视野半径(六边形环数,前端白名单常量)
 combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)
+ambush_attack_bonus,0.5,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
@@ -33,8 +34,7 @@ pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口�
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
 found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
-found_min_soft_limit,200,number,拓荒建村：出发村可用劳动人口最低门槛(=快照softLimit别名=硬上限-士兵人口);v3硬上限模型下main L10约244,留余量设200
-found_settler_count,3,number,拓荒建村：所需拓荒者数量
+found_settler_count,1,number,拓荒建村：所需拓荒者数量（每名拓荒者占用5人口）
 found_resource_cost_base,3000,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
 found_resource_cost_growth,2,number,开城包递增底数
 found_min_tile_distance,3,number,新村与任意已有村庄的最小六边形距离
@@ -66,6 +66,10 @@ pvp_recovery_cooldown_sec,86400,number,战败恢复冷却秒数
 pvp_recovery_trigger_total_ratio,0.20,number,战后四资源总量低于总容量此比例才触发恢复
 pvp_recovery_resource_ratio,0.10,number,战败恢复把每种基础资源补到容量比例
 pvp_recovery_gold_floor,100,number,战败恢复金币下限
+pvp_raid_power_per_building_level,100,number,玩家掠夺战每消耗多少进攻战力拆除外围建筑一级
+pvp_siege_power_per_building_level,100,number,玩家攻城战每消耗多少总进攻战力拆除外围建筑一级
+pvp_siege_weapon_power_per_building_level,100,number,玩家攻城战每消耗多少攻城武器战力拆除城内建筑一级
+pvp_siege_storage_loot_ratio,1,number,玩家攻城战可掠夺仓库与粮仓资源的比例
 villager_request_trigger_chance,0.3,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
 villager_request_order_resource,crop,string,幸福村贸易订单所需资源种类（key∈resources.csv）
 villager_request_order_amount,500,number,幸福村贸易订单所需资源数量

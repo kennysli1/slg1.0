@@ -50,6 +50,9 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   const cfg = loadGameConfig(configDir);
   assert.equal(cfg.questGraph.lines.main_foundation.entryQuest, 'm1');
   assert.equal(cfg.questGraph.quests.s2.lineCode, 'show_of_force');
+  assert.equal(cfg.quests.m1.scope, 'global', '主线必须是全局任务');
+  assert.equal(cfg.quests.d1.scope, 'village', '每日任务必须绑定村庄');
+  assert.equal(cfg.quests.s4.scope, 'village', '当前支线默认绑定村庄');
   assert.ok(cfg.questGraph.objectives.some((x) => x.questCode === 's2' && x.kind === 'carry_flag'));
   assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm2' && x.params === 'iron:200|gold:150'));
   assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm1' && x.toQuest === 'm2' && x.relation === 'requires'));
@@ -88,6 +91,8 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
   assert.equal(sumL10, 200, '主城 10 级每级 20，总和应为 200');
   const res = cfg.buildings['residence'];
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
+  assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
+  assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {

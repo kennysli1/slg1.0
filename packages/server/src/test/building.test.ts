@@ -287,3 +287,112 @@ test('拆除：重复拆除同一建筑应被拒（already_demolishing）', asyn
   assert.equal(d2.reason, 'already_demolishing');
 });
 
+test('战斗拆除：按最高等级逐级拆除并返回对应升级资源', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  const clay = raw.placed.find((p: any) => p.kind === 'claypit');
+  assert.ok(wood && clay);
+  wood.level = 5;
+  clay.level = 5;
+  app.store.set('building', 'v1', raw);
+
+  const damaged = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 300, powerPerLevel: 100,
+  });
+  assert.equal(damaged.ok, true);
+  const rows = (damaged.payload as any).destroyed;
+  assert.equal(rows.length, 3, '300 战力应拆 3 级');
+  assert.ok(rows.every((x: any) => x.fromLevel >= 4), '应从最高等级建筑开始拆');
+  const after = await layout(app);
+  const afterWood = after.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  const afterClay = after.zones.outer.placed.find((p: any) => p.kind === 'claypit');
+  assert.equal((afterWood?.level ?? 0) + (afterClay?.level ?? 0), 7, '总等级应从10降到7');
+  assert.ok(Object.values((damaged.payload as any).loot).some((x: any) => Number(x) > 0), '应返回拆除对应升级资源');
+});
+
+test('战斗破坏：建筑保留在槽位、不可升级，可按累计成本三分之一时间一次性修复', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 999999, clay: 999999, iron: 999999, crop: 999999, gold: 999999 } });
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(wood);
+  wood.level = 3;
+  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  app.store.set('building', 'v1', raw);
+
+  const hit = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 300, powerPerLevel: 100, mode: 'damage',
+  });
+  assert.equal(hit.ok, true);
+  const rows = (hit.payload as any).destroyed;
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((x: any) => x.mode === 'damage' && x.loot && Object.values(x.loot).some((n: any) => Number(n) > 0)));
+  assert.ok(Object.values((hit.payload as any).loot).some((n: any) => Number(n) > 0), '普通部队破坏建筑也应返回对应等级的建筑战利品');
+  const during = await layout(app);
+  const damaged = during.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(damaged, '破坏到0级仍应保留建筑槽位');
+  assert.equal(damaged.level, 0);
+  assert.equal(damaged.damaged, true);
+  assert.equal(damaged.repairTargetLevel, 3);
+  assert.equal(damaged.nextCost, null, '受损建筑不能继续升级');
+  assert.ok(damaged.repairCost && Object.values(damaged.repairCost).some((n: any) => n > 0));
+
+  const repair = await send(app, 'building.Repair', { villageId: 'v1', slotId: damaged.slotId });
+  assert.equal(repair.ok, true, `修复应成功: ${repair.reason ?? ''}`);
+  assert.ok((repair.payload as any).timeSec >= 1);
+  await app.scheduler.advanceTo((repair.payload as any).finishAt + 1, setClock);
+  const restored = (await layout(app)).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(restored);
+  assert.equal(restored.level, 3);
+  assert.equal(restored.damaged, false);
+  assert.equal(restored.repairTargetLevel, undefined);
+});
+
+test('战斗拆除：攻城武器可以移除已经被普通部队打到0级的建筑空壳', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.ok(wood);
+  wood.level = 1;
+  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  app.store.set('building', 'v1', raw);
+
+  await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 100, powerPerLevel: 100, mode: 'damage',
+  });
+  const damaged = (await layout(app)).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  assert.equal(damaged?.level, 0);
+  assert.equal(damaged?.repairTargetLevel, 1);
+
+  const removed = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'outer', power: 100, powerPerLevel: 100, mode: 'demolish',
+  });
+  assert.equal(removed.ok, true);
+  assert.equal((removed.payload as any).destroyed[0].fromLevel, 0);
+  assert.equal((removed.payload as any).destroyed[0].toLevel, 0);
+  assert.equal((removed.payload as any).destroyed[0].removed, true);
+  assert.equal((await layout(app)).zones.outer.placed.some((p: any) => p.kind === 'woodcutter'), false);
+});
+
+test('保险库：保护量按等级累加，攻城拆除后立即减少', async () => {
+  const app = freshApp();
+  const raw = app.store.get('building', 'v1') as any;
+  raw.placed.push({ slotId: 'inner-vault-test', zone: 'inner', kind: 'vault', level: 2 });
+  app.store.set('building', 'v1', raw);
+
+  const before = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((before.payload as any).protection, { wood: 250, clay: 250, iron: 250, crop: 250, gold: 2500 });
+
+  const damaged = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'inner', power: 100, powerPerLevel: 100,
+  });
+  assert.equal(damaged.ok, true);
+  const afterOne = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((afterOne.payload as any).protection, { wood: 100, clay: 100, iron: 100, crop: 100, gold: 1000 });
+
+  await send(app, 'building.ApplyBattleDamage', { villageId: 'v1', zone: 'inner', power: 100, powerPerLevel: 100 });
+  const afterDestroyed = await send(app, 'building.GetVaultProtection', { villageId: 'v1' });
+  assert.deepEqual((afterDestroyed.payload as any).protection, { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 });
+});
+

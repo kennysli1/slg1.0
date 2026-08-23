@@ -3,14 +3,20 @@
  * 布局：全屏 SVG 地图 + 桌面右侧战术栏（目标工作流与行军态势）。
  * 手机上目标工作流变为贴底抽屉，避免把表单和地图控件挤在同一视野内。
  */
-import { selected, garrisonContinue } from '../../app/store.js';
+import { useEffect } from 'preact/hooks';
+import { selected, garrisonContinue, mapAreaStale } from '../../app/store.js';
 import { HexMap } from './HexMap.js';
 import { TargetPanel } from './TargetPanel.js';
 import { MarchList } from './MarchList.js';
+import { refreshMapArea } from '../../app/refresh.js';
 
 export function MapScreen() {
   void selected.value;
   void garrisonContinue.value;
+  const areaStale = mapAreaStale.value;
+  useEffect(() => {
+    if (areaStale) void refreshMapArea();
+  }, [areaStale]);
   const showPanel = !!selected.value || !!garrisonContinue.value;
   return (
     <div class="map-screen">

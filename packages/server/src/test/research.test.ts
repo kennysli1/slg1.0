@@ -168,6 +168,28 @@ test('研究：StartResearch + 推进时钟 → 状态 completed，GetTechTree �
   assert.equal(t.status, 'completed', `研发完成后 status 应为 completed，实际：${t.status}`);
 });
 
+test('全局科技：一座村完成后其他村不可重复研发', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '全局科技跨村', 'pass1');
+  assert.equal(regRes.ok, true);
+  const player = (regRes.payload as any).player;
+  const capital = player.villageId as string;
+  const alloc = await send(app, 'player.AllocVillageId', { playerId: player.id });
+  const branch = (alloc.payload as any).villageId as string;
+  await app.createVillage(branch, 12, -8, '科技分城');
+  await send(app, 'player.AttachVillage', { playerId: player.id, villageId: branch, q: 12, r: -8, name: '科技分城' });
+  const techCode = 'advanced_storage';
+  app.store.set('research', capital, { villageId: capital, rp: 0, completed: [techCode], academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 } });
+  app.store.set('research', branch, { villageId: branch, rp: 999, completed: [], academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 } });
+
+  const tree = await send(app, 'research.GetTechTree', { villageId: branch });
+  const entry = (tree.payload as any).techs.find((t: any) => t.code === techCode);
+  assert.equal(entry.status, 'completed');
+  const start = await send(app, 'research.StartResearch', { villageId: branch, techCode });
+  assert.equal(start.ok, false);
+  assert.equal(start.reason, 'already_completed');
+});
+
 // ─── 新增：CancelResearch 返还比例 RP ───────────────────────────────
 test('研究：CancelResearch 在中途返还剩余比例 RP（向下取整）', async () => {
   const app = freshApp();

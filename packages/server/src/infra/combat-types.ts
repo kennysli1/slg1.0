@@ -54,6 +54,8 @@ export interface CombatUnit {
   carry: number;
   /** 该兵种携带的特性效果（已从 traits id 解析成效果列表，combat 直接用）。 */
   traits?: { effect: TraitEffect; value: number }[];
+  /** 伏击目标优先级：被伏击的远程兵先承受伤害，内部战斗字段，不对外持久化。 */
+  ambushPriority?: boolean;
 }
 
 /** 一方阵营的参战快照：兵种 code -> 条目。 */

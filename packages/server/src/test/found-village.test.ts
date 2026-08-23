@@ -38,12 +38,6 @@ async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
   // 等待 refreshHardCap 异步完成
   for (let i = 0; i < 10; i++) await Promise.resolve();
 
-  const pop = (await send(app, 'population.GetSnapshot', { villageId })).payload as any;
-  assert.ok(
-    pop.softLimit >= app.config.constants.foundMinSoftLimit,
-    `softLimit=${pop.softLimit} 应≥${app.config.constants.foundMinSoftLimit}`,
-  );
-
   const per = app.config.constants.foundResourceCostBase;
   // 抬高容量，避免「无露天仓库超额丢弃」把拓荒开城包钳到容量（测试聚焦拓荒流程，非溢出）
   await send(app, 'economy.SetCapacity', {
@@ -106,13 +100,15 @@ test('拓荒：成功建第二村', async () => {
   assert.equal(branch.q, tq);
   assert.equal(branch.r, tr);
 
-  // 拓荒者不应回村
+  // 成功建城后拓荒者已转移，不应回到出发城
   const army = (await send(app, 'military.GetArmy', { villageId: vid })).payload as any;
   assert.equal(army.troops?.settler ?? 0, 0);
 
-  // 新村有经济
+  // 新村有经济且以 5 人口开局
   const eco = await send(app, 'economy.GetResources', { villageId: branch.id });
   assert.equal(eco.ok, true);
+  const branchPop = (await send(app, 'population.GetSnapshot', { villageId: branch.id })).payload as any;
+  assert.equal(Math.round(branchPop.currentPop), 5, '新城初始人口应为5');
 });
 
 test('拓荒：距离过近拒绝', async () => {

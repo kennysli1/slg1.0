@@ -66,9 +66,23 @@ export interface Me {
 }
 export let me: Me | null = null;
 
-/** 用登录/切村响应更新本地身份。 */
-export function applyMe(player: Me): void {
+/** 用登录/切村响应更新本地身份；非切村动作可保留当前操作村。 */
+export function applyMe(player: Me, preserveCurrent = false): void {
+  if (preserveCurrent && me?.villageId) {
+    const current = player.villages?.find((v) => v.id === me!.villageId);
+    if (current) {
+      me = { ...player, villageId: current.id, currentVillageId: current.id, q: current.q, r: current.r };
+      return;
+    }
+  }
   me = player;
+}
+
+/** 处理玩家维度的村名推送，不必等待重新登录即可更新村庄列表与当前身份快照。 */
+export function applyVillageRename(villageId: string, name: string): void {
+  if (!me?.villages) return;
+  const villages = me.villages.map((v) => v.id === villageId ? { ...v, name } : v);
+  me = { ...me, villages };
 }
 
 /** 切到己方另一座村（会话当前操作村）。 */
@@ -91,20 +105,6 @@ export function isOwnVillageId(id: string): boolean {
 
 export function ownVillageAt(q: number, r: number): MeVillage | undefined {
   return me?.villages?.find((v) => v.q === q && v.r === r);
-}
-
-/** 放弃分城（不可弃主城；服务端有新建冷却锁）。 */
-export async function abandonVillage(villageId: string): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await req('AbandonVillage', { villageId });
-    if (res.ok) {
-      applyMe((res.payload as any).player as Me);
-      return { ok: true };
-    }
-    return { ok: false, error: res.error?.code };
-  } catch {
-    return { ok: false, error: 'network_error' };
-  }
 }
 
 export function onPush(h: PushHandler) {

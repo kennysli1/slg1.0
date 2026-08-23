@@ -8,7 +8,7 @@
  *  3) 标签页从后台切回 → 补一次；
  *  纯 UI 推进（资源数字/倒计时/人口外插）由 1 秒心跳本地完成，不访问服务器。
  */
-import { req, me, selectVillage } from '../api.js';
+import { req, me, selectVillage, applyMe, applyVillageRename } from '../api.js';
 import { errText } from '../shared/ui/text.js';
 import { worldW, worldH } from './config.js';
 import type { StoredNotification } from '@slg/shared';
@@ -19,12 +19,51 @@ import {
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setTaskMarkers, foreignMoves, mapCenter, patchForeignArmy, dropForeignArmy,
+  setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, mapAreaStale,
+  beginVillageSwitch, endVillageSwitch, patchForeignArmy, dropForeignArmy,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 
 let mapCenterLegacy: { q: number; r: number } | null = null;
+
+/**
+ * GM 可直接调整村庄坐标/名称；玩家快照不会主动推送这些字段。
+ * 地图区域中自己的村庄由 World 实时下发，因此每次完整刷新都用它校准本地村庄列表，
+ * 避免旧标签和旧坐标让玩家误以为两个村在同一格。
+ */
+function reconcileVillagesFromArea(areaPayload: any): void {
+  if (!me?.villages?.length) return;
+  const tiles = Array.isArray(areaPayload?.tiles) ? areaPayload.tiles : [];
+  const byId = new Map<string, { q: number; r: number; name?: string }>();
+  for (const tile of tiles) {
+    if (tile?.kind !== 'village' || typeof tile.refId !== 'string') continue;
+    if (tile.visibility === 'unexplored') continue;
+    const q = Number(tile.q), r = Number(tile.r);
+    if (Number.isFinite(q) && Number.isFinite(r)) byId.set(tile.refId, { q, r, name: typeof tile.name === 'string' ? tile.name : undefined });
+  }
+  let changed = false;
+  const villages = me.villages.map((v) => {
+    const tile = byId.get(v.id);
+    if (!tile) return v;
+    const next = {
+      ...v,
+      q: tile.q,
+      r: tile.r,
+      ...(tile.name ? { name: tile.name } : {}),
+    };
+    if (next.q !== v.q || next.r !== v.r || next.name !== v.name) changed = true;
+    return next;
+  });
+  if (!changed) return;
+  const current = villages.find((v) => v.id === me?.villageId);
+  applyMe({
+    ...me,
+    villages,
+    ...(current ? { q: current.q, r: current.r } : {}),
+  });
+}
+
 export function getMapCenter(): { q: number; r: number } | null {
   return mapCenter.value ?? mapCenterLegacy;
 }
@@ -37,8 +76,9 @@ let onSessionLost: ((msg: string) => void) | null = null;
 export function setSessionLostHandler(fn: (msg: string) => void): void { onSessionLost = fn; }
 
 /** 一次性拉齐主界面所需的全部快照。 */
-export async function refreshAll(): Promise<void> {
+export async function refreshAll(options: { includeArea?: boolean; waitForTasks?: boolean } = {}): Promise<void> {
   if (!me) return;
+  const includeArea = options.includeArea !== false;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
@@ -46,7 +86,9 @@ export async function refreshAll(): Promise<void> {
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
-      req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }),
+      includeArea
+        ? req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true })
+        : Promise.resolve({ ok: false, skipped: true } as any),
       req('ListMovements'),
       req('GetPopulation').catch(() => ({ ok: false } as any)),
       req('ListTreasures').catch(() => ({ ok: false } as any)),
@@ -54,7 +96,7 @@ export async function refreshAll(): Promise<void> {
       req('GetAlchemy').catch(() => ({ ok: false } as any)),
     ]);
 
-    const failed = [res, vil, army, area, moves].find((x) => !x.ok);
+    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves].find((x) => !x.ok);
     if (failed) {
       const code = failed.error?.code ?? 'failed';
       if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
@@ -62,25 +104,71 @@ export async function refreshAll(): Promise<void> {
       return;
     }
 
+    if (area.ok) reconcileVillagesFromArea(area.payload);
     setCache({
+      ...getCache(),
       res: res.payload, vil: vil.payload, army: army.payload,
-      area: area.payload, moves: moves.payload,
+      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload,
       treasures: treasures.ok ? treasures.payload : null,
       reputation: reputation.ok ? reputation.payload : null,
       alchemy: alchemy.ok ? alchemy.payload : null,
     });
+    if (area.ok) mapAreaStale.value = false;
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();
     if (pop.ok) applyPopPayload(pop.payload);
     bumpData();
     void refreshForeignMoves();
 
-    // 任务快照（任务条常驻村庄页，登录/刷新即拉取）
-    const taskRes = await req('task.GetState').catch(() => null);
-    if (taskRes?.ok) setTaskState(taskRes.payload);
+    // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
+    const taskRefresh = reloadPlayerTasks();
+    if (options.waitForTasks !== false) await taskRefresh;
   } catch {
     pushReport('刷新失败：网络连接异常');
   }
+}
+
+/** 进入地图页时补拉此前为降低切村等待而跳过的整张地图。 */
+export async function refreshMapArea(): Promise<boolean> {
+  if (!me) return false;
+  try {
+    const center = getMapCenter() ?? { q: me.q, r: me.r };
+    const area = await req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true });
+    if (!area.ok) return false;
+    reconcileVillagesFromArea(area.payload);
+    setCache({ ...getCache(), area: area.payload });
+    mapAreaStale.value = false;
+    bumpData();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 切换当前操作村庄：统一互斥、刷新和完成时机，避免各组件各自实现产生竞态。 */
+export async function switchVillage(villageId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!me || !villageId || villageId === me.villageId) return { ok: true };
+  const target = me.villages?.find((v) => v.id === villageId);
+  if (!target) return { ok: false, error: 'village_not_found' };
+  if (!beginVillageSwitch(target.id, target.name)) return { ok: false, error: 'switch_in_progress' };
+  try {
+    const result = await selectVillage(villageId);
+    if (!result.ok) return result;
+    bumpSession();
+    const onMap = tab.value === 'map';
+    if (!onMap) mapAreaStale.value = true;
+    // 任务聚合不会阻塞当前村庄数据可用；它在后台完成，避免切村卡住页面。
+    await refreshAll({ includeArea: onMap, waitForTasks: false });
+    return { ok: true };
+  } finally {
+    endVillageSwitch();
+  }
+}
+
+/** 轻量刷新玩家任务板，供任务推送使用。 */
+export async function reloadPlayerTasks(): Promise<void> {
+  const taskRes = await req('task.GetPlayerState').catch(() => null);
+  if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
 }
 
 /**
@@ -256,6 +344,12 @@ export function handlePush(event: string, payload: any): void {
   if (event === 'VillageFounded' && me?.villageId) {
     void selectVillage(me.villageId).then((r) => { if (r.ok) bumpSession(); });
   }
+  // 村名由 Player 模块作为玩家维度推送；刷新地图区域缓存，避免选中格/名称标签残留旧值。
+  if (event === 'VillageRenamed') {
+    applyVillageRename(String(payload?.villageId ?? ''), String(payload?.name ?? ''));
+    void refreshAll();
+    return;
+  }
 
   if (event === 'MercenaryCampUpdated') { void reloadMercCamp(); return; }
   if (event === 'TradeCenterUpdated') { void reloadTrade(); return; }
@@ -265,7 +359,7 @@ export function handlePush(event: string, payload: any): void {
   if (event === 'TechCompleted') { void reloadResearch(); }
 
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
-  if (event === 'TaskListChanged') { setTaskState(payload); return; }
+  if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
 
   // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野

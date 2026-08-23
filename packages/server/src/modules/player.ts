@@ -126,7 +126,7 @@ export class PlayerModule {
     private now: () => number,
     private config: GameConfig,
     /** 由 app 提供：实际创建一个村庄（拼装 economy/building/military/population + 放地图）。 */
-    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string) => void | Promise<void>,
+    private createVillage: (villageId: string, q: number, r: number, name: string, tribe: string, initialPop?: number) => void | Promise<void>,
     /** 环绕平行四边形世界尺寸（axial q 周期 W、r 周期 H），用于随机分配出生坐标。 */
     private worldW: number = 41,
     private worldH: number = 41,
@@ -163,6 +163,7 @@ export class PlayerModule {
     this.commands.register('player.Get', (c) => this.get(c));
     this.commands.register('player.GetByVillage', (c) => this.getByVillage(c));
     this.commands.register('player.SelectVillage', (c) => this.selectVillage(c));
+    this.commands.register('player.RenameVillage', (c) => this.renameVillage(c));
     this.commands.register('player.AbandonVillage', (c) => this.abandonVillage(c));
     this.commands.register('player.AttachVillage', (c) => this.attachVillage(c));
     this.commands.register('player.DetachVillage', (c) => this.detachVillage(c));
@@ -334,6 +335,34 @@ export class PlayerModule {
     };
   }
 
+  /** 修改玩家自己村庄的名称；地图地块由 World 通过事件同步，避免跨模块直接改状态。 */
+  private async renameVillage(cmd: Command): Promise<CommandResult> {
+    const { playerId, villageId, name } = cmd.payload as {
+      playerId: string; villageId: string; name: string;
+    };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const village = p.ownedVillages.find((v) => v.id === villageId);
+    if (!village) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    const clean = String(name ?? '').trim();
+    if (!clean) return { ok: false, payload: {}, reason: 'village_name_empty' };
+    if ([...clean].length > 24) return { ok: false, payload: {}, reason: 'village_name_too_long' };
+    if (village.name === clean) {
+      return { ok: true, payload: { player: this.publicPlayer(p) } };
+    }
+    const previousName = village.name;
+    village.name = clean;
+    this.store.set(COLLECTION, p.id, p);
+    await this._bus.emit({
+      name: 'player.VillageRenamed',
+      source: PlayerModule.NAME,
+      ts: this.now(),
+      // 通过玩家维度推送，保证地图/村庄列表的所有会话都能立即刷新名称。
+      payload: { playerId: p.id, playerIds: [p.id], villageId, name: clean, previousName },
+    });
+    return { ok: true, payload: { player: this.publicPlayer(p) } };
+  }
+
   /**
    * 内部：把已建好的村挂到玩家名下（found 到达后调用）。
    * payload: { playerId, villageId, q, r, name }
@@ -458,7 +487,8 @@ export class PlayerModule {
     const vName = (name && name.trim()) || `${p.name}的分城`;
 
     try {
-      await this.createVillage(villageId, q, r, vName, p.tribe);
+      // 拓荒成功后新城以 5 名初始人口开局；人口模块仍负责计算硬上限。
+      await this.createVillage(villageId, q, r, vName, p.tribe, 5);
     } catch (err) {
       console.error(`[Player] createOwnedVillage failed`, err);
       return { ok: false, payload: {}, reason: 'village_creation_failed' };
@@ -497,7 +527,7 @@ export class PlayerModule {
   private listAll(_cmd: Command): CommandResult {
     const players = this.store.all<PlayerState>(COLLECTION).map((p) => ({
       id: p.id,
-      villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r })),
+      villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r, name: v.name })),
     }));
     return { ok: true, payload: { players } };
   }

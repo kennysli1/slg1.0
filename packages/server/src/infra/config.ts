@@ -68,6 +68,12 @@ export interface BuildingLevelDef {
   taskRefreshSec?: number;
   /** 仅酒馆(tavern)：该等级酒馆同时可展示的随机任务数上限。 */
   taskMaxTasks?: number;
+  /** 仅保险库(vault)：该等级新增的各资源保护量；按等级累加，攻城拆除后重新计算。 */
+  vaultProtectWood?: number;
+  vaultProtectClay?: number;
+  vaultProtectIron?: number;
+  vaultProtectCrop?: number;
+  vaultProtectGold?: number;
 }
 
 export interface BuildingDef {
@@ -172,8 +178,10 @@ export interface QuestChoiceReward {
   rewards: QuestRewards;
 }
 
-/** 任务类型：main=主线(全玩家共有,科技树式前置,不可放弃)；random=随机(酒馆刷新,可放弃)。 */
+/** 任务类型：main=主线；daily=日常；side=支线。 */
 export type QuestType = 'main' | 'daily' | 'side';
+/** 任务归属：global=玩家全局；village=绑定某一座村庄。 */
+export type QuestScope = 'global' | 'village';
 
 /** 任务定义（来自 quests.csv）。 */
 export interface QuestDef {
@@ -182,6 +190,8 @@ export interface QuestDef {
   name: string;
   desc: string;
   type: QuestType;
+  /** 主线固定为 global；日常固定为 village；支线可由 CSV 配置。 */
+  scope: QuestScope;
   /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
   requires: string[];
   /** 目标（v1 单目标）。 */
@@ -225,6 +235,7 @@ export interface QuestGraphQuestDef {
   name: string;
   desc: string;
   type: QuestType;
+  scope: QuestScope;
   weight: number;
   repeatable: boolean;
   cooldownSec: number;
@@ -305,8 +316,6 @@ export interface UnitDef {
   traits: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
-  /** 是否永久消耗人口（拓荒者=true：解散/死亡时人口不返还）。 */
-  popPermanent: boolean;
   /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买、永久拥有；不进训练队列。 */
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
@@ -382,6 +391,8 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 伏击方攻击加成（0.5=+50%），仅在伏击战结算时生效。 */
+  ambushAttackBonus: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -413,8 +424,6 @@ export interface GameConstants {
   popHospitalRecoveryMax: number;
   /** 拓荒：出发村主基地最低等级。 */
   foundMinMainLevel: number;
-  /** 拓荒：出发村人口软上限最低门槛。 */
-  foundMinSoftLimit: number;
   /** 拓荒：所需拓荒者数量。 */
   foundSettlerCount: number;
   /** 拓荒：第2村开城包（单资源）。 */
@@ -475,6 +484,12 @@ export interface GameConstants {
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
+  /** PvP 掠夺/攻城：每拆除建筑一级所需的战力阈值。 */
+  pvpRaidPowerPerBuildingLevel: number;
+  pvpSiegePowerPerBuildingLevel: number;
+  pvpSiegeWeaponPowerPerBuildingLevel: number;
+  /** 攻城可从仓库/粮仓取走的存量比例。 */
+  pvpSiegeStorageLootRatio: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -680,7 +695,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -702,6 +717,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
       taskRefreshSec: r.taskRefreshSec ? num(r.taskRefreshSec) : undefined,
       taskMaxTasks: r.taskMaxTasks ? num(r.taskMaxTasks) : undefined,
+      vaultProtectWood: r.vaultProtectWood ? num(r.vaultProtectWood) : undefined,
+      vaultProtectClay: r.vaultProtectClay ? num(r.vaultProtectClay) : undefined,
+      vaultProtectIron: r.vaultProtectIron ? num(r.vaultProtectIron) : undefined,
+      vaultProtectCrop: r.vaultProtectCrop ? num(r.vaultProtectCrop) : undefined,
+      vaultProtectGold: r.vaultProtectGold ? num(r.vaultProtectGold) : undefined,
     };
   }
 
@@ -780,7 +800,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: num(r.popCost, 1),
-      popPermanent: num(r.popPermanent, 0) === 1,
     };
   }
 
@@ -809,7 +828,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: 0,
-      popPermanent: false,
       isMercenary: true,
       goldCost: num(r.goldCost, 0),
       commandCost: Math.max(1, num(r.commandCost, 1)),
@@ -925,6 +943,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     marchPointBase: cn('march_point_base', 0),
@@ -945,8 +964,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
     foundMinMainLevel: cn('found_min_main_level', 10),
-    foundMinSoftLimit: cn('found_min_soft_limit', 350),
-    foundSettlerCount: cn('found_settler_count', 3),
+    foundSettlerCount: cn('found_settler_count', 1),
     foundResourceCostBase: cn('found_resource_cost_base', 3000),
     foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
     foundMinTileDistance: cn('found_min_tile_distance', 3),
@@ -980,6 +998,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
+    pvpRaidPowerPerBuildingLevel: Math.max(1, cn('pvp_raid_power_per_building_level', 100)),
+    pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
+    pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
+    pvpSiegeStorageLootRatio: Math.max(0, Math.min(1, cn('pvp_siege_storage_loot_ratio', 1))),
     raw,
   };
 
@@ -1168,7 +1190,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const code = r.code.trim();
     questGraph.quests[code] = {
       id: num(r.id), code, lineCode: r.lineCode?.trim() || '', name: r.name ?? code, desc: r.desc ?? '',
-      type: (r.type as QuestType) || 'side', weight: Math.max(0, num(r.weight, 0)),
+      type: (r.type as QuestType) || 'side',
+      scope: ((r.scope?.trim() || ((r.type as QuestType) === 'main' ? 'global' : 'village')) as QuestScope),
+      weight: Math.max(0, num(r.weight, 0)),
       repeatable: num(r.repeatable, 0) === 1, cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
       abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
     };
@@ -1242,7 +1266,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
-      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, requires,
+      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
       abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12,
@@ -1305,6 +1329,14 @@ export function validateGameConfig(config: GameConfig): void {
         continue;
       }
       if (ld.popCap < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} popCap 不能为负`);
+      for (const [field, value] of [
+        ['vaultProtectWood', ld.vaultProtectWood], ['vaultProtectClay', ld.vaultProtectClay],
+        ['vaultProtectIron', ld.vaultProtectIron], ['vaultProtectCrop', ld.vaultProtectCrop],
+        ['vaultProtectGold', ld.vaultProtectGold],
+      ] as const) {
+        if (value !== undefined && value < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} ${field} 不能为负`);
+        if (b.kind !== 'vault' && value !== undefined && value !== 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} ${field} 仅允许用于 vault`);
+      }
       if (b.resource !== undefined) {
         if (ld.prod === undefined || ld.prod < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} 资源田 prod 必须≥0`);
       } else if (ld.prod !== undefined) {
@@ -1449,6 +1481,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
@@ -1537,6 +1570,9 @@ export function validateGameConfig(config: GameConfig): void {
   for (const q of Object.values(config.quests)) {
     if (!q.code) errors.push('quests.csv 存在空 code');
     if (q.type !== 'main' && q.type !== 'daily' && q.type !== 'side') errors.push(`quests.csv[${q.code}] type 必须是 main/daily/side`);
+    if (q.scope !== 'global' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] scope 必须是 global/village`);
+    if (q.type === 'main' && q.scope !== 'global') errors.push(`quests.csv[${q.code}] 主线任务必须是 global`);
+    if (q.type === 'daily' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] 日常任务必须是 village`);
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {

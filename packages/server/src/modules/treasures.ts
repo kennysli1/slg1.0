@@ -104,6 +104,11 @@ interface PendingTreasure {
   expectedArrivalAt?: number;
   /** 该待领取宝物由「军队带出的宝物返程回家」产生（storeCarried 因满栏转出的 deliver）。仅为 UI 标记（显示「本村带回」badge），multiset 下重复不再特殊处理。 */
   fromCarry?: boolean;
+  /** 转移军队送达时的来源村，供报告按来源/目的村清晰区分。 */
+  fromVillageId?: string;
+  fromVillageName?: string;
+  /** 任务奖励的最终收件村；与 pending villageId 一致时也保留，供报告明确显示。 */
+  rewardVillageId?: string;
 }
 
 /** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
@@ -128,6 +133,9 @@ interface PendingTreasureView {
   hasTradeCenter: boolean;
   /** 该待领取宝物由「军队带出的宝物返程回家」产生（仅 UI 标记，显示「本村带回」badge）。 */
   fromCarry?: boolean;
+  fromVillageId?: string;
+  fromVillageName?: string;
+  rewardVillageId?: string;
 }
 
 /**
@@ -673,7 +681,7 @@ export class TreasureModule {
   }
 
   /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
-  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false): void {
+  private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false, fromVillageId?: string, fromVillageName?: string, rewardVillageId?: string): void {
     const t = this.config.treasures[code];
     if (!t) return;
     const now = this.now();
@@ -684,7 +692,7 @@ export class TreasureModule {
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
       priceGold: t.priceGold, kind: 'deliver', createdAt: now, expiresAt: now + timeoutMs,
-      fromCarry, victoryFlagQualified,
+      fromCarry, victoryFlagQualified, fromVillageId, fromVillageName, rewardVillageId,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
     this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
@@ -705,18 +713,18 @@ export class TreasureModule {
 
   /** 授予宝物到村庄宝物栏；任务奖励满栏时可转为待处理报告。 */
   private async grant(cmd: Command): Promise<CommandResult> {
-    const { villageId, code, pendingIfFull, alwaysPending } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean; alwaysPending?: boolean };
+    const { villageId, code, pendingIfFull, alwaysPending, rewardVillageId } = cmd.payload as { villageId: string; code: string; pendingIfFull?: boolean; alwaysPending?: boolean; rewardVillageId?: string };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
     if (!t) return { ok: false, payload: {}, reason: 'unknown_treasure' };
     if (alwaysPending) {
-      this.createDeliverPending(villageId, code);
+      this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
       await this.emitChanged(villageId);
       return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
     }
     if (!this.storeIfRoom(s, code)) {
       if (pendingIfFull) {
-        this.createDeliverPending(villageId, code);
+        this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
         await this.emitChanged(villageId);
         return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
       }
@@ -841,25 +849,39 @@ export class TreasureModule {
     this.store.set(COLLECTION, p.villageId, s);
   }
 
-  /** 抵达另一个村庄：把携带宝物转为该村庄玩家的 deliver 待处理报告（sell/discard/take）。 */
+  /**
+   * 抵达另一个村庄：优先直接放入目的村宝物栏；目的村没有空位的宝物才转为该村
+   * 的 deliver 待处理报告（sell/discard/take）。这样转移与返城的宝物交付规则一致。
+   */
   private async offloadForeign(cmd: Command): Promise<CommandResult> {
-    const { villageId, codes, fromMovementId } = cmd.payload as {
-      villageId: string; codes?: string[]; fromMovementId?: string;
+    const { villageId, codes, fromMovementId, fromVillageId, fromVillageName } = cmd.payload as {
+      villageId: string; codes?: string[]; fromMovementId?: string; fromVillageId?: string; fromVillageName?: string;
     };
     const got = fromMovementId ? (this.removeCarried(fromMovementId) ?? []) : (codes ?? []);
-    if (got.includes('victory_flag')) {
-      const receiver = this.ensureState(villageId);
-      receiver.victoryFlagBonus = 0;
-      this.store.set(COLLECTION, villageId, receiver);
+    const receiver = this.ensureState(villageId);
+    const stored: string[] = [];
+    const pending: string[] = [];
+    for (const code of got) {
+      if (this.storeIfRoom(receiver, code)) stored.push(code);
+      else {
+        pending.push(code);
+        this.createDeliverPending(villageId, code, undefined, false, false, fromVillageId, fromVillageName);
+      }
     }
-    for (const code of got) this.createDeliverPending(villageId, code, undefined);
+    // 胜利旗易主时，无论直接入栏还是进入报告，都先重置目的村的额外加成。
+    if (got.includes('victory_flag')) receiver.victoryFlagBonus = 0;
+    if (got.length > 0) {
+      this.store.set(COLLECTION, villageId, receiver);
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+    }
     if (got.length > 0) {
       await this.bus.emit({
         name: 'treasure.CarriedArrived', source: TreasureModule.NAME, ts: this.now(),
-        payload: { villageId, codes: got, fromMovementId },
+        payload: { villageId, codes: got, stored, pending, fromMovementId, fromVillageId, fromVillageName },
       } as DomainEvent);
     }
-    return { ok: true, payload: { villageId, codes: got } };
+    return { ok: true, payload: { villageId, codes: got, stored, pending } };
   }
 
   /**
@@ -1353,7 +1375,7 @@ export class TreasureModule {
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
         kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
         expectedArrivalAt: p.expectedArrivalAt,
-        hasTradeCenter, fromCarry: p.fromCarry,
+        hasTradeCenter, fromCarry: p.fromCarry, fromVillageId: p.fromVillageId, fromVillageName: p.fromVillageName, rewardVillageId: p.rewardVillageId,
       }));
   }
 

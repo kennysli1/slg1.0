@@ -43,6 +43,42 @@ test('GM_TOKEN 未设时 /gm/collections 无需鉴权', async () => {
   }
 });
 
+test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify, app } = buildFastify();
+    const old = await app.commands.send({
+      name: 'world.PlaceVillage',
+      from: 'test',
+      payload: { q: 12, r: 14, refId: 'v-gm-sync', name: '测试村' },
+    });
+    assert.equal(old.ok, true);
+    await fastify.ready();
+    const response = await fastify.inject({
+      method: 'PUT',
+      url: '/gm/player/p-gm-sync',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: 'p-gm-sync',
+        name: '测试玩家',
+        ownedVillages: [{ id: 'v-gm-sync', q: 17, r: 35, name: '测试村' }],
+      }),
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
+    assert.equal(moved.ok, true);
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村' });
+    const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
+    assert.equal(previous.ok, true);
+    assert.equal((previous.payload as any).tile.kind, 'empty');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 // ─── 2. 设 GM_TOKEN + 无 header → 401 ────────────────────────────────
 test('GM_TOKEN 设置后无 X-GM-Token header → 401', async () => {
   const prev = process.env.GM_TOKEN;
@@ -152,9 +188,17 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
+    assert.match(res.body, /保木材\/级/, 'GM 页面应显示保险库木材保护量字段');
+    assert.match(res.body, /保金币\/级/, 'GM 页面应显示保险库金币保护量字段');
+    assert.match(res.body, /炼金炉功能参数（合并在升级消耗栏）/, 'GM 页面应把炼金炉参数合并到炼金炉升级消耗卡片');
+    assert.match(res.body, /alchemy_refine_sec/, 'GM 页面应提供炼金时间参数');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
     assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
+    assert.match(res.body, /拓荒参数/, 'GM 页面应包含拓荒专用调参板块');
+    assert.match(res.body, /found_resource_cost_base/, 'GM 页面应提供第2座城每种资源成本参数');
+    assert.match(res.body, /found_resource_cost_growth/, 'GM 页面应提供后续城成本增长倍率参数');
+    assert.match(res.body, /第2座城为木材\/泥土\/钢\/粮食各 3000/, 'GM 页面应说明当前默认拓荒成本');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -296,6 +340,56 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     };
     const treasuryLevel = (levelData.building_levels ?? []).find((r) => r.code === 'treasury' && String(r.level) === '1');
     assert.equal(Number(treasuryLevel?.treasureSlots), 7, 'balance/data 应返回修改后的宝库槽位');
+
+    const vaultSave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ building_levels: { 'vault|1': { vaultProtectWood: '777', vaultProtectGold: '8888' } } }),
+    });
+    assert.equal(vaultSave.statusCode, 200, `保险库保护量覆盖应成功：${vaultSave.body}`);
+    assert.equal(app.config.buildings.vault.levels[1].vaultProtectWood, 777, '保险库木材保护量应热重载');
+    assert.equal(app.config.buildings.vault.levels[1].vaultProtectGold, 8888, '保险库金币保护量应热重载');
+
+    const vaultData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const vaultLevel = (vaultData.building_levels ?? []).find((r) => r.code === 'vault' && String(r.level) === '1');
+    assert.equal(Number(vaultLevel?.vaultProtectWood), 777, 'balance/data 应返回修改后的保险库木材保护量');
+
+    const alchemySave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: { alchemy_refine_sec: { value: '42' } } }),
+    });
+    assert.equal(alchemySave.statusCode, 200, `炼金时间覆盖应成功：${alchemySave.body}`);
+    assert.equal(app.config.constants.alchemyRefineSec, 42, '炼金炉炼化时间应热重载为 42 秒');
+    const constantsData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    const alchemyConstant = (constantsData.constants ?? []).find((r) => r.key === 'alchemy_refine_sec');
+    assert.equal(Number(alchemyConstant?.value), 42, 'balance/data 应返回修改后的炼金时间');
+
+    const foundingSave = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: {
+        found_resource_cost_base: { value: '4321' },
+        found_resource_cost_growth: { value: '1.5' },
+      } }),
+    });
+    assert.equal(foundingSave.statusCode, 200, `拓荒成本覆盖应成功：${foundingSave.body}`);
+    assert.equal(app.config.constants.foundResourceCostBase, 4321, '第2座城每种资源成本应热重载');
+    assert.equal(app.config.constants.foundResourceCostGrowth, 1.5, '后续城成本增长倍率应热重载');
+    const foundingData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    const foundingBase = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_base');
+    const foundingGrowth = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_growth');
+    assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
+    assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
 
     await fastify.close();
   } finally {

@@ -23,12 +23,28 @@ export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 
 /** 当前页签。 */
-export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'reports';
+export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports';
 export const tab = signal<TabKey>('village');
 
 /** 登录态版本号（登录/切村后自增，驱动整壳重渲）。 */
 export const sessionVersion = signal(0);
 export function bumpSession(): void { sessionVersion.value++; }
+
+/** 当前村庄正在切换时的全局互斥状态；切换完成前禁止向旧村庄发起操作。 */
+export interface VillageSwitchState {
+  targetVillageId: string;
+  targetVillageName: string;
+}
+export const villageSwitching = signal<VillageSwitchState | null>(null);
+export function beginVillageSwitch(targetVillageId: string, targetVillageName: string): boolean {
+  if (villageSwitching.value) return false;
+  villageSwitching.value = { targetVillageId, targetVillageName };
+  return true;
+}
+export function endVillageSwitch(): void { villageSwitching.value = null; }
+
+/** 非地图页切村时暂不拉整张地图，进入地图页再补拉。 */
+export const mapAreaStale = signal(false);
 
 // ---------- 弹层栈 ----------
 
@@ -80,11 +96,12 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
+  taskInfo?: TaskCampInfo;
 }
 export const selected = signal<SelectedTarget | null>(null);
 
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
-export const garrisonContinue = signal<{ movementId: string } | null>(null);
+export const garrisonContinue = signal<{ movementId: string; movementType?: 'garrison' | 'ambush' } | null>(null);
 
 /** 地图相机中心（环面坐标 q,r）；跳转/拖拽后写入，供 refresh 与 HexMap 共享。 */
 export const mapCenter = signal<{ q: number; r: number } | null>(null);
@@ -126,8 +143,46 @@ export function dropForeignArmy(id: string): void {
 
 /** 任务完整快照：villageId → task.GetState 的 payload（active/offered/completed）。 */
 export const taskStates = signal<Record<string, any>>({});
+/** 玩家任务页聚合快照；任务执行仍通过每条记录携带的 villageId 定位来源村庄。 */
+export const playerTaskState = signal<any | null>(null);
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
+
+/** 地图详情使用的任务营地关联信息（由任务快照中的父任务实例派生）。 */
+export interface TaskCampInfo {
+  code: string;
+  name: string;
+  desc: string;
+  type?: string;
+  scope?: string;
+  campCleared?: number;
+  campTotal?: number;
+  villageId?: string;
+  objective?: Record<string, unknown> | null;
+}
+
+function decorateTaskCamps(active: any[]): any[] {
+  return active
+    .flatMap((task: any) => (task?.camps ?? []).map((camp: any) => {
+      const hasInfo = Boolean(task.code || task.name || task.desc || task.objective);
+      if (!hasInfo) return { ...camp };
+      return {
+        ...camp,
+        taskInfo: {
+          code: String(task.code ?? ''),
+          name: String(task.name ?? task.code ?? '任务'),
+          desc: String(task.desc ?? ''),
+          type: typeof task.type === 'string' ? task.type : undefined,
+          scope: typeof task.scope === 'string' ? task.scope : undefined,
+          campCleared: Number(task.campCleared ?? 0),
+          campTotal: Number(task.campTotal ?? task.camps?.length ?? 0),
+          villageId: typeof task.villageId === 'string' ? task.villageId : undefined,
+          objective: task.objective ?? null,
+        } satisfies TaskCampInfo,
+      };
+    }))
+    .filter((camp: any) => !camp?.cleared);
+}
 
 /** 写入/更新某村的完整任务快照（同时派生地图标记）。 */
 export function setTaskState(payload: any): void {
@@ -136,17 +191,55 @@ export function setTaskState(payload: any): void {
   taskStates.value = { ...taskStates.value, [vid]: payload };
   // 已清理营地仍会留在任务快照里显示进度，但不能成为地图标记。
   // 同时过滤可抵御旧服务端推送、缓存快照或消息乱序造成的幽灵标记。
-  const camps: any[] = (payload.active ?? [])
-    .flatMap((a: any) => (a.camps ?? []))
-    .filter((camp: any) => !camp?.cleared);
+  const camps = decorateTaskCamps(payload.active ?? []);
   taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
+}
+
+export function setPlayerTaskState(payload: any): void {
+  if (!payload) return;
+  playerTaskState.value = payload;
+  // 聚合响应也回填按村缓存，地图任务标记和旧组件仍能正常工作。
+  // 全局任务只持久化在玩家锚点村，但其营地对玩家名下所有村庄都可见；
+  // 旧实现只写 villages，切换村庄后地图会继续显示另一村的旧营地坐标。
+  const globalCamps = decorateTaskCamps(payload.global?.active ?? []);
+  for (const village of (payload.villages ?? [])) {
+    setTaskState(village);
+    const vid = village?.villageId as string | undefined;
+    if (!vid) continue;
+    const localCamps = taskMarkers.value[vid] ?? [];
+    const byId = new Map<string, any>();
+    for (const camp of [...globalCamps, ...localCamps]) {
+      if (camp?.id) byId.set(String(camp.id), camp);
+    }
+    taskMarkers.value = { ...taskMarkers.value, [vid]: [...byId.values()] };
+  }
 }
 
 /** 单独推送的地图标记更新（TaskMapUpdated）。 */
 export function setTaskMarkers(payload: any): void {
   if (!payload?.villageId) return;
-  const camps = Array.isArray(payload.camps) ? payload.camps.filter((camp: any) => !camp?.cleared) : [];
+  const previous = taskMarkers.value[payload.villageId as string] ?? [];
+  const previousById = new Map(previous.filter((camp: any) => camp?.id).map((camp: any) => [String(camp.id), camp]));
+  const camps = Array.isArray(payload.camps)
+    ? payload.camps
+      .map((camp: any) => ({ ...(previousById.get(String(camp?.id)) ?? {}), ...camp }))
+      .filter((camp: any) => !camp?.cleared)
+    : [];
   taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: camps };
+}
+
+/** 按地图目标坐标/引用查找任务营地，供目标详情补全任务名称与说明。 */
+export function findTaskCampMarker(refId: string | undefined, q: number, r: number): any | undefined {
+  for (const camps of Object.values(taskMarkers.value)) {
+    const match = camps.find((camp: any) =>
+      !camp?.cleared
+      && (refId ? String(camp.id) === refId : true)
+      && Number(camp.q) === q
+      && Number(camp.r) === r,
+    );
+    if (match) return match;
+  }
+  return undefined;
 }
 
 /** 读取当前村庄的任务快照（无则返回 null）。 */

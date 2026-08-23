@@ -27,6 +27,8 @@ interface TrainOrder {
   taskId: string;
   /** 每个兵的实际训练时长(ms)，含人口加速与建筑等级提速（训练开始时快照，整批一致）。 */
   trainMsEach: number;
+  /** 训练开始时快照的单兵资源成本；取消时仅退还尚未产出的兵。 */
+  costPerUnit?: Record<string, number>;
 }
 
 interface MilitaryState {
@@ -35,6 +37,8 @@ interface MilitaryState {
   tribe: string;
   /** 驻村兵力：兵种 -> 数量 */
   troops: Record<string, number>;
+  /** 掠夺防守配置；未设置的旧存档按“全军防守”兼容。 */
+  raidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
   marching?: Record<string, number>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
@@ -142,9 +146,11 @@ export class MilitaryModule {
   init(): void {
     this.commands.register('military.GetArmy', (c) => this.getArmy(c));
     this.commands.register('military.TrainTroops', (c) => this.trainTroops(c));
+    this.commands.register('military.CancelTraining', (c) => this.cancelTraining(c));
     this.commands.register('military.DisbandTroops', (c) => this.disbandTroops(c));
     // 供 Combat/Movement 取"参战快照"：对外只给算好的最终三维（派生管线对外口径）
     this.commands.register('military.GetCombatSnapshot', (c) => this.getCombatSnapshot(c));
+    this.commands.register('military.SetRaidDefense', (c) => this.setRaidDefense(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
     // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
@@ -616,6 +622,10 @@ export class MilitaryModule {
       payload: {
         tribe: s.tribe,
         troops: { ...s.troops },
+        raidDefense: {
+          enabled: s.raidDefense?.enabled !== false,
+          troops: { ...(s.raidDefense?.troops ?? s.troops) },
+        },
         trainable,
         training,
         slots: slotsOut,
@@ -711,11 +721,74 @@ export class MilitaryModule {
       nextDoneAt: this.now() + firstDoneMs,
       taskId,
       trainMsEach,
+      costPerUnit: { ...perUnit },
     };
     this.store.set(COLLECTION, villageId, s);
     // v5：训练中士兵立刻按 unit.upkeep 计入 cropUpkeep（不必等 produceOne）。
     this.reportUpkeep(s);
     return { ok: true, payload: { unit, count, slotId: targetSlot } };
+  }
+
+  /**
+   * 取消指定建筑实例中的训练队列。
+   * 已产出的士兵不会被撤回；尚未产出的部分返还预留人口和训练资源。
+   * 旧存档没有 costPerUnit 时仍可取消，但只能返还人口（无法可靠重建当时的建筑等级折扣）。
+   */
+  private async cancelTraining(cmd: Command): Promise<CommandResult> {
+    const { villageId, slotId } = cmd.payload as { villageId: string; slotId?: string };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+
+    s.trainingBySlot = s.trainingBySlot || {};
+    let order: TrainOrder | undefined;
+    let orderSlotId: string | undefined;
+    if (slotId) {
+      order = s.trainingBySlot[slotId];
+      orderSlotId = slotId;
+    } else if (s.training) {
+      // 兼容旧版单队列存档；新客户端总是带 slotId，避免多队列歧义。
+      order = s.training;
+    } else {
+      const active = Object.entries(s.trainingBySlot).filter(([, value]) => !!value);
+      if (active.length === 1) {
+        orderSlotId = active[0][0];
+        order = active[0][1];
+      }
+    }
+    if (!order) return { ok: false, payload: {}, reason: 'training_not_found' };
+
+    if (order.taskId) this.scheduler.cancel(order.taskId);
+    const remaining = Math.max(0, Math.floor(order.remaining));
+    const def = this.config.units[order.unit];
+    const returnedPop = def ? Math.max(0, def.popCost * remaining) : 0;
+    const refund: Record<string, number> = {};
+    for (const [resource, amount] of Object.entries(order.costPerUnit ?? {})) {
+      const value = Math.max(0, Number(amount) || 0) * remaining;
+      if (value > 0) refund[resource] = value;
+    }
+
+    if (orderSlotId) delete s.trainingBySlot[orderSlotId];
+    else s.training = null;
+    this.store.set(COLLECTION, villageId, s);
+
+    if (returnedPop > 0) {
+      await this.commands.send({
+        name: 'population.ReleaseTrainingPop',
+        from: MilitaryModule.NAME,
+        payload: { villageId, amount: returnedPop, restoreCivilian: true },
+      });
+    }
+    let refunded: Record<string, number> = {};
+    if (Object.keys(refund).length > 0) {
+      const grant = await this.commands.send({
+        name: 'economy.Grant',
+        from: MilitaryModule.NAME,
+        payload: { villageId, gain: refund },
+      });
+      refunded = ((grant.payload as any)?.applied ?? {}) as Record<string, number>;
+    }
+    this.reportUpkeep(s);
+    return { ok: true, payload: { unit: order.unit, remaining, returnedPop, refunded, refund } };
   }
 
   /**
@@ -767,7 +840,7 @@ export class MilitaryModule {
   /**
    * 解散驻村军队（DisbandTroops）：减兵力 + 归还人口 + 更新维护。
    * 只能解散驻村部队（出征中的军队不在 troops 里，归 movement 管辖）。
-   * 100% 归还人口（但拓荒者 popPermanent=true，由 population.ReturnPop 跳过）。
+   * 100% 归还训练时占用的人口。
    * 资源不返还。
    */
   private async disbandTroops(cmd: Command): Promise<CommandResult> {
@@ -791,7 +864,7 @@ export class MilitaryModule {
     this.reportUpkeep(s);
     this.reportGarrisonPop(s);
 
-    // 归还人口（population.ReturnPop 自行跳过 popPermanent 单位）
+    // 归还人口（population.ReturnPop 按各兵种 popCost 计算）
     const returnResult = await this.commands.send({
       name: 'population.ReturnPop',
       from: MilitaryModule.NAME,
@@ -807,19 +880,43 @@ export class MilitaryModule {
    * Combat/Movement 拿这个去结算，不知道铁匠养成怎么算的（派生管线对外口径）。
    */
   private getCombatSnapshot(cmd: Command): CommandResult {
-    const { villageId, units } = cmd.payload as { villageId: string; units?: Record<string, number> };
+    const { villageId, units, purpose } = cmd.payload as { villageId: string; units?: Record<string, number>; purpose?: 'raid' | 'siege' };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
+    if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
     // units 指定参战兵力；缺省取全部驻军
-    const source = units ?? s.troops;
+    const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
-      if (!this.config.units[unit] || n <= 0) continue;
-      const tm = this.techCombatMult(s, unit);
-      const stats = this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
-      snapshot[unit] = { count: n, ...stats };
+      const available = Math.min(Math.max(0, Math.floor(Number(n) || 0)), s.troops[unit] ?? 0);
+      if (!this.config.units[unit] || available <= 0) continue;
+      // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
+      const stats = purpose === 'raid'
+        ? this.finalStats(unit, 1, 1)
+        : (() => {
+          const tm = this.techCombatMult(s, unit);
+          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+        })();
+      snapshot[unit] = { count: available, ...stats };
     }
     return { ok: true, payload: { snapshot } };
+  }
+
+  /** 设置守方参与掠夺战的兵力；enabled=false 表示放弃防守掠夺。 */
+  private setRaidDefense(cmd: Command): CommandResult {
+    const { villageId, enabled, troops } = cmd.payload as { villageId: string; enabled: boolean; troops?: Record<string, number> };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const selected: Record<string, number> = {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      if (!this.config.units[unit]) continue;
+      const count = Math.min(Math.max(0, Math.floor(Number(raw) || 0)), s.troops[unit] ?? 0);
+      if (count > 0) selected[unit] = count;
+    }
+    s.raidDefense = { enabled: enabled !== false, troops: selected };
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { raidDefense: { ...s.raidDefense, troops: { ...selected } } } };
   }
 
   /**

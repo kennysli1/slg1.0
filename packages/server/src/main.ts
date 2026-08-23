@@ -69,6 +69,10 @@ async function main() {
     app.setupWorld();
     console.log('[server] 全新存档：已初始化世界与 PvE 目标');
   } else {
+    const synced = await app.syncWorldVillages();
+    if (synced.synced || synced.failed) {
+      console.log(`[server] 已校准 ${synced.synced} 个村庄地图坐标${synced.failed ? `，${synced.failed} 个失败` : ''}`);
+    }
     app.resume();
     console.log(`[server] 载入存档：${app.store.all('player').length} 个玩家，已恢复在途任务`);
   }
