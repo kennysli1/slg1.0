@@ -13,7 +13,7 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop } from '../app/state.js';
-import { setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
+import { findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
@@ -321,6 +321,23 @@ describe('任务营地地图标记', () => {
     });
     assert.deepEqual(taskMarkers.value['task-global-capital'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
     assert.deepEqual(taskMarkers.value['task-global-branch'], [{ id: 'global-camp', q: 12, r: 0, cleared: false }]);
+  });
+
+  it('任务营地标记携带任务名称与说明，地图推送不会丢失关联信息', () => {
+    const villageId = 'task-detail-test';
+    setTaskState({
+      villageId,
+      active: [{
+        code: 'm3', name: '清剿野兽', desc: '清理一处骚扰村落的营地', type: 'main', scope: 'global',
+        campCleared: 0, campTotal: 1, camps: [{ id: 'detail-camp', q: 4, r: 5, cleared: false }],
+      }],
+    });
+    assert.equal(taskMarkers.value[villageId][0].taskInfo.name, '清剿野兽');
+    assert.equal(taskMarkers.value[villageId][0].taskInfo.desc, '清理一处骚扰村落的营地');
+    assert.equal(findTaskCampMarker('detail-camp', 4, 5)?.taskInfo.scope, 'global');
+
+    setTaskMarkers({ villageId, camps: [{ id: 'detail-camp', q: 4, r: 5, cleared: false }] });
+    assert.equal(findTaskCampMarker('detail-camp', 4, 5)?.taskInfo.name, '清剿野兽');
   });
 });
 

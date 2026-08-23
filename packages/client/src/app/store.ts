@@ -80,6 +80,7 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
+  taskInfo?: TaskCampInfo;
 }
 export const selected = signal<SelectedTarget | null>(null);
 
@@ -131,6 +132,42 @@ export const playerTaskState = signal<any | null>(null);
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
 
+/** 地图详情使用的任务营地关联信息（由任务快照中的父任务实例派生）。 */
+export interface TaskCampInfo {
+  code: string;
+  name: string;
+  desc: string;
+  type?: string;
+  scope?: string;
+  campCleared?: number;
+  campTotal?: number;
+  villageId?: string;
+  objective?: Record<string, unknown> | null;
+}
+
+function decorateTaskCamps(active: any[]): any[] {
+  return active
+    .flatMap((task: any) => (task?.camps ?? []).map((camp: any) => {
+      const hasInfo = Boolean(task.code || task.name || task.desc || task.objective);
+      if (!hasInfo) return { ...camp };
+      return {
+        ...camp,
+        taskInfo: {
+          code: String(task.code ?? ''),
+          name: String(task.name ?? task.code ?? '任务'),
+          desc: String(task.desc ?? ''),
+          type: typeof task.type === 'string' ? task.type : undefined,
+          scope: typeof task.scope === 'string' ? task.scope : undefined,
+          campCleared: Number(task.campCleared ?? 0),
+          campTotal: Number(task.campTotal ?? task.camps?.length ?? 0),
+          villageId: typeof task.villageId === 'string' ? task.villageId : undefined,
+          objective: task.objective ?? null,
+        } satisfies TaskCampInfo,
+      };
+    }))
+    .filter((camp: any) => !camp?.cleared);
+}
+
 /** 写入/更新某村的完整任务快照（同时派生地图标记）。 */
 export function setTaskState(payload: any): void {
   if (!payload?.villageId) return;
@@ -138,9 +175,7 @@ export function setTaskState(payload: any): void {
   taskStates.value = { ...taskStates.value, [vid]: payload };
   // 已清理营地仍会留在任务快照里显示进度，但不能成为地图标记。
   // 同时过滤可抵御旧服务端推送、缓存快照或消息乱序造成的幽灵标记。
-  const camps: any[] = (payload.active ?? [])
-    .flatMap((a: any) => (a.camps ?? []))
-    .filter((camp: any) => !camp?.cleared);
+  const camps = decorateTaskCamps(payload.active ?? []);
   taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
 }
 
@@ -150,9 +185,7 @@ export function setPlayerTaskState(payload: any): void {
   // 聚合响应也回填按村缓存，地图任务标记和旧组件仍能正常工作。
   // 全局任务只持久化在玩家锚点村，但其营地对玩家名下所有村庄都可见；
   // 旧实现只写 villages，切换村庄后地图会继续显示另一村的旧营地坐标。
-  const globalCamps: any[] = (payload.global?.active ?? [])
-    .flatMap((a: any) => (a.camps ?? []))
-    .filter((camp: any) => !camp?.cleared);
+  const globalCamps = decorateTaskCamps(payload.global?.active ?? []);
   for (const village of (payload.villages ?? [])) {
     setTaskState(village);
     const vid = village?.villageId as string | undefined;
@@ -169,8 +202,28 @@ export function setPlayerTaskState(payload: any): void {
 /** 单独推送的地图标记更新（TaskMapUpdated）。 */
 export function setTaskMarkers(payload: any): void {
   if (!payload?.villageId) return;
-  const camps = Array.isArray(payload.camps) ? payload.camps.filter((camp: any) => !camp?.cleared) : [];
+  const previous = taskMarkers.value[payload.villageId as string] ?? [];
+  const previousById = new Map(previous.filter((camp: any) => camp?.id).map((camp: any) => [String(camp.id), camp]));
+  const camps = Array.isArray(payload.camps)
+    ? payload.camps
+      .map((camp: any) => ({ ...(previousById.get(String(camp?.id)) ?? {}), ...camp }))
+      .filter((camp: any) => !camp?.cleared)
+    : [];
   taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: camps };
+}
+
+/** 按地图目标坐标/引用查找任务营地，供目标详情补全任务名称与说明。 */
+export function findTaskCampMarker(refId: string | undefined, q: number, r: number): any | undefined {
+  for (const camps of Object.values(taskMarkers.value)) {
+    const match = camps.find((camp: any) =>
+      !camp?.cleared
+      && (refId ? String(camp.id) === refId : true)
+      && Number(camp.q) === q
+      && Number(camp.r) === r,
+    );
+    if (match) return match;
+  }
+  return undefined;
 }
 
 /** 读取当前村庄的任务快照（无则返回 null）。 */

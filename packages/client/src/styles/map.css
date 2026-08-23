@@ -652,6 +652,39 @@
   border: 1px solid var(--line);
   border-radius: var(--r-md);
 }
+.task-camp-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--c-panel-2);
+  border: 1px solid var(--c-gold-dim);
+  border-left: 3px solid var(--c-gold);
+  border-radius: var(--r-md);
+}
+.task-camp-info-title {
+  color: var(--c-gold-hi);
+  font-size: var(--f-md);
+  font-weight: 700;
+}
+.task-camp-info p {
+  margin: 0;
+  color: var(--c-ink-soft);
+  font-size: var(--f-sm);
+  line-height: 1.6;
+}
+.task-camp-info-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+.task-camp-info-facts span {
+  color: var(--c-ink-dim);
+  font-size: var(--f-xs);
+}
+.task-camp-info-facts b { color: var(--c-ink-soft); }
 .expedition-assessment-title,
 .expedition-confirm-card h3 {
   margin: 0;
