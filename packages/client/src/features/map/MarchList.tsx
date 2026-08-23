@@ -31,6 +31,7 @@ const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   caravan:   (d) => d ? '商队抵达' : '商队出发',
   garrison:  (_) => '野外驻扎',
   explore:   (_) => '探索返程',
+  ambush:    (_) => '伏击军',
 };
 
 async function doRecall(m: Movement): Promise<void> {

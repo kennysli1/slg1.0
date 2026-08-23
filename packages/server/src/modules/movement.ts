@@ -36,9 +36,9 @@ const log = makeLogger('movement');
 
 interface MovementRecord {
   id: string;
-  type: 'raid' | 'attack' | 'scout' | 'return' | 'found' | 'transport' | 'caravan' | 'garrison' | 'explore';
-  /** 玩家村战斗类型：raid=掠夺，siege=攻城；PvE/旧存档为空。 */
-  battleType?: 'raid' | 'siege';
+  type: 'raid' | 'attack' | 'scout' | 'return' | 'found' | 'transport' | 'caravan' | 'garrison' | 'explore' | 'ambush';
+  /** 战斗类型：玩家村 raid=掠夺、siege=攻城；ambush=伏击；PvE/旧存档为空。 */
+  battleType?: 'raid' | 'siege' | 'ambush';
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -134,6 +134,7 @@ export class MovementModule {
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendGarrison', (c) => this.sendGarrison(c));
+    this.commands.register('movement.SendAmbush', (c) => this.sendAmbush(c));
     this.commands.register('movement.SendExplore', (c) => this.sendExplore(c));
     this.commands.register('movement.StopMarch', (c) => this.stopMarch(c));
     this.commands.register('movement.ResumeMarch', (c) => this.resumeMarch(c));
@@ -226,7 +227,7 @@ export class MovementModule {
   }
 
   private isArmyMovement(m: MovementRecord): boolean {
-    return m.type === 'raid' || m.type === 'attack' || m.type === 'scout' || m.type === 'found' || m.type === 'explore' || m.type === 'garrison';
+    return m.type === 'raid' || m.type === 'attack' || m.type === 'scout' || m.type === 'found' || m.type === 'explore' || m.type === 'garrison' || m.type === 'ambush';
   }
 
   private toWire(m: MovementRecord, viewerVillageId: string): MovementWire {
@@ -484,7 +485,7 @@ export class MovementModule {
         const sight = this.config.units[code]?.vision ?? 1;
         if (count > most || (count === most && sight > radius)) { most = count; radius = sight; }
       }
-      if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius });
+      if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius: mv.type === 'ambush' ? 1 : radius });
     }
     return { ok: true, payload: { sources } };
   }
@@ -526,12 +527,26 @@ export class MovementModule {
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!mv.fromVillage || !mv.pos) continue;
       const key = `${mv.pos.q},${mv.pos.r}`;
-      if (!visible.has(key)) continue;
+      if (mv.type === 'ambush') {
+        // 伏击军的隐蔽性不受城池视野影响：只有查看方自己的地图单位在一格内时可见。
+        const nearby = await this.hasNearbyArmySource(playerId, mv.pos);
+        if (!nearby) continue;
+      } else if (!visible.has(key)) continue;
       const owner = await resolveOwner(mv.fromVillage);
       if (!owner || owner.playerId === playerId) continue;
       out.push(this.toForeignArmy(mv, owner));
     }
     return { ok: true, payload: { movements: out } };
+  }
+
+  /** 判断玩家是否有地图上的军队在目标一格内，用于伏击军的单位级可见性。 */
+  private async hasNearbyArmySource(playerId: string, pos: Hex): Promise<boolean> {
+    for (const own of this.store.all<MovementRecord>(COLLECTION)) {
+      if (!this.isArmyMovement(own) || own.type === 'ambush' && own.status === 'stationed' && own.pos.q === pos.q && own.pos.r === pos.r) continue;
+      if (await this.ownerOf(own.fromVillage) !== playerId) continue;
+      if (hexDistanceWrapped(own.pos, pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) <= 1) return true;
+    }
+    return false;
   }
 
   /** 一支离城军占用一个行军点；纯商队不占用。 */
@@ -603,7 +618,7 @@ export class MovementModule {
 
   /** 行军起步与每一步都将当时视野写入探索历史；无需依赖客户端刷新地图。 */
   private async revealVision(mv: MovementRecord): Promise<void> {
-    const radius = this.visionRadius(mv.troops);
+    const radius = mv.type === 'ambush' ? 1 : this.visionRadius(mv.troops);
     if (radius <= 0) return;
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
@@ -693,6 +708,41 @@ export class MovementModule {
     const state = await this.marchPointState(villageId);
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'garrison', villageId, q: toXY.q, r: toXY.r, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), marchPoints: state } };
+  }
+
+  /** 派兵至已知空地并进入隐蔽伏击状态；抵达前仍按普通军队参与野战。 */
+  private async sendAmbush(cmd: Command): Promise<CommandResult> {
+    const { villageId, q, r, troops, treasures } = cmd.payload as {
+      villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[];
+    };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const fromXY = await this.villageXY(villageId);
+    if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const toXY = wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if (toXY.q === fromXY.q && toXY.r === fromXY.r) return { ok: false, payload: {}, reason: 'same_tile' };
+    const known = await this.ensureKnown(villageId, toXY);
+    if (known) return known;
+    const tileRes = await this.commands.send({ name: 'world.GetTile', from: MovementModule.NAME, payload: toXY });
+    const tile = (tileRes.payload as any)?.tile;
+    if (tile && tile.kind && tile.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
+    const point = await this.ensureMarchPoint(villageId);
+    if (point) return point;
+    const delta = Object.fromEntries(Object.entries(valid.troops).map(([unit, n]) => [unit, -n]));
+    const adjusted = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    if (!adjusted.ok) return { ok: false, payload: {}, reason: adjusted.reason ?? 'no_troops' };
+    const id = this.nextId();
+    const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
+    if (!carry.ok) {
+      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      return { ok: false, payload: {}, reason: carry.reason };
+    }
+    const mv = await this.launch({ id, type: 'ambush', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    mv.requestedXY = toXY;
+    this.save(mv);
+    await this.revealVision(mv);
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'ambush', villageId, q: toXY.q, r: toXY.r, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), marchPoints: await this.marchPointState(villageId) } };
   }
 
   /** 未探索地块只能执行探索：抵达（或遇阻前一格）即返程，不会驻扎。 */
@@ -807,7 +857,7 @@ export class MovementModule {
   private async recallGarrison(cmd: Command): Promise<CommandResult> {
     const { villageId, movementId } = cmd.payload as { villageId: string; movementId: string };
     const mv = this.load(movementId);
-    if (!mv || mv.fromVillage !== villageId || mv.type !== 'garrison' || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
+    if (!mv || mv.fromVillage !== villageId || (mv.type !== 'garrison' && mv.type !== 'ambush') || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
     this.remove(mv.id);
     const id = await this.scheduleReturn(mv.fromVillage, mv.pos, mv.fromXY, mv.troops, {}, mv.treasures, mv.id);
     void this.bus.emit({ name: 'movement.GarrisonRecalled', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, returnId: id, villageId } } as DomainEvent);
@@ -817,13 +867,13 @@ export class MovementModule {
   /** 让已驻扎军继续走向新坐标，可选择驻扎、探索、掠夺或攻城；不再扣兵也不增加行军点。 */
   private async continueGarrison(cmd: Command): Promise<CommandResult> {
     const { villageId, movementId, q, r, mode, targetId, targetVillage } = cmd.payload as {
-      villageId: string; movementId: string; q: number; r: number; mode: 'garrison' | 'explore' | 'raid' | 'attack'; targetId?: string; targetVillage?: string;
+      villageId: string; movementId: string; q: number; r: number; mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush'; targetId?: string; targetVillage?: string;
     };
     const mv = this.load(movementId);
     if (!mv || mv.fromVillage !== villageId || mv.type !== 'garrison' || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
     const toXY = wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     if (toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
-    if (mode === 'garrison' || mode === 'raid' || mode === 'attack') {
+    if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack') {
       const known = await this.ensureKnown(villageId, toXY);
       if (known) return known;
     }
@@ -839,7 +889,7 @@ export class MovementModule {
     mv.type = mode;
     mv.targetId = mode === 'raid' ? targetId : undefined;
     mv.targetVillage = mode === 'attack' ? targetVillage : undefined;
-    mv.requestedXY = mode === 'garrison' || mode === 'explore' ? toXY : undefined;
+    mv.requestedXY = mode === 'garrison' || mode === 'ambush' || mode === 'explore' ? toXY : undefined;
     mv.toXY = toXY;
     mv.path = path;
     mv.stepIndex = 0;
@@ -1020,7 +1070,10 @@ export class MovementModule {
     const targetQ = targetTile?.q ?? q;
     const targetR = targetTile?.r ?? r;
     const targetName = targetTile?.name;
-    if (kind === 'empty') modes.push({ mode: 'garrison', label: '驻扎' });
+    if (kind === 'empty') {
+      modes.push({ mode: 'garrison', label: '驻扎' });
+      modes.push({ mode: 'ambush', label: '伏击' });
+    }
     else if (kind === 'pve' || kind === 'taskcamp') {
       // PvE 营地也可侦察，但 NPC 营地没有城内/城外建筑报告，只提供资源与守军情报。
       modes.push({ mode: 'scout', label: '侦察' });
@@ -1667,12 +1720,7 @@ export class MovementModule {
 
     // 前进一格
     mv.stepIndex += 1;
-    if (mv.stepIndex >= mv.path.length - 1) {
-      if (mv.stepIndex < mv.path.length) mv.pos = mv.path[mv.stepIndex];
-      await this.arrive(mv);
-      return;
-    }
-    mv.pos = mv.path[mv.stepIndex];
+    if (mv.stepIndex < mv.path.length) mv.pos = mv.path[mv.stepIndex];
     mv.nextStepAt = this.now() + mv.perStepMs;
     this.save(mv);
     await this.revealVision(mv);
@@ -1689,6 +1737,15 @@ export class MovementModule {
     } as DomainEvent);
     // 增量推送：他国军队步进（发给视野内的所有玩家）
     void this.emitForeignStep(mv);
+
+    // 伏击检测：只有已经抵达并驻扎的伏击军，才能在一格内拦截敌方行军。
+    if (mv.type !== 'return' && mv.type !== 'caravan') {
+      const ambush = await this.findAmbush(mv);
+      if (ambush) {
+        await this.resolveAmbushEncounter(ambush, mv);
+        return;
+      }
+    }
 
     // 相遇检测（仅两支出征军相遇即战；返程军/商队脱战免疫）
     if (mv.type !== 'return' && mv.type !== 'caravan') {
@@ -1759,7 +1816,7 @@ export class MovementModule {
     if (mv.type === 'return') { await this.arriveReturn(mv.id); return; }
     if (mv.type === 'found') { await this.arriveFound(mv); return; }
     if (mv.type === 'transport') { await this.arriveTransport(mv); return; }
-    if (mv.type === 'garrison') { await this.arriveGarrison(mv); return; }
+    if (mv.type === 'garrison' || mv.type === 'ambush') { await this.arriveGarrison(mv); return; }
     if (mv.type === 'explore') { await this.arriveExplore(mv); return; }
     if (mv.type === 'scout' && (mv.targetVillage || mv.targetId)) { await this.arriveScout(mv); return; }
     if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
@@ -1930,6 +1987,18 @@ export class MovementModule {
     return undefined;
   }
 
+  /** 找出一格内的敌方驻扎伏击军；行军中的伏击军不参与此检测。 */
+  private async findAmbush(mv: MovementRecord): Promise<MovementRecord | undefined> {
+    if (mv.status !== 'marching' || mv.type === 'return' || mv.type === 'caravan' || mv.type === 'ambush') return undefined;
+    const myOwner = await this.ownerOf(mv.fromVillage);
+    for (const other of this.store.all<MovementRecord>(COLLECTION)) {
+      if (other.id === mv.id || other.type !== 'ambush' || other.status !== 'stationed') continue;
+      if (await this.ownerOf(other.fromVillage) === myOwner) continue;
+      if (hexDistanceWrapped(other.pos, mv.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) <= 1) return other;
+    }
+    return undefined;
+  }
+
   /** 村庄归属玩家 id（找不到返回村庄 id 本身，保证不同村=不同归属的保守判定）。 */
   private async ownerOf(villageId: string): Promise<string> {
     const res = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
@@ -1988,16 +2057,42 @@ export class MovementModule {
     });
   }
 
+  /** 伏击战：伏击方作为 attacker，路过军队作为 defenderField；战斗结束后双方都回到出发城。 */
+  private async resolveAmbushEncounter(ambush: MovementRecord, target: MovementRecord): Promise<void> {
+    ambush.status = 'paused'; ambush.stepToken += 1;
+    target.status = 'paused'; target.stepToken += 1;
+    this.save(ambush);
+    this.save(target);
+    void this.bus.emit({ name: 'movement.Intercepted', source: MovementModule.NAME, ts: this.now(), payload: { villageId: ambush.fromVillage, at: ambush.pos, opponentVillage: target.fromVillage, battleType: 'ambush' } } as DomainEvent);
+    void this.bus.emit({ name: 'movement.Intercepted', source: MovementModule.NAME, ts: this.now(), payload: { villageId: target.fromVillage, at: target.pos, opponentVillage: ambush.fromVillage, battleType: 'ambush' } } as DomainEvent);
+    const aSnap = await this.attackerSnapshot(ambush);
+    const bSnap = await this.attackerSnapshot(target);
+    await this.commands.send({
+      name: 'combat.Engage', from: MovementModule.NAME,
+      payload: {
+        targetKind: 'field', battleType: 'ambush', targetId: `ambush:${ambush.id}:${target.id}`, targetXY: target.pos,
+        movementId: ambush.id, fromVillage: ambush.fromVillage, fromXY: ambush.fromXY,
+        originalFromXY: ambush.originalFromXY ?? ambush.fromXY, troops: ambush.troops,
+        attackerSnapshot: aSnap, treasures: ambush.treasures ?? [],
+        defenderField: {
+          movementId: target.id, fromVillage: target.fromVillage, fromXY: target.fromXY,
+          originalFromXY: target.originalFromXY ?? target.fromXY, troops: target.troops,
+          attackerSnapshot: bSnap, treasures: target.treasures ?? [],
+        },
+      },
+    });
+  }
+
   /** 战斗结束事件：为幸存者安排带战利品返程；全歼时按 pve/pvp 处理携带宝物。field 侧：幸存者继续行军。 */
   private async onBattleEnded(e: DomainEvent): Promise<void> {
     const p = e.payload as {
       side: string; fromVillage: string; fromXY: Hex; toXY: Hex;
       survivors?: Record<string, number>; loot?: Record<string, number>;
-      treasures?: string[]; targetKind?: string; targetId?: string; movementId: string;
+      treasures?: string[]; targetKind?: string; targetId?: string; battleType?: string; movementId: string;
       originalFromXY?: Hex;
     };
 
-    // 野战（field）分支：双方幸存者继续行军，不做返程/宝物处理。
+    // 野战（field）分支：普通相遇战幸存者继续原路线；伏击战双方幸存者都原路返城。
     if (p.targetKind === 'field') {
       const mv = this.load(p.movementId);
       if (!mv) return;
@@ -2013,6 +2108,13 @@ export class MovementModule {
         }
         this.remove(p.movementId);
         this.updateEnRoutePop(p.fromVillage);
+        return;
+      }
+      if (p.battleType === 'ambush') {
+        mv.troops = survivors;
+        this.remove(mv.id);
+        this.updateEnRoutePop(mv.fromVillage);
+        await this.scheduleReturn(mv.fromVillage, p.toXY, p.originalFromXY ?? p.fromXY, survivors, {}, p.treasures, p.movementId, p.originalFromXY ?? p.fromXY);
         return;
       }
       // 幸存者：更新兵力、解除暂停、恢复行军

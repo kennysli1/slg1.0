@@ -44,7 +44,7 @@ interface Battle {
   id: string;
   targetKind: 'village' | 'pve' | 'field';
   /** 玩家村战斗模式；PvE/野战没有该字段。 */
-  battleType?: 'raid' | 'siege';
+  battleType?: 'raid' | 'siege' | 'ambush';
   targetId: string; // 防守方村 id、PvE 目标 id 或野战时的 defender movement id
   targetXY: { q: number; r: number }; // 六边形轴坐标（不透明透传）
   wallLevel: number;
@@ -159,7 +159,7 @@ export class CombatModule {
   private async engage(cmd: Command): Promise<CommandResult> {
     const p = cmd.payload as {
       targetKind: 'village' | 'pve' | 'field';
-      battleType?: 'raid' | 'siege';
+      battleType?: 'raid' | 'siege' | 'ambush';
       targetId: string;
       targetXY: { q: number; r: number };
       movementId: string;
@@ -187,9 +187,9 @@ export class CombatModule {
         movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-        existing.attacker[`${contribId}#${code}`] = { ...u };
+        existing.attacker[`${contribId}#${code}`] = existing.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
       }
-      existing.attackPower0 += totalPower(p.attackerSnapshot);
+      existing.attackPower0 += totalPower(existing.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
       this.store.set(COLLECTION, existing.id, existing);
       log('援军并入', { battleId: existing.id, from: p.fromVillage, troops: p.troops, newAtkPower: Math.round(existing.attackPower0) });
       return { ok: true, payload: { battleId: existing.id, merged: true } };
@@ -206,9 +206,9 @@ export class CombatModule {
           movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-          raceCheck.attacker[`${contribId}#${code}`] = { ...u };
+          raceCheck.attacker[`${contribId}#${code}`] = raceCheck.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
         }
-        raceCheck.attackPower0 += totalPower(p.attackerSnapshot);
+        raceCheck.attackPower0 += totalPower(raceCheck.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
         this.store.set(COLLECTION, raceCheck.id, raceCheck);
         log('竞态并入（claiming）', { battleId: raceCheck.id, from: p.fromVillage });
         return { ok: true, payload: { battleId: raceCheck.id, merged: true } };
@@ -219,11 +219,14 @@ export class CombatModule {
       const df = p.defenderField;
       if (!df) return { ok: false, payload: {}, reason: 'field_missing_defender' };
       const defender: Snapshot = {};
-      for (const [code, u] of Object.entries(df.attackerSnapshot)) defender[code] = { ...u };
+      for (const [code, u] of Object.entries(df.attackerSnapshot)) {
+        // 伏击只打击路过军队的远程排，并让这些单位按近战数据加入前排。
+        defender[code] = p.battleType === 'ambush' && u.form === 'ranged' ? { ...u, form: 'melee', ambushPriority: true } : { ...u };
+      }
       const defenderOriginal: Record<string, number> = {};
       for (const [code, u] of Object.entries(defender)) defenderOriginal[code] = u.count;
       const attacker: Snapshot = {};
-      for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
+      for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = p.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
 
       const id = this.nextId();
       const defContrib: Contribution = {
@@ -233,7 +236,7 @@ export class CombatModule {
       const battle: Battle = {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
-        battleType: undefined,
+        battleType: p.battleType,
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
@@ -267,9 +270,9 @@ export class CombatModule {
         movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-        raceExisting.attacker[`${contribId}#${code}`] = { ...u };
+        raceExisting.attacker[`${contribId}#${code}`] = raceExisting.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
       }
-      raceExisting.attackPower0 += totalPower(p.attackerSnapshot);
+      raceExisting.attackPower0 += totalPower(raceExisting.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
       this.store.set(COLLECTION, raceExisting.id, raceExisting);
       log('二次检查并入', { battleId: raceExisting.id, from: p.fromVillage });
       return { ok: true, payload: { battleId: raceExisting.id, merged: true } };
@@ -324,7 +327,7 @@ export class CombatModule {
   }
 
   /** 拉取防守方快照 + 城墙等级。PvP 找 military+building；PvE 找 pve。 */
-  private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege'): Promise<{ defender: Snapshot; wallLevel: number }> {
+  private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege' | 'ambush'): Promise<{ defender: Snapshot; wallLevel: number }> {
     if (kind === 'pve') {
       const res = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: CombatModule.NAME, payload: { id: targetId } });
       return { defender: ((res.payload as any)?.snapshot ?? {}) as Snapshot, wallLevel: 0 };
@@ -425,7 +428,7 @@ export class CombatModule {
 
     // 野战（field）分支：跳过 pve/pvp 逻辑，双方各自处理伤亡
     if (b.targetKind === 'field') {
-      await this.finishField(b, attackerLosses, defenderLosses);
+      await this.finishField(b, attackerLosses, defenderLosses, attackerWins);
       this.store.delete(COLLECTION, b.id);
       return;
     }
@@ -553,7 +556,7 @@ export class CombatModule {
       targetKind: b.targetKind,
       targetId: b.targetId,
       battleType: b.battleType,
-      battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : undefined,
+      battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : b.battleType === 'ambush' ? '伏击' : undefined,
       buildingDamage,
       buildingLoot,
       storedLoot,
@@ -653,10 +656,11 @@ export class CombatModule {
   }
 
   /** 野战结算：双方同等对待，各自处理伤亡回收，然后发 BattleEnded（targetKind:'field'）给双方。 */
-  private async finishField(b: Battle, attackerLosses: Record<string, number>, defenderLosses: Record<string, number>): Promise<void> {
+  private async finishField(b: Battle, attackerLosses: Record<string, number>, defenderLosses: Record<string, number>, attackerWins: boolean): Promise<void> {
     const reportBase = {
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
-      attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, campCleared: false,
+      attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, battleType: b.battleType,
+      battleLabel: b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
     };
 
     // 进攻方（各贡献村）幸存者 → BattleEnded(attacker)
@@ -679,7 +683,7 @@ export class CombatModule {
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
           survivors, loot: {}, treasures: contrib.treasures, deployedTroops: contrib.troops,
-          attackerWins: false, ...reportBase,
+          attackerWins, ...reportBase,
         },
       } as DomainEvent);
     }
@@ -704,7 +708,7 @@ export class CombatModule {
           movementId: dc.movementId, fromVillage: dc.fromVillage,
           fromXY: dc.fromXY, toXY: b.targetXY,
           survivors: defSurvivors, loot: {}, treasures: dc.treasures, deployedTroops: dc.troops,
-          attackerWins: false, ...reportBase,
+          attackerWins: !attackerWins, ...reportBase,
         },
       } as DomainEvent);
     }
@@ -732,6 +736,7 @@ export class CombatModule {
   private snapshotForClient(b: Battle) {
     return {
       battleId: b.id, targetKind: b.targetKind, targetId: b.targetId,
+      battleType: b.battleType,
       attacker: aggregateCounts(b.attacker), defender: aggregateCounts(b.defender),
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
     };
@@ -765,6 +770,16 @@ function totalPower(snap: Snapshot): number {
   let p = 0;
   for (const u of Object.values(snap)) p += u.count * (u.meleeAtk + u.rangedAtk);
   return p;
+}
+
+/** 复制并放大攻击字段；防御、速度和运力不受伏击加成影响。 */
+function applyAmbushBonus(unit: CombatUnit, bonus: number): CombatUnit {
+  const mult = 1 + Math.max(0, Number(bonus) || 0);
+  return { ...unit, meleeAtk: unit.meleeAtk * mult, rangedAtk: unit.rangedAtk * mult };
+}
+
+function applyAmbushSnapshot(snap: Snapshot, bonus: number): Snapshot {
+  return Object.fromEntries(Object.entries(snap).map(([code, unit]) => [code, applyAmbushBonus(unit, bonus)]));
 }
 
 /** 只保留攻城武器（兵种表以 workshop 为训练建筑；代码命名兼容三族器械）。 */
@@ -957,8 +972,9 @@ function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defWallMu
   let rowCount = 0;
   let effMeleeHP = 0; // 该排对近战的等效耐久
   let effRangedHP = 0; // 该排对远程的等效耐久
+  const priority = Object.values(B).some((u) => u.ambushPriority && u.count > 0);
   for (const u of Object.values(B)) {
-    if (u.form !== targetForm || u.count <= 0) continue;
+    if (u.form !== targetForm || u.count <= 0 || (priority && !u.ambushPriority)) continue;
     rowCount += u.count;
     effMeleeHP += u.count * u.meleeDef * traitMult(u, 'def_melee') / Math.max(0.05, traitMult(u, 'dmg_taken_melee'));
     effRangedHP += u.count * u.rangedDef * traitMult(u, 'def_ranged') / Math.max(0.05, traitMult(u, 'dmg_taken_ranged'));
@@ -981,7 +997,8 @@ function applyKills(snap: Snapshot, killsFloat: number): number {
   if (n <= 0) return killsFloat;
 
   const targetForm: 'melee' | 'ranged' = hasAliveForm(snap, 'melee') ? 'melee' : 'ranged';
-  const row = Object.entries(snap).filter(([, u]) => u.form === targetForm && u.count > 0);
+  const priority = Object.values(snap).some((u) => u.ambushPriority && u.count > 0);
+  const row = Object.entries(snap).filter(([, u]) => u.form === targetForm && u.count > 0 && (!priority || u.ambushPriority));
   const rowCount = row.reduce((a, [, u]) => a + u.count, 0);
   if (rowCount <= 0) return frac;
 

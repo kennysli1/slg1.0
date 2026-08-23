@@ -194,6 +194,7 @@
 .march-path--found    { stroke: var(--c-gold);       stroke-dasharray: 6 4; }
 .march-path--caravan  { stroke: var(--c-gold-dim); }
 .march-path--garrison { stroke: var(--c-jade);      stroke-dasharray: 3 3; }
+.march-path--ambush   { stroke: var(--c-gold);      stroke-dasharray: 2 6; }
 .march-path--explore  { stroke: var(--c-steel);     stroke-dasharray: 2 5; }
 
 /* 行军箭头动画（dashoffset 流动） */
@@ -207,6 +208,7 @@
   animation: march-flow 2s linear infinite;
 }
 .march-path--garrison,
+.march-path--ambush,
 .march-path--explore { animation: march-flow 2.6s linear infinite; }
 @keyframes march-flow {
   to { stroke-dashoffset: -26; }
@@ -224,6 +226,7 @@
 .march-dot--transport { fill: var(--c-steel); }
 .march-dot--found   { fill: var(--c-gold); }
 .march-dot--garrison{ fill: var(--c-jade); }
+.march-dot--ambush  { fill: var(--c-gold); }
 .march-dot--explore { fill: var(--c-steel); }
 .march-dot.paused {
   fill: var(--c-crimson);

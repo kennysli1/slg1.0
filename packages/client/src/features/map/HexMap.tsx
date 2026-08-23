@@ -481,6 +481,7 @@ export function HexMap() {
         : m.type === 'found'     ? 'found'
         : m.type === 'caravan'   ? 'caravan'
         : m.type === 'garrison'  ? 'garrison'
+        : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
@@ -510,6 +511,7 @@ export function HexMap() {
         : m.type === 'transport' ? '📦'
         : m.type === 'caravan'   ? '💰'
         : m.type === 'garrison'  ? '⚑'
+        : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
@@ -541,6 +543,7 @@ export function HexMap() {
         : m.type === 'transport' ? '📦'
         : m.type === 'caravan'   ? '💰'
         : m.type === 'garrison'  ? '⚑'
+        : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';

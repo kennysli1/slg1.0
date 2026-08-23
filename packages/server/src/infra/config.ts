@@ -391,6 +391,8 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 伏击方攻击加成（0.5=+50%），仅在伏击战结算时生效。 */
+  ambushAttackBonus: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -941,6 +943,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     marchPointBase: cn('march_point_base', 0),
@@ -1478,6 +1481,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）

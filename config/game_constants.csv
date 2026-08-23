@@ -15,6 +15,7 @@ map_size,20,number,地图半径(六边形网格,以原点为中心的环数,hexD
 map_view_radius,6,number,前端地图视野半径(六边形环数,前端白名单常量)
 combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)
+ambush_attack_bonus,0.5,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）

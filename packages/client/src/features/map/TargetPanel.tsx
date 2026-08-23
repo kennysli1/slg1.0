@@ -17,7 +17,7 @@ import { foreignArmyAt, foreignArmyName, ownStationedMoveAt } from './map-target
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
-type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'scout';
+type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'scout' | 'ambush';
 type NumberMap = Record<string, number>;
 
 interface TargetMeta {
@@ -35,7 +35,7 @@ interface TargetMeta {
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
-const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', scout: '侦察' }[mode]);
+const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', scout: '侦察', ambush: '伏击' }[mode]);
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -124,6 +124,8 @@ function Assessment({
     ? '该格尚未探索。军队抵达后会立刻返城；若目标格已有设施或军队，则会在前一格掉头。集结点等级决定可探索的未探索深度。'
     : meta.mode === 'garrison'
     ? '派军队前往该坐标。抵达后若仍为空地便会原地驻扎；若已被设施或其他军队占据，部队将在前一格驻扎。'
+    : meta.mode === 'ambush'
+    ? '派军队前往该空地隐蔽伏击。抵达后视野缩小为1，只会被一格内的敌方军队发现；伏击战结束后双方幸存部队都会返城。'
     : isTransport
     ? '转移只能携带部队与随队宝物，不能携带木材、泥土、钢或粮食。'
     : meta.mode === 'raid'
@@ -136,6 +138,7 @@ function Assessment({
     transfer: '编组转移部队',
     reinforce: '编组增援部队',
     garrison: '编组驻扎部队',
+    ambush: '编组伏击部队',
     explore: '编组探索部队',
     scout: '编组侦察部队',
   };
@@ -146,13 +149,13 @@ function Assessment({
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
-          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
+          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' || meta.mode === 'ambush' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
         </div>
         <p>{copy}</p>
         <div class="expedition-facts">
           <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
           <span>行军距离 <b>{meta.dist} 格</b></span>
-          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
+          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'ambush' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
         </div>
       </section>
 
@@ -446,6 +449,8 @@ function ExpeditionWorkflow({
       ok = await act(req(isPve ? 'SendRaid' : 'SendVillageRaid', p), { okToast: '掠夺部队出发' });
     } else if (meta.mode === 'garrison') {
       ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '驻扎部队出发' });
+    } else if (meta.mode === 'ambush') {
+      ok = await act(req('SendAmbush', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '伏击部队出发' });
     } else if (meta.mode === 'explore') {
       ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '探索部队出发，抵达后将返城' });
     } else {
@@ -509,6 +514,7 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
 
 function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: number; dist: number; visibility?: string; onClose: () => void }) {
   const [garrison, setGarrison] = useState(false);
+  const [ambush, setAmbush] = useState(false);
   const [founding, setFounding] = useState(false);
   async function found() {
     if (await act(req('FoundVillage', { q, r }), { okToast: '拓荒令已发出' })) onClose();
@@ -525,7 +531,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   );
   if (garrison) {
     const exploring = visibility === 'unexplored';
-    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : 'garrison' }} initialStep={2} onClose={onClose} />;
+    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : ambush ? '野外伏击点' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : ambush ? 'ambush' : 'garrison' }} initialStep={2} onClose={onClose} />;
   }
   return (
     <Panel variant="gold" corners class="map-target-panel">
@@ -542,6 +548,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
           <div class="expedition-kicker expedition-mode-kicker">可用行军模式</div>
           <div class="target-actions target-actions--management expedition-mode-options">
             {allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}
+            {visibility !== 'unexplored' && <Btn variant="ghost" block onClick={() => { setAmbush(true); setGarrison(true); }}>伏击</Btn>}
             {visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}
           </div>
           {!allowExplore && visibility === 'unexplored' && <p class="expedition-empty">当前没有可用的行军模式。</p>}
@@ -623,6 +630,7 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
   const typeLabel: Record<string, string> = {
     raid: '掠夺军', attack: '进攻军', return: '返程军', found: '拓荒军',
     transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军',
+    ambush: '伏击军',
   };
   return (
     <Panel variant="danger" corners class="map-target-panel">
