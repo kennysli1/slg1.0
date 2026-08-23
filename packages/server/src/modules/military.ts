@@ -31,6 +31,12 @@ interface TrainOrder {
   costPerUnit?: Record<string, number>;
 }
 
+interface TrainerSlot {
+  slotId: string;
+  kind: string;
+  level: number;
+}
+
 interface MilitaryState {
   villageId: string;
   /** 该村种族，决定可训练哪些兵种 */
@@ -64,6 +70,8 @@ interface MilitaryState {
 }
 
 const COLLECTION = 'military';
+/** 旧版单队列的内部键；绝不直接作为公网 queueId 下发。 */
+const LEGACY_QUEUE_KEY = 'legacy-training';
 
 /** 骑兵兵种 code（伯乐翻倍/加速作用范围）。 */
 const CAVALRY_CODES = ['equlegati', 'equimperatoris', 'equcaesaris', 'theutates', 'druidrider', 'haeduan', 'paladin', 'teutonknight'];
@@ -71,6 +79,13 @@ const CAVALRY_CODES = ['equlegati', 'equimperatoris', 'equcaesaris', 'theutates'
 export class MilitaryModule {
   static readonly NAME = 'military';
 
+  /**
+   * 运行期的公网队列句柄。内部 slotId 属于 Building 的实现细节，不能越过
+   * Military 边界；重启后允许重新发号，因此无需也不得写入存档。
+   */
+  private readonly publicQueueIds = new Map<string, string>();
+  private readonly internalQueueKeys = new Map<string, { villageId: string; internalKey: string }>();
+  private nextPublicQueueId = 0;
 
 
   constructor(
@@ -354,16 +369,13 @@ export class MilitaryModule {
 
   // ---- Commands ----
 
-  /** 训练用军事建筑（其详情抽屉内嵌训练 UI）：兵营/马厩/兵工厂 + 城镇中心(特殊兵种)。 */
-  private static readonly TRAINER_KINDS = new Set(['barracks', 'stable', 'workshop', 'main']);
-
-  /** 解析本村建筑布局：返回所有槽位(slotId/kind/level)与每种建筑的最高等级。失败返回空（仅影响训练/可训展示）。 */
-  private async resolveLayout(villageId: string): Promise<{ slots: { slotId: string; kind: string; level: number }[]; kindLevels: Map<string, number> }> {
+  /** 解析本村建筑布局。建筑状态仍归 Building owner，Military 只取得快照。 */
+  private async resolveLayout(villageId: string): Promise<{ slots: TrainerSlot[]; kindLevels: Map<string, number> }> {
     try {
       const res = await this.commands.send({ name: 'building.GetLayout', from: MilitaryModule.NAME, payload: { villageId } });
       if (!res.ok) return { slots: [], kindLevels: new Map() };
       const layout = res.payload as any;
-      const slots: { slotId: string; kind: string; level: number }[] = [];
+      const slots: TrainerSlot[] = [];
       const kindLevels = new Map<string, number>();
       const add = (slotId: string, kind: string, level: number) => {
         slots.push({ slotId, kind, level });
@@ -412,9 +424,61 @@ export class MilitaryModule {
     return out;
   }
 
-  /** 某兵种是否由该建筑 kind 训练。 */
-  private unitBuildingMatches(unit: string, kind: string): boolean {
-    return this.config.units[unit]?.building === kind;
+  /** 同类建筑的稳定顺序：高等级优先；同等级按 slotId 排序，避免同一快照下随机选队列。 */
+  private sortTrainerSlots(slots: TrainerSlot[]): TrainerSlot[] {
+    return [...slots].sort((a, b) => b.level - a.level || a.slotId.localeCompare(b.slotId));
+  }
+
+  /** 已建成、可训练指定兵种的建筑实例。 */
+  private trainerSlotsFor(slots: TrainerSlot[], unit: string): TrainerSlot[] {
+    const building = this.config.units[unit]?.building;
+    return this.sortTrainerSlots(slots.filter((slot) => slot.kind === building && slot.level >= 1));
+  }
+
+  /**
+   * 旧单队列没有 slotId。为保持其继续训练及不与同一训练建筑超卖并行，
+   * 按当前稳定选址规则虚拟占用一个实例；新建队列仍只写 trainingBySlot。
+   */
+  private legacyReservedSlot(s: MilitaryState, slots: TrainerSlot[], unit: string): string | undefined {
+    if (!s.training || this.config.units[s.training.unit]?.building !== this.config.units[unit]?.building) return undefined;
+    return this.trainerSlotsFor(slots, unit)[0]?.slotId;
+  }
+
+  private queueMapKey(villageId: string, internalKey: string): string {
+    return `${villageId}\u0000${internalKey}`;
+  }
+
+  /** 返回当前进程稳定、对外不透明的队列 id。 */
+  private publicQueueId(villageId: string, internalKey: string): string {
+    const mapKey = this.queueMapKey(villageId, internalKey);
+    const existing = this.publicQueueIds.get(mapKey);
+    if (existing) return existing;
+    const queueId = `military-queue-${++this.nextPublicQueueId}`;
+    this.publicQueueIds.set(mapKey, queueId);
+    this.internalQueueKeys.set(queueId, { villageId, internalKey });
+    return queueId;
+  }
+
+  /** 外部 queueId 只能反查本村当前进程已签发的队列，不能伪造 slotId。 */
+  private internalQueueKey(villageId: string, queueId: string): string | undefined {
+    const entry = this.internalQueueKeys.get(queueId);
+    return entry?.villageId === villageId ? entry.internalKey : undefined;
+  }
+
+  private forgetPublicQueueId(villageId: string, internalKey: string): void {
+    const mapKey = this.queueMapKey(villageId, internalKey);
+    const queueId = this.publicQueueIds.get(mapKey);
+    if (!queueId) return;
+    this.publicQueueIds.delete(mapKey);
+    this.internalQueueKeys.delete(queueId);
+  }
+
+  /** Military owner 选取可用训练队列：空闲最高等级，同级 slotId 稳定排序。 */
+  private selectTrainSlot(s: MilitaryState, slots: TrainerSlot[], unit: string): TrainerSlot | undefined {
+    const legacyReserved = this.legacyReservedSlot(s, slots, unit);
+    return this.trainerSlotsFor(slots, unit).find((slot) =>
+      !s.trainingBySlot[slot.slotId] && slot.slotId !== legacyReserved,
+    );
   }
 
   /** 某兵种是否为骑兵（伯乐效果作用范围）。 */
@@ -556,13 +620,20 @@ export class MilitaryModule {
     const trainable = tribeUnits.map((u) => {
       const tm = this.techCombatMult(s, u.key);
       const st = this.finalStats(u.key, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+      const trainers = this.trainerSlotsFor(slots, u.key);
+      const selectedTrainer = this.selectTrainSlot(s, slots, u.key);
+      // 队列全忙时仍以最高等级实例投影数值，保证卡片展示稳定且不暴露建筑实例。
+      const projectedTrainer = selectedTrainer ?? trainers[0];
       const haveLv = u.building ? (kindLevels.get(u.building) ?? 0) : 1;
       const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
       const unlocked = haveLv >= 1 && techUnlocked;
       const bldName = this.config.buildings[u.building]?.name ?? u.building;
+      const level = projectedTrainer?.level ?? 1;
+      const kind = projectedTrainer?.kind ?? u.building;
       return {
-        key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-        cost: u.cost, trainSec: Math.max(1, Math.round(u.trainSec * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
+        key: u.key, name: u.name, icon: u.icon, form: u.form,
+        cost: this.effectiveCost(u.cost, level, kind),
+        trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(level, kind) * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
@@ -570,52 +641,23 @@ export class MilitaryModule {
         cropPerHourEach: this.foodPerSoldier(u.key, s, this.config.constants.popCropPerLabor),
         unlocked,
         lockReason: unlocked ? undefined : (!techUnlocked ? '需完成对应科技' : `需${bldName} 1 级`),
+        trainableNow: unlocked && !!selectedTrainer,
+        unavailableReason: unlocked && !selectedTrainer ? 'all_training_queues_busy' : undefined,
       };
     });
 
-    // 逐建筑训练队列：每个军事建筑实例一份独立队列（多实例并行训练）。
-    const slotsOut = slots
-      .filter((sl) => MilitaryModule.TRAINER_KINDS.has(sl.kind))
-      .map((sl) => {
-        const trainableHere = tribeUnits
-          .filter((u) => u.building === sl.kind)
-          .map((u) => {
-            const tm = this.techCombatMult(s, u.key);
-            const st = this.finalStats(u.key, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
-            const techUnlocked = !this.needsTechUnlock(u.key) || (s.techUnlockedUnits ?? []).includes(u.key);
-            const unlocked = sl.level >= 1 && techUnlocked;
-            return {
-              key: u.key, name: u.name, icon: u.icon, form: u.form, building: u.building,
-              cost: this.effectiveCost(u.cost, sl.level, sl.kind), // 已按建筑等级降费
-              trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(sl.level, sl.kind) * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
-              meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
-              meleeDef: st.meleeDef, rangedDef: st.rangedDef,
-              speed: st.speed, carry: st.carry, upkeep: st.upkeep,
-              cropPerHourEach: this.foodPerSoldier(u.key, s, this.config.constants.popCropPerLabor),
-              unlocked,
-              lockReason: unlocked ? undefined : (!techUnlocked ? '需完成对应科技' : '建筑建造中'),
-              level: sl.level,
-            };
-          });
-        const order = s.trainingBySlot[sl.slotId];
-        const training = order
-          ? { unit: order.unit, remaining: order.remaining, nextDoneAt: order.nextDoneAt }
-          : null;
-        return { slotId: sl.slotId, kind: sl.kind, level: sl.level, trainable: trainableHere, training };
-      });
-
-    // 旧单队列兼容：挂到首个匹配建筑槽位上展示（避免重复挂多个槽位）。
+    // 队列 id 是 Military 运行期句柄：不下发建筑字段，也不复用内部 slotId。
+    const trainingQueues = Object.entries(s.trainingBySlot)
+      .map(([slotId, order]) => ({ queueId: this.publicQueueId(s.villageId, slotId), unit: order.unit, remaining: order.remaining, nextDoneAt: order.nextDoneAt }));
     if (s.training) {
-      const legacy = { unit: s.training.unit, remaining: s.training.remaining, nextDoneAt: s.training.nextDoneAt };
-      const target = slotsOut.find((x) => !x.training && this.unitBuildingMatches(s.training!.unit, x.kind));
-      if (target) target.training = legacy;
+      trainingQueues.push({
+        queueId: this.publicQueueId(s.villageId, LEGACY_QUEUE_KEY),
+        unit: s.training.unit,
+        remaining: s.training.remaining,
+        nextDoneAt: s.training.nextDoneAt,
+      });
     }
-
-    // top-level training：首个活跃队列（兼容旧调用方 / movement 读取）。
-    const firstActive = Object.values(s.trainingBySlot)[0] ?? s.training;
-    const training = firstActive
-      ? { unit: firstActive.unit, remaining: firstActive.remaining, nextDoneAt: firstActive.nextDoneAt }
-      : null;
+    trainingQueues.sort((a, b) => a.nextDoneAt - b.nextDoneAt || a.queueId.localeCompare(b.queueId));
 
     return {
       ok: true,
@@ -627,20 +669,18 @@ export class MilitaryModule {
           troops: { ...(s.raidDefense?.troops ?? s.troops) },
         },
         trainable,
-        training,
-        slots: slotsOut,
+        trainingQueues,
       },
     };
   }
 
   /**
-   * 训练：在指定军事建筑实例(slotId)内训练某兵种。
-   * 校验兵种(含种族) → 校验该 slot 确为该兵种所属建筑且已建成 → 该建筑独立队列未占用 →
+   * 训练：Military 自行选择该兵种的空闲最高等级训练建筑，同级 slotId 稳定排序。
+   * 校验兵种(含种族) → 校验存在已建成训练建筑与可用队列 →
    * 扣人口 → 一次性预扣资源(数量×单价×建筑等级降费) → 入该 slot 队列，逐个产出。
-   * slotId 缺省时回退到该兵种所属建筑的第一个已建成实例（兼容旧调用 / 测试）。
    */
   private async trainTroops(cmd: Command): Promise<CommandResult> {
-    const { villageId, unit, count, slotId } = cmd.payload as { villageId: string; unit: string; count: number; slotId?: string };
+    const { villageId, unit, count } = cmd.payload as { villageId: string; unit: string; count: number };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.trainingBySlot = s.trainingBySlot || {};
@@ -653,21 +693,13 @@ export class MilitaryModule {
     }
     if (!Number.isInteger(count) || count <= 0) return { ok: false, payload: {}, reason: 'bad_count' };
 
-    // 该兵种所属建筑：必须通过 slotId 指向的实例，且该实例确为 def.building
+    // 服务端基于当前快照重新选取队列；客户端永不指定建筑实例，避免伪造与并发陈旧选择。
     const layout = await this.resolveLayout(villageId);
-    let targetSlot = slotId;
-    if (!targetSlot) {
-      // 缺省：取该兵种所属建筑第一个 level>=1 的实例
-      const found = layout.slots.find((sl) => sl.kind === def.building && sl.level >= 1);
-      targetSlot = found?.slotId;
-    }
-    if (!targetSlot) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
-    const slotInfo = layout.slots.find((sl) => sl.slotId === targetSlot);
-    if (!slotInfo || slotInfo.kind !== def.building) return { ok: false, payload: {}, reason: 'wrong_slot' };
-    if (slotInfo.level < 1) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
-    // 该建筑实例独立队列占用则拒绝（多实例并行：各自独立队列）
-    if (s.trainingBySlot[targetSlot]) return { ok: false, payload: {}, reason: 'queue_busy' };
-    if (s.training) return { ok: false, payload: {}, reason: 'queue_busy' }; // 旧单队列兼容
+    const trainers = this.trainerSlotsFor(layout.slots, unit);
+    if (trainers.length === 0) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
+    const slotInfo = this.selectTrainSlot(s, layout.slots, unit);
+    if (!slotInfo) return { ok: false, payload: {}, reason: 'queue_busy' };
+    const targetSlot = slotInfo.slotId;
 
     // 扣人口（训练开始时扣，不足则拒绝训练）
     const popResult = await this.commands.send({
@@ -726,34 +758,29 @@ export class MilitaryModule {
     this.store.set(COLLECTION, villageId, s);
     // v5：训练中士兵立刻按 unit.upkeep 计入 cropUpkeep（不必等 produceOne）。
     this.reportUpkeep(s);
-    return { ok: true, payload: { unit, count, slotId: targetSlot } };
+    return { ok: true, payload: { unit, count, queueId: this.publicQueueId(villageId, targetSlot) } };
   }
 
   /**
-   * 取消指定建筑实例中的训练队列。
+   * 取消 Military 对外暴露的训练队列。
    * 已产出的士兵不会被撤回；尚未产出的部分返还预留人口和训练资源。
    * 旧存档没有 costPerUnit 时仍可取消，但只能返还人口（无法可靠重建当时的建筑等级折扣）。
    */
   private async cancelTraining(cmd: Command): Promise<CommandResult> {
-    const { villageId, slotId } = cmd.payload as { villageId: string; slotId?: string };
+    const { villageId, queueId } = cmd.payload as { villageId: string; queueId: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
 
     s.trainingBySlot = s.trainingBySlot || {};
+    const internalKey = this.internalQueueKey(villageId, queueId);
+    if (!internalKey) return { ok: false, payload: {}, reason: 'training_not_found' };
     let order: TrainOrder | undefined;
     let orderSlotId: string | undefined;
-    if (slotId) {
-      order = s.trainingBySlot[slotId];
-      orderSlotId = slotId;
-    } else if (s.training) {
-      // 兼容旧版单队列存档；新客户端总是带 slotId，避免多队列歧义。
-      order = s.training;
+    if (internalKey === LEGACY_QUEUE_KEY) {
+      order = s.training ?? undefined;
     } else {
-      const active = Object.entries(s.trainingBySlot).filter(([, value]) => !!value);
-      if (active.length === 1) {
-        orderSlotId = active[0][0];
-        order = active[0][1];
-      }
+      order = s.trainingBySlot[internalKey];
+      orderSlotId = internalKey;
     }
     if (!order) return { ok: false, payload: {}, reason: 'training_not_found' };
 
@@ -769,6 +796,7 @@ export class MilitaryModule {
 
     if (orderSlotId) delete s.trainingBySlot[orderSlotId];
     else s.training = null;
+    this.forgetPublicQueueId(villageId, internalKey);
     this.store.set(COLLECTION, villageId, s);
 
     if (returnedPop > 0) {
@@ -793,7 +821,7 @@ export class MilitaryModule {
 
   /**
    * 出一个兵，若还有剩余则登记下一个（逐个产出）。
-   * slotId 指定则从 trainingBySlot[slotId] 取队列；缺省兼容旧单队列 s.training。
+   * 内部 slotId 指定则从 trainingBySlot 取队列；缺省兼容旧单队列 s.training。
    */
   private produceOne(villageId: string, slotId?: string): void {
     const s = this.load(villageId);
@@ -811,8 +839,10 @@ export class MilitaryModule {
       order.taskId = this.scheduler.schedule(nextMs, () => this.produceOne(villageId, slotId), `military:${villageId}`, `village:${villageId}`);
     } else if (slotId) {
       delete s.trainingBySlot[slotId];
+      this.forgetPublicQueueId(villageId, slotId);
     } else {
       s.training = null;
+      this.forgetPublicQueueId(villageId, LEGACY_QUEUE_KEY);
     }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
@@ -885,11 +915,15 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
     if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
-    // units 指定参战兵力；缺省取全部驻军
+    // units 指定已经由 Movement 验证并扣出村庄的参战兵力；此时不能再按当前驻军钳制，
+    // 否则“派出20、城里剩10”会只用10人参战。缺省/掠夺防守才按现有驻军取值。
     const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
-      const available = Math.min(Math.max(0, Math.floor(Number(n) || 0)), s.troops[unit] ?? 0);
+      const requested = Math.max(0, Math.floor(Number(n) || 0));
+      const available = units && purpose !== 'raid'
+        ? requested
+        : Math.min(requested, s.troops[unit] ?? 0);
       if (!this.config.units[unit] || available <= 0) continue;
       // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
       const stats = purpose === 'raid'

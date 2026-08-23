@@ -139,6 +139,11 @@
   flex-direction: column;
   gap: var(--s-3);
 }
+.train-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
 .train-queue-banner {
   display: flex;
   align-items: flex-start;
@@ -157,6 +162,12 @@
   font-weight: 700;
   margin-bottom: var(--s-2);
 }
+.train-queue-banner__estimate {
+  font-size: var(--f-xs);
+  color: var(--c-ink-dim);
+  margin-top: var(--s-1);
+}
+.train-queue-banner__action { margin-top: var(--s-2); }
 
 .train-unit-list {
   display: flex;
@@ -200,6 +211,7 @@
   color: var(--c-jade);
   margin-top: 2px;
 }
+.train-unit-row__stats { margin-top: var(--s-1); }
 
 .train-unit-row__controls {
   padding: 0 var(--s-3) var(--s-3);

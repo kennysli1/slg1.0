@@ -109,14 +109,13 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       TrainTroops: {
         command: 'military.TrainTroops', ownVillage: true, needAuth: true,
         schema: {
-          slotId: { type: 'string', minLen: 1, maxLen: 32, optional: true },
           unit:  { type: 'string', minLen: 1, maxLen: 32 },
           count: { type: 'integer', min: 1, max: 10000 },
         },
       },
       CancelTraining: {
         command: 'military.CancelTraining', ownVillage: true, needAuth: true,
-        schema: { slotId: { type: 'string', minLen: 1, maxLen: 32, optional: true } },
+        schema: { queueId: { type: 'string', minLen: 1, maxLen: 64 } },
       },
       DisbandTroops: {
         command: 'military.DisbandTroops', ownVillage: true, needAuth: true,
@@ -263,6 +262,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
+      ListPlayerMovements: { command: 'movement.ListPlayer', needAuth: true, injectPlayerId: true, schema: {} },
       ListForeign: { command: 'movement.ListForeign', needAuth: true, injectPlayerId: true, schema: {} },
     },
     eventPushMap: {

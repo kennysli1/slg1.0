@@ -151,6 +151,7 @@ export class MovementModule {
     this.commands.register('movement.ContinueGarrison', (c) => this.continueGarrison(c));
     this.commands.register('movement.SendCaravan', (c) => this.sendCaravan(c));
     this.commands.register('movement.List', (c) => this.list(c));
+    this.commands.register('movement.ListPlayer', (c) => this.listPlayer(c));
     this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
     this.commands.register('movement.ListVisionSources', (c) => this.listVisionSources(c));
     this.commands.register('movement.ListForeign', (c) => this.listForeign(c));
@@ -244,6 +245,7 @@ export class MovementModule {
     const canStop = dir === 'out' && this.stoppable(m, viewerVillageId);
     return {
       id: m.id,
+      fromVillage: m.fromVillage,
       type: m.type,
       dir,
       targetId: m.targetId,
@@ -476,6 +478,23 @@ export class MovementModule {
         marchPoints,
       },
     };
+  }
+
+  /**
+   * 列出玩家从所有己方村庄派出的军队，供地图跨村展示。
+   * 该查询只返回当前 playerId 所拥有的 fromVillage，不能被客户端伪造村庄范围；
+   * 需要对某支军队下令时，客户端必须先切换到 fromVillage，继续走 ownVillage 路由。
+   */
+  private async listPlayer(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    if (!playerId) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const playerRes = await this.commands.send({ name: 'player.Get', from: MovementModule.NAME, payload: { playerId } });
+    if (!playerRes.ok) return { ok: false, payload: {}, reason: playerRes.reason ?? 'player_not_found' };
+    const villageIds = new Set<string>(((playerRes.payload as any)?.player?.villages ?? []).map((v: any) => String(v.id)));
+    const movements = this.store.all<MovementRecord>(COLLECTION)
+      .filter((m) => villageIds.has(m.fromVillage))
+      .map((m) => this.toWire(m, ''));
+    return { ok: true, payload: { movements } };
   }
 
   /** 查询某行军是否仍存在（供其他模块跨模块查询，避免直接读 movement 集合，违反铁律#1）。 */

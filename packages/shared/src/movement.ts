@@ -14,6 +14,8 @@ export type MovementDir = 'in' | 'out';
 /** 己方视图：movement.List 下发的完整行军。 */
 export interface Movement {
   id: string;
+  /** 该军队实际出发的己方村庄；地图跨村展示与切换操作使用。 */
+  fromVillage?: string;
   type: MovementType;
   dir: MovementDir;
   status: MovementStatus;

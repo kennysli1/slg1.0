@@ -90,10 +90,12 @@ test('军队：取消训练停止队列并返还尚未产出的资源与人口',
   assert.equal(started.ok, true, `训练应成功: ${started.reason ?? ''}`);
   const afterStart = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   const army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
-  const activeSlot = (army.slots ?? []).find((slot: any) => slot.training);
-  assert.ok(activeSlot?.slotId, '应能找到正在训练的建筑队列');
+  const activeQueue = (army.trainingQueues ?? [])[0];
+  assert.ok(activeQueue?.queueId, '应能找到正在训练的队列');
+  assert.equal('slots' in army, false, 'GetArmy 不应泄漏建筑槽位');
+  assert.equal('training' in army, false, 'GetArmy 不应保留旧单队列字段');
 
-  const cancelled = await send(app, 'military.CancelTraining', { villageId: 'v1', slotId: activeSlot.slotId });
+  const cancelled = await send(app, 'military.CancelTraining', { villageId: 'v1', queueId: activeQueue.queueId });
   assert.equal(cancelled.ok, true, `取消训练应成功: ${cancelled.reason ?? ''}`);
   assert.equal((cancelled.payload as any).remaining, 2, '尚未产出的数量应全部返还');
   assert.ok(((cancelled.payload as any).refunded?.wood ?? 0) > 0, '应返还未产出士兵的木材成本');
@@ -102,8 +104,98 @@ test('军队：取消训练停止队列并返还尚未产出的资源与人口',
   const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
   const finalArmy = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   assert.equal(finalArmy.troops.legionnaire ?? 0, 0, '取消后不应继续产出士兵');
-  assert.equal((finalArmy.slots ?? []).some((slot: any) => slot.training), false, '取消后队列应为空');
+  assert.equal((finalArmy.trainingQueues ?? []).length, 0, '取消后队列应为空');
   assert.ok(after.resources.wood >= afterStart.resources.wood, '取消后未产出部分资源应回到村庄');
+});
+
+test('军队：训练由服务端稳定选择空闲最高等级队列，并只下发统一投影', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99_999, clay: 99_999, iron: 99_999, crop: 99_999 } });
+  await buildBarracks(app);
+  await buildBarracks(app);
+
+  const layout = (await send(app, 'building.GetLayout', { villageId: 'v1' })).payload as any;
+  const barracks = layout.zones.inner.placed.filter((p: any) => p.kind === 'barracks').sort((a: any, b: any) => a.slotId.localeCompare(b.slotId));
+  assert.ok(barracks.length >= 2, '应有至少两座兵营用于并行训练');
+  const upgrade = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: barracks[0].slotId });
+  assert.equal(upgrade.ok, true, `兵营升级应成功: ${upgrade.reason ?? ''}`);
+  await app.scheduler.advanceTo(clock + 60_000, setClock);
+
+  const upgradedLayout = (await send(app, 'building.GetLayout', { villageId: 'v1' })).payload as any;
+  const upgradedBarracks = upgradedLayout.zones.inner.placed.filter((p: any) => p.kind === 'barracks');
+  const high = [...upgradedBarracks].sort((a: any, b: any) => b.level - a.level || a.slotId.localeCompare(b.slotId))[0];
+  const nextAvailable = upgradedBarracks
+    .filter((p: any) => p.slotId !== high.slotId)
+    .sort((a: any, b: any) => b.level - a.level || a.slotId.localeCompare(b.slotId))[0];
+  assert.ok(nextAvailable, '应保留另一座空闲兵营');
+
+  const first = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+  assert.equal(first.ok, true, `首批训练应成功: ${first.reason ?? ''}`);
+  const firstQueueId = (first.payload as any).queueId;
+  assert.notEqual(firstQueueId, high.slotId, '公网 queueId 不得复用内部建筑 slotId');
+  assert.match(firstQueueId, /^military-queue-\d+$/, 'queueId 应为 Military 运行期不透明句柄');
+  assert.ok(app.store.get<any>('military', 'v1').trainingBySlot[high.slotId], '应优先占用最高等级兵营');
+
+  const afterFirst = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  const legionAfterFirst = afterFirst.trainable.find((u: any) => u.key === 'legionnaire');
+  assert.equal(legionAfterFirst.trainableNow, true, '仍有另一座空闲兵营时应可继续训练');
+  assert.equal('slots' in afterFirst, false, '统一投影不得下发建筑槽位');
+  assert.equal('training' in afterFirst, false, '统一投影不得下发旧 training');
+  assert.ok(afterFirst.trainingQueues.every((q: any) => !('slotId' in q) && !('kind' in q) && !('level' in q)), '队列不得泄漏建筑含义');
+
+  const second = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+  assert.equal(second.ok, true, `第二批训练应成功: ${second.reason ?? ''}`);
+  assert.notEqual((second.payload as any).queueId, nextAvailable.slotId, '第二条公网 queueId 也不得暴露内部 slotId');
+  assert.ok(app.store.get<any>('military', 'v1').trainingBySlot[nextAvailable.slotId], '最高等级忙时应改用稳定排序的下一座空闲兵营');
+
+  // 补满全部同类训练队列。布局里可能还有模板提供的额外兵营，故以服务器拒绝为准。
+  let exhausted = false;
+  for (let i = 0; i < 20; i++) {
+    const queued = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+    if (!queued.ok) {
+      assert.equal(queued.reason, 'queue_busy', `应仅因全部队列忙而拒绝: ${queued.reason ?? ''}`);
+      exhausted = true;
+      break;
+    }
+  }
+  assert.equal(exhausted, true, '应能补满全部同类训练队列');
+
+  const afterSecond = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  const legionAfterSecond = afterSecond.trainable.find((u: any) => u.key === 'legionnaire');
+  assert.equal(legionAfterSecond.unlocked, true, '建筑和科技解锁状态不应因队列占用改变');
+  assert.equal(legionAfterSecond.trainableNow, false, '所有同类队列忙时不可立即训练');
+  assert.equal(legionAfterSecond.unavailableReason, 'all_training_queues_busy');
+});
+
+test('军队：旧存档单训练队列可通过稳定 queueId 展示和取消', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99_999, clay: 99_999, iron: 99_999, crop: 99_999 } });
+  const state = app.store.get<any>('military', 'v1');
+  state.training = {
+    unit: 'legionnaire', slotId: 'old-slot', remaining: 2, nextDoneAt: clock + 30_000,
+    taskId: 'obsolete-task', trainMsEach: 30_000, costPerUnit: { wood: 12, clay: 10, iron: 15, crop: 3 },
+  };
+  state.trainingBySlot = {};
+  app.store.set('military', 'v1', state);
+  app.military.resume();
+
+  const army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  assert.equal(army.trainingQueues.length, 1);
+  const legacyQueue = army.trainingQueues[0];
+  assert.deepEqual({ unit: legacyQueue.unit, remaining: legacyQueue.remaining, nextDoneAt: legacyQueue.nextDoneAt }, { unit: 'legionnaire', remaining: 2, nextDoneAt: clock + 30_000 });
+  assert.match(legacyQueue.queueId, /^military-queue-\d+$/, '旧队列也必须使用不透明 queueId');
+  assert.notEqual(legacyQueue.queueId, 'legacy-training');
+  assert.notEqual(legacyQueue.queueId, 'old-slot');
+
+  // 军团兵与禁卫兵同属兵营；旧队列即使没有原始 slotId，也必须占用该训练建筑。
+  const blocked = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'praetorian', count: 1 });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, 'queue_busy', '旧军团兵队列应阻止同兵营的禁卫兵训练');
+
+  const cancelled = await send(app, 'military.CancelTraining', { villageId: 'v1', queueId: legacyQueue.queueId });
+  assert.equal(cancelled.ok, true, `旧队列应能取消: ${cancelled.reason ?? ''}`);
+  const after = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(after.trainingQueues, []);
 });
 
 test('军队：未建所需建筑时拒绝训练', async () => {

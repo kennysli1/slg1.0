@@ -131,22 +131,28 @@ export function setCache(c: any): void { cache = c; }
 
 /** 增量更新：将 MarchStep 推送的字段合并到 cache.moves.movements 中对应的行军条目。 */
 export function patchMovement(push: MarchStepPush): void {
-  const moves: ListMovementsPayload | undefined = cache.moves;
-  if (!moves?.movements) return;
-  const idx = moves.movements.findIndex((m) => m.id === push.id);
-  if (idx < 0) return;
-  const prev = moves.movements[idx];
-  const next = [...moves.movements];
-  next[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
-  cache.moves = { ...moves, movements: next };
+  const patchOne = (source: ListMovementsPayload | undefined): ListMovementsPayload | undefined => {
+    if (!source?.movements) return source;
+    const idx = source.movements.findIndex((m) => m.id === push.id);
+    if (idx < 0) return source;
+    const prev = source.movements[idx];
+    const next = [...source.movements];
+    next[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
+    return { ...source, movements: next };
+  };
+  cache.moves = patchOne(cache.moves);
+  cache.playerMoves = patchOne(cache.playerMoves);
 }
 
 /** 增量更新：从 cache.moves.movements 中移除指定 id 的行军条目。 */
 export function dropMovement(id: string): void {
-  const moves: ListMovementsPayload | undefined = cache.moves;
-  if (!moves?.movements) return;
-  const next = moves.movements.filter((m) => m.id !== id);
-  if (next.length !== moves.movements.length) cache.moves = { ...moves, movements: next };
+  const dropOne = (source: ListMovementsPayload | undefined): ListMovementsPayload | undefined => {
+    if (!source?.movements) return source;
+    const next = source.movements.filter((m) => m.id !== id);
+    return next.length !== source.movements.length ? { ...source, movements: next } : source;
+  };
+  cache.moves = dropOne(cache.moves);
+  cache.playerMoves = dropOne(cache.playerMoves);
 }
 
 export function getReports(): StoredReport[] { return reports; }

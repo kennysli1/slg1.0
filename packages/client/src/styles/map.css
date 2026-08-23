@@ -182,6 +182,10 @@
 .layer-markers {
   pointer-events: none;
 }
+.own-march-mk {
+  pointer-events: all;
+  cursor: pointer;
+}
 .march-path {
   fill: none;
   stroke: var(--c-steel);

@@ -543,7 +543,7 @@ export function HexMap() {
 
   // ─── march path + marker rendering ────────────────────────────────────────
   function buildMarchPaths() {
-    const moves: any[] = getCache().moves?.movements ?? [];
+    const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
     const paths: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
@@ -575,12 +575,11 @@ export function HexMap() {
   }
 
   function buildMarchMarkers() {
-    const moves: any[] = getCache().moves?.movements ?? [];
+    const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      if (m.status === 'paused') return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const emoji = m.type === 'attack' ? '⚔'
         : m.type === 'raid'      ? '⚡'
@@ -597,6 +596,8 @@ export function HexMap() {
         <g
           key={`mk-${i}`}
           id={`march-mk-${i}`}
+          data-own-move-id={m.id}
+          class="own-march-mk"
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <circle r={10} class={`march-dot march-dot--${t}${m.status === 'paused' ? ' paused' : ''}`} />
@@ -769,7 +770,7 @@ export function HexMap() {
     const frame = () => {
       if (!markerEl.current) return;
       const ref = viewRef();
-      const moves: any[] = getCache().moves?.movements ?? [];
+      const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
@@ -793,6 +794,17 @@ export function HexMap() {
 
   function handleMapTap(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
+    const ownMarker = hit?.closest?.('[data-own-move-id]') as Element | null;
+    if (ownMarker) {
+      const movementId = ownMarker.getAttribute('data-own-move-id');
+      const listed = movementId
+        ? (getCache().playerMoves?.movements ?? []).find((m: any) => m.id === movementId)
+        : undefined;
+      if (listed?.pos) {
+        selected.value = { refId: listed.id, kind: 'own_army', q: listed.pos.q, r: listed.pos.r, name: '己方军队' };
+        return;
+      }
+    }
     let cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) {
       // 可能点在外军标记层之上：暂时隐藏后回落到底层格

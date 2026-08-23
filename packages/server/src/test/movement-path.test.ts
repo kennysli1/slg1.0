@@ -376,7 +376,7 @@ test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均�
   const B = (rb.payload as any).player;
   const target = { q: (A.q + 2) % 41, r: A.r };
   await giveTroops(app, A.villageId, { legionnaire: 30 });
-  await giveTroops(app, B.villageId, { legionnaire: 30 });
+  await giveTroops(app, B.villageId, { equimperatoris: 10, merc_archer: 10 });
   await send(app, 'vision.Reveal', { playerId: A.id, ...target, radius: 0 });
   await send(app, 'vision.Reveal', { playerId: B.id, ...target, radius: 0 });
   const ambush = await send(app, 'movement.SendAmbush', { villageId: A.villageId, ...target, troops: { legionnaire: 20 } });
@@ -392,7 +392,11 @@ test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均�
 
   let triggered = false;
   app.bus.on('movement.Intercepted', (e) => { if ((e.payload as any).battleType === 'ambush') triggered = true; });
-  const enemy = await send(app, 'movement.SendGarrison', { villageId: B.villageId, ...target, troops: { legionnaire: 20 } });
+  const battleReports: any[] = [];
+  app.bus.on('combat.BattleEnded', (e) => {
+    if ((e.payload as any).battleType === 'ambush') battleReports.push(e.payload);
+  });
+  const enemy = await send(app, 'movement.SendGarrison', { villageId: B.villageId, ...target, troops: { equimperatoris: 10, merc_archer: 10 } });
   assert.equal(enemy.ok, true, `诱饵军派遣应成功: ${enemy.reason ?? ''}`);
   let iters = 0;
   while (app.scheduler.pending > 0 && iters < 20_000) {
@@ -401,4 +405,13 @@ test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均�
   }
   assert.equal(triggered, true, '敌方进入一格内应触发伏击');
   assert.equal(movements(app).some((m) => m.type === 'ambush' && m.status === 'stationed'), false, '伏击战后伏击记录应转为返程或结束');
+  const ambusherReport = battleReports.find((p) => p.villageId === A.villageId);
+  const victimReport = battleReports.find((p) => p.villageId === B.villageId);
+  assert.equal(ambusherReport?.side, 'attacker', '伏击方战报应保持 attacker 视角');
+  assert.equal(victimReport?.side, 'defender', '被伏击方战报应标记为 defender，不能伪装成 attacker');
+  assert.equal(victimReport?.attackerWins, ambusherReport?.attackerWins, '双方战报应共享同一个客观胜负，不得给被伏击方取反');
+  assert.deepEqual(victimReport?.defenderLineup, { equimperatoris: 10, merc_archer: 10 }, '被伏击方阵容应是近卫骑兵与雇佣弓手');
+  assert.equal(victimReport?.attackerLineup?.legionnaire, 20, '伏击方阵容应是军团兵');
+  assert.equal(Object.hasOwn(victimReport?.defenderLosses ?? {}, 'legionnaire'), false, '被伏击方损失中不能混入伏击方军团兵');
+  assert.equal(Object.keys(victimReport?.defenderLosses ?? {}).every((code) => code === 'equimperatoris' || code === 'merc_archer'), true, '被伏击方损失只能来自自己的兵种');
 });

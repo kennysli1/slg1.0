@@ -9,11 +9,11 @@ import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo,
 } from '../../app/config.js';
-import { act } from '../../app/refresh.js';
+import { act, switchVillage } from '../../app/refresh.js';
 import { req, me, isOwnVillageId } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Btn, Icon, IconPlate, Panel, Tag } from '../../ui/index.js';
-import { foreignArmyAt, foreignArmyName, ownStationedMoveAt } from './map-target-helpers.js';
+import { foreignArmyAt, foreignArmyName, ownArmyAt, ownStationedMoveAt } from './map-target-helpers.js';
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
@@ -630,6 +630,61 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
   );
 }
 
+/** 点击地图上己方其他村庄派出的军队：先切换来源村，才允许下达命令。 */
+function OwnArmyPanel({ move, onClose }: { move: Movement; onClose: () => void }) {
+  const source = me?.villages?.find((v) => v.id === move.fromVillage);
+  const typeLabel: Record<string, string> = {
+    raid: '掠夺军', attack: '攻城军', return: '返程军', found: '拓荒军',
+    transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军',
+    scout: '侦察军', ambush: '伏击军',
+  };
+  const isCurrent = move.fromVillage === me?.villageId;
+  const status = move.status === 'marching' ? '行军中'
+    : move.status === 'paused' ? '交战中'
+      : move.status === 'stationed' ? '驻扎中' : '已停止';
+  return (
+    <Panel variant="gold" corners class="map-target-panel">
+      <div class="target-head">
+        <IconPlate icon="ui_tab_army" label="己方军队" size="sm" plate="gold" />
+        <div class="target-heading-copy">
+          <div class="target-title">己方{typeLabel[move.type] ?? '军队'}</div>
+          <div class="target-coord">({move.pos?.q ?? 0},{move.pos?.r ?? 0})</div>
+        </div>
+        <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
+      </div>
+      <div class="target-body expedition-body">
+        <section class="expedition-assessment">
+          <div class="expedition-kicker">军队状态</div>
+          <dl class="enemy-army-facts">
+            <div><dt>来源村庄</dt><dd>{source?.name ?? move.fromVillage ?? '未知'}</dd></div>
+            <div><dt>当前状态</dt><dd>{status}</dd></div>
+            {!move.status || move.status === 'stationed' ? null : <div><dt>目标坐标</dt><dd>({move.to?.q ?? '?'},{move.to?.r ?? '?'})</dd></div>}
+          </dl>
+          {!isCurrent ? (
+            <p class="expedition-modal-copy">这支军队属于其他村庄。切换到来源村庄后，才能继续下达召回或下一步行军命令。</p>
+          ) : (
+            <p class="expedition-modal-copy">这是当前村庄的军队，可以在此查看状态；驻扎军请使用召回或行军操作。</p>
+          )}
+        </section>
+        <div class="target-foot expedition-foot expedition-foot--split">
+          {!isCurrent ? (
+            <Btn variant="primary" onClick={async () => {
+              if (!move.fromVillage) return;
+              const result = await switchVillage(move.fromVillage);
+              if (result.ok) { selected.value = null; showToast(`已切换到「${source?.name ?? '来源村庄'}」，现在可以下达命令`); }
+            }}>切换到来源村庄</Btn>
+          ) : move.recallable ? (
+            <Btn variant="danger" onClick={async () => {
+              if (await act(req('RecallMarch', { movementId: move.id }), { okToast: '撤回令已下达，部队开始返程' })) onClose();
+            }}>撤回</Btn>
+          ) : null}
+          <Btn onClick={onClose}>关闭</Btn>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /** 点击地图上「视野内的外国军队」后展示的只读信息卡：仅显示归属与类型，绝不暴露兵力/携带物。 */
 function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => void }) {
   // 订阅 dataVersion（每次外国军队轮询刷新）与 tick（ETA 每秒走字）
@@ -718,6 +773,16 @@ export function TargetPanel() {
         onClose={clearSelection}
       />
     );
+  }
+
+  const own = (sel.kind === 'own_army'
+    ? (getCache().playerMoves?.movements ?? []).find((m: Movement) => m.id === sel.refId)
+    : ownArmyAt(sel.q, sel.r)) as Movement | undefined;
+  if (own) {
+    if (own.fromVillage === me.villageId && own.status === 'stationed') {
+      return <OwnStationedPanel move={own} onClose={clearSelection} />;
+    }
+    return <OwnArmyPanel move={own} onClose={clearSelection} />;
   }
 
   const stationed = ownStationedMoveAt(sel.q, sel.r);
