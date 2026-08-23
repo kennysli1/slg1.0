@@ -150,7 +150,13 @@ export class VisionModule {
         const now = current.get(key) ?? { q, r, kind: 'empty' };
         state.explored[key] = now; dirty = true;
         out.push({ ...now, visibility: 'visible' });
-      } else if (state.explored[key]) out.push({ ...state.explored[key], visibility: 'explored' });
+      } else if (state.explored[key]) {
+        // 旧存档的探索快照没有 terrain；地貌由 World 按固定 seed 派生，
+        // 因此只从当前权威地块补地貌，POI 仍使用当时快照，避免泄露实时变化。
+        const snapshot = state.explored[key]!;
+        const terrain = current.get(key)?.terrain;
+        out.push({ ...snapshot, ...(terrain ? { terrain } : {}), visibility: 'explored' });
+      }
       else out.push({ q, r, kind: 'empty', visibility: 'unexplored' });
     }
     if (dirty) this.store.set(COLLECTION, playerId, state);

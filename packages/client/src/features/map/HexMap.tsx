@@ -45,6 +45,14 @@ export function terrainFromTile(tile: { terrain?: unknown } | undefined, visibil
     : 'plain';
 }
 
+/** 地形是空闲格的地貌名称，不改变其可驻扎/拓荒的玩法 kind。 */
+export function terrainDisplayName(terrain: Terrain | null): string {
+  if (terrain === 'forest') return '森林';
+  if (terrain === 'hills') return '丘陵';
+  if (terrain === 'plain') return '平原';
+  return '未探索区域';
+}
+
 /** 仅用于地貌装饰的稳定世界坐标散点，不参与决定地形类型。 */
 function terrainNoise(q: number, r: number, salt: number): number {
   return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
@@ -419,8 +427,9 @@ export function HexMap() {
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
             const terrain = terrainFromTile(t, visibility);
 
+            if (visibility !== 'unexplored') name = terrainDisplayName(terrain);
             if (visibility === 'unexplored') {
-              name = '未探索区域';
+              name = '未探索区域'; // 未探索格不能通过名称泄露地貌。
             } else if (isSelf) {
               // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
               kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
@@ -1310,19 +1319,19 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   );
 }
 
-function tileKindLabel(kind: string, isSelf: boolean): string {
+function tileKindLabel(kind: string, isSelf: boolean, emptyName = '空地'): string {
   if (kind === 'own_village') return isSelf ? '本城（己方）' : '己方村庄';
   if (kind === 'village') return '玩家村庄（可进攻）';
   if (kind === 'pve') return '野怪据点（可掠夺）';
   if (kind === 'enemy_army') return '敌方军队';
-  return '空地（可拓荒）';
+  return `${emptyName}（可拓荒）`;
 }
 
 function HexTooltip({ tip }: {
   tip: { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number };
 }) {
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
-  const label = tileKindLabel(tip.kind, isSelf);
+  const label = tileKindLabel(tip.kind, isSelf, tip.name);
 
   const left = Math.min(Math.max(130, tip.anchorX), window.innerWidth - 130);
   const top = Math.min(Math.max(8, tip.anchorY - TIP_ABOVE), window.innerHeight - 120);
