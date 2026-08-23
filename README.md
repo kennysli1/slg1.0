@@ -41,6 +41,7 @@ npm install                      # 首次安装依赖
 npm run build:shared             # 改过 packages/shared 后必跑（前后端共享类型）
 
 npm run dev:server               # 终端 A：启动后端，监听 http://localhost:8080  (ws: /ws)
+npm run dev:server:test-01       # 终端 A：启动 AI 测试服 01，监听 http://localhost:8081（独立存档）
 npm run dev -w @slg/client       # 终端 B：启动前端，打开提示的 http://localhost:5173
 ```
 
@@ -68,7 +69,7 @@ npm run reset:respawn    # 刷档：留登录凭据，重新分配地图位置
 npm run wipe:all         # 删档：连账号一起清空（均自动备份到 data/backups/）
 ```
 
-环境变量（生产）：`PORT`（默认 8080）、`HOST`（默认 0.0.0.0）、`DATA_PATH`（默认 `./data/game.json`）、`LOG_DIR`（默认 `./data/logs`）、`GM_TOKEN`（设置后 `/gm/*` 路由需 `X-GM-Token` header 鉴权）。
+环境变量（生产）：`PORT`（默认 8080）、`HOST`（默认 0.0.0.0）、`DATA_PATH`（默认 `./data/game.json`）、`LOG_DIR`（默认 `./data/logs`）、`GM_TOKEN`（设置后 `/gm/*` 路由需 `X-GM-Token` header 鉴权）。AI 测试服 01 固定使用 8081 与 `data/test-01/game.json`，不会读取或改写主服存档。
 
 ---
 

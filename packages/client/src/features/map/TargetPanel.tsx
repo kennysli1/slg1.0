@@ -17,7 +17,7 @@ import { foreignArmyAt, foreignArmyName, ownArmyAt, ownStationedMoveAt } from '.
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
-type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'scout' | 'ambush';
+type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'ambush';
 type NumberMap = Record<string, number>;
 
 interface TargetMeta {
@@ -35,7 +35,7 @@ interface TargetMeta {
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
-const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', scout: '侦察', ambush: '伏击' }[mode]);
+const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', auto_explore: '自动探索', scout: '侦察', ambush: '伏击' }[mode]);
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -120,7 +120,9 @@ function Assessment({
   onNext: () => void;
 }) {
   const isTransport = meta.mode === 'transport' || meta.mode === 'transfer';
-  const copy = meta.mode === 'explore'
+  const copy = meta.mode === 'auto_explore'
+    ? '部队会沿当前选定路线逐格探索。首次在新视野中发现公共营地、其他玩家城池或非己方部队时，立刻返城；抵达该终点也会返城，不会主动战斗或驻扎。'
+    : meta.mode === 'explore'
     ? '该格尚未探索。军队抵达后会立刻返城；若目标格已有设施或军队，则会在前一格掉头。集结点等级决定可探索的未探索深度。'
     : meta.mode === 'garrison'
     ? '派军队前往该坐标。抵达后若仍为空地便会原地驻扎；若已被设施或其他军队占据，部队将在前一格驻扎。'
@@ -140,6 +142,7 @@ function Assessment({
     garrison: '编组驻扎部队',
     ambush: '编组伏击部队',
     explore: '编组探索部队',
+    auto_explore: '编组自动探索部队',
     scout: '编组侦察部队',
   };
 
@@ -149,13 +152,13 @@ function Assessment({
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
-          {meta.mode === 'explore' ? '未探索区域' : meta.mode === 'garrison' || meta.mode === 'ambush' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
+          {meta.mode === 'explore' || meta.mode === 'auto_explore' ? '未探索区域' : meta.mode === 'garrison' || meta.mode === 'ambush' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
         </div>
         <p>{copy}</p>
         <div class="expedition-facts">
           <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
           <span>行军距离 <b>{meta.dist} 格</b></span>
-          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'ambush' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
+          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'auto_explore' || meta.mode === 'ambush' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
         </div>
       </section>
 
@@ -453,6 +456,8 @@ function ExpeditionWorkflow({
       ok = await act(req('SendAmbush', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '伏击部队出发' });
     } else if (meta.mode === 'explore') {
       ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '探索部队出发，抵达后将返城' });
+    } else if (meta.mode === 'auto_explore') {
+      ok = await act(req('SendAutoExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '自动探索部队已出发' });
     } else {
       ok = await act(req('SendAttack', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar }), { okToast: '攻城部队出发' });
     }
@@ -514,6 +519,7 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
 
 function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: number; dist: number; visibility?: string; onClose: () => void }) {
   const [garrison, setGarrison] = useState(false);
+  const [autoExplore, setAutoExplore] = useState(false);
   const [ambush, setAmbush] = useState(false);
   const [founding, setFounding] = useState(false);
   async function found() {
@@ -523,15 +529,16 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   const depth = visibility === 'unexplored' ? unexploredDepth(q, r) : 0;
   const maxExploreDepth = rallypointLevel();
   const allowExplore = visibility !== 'unexplored' || (depth >= 1 && depth <= maxExploreDepth);
+  const allowAutoExplore = visibility === 'unexplored' && maxExploreDepth >= 1;
   if (founding) return (
     <Panel variant="gold" corners class="map-target-panel">
       <WorkflowHeader meta={{ ...meta, mode: 'garrison' }} step={3} onClose={onClose} />
       <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">拓荒命令</div><h3>拓荒至 ({q},{r})</h3><p>服务器将复核拓荒者、开城资源、人口与村庄上限。</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={() => setFounding(false)}>返回</Btn><Btn variant="primary" size="lg" onClick={found}>确认拓荒</Btn></div></div>
     </Panel>
   );
-  if (garrison) {
+  if (garrison || autoExplore) {
     const exploring = visibility === 'unexplored';
-    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : ambush ? '野外伏击点' : '野外驻扎点', icon: 'pve_bandits', mode: exploring ? 'explore' : ambush ? 'ambush' : 'garrison' }} initialStep={2} onClose={onClose} />;
+    return <ExpeditionWorkflow meta={{ ...meta, name: exploring ? '未探索区域' : ambush ? '野外伏击点' : '野外驻扎点', icon: 'pve_bandits', mode: autoExplore ? 'auto_explore' : exploring ? 'explore' : ambush ? 'ambush' : 'garrison' }} initialStep={2} onClose={onClose} />;
   }
   return (
     <Panel variant="gold" corners class="map-target-panel">
@@ -540,7 +547,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
         <section class="expedition-assessment">
           <div class="expedition-kicker">目标评估</div>
           <div class="expedition-assessment-title">{visibility === 'unexplored' ? '未探索区域' : '可拓荒空地'}</div>
-          <p>{visibility === 'unexplored' ? allowExplore ? `未探索格不能驻扎；该格深度为 ${depth}，选择探索后军队抵达会立即返城。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。` : '可选择驻扎；拥有拓荒者时才显示拓荒模式。驻扎军抵达时会再次确认格子仍为空地。'}</p>
+          <p>{visibility === 'unexplored' ? allowExplore ? `可执行单点探索，或自动探索至该终点；自动探索会在沿途发现公共营地、他人城池或外军时提前返城。` : allowAutoExplore ? `该格深度为 ${depth < 0 ? '未知' : depth}，超过单点探索上限 ${maxExploreDepth} 格；仍可执行自动探索至该终点。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，需要至少 1 级集结点才能自动探索。` : '可选择驻扎；拥有拓荒者时才显示拓荒模式。驻扎军抵达时会再次确认格子仍为空地。'}</p>
           <div class="expedition-facts">
             <span>目标坐标 <b>{q},{r}</b></span>
             <span>行军距离 <b>{dist} 格</b></span>
@@ -548,6 +555,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
           <div class="expedition-kicker expedition-mode-kicker">可用行军模式</div>
           <div class="target-actions target-actions--management expedition-mode-options">
             {allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}
+            {allowAutoExplore && <Btn variant="ghost" block onClick={() => setAutoExplore(true)}>自动探索</Btn>}
             {visibility !== 'unexplored' && <Btn variant="ghost" block onClick={() => { setAmbush(true); setGarrison(true); }}>伏击</Btn>}
             {visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}
           </div>
@@ -685,7 +693,7 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
   const m = (foreignMoves.value?.movements ?? []).find((x) => x.id === sel.refId);
   const typeLabel: Record<string, string> = {
     raid: '掠夺军', attack: '进攻军', return: '返程军', found: '拓荒军',
-    transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军',
+    transport: '运输队', caravan: '商队', garrison: '驻扎军', explore: '探索军', auto_explore: '自动探索军',
     ambush: '伏击军',
   };
   return (

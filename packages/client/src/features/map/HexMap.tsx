@@ -483,6 +483,7 @@ export function HexMap() {
         : m.type === 'garrison'  ? 'garrison'
         : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
+        : m.type === 'auto_explore' ? 'explore'
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
         : 'return';
@@ -512,6 +513,7 @@ export function HexMap() {
         : m.type === 'garrison'  ? '⚑'
         : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
+        : m.type === 'auto_explore' ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
       markers.push(
@@ -546,6 +548,7 @@ export function HexMap() {
         : m.type === 'garrison'  ? '⚑'
         : m.type === 'ambush'    ? '🗡'
         : m.type === 'explore'   ? '🔭'
+        : m.type === 'auto_explore' ? '🔭'
         : '🏠';
       const t = m.type ?? 'return';
 
