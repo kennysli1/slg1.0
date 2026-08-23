@@ -60,3 +60,36 @@ test('PvE 营地可侦察：只返回资源与守军，建筑侦察在服务端�
   assert.ok(attackerReport.resources && Object.hasOwn(attackerReport.resources, 'wood'), 'PvE 报告应包含营地资源');
   assert.equal(attackerReport.buildings, undefined, 'PvE 报告不应包含建筑信息');
 });
+
+test('PvP 建筑侦察：城内外建筑报告同时包含守军快照', async () => {
+  let clock = 7_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true }); app.setupWorld();
+  const attacker = (await send(app, 'player.Register', { name: '建筑侦察甲', password: 'p1234' })).payload as any;
+  const defender = (await send(app, 'player.Register', { name: '建筑侦察乙', password: 'p1234' })).payload as any;
+  const villageId = attacker.player.villageId;
+  const targetVillage = defender.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId, delta: { equlegati: 3 } });
+  await send(app, 'military.AdjustTroops', { villageId: targetVillage, delta: { legionnaire: 4 } });
+  const reports: any[] = [];
+  app.bus.on('movement.ScoutReport', (event: any) => { reports.push(event.payload); });
+  const scout = await send(app, 'movement.SendScout', {
+    villageId,
+    targetVillage,
+    fromXY: { q: attacker.player.q, r: attacker.player.r },
+    toXY: { q: defender.player.q, r: defender.player.r },
+    troops: { equlegati: 3 },
+    scoutType: 'scout_buildings',
+  });
+  assert.equal(scout.ok, true, `建筑侦察应成功: ${scout.reason ?? ''}`);
+  let ticks = 0;
+  while (!reports.some((report) => report.side === 'attacker') && app.scheduler.pending > 0 && ticks < 100) {
+    clock += 3_600_000;
+    await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+    ticks++;
+  }
+  const report = reports.find((candidate) => candidate.side === 'attacker');
+  assert.ok(report, '幸存侦察兵应收到建筑报告');
+  assert.equal(report.scoutType, 'scout_buildings');
+  assert.ok(report.buildings?.center && report.buildings?.inner && report.buildings?.outer, '报告应包含城内外建筑');
+  assert.equal(report.defenderTroops.legionnaire, 4, '建筑侦察报告应同时包含守军兵力');
+});

@@ -347,6 +347,18 @@ describe('notificationText - PopulationChanged v3 硬上限', () => {
   });
 });
 
+describe('notificationText - 建筑侦察报告', () => {
+  it('城内外建筑侦察同时显示守军兵力', () => {
+    const result = notificationText('ScoutReport', {
+      scoutType: 'scout_buildings',
+      buildings: { center: [{ kind: 'townhall', name: '城镇中心', level: 1 }], inner: [], outer: [] },
+      defenderTroops: { legionnaire: 4 },
+    });
+    assert.ok(result?.includes('城镇中心1级'), `应含建筑快照，实际：${result}`);
+    assert.ok(result?.includes('军团兵4'), `应含守军兵力，实际：${result}`);
+  });
+});
+
 
 describe('人口资源条红框说明', () => {
   it('仓储溢出时说明人口增长扣减比例', () => {

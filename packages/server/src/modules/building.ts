@@ -737,7 +737,7 @@ export class BuildingModule {
 
   /**
    * 战斗后的即时建筑损伤：
-   *  - damage：普通部队破坏等级，建筑保留在槽位（最低 0 级），记录首次受损前等级供一次性修复；不产生拆除战利品。
+   *  - damage：普通部队破坏等级，建筑保留在槽位（最低 0 级），记录首次受损前等级供一次性修复；按被破坏的等级产生对应升级成本的建筑战利品。
    *  - demolish：攻城武器拆除等级，降到 0 级时整栋移除并按被拆等级产出建筑战利品。
    */
   private applyBattleDamage(cmd: Command): CommandResult {
@@ -768,7 +768,10 @@ export class BuildingModule {
       const def = this.config.buildings[p.kind];
       if (!def) break;
       const fromLevel = p.level;
-      const cost = operation === 'demolish' ? def.cost(fromLevel) : {};
+      // 两种战斗操作都把从当前等级降一级视为一次建筑损失，并按该级的升级成本
+      // 计入建筑战利品；区别仅在于 damage 保留可修复的建筑空壳，demolish 在 0
+      // 级时移除建筑。此前 damage 返回空 loot，导致掠夺战只显示损坏却带不回资源。
+      const cost = def.cost(fromLevel);
       for (const [resource, amount] of Object.entries(cost)) {
         const value = Number(amount);
         if (Number.isFinite(value) && value > 0) loot[resource] = (loot[resource] ?? 0) + value;

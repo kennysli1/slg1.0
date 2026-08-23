@@ -55,7 +55,8 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     if (payload.scoutType === 'scout_buildings') {
       const b = payload.buildings ?? {};
       const list = [...(b.center ?? []), ...(b.inner ?? []), ...(b.outer ?? [])].map((x: any) => `${x.name ?? x.kind}${x.level}级`).join('、') || '无';
-      return `${time}🔭 侦察报告：发现城内外建筑 ${list}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+      const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
+      return `${time}🔭 侦察报告：发现城内外建筑 ${list}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
     }
     const resources = Object.entries(payload.resources ?? {}).map(([k, n]: any) => `${resInfo(k).name}${fmt(Number(n) || 0)}`).join(' ') || '无';
     const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';

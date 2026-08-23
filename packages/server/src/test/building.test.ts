@@ -327,7 +327,8 @@ test('战斗破坏：建筑保留在槽位、不可升级，可按累计成本�
   assert.equal(hit.ok, true);
   const rows = (hit.payload as any).destroyed;
   assert.equal(rows.length, 3);
-  assert.ok(rows.every((x: any) => x.mode === 'damage' && x.loot && Object.keys(x.loot).length === 0));
+  assert.ok(rows.every((x: any) => x.mode === 'damage' && x.loot && Object.values(x.loot).some((n: any) => Number(n) > 0)));
+  assert.ok(Object.values((hit.payload as any).loot).some((n: any) => Number(n) > 0), '普通部队破坏建筑也应返回对应等级的建筑战利品');
   const during = await layout(app);
   const damaged = during.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
   assert.ok(damaged, '破坏到0级仍应保留建筑槽位');
