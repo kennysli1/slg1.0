@@ -740,7 +740,9 @@ export class CombatModule {
       } as DomainEvent);
     }
 
-    // 防守方（另一支行军）幸存者 → BattleEnded(attacker) (它从自身视角也是进攻方)
+    // 防守方（另一支行军）幸存者 → BattleEnded(defender)。
+    // side 表示这支军队在本场战斗中的真实阵营，不能为了“己方视角”伪装成 attacker；
+    // 否则客户端会把 attackerLosses（伏击方损失）误显示成被伏击方自己的损失。
     const dc = b.defenderContribution;
     if (dc) {
       const defSurvivors: Record<string, number> = {};
@@ -756,11 +758,11 @@ export class CombatModule {
       void this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
-          villageId: dc.fromVillage, side: 'attacker', battleId: b.id,
+          villageId: dc.fromVillage, side: 'defender', battleId: b.id,
           movementId: dc.movementId, fromVillage: dc.fromVillage,
           fromXY: dc.fromXY, toXY: b.targetXY,
           survivors: defSurvivors, loot: {}, treasures: dc.treasures, deployedTroops: dc.troops,
-          attackerWins: !attackerWins, ...reportBase,
+          attackerWins, ...reportBase,
         },
       } as DomainEvent);
     }
