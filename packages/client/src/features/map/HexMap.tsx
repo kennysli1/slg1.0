@@ -13,7 +13,7 @@ import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refre
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
-import { capitalCoordinate, currentVillageCoordinate, parseMapCoordinate } from './map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
 import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -428,7 +428,8 @@ export function HexMap() {
             if (visibility === 'unexplored') {
               name = '未探索区域'; terrain = 'empty';
             } else if (isSelf) {
-              kind = 'own_village'; refId = me!.id; name = me!.name;
+              // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
+              kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
               icon = 'bld_main'; terrain = 'village';
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
