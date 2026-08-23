@@ -9,6 +9,8 @@ test('外交与行军模式：默认中立、选项由关系决定、显式宣�
   const a = (await send(app, 'player.Register', { name: '外交甲', password: 'p1234' })).payload as any;
   const b = (await send(app, 'player.Register', { name: '外交乙', password: 'p1234' })).payload as any;
   const va = a.player.villageId, vb = b.player.villageId;
+  const selfOpts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: va, q: a.player.q, r: a.player.r });
+  assert.deepEqual((selfOpts.payload as any).modes, [], '当前操作村不应显示转移或切换行为');
   const ownerA = (await send(app, 'player.GetByVillage', { villageId: va })).payload as any;
   const ownerB = (await send(app, 'player.GetByVillage', { villageId: vb })).payload as any;
   const rel = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });

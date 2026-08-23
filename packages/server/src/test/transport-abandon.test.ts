@@ -101,6 +101,11 @@ test('运输：拒绝运给非己方村', async () => {
 test('转移行军：只能携带部队/宝物，禁止携带物资', async () => {
   const app = freshApp();
   const { capital, vid2 } = await makeTwoVillages(app);
+  const self = await send(app, 'movement.SendTransport', {
+    villageId: capital, targetVillage: capital, troops: {}, cargo: {}, mode: 'transfer',
+  });
+  assert.equal(self.ok, false);
+  assert.equal(self.reason, 'same_village');
   await send(app, 'military.AdjustTroops', { villageId: capital, delta: { legionnaire: 2 } });
 
   const ok = await send(app, 'movement.SendTransport', {

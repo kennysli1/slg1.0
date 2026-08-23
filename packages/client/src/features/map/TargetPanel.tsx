@@ -4,15 +4,15 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { getCache, type SelectedTarget } from '../../app/state.js';
-import { dataVersion, selected, openModal, garrisonContinue, foreignMoves, tick, showToast } from '../../app/store.js';
+import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo,
 } from '../../app/config.js';
 import { act } from '../../app/refresh.js';
-import { req, me, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
+import { req, me, isOwnVillageId } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
-import { Btn, Icon, IconPlate, Modal, Panel, Tag } from '../../ui/index.js';
+import { Btn, Icon, IconPlate, Panel, Tag } from '../../ui/index.js';
 import { foreignArmyAt, foreignArmyName, ownStationedMoveAt } from './map-target-helpers.js';
 import type { Movement } from '@slg/shared';
 
@@ -29,7 +29,6 @@ interface TargetMeta {
   icon: string;
   mode: DispatchMode;
   isOwn?: boolean;
-  isCapital?: boolean;
   declareWar?: boolean;
   targetKind?: string;
 }
@@ -114,12 +113,10 @@ function WorkflowHeader({
 }
 
 function Assessment({
-  meta, onNext, onSwitch, onAbandon,
+  meta, onNext,
 }: {
   meta: TargetMeta;
   onNext: () => void;
-  onSwitch?: () => void;
-  onAbandon?: () => void;
 }) {
   const isTransport = meta.mode === 'transport' || meta.mode === 'transfer';
   const copy = meta.mode === 'explore'
@@ -156,13 +153,6 @@ function Assessment({
           <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
         </div>
       </section>
-
-      {meta.isOwn && meta.refId !== me?.villageId && (
-        <div class="target-actions target-actions--management">
-          <Btn onClick={onSwitch}>切换到此村</Btn>
-          {!meta.isCapital && <Btn variant="danger" onClick={onAbandon}>放弃此村</Btn>}
-        </div>
-      )}
 
       <div class="target-foot expedition-foot">
         <Btn variant={meta.mode === 'attack' ? 'danger' : 'primary'} size="lg" block onClick={onNext}>
@@ -382,31 +372,10 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
     if (ok) onClose();
   }
 
-  async function switchVillage() {
-    const result = await selectVillage(meta.refId);
-    if (result.ok) onClose();
-  }
-
-  function confirmAbandon() {
-    openModal((close) => (
-      <Modal
-        title="放弃村庄"
-        sub={meta.name}
-        onClose={close}
-        foot={<><Btn onClick={close}>取消</Btn><Btn variant="danger" onClick={async () => {
-          close();
-          if (await abandonVillage(meta.refId)) onClose();
-        }}>确认放弃</Btn></>}
-      >
-        <p class="expedition-modal-copy">确认放弃「{meta.name}」？驻军将解散、资源清空且地块回归空地。此操作不可撤销。</p>
-      </Modal>
-    ), 'abandon-village');
-  }
-
   return (
     <Panel variant={meta.mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
-      {step === 1 && <Assessment meta={meta} onNext={() => setStep(2)} onSwitch={switchVillage} onAbandon={confirmAbandon} />}
+      {step === 1 && <Assessment meta={meta} onNext={() => setStep(2)} />}
       {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
@@ -414,7 +383,7 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
 }
 
 /** 所有地图目标共用的模式选择层；外交关系与可用模式由服务端权威返回。 */
-function ModeSelectPanel({ base, kind, onClose, onSwitch, onAbandon }: { base: TargetMeta; kind: string; onClose: () => void; onSwitch?: () => void; onAbandon?: () => void }) {
+function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: string; onClose: () => void }) {
   const [options, setOptions] = useState<ModeOption[] | null>(null);
   const [choice, setChoice] = useState<ModeOption | null>(null);
   useEffect(() => {
@@ -434,7 +403,6 @@ function ModeSelectPanel({ base, kind, onClose, onSwitch, onAbandon }: { base: T
           {(options ?? []).map((option) => <Btn key={option.mode} variant={option.requiresDeclaration ? 'danger' : 'primary'} block onClick={() => setChoice(option)}>{option.label}</Btn>)}
         </div>
         {options && options.length === 0 && <p class="expedition-empty">当前目标没有可用的行军模式。</p>}
-        {base.isOwn && base.refId !== me?.villageId && <div class="target-actions target-actions--management"><Btn onClick={onSwitch}>切换到此村</Btn>{!base.isCapital && <Btn variant="danger" onClick={onAbandon}>放弃此村</Btn>}</div>}
         <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消</Btn></div>
       </div>
     </Panel>
@@ -634,7 +602,6 @@ export function TargetPanel() {
   if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />;
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
-  const village = me.villages?.find((item) => item.id === sel.refId);
   const meta: TargetMeta = {
     refId: sel.refId,
     q: sel.q,
@@ -644,9 +611,8 @@ export function TargetPanel() {
     icon: isOwn ? 'bld_main' : sel.kind === 'pve' ? (sel.icon ?? 'pve_bandits') : 'bld_main',
     mode: isOwn ? 'transfer' : sel.kind === 'pve' ? 'raid' : 'attack',
     isOwn,
-    isCapital: village?.isCapital || sel.refId === me.capitalVillageId,
     targetKind: sel.kind,
   };
 
-  return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} onSwitch={async () => { const result = await selectVillage(meta.refId); if (result.ok) clearSelection(); }} onAbandon={async () => { if (await abandonVillage(meta.refId)) clearSelection(); }} />;
+  return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />;
 }
