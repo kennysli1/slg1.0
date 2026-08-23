@@ -368,6 +368,21 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['tradeRoutes', 'tradeViewRadius', 'npcOrderCount', 'npcRefreshSec', 'npcStoredRefreshes'],
     labels: ['level'],
   },
+  kingdom_services: {
+    file: 'kingdom_services.csv', key: 'id',
+    numeric: ['minCouncilLevel', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'gold', 'delaySec'],
+    labels: ['id', 'code', 'name', 'category', 'unitCode', 'treasureCode', 'desc'],
+  },
+  pve_targets: {
+    file: 'pve_targets.csv', key: 'id',
+    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'],
+    labels: ['id', 'code', 'name'],
+  },
+  pve_defenders: {
+    file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'],
+    numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'carry'],
+    labels: ['targetId', 'unitCode', 'name', 'form'],
+  },
   // 宝物目录（treasures.csv）：id → {effectValue, reputationValue, priceGold, dropRate} 可编辑；其余为展示标签
   treasures: {
     file: 'treasures.csv', key: 'id',
@@ -512,22 +527,24 @@ function sectionGeneric(table){
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var kingdomKeys = {}; for (var ki=0;ki<KINGDOM_ROWS.length;ki++) kingdomKeys[KINGDOM_ROWS[ki][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
-  var h = '<div class="hint">主键 ' + esc(meta.key) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
+  var keyLabel = meta.key || (meta.keyComposite || []).join('|');
+  var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
   h += '<table class="bt"><thead><tr>';
   for (var i=0;i<meta.labels.length;i++) h += '<th>'+esc(meta.labels[i])+'</th>';
   for (var j=0;j<fields.length;j++) h += '<th>'+esc(fields[j])+'</th>';
   h += '</tr></thead><tbody>';
   for (var k=0;k<rows.length;k++){
     var row = rows[k];
-    var key = row[meta.key];
+    var key = meta.key ? row[meta.key] : (meta.keyComposite || []).map(function(col){ return row[col] || ''; }).join('|');
     h += '<tr>';
     for (var a=0;a<meta.labels.length;a++) h += '<td class="lbl">'+esc(row[meta.labels[a]])+'</td>';
     for (var b=0;b<fields.length;b++){
@@ -557,6 +574,43 @@ var REP_ROWS = [
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
 ];
+
+var KINGDOM_ROWS = [
+  ['kingdom_fief_offset_ratio','封地位置偏移比例','王都在中心 四封地按世界宽高比例偏移'],
+  ['kingdom_task_initial_min_sec','首次任务最短等待','注册或首次进入系统后的秒数'],
+  ['kingdom_task_initial_max_sec','首次任务最长等待','与最短值之间随机'],
+  ['kingdom_task_interval_min_sec','循环最短间隔','领取或失败后下一任务的最短等待'],
+  ['kingdom_task_interval_max_sec','循环最长间隔','领取或失败后下一任务的最长等待'],
+  ['kingdom_task_duration_sec','任务有效期','超时失败且无惩罚'],
+  ['kingdom_task_tribute_weight','上贡权重','四类任务的相对抽取权重'],
+  ['kingdom_task_clear_pve_weight','清理PvE权重','只选本象限地图已有普通PvE'],
+  ['kingdom_task_attack_evil_weight','攻打负声望玩家权重','无合格目标时自动排除'],
+  ['kingdom_task_eliminate_troops_weight','消灭兵力权重','无合格目标时自动排除'],
+  ['kingdom_task_tribute_amount_min','上贡最小数量','随机资源需求下限'],
+  ['kingdom_task_tribute_amount_max','上贡最大数量','随机资源需求上限'],
+  ['kingdom_task_eliminate_troops_min','消灭兵力最小值','累计实际战损人数'],
+  ['kingdom_task_eliminate_troops_max','消灭兵力最大值','累计实际战损人数'],
+  ['kingdom_task_evil_target_threshold','负声望目标门槛','目标声望严格小于此值的负数'],
+  ['kingdom_task_tribute_reward_reputation','上贡奖励声望','手动领取时结算'],
+  ['kingdom_task_clear_pve_reward_reputation','清理PvE奖励声望','手动领取时结算'],
+  ['kingdom_task_attack_evil_reward_reputation','攻打玩家奖励声望','手动领取时结算'],
+  ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力奖励声望','手动领取时结算'],
+];
+
+function sectionKingdom(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">王国任务调度、权重、目标范围和声望奖励集中在此；议会厅商品、王国地标守军与掉落分别见下方独立表。所有保存均写回 CSV 并热重载，无需刷档。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<KINGDOM_ROWS.length;j++){
+    var item = KINGDOM_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>王国任务参数</h2>'+h+'</div>';
+}
 
 // ── 拓荒专用视图：把开城包的真实成本集中展示，避免在全局常量长表中漏看。 ──
 // 每个键仍然写入同一张 game_constants.csv，并沿用 balance_overrides.json 的持久化覆盖机制。
@@ -782,6 +836,7 @@ function render(){
   html += sectionBuildings();
   html += sectionFounding();
   html += sectionReputation();
+  html += sectionKingdom();
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];

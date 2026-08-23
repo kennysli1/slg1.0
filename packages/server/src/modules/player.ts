@@ -1,4 +1,4 @@
-import type { Command, CommandResult } from '@slg/shared';
+import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
@@ -282,6 +282,10 @@ export class PlayerModule {
       this.store.set(COLLECTION, id, p);
       this.store.set(COLLECTION_BYNAME, clean, id);
       this.store.set(COLLECTION_BYVILLAGE, villageId, id);
+      await this._bus.emit({
+        name: 'player.Registered', source: PlayerModule.NAME, ts: this.now(),
+        payload: { playerId: id, villageId, q, r },
+      } as DomainEvent);
       return { ok: true, payload: this.authPayload(p) };
     };
 
@@ -537,6 +541,7 @@ export class PlayerModule {
   private listAll(_cmd: Command): CommandResult {
     const players = this.store.all<PlayerState>(COLLECTION).map((p) => ({
       id: p.id,
+      name: p.name,
       villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r, name: v.name })),
     }));
     return { ok: true, payload: { players } };

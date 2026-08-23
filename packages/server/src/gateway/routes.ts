@@ -355,6 +355,23 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     eventPushMap: { 'reputation.Changed': 'ReputationChanged' },
     },
   {
+    moduleName: 'kingdom',
+    publicActions: {
+      GetKingdomState: { command: 'kingdom.GetState', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
+      SubmitKingdomTribute: { command: 'kingdom.SubmitTribute', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
+      ClaimKingdomTask: { command: 'kingdom.ClaimTask', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
+      BuyKingdomService: {
+        command: 'kingdom.BuyService', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: {
+          serviceCode: { type: 'string', minLen: 1, maxLen: 64 },
+          targetKind: { type: 'enum', optional: true, values: ['village', 'pve'] },
+          targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+        },
+      },
+    },
+    eventPushMap: { 'kingdom.Updated': 'KingdomUpdated' },
+    },
+  {
     moduleName: 'pve',
     publicActions: {
       GetTarget: {

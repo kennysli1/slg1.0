@@ -38,6 +38,8 @@ interface Contribution {
   troops: Record<string, number>;
   /** 该军队携带的宝物 code（军队携带宝物机制）；全歼时按 pve/pvp 规则处理。 */
   treasures: string[];
+  /** 王国议会厅购买的 NPC 军队：不占玩家人口，也不触发玩家伤亡回收或营地宝物掉落。 */
+  npcService?: boolean;
 }
 
 interface BattleRound {
@@ -200,6 +202,7 @@ export class CombatModule {
         originalFromXY?: { q: number; r: number };
         troops: Record<string, number>; attackerSnapshot: Snapshot; treasures?: string[];
       };
+      npcService?: boolean;
     };
 
     const contribId = p.movementId;
@@ -208,7 +211,7 @@ export class CombatModule {
     if (existing) {
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         existing.attacker[`${contribId}#${code}`] = existing.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -228,7 +231,7 @@ export class CombatModule {
       const raceCheck = this.findActive(p.targetId);
       if (raceCheck) {
         raceCheck.contributions[contribId] = {
-          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
+          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
           raceCheck.attacker[`${contribId}#${code}`] = raceCheck.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -262,7 +265,7 @@ export class CombatModule {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
         battleType: p.battleType,
-        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
+        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
         initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
@@ -294,7 +297,7 @@ export class CombatModule {
     if (raceExisting) {
       // 安全并入
       raceExisting.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures],
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         raceExisting.attacker[`${contribId}#${code}`] = raceExisting.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -325,7 +328,7 @@ export class CombatModule {
       attacker,
       defender,
       defenderOriginal,
-      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures] } },
+      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
       attackerPending: 0,
       defenderPending: 0,
       initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
@@ -646,7 +649,7 @@ export class CombatModule {
       }
 
       // 向攻击方村庄登记战死即时回收（combat 只传原始损失，population 按医院等级换算回收比例）
-      if (Object.keys(attackerLossesForVillage).length > 0) {
+      if (!contrib.npcService && Object.keys(attackerLossesForVillage).length > 0) {
         void this.commands.send({
           name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
@@ -657,7 +660,7 @@ export class CombatModule {
       // 清野营掉落宝物：命中的村庄按概率抽宝物，生成「待领取」记录（不直接入栏），
       // 经 treasure.PendingDropped 进战报，玩家需确认领取，超时自动遗弃。
       // 任务营地（isTaskCamp）或不可重生 NPC 村庄（isNoRespawn，如幸福村）清空不触发普通掉落，奖励由任务模块另行发放。
-      if (campCleared && attackerWins && !isTaskCamp && !isNoRespawn) {
+      if (!contrib.npcService && campCleared && attackerWins && !isTaskCamp && !isNoRespawn) {
         void this.commands.send({
           name: 'treasure.RollDrop', from: CombatModule.NAME,
           payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId },
@@ -681,7 +684,7 @@ export class CombatModule {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
-          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, ...reportBase,
+          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, npcService: !!contrib.npcService, ...reportBase,
         },
       } as DomainEvent);
     }

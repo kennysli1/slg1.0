@@ -84,7 +84,7 @@ test('旧世界补生成 PvE 遇到村庄占位时使用后备点，不产生 or
   });
   assert.equal(village.ok, true);
   app.resume();
-  const staticPve = app.store.all<any>('pve').filter((p) => p.id.startsWith('pve-') || p.id.startsWith('gen-pve-'));
+  const staticPve = app.store.all<any>('pve').filter((p) => !p.task);
   assert.equal(staticPve.length, Math.round(41 * 41 * 0.05));
   for (const pve of staticPve) {
     const tile = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: pve.q, r: pve.r } });

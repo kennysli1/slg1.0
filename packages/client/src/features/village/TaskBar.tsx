@@ -6,12 +6,12 @@
  *  - 酒馆可接取的随机任务 → 直接接取
  */
 import { useState } from 'preact/hooks';
-import { dataVersion, taskStates, playerTaskState, tab, openModal, selected, showToast } from '../../app/store.js';
+import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
 import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
-import { fmt } from '../../shared/utils/format.js';
+import { fmt, secLeft } from '../../shared/utils/format.js';
 import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
 import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
@@ -421,12 +421,77 @@ function TaskCategoryMenu({ type, state }: { type: TaskCategory; state: any }) {
   );
 }
 
+function kingdomObjective(task: any): string {
+  if (task.kind === 'tribute') return `上贡 ${resInfo(task.resource).name} ×${fmt(task.amount ?? 0)}`;
+  if (task.kind === 'clear_pve') return `清理指定的现有 PvE 营地（X ${task.targetQ} · Y ${task.targetR}）`;
+  if (task.kind === 'attack_evil') return `攻打负声望玩家 ${task.targetPlayerName ?? task.targetPlayerId}`;
+  if (task.kind === 'eliminate_troops') return `消灭 ${task.targetPlayerName ?? task.targetPlayerId} 的兵力 ${(task.eliminatedTroops ?? 0)}/${task.requiredTroops ?? 0}`;
+  return '等待封地领主指令';
+}
+
+function KingdomTaskMenu() {
+  tick.value;
+  const state = kingdomState.value;
+  if (!state) return null;
+  const task = state.task;
+  const goMap = () => {
+    if (!task || !Number.isFinite(task.targetQ) || !Number.isFinite(task.targetR)) return;
+    setMapCenter({ q: task.targetQ, r: task.targetR });
+    selected.value = { refId: task.targetPveId, kind: 'pve', q: task.targetQ, r: task.targetR, name: '王国任务目标' };
+    tab.value = 'map';
+  };
+  const submit = async () => {
+    await act(req('SubmitKingdomTribute'), { okToast: '上贡完成，任务可领取' });
+  };
+  const claim = async () => {
+    await act(req('ClaimKingdomTask'), { okToast: `王国任务完成，声望 +${task?.rewardReputation ?? 0}` });
+  };
+  const status = task?.status === 'ready' ? '待领取'
+    : task?.status === 'failed' ? '已过期'
+      : task?.status === 'claimed' ? '已领取' : task ? '进行中' : '等待指令';
+  return (
+    <details class="task-menu task-menu--category" open>
+      <summary><span>王国任务</span><span class="task-menu-count">{task ? 1 : 0}</span></summary>
+      <div class="task-menu-body">
+        <details class="task-menu task-menu--task" open>
+          <summary>
+            <span class="task-menu-summary-name">{state.fiefName}领主的指令</span>
+            <Tag kind="gold">王国</Tag>
+            <Tag kind="steel">全局</Tag>
+            <span class="task-menu-summary-state">{status}</span>
+          </summary>
+          <div class="task-menu-task-body">
+            <div class="task-card task-card--side">
+              <div class="task-card-desc">
+                {task ? kingdomObjective(task) : `下一项指令将在 ${secLeft(state.nextIssueAt)} 后下达。`}
+              </div>
+              {task && (task.status === 'active' || task.status === 'ready') && (
+                <div class="task-card-prog">
+                  <span class="task-prog-chip">剩余 {secLeft(task.expiresAt)}</span>
+                  <span class="task-prog-chip">奖励声望 +{task.rewardReputation}</span>
+                </div>
+              )}
+              {task?.status === 'failed' && <div class="task-prog-hint">任务已过期，没有惩罚；之后仍会循环出现新任务。</div>}
+              {task?.status === 'claimed' && <div class="task-prog-hint">下一项指令将在 {secLeft(state.nextIssueAt)} 后下达。</div>}
+              <div class="task-card-actions">
+                {task?.status === 'active' && task.kind === 'tribute' && <Btn size="sm" variant="primary" onClick={() => void submit()}>上贡资源</Btn>}
+                {task?.status === 'active' && task.kind === 'clear_pve' && <Btn size="sm" variant="ghost" onClick={goMap}>前往地图</Btn>}
+                {task?.status === 'ready' && <Btn size="sm" variant="primary" onClick={() => void claim()}>领取声望奖励</Btn>}
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </details>
+  );
+}
+
 function TaskScopeMenu({ scope, state, currentVillageId }: { scope: 'global' | 'village'; state: any; currentVillageId?: string }) {
   const categories: TaskCategory[] = scope === 'global' ? ['main', 'side', 'daily'] : ['side', 'daily'];
   const count = categories.reduce((total, type) => {
     const { active, offers } = categoryItems(state, type);
     return total + active.length + offers.length;
-  }, 0);
+  }, 0) + (scope === 'global' && kingdomState.value?.task ? 1 : 0);
   const label = scope === 'global' ? '全局任务' : '村庄任务';
   const sub = scope === 'global'
     ? '主线、全局支线与全局日常；可从任意村庄执行'
@@ -440,6 +505,7 @@ function TaskScopeMenu({ scope, state, currentVillageId }: { scope: 'global' | '
       </summary>
       <div class="task-menu-body task-menu-scope-body">
         {categories.map((type) => <TaskCategoryMenu key={type} type={type} state={state} />)}
+        {scope === 'global' && <KingdomTaskMenu />}
       </div>
     </details>
   );
