@@ -32,6 +32,8 @@ const ERR_MSG: Record<string, string> = {
   origin_not_found: '出发村庄不存在',
   cannot_attack_self: '不能攻击自己的村庄',
   village_not_found: '村庄不存在',
+  village_name_empty: '村庄名称不能为空',
+  village_name_too_long: '村庄名称不能超过24个字符',
   not_logged_in: '请重新登录',
   network_error: '网络连接异常',
   insufficient_population: '人口不足，无法训练',

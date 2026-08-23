@@ -163,6 +163,7 @@ export class PlayerModule {
     this.commands.register('player.Get', (c) => this.get(c));
     this.commands.register('player.GetByVillage', (c) => this.getByVillage(c));
     this.commands.register('player.SelectVillage', (c) => this.selectVillage(c));
+    this.commands.register('player.RenameVillage', (c) => this.renameVillage(c));
     this.commands.register('player.AbandonVillage', (c) => this.abandonVillage(c));
     this.commands.register('player.AttachVillage', (c) => this.attachVillage(c));
     this.commands.register('player.DetachVillage', (c) => this.detachVillage(c));
@@ -332,6 +333,33 @@ export class PlayerModule {
         currentVillageId: villageId,
       },
     };
+  }
+
+  /** 修改玩家自己村庄的名称；地图地块由 World 通过事件同步，避免跨模块直接改状态。 */
+  private async renameVillage(cmd: Command): Promise<CommandResult> {
+    const { playerId, villageId, name } = cmd.payload as {
+      playerId: string; villageId: string; name: string;
+    };
+    const p = this.load(playerId);
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const village = p.ownedVillages.find((v) => v.id === villageId);
+    if (!village) return { ok: false, payload: {}, reason: 'village_not_owned' };
+    const clean = String(name ?? '').trim();
+    if (!clean) return { ok: false, payload: {}, reason: 'village_name_empty' };
+    if ([...clean].length > 24) return { ok: false, payload: {}, reason: 'village_name_too_long' };
+    if (village.name === clean) {
+      return { ok: true, payload: { player: this.publicPlayer(p) } };
+    }
+    const previousName = village.name;
+    village.name = clean;
+    this.store.set(COLLECTION, p.id, p);
+    await this._bus.emit({
+      name: 'player.VillageRenamed',
+      source: PlayerModule.NAME,
+      ts: this.now(),
+      payload: { playerId: p.id, villageId, name: clean, previousName },
+    });
+    return { ok: true, payload: { player: this.publicPlayer(p) } };
   }
 
   /**

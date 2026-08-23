@@ -1,7 +1,57 @@
-import { me, selectVillage } from '../../api.js';
+import { useState } from 'preact/hooks';
+import { me, applyMe, req, selectVillage } from '../../api.js';
 import { refreshAll } from '../../app/refresh.js';
-import { dataVersion, sessionVersion, showToast } from '../../app/store.js';
-import { Panel } from '../../ui/index.js';
+import { act } from '../../app/refresh.js';
+import { dataVersion, openModal, sessionVersion, showToast } from '../../app/store.js';
+import { Btn, Modal, Panel } from '../../ui/index.js';
+import type { MeVillage } from '../../api.js';
+
+function RenameVillageModal({ village, close }: { village: MeVillage; close: () => void }) {
+  const [name, setName] = useState(village.name);
+  const [saving, setSaving] = useState(false);
+  const trimmed = name.trim();
+
+  async function save() {
+    if (!trimmed || saving) return;
+    setSaving(true);
+    const ok = await act(req('RenameVillage', { villageId: village.id, name: trimmed }), {
+      okToast: '村庄名称已修改',
+      onOk: (payload) => applyMe((payload as any).player, true),
+    });
+    setSaving(false);
+    if (ok) {
+      close();
+      sessionVersion.value++;
+    }
+  }
+
+  return (
+    <Modal
+      title="修改村庄名"
+      sub={`X ${village.q} · Y ${village.r}`}
+      onClose={saving ? () => {} : close}
+      foot={
+        <>
+          <Btn variant="ghost" disabled={saving} onClick={close}>取消</Btn>
+          <Btn variant="primary" disabled={saving || !trimmed} onClick={() => void save()}>{saving ? '保存中…' : '保存'}</Btn>
+        </>
+      }
+    >
+      <label class="field-label" for="village-name-input">村庄名称</label>
+      <input
+        id="village-name-input"
+        class="village-name-input"
+        type="text"
+        value={name}
+        maxLength={24}
+        data-modal-initial-focus
+        onInput={(event) => setName((event.currentTarget as HTMLInputElement).value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') void save(); }}
+      />
+      <p class="village-name-hint">名称会同步到村庄列表和地图。</p>
+    </Modal>
+  );
+}
 
 /** 村庄工作区切换器：村庄、军队、科技页共用，明确当前数据所属村庄。 */
 export function VillageList() {
@@ -29,22 +79,33 @@ export function VillageList() {
     await refreshAll();
   }
 
+  function rename(village: MeVillage) {
+    openModal((close) => <RenameVillageModal village={village} close={close} />, `rename-village-${village.id}`);
+  }
+
   return (
     <Panel variant="flat" pad class="village-list-panel">
       <div class="village-list-title">我的村庄</div>
       <div class="village-list" role="list" aria-label="切换村庄">
         {villages.map((village) => (
-          <button
+          <div
             key={village.id}
-            type="button"
             role="listitem"
             class={`village-list-item${village.id === me?.villageId ? ' active' : ''}`}
-            aria-current={village.id === me?.villageId ? 'page' : undefined}
-            onClick={() => void pick(village.id)}
           >
-            <span class="village-list-name">{village.name}{village.isCapital ? '（主城）' : ''}</span>
-            <span class="village-list-coords">X {village.q} · Y {village.r}</span>
-          </button>
+            <button
+              type="button"
+              class="village-list-select"
+              aria-current={village.id === me?.villageId ? 'page' : undefined}
+              onClick={() => void pick(village.id)}
+            >
+              <span class="village-list-name">{village.name}{village.isCapital ? '（主城）' : ''}</span>
+              <span class="village-list-coords">X {village.q} · Y {village.r}</span>
+            </button>
+            <div class="village-list-actions">
+              <Btn size="sm" variant="ghost" class="village-list-rename" onClick={() => rename(village)}>修改名称</Btn>
+            </div>
+          </div>
         ))}
       </div>
     </Panel>
