@@ -512,10 +512,10 @@ function sectionGeneric(table){
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && r.key !== 'alchemy_refine_sec'; });
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec'; });
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -593,6 +593,19 @@ function sectionReputation(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
+}
+
+// ── 伏击专用视图：与普通战斗常量分开，便于调试伏击强度。 ──
+function sectionAmbush(){
+  var rows = DATA.constants || [], row = null;
+  for (var i=0;i<rows.length;i++) if (rows[i].key === 'ambush_attack_bonus') { row = rows[i]; break; }
+  var value = row && row.value != null ? row.value : '';
+  var h = '<div class="hint">伏击军抵达空地后进入隐蔽驻扎；敌方军队进入一格内触发伏击战。该攻击加成只作用于伏击方，不影响行军中的普通野战。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  h += '<tr><td class="lbl">伏击攻击加成 <small style="color:#7a86a8">(ambush_attack_bonus)</small></td>';
+  h += '<td><input type="number" min="0" step="0.01" value="'+esc(value)+'" data-t="constants" data-k="ambush_attack_bonus" data-f="value" oninput="onEdit(this)"></td>';
+  h += '<td class="lbl">0.5 表示 +50%；仅伏击战攻击方生效</td></tr></tbody></table>';
+  return '<div class="sec"><h2>伏击参数</h2>'+h+'</div>';
 }
 
 // ── 建筑参数统一视图 ── 合并 buildings + building_levels + trade_center + merc_camp，每栋一张折叠卡片。
@@ -769,6 +782,7 @@ function render(){
   html += sectionBuildings();
   html += sectionFounding();
   html += sectionReputation();
+  html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
     if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染

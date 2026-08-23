@@ -180,7 +180,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       PreviewMarch: {
         command: 'movement.PreviewMarch', ownVillage: true, needAuth: true,
-        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
+        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout', 'ambush'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
       },
       FoundVillage: {
         command: 'movement.FoundVillage', ownVillage: true, needAuth: true,
@@ -201,6 +201,15 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       SendGarrison: {
         command: 'movement.SendGarrison', ownVillage: true, needAuth: true,
+        schema: {
+          q: { type: 'integer', min: -100, max: 100 },
+          r: { type: 'integer', min: -100, max: 100 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
+      SendAmbush: {
+        command: 'movement.SendAmbush', ownVillage: true, needAuth: true,
         schema: {
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
@@ -239,7 +248,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           movementId: { type: 'string', minLen: 1, maxLen: 64 },
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
-          mode: { type: 'enum', values: ['garrison', 'explore', 'raid', 'attack', 'scout', 'reinforce', 'transfer'] },
+          mode: { type: 'enum', values: ['garrison', 'explore', 'raid', 'attack', 'scout', 'reinforce', 'transfer', 'ambush'] },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
         },
