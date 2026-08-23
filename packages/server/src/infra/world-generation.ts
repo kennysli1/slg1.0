@@ -1,4 +1,4 @@
-import { wrapHex } from './hex.js';
+import { hexDistanceWrapped, wrapHex } from './hex.js';
 
 export type Terrain = 'plain' | 'forest' | 'hills';
 
@@ -16,6 +16,8 @@ export interface GeneratedWorldPlan {
   terrain: Terrain[];
   spawnSlots: Array<{ q: number; r: number }>;
   pveSpawns: WorldAnchor[];
+  /** 固定点碰到旧世界动态占用时，按此确定性顺序寻找替代格。 */
+  pveCandidates: Array<{ q: number; r: number }>;
 }
 
 const SPAWN_MIN_DISTANCE = 4;
@@ -102,6 +104,57 @@ function pveTypeAt(index: number, total: number): string {
   return PVE_TYPES[PVE_TYPES.length - 1]!;
 }
 
+function cellsWithin(center: { q: number; r: number }, radius: number, w: number, h: number): Array<{ q: number; r: number }> {
+  const out = new Map<string, { q: number; r: number }>();
+  for (let dq = -radius; dq <= radius; dq++) {
+    const minDr = Math.max(-radius, -dq - radius);
+    const maxDr = Math.min(radius, -dq + radius);
+    for (let dr = minDr; dr <= maxDr; dr++) {
+      const p = wrapHex({ q: center.q + dq, r: center.r + dr }, w, h);
+      out.set(`${p.q},${p.r}`, p);
+    }
+  }
+  return [...out.values()];
+}
+
+function greedyCoverage(
+  type: string,
+  radius: number,
+  required: number,
+  slots: Array<{ q: number; r: number }>,
+  anchors: WorldAnchor[],
+  blocked: Set<string>,
+  seed: string,
+  w: number,
+  h: number,
+  terrain: Terrain[],
+  preferred?: Terrain,
+): WorldAnchor[] {
+  const counts = slots.map((slot) => anchors.filter((a) => a.type === type && hexDistanceWrapped(slot, a, w, h) <= radius).length);
+  const picked: WorldAnchor[] = [];
+  while (true) {
+    const slotIndex = counts.findIndex((n) => n < required);
+    if (slotIndex < 0) return picked;
+    let best: { q: number; r: number; gain: number; tie: number } | undefined;
+    for (const p of cellsWithin(slots[slotIndex]!, radius, w, h)) {
+      if (blocked.has(`${p.q},${p.r}`)) continue;
+      let gain = 0;
+      for (let i = 0; i < slots.length; i++) {
+        if (counts[i]! < required && hexDistanceWrapped(slots[i]!, p, w, h) <= radius) gain++;
+      }
+      const preferencePenalty = preferred && terrain[p.r * w + p.q] !== preferred ? 1 : 0;
+      const tie = preferencePenalty + unitHash(seed, p.q, p.r, `coverage:${type}`) * 0.5;
+      if (!best || gain > best.gain || (gain === best.gain && tie < best.tie)) best = { ...p, gain, tie };
+    }
+    if (!best) throw new Error(`cannot satisfy ${type} spawn coverage`);
+    blocked.add(`${best.q},${best.r}`);
+    picked.push({ id: '', type, q: best.q, r: best.r });
+    for (let i = 0; i < slots.length; i++) {
+      if (hexDistanceWrapped(slots[i]!, best, w, h) <= radius) counts[i] = counts[i]! + 1;
+    }
+  }
+}
+
 /**
  * 纯函数式、确定性的环面世界计划。计划不落盘：同 seed + 尺寸 + 人工锚点必得同一结果。
  * 人工 PvE 锚点优先保留；自动点补足到 round(W*H*5%)，且不占用首村保留槽位。
@@ -125,21 +178,62 @@ export function generateWorldPlan(w: number, h: number, seed: string, anchors: W
   const reserved = new Set(spawnSlots.map((p) => `${p.q},${p.r}`));
   const targetCount = Math.round(w * h * 0.05);
   const supplement = Math.max(0, targetCount - normalizedAnchors.length);
+  const generatedBlocked = new Set([...occupied, ...reserved]);
+  const guaranteed = spawnSlots.length >= LARGE_WORLD_SPAWN_TARGET ? [
+    ...greedyCoverage('rats', 4, 2, spawnSlots, normalizedAnchors, generatedBlocked, seed, w, h, terrain, 'plain'),
+    ...greedyCoverage('wolves', 6, 1, spawnSlots, normalizedAnchors, generatedBlocked, seed, w, h, terrain, 'forest'),
+  ] : [];
+  if (guaranteed.length > supplement) throw new Error('PvE density is insufficient for spawn-slot guarantees');
   const candidates: Array<{ q: number; r: number; score: number }> = [];
   for (let r = 0; r < h; r++) for (let q = 0; q < w; q++) {
     const key = `${q},${r}`;
-    if (occupied.has(key) || reserved.has(key)) continue;
+    if (generatedBlocked.has(key)) continue;
     candidates.push({ q, r, score: unitHash(seed, q, r, 'pve-order') });
   }
   candidates.sort((a, b) => a.score - b.score);
-  if (candidates.length < supplement) throw new Error('world has insufficient cells for generated PvE targets');
-  const generated = candidates.slice(0, supplement).map((p, i) => ({
+  const fillCount = supplement - guaranteed.length;
+  if (candidates.length < fillCount) throw new Error('world has insufficient cells for generated PvE targets');
+  const fill: WorldAnchor[] = [];
+  for (let i = 0; i < fillCount; i++) {
+    const type = pveTypeAt(guaranteed.length + i, Math.max(1, supplement));
+    const preferred: Terrain | undefined = type === 'wolves'
+      ? 'forest'
+      : (type === 'fortress' || type === 'dark_legion' || type === 'bone_king') ? 'hills' : undefined;
+    let index = preferred
+      ? candidates.findIndex((p) => terrain[p.r * w + p.q] === preferred)
+      : 0;
+    if (index < 0) index = 0;
+    const [point] = candidates.splice(index, 1);
+    if (!point) throw new Error('world has insufficient cells for generated PvE targets');
+    fill.push({ id: '', type, q: point.q, r: point.r });
+  }
+  const generatedPoints: WorldAnchor[] = [...guaranteed, ...fill];
+  // 生态偏好是软分布约束：覆盖保底完成后，把部分森林普通点转为狼群，使狼群明显偏向森林。
+  const allForBias = [...normalizedAnchors, ...generatedPoints];
+  let wolvesTotal = allForBias.filter((p) => p.type === 'wolves').length;
+  let forestWolves = allForBias.filter((p) => p.type === 'wolves' && terrain[p.r * w + p.q] === 'forest').length;
+  for (const point of fill) {
+    if (forestWolves / Math.max(1, wolvesTotal) > 0.5) break;
+    if (point.type === 'wolves' || terrain[point.r * w + point.q] !== 'forest') continue;
+    if (point.type === 'fortress' || point.type === 'dark_legion' || point.type === 'bone_king') continue;
+    point.type = 'wolves';
+    wolvesTotal++;
+    forestWolves++;
+  }
+  const generated = generatedPoints.map((p, i) => ({
     id: `gen-pve-${i}`,
-    type: pveTypeAt(i, Math.max(1, supplement)),
+    type: p.type,
     q: p.q,
     r: p.r,
   }));
-  const plan = { w, h, seed, terrain, spawnSlots, pveSpawns: [...normalizedAnchors, ...generated] };
+  // 替代候选先列计划点，再列所有非保留格；旧世界碰撞时仍能补足总量。
+  const plannedKeys = new Set(generatedPoints.map((p) => `${p.q},${p.r}`));
+  const fallback = candidates.filter((p) => !plannedKeys.has(`${p.q},${p.r}`)).map(({ q, r }) => ({ q, r }));
+  const plan = {
+    w, h, seed, terrain, spawnSlots,
+    pveSpawns: [...normalizedAnchors, ...generated],
+    pveCandidates: [...generatedPoints.map(({ q, r }) => ({ q, r })), ...fallback],
+  };
   PLAN_CACHE.set(cacheKey, plan);
   return plan;
 }

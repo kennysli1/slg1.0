@@ -196,7 +196,7 @@ test('Gateway-Scheduler serial: resetWorld 后 serialQueue 被重置', async () 
   // (key 可能在清理前已移除，但 secondRan 一定是 false 因为 hang 还没完成)
   assert.equal(secondRan, false, 'reset 前第二个任务不应执行');
 
-  app.resetWorld({ keepAccounts: false });
+  await app.resetWorld({ keepAccounts: false });
 
   assert.equal(app.serialQueue.size, 0, 'resetWorld 后 serialQueue.size 应为 0');
 

@@ -126,7 +126,7 @@ export interface GameApp {
    *  - {keepAccounts:false}                      删档：连账号一起清空
    * 返回受影响的账号数（keepAccounts=false 时为被清空的账号数）。
    */
-  resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): { accounts: number };
+  resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): Promise<{ accounts: number }>;
   /**
    * 删除单个玩家账号及其所有游戏进度（经济/建筑/兵力/地图等）。
    * 返回被删除的主城 villageId + 全部 villageIds；若玩家不存在返回 null。
@@ -310,14 +310,32 @@ export function createGameApp(opts?: {
   for (const module of modules) module.init();
 
   /** 建立派生世界计划，并只补齐缺失的固定/生成 PvE；已有战损与重生状态不覆盖。 */
-  const ensureWorldPlan = (useConfiguredSize = false): void => {
-    const plan = world.setup(
+  const setupWorldPlan = (useConfiguredSize = false) => world.setup(
       useConfiguredSize ? configuredWorldW : config.constants.worldW,
       useConfiguredSize ? configuredWorldH : config.constants.worldH,
     );
+  const ensurePve = (plan: ReturnType<typeof setupWorldPlan>): void => {
+    const occupied = world.getOccupiedTileKeys();
+    let fallbackIndex = 0;
     for (const s of plan.pveSpawns) {
-      if (!store.get('pve', s.id)) pve.create(s.id, s.type, s.q, s.r);
+      if (store.get('pve', s.id)) continue;
+      let point = { q: s.q, r: s.r };
+      if (occupied.has(`${point.q},${point.r}`)) {
+        while (fallbackIndex < plan.pveCandidates.length) {
+          const candidate = plan.pveCandidates[fallbackIndex++]!;
+          if (!occupied.has(`${candidate.q},${candidate.r}`)) {
+            point = candidate;
+            break;
+          }
+        }
+      }
+      if (occupied.has(`${point.q},${point.r}`)) continue;
+      pve.create(s.id, s.type, point.q, point.r);
+      occupied.add(`${point.q},${point.r}`);
     }
+  };
+  const ensureWorldPlan = (useConfiguredSize = false): void => {
+    ensurePve(setupWorldPlan(useConfiguredSize));
   };
 
   return {
@@ -388,13 +406,23 @@ export function createGameApp(opts?: {
       }
       return newConfig;
     },
-    resetWorld({ keepAccounts, reassignSpots = false }) {
+    async resetWorld({ keepAccounts, reassignSpots = false }) {
       // 0. 先清空调度器：取消所有待处理定时任务，避免刷档后遗留任务触发旧逻辑。
       scheduler.reset();
       serialQueue.reset();
 
       // 1. 清空所有游戏进度集合。
       for (const c of PROGRESS_COLLECTIONS) store.clear(c);
+
+      if (reassignSpots) {
+        const resizedConfig: GameConfig = {
+          ...config,
+          constants: { ...config.constants, worldW: configuredWorldW, worldH: configuredWorldH },
+        };
+        for (const module of modules) module.setConfig(resizedConfig);
+        config = resizedConfig;
+        this.config = resizedConfig;
+      }
 
       // 2. 不保留账号 → 连账号集合一起清，回到零玩家状态，重建世界骨架。
       if (!keepAccounts) {
@@ -404,9 +432,11 @@ export function createGameApp(opts?: {
         return { accounts: n };
       }
 
-      // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
-      ensureWorldPlan(reassignSpots);
-      player.rebuildVillages(reassignSpots);
+      // 3. 保留账号：season 先恢复原村坐标再补 PvE，避免生成点抢占旧村；respawn 则先建新图再从保留槽分配。
+      const plan = setupWorldPlan(reassignSpots);
+      if (reassignSpots) ensurePve(plan);
+      await player.rebuildVillages(reassignSpots);
+      if (!reassignSpots) ensurePve(plan);
       return { accounts: store.all('player').length };
     },
     deletePlayer(playerId) {

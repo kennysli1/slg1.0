@@ -45,7 +45,7 @@ test('resetWorld: 刷档后 scheduler.pending 为 0（遗留任务被清除）',
   assert.ok(pendingBeforeReset > 0, '刷档前应有在途任务');
 
   // 刷档
-  app.resetWorld({ keepAccounts: false });
+  await app.resetWorld({ keepAccounts: false });
 
   assert.equal(app.scheduler.pending, 0, '刷档后 scheduler.pending 应为 0');
 

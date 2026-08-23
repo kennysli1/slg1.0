@@ -38,7 +38,7 @@ function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), 'kow-bal-'));
 }
 
-test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效', () => {
+test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效', async () => {
   const dataDir = tmpDataDir();
   const storePath = join(dataDir, 'game.json');
   try {
@@ -72,7 +72,7 @@ test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效'
     assert.deepEqual(rt, edits, 'loadBalanceOverrides 应原样读回（P2）');
 
     // P3：wipe（resetWorld）不应删除覆盖文件，重载后修改依旧
-    app.resetWorld({ keepAccounts: false });
+    await app.resetWorld({ keepAccounts: false });
     assert.ok(existsSync(overridePath!), 'wipe 不应删除 balance_overrides.json（P3）');
     app.reloadConfig();
     assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, 'wipe 后重载覆盖应依旧生效（P3）');

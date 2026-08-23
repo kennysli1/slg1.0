@@ -96,6 +96,22 @@ test('wire-boundary：payload 不是对象被拒绝', async () => {
   assert.equal(res.error?.code, 'bad_envelope');
 });
 
+test('wire-boundary：96×96 全图 GetArea 的 r=96 可通过 schema', async () => {
+  const { gateway } = makeGateway();
+  const { conn } = makeFakeConn();
+  const session = gateway.addClient(conn);
+  const registered = await gateway.handleRequest({
+    v: WIRE_VERSION, type: 'req', id: 'register-map-96', action: 'Register',
+    payload: { name: 'map96', password: 'pass1234', tribe: 'romans' },
+  }, session);
+  assert.equal(registered.ok, true);
+  const area = await gateway.handleRequest({
+    v: WIRE_VERSION, type: 'req', id: 'area-map-96', action: 'GetArea',
+    payload: { cq: 0, cr: 0, r: 96, full: true },
+  }, session);
+  assert.equal(area.ok, true, area.error?.code);
+});
+
 test('wire-boundary：未知 action 被拒绝', async () => {
   const { gateway } = makeGateway();
   const { conn } = makeFakeConn();

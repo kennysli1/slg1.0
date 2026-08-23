@@ -53,7 +53,7 @@ function backup(dataPath: string): string | null {
   return dest;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const mode = parseMode(process.argv.slice(2));
   const dataPath = process.env.DATA_PATH ?? join(__dirname, '../../../data/game.json');
 
@@ -73,7 +73,7 @@ function main(): void {
     mode === 'wipe'
       ? { keepAccounts: false }
       : { keepAccounts: true, reassignSpots: mode === 'respawn' };
-  const { accounts } = app.resetWorld(opts);
+  const { accounts } = await app.resetWorld(opts);
 
   // 4. 落盘
   app.store.flush();
@@ -86,4 +86,7 @@ function main(): void {
   process.exit(0);
 }
 
-main();
+void main().catch((err) => {
+  console.error('[admin] 执行失败：', err);
+  process.exit(1);
+});

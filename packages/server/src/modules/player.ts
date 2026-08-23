@@ -652,7 +652,7 @@ export class PlayerModule {
    * 运维：为所有现存账号重建**主城**（刷档后调用）。多村进度已随 PROGRESS 清空，
    * 此处把玩家收束回单主城。
    */
-  rebuildVillages(reassignSpots: boolean): void {
+  async rebuildVillages(reassignSpots: boolean): Promise<void> {
     const players = this.store
       .all<RawPlayer>(COLLECTION)
       .slice()
@@ -666,16 +666,25 @@ export class PlayerModule {
       let r = p.r;
       let villageId = `v-${p.id}-1`;
       if (reassignSpots) {
-        const spot = this.allocateSpot();
-        if (!spot) throw new Error('world_capacity_exhausted');
-        q = spot.q;
-        r = spot.r;
+        const allocated = await this.commands.send({
+          name: 'world.AllocateSpawn', from: PlayerModule.NAME,
+          payload: { refId: villageId, name: `${p.name}的村庄` },
+        });
+        if (!allocated.ok) throw new Error(allocated.reason ?? 'world_capacity_exhausted');
+        ({ q, r } = allocated.payload as { q: number; r: number });
       } else {
         // 保留原主城坐标；若旧 id 是 v-p-N 则升为 v-p-N-1
         const capital = p.ownedVillages.find((v) => v.id === p.capitalVillageId);
         if (capital) { q = capital.q; r = capital.r; }
       }
       const vName = `${p.name}的村庄`;
+      if (!reassignSpots) {
+        const restored = await this.commands.send({
+          name: 'world.RestoreVillage', from: PlayerModule.NAME,
+          payload: { q, r, refId: villageId, name: vName },
+        });
+        if (!restored.ok) throw new Error(restored.reason ?? 'village_restore_failed');
+      }
       const owned: OwnedVillage = { id: villageId, q, r, name: vName };
       const updated: PlayerState = {
         ...p,
@@ -687,7 +696,7 @@ export class PlayerModule {
       };
       this.store.set(COLLECTION, p.id, updated);
       this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
-      void this.createVillage(villageId, q, r, vName, p.tribe);
+      await this.createVillage(villageId, q, r, vName, p.tribe);
     }
   }
 }

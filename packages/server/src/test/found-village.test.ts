@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { hexDistanceWrapped } from '../infra/hex.js';
 
 let clock = 1_000_000;
 function freshApp(): GameApp {
@@ -77,15 +78,19 @@ test('拓荒：成功建第二村', async () => {
   const pr = player.r as number;
   await prepFoundReady(app, vid);
 
-  // 选一个距主城足够远的空地
+  // 选一个距主城足够远、且不是首村保留槽的空地
   const minD = app.config.constants.foundMinTileDistance;
-  let tq = pq + minD + 1;
-  let tr = pr;
-  // 若越界则换方向
-  if (Math.abs(tq) + Math.abs(tr) + Math.abs(-tq - tr) > app.config.constants.mapSize * 2) {
-    tq = pq;
-    tr = pr + minD + 1;
+  const plan = app.world.setup(app.config.constants.worldW, app.config.constants.worldH);
+  const reserved = new Set(plan.spawnSlots.map((slot) => `${slot.q},${slot.r}`));
+  let target: { q: number; r: number } | undefined;
+  for (let r = 0; r < plan.h && !target; r++) for (let q = 0; q < plan.w; q++) {
+    if (reserved.has(`${q},${r}`)) continue;
+    if (hexDistanceWrapped({ q: pq, r: pr }, { q, r }, plan.w, plan.h) < minD) continue;
+    const tile = await send(app, 'world.GetTile', { q, r });
+    if ((tile.payload as any).tile.kind === 'empty') { target = { q, r }; break; }
   }
+  assert.ok(target, '应找到可拓荒的非保留空地');
+  const { q: tq, r: tr } = target;
 
   const found = await send(app, 'movement.FoundVillage', { villageId: vid, q: tq, r: tr });
   assert.equal(found.ok, true, `FoundVillage: ${found.reason}`);

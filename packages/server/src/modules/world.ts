@@ -90,6 +90,7 @@ export class WorldModule {
     this.commands.register('world.GetArea', (c) => this.getArea(c));
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
+    this.commands.register('world.RestoreVillage', (c) => this.restoreVillage(c));
     this.commands.register('world.MoveVillage', (c) => this.moveVillage(c));
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
     this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
@@ -230,7 +231,23 @@ export class WorldModule {
       if (exist.kind === 'village' && exist.refId === refId) return { ok: true, payload: { q: w.q, r: w.r } };
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
+    if (this.plan!.spawnSlots.some((slot) => slot.q === w.q && slot.r === w.r)) {
+      return { ok: false, payload: {}, reason: 'spawn_slot_reserved' };
+    }
     this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name });
+    return { ok: true, payload: { q: w.q, r: w.r } };
+  }
+
+  /** 刷档保留坐标专用：恢复已存在账号的村庄，可占回其首村保留槽。 */
+  private restoreVillage(cmd: Command): CommandResult {
+    const { q, r, refId, name } = cmd.payload as { q: number; r: number; refId: string; name: string };
+    const w = wrapHex({ q, r }, this.worldW, this.worldH);
+    const key = hexKey(w.q, w.r);
+    const exist = this.store.get<Tile>(COLLECTION_TILE, key);
+    if (exist && exist.kind !== 'empty' && exist.refId !== refId) {
+      return { ok: false, payload: {}, reason: 'tile_occupied' };
+    }
+    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
