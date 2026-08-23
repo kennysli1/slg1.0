@@ -113,6 +113,8 @@ export interface StoredReport {
   text: string;
   kind: ReportKind;
   ts: number;
+  /** 战斗报告的结构化回放数据；其他类型战报不携带详情。 */
+  details?: Record<string, any>;
 }
 
 let cache: any = {};
@@ -154,8 +156,8 @@ export function getReports(): StoredReport[] { return reports; }
  * 分类必须来自事件名，**不能**回头去猜已渲染的中文文案（宝物名里带「人口」之类
  * 就会误判）。`ts` 缺省为现在。
  */
-export function addReport(text: string, kind: ReportKind = 'info', ts: number = Date.now()): void {
-  reports.unshift({ text, kind, ts });
+export function addReport(text: string, kind: ReportKind = 'info', ts: number = Date.now(), details?: Record<string, any>): void {
+  reports.unshift({ text, kind, ts, ...(details ? { details } : {}) });
   if (reports.length > 60) reports.pop();
 }
 
