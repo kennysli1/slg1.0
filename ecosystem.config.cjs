@@ -22,5 +22,24 @@ module.exports = {
       out_file: './logs/out.log',
       error_file: './logs/err.log',
     },
+    {
+      // AI 测试服 01：与主服使用相同代码，但世界存档、日志和端口完全隔离。
+      name: 'kow-test-01',
+      script: 'packages/server/dist/main.js',
+      node_args: '--enable-source-maps',
+      cwd: __dirname,
+      env: {
+        NODE_ENV: 'production',
+        PORT: '8081',
+        HOST: '0.0.0.0',
+        DATA_PATH: './data/test-01/game.json',
+        LOG_DIR: './logs/test-01',
+      },
+      autorestart: true,
+      max_restarts: 10,
+      kill_timeout: 5000,
+      out_file: './logs/test-01/out.log',
+      error_file: './logs/test-01/err.log',
+    },
   ],
 };
