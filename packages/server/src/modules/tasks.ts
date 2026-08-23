@@ -913,6 +913,24 @@ export class TasksModule {
   }
 
   /**
+   * 任务营地战败时不推进任务，也不让地图实体丢失。
+   *
+   * 任务营地不使用普通 PvE 的“清空后生命周期”：即使旧版本/并发结算已经
+   * 删除了 pve 实体，仍要按任务快照坐标补回，直到任务放弃或正式交付完成。
+   * 当前任务图没有“战败即任务失败”的目标，因此默认全部走保留路径。
+   */
+  private async preserveTaskCampAfterDefeat(villageId: string, targetId: string): Promise<void> {
+    const match = this.findTaskCamp(villageId, targetId);
+    if (!match) return;
+    const camp = match.inst.camps.find((item) => item.id === targetId && !item.cleared);
+    if (!camp) return;
+    await this.syncTaskCamp(match.inst, camp, match.taskVillageId);
+    this.store.set(COLLECTION, match.storageVillageId, match.state);
+    await this.pushList(match.taskVillageId);
+    await this.pushMap(match.taskVillageId);
+  }
+
+  /**
    * 恢复时校准任务状态与 PvE 实体的坐标。
    * 旧版本曾把同一任务的地图实体写在另一座村庄附近，导致任务卡和地图各显示一套坐标；
    * 任务实例保存的坐标是接取时的权威快照，空地可用时把实体搬回该坐标，否则采用现有实体
@@ -930,7 +948,17 @@ export class TasksModule {
       });
       return;
     }
-    const current = target.payload as { q?: number; r?: number };
+    const current = target.payload as { q?: number; r?: number; cleared?: boolean };
+    // 战败恢复路径可能遇到旧状态已被标成 cleared、但任务实例仍未完成的实体；
+    // 重新生成守军，避免地图标记还在却变成空营地，导致下一次出征被瞬间判定成功。
+    if (current.cleared === true) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
+      await this.commands.send({
+        name: 'pve.Spawn', from: TasksModule.NAME,
+        payload: { id: camp.id, type: template, q: camp.q, r: camp.r, task: true, ownerVillageId },
+      });
+      return;
+    }
     if (Number(current.q) === camp.q && Number(current.r) === camp.r) {
       await this.commands.send({ name: 'pve.AssignTaskOwner', from: TasksModule.NAME, payload: { id: camp.id, ownerVillageId } });
       return;
@@ -1025,10 +1053,16 @@ export class TasksModule {
   private async onBattleEnded(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number> };
     if (p.side !== 'attacker') return;
-    if (!p.attackerWins) return;
     const villageId = p.villageId;
     const targetId = p.targetId;
     if (!villageId || !targetId) return;
+
+    // 默认战败不影响任务生命周期：任务营地继续留在地图上，允许玩家再次派兵。
+    // 只有任务定义明确增加“战败即失败”规则时才应在这里另行处理；当前任务图没有此类任务。
+    if (!p.attackerWins) {
+      if (p.targetKind === 'pve') await this.preserveTaskCampAfterDefeat(villageId, targetId);
+      return;
+    }
 
     // 村民的请求：成功掠夺(清空)普通 PvE 营地后，按 GM 概率触发支线任务。
     if (p.targetKind === 'pve' && p.campCleared === true && !targetId.startsWith('happy-')) {
