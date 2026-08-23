@@ -9,6 +9,10 @@
 
 ## [未发布]
 
+### 破坏性
+
+- 军队训练协议升级至 Wire v5（最低兼容 v5）：`TrainTroops` 不再接受建筑 `slotId`，由 Military 服务端按空闲最高等级、同级稳定 `slotId` 选择训练队列；`GetArmy` 以统一 `trainable` 投影及无建筑语义的 `trainingQueues` 替代 `slots`/`training`，`CancelTraining` 改用 `queueId`。
+
 ### 新增
 
 - **[需刷档]** 新增自动探索行军：可向未探索终点派出部队，逐格发现公共 PvE 营地、其他玩家城池或非己方部队即返程；抵达终点也会返城，且不会主动战斗或驻扎。自动探索的首次揭示回执持久化，重启后不会漏掉本步遭遇判定。存档结构版本升至 6。
