@@ -69,6 +69,8 @@ const ERR_MSG: Record<string, string> = {
   allied_target: '盟军村庄不能掠夺或攻城，请改用增援',
   hostile_target: '敌对村庄不能执行增援',
   scout_units_only: '侦察行军只能携带侦察兵',
+  incoming_not_found: '该来袭预警已消失或敌军行军已经结束',
+  incoming_not_visible: '来袭军已离开当前视野，无法继续派出侦察兵',
   not_enemy_village: '侦察目标必须是其他玩家的村庄',
   cannot_abandon_capital: '不能放弃主城',
   abandon_locked: '新建分城冷却中，暂不可放弃',

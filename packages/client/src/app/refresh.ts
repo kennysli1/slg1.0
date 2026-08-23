@@ -308,6 +308,22 @@ export async function refreshForeignMoves(): Promise<void> {
   if (r.ok) foreignMoves.value = r.payload;
 }
 
+/** 只刷新己方行军与实时来袭预警，不拉资源、建筑、任务或地图大包。 */
+export async function refreshMovements(): Promise<void> {
+  if (!me) return;
+  const [moves, playerMoves] = await Promise.all([
+    req('ListMovements').catch(() => ({ ok: false } as any)),
+    req('ListPlayerMovements').catch(() => ({ ok: false } as any)),
+  ]);
+  if (!moves.ok && !playerMoves.ok) return;
+  setCache({
+    ...getCache(),
+    ...(moves.ok ? { moves: moves.payload } : {}),
+    ...(playerMoves.ok ? { playerMoves: playerMoves.payload } : {}),
+  });
+  bumpData();
+}
+
 let _foreignDebounceTimer: number | null = null;
 /** 在 delayMs 后触发一次 refreshForeignMoves（debounce：重复调用只保留最后一次）。 */
 export function scheduleForeignRefresh(delayMs = 1000): void {
@@ -381,6 +397,13 @@ export function handlePush(event: string, payload: any): void {
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
   if (event === 'KingdomUpdated') { void reloadKingdom(); return; }
+
+  // 来袭预警是当前视野的实时派生状态：只重拉行军，不写入战报。
+  if (event === 'IncomingWarningChanged') {
+    void refreshMovements();
+    scheduleForeignRefresh(0);
+    return;
+  }
 
   // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野
   if (event === 'MarchStep') {

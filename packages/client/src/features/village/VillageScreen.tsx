@@ -12,6 +12,7 @@ import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
+import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 import '../../styles/village.css';
 
@@ -128,6 +129,7 @@ export function VillageScreen() {
     <div class="vil-dashboard">
       <VillageList />
       <div class="vil-primary-column">
+        <IncomingWarnings />
         <header class="vil-dashboard-head">
           <span class="vil-eyebrow">城务总览</span>
           <SectionHead>城池详情</SectionHead>

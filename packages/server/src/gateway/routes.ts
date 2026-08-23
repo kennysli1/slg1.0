@@ -156,6 +156,14 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           scoutType: { type: 'enum', optional: true, values: ['scout_resources', 'scout_buildings'] },
         },
       },
+      SendIncomingScout: {
+        command: 'movement.SendIncomingScout', ownVillage: true, needAuth: true,
+        schema: {
+          movementId: { type: 'string', minLen: 1, maxLen: 64 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
       SendVillageRaid: {
         command: 'movement.SendVillageRaid', ownVillage: true, needAuth: true,
         schema: {
@@ -267,7 +275,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     eventPushMap: {
       'movement.Sent': 'MarchSent',
-      'movement.IncomingAttack': 'IncomingAttack',
+      'movement.IncomingWarningChanged': 'IncomingWarningChanged',
       'movement.Returned': 'MarchReturned',
       'movement.Intercepted': 'MarchIntercepted',
       'movement.VillageFounded': 'VillageFounded',

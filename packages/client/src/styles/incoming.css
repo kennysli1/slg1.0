@@ -1,0 +1,110 @@
+.incoming-warnings {
+  border-color: var(--c-crimson-hi);
+  overflow: hidden;
+}
+
+.incoming-warnings-head {
+  padding: var(--s-2) var(--s-3);
+  color: var(--c-crimson-hi);
+  font-weight: 800;
+  letter-spacing: .04em;
+  border-bottom: 1px solid var(--line);
+  background: var(--c-panel-2);
+}
+
+.incoming-warning-card {
+  display: grid;
+  gap: var(--s-1);
+  padding: var(--s-3);
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+  border-bottom: 1px solid var(--line-dark);
+}
+
+.incoming-warning-card:last-child { border-bottom: 0; }
+.incoming-warning-card .btn { justify-self: start; margin-top: var(--s-1); }
+
+.incoming-warning-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.incoming-warning-top strong { color: var(--c-crimson-hi); font-size: var(--f-sm); }
+.incoming-warning-top span { color: var(--c-gold); font-family: var(--ff-num); font-weight: 700; }
+
+.incoming-warning-route {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  color: var(--c-steel);
+}
+
+.incoming-intel { color: var(--c-ink-dim); }
+.incoming-intel--known { color: var(--c-jade); }
+.incoming-empty, .incoming-rule-note { color: var(--c-ink-soft); font-size: var(--f-xs); }
+
+.incoming-scout-units { display: grid; gap: var(--s-2); }
+.incoming-scout-unit {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) 5rem auto auto;
+  gap: var(--s-1);
+  align-items: center;
+}
+.incoming-scout-unit input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--s-1) var(--s-2);
+}
+
+.incoming-treasures { display: grid; gap: var(--s-2); margin-top: var(--s-3); }
+.incoming-treasures small { color: var(--c-ink-dim); }
+.incoming-treasure-list { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.incoming-treasure-list label {
+  display: inline-flex;
+  gap: var(--s-1);
+  align-items: center;
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--c-panel-2);
+  font-size: var(--f-xs);
+}
+
+.map-tactical-stack > .incoming-warnings {
+  pointer-events: auto;
+  width: 100%;
+  max-height: min(36vh, 320px);
+  overflow-y: auto;
+}
+
+.march-path--incoming-warning {
+  stroke: var(--c-crimson-hi);
+  stroke-width: 3.5;
+  stroke-dasharray: 5 4;
+  opacity: .92;
+  animation: march-flow 1s linear infinite;
+}
+
+.march-path--incoming-scout {
+  stroke: var(--c-gold);
+  stroke-dasharray: 2 4;
+  animation: march-flow 1.8s linear infinite;
+}
+
+@media (max-width: 720px) {
+  .map-tactical-stack > .incoming-warnings {
+    position: absolute;
+    top: max(var(--s-3), var(--safe-t));
+    right: var(--s-3);
+    left: var(--s-3);
+    width: auto;
+    max-height: min(34vh, 220px);
+  }
+  .map-tactical-stack > .incoming-warnings + .map-target-panel,
+  .map-tactical-stack > .incoming-warnings ~ .map-march-list { top: min(38vh, 240px); }
+  .incoming-scout-unit { grid-template-columns: minmax(5rem, 1fr) 4.5rem auto; }
+  .incoming-scout-unit .btn { grid-column: 1 / -1; }
+}

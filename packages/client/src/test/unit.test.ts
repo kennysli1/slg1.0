@@ -421,6 +421,24 @@ describe('notificationText - 建筑侦察报告', () => {
   });
 });
 
+describe('notificationText - 来袭预警与途中侦察', () => {
+  it('实时来袭预警刷新不进入战报', () => {
+    assert.equal(notificationText('IncomingWarningChanged', { visible: true }), null);
+  });
+
+  it('途中侦察完胜报告包含兵力、损失与宝物识别', () => {
+    const result = notificationText('ScoutReport', {
+      context: 'incoming_intercept', side: 'attacker', perfectVictory: true,
+      at: { q: 3, r: 4 }, defenderTroops: { legionnaire: 12 },
+      attackerLosses: {}, defenderLosses: { equlegati: 2 }, treasures: ['victory_flag'],
+    });
+    assert.match(result ?? '', /途中侦察完胜/);
+    assert.match(result ?? '', /军团兵12/);
+    assert.match(result ?? '', /敌方侦察兵损失/);
+    assert.match(result ?? '', /宝物/);
+  });
+});
+
 describe('notificationText - 伏击报告视角', () => {
   it('被伏击方只显示自己的兵种损失和客观胜负', () => {
     const result = notificationText('BattleEnded', {

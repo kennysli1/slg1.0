@@ -903,6 +903,7 @@
 .march-item--caravan .march-item-icon { background: var(--c-steel); }
 .march-item--found .march-item-icon { background: var(--c-gold); }
 .march-item--garrison .march-item-icon { background: var(--c-jade); }
+.march-item--incoming_scout .march-item-icon { background: var(--c-gold); }
 .march-item-body { flex: 1; min-width: 0; }
 .march-item-kind { font-weight: 700; color: var(--c-ink); }
 .march-item-dest { color: var(--c-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
