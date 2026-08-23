@@ -408,6 +408,21 @@ describe('notificationText - 建筑侦察报告', () => {
   });
 });
 
+describe('notificationText - 伏击报告视角', () => {
+  it('被伏击方只显示自己的兵种损失和客观胜负', () => {
+    const result = notificationText('BattleEnded', {
+      side: 'defender', battleLabel: '伏击', attackerWins: true,
+      attackPower: 800, defensePower: 500,
+      attackerLosses: { legionnaire: 10 },
+      defenderLosses: { equimperatoris: 2, merc_archer: 3 },
+    });
+    assert.match(result ?? '', /被伏击结束（失败）/);
+    assert.match(result ?? '', /我方损失：近卫骑兵2/);
+    assert.match(result ?? '', /弓箭雇佣兵3/);
+    assert.doesNotMatch(result ?? '', /军团兵10/);
+  });
+});
+
 
 describe('人口资源条红框说明', () => {
   it('仓储溢出时说明人口增长扣减比例', () => {

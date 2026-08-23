@@ -915,11 +915,15 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
     if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
-    // units 指定参战兵力；缺省取全部驻军
+    // units 指定已经由 Movement 验证并扣出村庄的参战兵力；此时不能再按当前驻军钳制，
+    // 否则“派出20、城里剩10”会只用10人参战。缺省/掠夺防守才按现有驻军取值。
     const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
     const snapshot: Record<string, any> = {};
     for (const [unit, n] of Object.entries(source)) {
-      const available = Math.min(Math.max(0, Math.floor(Number(n) || 0)), s.troops[unit] ?? 0);
+      const requested = Math.max(0, Math.floor(Number(n) || 0));
+      const available = units && purpose !== 'raid'
+        ? requested
+        : Math.min(requested, s.troops[unit] ?? 0);
       if (!this.config.units[unit] || available <= 0) continue;
       // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
       const stats = purpose === 'raid'
