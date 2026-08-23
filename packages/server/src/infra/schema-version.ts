@@ -11,5 +11,5 @@
  * 标记双向绑定——升了不写标记、写了标记不升，都会被拒绝提交。
  * 规矩全文见 docs/00_变更契约.md R6。
  */
-// 自动探索新增行军类型、返程原因与 vision.Reveal 回执；发布需按 R6 刷档。
-export const SAVE_SCHEMA_VERSION = 6;
+// 最近一次不兼容变更为炼金炉持久化结构（v5）。自动探索使用可选字段与惰性集合，兼容旧档。
+export const SAVE_SCHEMA_VERSION = 5;

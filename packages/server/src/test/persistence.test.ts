@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGameApp, type GameApp } from '../app.js';
+import { hexDistanceWrapped } from '../infra/hex.js';
 
 /**
  * 持久化 + 重启恢复测试。
@@ -59,6 +60,47 @@ test('重启后：账号/资源/建筑保留，密码仍可登录，在途建造
     const vil = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
     const wood1 = (vil.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
     assert.equal(wood1.level, 2, '重启后在途建造应继续并完成');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('旧存档迁移：缺少自动探索字段与回执集合时可直接重启并首次自动探索', async () => {
+  clock = 1_000_000;
+  const dir = mkdtempSync(join(tmpdir(), 'slg-auto-explore-migration-'));
+  const file = join(dir, 'game.json');
+
+  try {
+    let app = appAt(file);
+    app.setupWorld();
+    const reg = await app.commands.send({ name: 'player.Register', from: 't', payload: { name: '旧档探索', password: 'pass123', tribe: 'romans' } });
+    assert.equal(reg.ok, true);
+    const player = (reg.payload as any).player;
+    await app.commands.send({ name: 'military.AdjustTroops', from: 't', payload: { villageId: player.villageId, delta: { legionnaire: 20 } } });
+    app.store.flush();
+
+    // 模拟上线自动探索前的快照：不存在新增的回执集合，也没有 autoExplore 字段。
+    const legacy = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    delete legacy.vision_reveal;
+    writeFileSync(file, `${JSON.stringify(legacy)}\n`, 'utf8');
+
+    app = appAt(file);
+    assert.equal(app.store.collections().includes('vision_reveal'), false, '旧档不应被启动过程强制重写');
+    app.resume();
+
+    const camp = app.store.all<any>('pve').find((target) => hexDistanceWrapped(
+      { q: player.q, r: player.r }, { q: target.q, r: target.r }, app.config.constants.worldW, app.config.constants.worldH,
+    ) > 4);
+    assert.ok(camp, '测试世界应存在城池视野外的公共营地');
+    const sent = await app.commands.send({
+      name: 'movement.SendAutoExplore', from: 't',
+      payload: { villageId: player.villageId, q: camp.q, r: camp.r, troops: { legionnaire: 10 } },
+    });
+    assert.equal(sent.ok, true, `旧档迁移后应能自动探索: ${sent.reason ?? ''}`);
+
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    assert.equal(app.store.collections().includes('vision_reveal'), true, '首次揭示才应惰性创建回执集合');
+    assert.ok(app.store.get('player', player.id), '迁移不能丢失旧账号');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
