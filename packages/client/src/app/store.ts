@@ -101,7 +101,7 @@ export interface SelectedTarget {
 export const selected = signal<SelectedTarget | null>(null);
 
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
-export const garrisonContinue = signal<{ movementId: string } | null>(null);
+export const garrisonContinue = signal<{ movementId: string; movementType?: 'garrison' | 'ambush' } | null>(null);
 
 /** 地图相机中心（环面坐标 q,r）；跳转/拖拽后写入，供 refresh 与 HexMap 共享。 */
 export const mapCenter = signal<{ q: number; r: number } | null>(null);
