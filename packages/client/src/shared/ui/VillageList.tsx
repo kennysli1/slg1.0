@@ -91,19 +91,33 @@ export function VillageList() {
           <div
             key={village.id}
             role="listitem"
+            tabIndex={0}
             class={`village-list-item${village.id === me?.villageId ? ' active' : ''}`}
+            onClick={() => void pick(village.id)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                void pick(village.id);
+              }
+            }}
           >
             <button
               type="button"
               class="village-list-select"
               aria-current={village.id === me?.villageId ? 'page' : undefined}
-              onClick={() => void pick(village.id)}
+              onClick={(event) => { event.stopPropagation(); void pick(village.id); }}
             >
               <span class="village-list-name">{village.name}{village.isCapital ? '（主城）' : ''}</span>
               <span class="village-list-coords">X {village.q} · Y {village.r}</span>
             </button>
             <div class="village-list-actions">
-              <Btn size="sm" variant="ghost" class="village-list-rename" onClick={() => rename(village)}>修改名称</Btn>
+              <Btn
+                size="sm"
+                variant="ghost"
+                class="village-list-rename"
+                onClick={(event) => { event.stopPropagation(); rename(village); }}
+              >修改名称</Btn>
             </div>
           </div>
         ))}

@@ -40,8 +40,9 @@
 .vil-dashboard > .village-list-panel { grid-column: 1 / -1; }
 .village-list-title { margin-bottom: var(--s-2); color: var(--text-strong); font-family: var(--ff-han); font-weight: 700; }
 .village-list { display: flex; flex-wrap: wrap; gap: var(--s-2); }
-.village-list-item { display: grid; min-width: 220px; gap: var(--s-2); padding: var(--s-2) var(--s-3); border: 1px solid var(--border-default); border-radius: var(--r-sm); color: var(--text-default); background: var(--surface-raised); text-align: left; }
+.village-list-item { display: grid; min-width: 220px; gap: var(--s-2); padding: var(--s-2) var(--s-3); border: 1px solid var(--border-default); border-radius: var(--r-sm); color: var(--text-default); background: var(--surface-raised); text-align: left; cursor: pointer; }
 .village-list-item:hover, .village-list-item.active { border-color: var(--accent); background: rgb(111 174 196 / 12%); }
+.village-list-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .village-list-select { display: grid; width: 100%; gap: 2px; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .village-list-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-sm); }
 .village-list-actions { display: flex; justify-content: flex-end; }

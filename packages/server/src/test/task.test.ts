@@ -156,6 +156,43 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   assert.ok(tr && [...tr.town, ...tr.treasury].includes('warrior_token'), 'warrior_token 应进入宝物栏');
 });
 
+test('任务营地战败不推进任务，营地仍在地图上等待再次出征', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务营地战败保留');
+  const va = (regRes.payload as any).player.villageId as string;
+  const campId = 'taskcamp-defeat-keep';
+  app.store.set('task', va, {
+    villageId: va, completedMain: [], completedSide: [], abandonedSide: [], offered: [], offeredSide: [], firedTriggers: [],
+    active: {
+      m3: {
+        code: 'm3', type: 'main', acceptedAt: clock, spawnVillageId: va,
+        submitted: {}, camps: [{ id: campId, q: 6, r: 6, cleared: false }], campCleared: 0, progress: 0,
+      },
+    },
+  });
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'task_camp', q: 6, r: 6, task: true, ownerVillageId: va });
+  assert.equal(spawned.ok, true, `测试任务营地生成失败: ${spawned.reason ?? ''}`);
+
+  // 模拟战败链路中旧逻辑已经清掉实体；战败事件本身不应推进任务，且应自动补回营地。
+  await send(app, 'pve.Remove', { id: campId });
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: campId, attackerWins: false, battleId: 'b-defeat' },
+  } as any);
+  await tick();
+
+  const target = await send(app, 'pve.GetTarget', { id: campId });
+  assert.equal(target.ok, true, '战败后任务营地实体必须仍存在');
+  assert.equal((target.payload as any).cleared, false, '战败不应清空任务营地');
+  const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
+  assert.equal(tile.ok, true, '战败后任务营地地块必须仍存在');
+  const state = await send(app, 'task.GetState', { villageId: va });
+  const m3 = (state.payload as any).active.find((item: any) => item.code === 'm3');
+  assert.ok(m3, '战败后任务仍应 active');
+  assert.equal(m3.campCleared, 0, '战败不应推进清营进度');
+  assert.equal(m3.camps[0].cleared, false, '战败不应标记营地已清理');
+});
+
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
   const app = freshApp();
   const regRes = await reg(app, '携旗测试');
