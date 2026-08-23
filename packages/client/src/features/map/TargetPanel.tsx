@@ -7,7 +7,7 @@ import { getCache, type SelectedTarget } from '../../app/state.js';
 import { dataVersion, selected, openModal, garrisonContinue, foreignMoves, tick, showToast } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
-  unitInfo, resourceKeys, resInfo,
+  unitInfo,
 } from '../../app/config.js';
 import { act } from '../../app/refresh.js';
 import { req, me, isOwnVillageId, selectVillage, abandonVillage } from '../../api.js';
@@ -127,7 +127,7 @@ function Assessment({
     : meta.mode === 'garrison'
     ? '派军队前往该坐标。抵达后若仍为空地便会原地驻扎；若已被设施或其他军队占据，部队将在前一格驻扎。'
     : isTransport
-    ? '选择运输部队、物资与随队宝物。运输需要同时携带部队和货物。'
+    ? '转移只能携带部队与随队宝物，不能携带木材、泥土、钢或粮食。'
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
     : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 营地只能侦察资源与守军。只允许携带侦察兵；幸存部队会立即返城，若全军覆没则按 PvE 防守方规则处理携带宝物。' : '只允许携带侦察兵。抵达后获得目标情报，幸存部队会立即返城；携带宝物会随军返回，若全军覆没则被守方缴获。') : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
@@ -157,7 +157,7 @@ function Assessment({
         </div>
       </section>
 
-      {meta.isOwn && (
+      {meta.isOwn && meta.refId !== me?.villageId && (
         <div class="target-actions target-actions--management">
           <Btn onClick={onSwitch}>切换到此村</Btn>
           {!meta.isCapital && <Btn variant="danger" onClick={onAbandon}>放弃此村</Btn>}
@@ -233,34 +233,6 @@ function TroopPlanner({
   );
 }
 
-function CargoPlanner({ cargo, setCargo }: { cargo: NumberMap; setCargo: (cargo: NumberMap) => void }) {
-  const resources = getCache().res?.resources ?? {};
-  return (
-    <section class="target-section">
-      <div class="target-section-head"><span>运输货物</span><small>不含金币</small></div>
-      <div class="cargo-inputs">
-        {resourceKeys().filter((key) => key !== 'gold').map((key) => {
-          const max = Math.floor(resources[key] ?? 0);
-          const info = resInfo(key);
-          return (
-            <label key={key} class="cargo-row">
-              <Icon icon={info.icon} label={info.name} size="xs" />
-              <span>{info.name}</span>
-              <NumberInput
-                value={cargo[key] ?? 0}
-                max={max}
-                label={`${info.name}数量，最多${max}`}
-                onChange={(amount) => setCargo({ ...cargo, [key]: amount })}
-              />
-              <small class="cargo-max">/{fmt(max)}</small>
-            </label>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function TreasurePlanner({
   selectedCodes, setSelectedCodes, troopCount,
 }: { selectedCodes: string[]; setSelectedCodes: (codes: string[]) => void; troopCount: number }) {
@@ -310,13 +282,11 @@ function TreasurePlanner({
 }
 
 function Preparation({
-  meta, troops, setTroops, cargo, setCargo, treasures, setTreasures, scoutType, setScoutType, onBack, onNext,
+  meta, troops, setTroops, treasures, setTreasures, scoutType, setScoutType, onBack, onNext,
 }: {
   meta: TargetMeta;
   troops: NumberMap;
   setTroops: (troops: NumberMap) => void;
-  cargo: NumberMap;
-  setCargo: (cargo: NumberMap) => void;
   treasures: string[];
   setTreasures: (codes: string[]) => void;
   scoutType: 'scout_resources' | 'scout_buildings';
@@ -325,21 +295,16 @@ function Preparation({
   onNext: () => void;
 }) {
   const troopCount = total(troops);
-  const cargoCount = total(cargo);
   const isTransfer = meta.mode === 'transport' || meta.mode === 'transfer';
-  const canDispatch = troopCount > 0 && (!isTransfer || cargoCount > 0);
+  const canDispatch = troopCount > 0;
   return (
     <div class="target-body expedition-body">
       <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} scoutOnly={meta.mode === 'scout'} />
       {meta.mode === 'scout' && meta.targetKind !== 'pve' && meta.targetKind !== 'taskcamp' && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
-      {isTransfer && <CargoPlanner cargo={cargo} setCargo={setCargo} />}
+      {/* 转移行军不携带物资；资源转运统一走贸易中心的“转移资源”栏。 */}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
       <div class="expedition-validation" aria-live="polite">
-        {canDispatch
-          ? `已选择 ${fmt(troopCount)} 名部队${isTransfer ? `，装载 ${fmt(cargoCount)} 单位物资` : ''}。`
-          : isTransfer
-            ? '运输需要至少选择一支部队和一种货物。'
-            : '请选择至少一名部队。'}
+        {canDispatch ? `已选择 ${fmt(troopCount)} 名部队${isTransfer ? '，仅携带宝物' : ''}。` : '请选择至少一名部队。'}
       </div>
       <div class="target-foot expedition-foot expedition-foot--split">
         <Btn onClick={onBack}>上一步</Btn>
@@ -350,8 +315,8 @@ function Preparation({
 }
 
 function Confirmation({
-  meta, troops, cargo, treasures, onBack, onDispatch,
-}: { meta: TargetMeta; troops: NumberMap; cargo: NumberMap; treasures: string[]; onBack: () => void; onDispatch: () => void }) {
+  meta, troops, treasures, onBack, onDispatch,
+}: { meta: TargetMeta; troops: NumberMap; treasures: string[]; onBack: () => void; onDispatch: () => void }) {
   const [preview, setPreview] = useState<any>(null);
   useEffect(() => {
     let live = true;
@@ -370,7 +335,6 @@ function Confirmation({
         <dl>
           <div><dt>目标</dt><dd>({meta.q},{meta.r}) · {meta.dist} 格</dd></div>
           <div><dt>部队</dt><dd>{formatUnitSummary(troops)}</dd></div>
-          {(meta.mode === 'transport' || meta.mode === 'transfer') && <div><dt>物资</dt><dd>{Object.entries(cargo).filter(([, amount]) => amount > 0).map(([key, amount]) => `${resInfo(key).name} ${fmt(amount)}`).join(' · ')}</dd></div>}
           <div><dt>宝物</dt><dd>{treasureNames.length ? treasureNames.join(' · ') : '不携带'}</dd></div>
           {preview && <><div><dt>预计时长</dt><dd>{fmt(preview.travelSec ?? 0)} 秒</dd></div><div><dt>行军点</dt><dd>{preview.marchPoints?.used ?? 0}/{preview.marchPoints?.cap ?? 0} · 集结点 {preview.rallyPointLevel ?? 0} 级</dd></div><div><dt>可派兵力</dt><dd>{formatUnitSummary(preview.availableTroops ?? {})}</dd></div></>}
         </dl>
@@ -387,13 +351,11 @@ function Confirmation({
 function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () => void }) {
   const [step, setStep] = useState<WorkflowStep>(1);
   const [troops, setTroops] = useState<NumberMap>({});
-  const [cargo, setCargo] = useState<NumberMap>({});
   const [treasures, setTreasures] = useState<string[]>([]);
   const [scoutType, setScoutType] = useState<'scout_resources' | 'scout_buildings'>('scout_resources');
 
   async function dispatch() {
     const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, amount]) => amount > 0));
-    const selectedCargo = Object.fromEntries(Object.entries(cargo).filter(([, amount]) => amount > 0));
     const cap = treasureCarryCap(total(selectedTroops));
     const selectedTreasures = treasures.slice(0, cap);
     let ok = false;
@@ -402,7 +364,7 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
       ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve ? 'scout_resources' : scoutType }), { okToast: '侦察部队出发' });
     } else if (meta.mode === 'transport' || meta.mode === 'transfer') {
       ok = await act(req('SendTransport', {
-        targetVillage: meta.refId, troops: selectedTroops, cargo: selectedCargo, treasures: selectedTreasures,
+        targetVillage: meta.refId, troops: selectedTroops, cargo: {}, treasures: selectedTreasures, mode: 'transfer',
       }), { okToast: '转移部队出发' });
     } else if (meta.mode === 'reinforce') {
       ok = await act(req('SendReinforce', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '增援部队出发' });
@@ -445,8 +407,8 @@ function ExpeditionWorkflow({ meta, onClose }: { meta: TargetMeta; onClose: () =
     <Panel variant={meta.mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
       <WorkflowHeader meta={meta} step={step} onClose={onClose} />
       {step === 1 && <Assessment meta={meta} onNext={() => setStep(2)} onSwitch={switchVillage} onAbandon={confirmAbandon} />}
-      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} cargo={cargo} setCargo={setCargo} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
-      {step === 3 && <Confirmation meta={meta} troops={troops} cargo={cargo} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
+      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
   );
 }
@@ -472,7 +434,7 @@ function ModeSelectPanel({ base, kind, onClose, onSwitch, onAbandon }: { base: T
           {(options ?? []).map((option) => <Btn key={option.mode} variant={option.requiresDeclaration ? 'danger' : 'primary'} block onClick={() => setChoice(option)}>{option.label}</Btn>)}
         </div>
         {options && options.length === 0 && <p class="expedition-empty">当前目标没有可用的行军模式。</p>}
-        {base.isOwn && <div class="target-actions target-actions--management"><Btn onClick={onSwitch}>切换到此村</Btn>{!base.isCapital && <Btn variant="danger" onClick={onAbandon}>放弃此村</Btn>}</div>}
+        {base.isOwn && base.refId !== me?.villageId && <div class="target-actions target-actions--management"><Btn onClick={onSwitch}>切换到此村</Btn>{!base.isCapital && <Btn variant="danger" onClick={onAbandon}>放弃此村</Btn>}</div>}
         <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消</Btn></div>
       </div>
     </Panel>

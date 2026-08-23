@@ -78,6 +78,13 @@ export function applyMe(player: Me, preserveCurrent = false): void {
   me = player;
 }
 
+/** 处理玩家维度的村名推送，不必等待重新登录即可更新村庄列表与当前身份快照。 */
+export function applyVillageRename(villageId: string, name: string): void {
+  if (!me?.villages) return;
+  const villages = me.villages.map((v) => v.id === villageId ? { ...v, name } : v);
+  me = { ...me, villages };
+}
+
 /** 切到己方另一座村（会话当前操作村）。 */
 export async function selectVillage(villageId: string): Promise<{ ok: boolean; error?: string }> {
   try {

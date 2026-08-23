@@ -107,7 +107,16 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     const codes = payload.codes ?? [];
     const names = codes.map((c: string) => treasureInfo(c)?.name ?? c).join('、');
     if (payload.captured) return `${time}敌军部队被歼灭，其携带的宝物「${names}」被我方缴获，待你前往报告页处理`;
-    return `${time}友军部队将宝物「${names}」送达本村，待你前往报告页决定（收下/出售/遗弃）`;
+    const source = payload.fromVillageName ? `来自「${payload.fromVillageName}」` : '来自其他村庄';
+    const pending = payload.pending ?? [];
+    const stored = payload.stored ?? [];
+    const storedNames = stored.map((c: string) => treasureInfo(c)?.name ?? c).join('、');
+    const pendingNames = pending.map((c: string) => treasureInfo(c)?.name ?? c).join('、');
+    if (pending.length > 0 && stored.length > 0) {
+      return `${time}${source}的转移部队已送达：宝物「${storedNames}」已收入本村宝物栏；宝物「${pendingNames}」因宝物栏已满，请前往本村报告页处理`;
+    }
+    if (pending.length > 0) return `${time}${source}的转移部队将宝物「${pendingNames}」送达本村，但宝物栏已满，请前往本村报告页处理`;
+    return `${time}${source}的转移部队已将宝物「${storedNames || names}」收入本村宝物栏`;
   } else if (event === 'TreasureDemolishRedistributed') {
     const kept = (payload.kept ?? []).map((c: string) => treasureInfo(c)?.name ?? c).join('、');
     const count = payload.pendingCount ?? (payload.pending?.length ?? 0);

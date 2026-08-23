@@ -13,6 +13,15 @@ const RES_KEYS = ['wood', 'clay', 'iron', 'crop', 'gold'] as const;
 type ResKey = (typeof RES_KEYS)[number];
 const TRADE_RES = ['wood', 'clay', 'iron', 'crop'];
 
+interface TransferTarget {
+  villageId: string;
+  name: string;
+  q: number;
+  r: number;
+  distance: number;
+  relation: 'own' | 'allied';
+}
+
 /**
  * 领域模块 · Trade（贸易中心）
  *
@@ -171,6 +180,8 @@ export class TradeModule {
     this.commands.register('trade.RemoveNpcOrder', (c) => this.removeNpcOrder(c));
     // 玩家在贸易中心接单：把资源送往幸福村（网关对外暴露）
     this.commands.register('trade.AcceptNpcDelivery', (c) => this.acceptNpcDelivery(c));
+    // 己方/盟友村之间资源转移：由贸易中心派商队并消耗贸易路线。
+    this.commands.register('trade.TransferResources', (c) => this.transferResources(c));
 
     // 中心建成/升级 → 确保中心状态存在并刷新参数。
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -240,6 +251,33 @@ export class TradeModule {
     });
     const tile = (res.payload as any)?.tile;
     return res.ok && tile ? { q: tile.q, r: tile.r } : null;
+  }
+
+  /** 贸易中心可选的资源转移目标：己方村或盟友村，且必须在本中心视野半径内。 */
+  private async transferTargets(villageId: string, radius: number): Promise<TransferTarget[]> {
+    const source = await this.villageXY(villageId);
+    const ownerRes = await this.commands.send({ name: 'player.GetByVillage', from: TradeModule.NAME, payload: { villageId } });
+    const sourceOwner = ownerRes.ok ? (ownerRes.payload as any)?.player?.id : undefined;
+    if (!source || !sourceOwner) return [];
+    const allRes = await this.commands.send({ name: 'player.ListAll', from: TradeModule.NAME, payload: {} });
+    const players = (allRes.payload as any)?.players ?? [];
+    const { W, H } = this.worldSize();
+    const out: TransferTarget[] = [];
+    for (const p of players as Array<{ id: string; villages?: Array<{ id: string; q: number; r: number; name?: string }> }>) {
+      const relation = p.id === sourceOwner ? 'own' : ((await this.commands.send({
+        name: 'diplomacy.GetRelation', from: TradeModule.NAME,
+        payload: { playerId: sourceOwner, targetPlayerId: p.id },
+      })).payload as any)?.relation === 'allied' ? 'allied' : null;
+      if (!relation) continue;
+      for (const v of p.villages ?? []) {
+        if (v.id === villageId) continue;
+        const center = await this.commands.send({ name: 'building.GetBuildingLevel', from: TradeModule.NAME, payload: { villageId: v.id, kind: 'tradecenter' } });
+        if (!center.ok || Number((center.payload as any)?.level ?? 0) <= 0) continue;
+        const distance = hexDistanceWrapped(source, { q: v.q, r: v.r }, W, H);
+        if (distance <= radius) out.push({ villageId: v.id, name: v.name ?? v.id, q: v.q, r: v.r, distance, relation });
+      }
+    }
+    return out.sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name));
   }
 
   /** 资源记录求和（单位数，含 gold）。 */
@@ -409,10 +447,11 @@ export class TradeModule {
     const s = this.load(villageId);
     const level = await this.getCenterLevel(villageId);
     if (!s || level <= 0) {
-      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, npcOrders: [], npcDeliveryOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
+      return { ok: true, payload: { built: false, level: 0, tradeRoutes: 0, tradeRoutesUsed: 0, availableRoutes: 0, viewRadius: 0, transferTargets: [], npcOrders: [], npcDeliveryOrders: [], npcStoredRefreshes: 0, npcMaxStored: 0, npcRefreshSec: 0, npcNextRefreshAt: 0, playerOrders: [], myOrders: [], playerOrderMax: 0, playerOrderCurrent: 0, gold: 0 } };
     }
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
+    const transferTargets = await this.transferTargets(villageId, tc.tradeViewRadius);
 
     // 本村坐标（用于计算可见玩家订单距离）
     const myXY = await this.villageXY(villageId);
@@ -457,6 +496,7 @@ export class TradeModule {
         tradeRoutesUsed: s.tradeRoutesUsed,
         availableRoutes: available,
         viewRadius: tc.tradeViewRadius,
+        transferTargets,
         // NPC 订单池：普通资源订单 + 宝物出售订单（宝物出售按概率覆盖其中一条普通订单，随 normal 一起在此展示）
         npcOrders: s.npcOrderPool.map((o) => ({
           id: o.id, give: o.give, want: o.want, distance: o.distance, expiresAt: o.expiresAt,
@@ -484,6 +524,45 @@ export class TradeModule {
         gold,
       },
     };
+  }
+
+  /** 从本村贸易中心向己方/盟友村派资源商队。资源只允许四种基础资源，金币不走此栏。 */
+  private async transferResources(cmd: Command): Promise<CommandResult> {
+    const { villageId, targetVillage, cargo } = cmd.payload as { villageId: string; targetVillage: string; cargo?: Record<string, number> };
+    const s = this.load(villageId);
+    const level = await this.getCenterLevel(villageId);
+    if (!s || level <= 0) return { ok: false, payload: {}, reason: 'no_center' };
+    if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'same_village' };
+    const clean: Record<string, number> = {};
+    for (const key of TRADE_RES) {
+      const n = Math.floor(Number(cargo?.[key]) || 0);
+      if (n > 0) clean[key] = n;
+    }
+    if (Object.keys(clean).length === 0) return { ok: false, payload: {}, reason: 'empty_payload' };
+    if (Object.entries(cargo ?? {}).some(([key, value]) => !TRADE_RES.includes(key) && Number(value) > 0)) {
+      return { ok: false, payload: {}, reason: 'invalid_transfer_resource' };
+    }
+    const targets = await this.transferTargets(villageId, (this.config.tradeCenter[level] ?? { tradeViewRadius: 5 }).tradeViewRadius);
+    const target = targets.find((x) => x.villageId === targetVillage);
+    if (!target) return { ok: false, payload: {}, reason: 'transfer_target_unavailable' };
+    const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
+    const routesNeeded = Math.ceil(this.sumUnits(clean) / this.routeCapacity());
+    const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
+    if (routesNeeded > available) return { ok: false, payload: { routesNeeded, available }, reason: 'insufficient_routes' };
+    const spend = await this.commands.send({ name: 'economy.TrySpend', from: TradeModule.NAME, payload: { villageId, cost: clean } });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_resources' };
+    const caravan = await this.commands.send({
+      name: 'movement.SendCaravan', from: TradeModule.NAME,
+      payload: { fromVillage: villageId, targetVillage, cargo: clean, homeVillage: villageId, routesFreed: routesNeeded },
+    });
+    if (!caravan.ok) {
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId, gain: clean } });
+      return { ok: false, payload: {}, reason: caravan.reason ?? 'caravan_failed' };
+    }
+    s.tradeRoutesUsed += routesNeeded;
+    this.store.set(COLLECTION, villageId, s);
+    await this.emitUpdated(villageId);
+    return { ok: true, payload: { targetVillage, cargo: clean, routesNeeded, arriveAt: (caravan.payload as any)?.arriveAt, travelSec: (caravan.payload as any)?.travelSec } };
   }
 
   private async refresh(cmd: Command): Promise<CommandResult> {

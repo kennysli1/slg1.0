@@ -8,7 +8,7 @@
  *  3) 标签页从后台切回 → 补一次；
  *  纯 UI 推进（资源数字/倒计时/人口外插）由 1 秒心跳本地完成，不访问服务器。
  */
-import { req, me, selectVillage } from '../api.js';
+import { req, me, selectVillage, applyVillageRename } from '../api.js';
 import { errText } from '../shared/ui/text.js';
 import { worldW, worldH } from './config.js';
 import type { StoredNotification } from '@slg/shared';
@@ -260,6 +260,12 @@ export function handlePush(event: string, payload: any): void {
 
   if (event === 'VillageFounded' && me?.villageId) {
     void selectVillage(me.villageId).then((r) => { if (r.ok) bumpSession(); });
+  }
+  // 村名由 Player 模块作为玩家维度推送；刷新地图区域缓存，避免选中格/名称标签残留旧值。
+  if (event === 'VillageRenamed') {
+    applyVillageRename(String(payload?.villageId ?? ''), String(payload?.name ?? ''));
+    void refreshAll();
+    return;
   }
 
   if (event === 'MercenaryCampUpdated') { void reloadMercCamp(); return; }

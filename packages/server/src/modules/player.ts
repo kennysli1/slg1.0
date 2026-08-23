@@ -357,7 +357,8 @@ export class PlayerModule {
       name: 'player.VillageRenamed',
       source: PlayerModule.NAME,
       ts: this.now(),
-      payload: { playerId: p.id, villageId, name: clean, previousName },
+      // 通过玩家维度推送，保证地图/村庄列表的所有会话都能立即刷新名称。
+      payload: { playerId: p.id, playerIds: [p.id], villageId, name: clean, previousName },
     });
     return { ok: true, payload: { player: this.publicPlayer(p) } };
   }
@@ -526,7 +527,7 @@ export class PlayerModule {
   private listAll(_cmd: Command): CommandResult {
     const players = this.store.all<PlayerState>(COLLECTION).map((p) => ({
       id: p.id,
-      villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r })),
+      villages: p.ownedVillages.map((v) => ({ id: v.id, q: v.q, r: v.r, name: v.name })),
     }));
     return { ok: true, payload: { players } };
   }

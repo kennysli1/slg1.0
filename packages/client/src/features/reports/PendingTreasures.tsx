@@ -7,6 +7,7 @@
  * 倒计时由 Countdown 原子处理（不再用 setInterval 跑 DOM ticker）。
  */
 import { dataVersion } from '../../app/store.js';
+import { me } from '../../api.js';
 import { getPendingTreasures, type PendingTreasureView } from '../../app/state.js';
 import {
   treasureInfo, treasureEffectText, treasureRarityName, treasureCategoryName,
@@ -107,7 +108,7 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
         <div>
           {isDeliver ? (
             <span class="tcard-kind-badge tcard-kind-badge--deliver" title="军队把宝物送达本村，需你决定如何处理">
-              📦 送达 · 待决策
+              📦 送达本村 · 待决策{p.fromVillageName ? ` · 来自「${p.fromVillageName}」` : ''}
             </span>
           ) : (
             <span class="tcard-kind-badge tcard-kind-badge--camp" title="本村军队带回的宝物，确认即收入宝物栏">
@@ -187,7 +188,7 @@ export function PendingTreasures() {
 
   return (
     <section>
-      <SectionHead sub={`${pending.length} 件待处理`}>军队带回的宝物</SectionHead>
+      <SectionHead sub={`${pending.length} 件待处理`}>{me?.villages?.find((v) => v.id === me?.villageId)?.name ?? '当前村'} · 待处理宝物</SectionHead>
       <div class="pending-treasures">
         {pending.map((p) => (
           <TreasureCard key={p.movementId} p={p} />

@@ -765,19 +765,39 @@ test('携带/掉落回归：返程 movement 为新 id，须用 outwardId 回链�
 test('携带：OffloadForeign 军队抵达他村 → 转为该村民 deliver 报告', async () => {
   const app = await freshApp();
   await app.createVillage('v2', 1, 1, '测试村2');
+  // 目的村只有城镇中心 1 格，先占满以验证“满位才进报告”。
+  await send(app, 'treasure.Grant', { villageId: 'v2', code: 'war_flag' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
   await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv4', maxCarry: 2 });
-  const r = await send(app, 'treasure.OffloadForeign', { villageId: 'v2', fromMovementId: 'mv4' });
+  const r = await send(app, 'treasure.OffloadForeign', { villageId: 'v2', fromMovementId: 'mv4', fromVillageId: 'v1', fromVillageName: '测试村1' });
   assert.equal(r.ok, true, `OffloadForeign 应成功: ${r.reason ?? ''}`);
   assert.deepEqual(r.payload.codes, ['chainsaw'], '应转出 chainsaw');
+  assert.deepEqual(r.payload.stored, [], '目的村满位时不应直接入栏');
+  assert.deepEqual(r.payload.pending, ['chainsaw'], '目的村满位时应进入报告');
 
   const pend = (await send(app, 'treasure.List', { villageId: 'v2' })).payload as any;
   assert.equal(pend.pending.length, 1, 'v2 应产生 1 条报告');
   assert.equal(pend.pending[0].kind, 'deliver', '报告类型应为 deliver');
   assert.equal(pend.pending[0].code, 'chainsaw', '报告应为 chainsaw');
+  assert.equal(pend.pending[0].fromVillageId, 'v1', '报告应记录来源村 id');
+  assert.equal(pend.pending[0].fromVillageName, '测试村1', '报告应记录来源村名');
 
   const src = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.equal(Object.keys(src.carried).length, 0, '源村携带记录应清除');
+});
+
+test('携带：OffloadForeign 目的村有空位时直接入栏且不生成报告', async () => {
+  const app = await freshApp();
+  await app.createVillage('v2', 1, 1, '测试村2');
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  await send(app, 'treasure.AssignToArmy', { villageId: 'v1', codes: ['chainsaw'], movementId: 'mv4-room', maxCarry: 2 });
+  const r = await send(app, 'treasure.OffloadForeign', { villageId: 'v2', fromMovementId: 'mv4-room', fromVillageId: 'v1', fromVillageName: '测试村1' });
+  assert.equal(r.ok, true, `OffloadForeign 应成功: ${r.reason ?? ''}`);
+  assert.deepEqual(r.payload.stored, ['chainsaw'], '目的村有空位时应直接入栏');
+  assert.deepEqual(r.payload.pending, [], '目的村有空位时不应生成报告');
+  const dest = (await send(app, 'treasure.List', { villageId: 'v2' })).payload as any;
+  assert.deepEqual(dest.codes, ['chainsaw'], '宝物应进入目的村宝物栏');
+  assert.equal(dest.pending.length, 0, '目的村不应有待处理报告');
 });
 
 test('携带：LoseCarried pve=回收到系统宝物池（携带记录与栏位均清除）', async () => {

@@ -18,7 +18,7 @@ import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
-import { capitalCoordinate, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
+import { capitalCoordinate, currentVillageCoordinate, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -46,6 +46,11 @@ describe('地图定位', () => {
       ],
     };
     assert.deepEqual(capitalCoordinate(player), { q: 2, r: 3 });
+  });
+
+  it('地图回正使用当前操作村坐标，而不是主城坐标', () => {
+    const player = { id: 'p1', name: '领主', tribe: 't1', villageId: 'v2', capitalVillageId: 'v1', q: 8, r: 9, villages: [] };
+    assert.deepEqual(currentVillageCoordinate(player), { q: 8, r: 9 });
   });
 
   it('坐标跳转只接受地图范围内的完整整数', () => {

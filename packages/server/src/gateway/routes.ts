@@ -196,6 +196,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
           cargo: { type: 'record_int', maxKeys: 4, minVal: 0, maxVal: 10_000_000 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+          mode: { type: 'enum', optional: true, values: ['transfer', 'transport', 'reinforce'] },
         },
       },
       SendGarrison: {
@@ -324,6 +325,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
     },
+    eventPushMap: { 'player.VillageRenamed': 'VillageRenamed' },
     },
   {
     moduleName: 'population',
@@ -425,6 +427,13 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       AcceptNpcDelivery: {
         command: 'trade.AcceptNpcDelivery', ownVillage: true, needAuth: true,
         schema: { orderId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      TransferResources: {
+        command: 'trade.TransferResources', ownVillage: true, needAuth: true,
+        schema: {
+          targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
+          cargo: { type: 'record_int', maxKeys: 4, minVal: 0, maxVal: 10_000_000 },
+        },
       },
     },
     eventPushMap: {
