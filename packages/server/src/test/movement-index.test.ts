@@ -117,7 +117,19 @@ test('posIndex：移动后旧格不再触发遭遇，新格才有效', async () 
   await giveTroops(app, A.villageId, { legionnaire: 15 });
   const W = app.config.constants.worldW ?? 41;
   const H = app.config.constants.worldH ?? 41;
-  const garrisonTile = wrapHex({ q: A.q + 2, r: A.r }, W, H);
+  let garrisonTile: { q: number; r: number } | undefined;
+  let nextTile: { q: number; r: number } | undefined;
+  for (let d = 2; d < 30 && !garrisonTile; d++) {
+    const candidate = wrapHex({ q: A.q + d, r: A.r }, W, H);
+    const next = wrapHex({ q: candidate.q + 1, r: candidate.r }, W, H);
+    const [a, b] = await Promise.all([
+      send(app, 'world.GetTile', candidate), send(app, 'world.GetTile', next),
+    ]);
+    if ((a.payload as any).tile.kind === 'empty' && (b.payload as any).tile.kind === 'empty') {
+      garrisonTile = candidate; nextTile = next;
+    }
+  }
+  assert.ok(garrisonTile && nextTile, '应找到连续两格空地');
   await send(app, 'vision.Reveal', { playerId: A.id, ...garrisonTile, radius: 0 });
 
   const g = await send(app, 'movement.SendGarrison', {
@@ -139,7 +151,6 @@ test('posIndex：移动后旧格不再触发遭遇，新格才有效', async () 
   assert.deepEqual(beforePos, garrisonTile);
 
   // 续行到新格：save() 应更新 posIndex，旧格索引失效
-  const nextTile = wrapHex({ q: garrisonTile.q + 1, r: garrisonTile.r }, W, H);
   await send(app, 'vision.Reveal', { playerId: A.id, ...nextTile, radius: 0 });
   const cont = await send(app, 'movement.ContinueGarrison', {
     villageId: A.villageId, movementId: mvId, ...nextTile, mode: 'garrison',

@@ -937,7 +937,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // POST /gm/ops/reset — 刷档（需 ?confirm=yes，body: {mode:"season"|"respawn"|"wipe"}）
-  fastify.post('/gm/ops/reset', (req, reply) => {
+  fastify.post('/gm/ops/reset', async (req, reply) => {
     if (!auth(req, reply)) return;
     const query = req.query as Record<string, string>;
     if (query.confirm !== 'yes') {
@@ -953,7 +953,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       mode === 'wipe'
         ? { keepAccounts: false }
         : { keepAccounts: true, reassignSpots: mode === 'respawn' };
-    const { accounts } = gameApp.resetWorld(opts);
+    const { accounts } = await gameApp.resetWorld(opts);
     store.flush();
     void reply.send({ ok: true, mode, accounts });
   });
@@ -1479,4 +1479,3 @@ async function save(){
 load();
 </script>
 </body></html>`;
-

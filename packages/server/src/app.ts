@@ -126,7 +126,7 @@ export interface GameApp {
    *  - {keepAccounts:false}                      删档：连账号一起清空
    * 返回受影响的账号数（keepAccounts=false 时为被清空的账号数）。
    */
-  resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): { accounts: number };
+  resetWorld(opts: { keepAccounts: boolean; reassignSpots?: boolean }): Promise<{ accounts: number }>;
   /**
    * 删除单个玩家账号及其所有游戏进度（经济/建筑/兵力/地图等）。
    * 返回被删除的主城 villageId + 全部 villageIds；若玩家不存在返回 null。
@@ -159,8 +159,17 @@ export function createGameApp(opts?: {
   // 启动时加载一次覆盖，灌进初始 config
   const initialOverrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
   let config = loadGameConfig(configDir, initialOverrides);
+  let configuredWorldW = config.constants.worldW;
+  let configuredWorldH = config.constants.worldH;
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
+  const existingWorldMeta = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
+  if (Number.isFinite(existingWorldMeta?.w) && Number.isFinite(existingWorldMeta?.h)) {
+    config = {
+      ...config,
+      constants: { ...config.constants, worldW: existingWorldMeta!.w!, worldH: existingWorldMeta!.h! },
+    };
+  }
   const bus = new EventBus();
   const commands = new CommandBus();
   const serialQueue = new KeyedSerialQueue();
@@ -300,6 +309,35 @@ export function createGameApp(opts?: {
 
   for (const module of modules) module.init();
 
+  /** 建立派生世界计划，并只补齐缺失的固定/生成 PvE；已有战损与重生状态不覆盖。 */
+  const setupWorldPlan = (useConfiguredSize = false) => world.setup(
+      useConfiguredSize ? configuredWorldW : config.constants.worldW,
+      useConfiguredSize ? configuredWorldH : config.constants.worldH,
+    );
+  const ensurePve = (plan: ReturnType<typeof setupWorldPlan>): void => {
+    const occupied = world.getOccupiedTileKeys();
+    let fallbackIndex = 0;
+    for (const s of plan.pveSpawns) {
+      if (store.get('pve', s.id)) continue;
+      let point = { q: s.q, r: s.r };
+      if (occupied.has(`${point.q},${point.r}`)) {
+        while (fallbackIndex < plan.pveCandidates.length) {
+          const candidate = plan.pveCandidates[fallbackIndex++]!;
+          if (!occupied.has(`${candidate.q},${candidate.r}`)) {
+            point = candidate;
+            break;
+          }
+        }
+      }
+      if (occupied.has(`${point.q},${point.r}`)) continue;
+      pve.create(s.id, s.type, point.q, point.r);
+      occupied.add(`${point.q},${point.r}`);
+    }
+  };
+  const ensureWorldPlan = (useConfiguredSize = false): void => {
+    ensurePve(setupWorldPlan(useConfiguredSize));
+  };
+
   return {
     config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, task, vision, reputation, alchemy, now,
@@ -307,9 +345,7 @@ export function createGameApp(opts?: {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
     setupWorld() {
-      world.setup(config.constants.worldW, config.constants.worldH);
-      // PvE 目标点位由 config/pve_spawns.csv 决定
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+      ensureWorldPlan();
     },
     async syncWorldVillages() {
       let synced = 0, failed = 0;
@@ -335,12 +371,23 @@ export function createGameApp(opts?: {
       return { synced, failed };
     },
     resume() {
+      // 兼容既有 41×41 世界：尺寸取持久化 world_meta，只补派生计划中新缺失的 PvE。
+      ensureWorldPlan();
       for (const module of resumableModules) void module.resume();
     },
     reloadConfig() {
       // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
       const overrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
-      const newConfig = loadGameConfig(configDir, overrides);
+      let newConfig = loadGameConfig(configDir, overrides);
+      configuredWorldW = newConfig.constants.worldW;
+      configuredWorldH = newConfig.constants.worldH;
+      const actualWorld = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
+      if (Number.isFinite(actualWorld?.w) && Number.isFinite(actualWorld?.h)) {
+        newConfig = {
+          ...newConfig,
+          constants: { ...newConfig.constants, worldW: actualWorld!.w!, worldH: actualWorld!.h! },
+        };
+      }
       // 把新配置灌给所有领域模块（各模块运行时经 this.config 读取，故替换引用即可生效）
       for (const module of modules) module.setConfig(newConfig);
       // app 的世界重建/新村创建闭包也必须切到新配置，不能继续引用启动时的 config。
@@ -359,7 +406,7 @@ export function createGameApp(opts?: {
       }
       return newConfig;
     },
-    resetWorld({ keepAccounts, reassignSpots = false }) {
+    async resetWorld({ keepAccounts, reassignSpots = false }) {
       // 0. 先清空调度器：取消所有待处理定时任务，避免刷档后遗留任务触发旧逻辑。
       scheduler.reset();
       serialQueue.reset();
@@ -367,19 +414,29 @@ export function createGameApp(opts?: {
       // 1. 清空所有游戏进度集合。
       for (const c of PROGRESS_COLLECTIONS) store.clear(c);
 
+      if (reassignSpots) {
+        const resizedConfig: GameConfig = {
+          ...config,
+          constants: { ...config.constants, worldW: configuredWorldW, worldH: configuredWorldH },
+        };
+        for (const module of modules) module.setConfig(resizedConfig);
+        config = resizedConfig;
+        this.config = resizedConfig;
+      }
+
       // 2. 不保留账号 → 连账号集合一起清，回到零玩家状态，重建世界骨架。
       if (!keepAccounts) {
         const n = store.all('player').length;
         for (const c of ACCOUNT_COLLECTIONS) store.clear(c);
-        world.setup(config.constants.worldW, config.constants.worldH);
-        for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
+        ensureWorldPlan(true);
         return { accounts: n };
       }
 
-      // 3. 保留账号：重建世界（地图 + PvE），再为每个账号重建村庄。
-      world.setup(config.constants.worldW, config.constants.worldH);
-      for (const s of config.pveSpawns) pve.create(s.id, s.type, s.q, s.r);
-      player.rebuildVillages(reassignSpots);
+      // 3. 保留账号：season 先恢复原村坐标再补 PvE，避免生成点抢占旧村；respawn 则先建新图再从保留槽分配。
+      const plan = setupWorldPlan(reassignSpots);
+      if (reassignSpots) ensurePve(plan);
+      await player.rebuildVillages(reassignSpots);
+      if (!reassignSpots) ensurePve(plan);
       return { accounts: store.all('player').length };
     },
     deletePlayer(playerId) {

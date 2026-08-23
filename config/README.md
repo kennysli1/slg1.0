@@ -219,6 +219,10 @@
 
 > 加目标点 = 加一行。
 
+这些行是必须保留的人工锚点。World 会按实际世界面积自动补足公共 PvE 到 `round(W×H×5%)`；自动点位由 `world_seed` 确定，不写回 CSV，也不进入存档。新世界使用 `world_width/world_height`，已有世界始终优先采用存档中的 `world_meta` 尺寸。
+
+地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。地貌当前只用于地图表现和 PvE 分布，不改变行军速度或战斗数值。
+
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
 声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。

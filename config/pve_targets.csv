@@ -1,12 +1,12 @@
 ﻿id,code,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop
 #数字ID(跨表引用用),代码标识(英文,勿改),显示名,图标基名(渲染时拼 /art/+基名+.png),重生秒数,掠夺木材,掠夺泥土,掠夺铁矿,掠夺粮食
-1,rats,老鼠窝,pve_rats,120,200,200,100,100
-2,wolves,野狼群,pve_wolves,300,500,500,400,300
-3,bandits,强盗营地,pve_bandits,600,1200,1200,1000,600
-4,mercenaries,雇佣兵营,pve_mercenaries,1200,2500,2500,2000,1500
-5,barbarians,蛮族村寨,pve_barbarians,2400,5000,5000,4000,3000
-6,fortress,边境要塞,pve_fortress,4800,9000,9000,7000,5000
-7,dark_legion,黑暗军团,pve_dark_legion,7200,16000,16000,12000,8000
-8,bone_king,骷髅王营地,pve_bone_king,14400,28000,28000,20000,14000
+1,rats,老鼠窝,pve_rats,900,200,200,100,100
+2,wolves,野狼群,pve_wolves,1800,500,500,400,300
+3,bandits,强盗营地,pve_bandits,3600,1200,1200,1000,600
+4,mercenaries,雇佣兵营,pve_mercenaries,7200,2500,2500,2000,1500
+5,barbarians,蛮族村寨,pve_barbarians,14400,5000,5000,4000,3000
+6,fortress,边境要塞,pve_fortress,28800,9000,9000,7000,5000
+7,dark_legion,黑暗军团,pve_dark_legion,43200,16000,16000,12000,8000
+8,bone_king,骷髅王营地,pve_bone_king,86400,28000,28000,20000,14000
 99,task_camp,任务营地,quest_camp,999999,0,0,0,0
 100,happy_village,幸福村,pve_happy,999999,200,200,200,100

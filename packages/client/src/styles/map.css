@@ -12,7 +12,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #101815;
+  background: var(--map-canvas-edge);
 }
 /* 四周压暗的战争迷雾感：把注意力收到屏幕中央，也让浮层控件有个落脚的暗底。
    纯装饰层，不吃鼠标事件，不影响拖拽与点击。 */
@@ -22,8 +22,8 @@
   pointer-events: none;
   z-index: 1;
   background:
-    radial-gradient(ellipse 62% 62% at 50% 50%, transparent 40%, rgba(6, 9, 13, .55) 100%),
-    linear-gradient(180deg, rgba(6, 9, 13, .45), transparent 18%, transparent 82%, rgba(6, 9, 13, .55));
+    radial-gradient(ellipse 62% 62% at 50% 50%, transparent 40%, var(--map-vignette) 100%),
+    linear-gradient(180deg, var(--map-vignette-soft), transparent 18%, transparent 82%, var(--map-vignette));
 }
 
 /* ---------- SVG 画布 ---------- */
@@ -33,46 +33,44 @@
   height: 100%;
   cursor: grab;
   touch-action: none; /* 防止双指手势触发页面滚动 */
-  background: radial-gradient(circle at 48% 42%, #29362d, #151d1a 72%);
+  background: radial-gradient(circle at 48% 42%, var(--terrain-plain), var(--map-canvas-edge) 72%);
   flex: 1;
   min-height: 0;
 }
 .map-svg.grabbing { cursor: grabbing; }
 
 /* 地图底色 */
-.map-bg { fill: #17201c; }
+.map-bg { fill: var(--map-canvas); }
 
-/* ---------- 六边形底面：token 派生的地形色（无图时的回退） ---------- */
-.hex-base { stroke: rgb(232 218 178 / 10%); stroke-width: .7; transition: fill var(--t-fast), stroke var(--t-fast); }
-.hex-fill-empty   { fill: var(--c-panel-2); }
-.hex-fill-grass2  { fill: #35463a; fill-opacity: 1; }
-.hex-fill-grass3  { fill: #3c503f; fill-opacity: 1; }
-.hex-fill-forest  { fill: #263a2d; fill-opacity: 1; }
-.hex-fill-water   { fill: #263f49; fill-opacity: 1; }
-.hex-fill-hills   { fill: #594d3a; fill-opacity: 1; }
-.hex-fill-oasis   { fill: var(--c-steel); fill-opacity: .30; }
-.hex-fill-village { fill: var(--c-gold-dim); fill-opacity: .35; }
-.hex-fill-ruins   { fill: var(--c-ink-dim); fill-opacity: .30; }
-
-/* 地形纹理覆盖层：通过 CSS clip-path: url(#hex-clip) 剪裁到六边形。
-   贴图本身是白天写实调，直接铺满会亮到跟深色 UI 打架 —— 压暗降饱和一档，
-   让地图与面板同处一个色调里；被选中/占领的格子再单独提亮。 */
-.hex-terrain-img {
-  clip-path: url(#hex-clip);
-  overflow: hidden;
-  opacity: .58;
-  filter: saturate(.72) brightness(.84);
-  transition: filter var(--t-fast), opacity var(--t-fast);
+/* ---------- 连续地貌 ---------- */
+.layer-terrain,
+.layer-fog { pointer-events: none; }
+.terrain-surface { stroke: none; }
+.terrain-surface--plain { fill: var(--terrain-plain); }
+.terrain-surface--forest { fill: var(--terrain-forest); }
+.terrain-surface--hills { fill: var(--terrain-hills); }
+.terrain-surface--plain.terrain-surface--explored { fill: var(--terrain-plain-explored); }
+.terrain-surface--forest.terrain-surface--explored { fill: var(--terrain-forest-explored); }
+.terrain-surface--hills.terrain-surface--explored { fill: var(--terrain-hills-explored); }
+.terrain-plain-texture { fill: url("#plain-contours"); }
+.terrain-plain-contour {
+  fill: none;
+  stroke: var(--terrain-contour);
+  stroke-width: 1.2;
 }
-/* 自己的城、被占领格、选中格、悬停格：提亮到接近原图，形成"聚光"效果，
-   空地则退到背景里，玩家一眼就能扫到有内容的格子 */
-.hex-cell:hover .hex-terrain-img,
-.hex-cell--occupied .hex-terrain-img,
-.hex-cell--self .hex-terrain-img,
-.hex-cell--selected .hex-terrain-img {
-  opacity: .95;
-  filter: saturate(.95) brightness(1.05);
+.terrain-plain-contour--soft { stroke-width: .7; }
+.terrain-forest-canopy { fill: var(--terrain-forest-canopy); }
+.terrain-hill-ridge {
+  fill: none;
+  stroke: var(--terrain-ridge);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
+.terrain-detail--explored { opacity: .42; filter: saturate(.45); }
+.terrain-fog { pointer-events: none; }
+.terrain-fog--explored { fill: var(--terrain-fog-explored); }
+.terrain-fog--unexplored { fill: var(--terrain-fog-unexplored); }
 
 /* 实体图标：透明美术压在地形上，补一层投影才立得住 */
 .hex-entity-img {
@@ -82,11 +80,8 @@
 }
 .hex-cell:hover .hex-entity-img,
 .hex-cell--selected .hex-entity-img { filter: saturate(1) brightness(1.12) drop-shadow(0 4px 7px rgb(0 0 0 / 86%)); }
-
-/* 服务器权威视野：已探索显示最后一次观测的内容并覆以灰雾；未探索不泄露内容。 */
-.hex-fog { pointer-events: none; }
-.hex-fog--explored { fill: var(--c-steel); fill-opacity: .42; }
-.hex-fog--unexplored { fill: var(--c-ink); fill-opacity: .9; }
+.hex-poi.hex-cell--explored .hex-entity-img,
+.hex-poi.hex-cell--explored .hex-label { filter: saturate(.35); opacity: .68; }
 
 /* ---------- 实体描边（占领格的描边环） ---------- */
 .hex-ring {
@@ -155,9 +150,18 @@
   50%       { stroke-opacity: .55; stroke-width: 4.5; }
 }
 
-/* ---------- 格子悬停高亮 ---------- */
+/* ---------- 格子命中：默认隐藏边界，仅 hover / 选中显示 ---------- */
 .hex-cell { cursor: pointer; }
-.hex-cell:hover .hex-base { stroke: var(--c-gold-hi); stroke-width: 1.5; filter: brightness(1.18); }
+.hex-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.5;
+  transition: stroke var(--t-fast), fill var(--t-fast);
+}
+.hex-cell:hover .hex-hit {
+  fill: var(--border-subtle);
+  stroke: var(--terrain-hover-edge);
+}
 
 /* ---------- 六边形名字标签 ---------- */
 .hex-label {
@@ -1021,4 +1025,23 @@
 @keyframes sheet-up {
   from { transform: translateY(16px); opacity: 0; }
   to   { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hex-ring--self,
+  .hex-ring--task,
+  .hex-sel-ring,
+  .march-path,
+  .march-dot.paused,
+  .march-item--paused .march-item-kind,
+  .map-tooltip,
+  .map-target-panel {
+    animation: none;
+  }
+
+  .hex-hit,
+  .hex-entity-img,
+  .march-item-progress-bar {
+    transition: none;
+  }
 }

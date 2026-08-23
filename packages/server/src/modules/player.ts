@@ -252,12 +252,22 @@ export class PlayerModule {
 
       const id = `p-${this.nextSeq()}`;
       const villageId = `v-${id}-1`;
-      const { q, r } = this.allocateSpot();
       const vName = `${clean}的村庄`;
+      const allocated = await this.commands.send({
+        name: 'world.AllocateSpawn', from: PlayerModule.NAME,
+        payload: { refId: villageId, name: vName },
+      });
+      if (!allocated.ok) {
+        return { ok: false, payload: {}, reason: allocated.reason ?? 'world_capacity_exhausted' };
+      }
+      const { q, r } = allocated.payload as { q: number; r: number };
 
       try {
         await this.createVillage(villageId, q, r, vName, t);
       } catch (err) {
+        await this.commands.send({
+          name: 'world.ClearVillage', from: PlayerModule.NAME, payload: { refId: villageId },
+        });
         console.error(`[Player] register: createVillage failed for "${clean}"`, err);
         return { ok: false, payload: {}, reason: 'village_creation_failed' };
       }
@@ -593,7 +603,7 @@ export class PlayerModule {
    * 选到非空格子时，随机换一个继续，**绝不报错放弃**；占用真相直接复用 world.getOccupiedTileKeys()，
    * 保证与 PlaceVillage 的口径（exist && exist.kind !== 'empty'）完全一致。
    */
-  private allocateSpot(): { q: number; r: number } {
+  private allocateSpot(): { q: number; r: number } | null {
     const existing = this.store.all<RawPlayer>(COLLECTION).map((raw) => this.normalize(raw));
     // 玩家主城坐标（既有占用口径之一）
     const taken = new Set<string>();
@@ -635,15 +645,14 @@ export class PlayerModule {
         if (isFree(q, r)) return { q, r };
       }
     }
-    // 理论兜底：地图全满（极不可能）。返回一个坐标，交由 PlaceVillage 做最终裁决。
-    return { q: 0, r: 0 };
+    return null;
   }
 
   /**
    * 运维：为所有现存账号重建**主城**（刷档后调用）。多村进度已随 PROGRESS 清空，
    * 此处把玩家收束回单主城。
    */
-  rebuildVillages(reassignSpots: boolean): void {
+  async rebuildVillages(reassignSpots: boolean): Promise<void> {
     const players = this.store
       .all<RawPlayer>(COLLECTION)
       .slice()
@@ -657,15 +666,25 @@ export class PlayerModule {
       let r = p.r;
       let villageId = `v-${p.id}-1`;
       if (reassignSpots) {
-        const spot = this.allocateSpot();
-        q = spot.q;
-        r = spot.r;
+        const allocated = await this.commands.send({
+          name: 'world.AllocateSpawn', from: PlayerModule.NAME,
+          payload: { refId: villageId, name: `${p.name}的村庄` },
+        });
+        if (!allocated.ok) throw new Error(allocated.reason ?? 'world_capacity_exhausted');
+        ({ q, r } = allocated.payload as { q: number; r: number });
       } else {
         // 保留原主城坐标；若旧 id 是 v-p-N 则升为 v-p-N-1
         const capital = p.ownedVillages.find((v) => v.id === p.capitalVillageId);
         if (capital) { q = capital.q; r = capital.r; }
       }
       const vName = `${p.name}的村庄`;
+      if (!reassignSpots) {
+        const restored = await this.commands.send({
+          name: 'world.RestoreVillage', from: PlayerModule.NAME,
+          payload: { q, r, refId: villageId, name: vName },
+        });
+        if (!restored.ok) throw new Error(restored.reason ?? 'village_restore_failed');
+      }
       const owned: OwnedVillage = { id: villageId, q, r, name: vName };
       const updated: PlayerState = {
         ...p,
@@ -677,7 +696,7 @@ export class PlayerModule {
       };
       this.store.set(COLLECTION, p.id, updated);
       this.store.set(COLLECTION_BYVILLAGE, villageId, p.id);
-      void this.createVillage(villageId, q, r, vName, p.tribe);
+      await this.createVillage(villageId, q, r, vName, p.tribe);
     }
   }
 }

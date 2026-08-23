@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGameApp, type GameApp } from '../app.js';
+import { generateWorldPlan } from '../infra/world-generation.js';
 
 /**
  * 刷档测试：三种粒度各自的账号/进度/位置语义。
@@ -28,7 +29,7 @@ async function seed(app: GameApp) {
     const wood = (layout.payload as any).zones.outer.placed.find((f: any) => f.kind === 'woodcutter');
     const up = await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: p.villageId, slotId: wood.slotId } });
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
-    return p as { villageId: string; q: number; r: number; name: string };
+    return p as { id: string; villageId: string; q: number; r: number; name: string };
   };
   const a = await reg('阿甲', 'romans');
   const b = await reg('阿乙', 'gauls');
@@ -42,11 +43,21 @@ test('reset:season — 保留账号+地图位置，进度归零', async () => {
   try {
     let app = appAt(file);
     const { a } = await seed(app);
+    const seasonPlan = generateWorldPlan(
+      app.config.constants.worldW, app.config.constants.worldH,
+      String(app.config.constants.raw.world_seed), app.config.pveSpawns,
+    );
+    const collision = seasonPlan.pveSpawns.find((p) => p.id.startsWith('gen-pve-'))!;
+    const owner = app.store.get<any>('player', a.id)!;
+    owner.q = collision.q; owner.r = collision.r;
+    owner.ownedVillages[0].q = collision.q; owner.ownedVillages[0].r = collision.r;
+    app.store.set('player', a.id, owner);
+    a.q = collision.q; a.r = collision.r;
     (app.store as any).flush();
 
     // 刷档（新赛季）
     app = appAt(file);
-    const { accounts } = app.resetWorld({ keepAccounts: true, reassignSpots: false });
+    const { accounts } = await app.resetWorld({ keepAccounts: true, reassignSpots: false });
     assert.equal(accounts, 2, '两个账号应保留');
     (app.store as any).flush();
 
@@ -61,6 +72,8 @@ test('reset:season — 保留账号+地图位置，进度归零', async () => {
     assert.equal(p.villageId, a.villageId, 'villageId 应不变');
     assert.equal(p.q, a.q, 'q 坐标应保留');
     assert.equal(p.r, a.r, 'r 坐标应保留');
+    const restoredTile = await app.commands.send({ name: 'world.GetTile', from: 't', payload: { q: a.q, r: a.r } });
+    assert.equal((restoredTile.payload as any).tile.refId, a.villageId, 'season 必须先恢复旧村，PvE 不得抢占碰撞坐标');
 
     // 进度归零：村庄按开局模板重建，资源田回到开局 1 级（升过的那块也被重置）
     const vill = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: a.villageId } });
@@ -78,12 +91,20 @@ test('reset:respawn — 保留凭据，重新分配地图位置', async () => {
   const file = join(dir, 'game.json');
   try {
     let app = appAt(file);
+    app.world.setup(41, 41);
     const { b } = await seed(app);
     (app.store as any).flush();
 
     app = appAt(file);
-    const { accounts } = app.resetWorld({ keepAccounts: true, reassignSpots: true });
+    const { accounts } = await app.resetWorld({ keepAccounts: true, reassignSpots: true });
     assert.equal(accounts, 2);
+    const worldMeta = await app.commands.send({ name: 'world.GetMeta', from: 't', payload: {} });
+    assert.deepEqual(worldMeta.payload, { worldW: 96, worldH: 96 }, '旧41世界 respawn 后必须采用新世界96尺寸');
+    const plan = generateWorldPlan(96, 96, String(app.config.constants.raw.world_seed), app.config.pveSpawns);
+    const legalSlots = new Set(plan.spawnSlots.map((slot) => `${slot.q},${slot.r}`));
+    const respawned = app.store.all<any>('player').flatMap((player) => player.ownedVillages);
+    assert.ok(respawned.every((village) => legalSlots.has(`${village.q},${village.r}`)), '所有账号必须通过 World 出生槽重排');
+    assert.ok(respawned.some((village) => village.q >= 41 || village.r >= 41), '重排应使用96全图而非残留41尺寸');
     (app.store as any).flush();
 
     app = appAt(file);
@@ -117,7 +138,7 @@ test('wipe:all — 连账号一起清空，回到零玩家', async () => {
     (app.store as any).flush();
 
     app = appAt(file);
-    const { accounts } = app.resetWorld({ keepAccounts: false });
+    const { accounts } = await app.resetWorld({ keepAccounts: false });
     assert.equal(accounts, 2, '应报告清空了 2 个账号');
     (app.store as any).flush();
 

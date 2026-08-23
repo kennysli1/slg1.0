@@ -13,6 +13,9 @@ start_resource_amount,750,number,新村各资源初始存量
 base_production_per_hour,1000,number,资源田0级基础每小时产量
 map_size,20,number,地图半径(六边形网格,以原点为中心的环数,hexDistance<=size 为合法格)
 map_view_radius,6,number,前端地图视野半径(六边形环数,前端白名单常量)
+world_width,96,number,新世界环绕平行四边形宽度(旧世界优先使用world_meta实际尺寸)
+world_height,96,number,新世界环绕平行四边形高度(旧世界优先使用world_meta实际尺寸)
+world_seed,kow-world-v1,string,确定性地貌与出生槽位生成种子
 combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)
 ambush_attack_bonus,0.5,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)

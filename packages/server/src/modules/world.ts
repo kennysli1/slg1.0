@@ -5,6 +5,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
 import { hexKey, wrapHex, hexDistanceWrapped } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
+import { generateWorldPlan, terrainAt, type GeneratedWorldPlan, type Terrain } from '../infra/world-generation.js';
 
 /**
  * 领域模块 · World（地图 / 坐标 / 地块）
@@ -29,6 +30,8 @@ export interface Tile {
   name?: string;
   /** 图标基名（pve 目标用，渲染时拼 /art/+基名+.png）；村庄不带，前端用默认主基地图 */
   icon?: string;
+  /** 主导地貌；只影响展示与内容分布，当前不参与行军/战斗。 */
+  terrain?: Terrain;
 }
 
 interface WorldState {
@@ -42,6 +45,7 @@ const COLLECTION_TILE = 'world_tile';
 export class WorldModule {
   private worldW = 41; // 环绕平行四边形宽（axial q 周期）
   private worldH = 41; // 环绕平行四边形高（axial r 周期）
+  private plan?: GeneratedWorldPlan;
   static readonly NAME = 'world';
 
 
@@ -57,8 +61,12 @@ export class WorldModule {
   /** 热重载配置（改 CSV 后调用），同步刷新缓存的世界尺寸。 */
   setConfig(config: GameConfig): void {
     this.config = config;
-    this.worldW = config.constants.worldW ?? 41;
-    this.worldH = config.constants.worldH ?? 41;
+    const meta = this.store.get<WorldState>(COLLECTION_META, 'meta');
+    if (!meta) {
+      this.worldW = config.constants.worldW ?? 41;
+      this.worldH = config.constants.worldH ?? 41;
+    }
+    this.rebuildPlan();
   }
 
   init(): void {
@@ -70,15 +78,19 @@ export class WorldModule {
       this.worldW = this.config.constants.worldW ?? 41;
       this.worldH = this.config.constants.worldH ?? 41;
     }
+    this.rebuildPlan();
     this.normalizeTiles();
     this._bus.on('player.VillageRenamed', (evt: DomainEvent) => this.onVillageRenamed(evt));
     this.commands.register('world.GetTile', (c) => this.getTile(c));
+    this.commands.register('world.GetMeta', (c) => this.getMeta(c));
+    this.commands.register('world.AllocateSpawn', (c) => this.allocateSpawn(c));
     this.commands.register('world.GetTileByRef', (c) => this.getTileByRef(c));
     this.commands.register('world.MinVillageDistance', (c) => this.minVillageDistance(c));
     this.commands.register('world.ClearVillage', (c) => this.clearVillage(c));
     this.commands.register('world.GetArea', (c) => this.getArea(c));
     this.commands.register('world.Distance', (c) => this.distance(c));
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
+    this.commands.register('world.RestoreVillage', (c) => this.restoreVillage(c));
     this.commands.register('world.MoveVillage', (c) => this.moveVillage(c));
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
     this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
@@ -111,17 +123,46 @@ export class WorldModule {
   }
 
   /** 初始化地图（环绕平行四边形 W×H，坐标对 (W,H) 取模无缝）。 */
-  setup(w = 41, h = 41): void {
-    this.worldW = w;
-    this.worldH = h;
-    this.store.set<WorldState>(COLLECTION_META, 'meta', { w, h });
+  setup(w = 41, h = 41): GeneratedWorldPlan {
+    const existing = this.store.get<WorldState>(COLLECTION_META, 'meta');
+    this.worldW = existing?.w ?? w;
+    this.worldH = existing?.h ?? h;
+    if (!existing) this.store.set<WorldState>(COLLECTION_META, 'meta', { w: this.worldW, h: this.worldH });
+    this.rebuildPlan();
+    return this.plan!;
+  }
+
+  private rebuildPlan(): void {
+    const seed = String(this.config.constants.raw.world_seed ?? 'kow-world-v1');
+    this.plan = generateWorldPlan(this.worldW, this.worldH, seed, this.config.pveSpawns);
+  }
+
+  private getMeta(_cmd: Command): CommandResult {
+    return { ok: true, payload: { worldW: this.worldW, worldH: this.worldH } };
   }
 
   private getTile(cmd: Command): CommandResult {
     const { q, r } = cmd.payload as { q: number; r: number };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const t = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
-    return { ok: true, payload: { tile: t ?? { q: w.q, r: w.r, kind: 'empty' } } };
+    const tile = t ?? { q: w.q, r: w.r, kind: 'empty' as const };
+    return { ok: true, payload: { tile: { ...tile, terrain: terrainAt(this.plan!, w.q, w.r) } } };
+  }
+
+  /** 原子选择并占用一个预生成首村槽位；容量耗尽时明确失败，绝不退回 (0,0)。 */
+  private allocateSpawn(cmd: Command): CommandResult {
+    const { refId, name } = cmd.payload as { refId?: string; name?: string };
+    if (!refId || !name) return { ok: false, payload: {}, reason: 'bad_spawn_request' };
+    const existing = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === refId);
+    if (existing) return { ok: true, payload: { q: existing.q, r: existing.r } };
+    for (const slot of this.plan!.spawnSlots) {
+      const key = hexKey(slot.q, slot.r);
+      const tile = this.store.get<Tile>(COLLECTION_TILE, key);
+      if (tile && tile.kind !== 'empty') continue;
+      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name });
+      return { ok: true, payload: { ...slot } };
+    }
+    return { ok: false, payload: {}, reason: 'world_capacity_exhausted' };
   }
 
   /**
@@ -150,7 +191,7 @@ export class WorldModule {
    *  full=true 时忽略半径上限，返回整张地图的全部非空地块（用于全图渲染）。
    *  注：任务营地（kind==='taskcamp'）不进入全局视野——仅任务拥有者经 taskMarkers 可见，避免泄露给其他玩家。 */
   private async getArea(cmd: Command): Promise<CommandResult> {
-    const { cq, cr, r, full, playerId } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean; playerId?: string };
+    const { cq, cr, r, full, playerId, includeEmpty } = cmd.payload as { cq: number; cr: number; r: number; full?: boolean; playerId?: string; includeEmpty?: boolean };
     const center = { q: cq, r: cr };
     const radius = full
       ? Number.POSITIVE_INFINITY
@@ -158,10 +199,20 @@ export class WorldModule {
     const tiles: Tile[] = [];
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
       if (t.kind === 'taskcamp') continue; // 任务营地仅任务拥有者可见，不泄露给其它玩家
-      if (full || hexDistanceWrapped(center, t, this.worldW, this.worldH) <= radius) tiles.push(t);
+      if (full || hexDistanceWrapped(center, t, this.worldW, this.worldH) <= radius) {
+        tiles.push({ ...t, terrain: terrainAt(this.plan!, t.q, t.r) });
+      }
     }
-    if (!playerId) return { ok: true, payload: { tiles } }; // 仅内部测试/服务器查询保留原始地块
-    const masked = await this.commands.send({ name: 'vision.FilterArea', from: WorldModule.NAME, payload: { playerId, tiles } });
+    if (!playerId && !includeEmpty) return { ok: true, payload: { tiles } }; // 仅内部测试/服务器查询保留原始地块
+    const byKey = new Map(tiles.map((t) => [hexKey(t.q, t.r), t]));
+    for (let rr = 0; rr < this.worldH; rr++) for (let q = 0; q < this.worldW; q++) {
+      if (!full && hexDistanceWrapped(center, { q, r: rr }, this.worldW, this.worldH) > radius) continue;
+      const key = hexKey(q, rr);
+      if (!byKey.has(key)) byKey.set(key, { q, r: rr, kind: 'empty', terrain: terrainAt(this.plan!, q, rr) });
+    }
+    const completeTiles = [...byKey.values()];
+    if (!playerId) return { ok: true, payload: { tiles: completeTiles } };
+    const masked = await this.commands.send({ name: 'vision.FilterArea', from: WorldModule.NAME, payload: { playerId, tiles: completeTiles } });
     return masked.ok ? masked : { ok: false, payload: {}, reason: masked.reason };
   }
 
@@ -176,8 +227,27 @@ export class WorldModule {
     const { q, r, refId, name } = cmd.payload as { q: number; r: number; refId: string; name: string };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const exist = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
-    if (exist && exist.kind !== 'empty') return { ok: false, payload: {}, reason: 'tile_occupied' };
+    if (exist && exist.kind !== 'empty') {
+      if (exist.kind === 'village' && exist.refId === refId) return { ok: true, payload: { q: w.q, r: w.r } };
+      return { ok: false, payload: {}, reason: 'tile_occupied' };
+    }
+    if (this.plan!.spawnSlots.some((slot) => slot.q === w.q && slot.r === w.r)) {
+      return { ok: false, payload: {}, reason: 'spawn_slot_reserved' };
+    }
     this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name });
+    return { ok: true, payload: { q: w.q, r: w.r } };
+  }
+
+  /** 刷档保留坐标专用：恢复已存在账号的村庄，可占回其首村保留槽。 */
+  private restoreVillage(cmd: Command): CommandResult {
+    const { q, r, refId, name } = cmd.payload as { q: number; r: number; refId: string; name: string };
+    const w = wrapHex({ q, r }, this.worldW, this.worldH);
+    const key = hexKey(w.q, w.r);
+    const exist = this.store.get<Tile>(COLLECTION_TILE, key);
+    if (exist && exist.kind !== 'empty' && exist.refId !== refId) {
+      return { ok: false, payload: {}, reason: 'tile_occupied' };
+    }
+    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 

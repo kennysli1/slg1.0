@@ -30,8 +30,10 @@ export class MetaModule {
   }
 
   /** 前端渲染最小集：名称/图标/分类 + 白名单常量。 */
-  private getGameConfig(_cmd: Command): CommandResult {
+  private async getGameConfig(_cmd: Command): Promise<CommandResult> {
     const c = this.config;
+    const world = await this.commands.send({ name: 'world.GetMeta', from: MetaModule.NAME, payload: {} });
+    const actual = world.payload as { worldW?: number; worldH?: number };
     return {
       ok: true,
       payload: {
@@ -94,8 +96,8 @@ export class MetaModule {
         constants: {
           mapViewRadius: c.constants.mapViewRadius,
           mapSize: c.constants.mapSize,
-          worldW: c.constants.worldW,
-          worldH: c.constants.worldH,
+          worldW: Number(actual.worldW) || c.constants.worldW,
+          worldH: Number(actual.worldH) || c.constants.worldH,
           // 人口 v3（硬上限模型）展示/外插用常量：增长速率绑在城镇中心，由 main.popGrowthPerLevel × mainLevel 决定
           popGrowthPerLevel: c.buildings.main?.popGrowthPerLevel ?? 0,
           popProsperityFullRatio: c.constants.popProsperityFullRatio,
