@@ -62,3 +62,4 @@ import './register-spot.test.js';
 import './diplomacy-movement.test.js';
 import './reputation.test.js';
 import './alchemy.test.js';
+import './vision-multivillage.test.js';
