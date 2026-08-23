@@ -254,6 +254,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
+      ListPlayerMovements: { command: 'movement.ListPlayer', needAuth: true, injectPlayerId: true, schema: {} },
       ListForeign: { command: 'movement.ListForeign', needAuth: true, injectPlayerId: true, schema: {} },
     },
     eventPushMap: {
