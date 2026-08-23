@@ -306,6 +306,15 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           villageId: { type: 'string', minLen: 1, maxLen: 64 },
         },
       },
+      RenameVillage: {
+        command: 'player.RenameVillage',
+        needAuth: true,
+        injectPlayerId: true,
+        schema: {
+          villageId: { type: 'string', minLen: 1, maxLen: 64 },
+          name: { type: 'string', minLen: 1, maxLen: 24 },
+        },
+      },
       AbandonVillage: {
         command: 'player.AbandonVillage',
         needAuth: true,

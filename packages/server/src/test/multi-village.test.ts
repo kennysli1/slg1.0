@@ -99,6 +99,33 @@ test('Attach 第二村后 SelectVillage 切换当前村', async () => {
   assert.equal((sel.payload as any).player.capitalVillageId, capital);
 });
 
+test('RenameVillage：仅能修改自己的村庄并同步地图地块', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', {
+    name: 'mvrename', password: 'pass1', tribe: 'romans',
+  });
+  assert.equal(reg.ok, true, reg.reason);
+  const player = (reg.payload as any).player;
+  const villageId = player.villageId as string;
+  const original = app.store.get<any>('world_tile', `${player.q},${player.r}`);
+  assert.equal(original?.name, 'mvrename的村庄');
+
+  const renamed = await send(app, 'player.RenameVillage', {
+    playerId: player.id, villageId, name: '新曙光城',
+  });
+  assert.equal(renamed.ok, true, renamed.reason);
+  assert.equal((renamed.payload as any).player.villages[0].name, '新曙光城');
+  assert.equal(app.store.get<any>('player', player.id).ownedVillages[0].name, '新曙光城');
+  assert.equal(app.store.get<any>('world_tile', `${player.q},${player.r}`).name, '新曙光城');
+
+  const blank = await send(app, 'player.RenameVillage', { playerId: player.id, villageId, name: '   ' });
+  assert.equal(blank.ok, false);
+  assert.equal(blank.reason, 'village_name_empty');
+  const foreign = await send(app, 'player.RenameVillage', { playerId: 'p-nope', villageId, name: '越权' });
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.reason, 'player_not_found');
+});
+
 test('Gateway：SelectVillage 后 ownVillage 打到新当前村', async () => {
   const app = freshApp();
   const gw = new Gateway(app);
@@ -135,6 +162,14 @@ test('Gateway：SelectVillage 后 ownVillage 打到新当前村', async () => {
   assert.equal(session.villageId, vid2);
   assert.ok(session.villageIds?.includes(capital));
   assert.ok(session.villageIds?.includes(vid2));
+
+  const renameRes = await gw.handleRequest(
+    req('RenameVillage', { villageId: vid2, name: '新分城乙' }, 'n1'),
+    session,
+  );
+  assert.equal(renameRes.ok, true, renameRes.error?.msg);
+  assert.equal(session.villageId, vid2, '重命名不应改变当前操作村');
+  assert.equal(app.store.get<any>('player', pid).ownedVillages.find((v: any) => v.id === vid2).name, '新分城乙');
 
   // ownVillage 的 GetResources 应读到分城经济
   const eco = await gw.handleRequest(req('GetResources', {}, 'e1'), session);

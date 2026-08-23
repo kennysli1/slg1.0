@@ -71,6 +71,7 @@ export class WorldModule {
       this.worldH = this.config.constants.worldH ?? 41;
     }
     this.normalizeTiles();
+    this._bus.on('player.VillageRenamed', (evt: DomainEvent) => this.onVillageRenamed(evt));
     this.commands.register('world.GetTile', (c) => this.getTile(c));
     this.commands.register('world.GetTileByRef', (c) => this.getTileByRef(c));
     this.commands.register('world.MinVillageDistance', (c) => this.minVillageDistance(c));
@@ -81,6 +82,15 @@ export class WorldModule {
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
     this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
     this.commands.register('world.FindFreeTile', (c) => this.findFreeTile(c));
+  }
+
+  /** Player owns the name; World mirrors it onto its map tile through an event. */
+  private onVillageRenamed(evt: DomainEvent): void {
+    const { villageId, name } = evt.payload as { villageId?: string; name?: string };
+    if (!villageId || typeof name !== 'string') return;
+    const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === villageId);
+    if (!tile) return;
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, name });
   }
 
   /** 归一已有 tile 坐标进环面 [0,W)×[0,H)（幂等，兼容旧六边形存档；W=H=41 时旧坐标∈[-20,20] 单射→零碰撞）。 */

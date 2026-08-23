@@ -66,8 +66,15 @@ export interface Me {
 }
 export let me: Me | null = null;
 
-/** 用登录/切村响应更新本地身份。 */
-export function applyMe(player: Me): void {
+/** 用登录/切村响应更新本地身份；非切村动作可保留当前操作村。 */
+export function applyMe(player: Me, preserveCurrent = false): void {
+  if (preserveCurrent && me?.villageId) {
+    const current = player.villages?.find((v) => v.id === me!.villageId);
+    if (current) {
+      me = { ...player, villageId: current.id, currentVillageId: current.id, q: current.q, r: current.r };
+      return;
+    }
+  }
   me = player;
 }
 
