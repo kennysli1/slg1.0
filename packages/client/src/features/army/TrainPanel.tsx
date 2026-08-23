@@ -1,135 +1,105 @@
 /**
- * 训练面板：嵌入村庄建筑详情弹窗。签名固定（跨特性接口）。
+ * 统一训练面板。
  *
- * 设计要点：
- *  - 数量输入用 useState，dataVersion bump 触发重渲时不重置（不失去焦点）
- *  - 数量 state 是 Record<unitKey, number>，全部单位共一份，互不干扰
- *  - "最多" 按钮尊重资源 + 人口 + 动员上限三重约束
- *  - 禁用按钮同时给出明确中文原因
+ * 训练建筑由服务端为每个兵种选择；客户端只呈现当前可训兵种与公开训练队列，
+ * 不读取或指定任何建筑实例。
  */
 import { useState } from 'preact/hooks';
-import { dataVersion } from '../../app/store.js';
+import { dataVersion, tick } from '../../app/store.js';
 import { getCache, interpolatePop, getPopState, liveResources } from '../../app/state.js';
-import {
-  unitInfo, resourceKeys, unitCropPerHour,
-  trainTimeReducePerLevel, trainTimeReduceCap, trainCostReducePerLevel, trainCostReduceCap,
-} from '../../app/config.js';
+import { unitInfo, resourceKeys, unitCropPerHour } from '../../app/config.js';
 import { formName } from '../../shared/ui/text.js';
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
 import {
-  IconPlate, Tag, Btn, CostRow, TimerBar, StatGrid, Stat, Empty,
+  IconPlate, Tag, Btn, CostRow, TimerBar, StatGrid, Stat, Empty, confirmDanger,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 
-/** 跨特性接口：从村庄建筑弹窗内嵌入。签名不可改。 */
-export function TrainPanel({ slotId, kind: _kind, level }: { slotId: string; kind: string; level: number }) {
-  dataVersion.value; // 订阅数据刷新
+export function TrainPanel() {
+  dataVersion.value;
+  tick.value;
 
   const army = getCache().army;
-  // 找到对应建筑实例的 slot（含独立队列和可训兵种列表）
-  const slot = (army?.slots ?? []).find((s: any) => s.slotId === slotId);
+  const trainable: any[] = army?.trainable ?? [];
+  const queues: any[] = army?.trainingQueues ?? [];
+  const [qtys, setQtys] = useState<Record<string, number>>({});
 
-  // 数量 state：key = unitKey → 数量。用 lazy init 从 slot 初始化为 1
-  // 关键：用 useState 不是 signal，dataVersion 触发重渲时 state 保留不重置。
-  const [qtys, setQtys] = useState<Record<string, number>>(() => {
-    const init: Record<string, number> = {};
-    for (const u of (slot?.trainable ?? [])) init[u.key] = 1;
-    return init;
-  });
-
-  const setQty = (unitKey: string, val: number) => {
-    const clamped = Math.max(1, Math.floor(val));
-    setQtys((prev) => ({ ...prev, [unitKey]: clamped }));
+  const setQty = (unitKey: string, value: number) => {
+    setQtys((prev) => ({ ...prev, [unitKey]: Math.max(1, Math.floor(value)) }));
   };
-
-  if (!slot) {
-    return (
-      <Empty title="该建筑暂不提供训练" icon="⚔️">
-        当前状态下无可训练兵种
-      </Empty>
-    );
-  }
-
-  // 建筑等级带来的提速 / 降费百分比（cap 限定）
-  const lvl = level;
-  const timePct = Math.round(Math.min(trainTimeCap(), Math.max(0, lvl - 1) * trainTimeReducePerLevel()) * 100);
-  const costPct = Math.round(Math.min(trainCostCap(), Math.max(0, lvl - 1) * trainCostReducePerLevel()) * 100);
-  const hasBuff = timePct > 0 || costPct > 0;
 
   return (
     <div class="train-panel">
-
-      {/* 当前训练队列横幅 */}
-      {slot.training && <TrainQueueBanner slot={slot} />}
-
-      {/* 提速/降费说明 */}
-      {hasBuff && (
-        <div style="font-size: var(--f-xs); color: var(--c-jade); padding: 0 0 var(--s-1);">
-          本建筑 Lv{lvl}：训练提速 {timePct}%，造价降低 {costPct}%（已计入以下造价）
-        </div>
-      )}
-
-      {/* 兵种训练列表 */}
-      {slot.trainable.length === 0
-        ? <Empty title="暂无可训练兵种" icon="⚔️" />
+      <TrainingQueues queues={queues} trainable={trainable} />
+      {trainable.length === 0
+        ? <Empty title="暂无可训练兵种" icon="⚔️">建设满足条件的军事建筑后可解锁兵种。</Empty>
         : (
           <div class="train-unit-list">
-            {slot.trainable.map((u: any) => (
+            {trainable.map((unit) => (
               <TrainUnitRow
-                key={u.key}
-                u={u}
-                qty={qtys[u.key] ?? 1}
-                slotId={slotId}
-                queueBusy={!!slot.training}
-                onQtyChange={(v) => setQty(u.key, v)}
+                key={unit.key}
+                unit={unit}
+                qty={qtys[unit.key] ?? 1}
+                onQtyChange={(value) => setQty(unit.key, value)}
               />
             ))}
           </div>
-        )
-      }
+        )}
     </div>
   );
 }
 
-// ---------- 队列横幅 ----------
+function TrainingQueues({ queues, trainable }: { queues: any[]; trainable: any[] }) {
+  if (queues.length === 0) return null;
+  return (
+    <div class="train-queue-list">
+      {queues.map((queue) => (
+        <TrainQueueBanner key={queue.queueId} queue={queue} trainable={trainable} />
+      ))}
+    </div>
+  );
+}
 
-function TrainQueueBanner({ slot }: { slot: any }) {
-  const tr = slot.training;
-  const unitEntry = (slot.trainable ?? []).find((t: any) => t.key === tr.unit);
-  const name = unitEntry?.name ?? tr.unit;
-  const trainSec = (unitEntry?.trainSec ?? 30) * 1000;
-  const startAt = tr.nextDoneAt - trainSec;
+function TrainQueueBanner({ queue, trainable }: { queue: any; trainable: any[] }) {
+  const unit = trainable.find((entry) => entry.key === queue.unit);
+  const info = unitInfo(queue.unit);
+  const name = unit?.name ?? info.name;
+  const trainSec = Number(unit?.trainSec ?? 0);
+  const nextDoneAt = Number(queue.nextDoneAt);
+  const startAt = Number.isFinite(nextDoneAt) && trainSec > 0 ? nextDoneAt - trainSec * 1000 : Date.now();
 
   async function cancelTraining() {
+    const confirmed = await confirmDanger({
+      title: `取消${name}训练`,
+      body: '已产出的士兵会保留；尚未产出的兵力将取消，并返还对应人口和资源。',
+      confirmText: '取消训练',
+    });
+    if (!confirmed) return;
     await act(
-      req('CancelTraining', { slotId: slot.slotId }),
-      { okToast: '训练已取消，尚未产出的兵力和资源已返还' },
+      req('CancelTraining', { queueId: queue.queueId }),
+      { okToast: '训练已取消，尚未产出的兵力、人口和资源已返还' },
     );
   }
 
   return (
     <div class="train-queue-banner">
-      <IconPlate
-        icon={unitEntry?.icon ?? `unit_${tr.unit}`}
-        label={name}
-        size="sm"
-        plate="stone"
-      />
+      <IconPlate icon={unit?.icon ?? info.icon} label={name} size="sm" plate="stone" />
       <div class="train-queue-banner__body">
         <div class="train-queue-banner__label">
-          训练中：{name} ×{tr.remaining}
-          {tr.remaining > 1 && <span style="color: var(--c-ink-dim); font-weight: 400;">（每个 {fmtSecDur(unitEntry?.trainSec ?? 30)}）</span>}
+          训练中：{name} ×{fmt(Number(queue.remaining ?? 0))}
         </div>
-        <TimerBar startAt={startAt} finishAt={tr.nextDoneAt} label="下一个" kind="ember" />
-        {tr.remaining > 1 && (
-          <div style="font-size: var(--f-2xs); color: var(--c-ink-dim); margin-top: var(--s-1);">
-            全部完成约需 {fmtSecDur((unitEntry?.trainSec ?? 30) * tr.remaining)}
+        {Number.isFinite(nextDoneAt) && trainSec > 0 && (
+          <TimerBar startAt={startAt} finishAt={nextDoneAt} label="下一个" kind="ember" />
+        )}
+        {Number(queue.remaining) > 1 && trainSec > 0 && (
+          <div class="train-queue-banner__estimate">
+            全部完成约需 {fmtSecDur(trainSec * Number(queue.remaining))}
           </div>
         )}
-        <div style="margin-top: var(--s-2);">
+        <div class="train-queue-banner__action">
           <Btn size="sm" variant="danger" onClick={cancelTraining}>取消训练</Btn>
         </div>
       </div>
@@ -137,99 +107,71 @@ function TrainQueueBanner({ slot }: { slot: any }) {
   );
 }
 
-// ---------- 兵种训练行 ----------
-
 interface TrainUnitRowProps {
-  u: any;
+  unit: any;
   qty: number;
-  slotId: string;
-  queueBusy: boolean;
-  onQtyChange: (v: number) => void;
+  onQtyChange: (value: number) => void;
 }
 
-function TrainUnitRow({ u, qty, slotId, queueBusy, onQtyChange }: TrainUnitRowProps) {
-  const unlocked = u.unlocked !== false;
-  const info = unitInfo(u.key);
+function TrainUnitRow({ unit, qty, onQtyChange }: TrainUnitRowProps) {
+  const unlocked = unit.unlocked !== false;
+  const info = unitInfo(unit.key);
   const popCost = info.isMercenary ? 0 : info.popCost;
-  const cropPerHour = unitCropPerHour(u.key);
-
-  // 总消耗（按数量）
-  const totalCost: Record<string, number> = {};
-  for (const k of resourceKeys()) {
-    if (u.cost[k]) totalCost[k] = Math.round(u.cost[k] * qty);
-  }
+  const cropPerHour = unitCropPerHour(unit.key);
+  const totalCost = buildTotalCost(unit.cost, qty);
   const totalPop = popCost * qty;
-  const totalTrainSec = u.trainSec * qty;
-
-  // 校验：禁用原因（多条时只显示最高优先级）
-  const disabledReason = unlocked ? getDisabledReason(u, qty, totalCost, totalPop, queueBusy) : null;
+  const totalTrainSec = Number(unit.trainSec ?? 0) * qty;
+  const disabledReason = unlocked ? getDisabledReason(unit, qty, totalCost, totalPop) : null;
   const canTrain = unlocked && !disabledReason;
-
-  // 最多可训数量
-  const maxCount = unlocked ? calcMaxAffordable(u, popCost) : 0;
+  const maxCount = unlocked ? calcMaxAffordable(unit, popCost) : 0;
 
   async function doTrain() {
     if (!canTrain) return;
     await act(
-      req('TrainTroops', { slotId, unit: u.key, count: qty }),
-      { okToast: `${u.name} ×${qty} 训练已开始` },
+      req('TrainTroops', { unit: unit.key, count: qty }),
+      { okToast: `${unit.name} ×${qty} 训练已开始` },
     );
   }
 
   return (
     <div class={`train-unit-row${unlocked ? '' : ' train-unit-row--locked'}`}>
-      {/* 头部：图标 + 名称，点击展开详情 */}
       <div
         class="train-unit-row__head"
-        onClick={() => openUnitDetail(u.key)}
-        title={`查看 ${u.name} 详细属性`}
+        onClick={() => openUnitDetail(unit.key)}
+        title={`查看 ${unit.name} 详细属性`}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') openUnitDetail(u.key); }}
-        aria-label={`查看 ${u.name} 详细属性`}
+        onKeyDown={(event) => { if ((event as KeyboardEvent).key === 'Enter') openUnitDetail(unit.key); }}
+        aria-label={`查看 ${unit.name} 详细属性`}
       >
-        <IconPlate icon={u.icon ?? `unit_${u.key}`} label={u.name} size="md" plate="stone" />
+        <IconPlate icon={unit.icon ?? info.icon} label={unit.name} size="md" plate="stone" />
         <div class="train-unit-row__info">
           <div class="train-unit-row__name">
-            {u.name}
-            <Tag kind={u.form === 'ranged' ? 'steel' : 'ember'}>{formName(u.form)}</Tag>
+            {unit.name}
+            <Tag kind={unit.form === 'ranged' ? 'steel' : 'ember'}>{formName(unit.form)}</Tag>
           </div>
-          {/* 简要属性行 */}
-          <div style="margin-top: var(--s-1);">
+          <div class="train-unit-row__stats">
             <StatGrid>
-              <Stat icon="ui_icon_atk" label="攻" value={Math.round(u.form === 'ranged' ? u.rangedAtk : u.meleeAtk)} />
-              <Stat icon="ui_icon_def" label="防" value={Math.round(u.form === 'ranged' ? u.rangedDef : u.meleeDef)} />
-              <Stat icon="ui_icon_speed" label="速" value={Math.round(u.speed)} />
+              <Stat icon="ui_icon_atk" label="攻" value={Math.round(unit.form === 'ranged' ? unit.rangedAtk : unit.meleeAtk)} />
+              <Stat icon="ui_icon_def" label="防" value={Math.round(unit.form === 'ranged' ? unit.rangedDef : unit.meleeDef)} />
+              <Stat icon="ui_icon_speed" label="速" value={Math.round(unit.speed)} />
               {popCost > 0 && <Stat icon="ui_icon_pop" label="人口" value={popCost} />}
             </StatGrid>
           </div>
-          {cropPerHour > 0 && (
-            <div class="train-unit-row__bonus">耗粮 {cropPerHour}/时·兵</div>
-          )}
+          {cropPerHour > 0 && <div class="train-unit-row__bonus">耗粮 {cropPerHour}/时·兵</div>}
         </div>
       </div>
 
-      {/* 未解锁：只显示锁定理由 */}
-      {!unlocked && (
+      {!unlocked ? (
         <div class="train-unit-row__controls">
-          <div class="train-warn train-warn--danger">🔒 {u.lockReason ?? '前置建筑未满足，尚未解锁'}</div>
+          <div class="train-warn train-warn--danger">🔒 {unit.lockReason ?? '尚未解锁'}</div>
         </div>
-      )}
-
-      {/* 已解锁：训练控件 */}
-      {unlocked && (
-        <div class="train-unit-row__controls" onClick={(e) => e.stopPropagation()}>
-          {/* 造价预览（总量，随数量变化） */}
+      ) : (
+        <div class="train-unit-row__controls" onClick={(event) => event.stopPropagation()}>
           <CostRow cost={totalCost} timeSec={totalTrainSec} popCost={totalPop || null} />
-
-          {/* 数量选择行 */}
           <div class="qty-row">
             <div class="qty-controls">
-              <button
-                type="button"
-                aria-label="减少数量"
-                onClick={() => onQtyChange(qty - 1)}
-              >−</button>
+              <button type="button" aria-label="减少数量" onClick={() => onQtyChange(qty - 1)}>−</button>
               <input
                 class="qty-input"
                 type="number"
@@ -237,124 +179,88 @@ function TrainUnitRow({ u, qty, slotId, queueBusy, onQtyChange }: TrainUnitRowPr
                 max="9999"
                 value={qty}
                 aria-label="训练数量"
-                onInput={(e) => {
-                  const v = parseInt((e.currentTarget as HTMLInputElement).value, 10);
-                  if (!isNaN(v)) onQtyChange(v);
+                onInput={(event) => {
+                  const value = parseInt((event.currentTarget as HTMLInputElement).value, 10);
+                  if (!Number.isNaN(value)) onQtyChange(value);
                 }}
               />
-              <button
-                type="button"
-                aria-label="增加数量"
-                onClick={() => onQtyChange(qty + 1)}
-              >+</button>
+              <button type="button" aria-label="增加数量" onClick={() => onQtyChange(qty + 1)}>+</button>
             </div>
-
-            {/* 快捷数量 */}
             <div class="qty-presets">
-              {[1, 10, 50].map((n) => (
-                <Btn key={n} size="sm" variant="ghost" onClick={() => onQtyChange(n)}>×{n}</Btn>
+              {[1, 10, 50].map((count) => (
+                <Btn key={count} size="sm" variant="ghost" onClick={() => onQtyChange(count)}>×{count}</Btn>
               ))}
               {maxCount > 0 && (
-                <Btn size="sm" variant="ghost" onClick={() => onQtyChange(maxCount)}
-                  title="资源/人口/动员上限综合可训最大数量">
-                  最多({fmt(maxCount)})
-                </Btn>
+                <Btn size="sm" variant="ghost" onClick={() => onQtyChange(maxCount)}>最多({fmt(maxCount)})</Btn>
               )}
             </div>
           </div>
-
-          {/* 警告提示 */}
           {disabledReason && (
-            <div class={`train-warn${disabledReason.danger ? ' train-warn--danger' : ''}`}>
-              {disabledReason.text}
-            </div>
+            <div class={`train-warn${disabledReason.danger ? ' train-warn--danger' : ''}`}>{disabledReason.text}</div>
           )}
-
-          {/* 训练按钮 */}
-          <Btn
-            variant="primary"
-            block
-            disabled={!canTrain}
-            onClick={doTrain}
-          >
-            训练 {u.name} ×{qty}
-          </Btn>
+          <Btn variant="primary" block disabled={!canTrain} onClick={doTrain}>训练 {unit.name} ×{qty}</Btn>
         </div>
       )}
     </div>
   );
 }
 
-// ---------- 辅助函数 ----------
-
-function trainTimeCap() { return trainTimeReduceCap(); }
-function trainCostCap() { return trainCostReduceCap(); }
+function buildTotalCost(cost: Record<string, number> | undefined, qty: number): Record<string, number> {
+  const total: Record<string, number> = {};
+  for (const key of resourceKeys()) {
+    const amount = Number(cost?.[key] ?? 0);
+    if (amount > 0) total[key] = Math.round(amount * qty);
+  }
+  return total;
+}
 
 interface DisabledReason { text: string; danger?: boolean }
 
 function getDisabledReason(
-  u: any,
+  unit: any,
   qty: number,
   totalCost: Record<string, number>,
   totalPop: number,
-  queueBusy: boolean,
 ): DisabledReason | null {
-  if (queueBusy) return { text: '该建筑队列已有训练任务，请等当前批次完成' };
+  if (!unit.trainableNow) {
+    return { text: unit.unavailableReason ? '当前没有空闲训练队列' : '当前无法开始训练' };
+  }
 
   const have = liveResources();
-  for (const [k, v] of Object.entries(totalCost)) {
-    if (v > 0 && (have[k] ?? 0) < v) {
-      return { text: `资源不足（${k} 缺 ${fmt(Math.ceil(v - (have[k] ?? 0)))}）`, danger: true };
-    }
+  if (Object.entries(totalCost).some(([key, amount]) => amount > 0 && (have[key] ?? 0) < amount)) {
+    return { text: '资源不足', danger: true };
   }
 
-  const ps = getPopState();
-  if (ps && totalPop > 0) {
-    const civilianPop = interpolatePop();
-    if (civilianPop < totalPop) {
-      return { text: `人口不足：需 ${totalPop}，当前平民 ${fmt(civilianPop)}`, danger: true };
-    }
-    const footprint = (ps.soldierPop ?? 0) + (ps.trainingPop ?? 0);
-    const maxSoldier = (ps.mobilizeCap ?? 0) * (ps.totalPop ?? 0);
-    if (footprint + totalPop > maxSoldier + 1e-9) {
-      return {
-        text: `已达动员上限（${Math.round((ps.mobilizeCap ?? 0) * 100)}%）：`
-          + `士兵足迹 ${fmt(Math.round(footprint + totalPop))} / 上限 ${fmt(Math.round(maxSoldier))}`,
-        danger: true,
-      };
-    }
-    if (ps.inFamine) {
-      return { text: '⚠️ 当前处于饥荒，人口正在减少，谨慎训练' };
-    }
+  const pop = getPopState();
+  if (!pop || totalPop <= 0) return null;
+  const civilianPop = interpolatePop();
+  if (civilianPop < totalPop) return { text: `人口不足：需 ${totalPop}，当前平民 ${fmt(civilianPop)}`, danger: true };
+  const footprint = (pop.soldierPop ?? 0) + (pop.trainingPop ?? 0);
+  const maxSoldier = (pop.mobilizeCap ?? 0) * (pop.totalPop ?? 0);
+  if (footprint + totalPop > maxSoldier + 1e-9) {
+    return { text: '已达动员上限，无法继续训练', danger: true };
   }
+  if (pop.inFamine) return { text: '⚠️ 当前处于饥荒，人口正在减少，谨慎训练' };
   return null;
 }
 
-/** 按资源 + 人口 + 动员上限计算可训最大数量。 */
-function calcMaxAffordable(u: any, popCostPer: number): number {
+function calcMaxAffordable(unit: any, popCostPer: number): number {
   const have = liveResources();
   let max = 9999;
-
-  for (const k of resourceKeys()) {
-    if (u.cost[k] > 0) max = Math.min(max, Math.floor((have[k] ?? 0) / u.cost[k]));
+  for (const key of resourceKeys()) {
+    const cost = Number(unit.cost?.[key] ?? 0);
+    if (cost > 0) max = Math.min(max, Math.floor((have[key] ?? 0) / cost));
   }
 
-  const ps = getPopState();
-  if (ps && popCostPer > 0) {
-    const civilianPop = interpolatePop();
-    max = Math.min(max, Math.floor(civilianPop / popCostPer));
-
-    const footprint = (ps.soldierPop ?? 0) + (ps.trainingPop ?? 0);
-    const maxSoldier = (ps.mobilizeCap ?? 0) * (ps.totalPop ?? 0);
-    const remaining = maxSoldier - footprint;
-    if (remaining > 0) max = Math.min(max, Math.floor(remaining / popCostPer));
-    else max = 0;
+  const pop = getPopState();
+  if (pop && popCostPer > 0) {
+    max = Math.min(max, Math.floor(interpolatePop() / popCostPer));
+    const remaining = (pop.mobilizeCap ?? 0) * (pop.totalPop ?? 0) - (pop.soldierPop ?? 0) - (pop.trainingPop ?? 0);
+    max = Math.min(max, Math.max(0, Math.floor(remaining / popCostPer)));
   }
-
   return Math.max(0, max);
 }
 
-/** 秒 → 时长文案。统一走共享的 fmtDur（收毫秒），不在各页重复实现。 */
 function fmtSecDur(sec: number): string {
   return fmtDur(sec * 1000);
 }

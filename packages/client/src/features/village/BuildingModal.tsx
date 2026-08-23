@@ -305,16 +305,6 @@ function BuildingDetailModal({ slotId, close }: BuildingDetailModalProps) {
     }
   }
 
-  // Fallback: army.slots (e.g. when vil not yet loaded, from army screen)
-  if (!kind) {
-    const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
-    if (slot) {
-      kind = slot.kind ?? '';
-      level = slot.level ?? 0;
-      isBuild = level < 1;
-    }
-  }
-
   const info = buildingInfo(kind);
   const isMain = kind === 'main';
   const isMax = maxLevel > 0 && level >= maxLevel;
@@ -539,12 +529,6 @@ export function openBuilding(slotId: string): void {
         }
       }
     }
-  }
-
-  // Fallback to army slots
-  if (!kind) {
-    const slot = getCache().army?.slots?.find((s: any) => s.slotId === slotId);
-    if (slot) kind = slot.kind ?? null;
   }
 
   if (!kind) {

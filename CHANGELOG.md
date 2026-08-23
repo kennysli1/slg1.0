@@ -9,6 +9,10 @@
 
 ## [未发布]
 
+### 破坏性
+
+- 军队训练协议升级至 Wire v5（最低兼容 v5）：`TrainTroops` 不再接受建筑 `slotId`，由 Military 服务端按空闲最高等级、同级稳定 `slotId` 选择训练队列；`GetArmy` 以统一 `trainable` 投影及无建筑语义的 `trainingQueues` 替代 `slots`/`training`，`CancelTraining` 改用 `queueId`。
+
 ### 修复
 
 - 明确并回归覆盖地图视野的玩家维度：切换当前村庄后，`GetArea` 仍使用会话 `playerId` 聚合所有己方城池与军队视野，不会只显示当前村派出的军队视野。
