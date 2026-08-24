@@ -358,8 +358,8 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
 
 function TrainingCenterSection() {
   return (
-    <Panel pad class="training-center">
-      <SectionHead sub="选择本村训练建筑；每座建筑独立排队">训练</SectionHead>
+    <Panel pad>
+      <SectionHead sub="左侧选择军事建筑，右侧训练该建筑可造的兵种">训练</SectionHead>
       <TrainPanel />
     </Panel>
   );
