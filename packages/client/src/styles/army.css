@@ -111,6 +111,27 @@
 }
 .training-center__selector,
 .training-center__panel { min-width: 0; }
+.training-center__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+  color: var(--c-gold);
+  font-family: var(--ff-han);
+  font-size: var(--f-sm);
+  font-weight: 700;
+}
+.training-center__heading small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink-dim);
+  font-family: var(--ff-body);
+  font-size: var(--f-xs);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .training-center__slots { display: flex; flex-direction: column; gap: var(--s-2); }
 .training-center__slot {
   display: flex;
