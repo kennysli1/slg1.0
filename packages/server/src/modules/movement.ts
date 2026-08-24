@@ -221,6 +221,18 @@ export class MovementModule {
     this.indexAdd(mv);
   }
 
+  /**
+   * 行军增量的接收村索引。
+   * 普通出征只通知出发村；运输/增援同时通知目标村，令目标村地图和
+   * 行军列表能够实时跟随 incoming movement。王国增援的 fromVillage
+   * 是内部伪 ID，目标村是唯一真实接收者。
+   */
+  private movementPushVillages(mv: MovementRecord): string[] {
+    const ids = [mv.fromVillage];
+    if (mv.type === 'transport' && mv.targetVillage) ids.push(mv.targetVillage);
+    return [...new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))];
+  }
+
   private remove(id: string, reason: 'arrived' | 'returned' | 'destroyed' | 'converted' = 'destroyed'): void {
     const prev = this.load(id);
     if (prev) {
@@ -228,7 +240,12 @@ export class MovementModule {
       this.indexRemove(prev);
       void this.bus.emit({
         name: 'movement.Removed', source: MovementModule.NAME, ts: this.now(),
-        payload: { villageId: prev.fromVillage, id: prev.id, reason },
+        payload: {
+          villageId: prev.fromVillage,
+          villageIds: this.movementPushVillages(prev),
+          id: prev.id,
+          reason,
+        },
       } as DomainEvent);
       // 外军消失：通知视野内的玩家
       void this.commands.send({ name: 'vision.GetObservers', from: MovementModule.NAME, payload: { q: prev.pos.q, r: prev.pos.r } }).then((obsRes) => {
@@ -977,7 +994,17 @@ export class MovementModule {
     if (await this.finishAutoExploreReveal(mv)) return;
     void this.bus.emit({
       name: 'movement.Stepped', source: MovementModule.NAME, ts: this.now(),
-      payload: { villageId: mv.fromVillage, id: mv.id, pos: mv.pos, stepIndex: mv.stepIndex, nextStepAt: mv.nextStepAt, perStepMs: mv.perStepMs, status: mv.status, arriveAt: mv.arriveAt },
+      payload: {
+        villageId: mv.fromVillage,
+        villageIds: this.movementPushVillages(mv),
+        id: mv.id,
+        pos: mv.pos,
+        stepIndex: mv.stepIndex,
+        nextStepAt: mv.nextStepAt,
+        perStepMs: mv.perStepMs,
+        status: mv.status,
+        arriveAt: mv.arriveAt,
+      },
     } as DomainEvent);
     if (mv.stepIndex >= mv.path.length - 1) { await this.arrive(mv); return; }
     this.scheduler.schedule(Math.max(0, mv.nextStepAt - this.now()), () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
@@ -1754,6 +1781,7 @@ export class MovementModule {
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
       payload: {
         id: mv.id, type: 'transport', mode: mv.transportMode, villageId, targetVillage,
+        villageIds: [villageId, targetVillage],
         arriveAt: mv.arriveAt, cargo: cleanedCargo,
       },
     } as DomainEvent);
@@ -1871,7 +1899,16 @@ export class MovementModule {
     this.save(mv);
     void this.bus.emit({
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
-      payload: { id: mv.id, type: 'transport', mode: 'reinforce', npcService: true, targetVillage, arriveAt: mv.arriveAt, reinforcementUntil: mv.reinforcementUntil },
+      payload: {
+        id: mv.id,
+        type: 'transport',
+        mode: 'reinforce',
+        npcService: true,
+        targetVillage,
+        villageIds: [targetVillage],
+        arriveAt: mv.arriveAt,
+        reinforcementUntil: mv.reinforcementUntil,
+      },
     } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), reinforcementUntil: mv.reinforcementUntil } };
   }
@@ -1991,6 +2028,22 @@ export class MovementModule {
       const delay = Math.max(0, Number(mv.reinforcementUntil) - this.now());
       this.scheduler.schedule(delay, () => this.expireReinforcement(mv.id), `movement:${mv.id}`, `reinforcement:${mv.id}`);
     }
+    // step() 的最后一条事件仍是 marching；补发 stationed 快照，
+    // 让目标村客户端无需整页刷新即可把标记吸附到城池并显示驻防状态。
+    void this.bus.emit({
+      name: 'movement.Stepped', source: MovementModule.NAME, ts: this.now(),
+      payload: {
+        villageId: mv.fromVillage,
+        villageIds: this.movementPushVillages(mv),
+        id: mv.id,
+        pos: mv.pos,
+        stepIndex: mv.stepIndex,
+        nextStepAt: mv.nextStepAt,
+        perStepMs: mv.perStepMs,
+        status: mv.status,
+        arriveAt: mv.arriveAt,
+      },
+    } as DomainEvent);
     void this.bus.emit({
       name: 'movement.ReinforcementArrived', source: MovementModule.NAME, ts: this.now(),
       payload: { id: mv.id, villageId: mv.targetVillage, fromVillage: mv.fromVillage, until: mv.reinforcementUntil },
@@ -2272,6 +2325,7 @@ export class MovementModule {
       name: 'movement.Stepped', source: MovementModule.NAME, ts: this.now(),
       payload: {
         villageId: mv.fromVillage,
+        villageIds: this.movementPushVillages(mv),
         id: mv.id, pos: mv.pos, stepIndex: mv.stepIndex,
         nextStepAt: mv.nextStepAt, perStepMs: mv.perStepMs,
         status: mv.status, arriveAt: mv.arriveAt,

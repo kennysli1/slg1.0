@@ -216,14 +216,21 @@ export class Gateway {
       this.app.bus.on(internalName, (evt: DomainEvent) => {
         const raw = evt.payload as Record<string, unknown>;
         const villageId = raw?.villageId as string | undefined;
+        // 行军增量可能同时属于出发村和目标村（例如玩家/王国增援）。
+        // 事件仍保留 villageId 兼容旧事件；villageIds 用于把同一条更新
+        // 定向投递给两端，而不是只投递给出发村。
+        const villageIds = Array.isArray(raw?.villageIds)
+          ? (raw.villageIds as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
+          : undefined;
         const playerIds = raw?.playerIds as string[] | undefined;
         // 剥离路由字段，避免把观察者名单泄露给客户端
-        const { playerIds: _drop, ...outPayload } = raw;
+        const { playerIds: _drop, villageIds: _dropVillages, ...outPayload } = raw;
         const push: WirePush = {
           v: WIRE_VERSION, type: 'push', id: `push-${evt.ts}`, ts: evt.ts,
           event: pushEvent, payload: outPayload,
         };
-        if (villageId) this.sendToVillage(villageId, push);
+        if (villageIds?.length) this.sendToVillages(villageIds, push);
+        else if (villageId) this.sendToVillage(villageId, push);
         else if (playerIds?.length) this.sendToPlayers(playerIds, push);
       });
     }
@@ -247,6 +254,19 @@ export class Gateway {
     if (!set) return;
     for (const s of set) {
       try { s.conn.send(push); } catch { /* ignore */ }
+    }
+  }
+
+  private sendToVillages(villageIds: string[], push: WirePush): void {
+    const seen = new Set<Session>();
+    for (const villageId of villageIds) {
+      const set = this.byVillage.get(villageId);
+      if (!set) continue;
+      for (const s of set) {
+        if (seen.has(s)) continue;
+        seen.add(s);
+        try { s.conn.send(push); } catch { /* ignore */ }
+      }
     }
   }
 
