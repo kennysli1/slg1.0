@@ -370,6 +370,16 @@ export class CombatModule {
       payload: battleType === 'raid' ? { villageId: targetId, purpose: 'raid' } : { villageId: targetId },
     });
     const defender = ((defRes.payload as any)?.snapshot ?? {}) as Snapshot;
+    // 临时增援不写入目标村 military；战斗只在结算快照中合并，并由 Movement 在战后优先扣除。
+    const reinforcement = await this.commands.send({
+      name: 'movement.GetReinforcementSnapshot', from: CombatModule.NAME,
+      payload: { villageId: targetId, purpose: battleType === 'raid' ? 'raid' : 'siege' },
+    });
+    for (const [code, unit] of Object.entries(((reinforcement.payload as any)?.snapshot ?? {}) as Snapshot)) {
+      const current = defender[code];
+      if (current) current.count += unit.count;
+      else defender[code] = { ...unit };
+    }
     const build = await this.commands.send({ name: 'building.GetDefenseSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
     // 掠夺战即使守方派兵也不启用城墙；攻城战才取城墙加成。
     const wallLevel = battleType === 'raid' ? 0 : ((build.payload as any)?.wallLevel ?? 0);
@@ -691,11 +701,24 @@ export class CombatModule {
 
     // 防守方玩家（村庄战）收一份战报 + 登记战死即时回收
     if (b.targetKind === 'village') {
+      let residentLosses = defenderLosses;
       if (Object.keys(defenderLosses).length > 0) {
+        const temp = await this.commands.send({
+          name: 'movement.ApplyReinforcementLosses', from: CombatModule.NAME,
+          payload: { villageId: b.targetId, losses: defenderLosses },
+        });
+        residentLosses = ((temp.payload as any)?.remaining ?? defenderLosses) as Record<string, number>;
+        const lossesByVillage = ((temp.payload as any)?.lossesByVillage ?? {}) as Record<string, Record<string, number>>;
+        for (const [sourceVillage, losses] of Object.entries(lossesByVillage)) {
+          if (Object.keys(losses).length === 0) continue;
+          void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: sourceVillage, losses } });
+        }
+      }
+      if (Object.keys(residentLosses).length > 0) {
         void this.commands.send({
           name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
-          payload: { villageId: b.targetId, losses: defenderLosses },
+          payload: { villageId: b.targetId, losses: residentLosses },
         });
       }
       void this.bus.emit({

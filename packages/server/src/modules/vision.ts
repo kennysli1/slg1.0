@@ -150,6 +150,10 @@ export class VisionModule {
         const now = current.get(key) ?? { q, r, kind: 'empty' };
         state.explored[key] = now; dirty = true;
         out.push({ ...now, visibility: 'visible' });
+      } else if (current.get(key)?.kind === 'pve' && /^kingdom-(capital|fief-(ne|se|sw|nw))$/.test(String(current.get(key)?.refId ?? ''))) {
+        // 王都与四封地是世界公开地标：即使尚未探索，也显示地标本身；
+        // 守军、资源和其它实时内容仍只在可见时由 PvE/目标接口提供。
+        out.push({ ...(current.get(key) ?? { q, r, kind: 'empty' }), visibility: 'explored' });
       } else if (state.explored[key]) {
         // 旧存档的探索快照没有 terrain；地貌由 World 按固定 seed 派生，
         // 因此只从当前权威地块补地貌，POI 仍使用当时快照，避免泄露实时变化。

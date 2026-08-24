@@ -475,7 +475,7 @@ function KingdomTaskMenu() {
               {task?.status === 'claimed' && <div class="task-prog-hint">下一项指令将在 {secLeft(state.nextIssueAt)} 后下达。</div>}
               <div class="task-card-actions">
                 {task?.status === 'active' && task.kind === 'tribute' && <Btn size="sm" variant="primary" onClick={() => void submit()}>上贡资源</Btn>}
-                {task?.status === 'active' && task.kind === 'clear_pve' && <Btn size="sm" variant="ghost" onClick={goMap}>前往地图</Btn>}
+                {(task?.status === 'active' || task?.status === 'ready') && task?.kind === 'clear_pve' && <Btn size="sm" variant="ghost" onClick={goMap}>前往地图</Btn>}
                 {task?.status === 'ready' && <Btn size="sm" variant="primary" onClick={() => void claim()}>领取声望奖励</Btn>}
               </div>
             </div>
