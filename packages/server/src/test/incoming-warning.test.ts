@@ -44,6 +44,14 @@ test('来袭预警：仅当前可见时存在，完整来袭 movement 与兵力�
   const defender = await register(app, '预警守方');
   const incoming = incomingRecord(app, attacker, defender, { legionnaire: 20, equlegati: 2 }, ['victory_flag']);
   app.store.set('movement', incoming.id, incoming);
+  // 主动侦察抵达守方村庄时不应作为完整来袭 movement 或预警暴露给守方。
+  app.store.set('movement', 'incoming-scout-hidden', {
+    ...incoming,
+    id: 'incoming-scout-hidden',
+    type: 'scout',
+    troops: { equlegati: 4 },
+    treasures: [],
+  });
 
   const changes: any[] = [];
   app.bus.on('movement.IncomingWarningChanged', (event: any) => { changes.push(event.payload); });
@@ -52,6 +60,7 @@ test('来袭预警：仅当前可见时存在，完整来袭 movement 与兵力�
   const visible = await send(app, 'movement.List', { villageId: defender.villageId });
   const payload = visible.payload as any;
   assert.equal(payload.movements.some((movement: any) => movement.id === incoming.id), false, '守方不得取得敌方完整 movement');
+  assert.equal(payload.movements.some((movement: any) => movement.id === 'incoming-scout-hidden'), false, '守方不得看到来袭侦察 movement');
   assert.equal(payload.incomingWarnings.length, 1);
   assert.equal(payload.incomingWarnings[0].troops, undefined, '未侦察前不得泄露兵力');
   assert.equal(payload.incomingWarnings[0].treasures, undefined, '未侦察前不得泄露宝物');
