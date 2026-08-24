@@ -21,6 +21,10 @@ export interface Movement {
   status: MovementStatus;
   targetId?: string;
   targetVillage?: string;
+  /** transport 的语义；reinforce 为不并入目标村的临时增援。 */
+  transportMode?: 'transfer' | 'transport' | 'reinforce';
+  npcService?: boolean;
+  reinforcementUntil?: number;
   /** 途中侦察锁定的来袭行军 id；仅己方视图下发。 */
   targetMovementId?: string;
   scoutType?: 'scout_resources' | 'scout_buildings';

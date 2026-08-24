@@ -23,7 +23,7 @@ function categoryName(category: string): string {
 }
 
 function serviceContent(service: any): string {
-  if (service.category === 'reinforcement') return `${service.unitCode} ×${fmt(service.unitCount)}`;
+  if (service.category === 'reinforcement') return `${service.unitCode} ×${fmt(service.unitCount)} · 临时增援（不并入本村军队）`;
   if (service.category === 'attack') return `${service.unitCode} ×${fmt(service.unitCount)} · ${service.delaySec > 0 ? `${service.delaySec}秒后出发` : '立即出发'}`;
   if (service.category === 'treasure') return treasureInfo(service.treasureCode)?.name ?? service.treasureCode;
   return Object.entries(service.resources ?? {}).filter(([, n]) => Number(n) > 0)
@@ -51,7 +51,7 @@ function CouncilModal({ onClose }: { onClose: () => void }) {
       serviceCode: service.code,
       ...(target ? { targetKind: target.kind, targetId: target.refId } : {}),
     }), {
-      okToast: service.category === 'attack' ? '王国军队已受命出发' : `${service.name}已交付`,
+      okToast: service.category === 'attack' ? '王国军队已受命出发' : service.category === 'reinforcement' ? '王国增援已出发，抵达后临时驻防' : `${service.name}已交付`,
       onOk: () => void reloadKingdom(),
     });
   };

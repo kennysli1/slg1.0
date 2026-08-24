@@ -1,10 +1,10 @@
 id,code,name,category,minCouncilLevel,reputationCost,unitCode,unitCount,wood,clay,iron,crop,gold,treasureCode,delaySec,desc
 #数字ID,代码,显示名,服务类型(reinforcement/attack/supplies/treasure),最低议会厅等级,声望价格,兵种代码,数量,木材,泥土,钢铁,粮食,金币,宝物代码,执行延迟秒数,说明
 1,supplies_small,领主物资包,supplies,1,2,,0,300,300,300,300,50,,0,获得一批基础资源与金币
-2,reinforcement_guard,王国步兵增援,reinforcement,1,3,legionnaire,10,0,0,0,0,0,,0,十名王国步兵加入当前村庄
+2,reinforcement_guard,王国步兵增援,reinforcement,1,3,legionnaire,240,0,0,0,0,0,,0,二百四十名王国步兵临时驻防一小时 不并入本村军队且不消耗本村粮食
 3,supplies_large,领主大型物资包,supplies,2,5,,0,1000,1000,1000,1000,200,,0,获得一批大型资源与金币
 4,treasure_rare,领主珍藏,treasure,2,6,,0,0,0,0,0,0,fine_axe,0,获得一件稀有宝物 满栏时进入报告待处理
 5,attack_patrol,王国巡逻队代打,attack,3,8,legionnaire,100,0,0,0,0,0,,60,王国军队延迟出发攻打所选目标
-6,reinforcement_cavalry,王国骑兵增援,reinforcement,4,12,equimperatoris,15,0,0,0,0,0,,0,十五名王国骑兵加入当前村庄
+6,reinforcement_cavalry,王国骑兵增援,reinforcement,4,12,equimperatoris,300,0,0,0,0,0,,0,三百名王国骑兵临时驻防一小时 不并入本村军队且不消耗本村粮食
 7,treasure_epic,领主史诗珍藏,treasure,4,15,,0,0,0,0,0,0,harvest_totem,0,获得一件史诗宝物 满栏时进入报告待处理
 8,attack_host,王国主力军代打,attack,5,20,equimperatoris,50,0,0,0,0,0,,120,王国主力军延迟出发攻打所选目标

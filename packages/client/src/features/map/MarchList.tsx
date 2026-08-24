@@ -101,7 +101,21 @@ export function MarchList() {
 
         // 按钮矩阵
         let actions: preact.VNode | null = null;
-        if (stationed && !inDir) {
+        if (stationed && !inDir && m.npcService) {
+          actions = (
+            <span class="march-item-eta march-item-eta--sm" title="王国增援由王国控制，到期自动离开">
+              临时增援 · {m.reinforcementUntil ? secUntil(m.reinforcementUntil) : '自动撤离'}
+            </span>
+          );
+        } else if (stationed && !inDir && m.transportMode === 'reinforce') {
+          actions = (
+            <span class="march-item-actions">
+              <Btn size="sm" onClick={async () => {
+                await act(req('RecallGarrison', { movementId: m.id }), { okToast: '增援军开始返程' });
+              }}>召回</Btn>
+            </span>
+          );
+        } else if (stationed && !inDir) {
           actions = (
             <span class="march-item-actions">
               <Btn size="sm" onClick={async () => {
@@ -134,11 +148,14 @@ export function MarchList() {
             ? <span class="march-item-eta march-item-eta--sm">{secUntil(m.arriveAt)}</span>
             : null;
 
+        const displayLabel = type === 'transport' && m.transportMode === 'reinforce'
+          ? (m.npcService ? (inDir ? '王国临时增援' : '临时增援') : (inDir ? '友军增援' : '增援'))
+          : label;
         return (
           <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}${stopped ? ' march-item--stopped' : ''}`}>
             <span class="march-item-icon" aria-hidden="true" />
             <div class="march-item-body">
-              <div class="march-item-kind">{label}{paused ? ' · 交战中' : stationed ? ' · 等待命令' : stopped ? ' · 已停止' : ''}</div>
+              <div class="march-item-kind">{displayLabel}{paused ? ' · 交战中' : stationed && !m.npcService ? ' · 等待命令' : stopped ? ' · 已停止' : ''}</div>
               <div class="march-item-dest">{destText}{troops ? ` · ${troops}` : ''}</div>
               {prog && (
                 <div class="march-item-progress" role="progressbar" aria-valuenow={Math.round(prog.ratio * 100)} aria-valuemin={0} aria-valuemax={100}>

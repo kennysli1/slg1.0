@@ -4,17 +4,17 @@ import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { buildingInfo, treasureRarityName } from '../../app/config.js';
-import { Modal, IconPlate, Btn, Tag, Divider, TimerBar } from '../../ui/index.js';
+import { Modal, IconPlate, Btn, Tag, Divider, TimerBar, SecondaryActions, confirmDanger } from '../../ui/index.js';
 
 const KEY = 'alchemy';
 
-export function openAlchemy(_slotId: string): void {
-  openModal((close) => <AlchemyModal onClose={close} />, KEY);
+export function openAlchemy(slotId: string): void {
+  openModal((close) => <AlchemyModal slotId={slotId} onClose={close} />, KEY);
 }
 
 interface AvailableTreasure { code: string; location: 'town' | 'treasury' | 'reserve'; name: string; icon: string; rarity: string }
 
-function AlchemyModal({ onClose }: { onClose: () => void }) {
+function AlchemyModal({ slotId, onClose }: { slotId: string; onClose: () => void }) {
   dataVersion.value;
   tick.value;
   const [selecting, setSelecting] = useState<number | null>(null);
@@ -42,6 +42,17 @@ function AlchemyModal({ onClose }: { onClose: () => void }) {
 
   async function claim() {
     await act(req('ClaimAlchemy'), { okToast: '已收获炼化宝物' });
+  }
+
+  async function demolish() {
+    const ok = await confirmDanger({
+      title: '拆除炼金炉',
+      body: '整栋炼金炉会被完全拆除，不消耗也不返还资源；拆除开始后不可取消。',
+      confirmText: '确认拆除',
+    });
+    if (!ok) return;
+    await act(req('DemolishBuilding', { slotId }), { okToast: '拆除已开始' });
+    onClose();
   }
 
   return (
@@ -91,6 +102,11 @@ function AlchemyModal({ onClose }: { onClose: () => void }) {
           </> : <span style={{ color: 'var(--c-ink-dim)' }}>炼化结果槽</span>}
         </div>
         {data.result && <p style={{ color: 'var(--c-ink-dim)', fontSize: 'var(--f-xs)' }}>收获时会按宝物栏优先级存入；没有空位时提示宝库已满。</p>}
+        <Divider />
+        <SecondaryActions label="建筑管理" hint="拆除与移除">
+          <p class="secondary-actions__hint">确定不再需要炼金炉时可拆除；拆除开始后不可取消。</p>
+          <Btn variant="danger" size="sm" onClick={() => void demolish()}>拆除建筑</Btn>
+        </SecondaryActions>
       </>}
     </Modal>
   );

@@ -18,6 +18,78 @@ test('王国地标：王都位于世界中心，四封地位于四象限中心�
   }
 });
 
+test('王国地标：即使未探索也会在地图返回公开地标标记', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const registered = await send(app, 'player.Register', { name: '王国地标可见', password: 'p1234', tribe: 'romans' });
+  const player = (registered.payload as any).player;
+  const area = await send(app, 'world.GetArea', {
+    cq: player.q, cr: player.r, r: 1, full: true, playerId: player.id,
+  });
+  const tiles = (area.payload as any).tiles as any[];
+  for (const id of ['kingdom-capital', 'kingdom-fief-ne', 'kingdom-fief-se', 'kingdom-fief-sw', 'kingdom-fief-nw']) {
+    const tile = tiles.find((t) => t.refId === id);
+    assert.ok(tile, `${id} 应存在地图标记`);
+    assert.notEqual(tile.visibility, 'unexplored', `${id} 不应被战争迷雾隐藏`);
+  }
+});
+
+test('议会厅/玩家增援：抵达后不并入目标村军队，来源村仍承担军队足迹', async () => {
+  let clock = 1_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const registered = await send(app, 'player.Register', { name: '临时增援测试', password: 'p1234', tribe: 'romans' });
+  const player = (registered.payload as any).player;
+  const target = await send(app, 'military.GetArmy', { villageId: player.villageId });
+  const before = (target.payload as any).troops;
+  const tile = await send(app, 'world.GetTileByRef', { refId: player.villageId, kind: 'village' });
+  const xy = (tile.payload as any).tile;
+  const sent = await send(app, 'movement.SendKingdomReinforcement', {
+    targetVillage: player.villageId, fromXY: { q: xy.q, r: xy.r },
+    troops: { legionnaire: 240 }, durationSec: 1, orderId: 'test-reinforcement',
+  });
+  assert.equal(sent.ok, true, sent.reason);
+  const movement = app.store.get<any>('movement', (sent.payload as any).id);
+  await app.scheduler.advanceTo(movement.arriveAt, (t) => { clock = t; });
+  const after = await send(app, 'military.GetArmy', { villageId: player.villageId });
+  assert.deepEqual((after.payload as any).troops, before, '临时增援不应写入目标村常驻军队');
+  const reinforcement = await send(app, 'movement.GetReinforcementSnapshot', { villageId: player.villageId });
+  assert.equal((reinforcement.payload as any).snapshot.legionnaire.count, 240);
+  await app.scheduler.advanceTo(clock + 1000, (t) => { clock = t; });
+  assert.equal(app.store.get<any>('movement', (sent.payload as any).id), undefined, '王国增援到期自动离开');
+});
+
+test('玩家增援：目标村不接管兵力，来源村保留口粮足迹且可召回', async () => {
+  let clock = 1_500_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const a = (await send(app, 'player.Register', { name: '玩家增援甲', password: 'p1234', tribe: 'romans' })).payload as any;
+  const b = (await send(app, 'player.Register', { name: '玩家增援乙', password: 'p1234', tribe: 'gauls' })).payload as any;
+  await send(app, 'military.AdjustTroops', { villageId: a.player.villageId, delta: { legionnaire: 3 } });
+  const targetBefore = await send(app, 'military.GetArmy', { villageId: b.player.villageId });
+  const sent = await send(app, 'movement.SendTransport', {
+    villageId: a.player.villageId, targetVillage: b.player.villageId,
+    troops: { legionnaire: 3 }, cargo: {}, mode: 'reinforce',
+  });
+  assert.equal(sent.ok, true, sent.reason);
+  const sourceMoving = (await send(app, 'economy.GetCropContext', { villageId: a.player.villageId })).payload as any;
+  assert.ok(sourceMoving.troopUpkeepPerHour > 0, '来源村应继续承担增援军的行军口粮');
+  while (app.store.get<any>('movement', (sent.payload as any).id)?.status === 'marching') {
+    await app.scheduler.advanceTo(clock + 3_600_000, (t) => { clock = t; });
+  }
+  const targetAfter = await send(app, 'military.GetArmy', { villageId: b.player.villageId });
+  assert.deepEqual((targetAfter.payload as any).troops, (targetBefore.payload as any).troops, '增援不应并入目标村常驻军队');
+  const stationed = await send(app, 'movement.GetReinforcementSnapshot', { villageId: b.player.villageId });
+  assert.equal((stationed.payload as any).snapshot.legionnaire.count, 3);
+  const recalled = await send(app, 'movement.RecallGarrison', { villageId: a.player.villageId, movementId: sent.payload.id });
+  assert.equal(recalled.ok, true, recalled.reason);
+  while (app.store.get<any>('movement', (recalled.payload as any).id)) {
+    await app.scheduler.advanceTo(clock + 3_600_000, (t) => { clock = t; });
+  }
+  const sourceReturned = (await send(app, 'military.GetArmy', { villageId: a.player.villageId })).payload as any;
+  assert.equal(sourceReturned.troops.legionnaire, 3, '召回后兵力应回到来源村');
+});
+
 test('王国任务：循环上贡有期限，目标完成后手动领取才结算声望', async () => {
   let clock = 1_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0 });

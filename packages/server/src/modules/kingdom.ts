@@ -364,7 +364,18 @@ export class KingdomModule {
     if (service.category === 'supplies') {
       result = await this.commands.send({ name: 'economy.Grant', from: KingdomModule.NAME, payload: { villageId, gain: service.resources } });
     } else if (service.category === 'reinforcement') {
-      result = await this.commands.send({ name: 'military.AdjustTroops', from: KingdomModule.NAME, payload: { villageId, delta: { [service.unitCode!]: service.unitCount } } });
+      const anchors = kingdomLandmarkAnchors(this.config.constants.worldW, this.config.constants.worldH, this.n('kingdom_fief_offset_ratio', 0.25));
+      const origin = anchors.find((a) => a.id === `kingdom-fief-${state.fief}`) ?? anchors[0]!;
+      result = await this.commands.send({
+        name: 'movement.SendKingdomReinforcement', from: KingdomModule.NAME,
+        payload: {
+          targetVillage: villageId,
+          fromXY: { q: origin.q, r: origin.r },
+          troops: { [service.unitCode!]: service.unitCount },
+          durationSec: Number(this.config.constants.raw.kingdom_reinforcement_duration_sec) || 3600,
+          orderId: `kr-${playerId}-${this.now()}`,
+        },
+      });
     } else if (service.category === 'treasure') {
       result = await this.commands.send({ name: 'treasure.Grant', from: KingdomModule.NAME, payload: { villageId, code: service.treasureCode, pendingIfFull: true, rewardVillageId: villageId } });
     } else {
