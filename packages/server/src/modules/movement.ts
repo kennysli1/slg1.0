@@ -502,7 +502,7 @@ export class MovementModule {
     const { villageId } = cmd.payload as { villageId: string };
     const all = this.store.all<MovementRecord>(COLLECTION).filter(
       (m) => m.fromVillage === villageId || (
-        m.targetVillage === villageId && !this.isIncomingHostile(m)
+        m.targetVillage === villageId && !this.isIncomingHostile(m) && !this.isScoutMovement(m)
       ),
     );
     const marchPoints = await this.marchPointState(villageId);
@@ -519,6 +519,11 @@ export class MovementModule {
 
   private isIncomingHostile(mv: MovementRecord): boolean {
     return (mv.type === 'attack' || mv.type === 'raid') && !!mv.targetVillage;
+  }
+
+  /** 侦察行军对目标方与第三方均不可见；仅发起方可在自己的行军列表中查看。 */
+  private isScoutMovement(mv: MovementRecord): boolean {
+    return mv.type === 'scout' || mv.type === 'incoming_scout';
   }
 
   /** 当前村庄实时可见的来袭军；查询本身不写状态，断线重连也不会保留过期警报。 */
@@ -692,6 +697,9 @@ export class MovementModule {
     const out: ForeignArmy[] = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!mv.fromVillage || !mv.pos) continue;
+      // 侦察部队不产生地图外军标记；无论是主动侦察还是途中拦截侦察，
+      // 都只对派出方可见，不能被目标或第三方通过地图轮询/推送发现。
+      if (this.isScoutMovement(mv)) continue;
       const key = `${mv.pos.q},${mv.pos.r}`;
       if (mv.type === 'ambush') {
         // 伏击军的隐蔽性不受城池视野影响：只有查看方自己的地图单位在一格内时可见。
@@ -2253,6 +2261,9 @@ export class MovementModule {
 
   /** 外军增量步进推送：找出能看到此格的玩家（城市视野），对每人推送 ForeignArmyStep。 */
   private async emitForeignStep(mv: MovementRecord): Promise<void> {
+    // ListForeign 已过滤侦察，这里也必须在增量通道早退，避免地图轮询间隔内
+    // 通过 ForeignStepped 短暂暴露侦察部队。
+    if (this.isScoutMovement(mv)) return;
     const ownerRes = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     if (!ownerRes.ok) return;
     const p = ownerRes.ok ? (ownerRes.payload as any)?.player : undefined;

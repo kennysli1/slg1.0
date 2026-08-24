@@ -131,3 +131,14 @@ test('movement.ForeignStepped：他国行军进入视野时发出外军步进事
   }
   // 注意：若 A/B 村庄在地图上距离超过 city_vision 范围，外军不会进入视野；此情况下跳过外军可见性断言
 });
+
+test('movement.ForeignStepped：侦察军步进不向其他玩家推送', async () => {
+  const app = freshApp();
+  const foreignSteps: any[] = [];
+  app.bus.on('movement.ForeignStepped', (e) => { foreignSteps.push(e.payload); });
+
+  // 该方法是地图增量通道的唯一出口；即使调用方绕过 ListForeign，侦察类型也必须早退。
+  await (app.movement as any).emitForeignStep({ type: 'scout' });
+  await (app.movement as any).emitForeignStep({ type: 'incoming_scout' });
+  assert.equal(foreignSteps.length, 0, '主动侦察与途中拦截侦察均不得推送 ForeignStepped');
+});

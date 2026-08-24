@@ -69,6 +69,15 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
     path: [far, far], stepIndex: 0, pos: far,
     perStepMs: 1000, nextStepAt: clock + 1000, status: 'marching', stepToken: 1,
   });
+  // B 的主动侦察军：即使停在 A 的可见格，也不能通过地图外军列表发现
+  setMovement(app, {
+    id: 'mv-B-scout', type: 'scout', fromVillage: B.villageId, targetVillage: A.villageId,
+    fromXY: { q: B.q, r: B.r }, toXY: vis,
+    troops: { equlegati: 8 }, loot: {}, cargo: {}, treasures: [],
+    departAt: clock, arriveAt: clock + 300000,
+    path: [vis, vis], stepIndex: 0, pos: vis,
+    perStepMs: 1000, nextStepAt: clock + 1000, status: 'marching', stepToken: 1,
+  });
   // A 自己的一支军队：停在 A 视野内（验证己方军队不被列入对外列表）
   setMovement(app, {
     id: 'mv-A-own', type: 'garrison', fromVillage: A.villageId,
@@ -90,6 +99,7 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
   assert.ok(ids.includes('mv-B-caravan'), '视野内他国商队应出现');
   // 3) 不可见格的他国军队不出现
   assert.ok(!ids.includes('mv-B-far'), '视野外他国军队不应出现');
+  assert.ok(!ids.includes('mv-B-scout'), '他国侦察军不应出现在地图外军列表');
   // 4) 己方军队不出现
   assert.ok(!ids.includes('mv-A-own'), '己方军队不应出现在对外列表');
 

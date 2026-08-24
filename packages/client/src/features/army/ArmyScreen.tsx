@@ -14,8 +14,11 @@
  *  目前在 form 层面均归为 melee，与步兵共组，等未来有专属 category 字段
  *  时再细分。雇佣兵因无人口/耗粮消耗，单独成区并使用金色样式区分。
  */
+import { useEffect, useState } from 'preact/hooks';
 import { dataVersion } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
+import { req } from '../../api.js';
+import { act } from '../../app/refresh.js';
 import {
   unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
 } from '../../app/config.js';
@@ -24,7 +27,7 @@ import { fmt } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
 import { TrainPanel } from './TrainPanel.js';
 import {
-  Panel, SectionHead, Divider, Empty, Tag, IconPlate, Stat,
+  Panel, SectionHead, Divider, Empty, Tag, IconPlate, Stat, Btn,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 import { VillageList } from '../../shared/ui/VillageList.js';
@@ -47,8 +50,98 @@ export function ArmyScreen() {
       <VillageList />
       <IncomingWarnings />
       <GarrisonSection army={army} />
+      <RaidDefenseSection army={army} />
       <TrainingCenterSection />
     </div>
+  );
+}
+
+// ============================================================
+// § 1.5  掠夺防守配置
+// ============================================================
+
+/**
+ * 设置本村在玩家掠夺战中实际派出的防守兵力。
+ * 这是村庄级配置：只影响「掠夺」而不影响攻城战，且兵力上限始终按当前驻军校验。
+ */
+function RaidDefenseSection({ army }: { army: any }) {
+  const troops: Record<string, number> = army.troops ?? {};
+  const raidDefense = army.raidDefense ?? { enabled: true, troops: troops };
+  const [enabled, setEnabled] = useState(raidDefense.enabled !== false);
+  const [selected, setSelected] = useState<Record<string, number>>({ ...(raidDefense.troops ?? troops) });
+  const snapshotKey = JSON.stringify({ enabled: raidDefense.enabled !== false, troops: raidDefense.troops ?? troops });
+
+  // act() 完成刷新后同步服务端快照，避免切村/训练/战斗后仍显示旧配置。
+  useEffect(() => {
+    setEnabled(raidDefense.enabled !== false);
+    setSelected({ ...(raidDefense.troops ?? troops) });
+  }, [snapshotKey]);
+
+  const entries = Object.entries(troops).filter(([, count]) => Number(count) > 0);
+
+  async function save() {
+    const normalized = Object.fromEntries(
+      entries
+        .map(([key, count]) => [key, Math.min(Math.max(0, Math.floor(Number(selected[key]) || 0)), Number(count))] as const)
+        .filter(([, count]) => count > 0),
+    );
+    await act(req('SetRaidDefense', { enabled, troops: normalized }), {
+      okToast: '掠夺防守配置已保存',
+    });
+  }
+
+  return (
+    <Panel pad>
+      <SectionHead sub="仅用于玩家掠夺战；攻城战不受此配置影响">
+        防御掠夺
+      </SectionHead>
+      <div class="raid-defense-panel">
+        <label class="raid-defense-toggle">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)}
+          />
+          <span>派驻军防守掠夺</span>
+        </label>
+        <div class="hint-sm">关闭后，本村遭遇掠夺时不派出防守兵力；开启后按下方数量出战。</div>
+
+        {entries.length === 0 ? (
+          <Empty icon="🛡️" title="暂无可配置驻军">训练或召回部队后可设置防守数量。</Empty>
+        ) : entries.map(([key, count]) => {
+          const info = unitInfo(key);
+          const name = army.trainable?.find((unit: any) => unit.key === key)?.name ?? info.name ?? key;
+          const value = Math.min(Math.max(0, Math.floor(Number(selected[key]) || 0)), Number(count));
+          return (
+            <div class="raid-defense-row" key={key}>
+              <span>{name} <small class="hint-sm">可用 {fmt(Number(count))}</small></span>
+              <input
+                type="number"
+                min="0"
+                max={Number(count)}
+                value={value}
+                disabled={!enabled}
+                aria-label={`${name}防守数量`}
+                onInput={(event) => {
+                  const next = Math.min(Math.max(0, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0)), Number(count));
+                  setSelected((current) => ({ ...current, [key]: next }));
+                }}
+              />
+              <Btn
+                size="sm"
+                variant="ghost"
+                disabled={!enabled}
+                onClick={() => setSelected((current) => ({ ...current, [key]: Number(count) }))}
+              >
+                全部
+              </Btn>
+            </div>
+          );
+        })}
+
+        <Btn variant="primary" block onClick={() => void save()}>保存防守配置</Btn>
+      </div>
+    </Panel>
   );
 }
 
