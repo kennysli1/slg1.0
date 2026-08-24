@@ -79,6 +79,10 @@ test('玩家增援：目标村不接管兵力，来源村保留口粮足迹且�
   }
   const targetAfter = await send(app, 'military.GetArmy', { villageId: b.player.villageId });
   assert.deepEqual((targetAfter.payload as any).troops, (targetBefore.payload as any).troops, '增援不应并入目标村常驻军队');
+  const shown = (targetAfter.payload as any).reinforcements?.find((entry: any) => entry.id === sent.payload.id);
+  assert.equal(shown?.fromVillage, a.player.villageId, '军队页应保留增援来源村庄');
+  assert.equal(shown?.fromPlayerName, a.player.name, '军队页应显示增援来源玩家');
+  assert.equal(shown?.troops?.legionnaire, 3, '军队页应显示该批增援兵力');
   const stationed = await send(app, 'movement.GetReinforcementSnapshot', { villageId: b.player.villageId });
   assert.equal((stationed.payload as any).snapshot.legionnaire.count, 3);
   const recalled = await send(app, 'movement.RecallGarrison', { villageId: a.player.villageId, movementId: sent.payload.id });

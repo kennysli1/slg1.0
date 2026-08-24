@@ -86,6 +86,10 @@ export class MilitaryModule {
   private readonly publicQueueIds = new Map<string, string>();
   private readonly internalQueueKeys = new Map<string, { villageId: string; internalKey: string }>();
   private nextPublicQueueId = 0;
+  /** 训练建筑的运行期不透明句柄；客户端只能用它选择本村建筑，不能伪造任意 slotId。 */
+  private readonly publicTrainerIds = new Map<string, string>();
+  private readonly internalTrainerKeys = new Map<string, { villageId: string; internalKey: string }>();
+  private nextPublicTrainerId = 0;
 
 
   constructor(
@@ -473,6 +477,27 @@ export class MilitaryModule {
     this.internalQueueKeys.delete(queueId);
   }
 
+  private trainerMapKey(villageId: string, internalKey: string): string {
+    return `${villageId}\u0000${internalKey}`;
+  }
+
+  /** 返回当前进程稳定、对外不透明的训练建筑 id。 */
+  private publicTrainerId(villageId: string, internalKey: string): string {
+    const mapKey = this.trainerMapKey(villageId, internalKey);
+    const existing = this.publicTrainerIds.get(mapKey);
+    if (existing) return existing;
+    const id = `military-building-${++this.nextPublicTrainerId}`;
+    this.publicTrainerIds.set(mapKey, id);
+    this.internalTrainerKeys.set(id, { villageId, internalKey });
+    return id;
+  }
+
+  /** 仅允许反查当前村、当前进程签发的训练建筑句柄。 */
+  private internalTrainerKey(villageId: string, publicId: string): string | undefined {
+    const entry = this.internalTrainerKeys.get(publicId);
+    return entry?.villageId === villageId ? entry.internalKey : undefined;
+  }
+
   /** Military owner 选取可用训练队列：空闲最高等级，同级 slotId 稳定排序。 */
   private selectTrainSlot(s: MilitaryState, slots: TrainerSlot[], unit: string): TrainerSlot | undefined {
     const legacyReserved = this.legacyReservedSlot(s, slots, unit);
@@ -632,6 +657,7 @@ export class MilitaryModule {
       const kind = projectedTrainer?.kind ?? u.building;
       return {
         key: u.key, name: u.name, icon: u.icon, form: u.form,
+        buildingKind: u.building,
         cost: this.effectiveCost(u.cost, level, kind),
         trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(level, kind) * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
@@ -646,18 +672,66 @@ export class MilitaryModule {
       };
     });
 
-    // 队列 id 是 Military 运行期句柄：不下发建筑字段，也不复用内部 slotId。
-    const trainingQueues = Object.entries(s.trainingBySlot)
-      .map(([slotId, order]) => ({ queueId: this.publicQueueId(s.villageId, slotId), unit: order.unit, remaining: order.remaining, nextDoneAt: order.nextDoneAt }));
+    // 训练建筑只下发不透明句柄；客户端据此选择训练建筑，不会看到内部 slotId。
+    const trainingBuildings = this.sortTrainerSlots(slots)
+      .filter((slot) => Object.values(this.config.units).some((u) => u.building === slot.kind))
+      .map((slot) => {
+        const legacyOrder = s.training
+          && this.config.units[s.training.unit]?.building === slot.kind
+          && this.trainerSlotsFor(slots, s.training.unit)[0]?.slotId === slot.slotId
+          ? s.training
+          : undefined;
+        const order = s.trainingBySlot[slot.slotId]
+          ?? legacyOrder;
+        const queueId = order
+          ? this.publicQueueId(s.villageId, order.slotId === slot.slotId ? slot.slotId : LEGACY_QUEUE_KEY)
+          : undefined;
+        return {
+          buildingId: this.publicTrainerId(s.villageId, slot.slotId),
+          kind: slot.kind,
+          name: this.config.buildings[slot.kind]?.name ?? slot.kind,
+          level: slot.level,
+          busy: !!order,
+          training: order ? { unit: order.unit, remaining: order.remaining, nextDoneAt: order.nextDoneAt, queueId } : undefined,
+        };
+      });
+
+    // 队列 id 是 Military 运行期句柄；建筑来源通过上面的 buildingId/名称显式下发。
+    const trainingQueues: Array<{
+      queueId: string; unit: string; remaining: number; nextDoneAt: number;
+      buildingId?: string; buildingKind?: string; buildingName?: string; buildingLevel?: number;
+    }> = Object.entries(s.trainingBySlot)
+      .map(([slotId, order]) => {
+        const slot = slots.find((candidate) => candidate.slotId === slotId);
+        return {
+          queueId: this.publicQueueId(s.villageId, slotId),
+          unit: order.unit,
+          remaining: order.remaining,
+          nextDoneAt: order.nextDoneAt,
+          buildingId: this.publicTrainerId(s.villageId, slotId),
+          buildingKind: slot?.kind,
+          buildingName: slot ? (this.config.buildings[slot.kind]?.name ?? slot.kind) : undefined,
+          buildingLevel: slot?.level,
+        };
+      });
     if (s.training) {
+      const legacySlot = this.trainerSlotsFor(slots, s.training.unit)[0];
       trainingQueues.push({
         queueId: this.publicQueueId(s.villageId, LEGACY_QUEUE_KEY),
         unit: s.training.unit,
         remaining: s.training.remaining,
         nextDoneAt: s.training.nextDoneAt,
+        buildingId: legacySlot ? this.publicTrainerId(s.villageId, legacySlot.slotId) : undefined,
+        buildingKind: legacySlot?.kind,
+        buildingName: legacySlot ? (this.config.buildings[legacySlot.kind]?.name ?? legacySlot.kind) : '旧版训练队列',
+        buildingLevel: legacySlot?.level,
       });
     }
     trainingQueues.sort((a, b) => a.nextDoneAt - b.nextDoneAt || a.queueId.localeCompare(b.queueId));
+    const reinforcementRes = await this.commands.send({
+      name: 'movement.ListReinforcements', from: MilitaryModule.NAME,
+      payload: { villageId: s.villageId },
+    });
 
     return {
       ok: true,
@@ -670,17 +744,19 @@ export class MilitaryModule {
         },
         trainable,
         trainingQueues,
+        trainingBuildings,
+        reinforcements: reinforcementRes.ok ? ((reinforcementRes.payload as any)?.reinforcements ?? []) : [],
       },
     };
   }
 
   /**
-   * 训练：Military 自行选择该兵种的空闲最高等级训练建筑，同级 slotId 稳定排序。
+   * 训练：客户端可指定一个本村空闲训练建筑；缺省时沿用空闲最高等级建筑。
    * 校验兵种(含种族) → 校验存在已建成训练建筑与可用队列 →
    * 扣人口 → 一次性预扣资源(数量×单价×建筑等级降费) → 入该 slot 队列，逐个产出。
    */
   private async trainTroops(cmd: Command): Promise<CommandResult> {
-    const { villageId, unit, count } = cmd.payload as { villageId: string; unit: string; count: number };
+    const { villageId, unit, count, buildingId } = cmd.payload as { villageId: string; unit: string; count: number; buildingId?: string };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.trainingBySlot = s.trainingBySlot || {};
@@ -693,11 +769,22 @@ export class MilitaryModule {
     }
     if (!Number.isInteger(count) || count <= 0) return { ok: false, payload: {}, reason: 'bad_count' };
 
-    // 服务端基于当前快照重新选取队列；客户端永不指定建筑实例，避免伪造与并发陈旧选择。
+    // 服务端基于当前快照校验客户端选择的本村建筑；缺省时保持旧的自动选址规则。
     const layout = await this.resolveLayout(villageId);
     const trainers = this.trainerSlotsFor(layout.slots, unit);
     if (trainers.length === 0) return { ok: false, payload: {}, reason: `requires_building:${def.building}` };
-    const slotInfo = this.selectTrainSlot(s, layout.slots, unit);
+    let slotInfo: TrainerSlot | undefined;
+    if (buildingId) {
+      const selectedSlotId = this.internalTrainerKey(villageId, buildingId);
+      if (!selectedSlotId) return { ok: false, payload: {}, reason: 'training_building_not_found' };
+      slotInfo = trainers.find((slot) => slot.slotId === selectedSlotId);
+      if (!slotInfo) return { ok: false, payload: {}, reason: 'invalid_training_building' };
+      if (s.trainingBySlot[slotInfo.slotId] || slotInfo.slotId === this.legacyReservedSlot(s, layout.slots, unit)) {
+        return { ok: false, payload: {}, reason: 'queue_busy' };
+      }
+    } else {
+      slotInfo = this.selectTrainSlot(s, layout.slots, unit);
+    }
     if (!slotInfo) return { ok: false, payload: {}, reason: 'queue_busy' };
     const targetSlot = slotInfo.slotId;
 

@@ -50,9 +50,53 @@ export function ArmyScreen() {
       <VillageList />
       <IncomingWarnings />
       <GarrisonSection army={army} />
+      <ReinforcementSection army={army} />
       <RaidDefenseSection army={army} />
       <TrainingCenterSection />
     </div>
+  );
+}
+
+// ============================================================
+// § 1.2  增援部队
+// ============================================================
+
+function ReinforcementSection({ army }: { army: any }) {
+  const reinforcements: any[] = army.reinforcements ?? [];
+  if (reinforcements.length === 0) return null;
+
+  return (
+    <Panel pad>
+      <SectionHead sub="增援兵力仍由来源村庄承担口粮、人口和伤亡">增援部队</SectionHead>
+      <div class="reinforcement-list">
+        {reinforcements.map((entry) => {
+          const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
+          const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
+          const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
+          const troopEntries = Object.entries(entry.troops ?? {}).filter(([, count]) => Number(count) > 0);
+          return (
+            <div class="reinforcement-card" key={entry.id}>
+              <div class="reinforcement-card__head">
+                <div>
+                  <div class="reinforcement-card__source">{sourceVillage}</div>
+                  <div class="reinforcement-card__owner">来自玩家：{sourcePlayer}</div>
+                </div>
+                <Tag kind={entry.status === 'stationed' ? 'jade' : 'steel'}>{status}</Tag>
+              </div>
+              <div class="reinforcement-card__troops">
+                {troopEntries.length === 0
+                  ? <span class="hint-sm">暂无存活兵力</span>
+                  : troopEntries.map(([unit, count]) => (
+                    <span class="reinforcement-card__troop" key={unit}>
+                      {unitInfo(unit).name} ×{fmt(Number(count))}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
   );
 }
 
@@ -315,7 +359,7 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
 function TrainingCenterSection() {
   return (
     <Panel pad class="training-center">
-      <SectionHead sub="可用队列由领地内建筑自动分配">训练</SectionHead>
+      <SectionHead sub="选择本村训练建筑；每座建筑独立排队">训练</SectionHead>
       <TrainPanel />
     </Panel>
   );

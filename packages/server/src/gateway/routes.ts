@@ -111,6 +111,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           unit:  { type: 'string', minLen: 1, maxLen: 32 },
           count: { type: 'integer', min: 1, max: 10000 },
+          buildingId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
         },
       },
       CancelTraining: {

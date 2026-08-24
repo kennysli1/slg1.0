@@ -140,5 +140,6 @@ test('movement.ForeignStepped：侦察军步进不向其他玩家推送', async 
   // 该方法是地图增量通道的唯一出口；即使调用方绕过 ListForeign，侦察类型也必须早退。
   await (app.movement as any).emitForeignStep({ type: 'scout' });
   await (app.movement as any).emitForeignStep({ type: 'incoming_scout' });
-  assert.equal(foreignSteps.length, 0, '主动侦察与途中拦截侦察均不得推送 ForeignStepped');
+  await (app.movement as any).emitForeignStep({ type: 'return', scoutReturn: true });
+  assert.equal(foreignSteps.length, 0, '主动侦察、途中拦截侦察及其返程均不得推送 ForeignStepped');
 });
