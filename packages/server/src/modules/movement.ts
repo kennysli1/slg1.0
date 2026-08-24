@@ -82,6 +82,8 @@ interface MovementRecord {
   npcService?: boolean;
   reinforcementUntil?: number;
   reinforcementSnapshot?: Snapshot;
+  /** 该支增援独立的掠夺防守配置；旧记录缺省为全军参与。 */
+  reinforcementRaidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 拓荒发起玩家（found 到达建村用） */
   founderPlayerId?: string;
   departAt: number;
@@ -163,6 +165,7 @@ export class MovementModule {
     this.commands.register('movement.SendKingdomReinforcement', (c) => this.sendKingdomReinforcement(c));
     this.commands.register('movement.GetReinforcementSnapshot', (c) => this.getReinforcementSnapshot(c));
     this.commands.register('movement.ApplyReinforcementLosses', (c) => this.applyReinforcementLosses(c));
+    this.commands.register('movement.SetReinforcementRaidDefense', (c) => this.setReinforcementRaidDefense(c));
     this.commands.register('movement.SendGarrison', (c) => this.sendGarrison(c));
     this.commands.register('movement.SendAmbush', (c) => this.sendAmbush(c));
     this.commands.register('movement.SendExplore', (c) => this.sendExplore(c));
@@ -695,6 +698,10 @@ export class MovementModule {
         fromPlayerId,
         fromPlayerName,
         troops: { ...mv.troops },
+        raidDefense: {
+          enabled: mv.reinforcementRaidDefense?.enabled !== false,
+          troops: { ...(mv.reinforcementRaidDefense?.troops ?? mv.troops) },
+        },
         npcService: mv.npcService === true,
         arriveAt: mv.arriveAt,
         reinforcementUntil: mv.reinforcementUntil,
@@ -2060,52 +2067,132 @@ export class MovementModule {
     } as DomainEvent);
   }
 
-  /** Combat 读取目标村当前所有临时增援；不会泄露给普通客户端。 */
+  /** Combat 读取目标村当前所有临时增援；不会泄露给普通客户端。
+   * `contributions` 保留每支援军的独立兵力池，`snapshot` 仅为攻城等旧调用提供聚合兼容。
+   */
   private getReinforcementSnapshot(cmd: Command): CommandResult {
     const { villageId, purpose } = cmd.payload as { villageId: string; purpose?: 'raid' | 'siege' };
     const snapshot: Snapshot = {};
+    const contributions: Array<Record<string, unknown>> = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (mv.transportMode !== 'reinforce' || mv.targetVillage !== villageId || mv.status !== 'stationed') continue;
-      for (const [code, unit] of Object.entries(mv.reinforcementSnapshot ?? this.buildSnapshot(mv.troops))) {
-        const normalized = purpose === 'raid' ? this.buildSnapshot({ [code]: unit.count })[code] : unit;
-        if (!normalized) continue;
+      const source = purpose === 'raid'
+        ? (mv.reinforcementRaidDefense?.enabled === false ? {} : (mv.reinforcementRaidDefense?.troops ?? mv.troops))
+        : mv.troops;
+      const storedSnapshot = mv.reinforcementSnapshot ?? this.buildSnapshot(mv.troops);
+      const contribution: Snapshot = {};
+      for (const [code, raw] of Object.entries(source)) {
+        const available = Math.max(0, Math.floor(Number(mv.troops[code] ?? mv.reinforcementSnapshot?.[code]?.count ?? 0)));
+        const count = Math.min(available, Math.max(0, Math.floor(Number(raw) || 0)));
+        if (count <= 0) continue;
+        const baseUnit = purpose === 'raid'
+          ? this.buildSnapshot({ [code]: count })[code]
+          : (storedSnapshot[code] ?? this.buildSnapshot({ [code]: count })[code]);
+        const unit = baseUnit ? { ...baseUnit, count } : undefined;
+        if (!unit) continue;
+        contribution[code] = unit;
         const current = snapshot[code];
-        if (current) current.count += normalized.count;
-        else snapshot[code] = { ...normalized };
+        if (current) current.count += count;
+        else snapshot[code] = { ...unit };
+      }
+      if (Object.keys(contribution).length > 0) {
+        contributions.push({
+          id: mv.id,
+          fromVillage: mv.fromVillage,
+          npcService: mv.npcService === true,
+          troops: contribution,
+        });
       }
     }
-    return { ok: true, payload: { snapshot } };
+    return { ok: true, payload: { snapshot, contributions } };
+  }
+
+  /** 设置某一支增援自己的掠夺防守配置；目标村权限由 gateway 注入并在此复核。 */
+  private setReinforcementRaidDefense(cmd: Command): CommandResult {
+    const { villageId, movementId, enabled, troops } = cmd.payload as {
+      villageId: string; movementId: string; enabled: boolean; troops?: Record<string, number>;
+    };
+    const mv = this.store.get<MovementRecord>(COLLECTION, movementId);
+    if (!mv || mv.transportMode !== 'reinforce' || mv.targetVillage !== villageId) {
+      return { ok: false, payload: {}, reason: 'reinforcement_not_found' };
+    }
+    if (mv.status !== 'marching' && mv.status !== 'stationed') {
+      return { ok: false, payload: {}, reason: 'reinforcement_not_configurable' };
+    }
+    const selected: Record<string, number> = {};
+    for (const [code, raw] of Object.entries(troops ?? {})) {
+      if (!this.config.units[code]) continue;
+      const available = Math.max(0, Math.floor(Number(mv.troops[code] ?? mv.reinforcementSnapshot?.[code]?.count ?? 0)));
+      const count = Math.min(available, Math.max(0, Math.floor(Number(raw) || 0)));
+      if (count > 0) selected[code] = count;
+    }
+    mv.reinforcementRaidDefense = { enabled: enabled !== false, troops: selected };
+    this.save(mv);
+    return { ok: true, payload: {
+      movementId: mv.id,
+      raidDefense: { enabled: mv.reinforcementRaidDefense.enabled, troops: { ...selected } },
+    } };
   }
 
   /**
-   * 战斗结束时优先从临时增援中扣除防守损失；返回仍需从目标村常驻军扣除的部分。
+   * 战斗结束时按战斗快照指定的来源扣除临时增援；返回仍需从目标村常驻军扣除的部分。
    * 玩家增援的伤亡归来源村处理，王国 NPC 增援不产生玩家人口伤亡。
+   * 旧调用仍可传 `losses`，继续按旧的兼容顺序扣除。
    */
   private applyReinforcementLosses(cmd: Command): CommandResult {
-    const { villageId, losses } = cmd.payload as { villageId: string; losses: Record<string, number> };
-    const remaining = { ...(losses ?? {}) };
+    const { villageId, losses, lossesByMovement } = cmd.payload as {
+      villageId: string;
+      losses?: Record<string, number>;
+      lossesByMovement?: Record<string, Record<string, number>>;
+    };
+    const requested = lossesByMovement ? {} : { ...(losses ?? {}) };
+    const remaining = { ...requested };
     const lossesByVillage: Record<string, Record<string, number>> = {};
     const records = this.store.all<MovementRecord>(COLLECTION)
       .filter((mv) => mv.transportMode === 'reinforce' && mv.targetVillage === villageId && mv.status === 'stationed');
+
+    const takeFrom = (mv: MovementRecord, code: string, needRaw: number): number => {
+      const need = Math.max(0, Math.floor(Number(needRaw) || 0));
+      if (need <= 0) return 0;
+      const available = Math.max(0, Math.floor(Number(mv.troops[code] ?? mv.reinforcementSnapshot?.[code]?.count ?? 0)));
+      const taken = Math.min(available, need);
+      if (taken <= 0) return 0;
+      mv.troops[code] = available - taken;
+      if (mv.troops[code] <= 0) delete mv.troops[code];
+      if (mv.reinforcementRaidDefense?.troops[code] !== undefined) {
+        const configured = Math.max(0, Math.floor(Number(mv.reinforcementRaidDefense.troops[code]) || 0));
+        const current = Math.max(0, Math.floor(Number(mv.troops[code] ?? 0)));
+        if (current <= 0) delete mv.reinforcementRaidDefense.troops[code];
+        else mv.reinforcementRaidDefense.troops[code] = Math.min(configured, current);
+      }
+      if (mv.reinforcementSnapshot?.[code]) {
+        mv.reinforcementSnapshot[code].count = Math.max(0, mv.reinforcementSnapshot[code].count - taken);
+        if (mv.reinforcementSnapshot[code].count <= 0) delete mv.reinforcementSnapshot[code];
+      }
+      if (!mv.npcService && mv.fromVillage) {
+        const villageLoss = lossesByVillage[mv.fromVillage] ?? {};
+        villageLoss[code] = (villageLoss[code] ?? 0) + taken;
+        lossesByVillage[mv.fromVillage] = villageLoss;
+      }
+      return taken;
+    };
+
+    if (lossesByMovement) {
+      for (const mv of records) {
+        const sourceLosses = lossesByMovement[mv.id];
+        if (!sourceLosses) continue;
+        for (const [code, need] of Object.entries(sourceLosses)) takeFrom(mv, code, need);
+        if (Object.keys(mv.troops).length === 0) this.remove(mv.id, 'destroyed');
+        else this.save(mv);
+      }
+      return { ok: true, payload: { remaining: {}, lossesByVillage } };
+    }
+
     for (const mv of records) {
       for (const [code, rawLoss] of Object.entries(remaining)) {
-        let need = Math.max(0, Math.floor(Number(rawLoss) || 0));
-        if (need <= 0) continue;
-        const available = Math.max(0, Math.floor(Number(mv.troops[code] ?? mv.reinforcementSnapshot?.[code]?.count ?? 0)));
-        const taken = Math.min(available, need);
-        if (taken <= 0) continue;
-        mv.troops[code] = available - taken;
-        if (mv.troops[code] <= 0) delete mv.troops[code];
-        if (mv.reinforcementSnapshot?.[code]) {
-          mv.reinforcementSnapshot[code].count = Math.max(0, mv.reinforcementSnapshot[code].count - taken);
-          if (mv.reinforcementSnapshot[code].count <= 0) delete mv.reinforcementSnapshot[code];
-        }
+        const need = Math.max(0, Math.floor(Number(rawLoss) || 0));
+        const taken = takeFrom(mv, code, need);
         remaining[code] = need - taken;
-        if (!mv.npcService && mv.fromVillage && taken > 0) {
-          const villageLoss = lossesByVillage[mv.fromVillage] ?? {};
-          villageLoss[code] = (villageLoss[code] ?? 0) + taken;
-          lossesByVillage[mv.fromVillage] = villageLoss;
-        }
       }
       if (Object.keys(mv.troops).length === 0) this.remove(mv.id, 'destroyed');
       else this.save(mv);

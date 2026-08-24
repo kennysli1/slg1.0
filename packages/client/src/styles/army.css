@@ -512,6 +512,23 @@
   flex-direction: column;
   gap: var(--s-3);
 }
+.raid-defense-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,.02);
+}
+.raid-defense-source-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  color: var(--c-ink);
+}
+.raid-defense-source-head strong { font-size: var(--f-sm); }
 .raid-defense-toggle {
   display: flex;
   align-items: center;
