@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { Gateway, type ClientConnection } from '../gateway/gateway.js';
+import { WIRE_VERSION } from '@slg/shared';
 
 /**
  * 行军增量推送（MarchStep / MarchRemoved / ForeignArmyStep / ForeignArmyRemoved / MarchRecalled）行为测试。
@@ -142,4 +144,54 @@ test('movement.ForeignStepped：侦察军步进不向其他玩家推送', async 
   await (app.movement as any).emitForeignStep({ type: 'incoming_scout' });
   await (app.movement as any).emitForeignStep({ type: 'return', scoutReturn: true });
   assert.equal(foreignSteps.length, 0, '主动侦察、途中拦截侦察及其返程均不得推送 ForeignStepped');
+});
+
+test('王国增援：目标村收到实时步进、抵达和到期移除推送', async () => {
+  const app = freshApp();
+  const pushes: any[] = [];
+  const gw = new Gateway(app);
+  const conn: ClientConnection = { send: (msg) => pushes.push(msg) };
+  const session = gw.addClient(conn);
+  const registered = await gw.handleRequest({
+    v: WIRE_VERSION, type: 'req', id: 'register-reinforcement', ts: clock,
+    action: 'Register', payload: { name: '网关增援目标', password: 'pass123', tribe: 'romans' },
+  }, session);
+  assert.equal(registered.ok, true);
+  const target = (registered.payload as any).player as { villageId: string; q: number; r: number };
+  pushes.length = 0;
+
+  const sent = await send(app, 'movement.SendKingdomReinforcement', {
+    targetVillage: target.villageId,
+    fromXY: { q: target.q + 3, r: target.r },
+    troops: { legionnaire: 2 },
+    durationSec: 1,
+    orderId: 'kingdom-reinforcement-test',
+  });
+  assert.equal(sent.ok, true);
+  const id = (sent.payload as any).id as string;
+  const initial = pushes.find((p) => p.event === 'MarchSent' && p.payload?.id === id);
+  assert.ok(initial, '目标村应收到增援发出的 MarchSent');
+
+  const mv = app.store.get<any>('movement', id);
+  assert.ok(mv, '增援应写入行军记录');
+  await app.scheduler.advanceTo(clock + Number(mv.perStepMs) + 1, setClock);
+  const stepped = pushes.filter((p) => p.event === 'MarchStep' && p.payload?.id === id);
+  assert.ok(stepped.length > 0, '目标村应收到增援逐格 MarchStep');
+
+  let guard = 0;
+  while (app.store.get<any>('movement', id)?.status === 'marching' && guard++ < 20) {
+    const current = app.store.get<any>('movement', id);
+    await app.scheduler.advanceTo(clock + Number(current?.perStepMs ?? 1) + 1, setClock);
+  }
+  assert.equal(app.store.get<any>('movement', id)?.status, 'stationed');
+  assert.ok(
+    pushes.some((p) => p.event === 'MarchStep' && p.payload?.id === id && p.payload?.status === 'stationed'),
+    '抵达后应向目标村推送 stationed 状态',
+  );
+
+  await app.scheduler.advanceTo(clock + 1_500, setClock);
+  assert.ok(
+    pushes.some((p) => p.event === 'MarchRemoved' && p.payload?.id === id),
+    '增援到期后应向目标村推送 MarchRemoved',
+  );
 });
