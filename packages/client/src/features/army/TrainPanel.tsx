@@ -1,8 +1,7 @@
 /**
  * 统一训练面板。
  *
- * 训练建筑由服务端为每个兵种选择；客户端只呈现当前可训兵种与公开训练队列，
- * 不读取或指定任何建筑实例。
+ * 训练建筑由服务端下发不透明句柄；客户端可选择本村哪一座建筑承接本批训练。
  */
 import { useState } from 'preact/hooks';
 import { dataVersion, tick } from '../../app/store.js';
@@ -25,7 +24,9 @@ export function TrainPanel() {
   const army = getCache().army;
   const trainable: any[] = army?.trainable ?? [];
   const queues: any[] = army?.trainingQueues ?? [];
+  const buildings: any[] = army?.trainingBuildings ?? [];
   const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [selectedBuildings, setSelectedBuildings] = useState<Record<string, string>>({});
 
   const setQty = (unitKey: string, value: number) => {
     setQtys((prev) => ({ ...prev, [unitKey]: Math.max(1, Math.floor(value)) }));
@@ -33,6 +34,7 @@ export function TrainPanel() {
 
   return (
     <div class="train-panel">
+      <TrainingBuildings buildings={buildings} />
       <TrainingQueues queues={queues} trainable={trainable} />
       {trainable.length === 0
         ? <Empty title="暂无可训练兵种" icon="⚔️">建设满足条件的军事建筑后可解锁兵种。</Empty>
@@ -44,10 +46,36 @@ export function TrainPanel() {
                 unit={unit}
                 qty={qtys[unit.key] ?? 1}
                 onQtyChange={(value) => setQty(unit.key, value)}
+                buildingOptions={buildings.filter((building) => building.kind === unit.buildingKind)}
+                selectedBuildingId={selectedBuildings[unit.key]}
+                onBuildingChange={(buildingId) => setSelectedBuildings((prev) => ({ ...prev, [unit.key]: buildingId }))}
               />
             ))}
           </div>
         )}
+    </div>
+  );
+}
+
+function TrainingBuildings({ buildings }: { buildings: any[] }) {
+  if (buildings.length === 0) return null;
+  return (
+    <div class="train-building-list" aria-label="训练建筑状态">
+      <div class="train-building-list__title">训练建筑</div>
+      <div class="train-building-list__items">
+        {buildings.map((building) => {
+          const training = building.training;
+          const trainingName = training ? unitInfo(training.unit).name : '';
+          return (
+            <div class={`train-building-card${building.busy ? ' train-building-card--busy' : ''}`} key={building.buildingId}>
+              <div class="train-building-card__name">{building.name} Lv{building.level}</div>
+              <div class="train-building-card__status">
+                {building.busy ? `训练中：${trainingName} ×${fmt(Number(training?.remaining ?? 0))}` : '空闲'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -91,6 +119,11 @@ function TrainQueueBanner({ queue, trainable }: { queue: any; trainable: any[] }
         <div class="train-queue-banner__label">
           训练中：{name} ×{fmt(Number(queue.remaining ?? 0))}
         </div>
+        {queue.buildingName && (
+          <div class="train-queue-banner__building">
+            建筑：{queue.buildingName}{queue.buildingLevel ? ` Lv${queue.buildingLevel}` : ''}
+          </div>
+        )}
         {Number.isFinite(nextDoneAt) && trainSec > 0 && (
           <TimerBar startAt={startAt} finishAt={nextDoneAt} label="下一个" kind="ember" />
         )}
@@ -111,24 +144,30 @@ interface TrainUnitRowProps {
   unit: any;
   qty: number;
   onQtyChange: (value: number) => void;
+  buildingOptions: any[];
+  selectedBuildingId?: string;
+  onBuildingChange: (buildingId: string) => void;
 }
 
-function TrainUnitRow({ unit, qty, onQtyChange }: TrainUnitRowProps) {
+function TrainUnitRow({ unit, qty, onQtyChange, buildingOptions, selectedBuildingId, onBuildingChange }: TrainUnitRowProps) {
   const unlocked = unit.unlocked !== false;
   const info = unitInfo(unit.key);
+  const selectedBuilding = buildingOptions.find((building) => building.buildingId === selectedBuildingId)
+    ?? buildingOptions.find((building) => !building.busy)
+    ?? buildingOptions[0];
   const popCost = info.isMercenary ? 0 : info.popCost;
   const cropPerHour = unitCropPerHour(unit.key);
   const totalCost = buildTotalCost(unit.cost, qty);
   const totalPop = popCost * qty;
   const totalTrainSec = Number(unit.trainSec ?? 0) * qty;
-  const disabledReason = unlocked ? getDisabledReason(unit, qty, totalCost, totalPop) : null;
+  const disabledReason = unlocked ? getDisabledReason(unit, qty, totalCost, totalPop, selectedBuilding) : null;
   const canTrain = unlocked && !disabledReason;
   const maxCount = unlocked ? calcMaxAffordable(unit, popCost) : 0;
 
   async function doTrain() {
     if (!canTrain) return;
     await act(
-      req('TrainTroops', { unit: unit.key, count: qty }),
+      req('TrainTroops', { unit: unit.key, count: qty, ...(selectedBuilding ? { buildingId: selectedBuilding.buildingId } : {}) }),
       { okToast: `${unit.name} ×${qty} 训练已开始` },
     );
   }
@@ -168,6 +207,23 @@ function TrainUnitRow({ unit, qty, onQtyChange }: TrainUnitRowProps) {
         </div>
       ) : (
         <div class="train-unit-row__controls" onClick={(event) => event.stopPropagation()}>
+          <label class="train-building-picker">
+            <span>训练建筑</span>
+            <select
+              value={selectedBuilding?.buildingId ?? ''}
+              disabled={buildingOptions.length === 0}
+              aria-label={`${unit.name}训练建筑`}
+              onChange={(event) => onBuildingChange((event.currentTarget as HTMLSelectElement).value)}
+            >
+              {buildingOptions.length === 0
+                ? <option value="">暂无可用建筑</option>
+                : buildingOptions.map((building) => (
+                  <option value={building.buildingId} key={building.buildingId}>
+                    {building.name} Lv{building.level}{building.busy ? ' · 训练中' : ' · 空闲'}
+                  </option>
+                ))}
+            </select>
+          </label>
           <CostRow cost={totalCost} timeSec={totalTrainSec} popCost={totalPop || null} />
           <div class="qty-row">
             <div class="qty-controls">
@@ -221,10 +277,13 @@ function getDisabledReason(
   qty: number,
   totalCost: Record<string, number>,
   totalPop: number,
+  selectedBuilding?: any,
 ): DisabledReason | null {
   if (!unit.trainableNow) {
     return { text: unit.unavailableReason ? '当前没有空闲训练队列' : '当前无法开始训练' };
   }
+  if (!selectedBuilding) return { text: '当前没有可用训练建筑' };
+  if (selectedBuilding.busy) return { text: '所选建筑正在训练，请选择空闲建筑' };
 
   const have = liveResources();
   if (Object.entries(totalCost).some(([key, amount]) => amount > 0 && (have[key] ?? 0) < amount)) {

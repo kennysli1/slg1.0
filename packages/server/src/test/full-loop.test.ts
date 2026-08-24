@@ -141,9 +141,12 @@ test('军队：训练由服务端稳定选择空闲最高等级队列，并只�
   assert.equal(legionAfterFirst.trainableNow, true, '仍有另一座空闲兵营时应可继续训练');
   assert.equal('slots' in afterFirst, false, '统一投影不得下发建筑槽位');
   assert.equal('training' in afterFirst, false, '统一投影不得下发旧 training');
-  assert.ok(afterFirst.trainingQueues.every((q: any) => !('slotId' in q) && !('kind' in q) && !('level' in q)), '队列不得泄漏建筑含义');
+  assert.ok(afterFirst.trainingQueues.every((q: any) => typeof q.buildingId === 'string' && typeof q.buildingName === 'string'), '队列应标明训练建筑');
+  assert.ok(afterFirst.trainingBuildings.some((b: any) => b.busy && b.kind === 'barracks'), '训练建筑状态应标出正在训练的兵营');
 
-  const second = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1 });
+  const nextBuilding = afterFirst.trainingBuildings.find((b: any) => !b.busy && b.kind === 'barracks');
+  assert.ok(nextBuilding?.buildingId, '应下发空闲兵营的不透明选择句柄');
+  const second = await send(app, 'military.TrainTroops', { villageId: 'v1', unit: 'legionnaire', count: 1, buildingId: nextBuilding.buildingId });
   assert.equal(second.ok, true, `第二批训练应成功: ${second.reason ?? ''}`);
   assert.notEqual((second.payload as any).queueId, nextAvailable.slotId, '第二条公网 queueId 也不得暴露内部 slotId');
   assert.ok(app.store.get<any>('military', 'v1').trainingBySlot[nextAvailable.slotId], '最高等级忙时应改用稳定排序的下一座空闲兵营');

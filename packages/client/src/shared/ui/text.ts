@@ -10,6 +10,8 @@ const ERR_MSG: Record<string, string> = {
   name_too_long: '名字太长(≤16)',
   queue_busy: '已有建造/训练在进行，请等当前完成',
   training_not_found: '该训练队列已完成或已取消',
+  training_building_not_found: '训练建筑选择已失效，请刷新后重试',
+  invalid_training_building: '所选建筑不能训练该兵种',
   queue_full: '当前队列已满，请稍后添加',
   requires_not_met: '前置建筑不满足，尚未解锁',
   max_level: '已达最高等级',

@@ -162,12 +162,107 @@
   font-weight: 700;
   margin-bottom: var(--s-2);
 }
+
+/* ---------- 增援部队 ---------- */
+.reinforcement-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.reinforcement-card {
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,.02);
+}
+.reinforcement-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.reinforcement-card__source {
+  color: var(--c-ink);
+  font-size: var(--f-sm);
+  font-weight: 700;
+}
+.reinforcement-card__owner {
+  color: var(--c-ink-dim);
+  font-size: var(--f-xs);
+  margin-top: 2px;
+}
+.reinforcement-card__troops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+.reinforcement-card__troop {
+  padding: 2px var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+  background: var(--c-panel-3);
+}
+.train-queue-banner__building {
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+  margin-bottom: var(--s-2);
+}
 .train-queue-banner__estimate {
   font-size: var(--f-xs);
   color: var(--c-ink-dim);
   margin-top: var(--s-1);
 }
 .train-queue-banner__action { margin-top: var(--s-2); }
+
+.train-building-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,.02);
+}
+.train-building-list__title {
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+  font-weight: 700;
+}
+.train-building-list__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--s-2);
+}
+.train-building-card {
+  min-width: 0;
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--c-panel-3);
+}
+.train-building-card--busy {
+  border-color: rgba(224,138,60,.45);
+  background: rgba(224,138,60,.08);
+}
+.train-building-card__name {
+  color: var(--c-ink);
+  font-size: var(--f-xs);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.train-building-card__status {
+  color: var(--c-ink-dim);
+  font-size: var(--f-2xs);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .train-unit-list {
   display: flex;
@@ -220,6 +315,20 @@
   flex-direction: column;
   gap: var(--s-2);
   padding-top: var(--s-2);
+}
+.train-building-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--c-ink-soft);
+  font-size: var(--f-xs);
+}
+.train-building-picker select {
+  min-height: 36px;
+  width: 100%;
+  padding: 0 var(--s-2);
+  font-size: var(--f-xs);
 }
 .qty-row {
   display: flex;
