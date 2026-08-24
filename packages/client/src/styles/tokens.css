@@ -66,7 +66,8 @@
   --terrain-hills-explored: #49453e;
   --terrain-ridge: rgb(226 205 160 / 32%);
   --terrain-contour: rgb(221 212 174 / 12%);
-  --terrain-fog-explored: rgb(64 77 82 / 48%);
+  /* 已探索但当前不可见：使用更深的冷灰雾，与实时可见地形明确区分。 */
+  --terrain-fog-explored: rgb(25 32 34 / 68%);
   --terrain-fog-unexplored: rgb(9 14 16 / 96%);
   --terrain-hover-edge: var(--accent-strong);
 
