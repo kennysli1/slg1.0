@@ -15,10 +15,10 @@
  *  时再细分。雇佣兵因无人口/耗粮消耗，单独成区并使用金色样式区分。
  */
 import { useEffect, useState } from 'preact/hooks';
-import { dataVersion } from '../../app/store.js';
+import { dataVersion, showToast } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { req } from '../../api.js';
-import { act } from '../../app/refresh.js';
+import { act, refreshAll } from '../../app/refresh.js';
 import {
   unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
 } from '../../app/config.js';
@@ -113,12 +113,25 @@ function RaidDefenseSection({ army }: { army: any }) {
   const raidDefense = army.raidDefense ?? { enabled: true, troops: troops };
   const [enabled, setEnabled] = useState(raidDefense.enabled !== false);
   const [selected, setSelected] = useState<Record<string, number>>({ ...(raidDefense.troops ?? troops) });
-  const snapshotKey = JSON.stringify({ enabled: raidDefense.enabled !== false, troops: raidDefense.troops ?? troops });
+  const reinforcements: any[] = army.reinforcements ?? [];
+  const [reinforcementDrafts, setReinforcementDrafts] = useState<Record<string, { enabled: boolean; troops: Record<string, number> }>>({});
+  const snapshotKey = JSON.stringify({
+    own: { enabled: raidDefense.enabled !== false, troops: raidDefense.troops ?? troops },
+    reinforcements: reinforcements.map((entry) => ({ id: entry.id, troops: entry.troops, raidDefense: entry.raidDefense, status: entry.status })),
+  });
 
   // act() 完成刷新后同步服务端快照，避免切村/训练/战斗后仍显示旧配置。
   useEffect(() => {
     setEnabled(raidDefense.enabled !== false);
     setSelected({ ...(raidDefense.troops ?? troops) });
+    const next: Record<string, { enabled: boolean; troops: Record<string, number> }> = {};
+    for (const entry of reinforcements) {
+      next[entry.id] = {
+        enabled: entry.raidDefense?.enabled !== false,
+        troops: { ...(entry.raidDefense?.troops ?? entry.troops ?? {}) },
+      };
+    }
+    setReinforcementDrafts(next);
   }, [snapshotKey]);
 
   const entries = Object.entries(troops).filter(([, count]) => Number(count) > 0);
@@ -129,10 +142,61 @@ function RaidDefenseSection({ army }: { army: any }) {
         .map(([key, count]) => [key, Math.min(Math.max(0, Math.floor(Number(selected[key]) || 0)), Number(count))] as const)
         .filter(([, count]) => count > 0),
     );
-    await act(req('SetRaidDefense', { enabled, troops: normalized }), {
-      okToast: '掠夺防守配置已保存',
-    });
+    let ok = await act(req('SetRaidDefense', { enabled, troops: normalized }), { silent: true });
+    for (const entry of reinforcements) {
+      const draft = reinforcementDrafts[entry.id] ?? { enabled: true, troops: entry.troops ?? {} };
+      const available = entry.troops ?? {};
+      const selectedReinforcement = Object.fromEntries(
+        Object.entries(available)
+          .map(([key, count]) => [key, Math.min(Math.max(0, Math.floor(Number(draft.troops[key]) || 0)), Number(count))] as const)
+          .filter(([, count]) => count > 0),
+      );
+      const saved = await act(req('SetReinforcementRaidDefense', {
+        movementId: entry.id,
+        enabled: draft.enabled,
+        troops: selectedReinforcement,
+      }), { silent: true });
+      ok = ok && saved;
+    }
+    if (ok) {
+      showToast('掠夺防守配置已保存', 'ok');
+      await refreshAll();
+    }
   }
+
+  const updateReinforcement = (id: string, patch: Partial<{ enabled: boolean; troops: Record<string, number> }>) => {
+    setReinforcementDrafts((current) => ({
+      ...current,
+      [id]: { ...(current[id] ?? { enabled: true, troops: {} }), ...patch },
+    }));
+  };
+
+  const renderRows = (poolTroops: Record<string, number>, poolSelected: Record<string, number>, poolEnabled: boolean, setPoolSelected: (next: Record<string, number>) => void, prefix: string) => {
+    const poolEntries = Object.entries(poolTroops).filter(([, count]) => Number(count) > 0);
+    return poolEntries.map(([key, count]) => {
+      const info = unitInfo(key);
+      const name = army.trainable?.find((unit: any) => unit.key === key)?.name ?? info.name ?? key;
+      const value = Math.min(Math.max(0, Math.floor(Number(poolSelected[key]) || 0)), Number(count));
+      return (
+        <div class="raid-defense-row" key={`${prefix}:${key}`}>
+          <span>{name} <small class="hint-sm">可用 {fmt(Number(count))}</small></span>
+          <input
+            type="number"
+            min="0"
+            max={Number(count)}
+            value={value}
+            disabled={!poolEnabled}
+            aria-label={`${name}防守数量`}
+            onInput={(event) => {
+              const next = Math.min(Math.max(0, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0)), Number(count));
+              setPoolSelected({ ...poolSelected, [key]: next });
+            }}
+          />
+          <Btn size="sm" variant="ghost" disabled={!poolEnabled} onClick={() => setPoolSelected({ ...poolSelected, [key]: Number(count) })}>全部</Btn>
+        </div>
+      );
+    });
+  };
 
   return (
     <Panel pad>
@@ -140,50 +204,39 @@ function RaidDefenseSection({ army }: { army: any }) {
         防御掠夺
       </SectionHead>
       <div class="raid-defense-panel">
-        <label class="raid-defense-toggle">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)}
-          />
-          <span>派驻军防守掠夺</span>
-        </label>
-        <div class="hint-sm">关闭后，本村遭遇掠夺时不派出防守兵力；开启后按下方数量出战。</div>
+        <div class="raid-defense-source-card">
+          <div class="raid-defense-source-head">
+            <strong>本村驻军</strong><span class="hint-sm">自己的部队</span>
+          </div>
+          <label class="raid-defense-toggle">
+            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
+            <span>投入掠夺防守</span>
+          </label>
+          <div class="hint-sm">关闭或将数量设为 0 后，本村部队不会参加掠夺防守。</div>
+          {entries.length === 0 ? <div class="hint-sm">暂无可配置驻军。</div> : renderRows(troops, selected, enabled, setSelected, 'own')}
+        </div>
 
-        {entries.length === 0 ? (
-          <Empty icon="🛡️" title="暂无可配置驻军">训练或召回部队后可设置防守数量。</Empty>
-        ) : entries.map(([key, count]) => {
-          const info = unitInfo(key);
-          const name = army.trainable?.find((unit: any) => unit.key === key)?.name ?? info.name ?? key;
-          const value = Math.min(Math.max(0, Math.floor(Number(selected[key]) || 0)), Number(count));
+        {reinforcements.map((entry) => {
+          const draft = reinforcementDrafts[entry.id] ?? { enabled: entry.raidDefense?.enabled !== false, troops: entry.raidDefense?.troops ?? entry.troops ?? {} };
+          const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
+          const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
+          const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
           return (
-            <div class="raid-defense-row" key={key}>
-              <span>{name} <small class="hint-sm">可用 {fmt(Number(count))}</small></span>
-              <input
-                type="number"
-                min="0"
-                max={Number(count)}
-                value={value}
-                disabled={!enabled}
-                aria-label={`${name}防守数量`}
-                onInput={(event) => {
-                  const next = Math.min(Math.max(0, Math.floor(Number((event.currentTarget as HTMLInputElement).value) || 0)), Number(count));
-                  setSelected((current) => ({ ...current, [key]: next }));
-                }}
-              />
-              <Btn
-                size="sm"
-                variant="ghost"
-                disabled={!enabled}
-                onClick={() => setSelected((current) => ({ ...current, [key]: Number(count) }))}
-              >
-                全部
-              </Btn>
+            <div class="raid-defense-source-card" key={entry.id}>
+              <div class="raid-defense-source-head">
+                <strong>援军 · {sourceVillage}</strong><span class="hint-sm">来自 {sourcePlayer} · {status}</span>
+              </div>
+              <label class="raid-defense-toggle">
+                <input type="checkbox" checked={draft.enabled} onChange={(event) => updateReinforcement(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })} />
+                <span>投入掠夺防守</span>
+              </label>
+              <div class="hint-sm">该来源援军独立配置，不会与本村或其他援军同兵种合并。</div>
+              {renderRows(entry.troops ?? {}, draft.troops, draft.enabled, (next) => updateReinforcement(entry.id, { troops: next }), `reinforcement:${entry.id}`)}
             </div>
           );
         })}
 
-        <Btn variant="primary" block onClick={() => void save()}>保存防守配置</Btn>
+        <Btn variant="primary" block onClick={() => void save()}>保存全部防守配置</Btn>
       </div>
     </Panel>
   );

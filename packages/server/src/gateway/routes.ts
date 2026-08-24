@@ -182,6 +182,14 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
+      SetReinforcementRaidDefense: {
+        command: 'movement.SetReinforcementRaidDefense', ownVillage: true, needAuth: true,
+        schema: {
+          movementId: { type: 'string', minLen: 1, maxLen: 64 },
+          enabled: { type: 'boolean' },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 0, maxVal: 100000 },
+        },
+      },
       GetMarchOptions: {
         command: 'movement.GetMarchOptions', ownVillage: true, needAuth: true,
         schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, kind: { type: 'string', minLen: 1, maxLen: 16 }, refId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },

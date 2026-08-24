@@ -42,6 +42,15 @@ interface Contribution {
   npcService?: boolean;
 }
 
+/** 防守方独立兵力池：本村驻军与每支临时援军在战斗快照中保持来源边界。 */
+interface DefenderContribution {
+  sourceId: string;
+  movementId?: string;
+  fromVillage?: string;
+  npcService?: boolean;
+  troops: Record<string, number>;
+}
+
 interface BattleRound {
   round: number;
   attackerLosses: Record<string, number>;
@@ -64,6 +73,8 @@ interface Battle {
   defender: Snapshot;
   /** 防守方开战时各兵种原始数量（结束时算实际损失，交回 owner 扣兵）。 */
   defenderOriginal: Record<string, number>;
+  /** 防守方来源索引；旧战斗没有该字段时按目标村驻军兼容。 */
+  defenderContributions?: Record<string, DefenderContribution>;
   contributions: Record<string, Contribution>; // movementId -> 贡献
   /** 野战时防守方行军贡献（用于 BattleEnded 中恢复防守方行军）。 */
   defenderContribution?: Contribution;
@@ -285,7 +296,7 @@ export class CombatModule {
 
     this.claiming.add(p.targetId);
 
-    let fetchedDefender: { defender: Snapshot; wallLevel: number } | null = null;
+    let fetchedDefender: { defender: Snapshot; wallLevel: number; defenderContributions?: Record<string, DefenderContribution> } | null = null;
     try {
       fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId, p.battleType);
     } finally {
@@ -309,7 +320,7 @@ export class CombatModule {
       return { ok: true, payload: { battleId: raceExisting.id, merged: true } };
     }
 
-    const { defender, wallLevel } = fetchedDefender!;
+    const { defender, wallLevel, defenderContributions } = fetchedDefender!;
 
     const attacker: Snapshot = {};
     for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
@@ -328,6 +339,7 @@ export class CombatModule {
       attacker,
       defender,
       defenderOriginal,
+      defenderContributions,
       contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
       attackerPending: 0,
       defenderPending: 0,
@@ -360,7 +372,7 @@ export class CombatModule {
   }
 
   /** 拉取防守方快照 + 城墙等级。PvP 找 military+building；PvE 找 pve。 */
-  private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege' | 'ambush'): Promise<{ defender: Snapshot; wallLevel: number }> {
+  private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege' | 'ambush'): Promise<{ defender: Snapshot; wallLevel: number; defenderContributions?: Record<string, DefenderContribution> }> {
     if (kind === 'pve') {
       const res = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: CombatModule.NAME, payload: { id: targetId } });
       return { defender: ((res.payload as any)?.snapshot ?? {}) as Snapshot, wallLevel: 0 };
@@ -369,21 +381,44 @@ export class CombatModule {
       name: 'military.GetCombatSnapshot', from: CombatModule.NAME,
       payload: battleType === 'raid' ? { villageId: targetId, purpose: 'raid' } : { villageId: targetId },
     });
-    const defender = ((defRes.payload as any)?.snapshot ?? {}) as Snapshot;
-    // 临时增援不写入目标村 military；战斗只在结算快照中合并，并由 Movement 在战后优先扣除。
+    const resident = ((defRes.payload as any)?.snapshot ?? {}) as Snapshot;
+    const defender: Snapshot = {};
+    const defenderContributions: Record<string, DefenderContribution> = {};
+    const residentSource = `resident:${targetId}`;
+    const residentTroops: Record<string, number> = {};
+    // 防守方同兵种也按来源命名空间保存，战斗计算仍使用相同的兵种属性，
+    // 结算时再按来源扣除，避免援军与本村部队混成一个兵力池。
+    for (const [code, unit] of Object.entries(resident)) {
+      defender[`${residentSource}#${code}`] = { ...unit };
+      residentTroops[code] = unit.count;
+    }
+    defenderContributions[residentSource] = { sourceId: residentSource, fromVillage: targetId, troops: residentTroops };
+
+    // 临时增援不写入目标村 military；战斗只在结算快照中合并，并由 Movement 在战后按 movementId 扣除。
     const reinforcement = await this.commands.send({
       name: 'movement.GetReinforcementSnapshot', from: CombatModule.NAME,
       payload: { villageId: targetId, purpose: battleType === 'raid' ? 'raid' : 'siege' },
     });
-    for (const [code, unit] of Object.entries(((reinforcement.payload as any)?.snapshot ?? {}) as Snapshot)) {
-      const current = defender[code];
-      if (current) current.count += unit.count;
-      else defender[code] = { ...unit };
+    const reinforcementContributions = ((reinforcement.payload as any)?.contributions ?? []) as Array<{ id: string; fromVillage?: string; npcService?: boolean; troops?: Snapshot }>;
+    for (const source of reinforcementContributions) {
+      const sourceId = `reinforcement:${source.id}`;
+      const sourceTroops: Record<string, number> = {};
+      for (const [code, unit] of Object.entries(source.troops ?? {})) {
+        defender[`${sourceId}#${code}`] = { ...unit };
+        sourceTroops[code] = unit.count;
+      }
+      defenderContributions[sourceId] = {
+        sourceId,
+        movementId: source.id,
+        fromVillage: source.fromVillage,
+        npcService: source.npcService,
+        troops: sourceTroops,
+      };
     }
     const build = await this.commands.send({ name: 'building.GetDefenseSnapshot', from: CombatModule.NAME, payload: { villageId: targetId } });
     // 掠夺战即使守方派兵也不启用城墙；攻城战才取城墙加成。
     const wallLevel = battleType === 'raid' ? 0 : ((build.payload as any)?.wallLevel ?? 0);
-    return { defender, wallLevel };
+    return { defender, wallLevel, defenderContributions };
   }
 
   // ---- Tick 推进 ----
@@ -462,11 +497,26 @@ export class CombatModule {
     const defAlive = totalCount(b.defender);
     const attackerWins = defAlive <= 0;
 
-    // 防守方实际损失（原始 - 现存）
+    // 防守方实际损失（原始 - 现存）。内部快照按来源命名空间，
+    // 同时生成按兵种聚合的战报数据和按来源扣兵数据。
     const defenderLosses: Record<string, number> = {};
-    for (const [code, orig] of Object.entries(b.defenderOriginal)) {
-      const dead = orig - (b.defender[code]?.count ?? 0);
-      if (dead > 0) defenderLosses[code] = dead;
+    const defenderLossesByMovement: Record<string, Record<string, number>> = {};
+    const residentDefenderLosses: Record<string, number> = {};
+    for (const [key, orig] of Object.entries(b.defenderOriginal)) {
+      const dead = orig - (b.defender[key]?.count ?? 0);
+      if (dead <= 0) continue;
+      const split = key.indexOf('#');
+      const sourceId = split >= 0 ? key.slice(0, split) : `resident:${b.targetId}`;
+      const code = split >= 0 ? key.slice(split + 1) : key;
+      defenderLosses[code] = (defenderLosses[code] ?? 0) + dead;
+      const source = b.defenderContributions?.[sourceId];
+      if (source?.movementId) {
+        const sourceLosses = defenderLossesByMovement[source.movementId] ?? {};
+        sourceLosses[code] = (sourceLosses[code] ?? 0) + dead;
+        defenderLossesByMovement[source.movementId] = sourceLosses;
+      } else {
+        residentDefenderLosses[code] = (residentDefenderLosses[code] ?? 0) + dead;
+      }
     }
 
     // 进攻方按 code 聚合的损失（战报用）
@@ -517,9 +567,9 @@ export class CombatModule {
       }
     } else {
       // PvP：扣防守方兵力
-      if (Object.keys(defenderLosses).length) {
+      if (Object.keys(residentDefenderLosses).length) {
         const delta: Record<string, number> = {};
-        for (const [code, dead] of Object.entries(defenderLosses)) delta[code] = -dead;
+        for (const [code, dead] of Object.entries(residentDefenderLosses)) delta[code] = -dead;
         await this.commands.send({ name: 'military.AdjustTroops', from: CombatModule.NAME, payload: { villageId: b.targetId, delta } });
       }
       const battleType = b.battleType ?? 'siege';
@@ -701,24 +751,22 @@ export class CombatModule {
 
     // 防守方玩家（村庄战）收一份战报 + 登记战死即时回收
     if (b.targetKind === 'village') {
-      let residentLosses = defenderLosses;
-      if (Object.keys(defenderLosses).length > 0) {
+      if (Object.keys(defenderLossesByMovement).length > 0) {
         const temp = await this.commands.send({
           name: 'movement.ApplyReinforcementLosses', from: CombatModule.NAME,
-          payload: { villageId: b.targetId, losses: defenderLosses },
+          payload: { villageId: b.targetId, lossesByMovement: defenderLossesByMovement },
         });
-        residentLosses = ((temp.payload as any)?.remaining ?? defenderLosses) as Record<string, number>;
         const lossesByVillage = ((temp.payload as any)?.lossesByVillage ?? {}) as Record<string, Record<string, number>>;
         for (const [sourceVillage, losses] of Object.entries(lossesByVillage)) {
           if (Object.keys(losses).length === 0) continue;
           void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: sourceVillage, losses } });
         }
       }
-      if (Object.keys(residentLosses).length > 0) {
+      if (Object.keys(residentDefenderLosses).length > 0) {
         void this.commands.send({
           name: 'population.RecoverCasualties',
           from: CombatModule.NAME,
-          payload: { villageId: b.targetId, losses: residentLosses },
+          payload: { villageId: b.targetId, losses: residentDefenderLosses },
         });
       }
       void this.bus.emit({

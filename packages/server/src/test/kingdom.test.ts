@@ -94,6 +94,79 @@ test('玩家增援：目标村不接管兵力，来源村保留口粮足迹且�
   assert.equal(sourceReturned.troops.legionnaire, 3, '召回后兵力应回到来源村');
 });
 
+test('掠夺防守：本村与每支援军独立配置，关闭的援军不参加且不承担伤亡', async () => {
+  let clock = 1_700_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const source = (await send(app, 'player.Register', { name: '防守援军来源', password: 'p1234', tribe: 'romans' })).payload as any;
+  const target = (await send(app, 'player.Register', { name: '防守目标', password: 'p1234', tribe: 'romans' })).payload as any;
+  const attacker = (await send(app, 'player.Register', { name: '掠夺测试进攻方', password: 'p1234', tribe: 'romans' })).payload as any;
+  const sourceId = source.player.villageId;
+  const targetId = target.player.villageId;
+  const attackerId = attacker.player.villageId;
+
+  await send(app, 'military.AdjustTroops', { villageId: sourceId, delta: { legionnaire: 5 } });
+  await send(app, 'military.AdjustTroops', { villageId: targetId, delta: { legionnaire: 5 } });
+  await send(app, 'military.AdjustTroops', { villageId: attackerId, delta: { legionnaire: 100 } });
+  const reinforce = await send(app, 'movement.SendTransport', {
+    villageId: sourceId, targetVillage: targetId, troops: { legionnaire: 5 }, cargo: {}, mode: 'reinforce',
+  });
+  assert.equal(reinforce.ok, true, reinforce.reason);
+  const reinforcementId = (reinforce.payload as any).id;
+  while (app.store.get<any>('movement', reinforcementId)?.status === 'marching') {
+    await app.scheduler.advanceTo(clock + 3_600_000, (t) => { clock = t; });
+  }
+
+  const listed = (await send(app, 'movement.ListReinforcements', { villageId: targetId })).payload as any;
+  const listedSource = listed.reinforcements.find((entry: any) => entry.id === reinforcementId);
+  assert.equal(listedSource.raidDefense.enabled, true);
+  assert.equal(listedSource.raidDefense.troops.legionnaire, 5);
+  const raidBefore = (await send(app, 'movement.GetReinforcementSnapshot', { villageId: targetId, purpose: 'raid' })).payload as any;
+  assert.equal(raidBefore.contributions.length, 1);
+  assert.equal(raidBefore.contributions[0].troops.legionnaire.count, 5);
+
+  const disabled = await send(app, 'movement.SetReinforcementRaidDefense', {
+    villageId: targetId, movementId: reinforcementId, enabled: false, troops: {},
+  });
+  assert.equal(disabled.ok, true, disabled.reason);
+  const raidAfter = (await send(app, 'movement.GetReinforcementSnapshot', { villageId: targetId, purpose: 'raid' })).payload as any;
+  assert.deepEqual(raidAfter.contributions, [], '关闭的来源不应进入掠夺防守快照');
+  const siegeSnapshot = (await send(app, 'movement.GetReinforcementSnapshot', { villageId: targetId, purpose: 'siege' })).payload as any;
+  assert.equal(siegeSnapshot.contributions[0].troops.legionnaire.count, 5, '攻城仍使用全部援军');
+
+  const targetArmy = await send(app, 'military.SetRaidDefense', { villageId: targetId, enabled: true, troops: { legionnaire: 5 } });
+  assert.equal(targetArmy.ok, true);
+  const raid = await send(app, 'movement.SendVillageRaid', {
+    villageId: attackerId, targetVillage: targetId,
+    troops: { legionnaire: 100 }, declareWar: true,
+  });
+  assert.equal(raid.ok, true, raid.reason);
+  const raidId = (raid.payload as any).id;
+  for (let i = 0; i < 200 && (app.store.all<any>('movement').some((entry: any) => entry.fromVillage === attackerId) || app.store.all<any>('battle').length > 0); i++) {
+    await app.scheduler.advanceTo(clock + 3_600_000, (t) => { clock = t; });
+  }
+  const sourceArmy = (await send(app, 'military.GetArmy', { villageId: sourceId })).payload as any;
+  assert.equal(sourceArmy.troops.legionnaire ?? 0, 0, '关闭来源未参加战斗，来源村驻军仍被出征方独立处理');
+  const targetAfter = (await send(app, 'military.GetArmy', { villageId: targetId })).payload as any;
+  assert.equal(targetAfter.troops.legionnaire ?? 0, 0, '本村投入的兵力应独立结算');
+  const stationedAfter = (await send(app, 'movement.ListReinforcements', { villageId: targetId })).payload as any;
+  assert.equal(stationedAfter.reinforcements.find((entry: any) => entry.id === reinforcementId)?.troops.legionnaire, 5, '关闭的援军不应被战斗扣除');
+
+  // 开启同一支援军、关闭本村驻军后再战：死亡必须精确落到该 movement 来源。
+  await send(app, 'movement.SetReinforcementRaidDefense', { villageId: targetId, movementId: reinforcementId, enabled: true, troops: { legionnaire: 5 } });
+  await send(app, 'military.SetRaidDefense', { villageId: targetId, enabled: true, troops: {} });
+  const raid2 = await send(app, 'movement.SendVillageRaid', {
+    villageId: attackerId, targetVillage: targetId, troops: { legionnaire: 100 }, declareWar: true,
+  });
+  assert.equal(raid2.ok, true, raid2.reason);
+  const raid2Id = (raid2.payload as any).id;
+  for (let i = 0; i < 200 && (app.store.all<any>('movement').some((entry: any) => entry.fromVillage === attackerId) || app.store.all<any>('battle').length > 0); i++) {
+    await app.scheduler.advanceTo(clock + 3_600_000, (t) => { clock = t; });
+  }
+  const stationedAfterIncluded = (await send(app, 'movement.ListReinforcements', { villageId: targetId })).payload as any;
+  assert.equal(stationedAfterIncluded.reinforcements.find((entry: any) => entry.id === reinforcementId), undefined, '开启的援军全灭后应从其来源记录中移除');
+});
+
 test('王国任务：循环上贡有期限，目标完成后手动领取才结算声望', async () => {
   let clock = 1_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0 });
