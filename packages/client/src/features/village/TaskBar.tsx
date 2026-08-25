@@ -5,7 +5,7 @@
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
-import { useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
@@ -208,15 +208,23 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
 // ── 任务 NPC 对话弹窗 ────────────────────────────────────────────────────────
 function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; close: () => void }) {
   const [busy, setBusy] = useState(false);
-  const onReply = async (key: string) => {
-    if (busy) return;
-    // “离开”只关闭对话；StartAccept 没有修改任务 offer，之后仍可再次点击接取。
-    if (key === 'leave') {
-      close();
+  const [accepted, setAccepted] = useState(false);
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
+    .filter((item: any) => item && (item.npcName || item.npcText));
+  const current = segments[segmentIndex] ?? dialogue;
+  const finish = useCallback(() => {
+    if (segmentIndex < segments.length - 1) {
+      setSegmentIndex((value) => value + 1);
       return;
     }
-    if (key !== 'accept') {
-      showToast('该回复暂未绑定任务行为', 'bad');
+    close();
+  }, [close, segmentIndex, segments.length]);
+  const onReply = async (key: string) => {
+    if (busy) return;
+    // 多段对话中每个回复都会推进到下一段；accept 仅在首次出现时真正接取任务。
+    if (key !== 'accept' || accepted) {
+      finish();
       return;
     }
     setBusy(true);
@@ -226,17 +234,20 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
     }
     await act(req('task.Accept', { code: task.code }), {
       okToast: '已接取任务',
-      onOk: () => close(),
+      onOk: () => {
+        setAccepted(true);
+        finish();
+      },
     });
     setBusy(false);
   };
 
   return (
-    <Modal title={dialogue.npcName} sub={task.name} onClose={close}>
+    <Modal title={current?.npcName || '任务对话'} sub={task.name} onClose={finish}>
       <div class="dialogue-session">
-        <div class="dialogue-npc-text">{dialogue.npcText}</div>
+        <div class="dialogue-npc-text">{current?.npcText ?? ''}</div>
         <div class="dialogue-replies" aria-label="玩家回复">
-          {(dialogue.replies ?? []).map((reply: any) => (
+          {(current?.replies ?? []).map((reply: any) => (
             <Btn
               key={reply.key}
               variant={reply.key === 'leave' ? 'ghost' : 'primary'}

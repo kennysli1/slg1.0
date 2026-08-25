@@ -54,6 +54,46 @@ test('dialogue：S4 带回被囚禁的娜塔莉们时报告入口返回无选项
   assert.deepEqual(dialogue.replies, []);
 });
 
+test('dialogue：同一对象的多段文本按 segment 顺序一次返回', async () => {
+  const app = createGameApp({ now: () => 2_600_000, manualScheduler: true });
+  app.setupWorld();
+  const first = app.config.dialogues['s4_natalies_returned:1'];
+  assert.ok(first);
+  app.config.dialogues['s4_natalies_returned:2'] = {
+    ...first,
+    segment: 2,
+    npcName: '被囚禁的娜塔莉们',
+    npcText: '请把我们的消息带回家。',
+    replies: [],
+  };
+  const started = await send(app, 'dialogue.StartForTask', { taskCode: 's4', trigger: 'natalies_returned' });
+  assert.equal(started.ok, true, started.reason);
+  const dialogue = (started.payload as any).dialogue;
+  assert.equal(dialogue.segmentCount, 2);
+  assert.deepEqual(dialogue.segments.map((item: any) => item.segment), [1, 2]);
+  assert.equal(dialogue.segments[1].npcText, '请把我们的消息带回家。');
+});
+
+test('dialogue：自动任务对话快照也携带完整段落组', async () => {
+  const app = createGameApp({ now: () => 2_700_000, manualScheduler: true });
+  app.setupWorld();
+  const first = app.config.dialogues['m1_accept:1'];
+  assert.ok(first);
+  app.config.dialogues['m1_accept:2'] = {
+    ...first,
+    segment: 2,
+    npcText: '愿我们一起重建家园。',
+  };
+  const registered = await send(app, 'player.Register', { name: 'm1-segs', password: 'pass1', tribe: 'romans' });
+  assert.equal(registered.ok, true, registered.reason);
+  const player = (registered.payload as any).player;
+  const snapshot = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  const pending = ((snapshot.payload as any).pendingDialogues ?? [])
+    .find((item: any) => item.taskCode === 'm1' && item.trigger === 'accept');
+  assert.equal(pending.dialogue.segmentCount, 2);
+  assert.equal(pending.dialogue.segments[1].npcText, '愿我们一起重建家园。');
+});
+
 test('dialogue：S3 接取后弹出当前接取村庄村民的单段后续对话', async () => {
   const app = createGameApp({ now: () => 3_000_000, manualScheduler: true });
   app.setupWorld();

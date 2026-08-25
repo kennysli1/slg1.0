@@ -112,6 +112,19 @@ interface SerializedDialogueSession {
   code: string;
   taskCode: string;
   trigger: string;
+  segment: number;
+  segmentCount: number;
+  npcName: string;
+  npcText: string;
+  replies: { key: string; label: string }[];
+  segments: SerializedDialogueSegment[];
+}
+
+interface SerializedDialogueSegment {
+  code: string;
+  taskCode: string;
+  trigger: string;
+  segment: number;
   npcName: string;
   npcText: string;
   replies: { key: string; label: string }[];
@@ -1850,18 +1863,33 @@ export class TasksModule {
   }
 
   private serializePendingDialogue(item: PendingTaskDialogue): Record<string, unknown> {
-    const def = Object.values(this.config.dialogues ?? {})
-      .find((dialogue) => dialogue.taskCode === item.taskCode && dialogue.trigger === item.trigger);
-    if (!def) return { ...item, dialogue: null };
+    const defs = Object.values(this.config.dialogues ?? {})
+      .filter((dialogue) => dialogue.taskCode === item.taskCode && dialogue.trigger === item.trigger)
+      .sort((a, b) => a.segment - b.segment)
+      .filter((dialogue) => dialogue.npcName || dialogue.npcText);
+    if (!defs.length) return { ...item, dialogue: null };
     const render = (value: string) => value.replaceAll('{villageName}', this.villageName(item.villageId));
-    const dialogue: SerializedDialogueSession = {
-      id: item.id,
+    const segments = defs.map((def): SerializedDialogueSegment => ({
       code: def.code,
       taskCode: def.taskCode,
       trigger: def.trigger,
+      segment: def.segment,
       npcName: render(def.npcName),
       npcText: render(def.npcText),
       replies: def.replies.map((reply) => ({ ...reply })),
+    }));
+    const first = segments[0];
+    const dialogue: SerializedDialogueSession = {
+      id: item.id,
+      code: first.code,
+      taskCode: first.taskCode,
+      trigger: first.trigger,
+      segment: first.segment,
+      segmentCount: segments.length,
+      npcName: first.npcName,
+      npcText: first.npcText,
+      replies: first.replies,
+      segments,
     };
     return { ...item, dialogue };
   }

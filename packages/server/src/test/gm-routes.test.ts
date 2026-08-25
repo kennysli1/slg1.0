@@ -245,7 +245,10 @@ test('/gm/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
     const data = await fastify.inject({ method: 'GET', url: '/gm/dialogues/data' });
     assert.equal(data.statusCode, 200);
-    const parsed = JSON.parse(data.body) as { rows: Array<Record<string, string>> };
+    const parsed = JSON.parse(data.body) as { header: string[]; rows: Array<Record<string, string>> };
+    assert.ok(parsed.header.includes('segment'));
+    assert.match(page.body, /\+ 段落/);
+    assert.match(page.body, /只有 npcName、npcText、replies 可编辑/);
     assert.equal(parsed.rows[0]?.taskCode, 's3');
     assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
