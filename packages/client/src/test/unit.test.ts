@@ -29,7 +29,7 @@ describe('首屏刷新调度', () => {
         { includeArea: false, waitForTasks: false, silent: true },
         { includeArea: true, waitForTasks: true, silent: false },
       ),
-      { includeArea: true, waitForTasks: true, silent: false },
+      { includeArea: true, waitForTasks: true, deferSecondary: false, silent: false },
     );
   });
 });
