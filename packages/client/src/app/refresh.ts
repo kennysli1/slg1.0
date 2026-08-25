@@ -76,151 +76,74 @@ export function setMapCenter(c: { q: number; r: number } | null): void {
 let onSessionLost: ((msg: string) => void) | null = null;
 export function setSessionLostHandler(fn: (msg: string) => void): void { onSessionLost = fn; }
 
-export interface RefreshOptions {
-  includeArea?: boolean;
-  waitForTasks?: boolean;
-  /** 切村时先让报告请求插队，核心快照返回后由调用方启动后台补齐。 */
-  deferSecondary?: boolean;
-  /** 后台补齐数据时不把瞬时网络错误写进玩家战报。 */
-  silent?: boolean;
-}
-
-let refreshInFlight: Promise<void> | null = null;
-let queuedRefresh: RefreshOptions | null = null;
-
-export function mergeRefreshOptions(a: RefreshOptions, b: RefreshOptions): RefreshOptions {
-  return {
-    includeArea: a.includeArea !== false || b.includeArea !== false,
-    waitForTasks: a.waitForTasks === true || b.waitForTasks === true,
-    deferSecondary: a.deferSecondary === true || b.deferSecondary === true,
-    // 只要有一个前台请求需要反馈，就保留错误提示；纯后台刷新才静默。
-    silent: a.silent === true && b.silent === true,
-  };
-}
-
-/** 拉取当前村庄快照并合并同时到来的刷新请求。 */
-export function refreshAll(options: RefreshOptions = {}): Promise<void> {
-  if (refreshInFlight) {
-    queuedRefresh = queuedRefresh ? mergeRefreshOptions(queuedRefresh, options) : options;
-    return refreshInFlight;
-  }
-
-  refreshInFlight = (async () => {
-    let next: RefreshOptions | null = options;
-    while (next) {
-      const current = next;
-      next = null;
-      await performRefreshAll(current);
-      if (queuedRefresh) {
-        next = queuedRefresh;
-        queuedRefresh = null;
-      }
-    }
-  })().finally(() => {
-    refreshInFlight = null;
-  });
-  return refreshInFlight;
-}
-
-async function performRefreshAll(options: RefreshOptions = {}): Promise<void> {
+/**
+ * 一次性拉齐主界面所需的全部快照。
+ * Gateway 会按村庄串行执行请求；这里必须保持单轮、边界明确的刷新，不能再改成
+ * 持续合并队列或由每个页面重复补拉，否则报告与切村请求会长期排在大地图之后。
+ */
+export async function refreshAll(options: { includeArea?: boolean; waitForTasks?: boolean } = {}): Promise<void> {
   if (!me) return;
-  const villageId = me.villageId;
   const includeArea = options.includeArea !== false;
   try {
-    const safe = <T>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
-    // 同一村庄请求在 Gateway 中串行执行。先完成能渲染村庄、资源栏和军队页的核心快照，
-    // 地图/宝物/炼金/王国等历史或大包数据随后后台补齐，避免切村时被大地图卡住。
-    const [res, vil, army, moves, playerMoves, pop, reputation] = await Promise.all([
-      safe(req('GetResources')),
-      safe(req('GetVillageLayout')),
-      safe(req('GetArmy')),
-      safe(req('ListMovements')),
-      safe(req('ListPlayerMovements')),
-      safe(req('GetPopulation')),
-      safe(req('GetReputation')),
+    const center = getMapCenter() ?? { q: me.q, r: me.r };
+    // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
+    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom] = await Promise.all([
+      req('GetResources'),
+      req('GetVillageLayout'),
+      req('GetArmy'),
+      includeArea
+        ? req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true })
+        : Promise.resolve({ ok: false, skipped: true } as any),
+      req('ListMovements'),
+      req('ListPlayerMovements'),
+      req('GetPopulation').catch(() => ({ ok: false } as any)),
+      req('ListTreasures').catch(() => ({ ok: false } as any)),
+      req('GetReputation').catch(() => ({ ok: false } as any)),
+      req('GetAlchemy').catch(() => ({ ok: false } as any)),
+      req('GetKingdomState').catch(() => ({ ok: false } as any)),
     ]);
 
-    if (villageId !== me?.villageId) return;
-    const failed = [res, vil, army, moves, playerMoves]
-      .find((x) => !x?.ok);
-    if (failed?.error?.code === 'not_logged_in') {
-      onSessionLost?.('连接已断开，请重新登录');
+    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
+    if (failed) {
+      const code = failed.error?.code ?? 'failed';
+      if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
+      else pushReport(`刷新失败：${errText(code)}`);
       return;
-    }
-    const hasSnapshot = [res, vil, army, moves, playerMoves, pop, reputation].some((x) => x?.ok);
-    if (!hasSnapshot) {
-      if (!options.silent) pushReport('刷新失败：网络连接异常');
-      return;
-    }
-    if (failed && !options.silent) {
-      const code = failed.error?.code ?? '网络连接异常';
-      pushReport(`刷新失败：${errText(code)}`);
     }
 
+    if (area.ok) reconcileVillagesFromArea(area.payload);
     setCache({
       ...getCache(),
-      ...(res?.ok ? { res: res.payload } : {}),
-      ...(vil?.ok ? { vil: vil.payload } : {}),
-      ...(army?.ok ? { army: army.payload } : {}),
-      ...(moves?.ok ? { moves: moves.payload } : {}),
-      ...(playerMoves?.ok ? { playerMoves: playerMoves.payload } : {}),
-      ...(reputation?.ok ? { reputation: reputation.payload } : {}),
+      res: res.payload, vil: vil.payload, army: army.payload,
+      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload, playerMoves: playerMoves.payload,
+      treasures: treasures.ok ? treasures.payload : null,
+      reputation: reputation.ok ? reputation.payload : null,
+      alchemy: alchemy.ok ? alchemy.payload : null,
+      kingdom: kingdom.ok ? kingdom.payload : null,
     });
-    if (res?.ok) markResFetched();
-    if (pop?.ok) applyPopPayload(pop.payload);
+    kingdomState.value = kingdom.ok ? kingdom.payload : null;
+    if (area.ok) mapAreaStale.value = false;
+    setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
+    markResFetched();
+    if (pop.ok) applyPopPayload(pop.payload);
     bumpData();
+    void refreshForeignMoves();
 
-    // 切村时由调用方先拉报告，再启动后台请求，避免大地图排在报告前面。
-    if (options.deferSecondary) return;
-    // 任务快照与次级村庄数据不阻塞核心快照。waitForTasks 仅保留动作调用方的兼容语义。
+    // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
     const taskRefresh = reloadPlayerTasks();
     if (options.waitForTasks !== false) await taskRefresh;
-    void refreshSecondarySnapshot(villageId, includeArea);
   } catch {
-    if (!options.silent) pushReport('刷新失败：网络连接异常');
+    pushReport('刷新失败：网络连接异常');
   }
-}
-
-/** 后台补齐大地图、宝物、炼金、王国和视野数据；任何旧村响应都不得覆盖新村。 */
-async function refreshSecondarySnapshot(villageId: string, includeArea: boolean): Promise<void> {
-  const center = getMapCenter() ?? (me ? { q: me.q, r: me.r } : { q: 0, r: 0 });
-  const safe = <T>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
-  const [area, treasures, alchemy, kingdom, foreign] = await Promise.all([
-    includeArea
-      ? safe(req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }))
-      : Promise.resolve(null),
-    safe(req('ListTreasures')),
-    safe(req('GetAlchemy')),
-    safe(req('GetKingdomState')),
-    safe(req('ListForeign')),
-  ]);
-  if (villageId !== me?.villageId) return;
-  if (area?.ok) reconcileVillagesFromArea(area.payload);
-  const next = { ...getCache() };
-  let changed = false;
-  if (area?.ok) { next.area = area.payload; mapAreaStale.value = false; changed = true; }
-  else if (includeArea) mapAreaStale.value = true;
-  if (treasures?.ok) {
-    next.treasures = treasures.payload;
-    const pending = (treasures.payload as any)?.pending;
-    setPendingTreasures(Array.isArray(pending) ? pending : []);
-    changed = true;
-  }
-  if (alchemy?.ok) { next.alchemy = alchemy.payload; changed = true; }
-  if (kingdom?.ok) { next.kingdom = kingdom.payload; kingdomState.value = kingdom.payload; changed = true; }
-  if (foreign?.ok) { foreignMoves.value = foreign.payload as any; changed = true; }
-  if (changed) bumpData();
 }
 
 /** 进入地图页时补拉此前为降低切村等待而跳过的整张地图。 */
 export async function refreshMapArea(): Promise<boolean> {
   if (!me) return false;
-  const villageId = me.villageId;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     const area = await req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true });
     if (!area.ok) return false;
-    if (villageId !== me?.villageId) return false;
     reconcileVillagesFromArea(area.payload);
     setCache({ ...getCache(), area: area.payload });
     mapAreaStale.value = false;
@@ -243,11 +166,8 @@ export async function switchVillage(villageId: string): Promise<{ ok: boolean; e
     bumpSession();
     const onMap = tab.value === 'map';
     if (!onMap) mapAreaStale.value = true;
-    // 核心快照完成即可解除切村遮罩；任务、地图、宝物和报告在后台继续同步。
-    await refreshAll({ includeArea: onMap, waitForTasks: false, deferSecondary: true });
-    void hydrateReports({ notifyOnError: false });
-    void reloadPlayerTasks();
-    void refreshSecondarySnapshot(me.villageId, onMap);
+    // 任务聚合不会阻塞当前村庄数据可用；它在后台完成，避免切村卡住页面。
+    await refreshAll({ includeArea: onMap, waitForTasks: false });
     return { ok: true };
   } finally {
     endVillageSwitch();
@@ -419,12 +339,10 @@ export function scheduleForeignRefresh(delayMs = 1000): void {
 }
 
 /** 登录后拉一次历史通知，播种战报列表。 */
-export async function hydrateReports(options: { notifyOnError?: boolean } = {}): Promise<void> {
-  const villageId = me?.villageId;
+export async function hydrateReports(): Promise<void> {
   try {
     const res = await req('GetNotifications');
     if (!res.ok) return;
-    if (villageId !== me?.villageId) return;
     const list = ((res.payload as any).notifications ?? []) as StoredNotification[];
     const seeded: StoredReport[] = [];
     for (const n of list) {
@@ -437,7 +355,7 @@ export async function hydrateReports(options: { notifyOnError?: boolean } = {}):
     seedReports(seeded);
     bumpReports();
   } catch {
-    if (options.notifyOnError !== false) pushReport('历史战报加载失败：网络连接异常');
+    pushReport('历史战报加载失败：网络连接异常');
   }
 }
 

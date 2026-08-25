@@ -609,6 +609,7 @@ function TaskBoard({ state }: { state: any }) {
 /** 玩家绑定的独立任务页。 */
 export function TasksScreen() {
   dataVersion.value;
+  playerTaskState.value;
   return (
     <>
       <VillageList />

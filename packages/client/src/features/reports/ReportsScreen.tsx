@@ -5,7 +5,7 @@
  * 见 app/refresh.ts）。**不要**回头去正则匹配已渲染的中文文案 —— 宝物名里带「人口」
  * 之类就会误判。
  */
-import { useEffect, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { me } from '../../api.js';
 import { reportsVersion, dataVersion, battles } from '../../app/store.js';
 import { getReports, type ReportKind, type StoredReport } from '../../app/state.js';
@@ -13,7 +13,6 @@ import { Empty, Icon, Panel, SectionHead } from '../../ui/index.js';
 import { BattleLive } from './BattleLive.js';
 import { BattleReportCard } from './BattleReport.js';
 import { PendingTreasures } from './PendingTreasures.js';
-import { hydrateReports } from '../../app/refresh.js';
 
 // ── 过滤配置 ─────────────────────────────────────────────────
 
@@ -140,13 +139,6 @@ export function ReportsScreen() {
   const hasBattles = Object.keys(battles.value).length > 0;
 
   const [filter, setFilter] = useState<FilterKind>('all');
-  const currentVillageId = me?.villageId ?? '';
-
-  // 报告按村庄保存：登录和切村都会由 App/refreshAll 预取，进入报告页时
-  // 再补一次历史通知，避免切村后继续显示上一座村的报告。
-  useEffect(() => {
-    void hydrateReports({ notifyOnError: false });
-  }, [currentVillageId]);
 
   const allReports = getReports();
 
