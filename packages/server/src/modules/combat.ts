@@ -125,6 +125,8 @@ export class CombatModule {
   init(): void {
     this.commands.register('combat.Engage', (c) => this.engage(c)); // 内部：Movement 到达时调用
     this.commands.register('combat.GetBattle', (c) => this.getBattle(c));
+    this.commands.register('combat.GetFieldBattle', (c) => this.getFieldBattle(c));
+    this.commands.register('combat.CancelFieldBattle', (c) => this.cancelFieldBattle(c));
   }
 
   /** 重启恢复：为所有进行中的战场重新登记下一 tick。 */
@@ -174,6 +176,47 @@ export class CombatModule {
       return { ok: false, payload: {}, reason: 'battle_forbidden' };
     }
     return { ok: true, payload: { battle: this.snapshotForClient(b) } };
+  }
+
+  /** Movement 的内部查询：返回包含指定行军的进行中野战及其双方行军 id。 */
+  private getFieldBattle(cmd: Command): CommandResult {
+    const { movementId } = cmd.payload as { movementId?: string };
+    if (!movementId) return { ok: false, payload: {}, reason: 'movement_id_required' };
+    const battle = this.store.all<Battle>(COLLECTION).find((b) => {
+      if (b.status !== 'active' || b.targetKind !== 'field') return false;
+      return Boolean(b.contributions?.[movementId] || b.defenderContribution?.movementId === movementId);
+    });
+    if (!battle) return { ok: true, payload: { battle: null } };
+    const movementIds = [
+      ...Object.keys(battle.contributions ?? {}),
+      ...(battle.defenderContribution?.movementId ? [battle.defenderContribution.movementId] : []),
+    ];
+    return { ok: true, payload: { battle: { id: battle.id, movementIds: [...new Set(movementIds)] } } };
+  }
+
+  /** Movement 的内部运维命令：删除一场野战并取消其下一 tick，不结算伤亡。 */
+  private cancelFieldBattle(cmd: Command): CommandResult {
+    const { battleId, movementId } = cmd.payload as { battleId?: string; movementId?: string };
+    const battle = battleId
+      ? this.store.get<Battle>(COLLECTION, battleId)
+      : movementId
+        ? this.store.all<Battle>(COLLECTION).find((b) => b.status === 'active' && b.targetKind === 'field'
+          && Boolean(b.contributions?.[movementId] || b.defenderContribution?.movementId === movementId))
+        : undefined;
+    if (!battle || battle.status !== 'active' || battle.targetKind !== 'field') {
+      return { ok: true, payload: { cancelled: false } };
+    }
+    this.scheduler.cancelByOwner(`combat:${battle.id}`);
+    this.store.delete(COLLECTION, battle.id);
+    void this.bus.emit({
+      name: 'combat.BattleCancelled', source: CombatModule.NAME, ts: this.now(),
+      payload: { battleId: battle.id, targetKind: 'field', reason: 'scout_immunity' },
+    } as DomainEvent);
+    const movementIds = [
+      ...Object.keys(battle.contributions ?? {}),
+      ...(battle.defenderContribution?.movementId ? [battle.defenderContribution.movementId] : []),
+    ];
+    return { ok: true, payload: { cancelled: true, battleId: battle.id, movementIds: [...new Set(movementIds)] } };
   }
 
   private canViewBattle(b: Battle, villageId: string): boolean {

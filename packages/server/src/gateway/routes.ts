@@ -54,6 +54,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'combat.BattleStarted': 'BattleStarted',
       'combat.BattleTick': 'BattleTick',
       'combat.BattleEnded': 'BattleEnded',
+      'combat.BattleCancelled': 'BattleCancelled',
     },
     },
   {

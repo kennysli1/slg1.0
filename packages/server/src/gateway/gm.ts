@@ -13,6 +13,7 @@
  *   DELETE /gm/ops/player/:playerId       删除单个玩家账号及所有进度（需 ?confirm=yes）
  *   POST   /gm/ops/grant-treasure         GM 测试：授予村庄某宝物并推送效果（body: {villageId, code}）
  *   POST   /gm/ops/use-treasure           GM 测试：使用村庄某特殊宝物（即时发金币，body: {villageId, code}）
+ *   POST   /gm/ops/cancel-scout-encounters 解除旧版本错误产生的侦察野战并让双方从当前位置返村
  *
  * 安全：GM_TOKEN=<secret> 时所有请求需带 X-GM-Token header（面板自动处理）。
  */
@@ -1084,6 +1085,18 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   };
   fastify.post('/gm/ops/sell-treasure', treasureDispose('treasure.Sell'));
   fastify.post('/gm/ops/discard-treasure', treasureDispose('treasure.Discard'));
+
+  // POST /gm/ops/cancel-scout-encounters — 解除旧版本错误产生的侦察野战并让双方返村
+  fastify.post('/gm/ops/cancel-scout-encounters', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const res: any = await gameApp.commands.send({ name: 'movement.CancelScoutEncounters', from: 'gm', payload: {} });
+    if (!res.ok) {
+      void reply.code(400).send({ ok: false, reason: res.reason ?? 'cancel_failed', payload: res.payload });
+      return;
+    }
+    store.flush();
+    void reply.send(res);
+  });
 
   // ── 任务模块 GM 运维端点（body 取 villageId，必要时取 code/resources）──
   const taskOp = async (

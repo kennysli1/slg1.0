@@ -1,5 +1,5 @@
 /** 主导航：桌面顶部战术栏，移动端底部导航栏。 */
-import { tab, dataVersion, reportsVersion, type TabKey } from '../app/store.js';
+import { tab, dataVersion, reportsVersion, playerTaskState, type TabKey } from '../app/store.js';
 import { getCache, getPendingTreasures } from '../app/state.js';
 import { Icon } from '../ui/index.js';
 
@@ -16,12 +16,17 @@ export function TabBar() {
   const active = tab.value;
   dataVersion.value;
   reportsVersion.value;
+  playerTaskState.value;
   const pending = getPendingTreasures().length;
   const marching = (getCache().moves?.movements ?? []).length;
+  const sideOffers = (playerTaskState.value?.offeredSide ?? [])
+    .filter((task: any) => task?.type === 'side').length;
   return (
     <nav class="tabbar" aria-label="主要功能">
       {tabs.map((item) => {
-        const badge = item.key === 'reports' ? pending : item.key === 'map' ? marching : 0;
+        const badge = item.key === 'reports' ? pending
+          : item.key === 'map' ? marching
+            : item.key === 'tasks' ? sideOffers : 0;
         return (
           <button
             key={item.key}
@@ -32,7 +37,7 @@ export function TabBar() {
           >
             <Icon icon={item.icon} label="" decorative size="sm" />
             <span>{item.name}</span>
-            {badge > 0 && <span class="tab-badge" aria-label={`${badge} 条待处理信息`}>{badge}</span>}
+            {badge > 0 && <span class="tab-badge" aria-label={item.key === 'tasks' ? `${badge} 个可接受支线任务` : `${badge} 条待处理信息`}>{badge}</span>}
           </button>
         );
       })}

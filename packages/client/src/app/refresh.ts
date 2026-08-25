@@ -367,6 +367,11 @@ export function handlePush(event: string, payload: any): void {
   // 战斗实时快照
   if (event === 'BattleTick' || event === 'BattleStarted') putBattle(payload);
   if (event === 'BattleEnded' && payload?.battleId) dropBattle(payload.battleId);
+  if (event === 'BattleCancelled') {
+    if (payload?.battleId) dropBattle(payload.battleId);
+    void refreshMovements();
+    return;
+  }
 
   // 人口变化很频繁：只校正快照，绝不触发 refreshAll，
   // 否则会形成 push → refresh → settle → emit 的正反馈死循环。

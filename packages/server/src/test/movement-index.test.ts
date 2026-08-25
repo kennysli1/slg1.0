@@ -168,3 +168,28 @@ test('posIndex：移动后旧格不再触发遭遇，新格才有效', async () 
   assert.equal(moved, true, '续行推进后 pos 应离开旧格');
   assert.notDeepEqual(after?.pos, garrisonTile);
 });
+
+test('侦察军：不触发普通遭遇战或伏击战', async () => {
+  const app = freshApp();
+  const A = await register(app, '侦察免疫甲');
+  const B = await register(app, '侦察免疫乙');
+  await giveTroops(app, A.villageId, { equlegati: 5 });
+  await giveTroops(app, B.villageId, { equlegati: 5 });
+  const intercepted: any[] = [];
+  app.bus.on('movement.Intercepted', (e) => { intercepted.push(e.payload); });
+
+  const a = await send(app, 'movement.SendScout', {
+    villageId: A.villageId, targetVillage: B.villageId, troops: { equlegati: 2 }, scoutType: 'scout_resources',
+  });
+  const b = await send(app, 'movement.SendScout', {
+    villageId: B.villageId, targetVillage: A.villageId, troops: { equlegati: 2 }, scoutType: 'scout_resources',
+  });
+  assert.equal(a.ok, true, `甲侦察应成功: ${a.reason ?? ''}`);
+  assert.equal(b.ok, true, `乙侦察应成功: ${b.reason ?? ''}`);
+
+  for (let i = 0; i < 200 && app.scheduler.pending > 0; i++) {
+    await app.scheduler.advanceTo(clock + 10_000, setClock);
+    assert.equal(app.store.all<any>('battle').some((battle) => battle.targetKind === 'field'), false, '侦察军不得创建野战');
+  }
+  assert.equal(intercepted.some((p) => p?.battleType === 'ambush' || p?.battleType === undefined), false, '侦察军不得触发遭遇或伏击');
+});
