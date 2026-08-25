@@ -62,8 +62,10 @@ export function App() {
     // 避免首屏同时压入同村串行车道，导致后续请求排队超时。
     void (async () => {
       if (!await refreshInitial()) return;
-      await hydrateReports({ notifyOnError: false });
-      await refreshAll({ silent: true });
+      // 历史战报和完整村庄快照都是后台任务，不能阻塞人口/声望已经显示的首屏。
+      void hydrateReports({ notifyOnError: false });
+      // 地图大包进入地图页后再拉，避免它占用同村串行车道拖住军队/任务等快照。
+      void refreshAll({ silent: true, includeArea: false, waitForTasks: false });
     })();
   }
 
