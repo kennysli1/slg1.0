@@ -5,7 +5,7 @@
  * 见 app/refresh.ts）。**不要**回头去正则匹配已渲染的中文文案 —— 宝物名里带「人口」
  * 之类就会误判。
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { me } from '../../api.js';
 import { reportsVersion, dataVersion, battles } from '../../app/store.js';
 import { getReports, type ReportKind, type StoredReport } from '../../app/state.js';
@@ -13,6 +13,7 @@ import { Empty, Icon, Panel, SectionHead } from '../../ui/index.js';
 import { BattleLive } from './BattleLive.js';
 import { BattleReportCard } from './BattleReport.js';
 import { PendingTreasures } from './PendingTreasures.js';
+import { hydrateReports, refreshTreasures } from '../../app/refresh.js';
 
 // ── 过滤配置 ─────────────────────────────────────────────────
 
@@ -139,6 +140,17 @@ export function ReportsScreen() {
   const hasBattles = Object.keys(battles.value).length > 0;
 
   const [filter, setFilter] = useState<FilterKind>('all');
+  const [loaded, setLoaded] = useState(false);
+
+  // 报告和待领取宝物按需加载；避免登录时与其它村级快照争抢串行车道。
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([
+      hydrateReports({ notifyOnError: false }),
+      refreshTreasures(),
+    ]).finally(() => { if (alive) setLoaded(true); });
+    return () => { alive = false; };
+  }, []);
 
   const allReports = getReports();
 
@@ -147,6 +159,10 @@ export function ReportsScreen() {
     : allReports.filter((r) => r.kind === filter);
 
   const isEmpty = allReports.length === 0 && !hasBattles;
+
+  if (!loaded && isEmpty) {
+    return <div class="loading">报告数据加载中…</div>;
+  }
 
   return (
     <div aria-label="战报">

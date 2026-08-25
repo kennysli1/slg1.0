@@ -431,6 +431,54 @@ export async function refreshMovements(): Promise<void> {
   bumpData();
 }
 
+/** 只刷新军队页需要的驻军/训练快照，避免为打开军队页拉整包村庄数据。 */
+export async function refreshArmySnapshot(): Promise<boolean> {
+  if (!me) return false;
+  const result = await req('GetArmy').catch(() => null);
+  if (!result?.ok) return false;
+  setCache({ ...getCache(), army: result.payload });
+  bumpData();
+  return true;
+}
+
+/** 只刷新宝物栏及待领取宝物；村庄页和报告页均按需使用。 */
+export async function refreshTreasures(): Promise<boolean> {
+  if (!me) return false;
+  const result = await req('ListTreasures').catch(() => null);
+  if (!result?.ok) return false;
+  const payload = result.payload as any;
+  setCache({ ...getCache(), treasures: payload });
+  setPendingTreasures(Array.isArray(payload?.pending) ? payload.pending : []);
+  bumpData();
+  return true;
+}
+
+/** 村庄页的次级面板数据（炼金炉等）按需加载，不阻塞人口/建筑首屏。 */
+export async function refreshVillageSecondary(): Promise<boolean> {
+  if (!me) return false;
+  const [treasures, alchemy] = await Promise.all([
+    req('ListTreasures').catch(() => null),
+    req('GetAlchemy').catch(() => null),
+  ]);
+  const next = { ...getCache() };
+  let changed = false;
+  if (treasures?.ok) {
+    next.treasures = treasures.payload;
+    const pending = (treasures.payload as any)?.pending;
+    setPendingTreasures(Array.isArray(pending) ? pending : []);
+    changed = true;
+  }
+  if (alchemy?.ok) {
+    next.alchemy = alchemy.payload;
+    changed = true;
+  }
+  if (changed) {
+    setCache(next);
+    bumpData();
+  }
+  return changed;
+}
+
 let _foreignDebounceTimer: number | null = null;
 /** 在 delayMs 后触发一次 refreshForeignMoves（debounce：重复调用只保留最后一次）。 */
 export function scheduleForeignRefresh(delayMs = 1000): void {
