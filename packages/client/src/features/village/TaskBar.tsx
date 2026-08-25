@@ -467,7 +467,7 @@ function categoryItems(state: any, type: TaskCategory): { active: any[]; offers:
   return { active, offers };
 }
 
-function TaskEntry({ task, offer, openState = true, onToggle = () => {} }: { task?: any; offer?: any; openState?: boolean; onToggle?: (event: Event) => void }) {
+function TaskEntry({ task, offer, openState = true, onToggle = () => {}, showOfferAlert = true }: { task?: any; offer?: any; openState?: boolean; onToggle?: (event: Event) => void; showOfferAlert?: boolean }) {
   const item = task ?? offer;
   if (!item) return null;
   const isOffer = !task;
@@ -494,7 +494,7 @@ function TaskEntry({ task, offer, openState = true, onToggle = () => {} }: { tas
           ? <Tag kind="steel">全局</Tag>
           : item.villageId && <span class="task-card-village">{villageName(item.villageId)}</span>}
         <span class="task-menu-summary-state">{isOffer ? '可接取' : item.ready ? '待领取' : '进行中'}</span>
-        {isOffer && !openState && <span class="task-menu-alert" aria-label="有可接取任务">!</span>}
+        {isOffer && showOfferAlert && <span class="task-menu-alert" aria-label="有可接取任务">!</span>}
       </summary>
       <div class="task-menu-task-body">
         {isOffer
@@ -515,7 +515,8 @@ function TaskCategoryMenu({ type, state, openState, onToggle, taskOpenState, onT
 }) {
   const { active, offers } = categoryItems(state, type);
   const count = active.length + offers.length;
-  const offerCount = offers.length;
+  // 酒馆日常仍正常展示和接取，但不在任务页/导航栏的提醒范围内。
+  const offerCount = type === 'daily' ? 0 : offers.length;
   if (count === 0) return null;
   return (
     <details class="task-menu task-menu--category" open={openState} onToggle={onToggle}>
@@ -526,7 +527,7 @@ function TaskCategoryMenu({ type, state, openState, onToggle, taskOpenState, onT
       </summary>
       <div class="task-menu-body">
         {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} openState={taskOpenState[`task:${item.code}`] ?? true} onToggle={(event) => onTaskToggle(`task:${item.code}`, event)} />)}
-        {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} openState={taskOpenState[`task:${item.code}`] ?? true} onToggle={(event) => onTaskToggle(`task:${item.code}`, event)} />)}
+        {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} showOfferAlert={type !== 'daily'} openState={taskOpenState[`task:${item.code}`] ?? true} onToggle={(event) => onTaskToggle(`task:${item.code}`, event)} />)}
       </div>
     </details>
   );
@@ -622,7 +623,7 @@ function TaskScopeMenu({ scope, state, currentVillageId, openState, onMenuToggle
     const { active, offers } = categoryItems(state, type);
     return total + active.length + offers.length;
   }, 0) + (scope === 'global' && kingdomState.value?.task ? 1 : 0);
-  const offerCount = categories.reduce((total, type) => total + categoryItems(state, type).offers.length, 0);
+  const offerCount = categories.reduce((total, type) => total + (type === 'daily' ? 0 : categoryItems(state, type).offers.length), 0);
   const label = scope === 'global' ? '全局任务' : '村庄任务';
   const sub = scope === 'global'
     ? '主线、全局支线与全局日常；可从任意村庄执行'
@@ -666,8 +667,8 @@ export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSi
   if (!offered?.length && !side.length) return null;
   return (
     <div class="task-offers">
-      {side.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} />)}
-      {(offered ?? []).map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} />)}
+      {side.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert />)}
+      {(offered ?? []).map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert={false} />)}
     </div>
   );
 }

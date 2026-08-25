@@ -571,6 +571,10 @@ var REP_ROWS = [
   ['reputation_good_pop_growth_cap','正声望人口增长上限','正声望人口增长倍率上限'],
   ['reputation_evil_pop_growth_penalty_per_point','负声望人口下降/点','每点负声望带来的人口增长下降倍率'],
   ['reputation_evil_pop_growth_penalty_cap','负声望人口下降上限','负声望人口增长下降倍率上限'],
+  ['reputation_evil_army_attack_per_point','负声望军队攻击/点','每点负声望带来的军队攻击倍率加成'],
+  ['reputation_evil_army_attack_cap','负声望军队攻击上限','负声望军队攻击倍率加成上限'],
+  ['reputation_evil_army_defense_per_point','负声望军队防御/点','每点负声望带来的军队防御倍率加成'],
+  ['reputation_evil_army_defense_cap','负声望军队防御上限','负声望军队防御倍率加成上限'],
   ['reputation_good_gold_tax_penalty_per_point','正声望税收下降/点','每点正声望带来的金币税收下降倍率'],
   ['reputation_good_gold_tax_penalty_cap','正声望税收下降上限','正声望金币税收下降倍率上限'],
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
@@ -639,7 +643,7 @@ function sectionFounding(){
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉任务的声望结算可在任务效果表的 adjust_reputation 行调整，宝物本身不再扣除声望。</div>';
+  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、负声望军队攻防、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉任务的声望结算可在任务效果表的 adjust_reputation 行调整，宝物本身不再扣除声望。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<REP_ROWS.length;j++){
     var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -1122,6 +1126,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/refresh', (req, reply) => taskOp(req, reply, 'task.GmRefreshRandom', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset', (req, reply) => taskOp(req, reply, 'task.GmReset', (b) => ({ villageId: b.villageId })));
+  fastify.post('/gm/ops/task/reset-all', (req, reply) => taskOp(req, reply, 'task.GmResetAll', () => ({})));
 
   // GET /gm/tasks — 任务管理 Web 面板
   fastify.get('/gm/tasks', (_req, reply) => {

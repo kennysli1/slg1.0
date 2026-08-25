@@ -227,7 +227,7 @@
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
 
 王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |

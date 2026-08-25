@@ -198,6 +198,7 @@ export class TasksModule {
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
     this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
+    this.commands.register('task.GmResetAll', (c: Command) => this.gmResetAll(c));
     this.commands.register('task.GmRetriggerAbandoned', (c: Command) => this.gmRetriggerAbandoned(c));
 
     // 酒馆建造/升级/拆除 → 重排随机刷新节奏 + 接取上限
@@ -263,7 +264,7 @@ export class TasksModule {
     const s = this.store.get<TaskState>(COLLECTION, villageId);
     if (s) {
       for (const inst of Object.values(s.active)) {
-        for (const c of inst.camps) {
+        for (const c of inst.camps ?? []) {
           void this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
         }
       }
@@ -273,10 +274,13 @@ export class TasksModule {
 
   // ── 建村：初始化 + M1 自动解锁 ──
   createVillage(villageId: string): void {
-    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offeredMain: [], offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
-    this.store.set(COLLECTION, villageId, s);
+    this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
+  }
+
+  private emptyTaskState(villageId: string): TaskState {
+    return { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offeredMain: [], offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
   }
 
   // ── 状态读写 ──
@@ -1171,8 +1175,29 @@ export class TasksModule {
     const { villageId } = cmd.payload as { villageId: string };
     if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
     this.wipeSingleVillage(villageId);
-    this.createVillage(villageId);
+    this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
+    await this.unlockMainQuests(villageId);
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+  }
+
+  /** 重置所有玩家/村庄的任务进度；只清 task 状态和任务营地，不触碰其他游戏存档。 */
+  private async gmResetAll(_cmd: Command): Promise<CommandResult> {
+    const players = await this.commands.send({ name: 'player.ListAll', from: TasksModule.NAME, payload: {} });
+    if (!players.ok) return { ok: false, payload: {}, reason: players.reason ?? 'players_unavailable' };
+    const playerRows = ((players.payload as any)?.players ?? []) as Array<{ villages?: Array<{ id?: string }> }>;
+    const villageIds = [...new Set(playerRows.flatMap((p) => (p.villages ?? []).map((v) => String(v.id ?? '')).filter(Boolean)))];
+    const existingIds = this.store.all<TaskState>(COLLECTION).map((state) => state.villageId).filter(Boolean);
+    const allIds = [...new Set([...existingIds, ...villageIds])];
+    for (const villageId of allIds) this.wipeSingleVillage(villageId);
+    for (const villageId of villageIds) {
+      this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
+      await this.unlockMainQuests(villageId);
+      await this.pushList(villageId);
+    }
+    return {
+      ok: true,
+      payload: { resetPlayers: playerRows.length, resetVillages: villageIds.length, clearedTaskStates: existingIds.length },
+    };
   }
 
   // ── 主线解锁（m1 自动激活，其余进入手动接取列表）──

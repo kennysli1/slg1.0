@@ -22,8 +22,8 @@ export function TabBar() {
   const taskOffers = [
     ...(playerTaskState.value?.offeredMain ?? []),
     ...(playerTaskState.value?.offeredSide ?? []),
-    ...(playerTaskState.value?.offered ?? []),
-  ].length;
+    ...(playerTaskState.value?.offered ?? []).filter((task: any) => task?.type !== 'daily'),
+  ].filter((task: any) => task?.type !== 'daily').length;
   return (
     <nav class="tabbar" aria-label="主要功能">
       {tabs.map((item) => {

@@ -88,6 +88,12 @@ export class ReputationModule {
     const evilPenalty = value < 0
       ? Math.min(c.reputationEvilPopGrowthPenaltyCap, Math.abs(value) * c.reputationEvilPopGrowthPenaltyPerPoint)
       : 0;
+    const evilArmyAttackBonus = value < 0
+      ? Math.min(c.reputationEvilArmyAttackCap, Math.abs(value) * c.reputationEvilArmyAttackPerPoint)
+      : 0;
+    const evilArmyDefenseBonus = value < 0
+      ? Math.min(c.reputationEvilArmyDefenseCap, Math.abs(value) * c.reputationEvilArmyDefensePerPoint)
+      : 0;
     const goodTaxPenalty = value > 0
       ? Math.min(c.reputationGoodGoldTaxPenaltyCap, value * c.reputationGoodGoldTaxPenaltyPerPoint)
       : 0;
@@ -98,6 +104,10 @@ export class ReputationModule {
       populationGrowthBonus: goodBonus,
       populationGrowthPenalty: evilPenalty,
       populationGrowthMult: value < 0 ? Math.max(0, 1 - evilPenalty) : 1 + goodBonus,
+      armyAttackBonus: evilArmyAttackBonus,
+      armyDefenseBonus: evilArmyDefenseBonus,
+      armyAttackMult: 1 + evilArmyAttackBonus,
+      armyDefenseMult: 1 + evilArmyDefenseBonus,
       goldTaxReduction: goodTaxPenalty,
       goldTaxMult: Math.max(0, 1 - goodTaxPenalty),
       pveTreasureDropBonus: evilBonus,

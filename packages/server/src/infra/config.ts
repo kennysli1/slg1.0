@@ -508,6 +508,14 @@ export interface GameConstants {
   reputationGoodPopGrowthCap: number;
   reputationEvilPopGrowthPenaltyPerPoint: number;
   reputationEvilPopGrowthPenaltyCap: number;
+  /** 声望：每点负声望带来的军队攻击倍率加成。 */
+  reputationEvilArmyAttackPerPoint: number;
+  /** 声望：负声望军队攻击倍率加成上限。 */
+  reputationEvilArmyAttackCap: number;
+  /** 声望：每点负声望带来的军队防御倍率加成。 */
+  reputationEvilArmyDefensePerPoint: number;
+  /** 声望：负声望军队防御倍率加成上限。 */
+  reputationEvilArmyDefenseCap: number;
   reputationGoodGoldTaxPenaltyPerPoint: number;
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
@@ -1094,6 +1102,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodPopGrowthCap: cn('reputation_good_pop_growth_cap', 0.5),
     reputationEvilPopGrowthPenaltyPerPoint: cn('reputation_evil_pop_growth_penalty_per_point', 0.005),
     reputationEvilPopGrowthPenaltyCap: cn('reputation_evil_pop_growth_penalty_cap', 0.5),
+    reputationEvilArmyAttackPerPoint: cn('reputation_evil_army_attack_per_point', 0.005),
+    reputationEvilArmyAttackCap: cn('reputation_evil_army_attack_cap', 0.5),
+    reputationEvilArmyDefensePerPoint: cn('reputation_evil_army_defense_per_point', 0.005),
+    reputationEvilArmyDefenseCap: cn('reputation_evil_army_defense_cap', 0.5),
     reputationGoodGoldTaxPenaltyPerPoint: cn('reputation_good_gold_tax_penalty_per_point', 0.005),
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
