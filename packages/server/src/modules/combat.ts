@@ -95,6 +95,7 @@ interface Battle {
 
 const COLLECTION = 'battle';
 const MAX_TICKS = 20000; // 安全阀：极端情况下(双方都0攻)兜底结束，避免无限循环
+const MAX_REPLAY_ROUNDS = 120; // 战报只保留均匀抽样的关键轮次，避免极端战斗产生数 MB 推送/存档
 
 export class CombatModule {
   static readonly NAME = 'combat';
@@ -711,7 +712,8 @@ export class CombatModule {
       battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : b.battleType === 'ambush' ? '伏击' : undefined,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
-      rounds: b.rounds,
+      totalRounds: b.rounds.length,
+      rounds: sampleBattleRounds(b.rounds),
       buildingDamage,
       buildingLoot,
       storedLoot,
@@ -829,7 +831,8 @@ export class CombatModule {
       battleLabel: b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
-      rounds: b.rounds,
+      totalRounds: b.rounds.length,
+      rounds: sampleBattleRounds(b.rounds),
     };
 
     // 进攻方（各贡献村）幸存者 → BattleEnded(attacker)
@@ -1119,6 +1122,22 @@ function aggregateCounts(snap: Snapshot): Record<string, number> {
 /** 把一支增援部队的兵种数量并入战报阵容。 */
 function mergeCounts(target: Record<string, number>, source: Record<string, number>): void {
   for (const [code, count] of Object.entries(source)) target[code] = (target[code] ?? 0) + count;
+}
+
+/**
+ * 战斗运算仍保留完整逐轮状态直到结算，但对外战报只发送固定数量的均匀采样。
+ * 首尾轮始终保留；totalRounds 由调用方单独下发，客户端可明确标注这是关键轮次回放。
+ */
+function sampleBattleRounds<T>(rounds: T[]): T[] {
+  if (rounds.length <= MAX_REPLAY_ROUNDS) return rounds;
+  const sampled: T[] = [];
+  let previous = -1;
+  for (let i = 0; i < MAX_REPLAY_ROUNDS; i++) {
+    const index = Math.round((i * (rounds.length - 1)) / (MAX_REPLAY_ROUNDS - 1));
+    if (index !== previous) sampled.push(rounds[index]);
+    previous = index;
+  }
+  return sampled;
 }
 
 /** 计算一轮中各兵种实际减少的数量（只记录正数）。 */

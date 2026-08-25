@@ -18,6 +18,7 @@ import type { GameConfig } from '../infra/config.js';
  */
 
 const COLLECTION = 'notifications';
+const MAX_STORED_REPLAY_ROUNDS = 120;
 
 interface VillageNotifications {
   items: StoredNotification[];
@@ -64,6 +65,7 @@ export class NotificationsModule {
   }
 
   init(): void {
+    this.compactHistoricalBattleReports();
     this.commands.register('notifications.List', (c) => this.list(c));
     for (const internalName of Object.keys(EVENT_MAP)) {
       this.bus.on(internalName, (e: DomainEvent) => this.record(internalName, e));
@@ -79,7 +81,7 @@ export class NotificationsModule {
     const notification: StoredNotification = {
       id: `nt-${villageId}-${++bucket.seq}`,
       event: pushEvent,
-      payload: evt.payload as Record<string, unknown>,
+      payload: compactBattlePayload(pushEvent, evt.payload as Record<string, unknown>).payload,
       ts: evt.ts,
     };
     bucket.items.push(notification);
@@ -90,7 +92,63 @@ export class NotificationsModule {
 
   private list(cmd: Command): CommandResult {
     const { villageId } = cmd.payload as { villageId: string };
-    const bucket = this.store.get<VillageNotifications>(COLLECTION, villageId);
+    const bucket = this.compactVillageBucket(villageId);
     return { ok: true, payload: { notifications: bucket?.items ?? [] } };
   }
+
+  /**
+   * 兼容旧存档：历史极端战斗曾把最多 20,000 个逐轮快照写进单条通知，
+   * 导致登录时 GetNotifications 占住同村串行队列。启动时只压缩回放数组，保留战报本身及全部结算摘要。
+   */
+  private compactHistoricalBattleReports(): void {
+    for (const villageId of this.store.keys(COLLECTION)) this.compactVillageBucket(villageId);
+  }
+
+  private compactVillageBucket(villageId: string): VillageNotifications | undefined {
+    const bucket = this.store.get<VillageNotifications>(COLLECTION, villageId);
+    if (!bucket?.items?.length) return bucket;
+    let changed = false;
+    const items = bucket.items.map((item) => {
+      const compacted = compactBattlePayload(item.event, item.payload);
+      if (!compacted.changed) return item;
+      changed = true;
+      return { ...item, payload: compacted.payload };
+    });
+    if (!changed) return bucket;
+    const compactedBucket = { ...bucket, items };
+    this.store.set(COLLECTION, villageId, compactedBucket);
+    return compactedBucket;
+  }
+}
+
+function compactBattlePayload(
+  event: string,
+  payload: Record<string, unknown>,
+): { payload: Record<string, unknown>; changed: boolean } {
+  if (event !== 'BattleEnded' || !Array.isArray(payload.rounds)) return { payload, changed: false };
+  const rounds = payload.rounds;
+  const lastRound = Number((rounds.at(-1) as { round?: unknown } | undefined)?.round);
+  const declaredTotal = Number(payload.totalRounds);
+  const totalRounds = Number.isFinite(declaredTotal) && declaredTotal >= rounds.length
+    ? Math.floor(declaredTotal)
+    : Number.isFinite(lastRound) && lastRound >= rounds.length
+      ? Math.floor(lastRound)
+      : rounds.length;
+  const sampled = sampleReplayRounds(rounds);
+  const changed = sampled.length !== rounds.length || declaredTotal !== totalRounds;
+  return changed
+    ? { payload: { ...payload, totalRounds, rounds: sampled }, changed: true }
+    : { payload, changed: false };
+}
+
+function sampleReplayRounds<T>(rounds: T[]): T[] {
+  if (rounds.length <= MAX_STORED_REPLAY_ROUNDS) return rounds;
+  const sampled: T[] = [];
+  let previous = -1;
+  for (let i = 0; i < MAX_STORED_REPLAY_ROUNDS; i++) {
+    const index = Math.round((i * (rounds.length - 1)) / (MAX_STORED_REPLAY_ROUNDS - 1));
+    if (index !== previous) sampled.push(rounds[index]);
+    previous = index;
+  }
+  return sampled;
 }

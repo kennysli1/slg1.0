@@ -18,6 +18,7 @@ interface BattleDetails {
   attackerLineup?: Counts;
   defenderLineup?: Counts;
   rounds?: BattleRound[];
+  totalRounds?: number;
   battleLabel?: string;
   attackPower?: number;
   defensePower?: number;
@@ -77,12 +78,17 @@ function BattleReplay({ details }: { details: BattleDetails }) {
   const attackerLabel = details.side === 'defender' ? '敌方（攻）' : '我方（攻）';
   const defenderLabel = details.side === 'defender' ? '我方（守）' : '敌方（守）';
   const rounds = Array.isArray(details.rounds) ? details.rounds : [];
+  const totalRounds = Math.max(rounds.length, Number(details.totalRounds) || 0);
 
   return (
     <div class="battle-report-replay">
       <div class="battle-report-replay-heading">
         <span>战斗回放</span>
-        <small>{rounds.length ? `共 ${rounds.length} 轮 · 按结算顺序` : '等待战斗结算'}</small>
+        <small>{rounds.length
+          ? totalRounds > rounds.length
+            ? `共 ${totalRounds.toLocaleString()} 轮 · 展示 ${rounds.length} 个关键轮次`
+            : `共 ${rounds.length} 轮 · 按结算顺序`
+          : '等待战斗结算'}</small>
       </div>
 
       <div class="battle-report-lineups">

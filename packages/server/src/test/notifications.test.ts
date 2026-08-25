@@ -65,9 +65,37 @@ test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
   assert.ok(Object.keys(attackerReport.payload.attackerLineup ?? {}).length > 0, '战斗结束战报应包含进攻方阵容');
   assert.ok(Object.hasOwn(attackerReport.payload, 'defenderLineup'), '战斗结束战报应包含防守方阵容字段（即使为空）');
   assert.ok(Array.isArray(attackerReport.payload.rounds) && attackerReport.payload.rounds.length > 0, '战斗结束战报应包含逐轮回放');
-  assert.equal(attackerReport.payload.rounds.at(-1).round, attackerReport.payload.rounds.length, '逐轮回放应按轮次连续记录');
+  assert.equal(attackerReport.payload.rounds.at(-1).round, attackerReport.payload.totalRounds, '逐轮回放应保留最终轮并声明总轮数');
   assert.ok(atkEvents.includes('MarchReturned'), `攻方应有 MarchReturned，实际: ${JSON.stringify(atkEvents)}`);
   assert.ok(!defEvents.includes('IncomingAttack'), `实时来袭预警不得写入战报，实际: ${JSON.stringify(defEvents)}`);
+});
+
+test('notifications: 旧存档的超长战斗回放会压缩为关键轮次且保留结算摘要', async () => {
+  const app = freshApp();
+  const r = (await reg(app, '旧战报')).payload as any;
+  const vid = r.player.villageId;
+  const rounds = Array.from({ length: 20_000 }, (_, index) => ({
+    round: index + 1,
+    attacker: { legionnaire: 20_000 - index },
+    defender: { rat: 20_000 - index },
+  }));
+  app.store.set('notifications', vid, {
+    seq: 1,
+    items: [{
+      id: `nt-${vid}-1`,
+      event: 'BattleEnded',
+      payload: { villageId: vid, attackerWins: true, attackerLosses: {}, defenderLosses: {}, rounds },
+      ts: clock,
+    }],
+  });
+
+  const res = (await send(app, 'notifications.List', { villageId: vid })).payload as any;
+  const report = res.notifications[0];
+  assert.equal(report.payload.totalRounds, 20_000);
+  assert.equal(report.payload.rounds.length, 120);
+  assert.equal(report.payload.rounds[0].round, 1);
+  assert.equal(report.payload.rounds.at(-1).round, 20_000);
+  assert.equal(report.payload.attackerWins, true, '压缩回放不能丢失战斗结算摘要');
 });
 
 test('notifications: 超过上限时丢最旧条目', async () => {
