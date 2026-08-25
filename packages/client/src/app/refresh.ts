@@ -94,18 +94,34 @@ export interface RefreshOptions {
 export async function refreshInitial(): Promise<boolean> {
   if (!me) return false;
   try {
-    const [res, vil] = await Promise.all([
-      req('GetResources'),
-      req('GetVillageLayout'),
+    // 人口和声望同样属于首屏 HUD 的关键快照，不能等完整地图请求结束后才加载。
+    // 每个请求单独兜底：某一个读请求超时不能把已经成功的其它快照一起丢掉。
+    const safe = (action: string) => req(action).catch(() => null);
+    const [res, vil, pop, reputation] = await Promise.all([
+      safe('GetResources'),
+      safe('GetVillageLayout'),
+      safe('GetPopulation'),
+      safe('GetReputation'),
     ]);
-    if (!res.ok || !vil.ok) {
-      const failed = !res.ok ? res : vil;
-      const code = failed.error?.code ?? 'failed';
-      if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
-      else pushReport(`刷新失败：${errText(code)}`);
+    const failed = [res, vil, pop, reputation].find((x) => x && !x.ok);
+    const failedCode = failed?.error?.code;
+    if (failedCode === 'not_logged_in') {
+      onSessionLost?.('连接已断开，请重新登录');
       return false;
     }
-    setCache({ ...getCache(), res: res.payload, vil: vil.payload });
+    const hasCore = Boolean(res?.ok || vil?.ok || pop?.ok || reputation?.ok);
+    if (!hasCore) {
+      pushReport(`刷新失败：${errText(failedCode ?? 'network_error')}`);
+      return false;
+    }
+    setCache({
+      ...getCache(),
+      ...(res?.ok ? { res: res.payload } : {}),
+      ...(vil?.ok ? { vil: vil.payload } : {}),
+      ...(reputation?.ok ? { reputation: reputation.payload } : {}),
+    });
+    if (pop?.ok) applyPopPayload(pop.payload);
+    if (res?.ok) markResFetched();
     // 地图尚未补齐；若玩家立刻切到地图页，MapScreen 会主动重试全量区域。
     mapAreaStale.value = true;
     bumpData();
@@ -157,46 +173,62 @@ async function performRefreshAll(options: RefreshOptions = {}): Promise<void> {
   const includeArea = options.includeArea !== false;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
+    const safe = <T>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
     const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom] = await Promise.all([
-      req('GetResources'),
-      req('GetVillageLayout'),
-      req('GetArmy'),
+      safe(req('GetResources')),
+      safe(req('GetVillageLayout')),
+      safe(req('GetArmy')),
       includeArea
-        ? req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true })
-        : Promise.resolve({ ok: false, skipped: true } as any),
-      req('ListMovements'),
-      req('ListPlayerMovements'),
-      req('GetPopulation').catch(() => ({ ok: false } as any)),
-      req('ListTreasures').catch(() => ({ ok: false } as any)),
-      req('GetReputation').catch(() => ({ ok: false } as any)),
-      req('GetAlchemy').catch(() => ({ ok: false } as any)),
-      req('GetKingdomState').catch(() => ({ ok: false } as any)),
+        ? safe(req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }))
+        : Promise.resolve(null),
+      safe(req('ListMovements')),
+      safe(req('ListPlayerMovements')),
+      safe(req('GetPopulation')),
+      safe(req('ListTreasures')),
+      safe(req('GetReputation')),
+      safe(req('GetAlchemy')),
+      safe(req('GetKingdomState')),
     ]);
 
-    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
-    if (failed) {
-      const code = failed.error?.code ?? 'failed';
-      if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
-      else if (!options.silent) pushReport(`刷新失败：${errText(code)}`);
+    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves]
+      .find((x) => !x?.ok);
+    if (failed?.error?.code === 'not_logged_in') {
+      onSessionLost?.('连接已断开，请重新登录');
       return;
     }
+    const hasSnapshot = [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom]
+      .some((x) => x?.ok);
+    if (!hasSnapshot) {
+      if (!options.silent) pushReport('刷新失败：网络连接异常');
+      return;
+    }
+    if (failed && !options.silent) {
+      const code = failed.error?.code ?? '网络连接异常';
+      pushReport(`刷新失败：${errText(code)}`);
+    }
 
-    if (area.ok) reconcileVillagesFromArea(area.payload);
+    if (area?.ok) reconcileVillagesFromArea(area.payload);
     setCache({
       ...getCache(),
-      res: res.payload, vil: vil.payload, army: army.payload,
-      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload, playerMoves: playerMoves.payload,
-      treasures: treasures.ok ? treasures.payload : null,
-      reputation: reputation.ok ? reputation.payload : null,
-      alchemy: alchemy.ok ? alchemy.payload : null,
-      kingdom: kingdom.ok ? kingdom.payload : null,
+      ...(res?.ok ? { res: res.payload } : {}),
+      ...(vil?.ok ? { vil: vil.payload } : {}),
+      ...(army?.ok ? { army: army.payload } : {}),
+      ...(area?.ok ? { area: area.payload } : {}),
+      ...(moves?.ok ? { moves: moves.payload } : {}),
+      ...(playerMoves?.ok ? { playerMoves: playerMoves.payload } : {}),
+      ...(treasures?.ok ? { treasures: treasures.payload } : {}),
+      ...(reputation?.ok ? { reputation: reputation.payload } : {}),
+      ...(alchemy?.ok ? { alchemy: alchemy.payload } : {}),
+      ...(kingdom?.ok ? { kingdom: kingdom.payload } : {}),
     });
-    kingdomState.value = kingdom.ok ? kingdom.payload : null;
-    if (area.ok) mapAreaStale.value = false;
-    setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
-    markResFetched();
-    if (pop.ok) applyPopPayload(pop.payload);
+    if (kingdom?.ok) kingdomState.value = kingdom.payload;
+    if (area?.ok) mapAreaStale.value = false;
+    if (treasures?.ok) {
+      setPendingTreasures((treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
+    }
+    if (res?.ok) markResFetched();
+    if (pop?.ok) applyPopPayload(pop.payload);
     bumpData();
     void refreshForeignMoves();
 
