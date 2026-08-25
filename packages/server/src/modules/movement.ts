@@ -182,6 +182,7 @@ export class MovementModule {
     this.commands.register('movement.ListReinforcements', (c) => this.listReinforcements(c));
     this.commands.register('movement.ListVisionSources', (c) => this.listVisionSources(c));
     this.commands.register('movement.ListForeign', (c) => this.listForeign(c));
+    this.commands.register('movement.CancelScoutEncounters', (c) => this.cancelScoutEncounters(c));
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
     // 目标消失（PvE 营地/幸福村被移除、玩家村庄被放弃）→ 在途的进攻/运输/商队立即原路返回
@@ -361,6 +362,9 @@ export class MovementModule {
 
   /** 重启恢复：为所有在途、仍在行军的部队重新登记下一格推进（过期则立即触发）。 */
   resume(): void {
+    // 旧版本可能已把侦察军错误送入野战；启动时先解除这类战场，避免零攻击快照
+    // 长时间空转占用 CPU，并让双方按当前位置正常返村。
+    void this.cancelScoutEncounters({ name: 'movement.CancelScoutEncounters', from: MovementModule.NAME, payload: {} });
     // 先汇总各村的在途部队 popCost 总量 + 在途兵力，恢复 population.SetEnRoutePop 与 military 粮耗。
     const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number> }>();
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
@@ -2425,7 +2429,7 @@ export class MovementModule {
     if (await this.maybeResolveIncomingScout(mv)) return;
 
     // 伏击检测：只有已经抵达并驻扎的伏击军，才能在一格内拦截敌方行军。
-    if (mv.type !== 'return' && mv.type !== 'caravan' && mv.type !== 'transport' && mv.type !== 'incoming_scout') {
+    if (mv.type !== 'return' && mv.type !== 'caravan' && mv.type !== 'transport' && mv.type !== 'scout' && mv.type !== 'incoming_scout') {
       const ambush = await this.findAmbush(mv);
       if (ambush) {
         await this.resolveAmbushEncounter(ambush, mv);
@@ -2434,7 +2438,7 @@ export class MovementModule {
     }
 
     // 相遇检测（仅两支出征军相遇即战；返程军/商队脱战免疫）
-    if (mv.type !== 'return' && mv.type !== 'caravan' && mv.type !== 'transport' && mv.type !== 'incoming_scout') {
+    if (mv.type !== 'return' && mv.type !== 'caravan' && mv.type !== 'transport' && mv.type !== 'scout' && mv.type !== 'incoming_scout') {
       const opponent = await this.findEncounter(mv);
       if (opponent) {
         await this.resolveFieldEncounter(mv, opponent);
@@ -2787,14 +2791,14 @@ export class MovementModule {
    * 返回对手 movement 或 undefined。
    */
   private async findEncounter(mv: MovementRecord): Promise<MovementRecord | undefined> {
-    if (mv.type === 'incoming_scout') return undefined;
+    if (mv.type === 'scout' || mv.type === 'incoming_scout') return undefined;
     const myOwner = await this.ownerOf(mv.fromVillage);
     const ids = this.posIndex.get(this.posKey(mv.pos.q, mv.pos.r));
     if (!ids) return undefined;
     for (const oid of ids) {
       const other = this.load(oid);
       if (!other || other.id === mv.id) continue;
-      if (other.type === 'return' || other.type === 'caravan' || other.type === 'transport' || other.type === 'incoming_scout' || other.status !== 'marching') continue;
+      if (other.type === 'return' || other.type === 'caravan' || other.type === 'transport' || other.type === 'scout' || other.type === 'incoming_scout' || other.status !== 'marching') continue;
       const otherOwner = await this.ownerOf(other.fromVillage);
       if (otherOwner && myOwner && otherOwner === myOwner) continue;
       return other;
@@ -2804,7 +2808,7 @@ export class MovementModule {
 
   /** 找出一格内的敌方驻扎伏击军；行军中的伏击军不参与此检测。 */
   private async findAmbush(mv: MovementRecord): Promise<MovementRecord | undefined> {
-    if (mv.status !== 'marching' || mv.type === 'return' || mv.type === 'caravan' || mv.type === 'transport' || mv.type === 'incoming_scout' || mv.type === 'ambush') return undefined;
+    if (mv.status !== 'marching' || mv.type === 'return' || mv.type === 'caravan' || mv.type === 'transport' || mv.type === 'scout' || mv.type === 'incoming_scout' || mv.type === 'ambush') return undefined;
     const myOwner = await this.ownerOf(mv.fromVillage);
     for (const other of this.store.all<MovementRecord>(COLLECTION)) {
       if (other.id === mv.id || other.type !== 'ambush' || other.status !== 'stationed') continue;
@@ -2977,6 +2981,45 @@ export class MovementModule {
         payload: { movementId: p.movementId, expectedArrivalAt: returnMv.arriveAt },
       });
     }
+  }
+
+  /**
+   * 解除旧版本错误产生的侦察野战。侦察军不应被任何玩家看见，也不应参与普通遭遇战/伏击战；
+   * 对已存在的错误战场不结算伤亡，双方从当前格各自原路返村。
+   */
+  private async cancelScoutEncounters(_cmd: Command): Promise<CommandResult> {
+    const pausedScouts = this.store.all<MovementRecord>(COLLECTION)
+      .filter((m) => m.type === 'scout' && m.status === 'paused');
+    const processed = new Set<string>();
+    const returned: string[] = [];
+    for (const scout of pausedScouts) {
+      if (processed.has(scout.id)) continue;
+      const info = await this.commands.send({
+        name: 'combat.GetFieldBattle', from: MovementModule.NAME,
+        payload: { movementId: scout.id },
+      });
+      const battle = info.ok ? (info.payload as any)?.battle : undefined;
+      const ids: string[] = Array.isArray(battle?.movementIds)
+        ? [...new Set((battle.movementIds as unknown[]).map((id) => String(id)))]
+        : [];
+      if (!battle || ids.length < 2) continue;
+      const participants = ids.map((id) => this.load(id)).filter((m): m is MovementRecord => Boolean(m));
+      // 只处理双方都是侦察军的旧错误战场；普通野战不受该运维修复影响。
+      if (participants.length !== ids.length || participants.some((m) => m.type !== 'scout')) continue;
+      const cancelled = await this.commands.send({
+        name: 'combat.CancelFieldBattle', from: MovementModule.NAME,
+        payload: { battleId: battle.id },
+      });
+      if (!cancelled.ok || !(cancelled.payload as any)?.cancelled) continue;
+      for (const mv of participants) {
+        processed.add(mv.id);
+        const current = this.load(mv.id);
+        if (!current || current.status !== 'paused') continue;
+        await this.startReturn(current);
+        returned.push(mv.id);
+      }
+    }
+    return { ok: true, payload: { cancelled: returned.length, movementIds: returned } };
   }
 
   private async scheduleReturn(
