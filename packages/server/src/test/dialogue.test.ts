@@ -92,8 +92,9 @@ test('dialogue：新账号自动激活 M1 并保留一次性待弹对话记录',
   const pending = ((snapshot.payload as any).pendingDialogues ?? [])
     .find((item: any) => item.taskCode === 'm1' && item.trigger === 'accept');
   assert.ok(pending, 'M1 首次自动激活应有待弹对话记录');
-  assert.equal(pending.dialogue.npcName, '');
-  assert.equal(pending.dialogue.npcText, '');
+  assert.equal(pending.dialogue.npcName, 'dialogue-m1的村庄的长老');
+  assert.match(pending.dialogue.npcText, /欢迎领主大人接手我们的村庄/);
+  assert.match(pending.dialogue.npcText, /由于年久失修我们城外的资源田都已经荒废了/);
   const consumed = await send(app, 'task.ConsumeDialogue', { playerId: player.id, dialogueId: pending.id });
   assert.equal(consumed.ok, true, consumed.reason);
   const after = await send(app, 'task.GetPlayerState', { playerId: player.id });
