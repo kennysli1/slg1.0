@@ -1519,7 +1519,7 @@ const GM_DIALOGUES_HTML = `<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;vertical-align:top}th{position:sticky;top:0;background:#20354c;color:#8ed5ff;white-space:nowrap}input,textarea{width:190px;min-width:120px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}textarea{height:96px;resize:vertical}.small{width:70px;min-width:70px}.row-actions{min-width:54px;white-space:nowrap}a{color:#79cfff}
 </style></head><body>
 <h1>NPC 对话编辑</h1>
-<p class="hint">每行是一个可复用的对话 session，按“任务代码 + 触发点”绑定。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>；保存前会校验任务引用、文本和回复键，失败时不会写入配置。</p>
+<p class="hint">每行是一个可复用的对话 session，按“任务代码 + 触发点”绑定；<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是接取后的自动对话。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>；主线与支线已预置空白模板，可直接填写 npcName/npcText，空白模板不会阻塞任务接取；保存前会校验任务引用和回复键，失败时不会写入配置。</p>
 <div class="bar"><button onclick="addRow()">+ 新增行</button><button class="save" onclick="save()">保存并热重载</button><span id="status">加载中…</span></div>
 <div class="table-wrap"><table id="grid"></table></div>
 <script>

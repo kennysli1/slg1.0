@@ -40,3 +40,49 @@ test('dialogue：未知任务的对话请求返回空 session', async () => {
   assert.equal(result.ok, true);
   assert.equal((result.payload as any).dialogue, null);
 });
+
+test('dialogue：S3 接取后弹出当前接取村庄村民的单段后续对话', async () => {
+  const app = createGameApp({ now: () => 3_000_000, manualScheduler: true });
+  app.setupWorld();
+  const registered = await send(app, 'player.Register', { name: 's3-after', password: 'pass1', tribe: 'romans' });
+  assert.equal(registered.ok, true, registered.reason);
+  const player = (registered.payload as any).player;
+  const villageId = player.villageId as string;
+  const state = app.store.get<any>('task', villageId)!;
+  state.offeredSide = ['s3'];
+  app.store.set('task', villageId, state);
+
+  const accepted = await send(app, 'task.Accept', { villageId, code: 's3' });
+  assert.equal(accepted.ok, true, accepted.reason);
+  const snapshot = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  assert.equal(snapshot.ok, true, snapshot.reason);
+  const pending = ((snapshot.payload as any).pendingDialogues ?? [])
+    .find((item: any) => item.taskCode === 's3' && item.trigger === 'after_accept');
+  assert.ok(pending?.dialogue);
+  assert.equal(pending.dialogue.npcName, 's3-after的村庄的村民');
+  assert.equal(pending.dialogue.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
+  assert.deepEqual(pending.dialogue.replies, []);
+
+  const consumed = await send(app, 'task.ConsumeDialogue', { playerId: player.id, dialogueId: pending.id });
+  assert.equal(consumed.ok, true, consumed.reason);
+  const after = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  assert.equal((after.payload as any).pendingDialogues.some((item: any) => item.id === pending.id), false);
+});
+
+test('dialogue：新账号自动激活 M1 并保留一次性待弹对话记录', async () => {
+  const app = createGameApp({ now: () => 4_000_000, manualScheduler: true });
+  app.setupWorld();
+  const registered = await send(app, 'player.Register', { name: 'dialogue-m1', password: 'pass1', tribe: 'romans' });
+  assert.equal(registered.ok, true, registered.reason);
+  const player = (registered.payload as any).player;
+  const snapshot = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  const pending = ((snapshot.payload as any).pendingDialogues ?? [])
+    .find((item: any) => item.taskCode === 'm1' && item.trigger === 'accept');
+  assert.ok(pending, 'M1 首次自动激活应有待弹对话记录');
+  assert.equal(pending.dialogue.npcName, '');
+  assert.equal(pending.dialogue.npcText, '');
+  const consumed = await send(app, 'task.ConsumeDialogue', { playerId: player.id, dialogueId: pending.id });
+  assert.equal(consumed.ok, true, consumed.reason);
+  const after = await send(app, 'task.GetPlayerState', { playerId: player.id });
+  assert.equal((after.payload as any).pendingDialogues.some((item: any) => item.id === pending.id), false);
+});
