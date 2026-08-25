@@ -1,3 +1,12 @@
 id,code,taskCode,trigger,npcName,npcText,replies
 #数字ID,稳定对话代码,绑定任务代码,触发点,对话对象,对话文本,回复选项(key:显示文本|...)
 1,s3_accept,s3,accept,幸福村的村民,感谢你清除了附近的威胁。我是邻村幸福村的居民，这些强盗在附近为非作歹，我们的粮食都被他们抢去了。请问你能伸出援手，帮我们解决一下燃眉之急吗？我们只需要一些救急的粮食，让我们的妇女和儿童不再饿肚子。作为回报，我们可以送你一份礼物。,accept:接受任务|leave:离开
+2,m1_accept,m1,accept,,,
+3,m2_accept,m2,accept,,,
+4,m3_accept,m3,accept,,,
+5,m4_accept,m4,accept,,,
+6,m5_accept,m5,accept,,,
+7,s1_accept,s1,accept,,,accept:接受任务|leave:离开
+8,s2_accept,s2,accept,,,accept:接受任务|leave:离开
+9,s4_accept,s4,accept,,,accept:接受任务|leave:离开
+10,s3_after_accept,s3,after_accept,{villageName}的村民,领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？,

@@ -14,6 +14,7 @@ import { MapScreen } from '../features/map/MapScreen.js';
 import { TechTreeScreen } from '../features/research/TechTreeScreen.js';
 import { ReportsScreen } from '../features/reports/ReportsScreen.js';
 import { TasksScreen } from '../features/village/TaskBar.js';
+import { TaskDialogueHost } from '../features/village/TaskDialogueHost.js';
 
 type Phase = 'boot' | 'login' | 'game';
 
@@ -79,6 +80,7 @@ export function App() {
         <Page />
       </div>
       <VillageSwitchOverlay />
+      <TaskDialogueHost />
       <ModalHost />
       <ToastHost />
     </>

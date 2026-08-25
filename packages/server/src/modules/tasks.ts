@@ -93,6 +93,26 @@ interface TaskInstance {
   natalieDecision?: 'store' | 'release';
 }
 
+/** 自动触发、尚未在客户端关闭的一次性任务对话。 */
+interface PendingTaskDialogue {
+  id: string;
+  taskCode: string;
+  trigger: string;
+  /** 对话发生时的村庄；全局任务也要保留实际执行村。 */
+  villageId: string;
+  createdAt: number;
+}
+
+interface SerializedDialogueSession {
+  id: string;
+  code: string;
+  taskCode: string;
+  trigger: string;
+  npcName: string;
+  npcText: string;
+  replies: { key: string; label: string }[];
+}
+
 interface TaskState {
   villageId: string;
   /** 已完成的主线任务 code。 */
@@ -110,6 +130,7 @@ interface TaskState {
   /** 已触发的支线任务触发条件 key（如 `building_built:treasury`）；触发后对应支线进入可接取。 */
   firedTriggers: string[];
   cooldownUntil?: Record<string, number>;
+  pendingDialogues?: PendingTaskDialogue[];
 }
 
 interface TavernInfo {
@@ -141,6 +162,7 @@ export class TasksModule {
     now: () => number, config: GameConfig, rng: () => number = Math.random,
     private playerVillages: (playerId: string) => string[] = () => [],
     private villageOwner: (villageId: string) => string | null = () => null,
+    private villageName: (villageId: string) => string = (villageId) => villageId,
   ) {
     this.config = config;
     this.store = store;
@@ -160,6 +182,7 @@ export class TasksModule {
     this.commands.register('task.GetState', (c: Command) => this.getState(c));
     this.commands.register('task.GetPlayerState', (c: Command) => this.getPlayerState(c));
     this.commands.register('task.StartAccept', (c: Command) => this.startAccept(c));
+    this.commands.register('task.ConsumeDialogue', (c: Command) => this.consumeDialogue(c));
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
@@ -239,7 +262,7 @@ export class TasksModule {
 
   // ── 建村：初始化 + 自动解锁主线 ──
   createVillage(villageId: string): void {
-    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [] };
+    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
     this.store.set(COLLECTION, villageId, s);
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
@@ -249,7 +272,7 @@ export class TasksModule {
   private ensureState(villageId: string): TaskState {
     let s = this.store.get<TaskState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [] };
+      s = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
       this.store.set(COLLECTION, villageId, s);
     }
     if (!Array.isArray(s.completedMain)) s.completedMain = [];
@@ -259,6 +282,7 @@ export class TasksModule {
     if (!Array.isArray(s.offered)) s.offered = [];
     if (!Array.isArray(s.offeredSide)) s.offeredSide = [];
     if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
+    if (!Array.isArray(s.pendingDialogues)) s.pendingDialogues = [];
     // 迁移旧字段 completedRandom → completedSide（支线）/ 丢弃（日常可反复）；旧 offered 中的支线 → offeredSide
     const legacy = s as unknown as { completedRandom?: string[] };
     if (Array.isArray(legacy.completedRandom)) {
@@ -426,6 +450,7 @@ export class TasksModule {
     const completedMain = new Set<string>();
     const completedSide = new Set<string>();
     const abandonedSide = new Set<string>();
+    const pendingDialogues = new Map<string, Record<string, unknown>>();
     for (const snap of [global, ...villages]) {
       for (const item of (snap.active as Record<string, unknown>[])) {
         const code = String(item.code ?? '');
@@ -444,6 +469,10 @@ export class TasksModule {
       for (const code of (snap.completedMain as string[])) completedMain.add(code);
       for (const code of (snap.completedSide as string[])) completedSide.add(code);
       for (const code of (snap.abandonedSide as string[])) abandonedSide.add(code);
+      for (const item of ((snap.pendingDialogues as Record<string, unknown>[] | undefined) ?? [])) {
+        const id = String(item.id ?? '');
+        if (id && !pendingDialogues.has(id)) pendingDialogues.set(id, item);
+      }
     }
     return {
       ok: true,
@@ -458,6 +487,7 @@ export class TasksModule {
         completedMain: [...completedMain],
         completedSide: [...completedSide],
         abandonedSide: [...abandonedSide],
+        pendingDialogues: [...pendingDialogues.values()],
       },
     };
   }
@@ -494,10 +524,27 @@ export class TasksModule {
     if (!check.ok) return check;
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: 'accept' },
+      payload: { taskCode: code, trigger: 'accept', villageName: this.villageName(villageId) },
     });
     if (!dialogue.ok) return dialogue;
     return { ok: true, payload: { code, dialogue: (dialogue.payload as any).dialogue ?? null } };
+  }
+
+  /** 客户端关闭自动对话后确认一次；只允许从该玩家名下的任务状态移除。 */
+  private consumeDialogue(cmd: Command): CommandResult {
+    const { playerId, dialogueId } = cmd.payload as { playerId?: string; dialogueId?: string };
+    if (!playerId || !dialogueId) return { ok: false, payload: {}, reason: 'playerId_and_dialogueId_required' };
+    for (const villageId of this.playerVillages(playerId)) {
+      const s = this.ensureState(villageId);
+      const before = s.pendingDialogues?.length ?? 0;
+      if (!before) continue;
+      const next = s.pendingDialogues!.filter((item) => item.id !== dialogueId);
+      if (next.length === before) continue;
+      s.pendingDialogues = next;
+      this.store.set(COLLECTION, villageId, s);
+      return { ok: true, payload: { dialogueId } };
+    }
+    return { ok: false, payload: {}, reason: 'dialogue_not_found' };
   }
 
   // ── 命令：Accept（接取日常/支线任务）──
@@ -673,8 +720,26 @@ export class TasksModule {
     } else if (q.objective.kind === 'deliver_to_npc') {
       await this.spawnNpcVillage(villageId, s, inst);
     }
+    // 主线自动激活时展示“接取”对话；支线接取后展示可选的后续对话。
+    // 对话定义可为空，GM 填写后仍可通过未消费的 pending 记录热生效。
+    if (q.type === 'main') this.queueDialogue(storageVillageId, code, 'accept', villageId);
+    else if (q.type === 'side') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
+  }
+
+  private queueDialogue(storageVillageId: string, taskCode: string, trigger: string, villageId: string): void {
+    const s = this.ensureState(storageVillageId);
+    const pending = s.pendingDialogues ?? (s.pendingDialogues = []);
+    if (pending.some((item) => item.taskCode === taskCode && item.trigger === trigger)) return;
+    pending.push({
+      id: `task-dialogue-${storageVillageId}-${taskCode}-${trigger}`,
+      taskCode,
+      trigger,
+      villageId,
+      createdAt: this.now(),
+    });
+    this.store.set(COLLECTION, storageVillageId, s);
   }
 
   /** 在村内找空地生成任务营地（task=true，不掉落/不自动重生）。 */
@@ -1575,7 +1640,7 @@ export class TasksModule {
 
   // ── 序列化 + 推送 ──
   private emptySnapshot(villageId: string | null): Record<string, unknown> {
-    return { villageId, active: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [] };
+    return { villageId, active: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [], pendingDialogues: [] };
   }
 
   /** 当前村任务页快照：本村 village 任务 + 玩家锚点上的 global 任务。 */
@@ -1591,6 +1656,10 @@ export class TasksModule {
       completedMain: [...(global.completedMain as string[])],
       completedSide: [...(global.completedSide as string[]), ...(local.completedSide as string[])],
       abandonedSide: [...(global.abandonedSide as string[]), ...(local.abandonedSide as string[])],
+      pendingDialogues: [
+        ...((global.pendingDialogues as unknown[]) ?? []),
+        ...((local.pendingDialogues as unknown[]) ?? []),
+      ],
       global,
       village: local,
     };
@@ -1609,6 +1678,9 @@ export class TasksModule {
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
       .map((q) => this.serializeOffer(q, villageId));
+    const pendingDialogues = (s.pendingDialogues ?? [])
+      .filter((item) => include(item.taskCode))
+      .map((item) => this.serializePendingDialogue(item));
     return {
       villageId,
       active,
@@ -1617,7 +1689,25 @@ export class TasksModule {
       completedMain: s.completedMain.filter(include),
       completedSide: s.completedSide.filter(include),
       abandonedSide: s.abandonedSide.filter(include),
+      pendingDialogues,
     };
+  }
+
+  private serializePendingDialogue(item: PendingTaskDialogue): Record<string, unknown> {
+    const def = Object.values(this.config.dialogues ?? {})
+      .find((dialogue) => dialogue.taskCode === item.taskCode && dialogue.trigger === item.trigger);
+    if (!def) return { ...item, dialogue: null };
+    const render = (value: string) => value.replaceAll('{villageName}', this.villageName(item.villageId));
+    const dialogue: SerializedDialogueSession = {
+      id: item.id,
+      code: def.code,
+      taskCode: def.taskCode,
+      trigger: def.trigger,
+      npcName: render(def.npcName),
+      npcText: render(def.npcText),
+      replies: def.replies.map((reply) => ({ ...reply })),
+    };
+    return { ...item, dialogue };
   }
 
   private serializeOffer(q: QuestDef, villageId?: string): Record<string, unknown> {

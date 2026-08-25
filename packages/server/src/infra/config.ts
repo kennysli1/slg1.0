@@ -1756,16 +1756,15 @@ export function validateGameConfig(config: GameConfig): void {
     if (!graphQuestCodes.has(row.toQuest)) errors.push(`quest_edges.csv[${row.id}] 终点任务不存在：${row.toQuest}`);
   }
 
-  // 对话目录校验：对话必须绑定现有任务，回复键不可重复且至少有一个可选回复。
+  // 对话目录校验：对话必须绑定现有任务，回复键不可重复。
+  // GM 可先建立空白模板（npcName/npcText/replies 均为空），填完后热重载即可生效；
+  // 空白的支线接取模板不会阻塞直接接取，主线模板会保留为待弹对话。
   const dialogueCodes = new Set<string>();
   for (const d of Object.values(config.dialogues ?? {})) {
     if (dialogueCodes.has(d.code)) errors.push(`dialogues.csv[${d.code}] code 重复`);
     dialogueCodes.add(d.code);
     if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
     if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
-    if (!d.npcName) errors.push(`dialogues.csv[${d.code}] npcName 不能为空`);
-    if (!d.npcText) errors.push(`dialogues.csv[${d.code}] npcText 不能为空`);
-    if (!d.replies.length) errors.push(`dialogues.csv[${d.code}] 至少需要一个玩家回复`);
     const replyKeys = new Set<string>();
     for (const reply of d.replies) {
       if (replyKeys.has(reply.key)) errors.push(`dialogues.csv[${d.code}] 回复键重复：${reply.key}`);

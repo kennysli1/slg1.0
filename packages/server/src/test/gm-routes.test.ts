@@ -248,6 +248,11 @@ test('/gm/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async
     const parsed = JSON.parse(data.body) as { rows: Array<Record<string, string>> };
     assert.equal(parsed.rows[0]?.taskCode, 's3');
     assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
+    for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 's1', 's2', 's3', 's4']) {
+      assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
+    }
+    assert.ok(configured.has('s3:after_accept'), 'GM 对话表应包含 S3 接取后模板');
     const bad = await fastify.inject({
       method: 'POST', url: '/gm/dialogues/save',
       headers: { 'content-type': 'application/json' },
