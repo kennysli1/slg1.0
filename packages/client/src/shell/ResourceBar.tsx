@@ -79,9 +79,11 @@ function ReputationCell() {
   const popBonus = Math.round((Number(rep?.populationGrowthBonus) || 0) * 100);
   const pveBonus = Math.round((Number(rep?.pveTreasureDropBonus) || 0) * 100);
   const popPenalty = Math.round((Number(rep?.populationGrowthPenalty) || 0) * 100);
+  const armyAttackBonus = Math.round((Number(rep?.armyAttackBonus) || 0) * 100);
+  const armyDefenseBonus = Math.round((Number(rep?.armyDefenseBonus) || 0) * 100);
   const taxReduction = Math.round((Number(rep?.goldTaxReduction) || 0) * 100);
   const title = rep
-    ? `声望值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${value < 0 ? '-' + popPenalty : '+' + popBonus}%；金币税收 ${value > 0 ? '-' + taxReduction : '无修正'}；PvE宝物掉落 ${pveBonus >= 0 ? '+' : ''}${pveBonus}%`
+    ? `声望值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${value < 0 ? '-' + popPenalty : '+' + popBonus}%；军队攻防 ${value < 0 ? '+' + armyAttackBonus + '% / +' + armyDefenseBonus + '%' : '无修正'}；金币税收 ${value > 0 ? '-' + taxReduction : '无修正'}；PvE宝物掉落 ${pveBonus >= 0 ? '+' : ''}${pveBonus}%`
     : '声望值：正在加载';
   return (
     <div class={`res res--reputation res--${value > 0 ? 'good' : value < 0 ? 'evil' : 'neutral'}`} title={title}>

@@ -31,6 +31,23 @@ test('声望：负声望降低人口增长，正声望降低金币税收', async
   assert.equal((good.payload as any).goldTaxMult, 0.9);
 });
 
+test('声望：负声望为军队攻防快照提供可配置加成', async () => {
+  const app = createGameApp({ manualScheduler: true }); app.setupWorld();
+  const reg = (await send(app, 'player.Register', { name: '声望军队', password: 'p1234', tribe: 'romans' })).payload as any;
+  const villageId = reg.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId, delta: { legionnaire: 1 } });
+  const neutral = await send(app, 'military.GetCombatSnapshot', { villageId, units: { legionnaire: 1 } });
+  await send(app, 'reputation.AdjustByVillage', { villageId, delta: -20 });
+  const evil = await send(app, 'military.GetCombatSnapshot', { villageId, units: { legionnaire: 1 } });
+  const before = (neutral.payload as any).snapshot.legionnaire;
+  const after = (evil.payload as any).snapshot.legionnaire;
+  assert.equal(after.meleeAtk, before.meleeAtk * 1.1);
+  assert.equal(after.meleeDef, before.meleeDef * 1.1);
+  const rep = await send(app, 'reputation.GetByVillage', { villageId });
+  assert.equal((rep.payload as any).armyAttackBonus, 0.1);
+  assert.equal((rep.payload as any).armyDefenseBonus, 0.1);
+});
+
 test('声望：正负声望按每十点敌方士兵人口结算击杀奖励并保留余数', async () => {
   const app = createGameApp({ manualScheduler: true }); app.setupWorld();
   const a = (await send(app, 'player.Register', { name: '声望善', password: 'p1234', tribe: 'romans' })).payload as any;

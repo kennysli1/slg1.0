@@ -996,12 +996,20 @@ export class MilitaryModule {
    * 参战快照：对外只给"算好的最终三维 × 数量"。
    * Combat/Movement 拿这个去结算，不知道铁匠养成怎么算的（派生管线对外口径）。
    */
-  private getCombatSnapshot(cmd: Command): CommandResult {
+  private async getCombatSnapshot(cmd: Command): Promise<CommandResult> {
     const { villageId, units, purpose } = cmd.payload as { villageId: string; units?: Record<string, number>; purpose?: 'raid' | 'siege' };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
     if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
+    // 声望是玩家级派生加成；负声望的军队攻防 buff 适用于所有由该村出战/守城的快照，
+    // 包括掠夺防守（掠夺仍不叠加城墙、宝物、科技等守城专属加成）。
+    const reputation = await this.commands.send({
+      name: 'reputation.GetByVillage', from: MilitaryModule.NAME, payload: { villageId },
+    });
+    const reputationPayload = (reputation.ok ? reputation.payload : {}) as { armyAttackMult?: number; armyDefenseMult?: number };
+    const reputationAtk = Number.isFinite(reputationPayload.armyAttackMult) ? Math.max(1, reputationPayload.armyAttackMult!) : 1;
+    const reputationDef = Number.isFinite(reputationPayload.armyDefenseMult) ? Math.max(1, reputationPayload.armyDefenseMult!) : 1;
     // units 指定已经由 Movement 验证并扣出村庄的参战兵力；此时不能再按当前驻军钳制，
     // 否则“派出20、城里剩10”会只用10人参战。缺省/掠夺防守才按现有驻军取值。
     const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
@@ -1014,10 +1022,10 @@ export class MilitaryModule {
       if (!this.config.units[unit] || available <= 0) continue;
       // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
       const stats = purpose === 'raid'
-        ? this.finalStats(unit, 1, 1)
+        ? this.finalStats(unit, reputationAtk, reputationDef)
         : (() => {
           const tm = this.techCombatMult(s, unit);
-          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk, (s.treasureDefMult ?? 1) * tm.def * reputationDef);
         })();
       snapshot[unit] = { count: available, ...stats };
     }

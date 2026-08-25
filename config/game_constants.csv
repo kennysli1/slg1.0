@@ -92,6 +92,10 @@ reputation_good_pop_growth_per_point,0.005,number,每点正声望带来的人口
 reputation_good_pop_growth_cap,0.5,number,正声望人口增长倍率上限（0.5=+50%）
 reputation_evil_pop_growth_penalty_per_point,0.005,number,每点负声望带来的人口增长下降倍率（0.005=0.5%）
 reputation_evil_pop_growth_penalty_cap,0.5,number,负声望人口增长下降倍率上限（0.5=−50%）
+reputation_evil_army_attack_per_point,0.005,number,每点负声望带来的军队攻击倍率加成（0.005=0.5%）
+reputation_evil_army_attack_cap,0.5,number,负声望军队攻击倍率加成上限（0.5=+50%）
+reputation_evil_army_defense_per_point,0.005,number,每点负声望带来的军队防御倍率加成（0.005=0.5%）
+reputation_evil_army_defense_cap,0.5,number,负声望军队防御倍率加成上限（0.5=+50%）
 reputation_good_gold_tax_penalty_per_point,0.005,number,每点正声望带来的金币税收下降倍率（0.005=0.5%）
 reputation_good_gold_tax_penalty_cap,0.5,number,正声望金币税收下降倍率上限（0.5=−50%）
 reputation_evil_pve_drop_rate_per_point,0.01,number,每点负声望带来的PvE宝物掉落概率倍率

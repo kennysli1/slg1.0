@@ -47,6 +47,33 @@ test('建村即自动解锁主线 m1（repair_buildings），不自动接随机'
   assert.deepEqual(p.completedMain, []);
 });
 
+test('GM 可一次性重置所有玩家和村庄任务进度而保留其他存档', async () => {
+  const app = freshApp();
+  const a = (await reg(app, '任务重置甲')).payload as any;
+  const b = (await reg(app, '任务重置乙')).payload as any;
+  const villages = [a.player.villageId, b.player.villageId];
+  for (const villageId of villages) {
+    const state = app.store.get<any>('task', villageId)!;
+    state.completedMain = ['m1'];
+    state.active = { m2: { code: 'm2', type: 'main' } };
+    state.offeredMain = ['m3'];
+    app.store.set('task', villageId, state);
+  }
+  const beforeEconomy = app.store.get<any>('economy', villages[0]);
+  const reset = await send(app, 'task.GmResetAll', {});
+  assert.equal(reset.ok, true);
+  assert.equal((reset.payload as any).resetPlayers, 2);
+  assert.equal((reset.payload as any).resetVillages, 2);
+  for (const villageId of villages) {
+    const state = app.store.get<any>('task', villageId);
+    assert.ok(state, '每个玩家村庄都应重新建立任务状态');
+    assert.ok(state.active.m1, '重置后应重新激活 m1');
+    assert.deepEqual(state.completedMain, []);
+    assert.deepEqual(state.offeredMain, []);
+  }
+  assert.deepEqual(app.store.get<any>('economy', villages[0]), beforeEconomy, '任务重置不应修改资源存档');
+});
+
 test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 并发放奖励', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试2');
