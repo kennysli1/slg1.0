@@ -20,6 +20,19 @@ import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { mergeRefreshOptions } from '../app/refresh.js';
+
+describe('首屏刷新调度', () => {
+  it('合并并发刷新时保留更重的地图/任务请求，并让前台错误可见', () => {
+    assert.deepEqual(
+      mergeRefreshOptions(
+        { includeArea: false, waitForTasks: false, silent: true },
+        { includeArea: true, waitForTasks: true, silent: false },
+      ),
+      { includeArea: true, waitForTasks: true, silent: false },
+    );
+  });
+});
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
