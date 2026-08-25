@@ -41,6 +41,19 @@ test('dialogue：未知任务的对话请求返回空 session', async () => {
   assert.equal((result.payload as any).dialogue, null);
 });
 
+test('dialogue：S4 带回被囚禁的娜塔莉们时报告入口返回无选项对话', async () => {
+  const app = createGameApp({ now: () => 2_500_000, manualScheduler: true });
+  app.setupWorld();
+  const started = await send(app, 'dialogue.StartForTask', { taskCode: 's4', trigger: 'natalies_returned' });
+  assert.equal(started.ok, true, started.reason);
+  const dialogue = (started.payload as any).dialogue;
+  assert.equal(dialogue.code, 's4_natalies_returned');
+  assert.equal(dialogue.npcName, '被囚禁的娜塔莉们');
+  assert.match(dialogue.npcText, /多谢你拯救了我们/);
+  assert.match(dialogue.npcText, /请释放我们让我们回家/);
+  assert.deepEqual(dialogue.replies, []);
+});
+
 test('dialogue：S3 接取后弹出当前接取村庄村民的单段后续对话', async () => {
   const app = createGameApp({ now: () => 3_000_000, manualScheduler: true });
   app.setupWorld();

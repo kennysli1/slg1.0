@@ -6,7 +6,7 @@
  * Action: ClaimPendingTreasure { movementId } 或 { movementId, decision }
  * 倒计时由 Countdown 原子处理（不再用 setInterval 跑 DOM ticker）。
  */
-import { dataVersion } from '../../app/store.js';
+import { dataVersion, openModal, showToast } from '../../app/store.js';
 import { me } from '../../api.js';
 import { getPendingTreasures, type PendingTreasureView } from '../../app/state.js';
 import {
@@ -16,6 +16,31 @@ import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Btn, IconPlate, Countdown, SectionHead, confirmDanger } from '../../ui/index.js';
+import { Modal } from '../../ui/Modal.js';
+
+function NatalieDialogueModal({ dialogue, close }: { dialogue: any; close: () => void }) {
+  return (
+    <Modal title={dialogue?.npcName || '被囚禁的娜塔莉们'} sub="S4 · 调查坐标" onClose={close}>
+      <div class="dialogue-session">
+        <div class="dialogue-npc-text">{dialogue?.npcText ?? ''}</div>
+      </div>
+    </Modal>
+  );
+}
+
+async function openNatalieDialogue(): Promise<void> {
+  const started = await req('StartTaskDialogue', { taskCode: 's4', trigger: 'natalies_returned' });
+  if (!started.ok) {
+    showToast('对话加载失败，请稍后重试', 'bad');
+    return;
+  }
+  const dialogue = (started.payload as any)?.dialogue;
+  if (!dialogue) {
+    showToast('暂时没有可查看的对话', 'bad');
+    return;
+  }
+  openModal((close) => <NatalieDialogueModal dialogue={dialogue} close={close} />, `report-dialogue-${dialogue.id}`);
+}
 
 function rarityClass(rarity: string): string {
   if (rarity === 'rare') return 'tcard--rare';
@@ -174,6 +199,15 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
               onClick={() => p.arrivedAt && void claimTreasure(p.movementId, undefined, p.name)}
             >
               {p.arrivedAt ? '确认领取' : '等待归村…'}
+            </Btn>
+          )}
+          {isCaptured && isArrived && (
+            <Btn
+              variant="ghost"
+              size="sm"
+              onClick={() => void openNatalieDialogue()}
+            >
+              查看对话
             </Btn>
           )}
         </div>
