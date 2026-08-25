@@ -539,9 +539,15 @@ function KingdomTaskMenu() {
               <div class="task-card-desc">
                 {task ? kingdomObjective(task) : `下一项指令将在 ${secLeft(state.nextIssueAt)} 后下达。`}
               </div>
-              {task && (task.status === 'active' || task.status === 'ready') && (
+              {task?.status === 'active' && (
                 <div class="task-card-prog">
                   <span class="task-prog-chip">剩余 {secLeft(task.expiresAt)}</span>
+                  <span class="task-prog-chip">奖励声望 +{task.rewardReputation}</span>
+                </div>
+              )}
+              {task?.status === 'ready' && (
+                <div class="task-card-prog">
+                  <span class="task-prog-chip">目标已完成 · 期限已冻结</span>
                   <span class="task-prog-chip">奖励声望 +{task.rewardReputation}</span>
                 </div>
               )}

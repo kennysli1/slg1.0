@@ -148,8 +148,14 @@ function TreasureCard({ p }: { p: PendingTreasureView }) {
         )}
 
         <div class="tcard-expiry">
-          <span>⏳ 超时遗弃：</span>
-          <Countdown until={p.expiresAt} done="已超时，等待回收" />
+          {p.expiresAt !== undefined ? (
+            <>
+              <span>⏳ 超时遗弃：</span>
+              <Countdown until={p.expiresAt} done="已超时，等待回收" />
+            </>
+          ) : (
+            <span>任务/送达宝物无需限时处理</span>
+          )}
         </div>
 
         <div class="tcard-actions">

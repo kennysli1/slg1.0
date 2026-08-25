@@ -224,7 +224,6 @@ export class TasksModule {
     this.bus.on('treasure.ReportCoords', (evt: DomainEvent) => void this.onReportCoords(evt));
     // ② captured_natalies 报告被玩家抉择（入库/释放）→ 决定是否标记任务就绪
     this.bus.on('treasure.PendingClaimed', (evt: DomainEvent) => void this.onNatalieDecision(evt));
-    this.bus.on('treasure.PendingExpired', (evt: DomainEvent) => void this.onNatalieExpired(evt));
   }
 
   async resume(): Promise<void> {
@@ -953,20 +952,6 @@ export class TasksModule {
     await this.markReady(p.villageId, inst.code);
   }
 
-  /** ② captured_natalies 报告超时未处理：重新投放，给玩家再次抉择机会（避免任务卡死）。 */
-  private async onNatalieExpired(evt: DomainEvent): Promise<void> {
-    const p = evt.payload as { villageId: string; code: string };
-    if (p.code !== 'captured_natalies') return;
-    const s = this.load(p.villageId);
-    if (!s) return;
-    const inst = Object.values(s.active).find((i) => i.awaitingNatalieDecision && i.awaitingNatalieCode === 'captured_natalies');
-    if (!inst) return;
-    await this.commands.send({
-      name: 'treasure.Grant', from: TasksModule.NAME,
-      payload: { villageId: p.villageId, code: 'captured_natalies', pendingIfFull: true },
-    });
-  }
-
   /** 清理任务营地并将进度写回任务所属村。实际出兵村只负责提供战斗结果。 */
   private async applyTaskCampBattle(
     attackerVillageId: string,
@@ -992,6 +977,7 @@ export class TasksModule {
           source: 'camp',
           movementId: payload.movementId,
           forceCode: 'captured_natalies',
+          taskRelated: true,
         },
       });
       if (q.code === 's4') {
@@ -1232,7 +1218,7 @@ export class TasksModule {
         if (inst.campCleared >= inst.camps.length) {
           await this.commands.send({
             name: 'treasure.RollDrop', from: TasksModule.NAME,
-            payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies' },
+            payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies', taskRelated: true },
           });
           if (code === 's4') {
             inst.awaitingNatalieDecision = true;

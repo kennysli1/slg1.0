@@ -181,10 +181,13 @@ export class KingdomModule {
 
   private armTask(state: KingdomState): void {
     this.scheduler.cancelByOwner(`kingdom-task:${state.playerId}`);
-    if (state.task && (state.task.status === 'active' || state.task.status === 'ready')) {
+    // 任务完成后进入 ready，期限被冻结，直到玩家领取奖励。
+    // 只有仍在执行中的任务才需要到期失败定时器；ready 状态不应继续倒计时。
+    if (state.task?.status === 'active') {
       this.scheduler.scheduleAt(state.task.expiresAt, () => this.expireTask(state.playerId, state.task!.id), `kingdom-task:${state.playerId}`);
       return;
     }
+    if (state.task?.status === 'ready') return;
     const at = state.nextIssueAt || this.now();
     this.scheduler.scheduleAt(at, () => this.issueTask(state.playerId), `kingdom-task:${state.playerId}`);
   }
@@ -231,7 +234,12 @@ export class KingdomModule {
   private async issueTask(playerId: string): Promise<void> {
     const state = await this.ensure(playerId);
     if (!state) return;
-    if (state.task && (state.task.status === 'active' || state.task.status === 'ready') && state.task.expiresAt > this.now()) {
+    // ready 表示目标已经完成，必须等玩家领取后才开始下一轮，不能因为旧期限已过而重发任务。
+    if (state.task?.status === 'ready') {
+      this.armTask(state);
+      return;
+    }
+    if (state.task?.status === 'active' && state.task.expiresAt > this.now()) {
       this.armTask(state);
       return;
     }
@@ -277,7 +285,7 @@ export class KingdomModule {
 
   private async expireTask(playerId: string, taskId: string): Promise<void> {
     const state = this.store.get<KingdomState>(COLLECTION, playerId);
-    if (!state?.task || state.task.id !== taskId || !['active', 'ready'].includes(state.task.status)) return;
+    if (!state?.task || state.task.id !== taskId || state.task.status !== 'active') return;
     if (state.task.expiresAt > this.now()) { this.armTask(state); return; }
     state.task.status = 'failed';
     this.store.set(COLLECTION, playerId, state);
@@ -311,7 +319,6 @@ export class KingdomModule {
     const state = await this.ensure(playerId);
     const task = state?.task;
     if (!state || !task || task.status !== 'ready') return { ok: false, payload: {}, reason: 'kingdom_task_not_ready' };
-    if (task.expiresAt <= this.now()) { await this.expireTask(playerId, task.id); return { ok: false, payload: {}, reason: 'kingdom_task_expired' }; }
     const reward = await this.commands.send({ name: 'reputation.Adjust', from: KingdomModule.NAME, payload: { playerId, delta: task.rewardReputation, reason: 'kingdom_task' } });
     if (!reward.ok) return reward;
     task.status = 'claimed';

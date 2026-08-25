@@ -9,7 +9,7 @@ export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
 }
 
-/** 待领取宝物视图（军队带回、待玩家确认领取；含确认倒计时）。 */
+/** 待领取宝物视图（只有普通 PvE 随机掉落含确认倒计时，任务/送达宝物无期限）。 */
 export interface PendingTreasureView {
   movementId: string;
   code: string;
@@ -23,7 +23,7 @@ export interface PendingTreasureView {
   priceGold: number;
   /** 'camp'=本村军队带回（默认收下即可）；'deliver'=送达另一村/宝库拆除（需玩家选 收下/出售/遗弃）。 */
   kind?: 'camp' | 'deliver';
-  expiresAt: number;
+  expiresAt?: number;
   /** camp 类型专用：军队是否已归村。未归村时不可领取（Bug3 修复）。 */
   arrivedAt?: number;
   /** camp 类型专用：预计军队到家时间戳。客户端在 arrivedAt 之前用它渲染「还有多久抵达」倒计时；归村后才显示「过期」倒计时。 */

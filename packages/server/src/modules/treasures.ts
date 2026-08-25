@@ -79,7 +79,7 @@ const COLLECTION = 'treasure';
 /** 待领取宝物集合：军队带回、等待玩家确认领取的宝物（铁律#1：owner 仍是本模块）。键 = movementId。 */
 const COLLECTION_PENDING = 'treasure_pending';
 
-/** 待领取宝物（军队带回、待确认）。超时未确认由调度器自动遗弃。 */
+/** 待领取宝物（军队带回、待确认）。只有普通 PvE 随机掉落会超时遗弃。 */
 interface PendingTreasure {
   movementId: string;
   villageId: string;
@@ -95,7 +95,10 @@ interface PendingTreasure {
   /** 来源类型：'camp'=清理野营掉落（确认即入栏，满/重复自动卖）；'deliver'=军队送达/宝库拆除（玩家须明确决定 收下/出售/遗弃）。 */
   kind: 'camp' | 'deliver';
   createdAt: number;
-  expiresAt: number;
+  /** 普通 PvE 随机掉落的处理期限；任务奖励、送达和转交宝物没有期限。 */
+  expiresAt?: number;
+  /** 任务专属掉落标记；用于兼容旧存档并明确禁止过期。 */
+  taskRelated?: boolean;
   /** 军队到家时间戳（仅 kind='camp' 有效；deliver 在创建时已在场故无此字段）。claimPending 必须等军队归村后才允许领取 camp 掉落。 */
   arrivedAt?: number;
   /** ④ 胜利旗帜经「报告(满栏转 deliver)」路径领回时，标记该 pending 携带 +2% 加成资格。 */
@@ -111,7 +114,7 @@ interface PendingTreasure {
   rewardVillageId?: string;
 }
 
-/** 待领取宝物视图（下发客户端用，含确认倒计时）。 */
+/** 待领取宝物视图（下发客户端用；仅普通 PvE 随机掉落含确认倒计时）。 */
 interface PendingTreasureView {
   movementId: string;
   code: string;
@@ -124,7 +127,7 @@ interface PendingTreasureView {
   applyType: string;
   priceGold: number;
   kind: 'camp' | 'deliver';
-  expiresAt: number;
+  expiresAt?: number;
   /** 军队到家时间戳（kind='camp' 才有，deliver 创建时已在场故为 undefined）。客户端据此前端显示「军队未归」不可领取。 */
   arrivedAt?: number;
   /** 预计军队到家时间戳（仅 camp 有效）。客户端在 arrivedAt 之前用它渲染「预计 X 抵达」倒计时。 */
@@ -221,16 +224,30 @@ export class TreasureModule {
    * 这批记录缺少 arrivedAt 字段，且其对应行军记录已随归村/全歼被删除，
    * 导致 MarkPendingArrived 从未触发、调度器超时任务也可能在服务器重启时丢失 —— 宝物卡在「等待归村」无法领取。
    * 处理：
-   *  - 已过期 → 直接清理（超时任务可能因重启丢失）；
+   *  - 有期限且已过期 → 直接清理（超时任务可能因重启丢失）；
+   *  - 任务奖励、送达和转交宝物 → 迁移为永久待处理，不再登记超时任务；
    *  - camp 类且未标记归村、对应行军已不存在（军队已归村或全歼）→ 视为已归村，允许玩家领取；
    *  - 其余未过期记录 → 重新登记调度器超时任务（防重启后丢失），归村时 MarkPendingArrived 仍会正常触发。
    */
+  /** 只有普通 camp 随机掉落才会过期；任务专属、送达和转交记录永久保留。 */
+  private pendingHasExpiry(p: PendingTreasure): boolean {
+    return p.kind === 'camp' && p.taskRelated !== true && p.expiresAt !== undefined;
+  }
+
   private async migratePendingsOnResume(): Promise<void> {
     const now = this.now();
     for (const p of this.store.all<PendingTreasure>(COLLECTION_PENDING)) {
       const owner = `treasure-pending:${p.movementId}`;
-      // 1) 已超时（调度任务可能已丢失）→ 直接清理
-      if (p.expiresAt <= now) {
+      // 任务奖励、送达和转交宝物从现在起不设过期时间。captured_natalies
+      // 兼容旧版本直接通过 RollDrop 创建的任务掉落。
+      const taskRelated = p.kind === 'deliver' || p.taskRelated === true || p.code === 'captured_natalies' || p.code === 'secret_note';
+      if (taskRelated && p.expiresAt !== undefined) {
+        delete p.expiresAt;
+        if (p.kind === 'camp') p.taskRelated = true;
+        this.store.set(COLLECTION_PENDING, p.movementId, p);
+      }
+      // 1) 有期限且已超时（调度任务可能因重启丢失）→ 直接清理
+      if (this.pendingHasExpiry(p) && p.expiresAt! <= now) {
         this.store.delete(COLLECTION_PENDING, p.movementId);
         this.scheduler.cancelByOwner(owner);
         continue;
@@ -250,10 +267,12 @@ export class TreasureModule {
         }
         // 行军仍存在（军队还在外）→ 保持「等待归村」，归村时 MarkPendingArrived 会触发
       }
-      // 3) 重新登记超时任务（先取消可能残留的，再登记，防重复 / 防重启丢失）
-      const delay = Math.max(0, p.expiresAt - now);
+      // 3) 仅普通 PvE 随机掉落重新登记超时任务；永久待处理记录清理旧任务即可。
       this.scheduler.cancelByOwner(owner);
-      this.scheduler.schedule(delay, () => this.expirePending(p.movementId), owner, `village:${p.villageId}`);
+      if (this.pendingHasExpiry(p)) {
+        const delay = Math.max(0, p.expiresAt! - now);
+        this.scheduler.schedule(delay, () => this.expirePending(p.movementId), owner, `village:${p.villageId}`);
+      }
     }
   }
 
@@ -680,22 +699,20 @@ export class TreasureModule {
     return { ok: true, payload: { code, from: 'reserve', to, codes: this.allStoredCodes(s) } };
   }
 
-  /** 生成一条 deliver 待领取记录（军队送达/宝库拆除）。movementId 缺省自动生成；超时自动遗弃。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
+  /** 生成一条永久 deliver 待领取记录（军队送达/宝库拆除/任务奖励）。movementId 缺省自动生成。fromCarry=true 表示由「军队带出的宝物返程回家」转出（收下时允许重复入栏）。 */
   private createDeliverPending(villageId: string, code: string, movementId?: string, fromCarry = false, victoryFlagQualified = false, fromVillageId?: string, fromVillageName?: string, rewardVillageId?: string): void {
     const t = this.config.treasures[code];
     if (!t) return;
     const now = this.now();
-    const timeoutMs = Math.max(1, Math.floor(this.config.constants.treasureClaimTimeoutSec)) * 1000;
     const pid = movementId || `pend-${villageId}-${now}-${Math.random().toString(36).slice(2, 8)}`;
     const pending: PendingTreasure = {
       movementId: pid, villageId, code,
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
-      priceGold: t.priceGold, kind: 'deliver', createdAt: now, expiresAt: now + timeoutMs,
+      priceGold: t.priceGold, kind: 'deliver', createdAt: now,
       fromCarry, victoryFlagQualified, fromVillageId, fromVillageName, rewardVillageId,
     };
     this.store.set(COLLECTION_PENDING, pid, pending);
-    this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
   }
 
   /** 找到并移除某 movementId 的携带宝物，返回其 codes（不存在返回 null）。 */
@@ -917,13 +934,16 @@ export class TreasureModule {
     if (p.arrivedAt) return { ok: true, payload: { movementId, marked: false } };
     const now = this.now();
     p.arrivedAt = now;
-    // 超时计时器从「军队返回村庄」开始算：重置 expiresAt 并重新注册超时任务（覆盖 rollDrop 时基于掉落时刻的旧超时）
-    const timeoutMs = Math.max(1, Math.floor(this.config.constants.treasureClaimTimeoutSec)) * 1000;
-    p.expiresAt = now + timeoutMs;
     this.store.set(COLLECTION_PENDING, movementId, p);
-    this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
-    this.scheduler.schedule(timeoutMs, () => this.expirePending(movementId), `treasure-pending:${movementId}`, `village:${p.villageId}`);
-    // 推动客户端 refreshAll → 重新拉取 pending（含 arrivedAt / 新的 expiresAt），让领取按钮从「等待归村」转为可点、倒计时从头开始
+    // 普通 PvE 随机掉落的超时从军队归村时开始计算；任务掉落没有期限。
+    if (this.pendingHasExpiry(p)) {
+      const timeoutMs = Math.max(1, Math.floor(this.config.constants.treasureClaimTimeoutSec)) * 1000;
+      p.expiresAt = now + timeoutMs;
+      this.store.set(COLLECTION_PENDING, movementId, p);
+      this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
+      this.scheduler.schedule(timeoutMs, () => this.expirePending(movementId), `treasure-pending:${movementId}`, `village:${p.villageId}`);
+    }
+    // 推动客户端 refreshAll → 重新拉取 pending，让领取按钮从「等待归村」转为可点。
     await this.emitChanged(p.villageId);
     return { ok: true, payload: { movementId, marked: true, expiresAt: p.expiresAt } };
   }
@@ -1199,13 +1219,15 @@ export class TreasureModule {
    * 这是「军队带回宝物 → 战报确认 + 超时自动遗弃」机制的服务端实现。
    */
   private async rollDrop(cmd: Command): Promise<CommandResult> {
-    const { villageId, source, movementId, forceCode } = cmd.payload as {
+    const { villageId, source, movementId, forceCode, taskRelated } = cmd.payload as {
       villageId: string;
       source: 'camp';
       /** 关联的行军 id（attack movement），用作待领取记录主键；缺省时自动生成。 */
       movementId?: string;
       /** 测试/调试用：强制抽中指定 code（跳过概率门控与加权）。 */
       forceCode?: string;
+      /** 任务专属掉落不设置报告处理期限。captured_natalies 也按旧调用自动识别。 */
+      taskRelated?: boolean;
     };
     const c = this.config.constants;
     const baseChance = c.treasureCampDropChance;
@@ -1228,6 +1250,7 @@ export class TreasureModule {
     // 生成待领取记录（不直接入栏）
     const now = this.now();
     const timeoutMs = Math.max(1, Math.floor(c.treasureClaimTimeoutSec)) * 1000;
+    const noExpiry = Boolean(taskRelated || forceCode === 'captured_natalies');
     const pid = movementId || `pend-${villageId}-${now}-${Math.random().toString(36).slice(2, 8)}`;
     // 占位预计归村时间：rollDrop 时返程 movement 尚未创建（onBattleEnded 后才创建），
     // 此处先按 60s 占位，movement 模块在 scheduleReturn 后会通过 treasure.SetExpectedArrival 用真实 arrivesAt 精化。
@@ -1236,12 +1259,16 @@ export class TreasureModule {
       movementId: pid, villageId, code,
       name: t.name, icon: t.icon, category: t.category, rarity: t.rarity,
       effectType: t.effectType, effectValue: t.effectValue, applyType: t.applyType,
-      priceGold: t.priceGold, kind: 'camp', createdAt: now, expiresAt: now + timeoutMs,
+      priceGold: t.priceGold, kind: 'camp', createdAt: now,
       expectedArrivalAt,
+      ...(noExpiry ? { taskRelated: true } : {}),
     };
+    if (!noExpiry) pending.expiresAt = now + timeoutMs;
     this.store.set(COLLECTION_PENDING, pid, pending);
-    // 注册超时自动遗弃（按 village 串行，避免写竞争）
-    this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
+    // 只有普通 PvE 随机掉落注册超时自动遗弃（按 village 串行，避免写竞争）。
+    if (pending.expiresAt !== undefined) {
+      this.scheduler.schedule(timeoutMs, () => this.expirePending(pid), `treasure-pending:${pid}`, `village:${villageId}`);
+    }
 
     // 进战报（待确认领取）
     await this.bus.emit({
@@ -1249,7 +1276,7 @@ export class TreasureModule {
       payload: {
         villageId, movementId: pid, code, name: t.name, icon: t.icon, category: t.category,
         rarity: t.rarity, effectType: t.effectType, effectValue: t.effectValue,
-        applyType: t.applyType, priceGold: t.priceGold, expiresAt: pending.expiresAt,
+        applyType: t.applyType, priceGold: t.priceGold, ...(pending.expiresAt !== undefined ? { expiresAt: pending.expiresAt } : {}),
       },
     } as DomainEvent);
 
@@ -1270,7 +1297,7 @@ export class TreasureModule {
     const { movementId, decision } = cmd.payload as { movementId: string; decision?: 'take' | 'sell' | 'discard' | 'release' };
     const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
     if (!p) return { ok: false, payload: {}, reason: 'pending_not_found' };
-    if (p.expiresAt < this.now()) {
+    if (this.pendingHasExpiry(p) && p.expiresAt! < this.now()) {
       // 已在服务端超时（调度器尚未触发或竞态）→ 视为已遗弃
       this.store.delete(COLLECTION_PENDING, movementId);
       this.scheduler.cancelByOwner(`treasure-pending:${movementId}`);
@@ -1348,10 +1375,10 @@ export class TreasureModule {
     };
   }
 
-  /** 超时自动遗弃：调度器到点触发（treasureClaimTimeoutSec 后）。记录已不存在则安全跳过。 */
+  /** 超时自动遗弃：仅普通 PvE 随机掉落会登记此调度任务。记录已不存在或无期限则安全跳过。 */
   private async expirePending(movementId: string): Promise<void> {
     const p = this.store.get<PendingTreasure>(COLLECTION_PENDING, movementId);
-    if (!p) return;
+    if (!p || !this.pendingHasExpiry(p)) return;
     this.store.delete(COLLECTION_PENDING, movementId);
     await this.bus.emit({
       name: 'treasure.PendingExpired', source: TreasureModule.NAME, ts: this.now(),
@@ -1373,7 +1400,7 @@ export class TreasureModule {
         movementId: p.movementId, code: p.code, name: p.name, icon: p.icon,
         category: p.category, rarity: p.rarity, effectType: p.effectType,
         effectValue: p.effectValue, applyType: p.applyType, priceGold: p.priceGold,
-        kind: p.kind, expiresAt: p.expiresAt, arrivedAt: p.arrivedAt,
+        kind: p.kind, ...(this.pendingHasExpiry(p) ? { expiresAt: p.expiresAt } : {}), arrivedAt: p.arrivedAt,
         expectedArrivalAt: p.expectedArrivalAt,
         hasTradeCenter, fromCarry: p.fromCarry, fromVillageId: p.fromVillageId, fromVillageName: p.fromVillageName, rewardVillageId: p.rewardVillageId,
       }));

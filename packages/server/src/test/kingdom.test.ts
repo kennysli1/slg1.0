@@ -167,7 +167,7 @@ test('掠夺防守：本村与每支援军独立配置，关闭的援军不参�
   assert.equal(stationedAfterIncluded.reinforcements.find((entry: any) => entry.id === reinforcementId), undefined, '开启的援军全灭后应从其来源记录中移除');
 });
 
-test('王国任务：循环上贡有期限，目标完成后手动领取才结算声望', async () => {
+test('王国任务：循环上贡有期限，完成后冻结期限并等待手动领取才结算声望', async () => {
   let clock = 1_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0 });
   app.setupWorld();
@@ -182,6 +182,11 @@ test('王国任务：循环上贡有期限，目标完成后手动领取才结�
   const submitted = await send(app, 'kingdom.SubmitTribute', { playerId: player.id, villageId: player.villageId });
   assert.equal(submitted.ok, true);
   assert.equal(((await send(app, 'reputation.Get', { playerId: player.id })).payload as any).value, 0, '目标完成不能自动发声望');
+  const readyTask = app.store.get<any>('kingdom', player.id).task;
+  assert.equal(readyTask.status, 'ready');
+  // 完成后的旧期限即使已经过去，也不能把任务改成失败或重发；领取前一直保持 ready。
+  await app.scheduler.advanceTo(readyTask.expiresAt + 1, (t) => { clock = t; });
+  assert.equal(app.store.get<any>('kingdom', player.id).task.status, 'ready', '待领取任务不应继续倒计时');
   const claimed = await send(app, 'kingdom.ClaimTask', { playerId: player.id, villageId: player.villageId });
   assert.equal(claimed.ok, true);
   assert.equal(((await send(app, 'reputation.Get', { playerId: player.id })).payload as any).value, 2);

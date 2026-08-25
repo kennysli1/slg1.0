@@ -230,6 +230,30 @@ test('宝物掉落：门控命中(低 RNG) → 加权抽到某宝物并待领取
   assert.equal(list.pending[0].code, 'chainsaw', '待领取 code 应为 chainsaw');
 });
 
+test('任务/送达宝物：待处理报告不设置倒计时，超时后仍可领取', async () => {
+  const app = await freshApp();
+  // 占满主栏，让任务奖励走报告待处理路径。
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const granted = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw', pendingIfFull: true, rewardVillageId: 'v1' });
+  assert.equal(granted.ok, true);
+  const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.equal(listed.pending.length, 1);
+  const pendingId = listed.pending[0].movementId;
+  const raw = app.store.get<any>('treasure_pending', pendingId);
+  assert.equal(raw.expiresAt, undefined, '任务奖励不应有过期时间');
+  await app.scheduler.advanceTo(clock + 10 * 60 * 60 * 1000, setClock);
+  assert.ok(app.store.get<any>('treasure_pending', pendingId), '任务奖励不应被超时回收');
+  const discarded = await send(app, 'treasure.ClaimPending', { movementId: pendingId, decision: 'discard' });
+  assert.equal(discarded.ok, true, '超时后仍可处理任务奖励');
+
+  const drop = await send(app, 'treasure.RollDrop', {
+    villageId: 'v1', source: 'camp', movementId: 'mv-task-drop', forceCode: 'captured_natalies', taskRelated: true,
+  });
+  assert.equal(drop.ok, true);
+  const taskPending = app.store.get<any>('treasure_pending', 'mv-task-drop');
+  assert.equal(taskPending.expiresAt, undefined, '任务专属 PvE 掉落不应有过期时间');
+});
+
 test('待领取：不存在的 movementId 确认 → pending_not_found', async () => {
   const app = await freshApp();
   const claim = await send(app, 'treasure.ClaimPending', { movementId: 'nope' });
