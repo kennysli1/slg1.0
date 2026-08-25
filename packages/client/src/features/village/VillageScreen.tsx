@@ -2,11 +2,8 @@
  * 村庄页：以场景为主的城市经营驾驶舱。
  * 列表视图保留为完整、可键盘访问的建筑管理入口。
  */
-import { useEffect } from 'preact/hooks';
 import { dataVersion, tick } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { me } from '../../api.js';
-import { refreshVillageSecondary } from '../../app/refresh.js';
 import { buildingInfo } from '../../app/config.js';
 import { Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
 import { VillageScene } from './VillageScene.js';
@@ -119,11 +116,6 @@ function VillageListView({ vil }: { vil: any }) {
 
 export function VillageScreen() {
   dataVersion.value; // subscribe — re-renders when server data updates
-
-  const currentVillageId = me?.villageId ?? '';
-  useEffect(() => {
-    void refreshVillageSecondary();
-  }, [currentVillageId]);
 
   const vil = getCache().vil;
   if (!vil || !vil.zones) return <div class="loading">村庄数据加载中…</div>;

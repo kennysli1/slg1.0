@@ -13,7 +13,7 @@ import { Empty, Icon, Panel, SectionHead } from '../../ui/index.js';
 import { BattleLive } from './BattleLive.js';
 import { BattleReportCard } from './BattleReport.js';
 import { PendingTreasures } from './PendingTreasures.js';
-import { hydrateReports, refreshTreasures } from '../../app/refresh.js';
+import { hydrateReports } from '../../app/refresh.js';
 
 // ── 过滤配置 ─────────────────────────────────────────────────
 
@@ -140,17 +140,13 @@ export function ReportsScreen() {
   const hasBattles = Object.keys(battles.value).length > 0;
 
   const [filter, setFilter] = useState<FilterKind>('all');
-  const [loaded, setLoaded] = useState(false);
+  const currentVillageId = me?.villageId ?? '';
 
-  // 报告和待领取宝物按需加载；避免登录时与其它村级快照争抢串行车道。
+  // 报告按村庄保存：登录和切村都会由 App/refreshAll 预取，进入报告页时
+  // 再补一次历史通知，避免切村后继续显示上一座村的报告。
   useEffect(() => {
-    let alive = true;
-    void Promise.all([
-      hydrateReports({ notifyOnError: false }),
-      refreshTreasures(),
-    ]).finally(() => { if (alive) setLoaded(true); });
-    return () => { alive = false; };
-  }, []);
+    void hydrateReports({ notifyOnError: false });
+  }, [currentVillageId]);
 
   const allReports = getReports();
 
@@ -159,10 +155,6 @@ export function ReportsScreen() {
     : allReports.filter((r) => r.kind === filter);
 
   const isEmpty = allReports.length === 0 && !hasBattles;
-
-  if (!loaded && isEmpty) {
-    return <div class="loading">报告数据加载中…</div>;
-  }
 
   return (
     <div aria-label="战报">

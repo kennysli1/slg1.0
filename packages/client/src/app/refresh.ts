@@ -79,57 +79,10 @@ export function setSessionLostHandler(fn: (msg: string) => void): void { onSessi
 export interface RefreshOptions {
   includeArea?: boolean;
   waitForTasks?: boolean;
+  /** 切村时先让报告请求插队，核心快照返回后由调用方启动后台补齐。 */
+  deferSecondary?: boolean;
   /** 后台补齐数据时不把瞬时网络错误写进玩家战报。 */
   silent?: boolean;
-}
-
-/**
- * 首屏关键快照：只取资源和村庄布局。
- *
- * Gateway 会把同一村庄的请求放进串行车道。首屏原来一次发十多个请求，
- * 其中全量地图和历史任务会让后续请求在 10 秒客户端超时之前一直排队，
- * 用户看到的就是长时间 loading 以及误报的“网络连接异常”。
- * 先提交这两个渲染村庄页必需的快照，地图/军队/任务等由后台刷新补齐。
- */
-export async function refreshInitial(): Promise<boolean> {
-  if (!me) return false;
-  try {
-    // 人口和声望同样属于首屏 HUD 的关键快照，不能等完整地图请求结束后才加载。
-    // 每个请求单独兜底：某一个读请求超时不能把已经成功的其它快照一起丢掉。
-    const safe = (action: string) => req(action).catch(() => null);
-    const [res, vil, pop, reputation] = await Promise.all([
-      safe('GetResources'),
-      safe('GetVillageLayout'),
-      safe('GetPopulation'),
-      safe('GetReputation'),
-    ]);
-    const failed = [res, vil, pop, reputation].find((x) => x && !x.ok);
-    const failedCode = failed?.error?.code;
-    if (failedCode === 'not_logged_in') {
-      onSessionLost?.('连接已断开，请重新登录');
-      return false;
-    }
-    const hasCore = Boolean(res?.ok || vil?.ok || pop?.ok || reputation?.ok);
-    if (!hasCore) {
-      pushReport(`刷新失败：${errText(failedCode ?? 'network_error')}`);
-      return false;
-    }
-    setCache({
-      ...getCache(),
-      ...(res?.ok ? { res: res.payload } : {}),
-      ...(vil?.ok ? { vil: vil.payload } : {}),
-      ...(reputation?.ok ? { reputation: reputation.payload } : {}),
-    });
-    if (pop?.ok) applyPopPayload(pop.payload);
-    if (res?.ok) markResFetched();
-    // 地图尚未补齐；若玩家立刻切到地图页，MapScreen 会主动重试全量区域。
-    mapAreaStale.value = true;
-    bumpData();
-    return true;
-  } catch {
-    pushReport('刷新失败：网络连接异常');
-    return false;
-  }
 }
 
 let refreshInFlight: Promise<void> | null = null;
@@ -139,12 +92,13 @@ export function mergeRefreshOptions(a: RefreshOptions, b: RefreshOptions): Refre
   return {
     includeArea: a.includeArea !== false || b.includeArea !== false,
     waitForTasks: a.waitForTasks === true || b.waitForTasks === true,
+    deferSecondary: a.deferSecondary === true || b.deferSecondary === true,
     // 只要有一个前台请求需要反馈，就保留错误提示；纯后台刷新才静默。
     silent: a.silent === true && b.silent === true,
   };
 }
 
-/** 一次性拉齐主界面所需的全部快照，并合并同时到来的刷新请求。 */
+/** 拉取当前村庄快照并合并同时到来的刷新请求。 */
 export function refreshAll(options: RefreshOptions = {}): Promise<void> {
   if (refreshInFlight) {
     queuedRefresh = queuedRefresh ? mergeRefreshOptions(queuedRefresh, options) : options;
@@ -170,35 +124,30 @@ export function refreshAll(options: RefreshOptions = {}): Promise<void> {
 
 async function performRefreshAll(options: RefreshOptions = {}): Promise<void> {
   if (!me) return;
+  const villageId = me.villageId;
   const includeArea = options.includeArea !== false;
   try {
-    const center = getMapCenter() ?? { q: me.q, r: me.r };
     const safe = <T>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
-    // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom] = await Promise.all([
+    // 同一村庄请求在 Gateway 中串行执行。先完成能渲染村庄、资源栏和军队页的核心快照，
+    // 地图/宝物/炼金/王国等历史或大包数据随后后台补齐，避免切村时被大地图卡住。
+    const [res, vil, army, moves, playerMoves, pop, reputation] = await Promise.all([
       safe(req('GetResources')),
       safe(req('GetVillageLayout')),
       safe(req('GetArmy')),
-      includeArea
-        ? safe(req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }))
-        : Promise.resolve(null),
       safe(req('ListMovements')),
       safe(req('ListPlayerMovements')),
       safe(req('GetPopulation')),
-      safe(req('ListTreasures')),
       safe(req('GetReputation')),
-      safe(req('GetAlchemy')),
-      safe(req('GetKingdomState')),
     ]);
 
-    const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves]
+    if (villageId !== me?.villageId) return;
+    const failed = [res, vil, army, moves, playerMoves]
       .find((x) => !x?.ok);
     if (failed?.error?.code === 'not_logged_in') {
       onSessionLost?.('连接已断开，请重新登录');
       return;
     }
-    const hasSnapshot = [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom]
-      .some((x) => x?.ok);
+    const hasSnapshot = [res, vil, army, moves, playerMoves, pop, reputation].some((x) => x?.ok);
     if (!hasSnapshot) {
       if (!options.silent) pushReport('刷新失败：网络连接异常');
       return;
@@ -208,45 +157,70 @@ async function performRefreshAll(options: RefreshOptions = {}): Promise<void> {
       pushReport(`刷新失败：${errText(code)}`);
     }
 
-    if (area?.ok) reconcileVillagesFromArea(area.payload);
     setCache({
       ...getCache(),
       ...(res?.ok ? { res: res.payload } : {}),
       ...(vil?.ok ? { vil: vil.payload } : {}),
       ...(army?.ok ? { army: army.payload } : {}),
-      ...(area?.ok ? { area: area.payload } : {}),
       ...(moves?.ok ? { moves: moves.payload } : {}),
       ...(playerMoves?.ok ? { playerMoves: playerMoves.payload } : {}),
-      ...(treasures?.ok ? { treasures: treasures.payload } : {}),
       ...(reputation?.ok ? { reputation: reputation.payload } : {}),
-      ...(alchemy?.ok ? { alchemy: alchemy.payload } : {}),
-      ...(kingdom?.ok ? { kingdom: kingdom.payload } : {}),
     });
-    if (kingdom?.ok) kingdomState.value = kingdom.payload;
-    if (area?.ok) mapAreaStale.value = false;
-    if (treasures?.ok) {
-      setPendingTreasures((treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
-    }
     if (res?.ok) markResFetched();
     if (pop?.ok) applyPopPayload(pop.payload);
     bumpData();
-    void refreshForeignMoves();
 
-    // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
+    // 切村时由调用方先拉报告，再启动后台请求，避免大地图排在报告前面。
+    if (options.deferSecondary) return;
+    // 任务快照与次级村庄数据不阻塞核心快照。waitForTasks 仅保留动作调用方的兼容语义。
     const taskRefresh = reloadPlayerTasks();
     if (options.waitForTasks !== false) await taskRefresh;
+    void refreshSecondarySnapshot(villageId, includeArea);
   } catch {
     if (!options.silent) pushReport('刷新失败：网络连接异常');
   }
 }
 
+/** 后台补齐大地图、宝物、炼金、王国和视野数据；任何旧村响应都不得覆盖新村。 */
+async function refreshSecondarySnapshot(villageId: string, includeArea: boolean): Promise<void> {
+  const center = getMapCenter() ?? (me ? { q: me.q, r: me.r } : { q: 0, r: 0 });
+  const safe = <T>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
+  const [area, treasures, alchemy, kingdom, foreign] = await Promise.all([
+    includeArea
+      ? safe(req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true }))
+      : Promise.resolve(null),
+    safe(req('ListTreasures')),
+    safe(req('GetAlchemy')),
+    safe(req('GetKingdomState')),
+    safe(req('ListForeign')),
+  ]);
+  if (villageId !== me?.villageId) return;
+  if (area?.ok) reconcileVillagesFromArea(area.payload);
+  const next = { ...getCache() };
+  let changed = false;
+  if (area?.ok) { next.area = area.payload; mapAreaStale.value = false; changed = true; }
+  else if (includeArea) mapAreaStale.value = true;
+  if (treasures?.ok) {
+    next.treasures = treasures.payload;
+    const pending = (treasures.payload as any)?.pending;
+    setPendingTreasures(Array.isArray(pending) ? pending : []);
+    changed = true;
+  }
+  if (alchemy?.ok) { next.alchemy = alchemy.payload; changed = true; }
+  if (kingdom?.ok) { next.kingdom = kingdom.payload; kingdomState.value = kingdom.payload; changed = true; }
+  if (foreign?.ok) { foreignMoves.value = foreign.payload as any; changed = true; }
+  if (changed) bumpData();
+}
+
 /** 进入地图页时补拉此前为降低切村等待而跳过的整张地图。 */
 export async function refreshMapArea(): Promise<boolean> {
   if (!me) return false;
+  const villageId = me.villageId;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     const area = await req('GetArea', { cq: center.q, cr: center.r, r: Math.max(worldW(), worldH()), full: true });
     if (!area.ok) return false;
+    if (villageId !== me?.villageId) return false;
     reconcileVillagesFromArea(area.payload);
     setCache({ ...getCache(), area: area.payload });
     mapAreaStale.value = false;
@@ -269,8 +243,11 @@ export async function switchVillage(villageId: string): Promise<{ ok: boolean; e
     bumpSession();
     const onMap = tab.value === 'map';
     if (!onMap) mapAreaStale.value = true;
-    // 任务聚合不会阻塞当前村庄数据可用；它在后台完成，避免切村卡住页面。
-    await refreshAll({ includeArea: onMap, waitForTasks: false });
+    // 核心快照完成即可解除切村遮罩；任务、地图、宝物和报告在后台继续同步。
+    await refreshAll({ includeArea: onMap, waitForTasks: false, deferSecondary: true });
+    void hydrateReports({ notifyOnError: false });
+    void reloadPlayerTasks();
+    void refreshSecondarySnapshot(me.villageId, onMap);
     return { ok: true };
   } finally {
     endVillageSwitch();
@@ -431,54 +408,6 @@ export async function refreshMovements(): Promise<void> {
   bumpData();
 }
 
-/** 只刷新军队页需要的驻军/训练快照，避免为打开军队页拉整包村庄数据。 */
-export async function refreshArmySnapshot(): Promise<boolean> {
-  if (!me) return false;
-  const result = await req('GetArmy').catch(() => null);
-  if (!result?.ok) return false;
-  setCache({ ...getCache(), army: result.payload });
-  bumpData();
-  return true;
-}
-
-/** 只刷新宝物栏及待领取宝物；村庄页和报告页均按需使用。 */
-export async function refreshTreasures(): Promise<boolean> {
-  if (!me) return false;
-  const result = await req('ListTreasures').catch(() => null);
-  if (!result?.ok) return false;
-  const payload = result.payload as any;
-  setCache({ ...getCache(), treasures: payload });
-  setPendingTreasures(Array.isArray(payload?.pending) ? payload.pending : []);
-  bumpData();
-  return true;
-}
-
-/** 村庄页的次级面板数据（炼金炉等）按需加载，不阻塞人口/建筑首屏。 */
-export async function refreshVillageSecondary(): Promise<boolean> {
-  if (!me) return false;
-  const [treasures, alchemy] = await Promise.all([
-    req('ListTreasures').catch(() => null),
-    req('GetAlchemy').catch(() => null),
-  ]);
-  const next = { ...getCache() };
-  let changed = false;
-  if (treasures?.ok) {
-    next.treasures = treasures.payload;
-    const pending = (treasures.payload as any)?.pending;
-    setPendingTreasures(Array.isArray(pending) ? pending : []);
-    changed = true;
-  }
-  if (alchemy?.ok) {
-    next.alchemy = alchemy.payload;
-    changed = true;
-  }
-  if (changed) {
-    setCache(next);
-    bumpData();
-  }
-  return changed;
-}
-
 let _foreignDebounceTimer: number | null = null;
 /** 在 delayMs 后触发一次 refreshForeignMoves（debounce：重复调用只保留最后一次）。 */
 export function scheduleForeignRefresh(delayMs = 1000): void {
@@ -491,9 +420,11 @@ export function scheduleForeignRefresh(delayMs = 1000): void {
 
 /** 登录后拉一次历史通知，播种战报列表。 */
 export async function hydrateReports(options: { notifyOnError?: boolean } = {}): Promise<void> {
+  const villageId = me?.villageId;
   try {
     const res = await req('GetNotifications');
     if (!res.ok) return;
+    if (villageId !== me?.villageId) return;
     const list = ((res.payload as any).notifications ?? []) as StoredNotification[];
     const seeded: StoredReport[] = [];
     for (const n of list) {

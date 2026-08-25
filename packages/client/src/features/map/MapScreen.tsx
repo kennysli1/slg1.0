@@ -8,19 +8,13 @@ import { selected, garrisonContinue, mapAreaStale } from '../../app/store.js';
 import { HexMap } from './HexMap.js';
 import { TargetPanel } from './TargetPanel.js';
 import { MarchList } from './MarchList.js';
-import { refreshForeignMoves, refreshMapArea, refreshMovements } from '../../app/refresh.js';
+import { refreshMapArea } from '../../app/refresh.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 export function MapScreen() {
   void selected.value;
   void garrisonContinue.value;
   const areaStale = mapAreaStale.value;
-  // 地图页按需加载大地图、己方行军和视野内外国军队；它们不再由登录后的
-  // 全量刷新抢占同村请求队列。
-  useEffect(() => {
-    void refreshMovements();
-    void refreshForeignMoves();
-  }, []);
   useEffect(() => {
     if (areaStale) void refreshMapArea();
   }, [areaStale]);
