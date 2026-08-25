@@ -59,6 +59,7 @@
 | 表22 | `quest_edges.csv` | **任务关系边**（前置与分支解锁） | 调任务依赖、成功/失败后续 |
 | 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 | 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
+| 表25 | `dialogues.csv` | **NPC 对话 session 目录** | 调任务触发点、NPC 名称/文本和玩家回复选项 |
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -401,6 +402,15 @@
 | lootMult | 该区间最终可掠夺量倍率 |
 
 > 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在 GM 关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
+
+### dialogues.csv — NPC 对话
+| 列 | 含义 |
+|----|------|
+| id / code | 数字主键 / 稳定对话代码 |
+| taskCode | 绑定的任务代码；对话由任务动作启动 |
+| trigger | 触发点，例如 `accept`（点击接取任务） |
+| npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
+| replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
 ## kingdom_services.csv — 议会厅服务
 

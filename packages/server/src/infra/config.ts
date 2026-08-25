@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { loadCsv, num } from './csv.js';
 import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
 import {
@@ -283,6 +284,23 @@ export interface QuestGraphDef {
   objectives: QuestObjectiveDef[];
   effects: QuestEffectDef[];
   edges: QuestEdgeDef[];
+}
+
+/** 对话中的一个玩家回复选项（由 dialogues.csv 的 replies 列解析）。 */
+export interface DialogueReplyDef {
+  key: string;
+  label: string;
+}
+
+/** 绑定到任务触发点的 NPC 对话 session 定义。对话本身不写入存档。 */
+export interface DialogueDef {
+  id: number;
+  code: string;
+  taskCode: string;
+  trigger: string;
+  npcName: string;
+  npcText: string;
+  replies: DialogueReplyDef[];
 }
 
 /** 城镇中心某等级开放的槽位数（来自 town_center_slots.csv）。 */
@@ -615,6 +633,8 @@ export interface GameConfig {
   quests: Record<string, QuestDef>;
   /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
   questGraph: QuestGraphDef;
+  /** 对话目录（dialogues.csv）：按任务 code + trigger 查找可启动的对话。 */
+  dialogues: Record<string, DialogueDef>;
   pvpPowerCurve: { maxRatio: number; lootMult: number }[];
 }
 
@@ -645,6 +665,17 @@ function parseResourceList(s: string): Record<string, number> | null {
     if (code) out[code.trim()] = num(amt);
   }
   return out;
+}
+
+/** 解析 dialogues.csv 的 replies：accept:接受任务|leave:离开。 */
+function parseDialogueReplies(raw: string): DialogueReplyDef[] {
+  return (raw ?? '').split('|').map((part) => {
+    const separator = part.indexOf(':');
+    if (separator <= 0) return null;
+    const key = part.slice(0, separator).trim();
+    const label = part.slice(separator + 1).trim();
+    return key && label ? { key, label } : null;
+  }).filter((item): item is DialogueReplyDef => Boolean(item));
 }
 
 /**
@@ -1331,12 +1362,29 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12,
     };
   }
+  const dialogues: Record<string, DialogueDef> = {};
+  // 旧配置目录可能尚未包含新表；空目录仍可启动，仓库配置则必须通过下方完整校验。
+  const dialogueRows = existsSync(p('dialogues.csv')) ? loadCsv(p('dialogues.csv')) : [];
+  assertUniqueRows(dialogueRows, 'dialogues.csv', 'id', 'code');
+  for (const r of dialogueRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    dialogues[code] = {
+      id: num(r.id),
+      code,
+      taskCode: r.taskCode?.trim() ?? '',
+      trigger: r.trigger?.trim() || 'accept',
+      npcName: r.npcName?.trim() ?? '',
+      npcText: r.npcText?.trim() ?? '',
+      replies: parseDialogueReplies(r.replies ?? ''),
+    };
+  }
   const pvpPowerCurve = loadCsv(p('pvp_power_curve.csv'))
     .map((r) => ({ maxRatio: Math.max(0, num(r.maxRatio, Number.MAX_SAFE_INTEGER)), lootMult: Math.max(0, Math.min(1, num(r.lootMult, 1))) }))
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, quests, questGraph, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, quests, questGraph, dialogues, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;
@@ -1706,6 +1754,23 @@ export function validateGameConfig(config: GameConfig): void {
   for (const row of config.questGraph.edges) {
     if (!graphQuestCodes.has(row.fromQuest)) errors.push(`quest_edges.csv[${row.id}] 起点任务不存在：${row.fromQuest}`);
     if (!graphQuestCodes.has(row.toQuest)) errors.push(`quest_edges.csv[${row.id}] 终点任务不存在：${row.toQuest}`);
+  }
+
+  // 对话目录校验：对话必须绑定现有任务，回复键不可重复且至少有一个可选回复。
+  const dialogueCodes = new Set<string>();
+  for (const d of Object.values(config.dialogues ?? {})) {
+    if (dialogueCodes.has(d.code)) errors.push(`dialogues.csv[${d.code}] code 重复`);
+    dialogueCodes.add(d.code);
+    if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
+    if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
+    if (!d.npcName) errors.push(`dialogues.csv[${d.code}] npcName 不能为空`);
+    if (!d.npcText) errors.push(`dialogues.csv[${d.code}] npcText 不能为空`);
+    if (!d.replies.length) errors.push(`dialogues.csv[${d.code}] 至少需要一个玩家回复`);
+    const replyKeys = new Set<string>();
+    for (const reply of d.replies) {
+      if (replyKeys.has(reply.key)) errors.push(`dialogues.csv[${d.code}] 回复键重复：${reply.key}`);
+      replyKeys.add(reply.key);
+    }
   }
 
   if (errors.length) {

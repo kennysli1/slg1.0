@@ -231,6 +231,37 @@ test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任�
   }
 });
 
+test('/gm/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const page = await fastify.inject({ method: 'GET', url: '/gm/dialogues' });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /NPC 对话编辑/);
+    const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
+    const data = await fastify.inject({ method: 'GET', url: '/gm/dialogues/data' });
+    assert.equal(data.statusCode, 200);
+    const parsed = JSON.parse(data.body) as { rows: Array<Record<string, string>> };
+    assert.equal(parsed.rows[0]?.taskCode, 's3');
+    assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const bad = await fastify.inject({
+      method: 'POST', url: '/gm/dialogues/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rows: [{ ...parsed.rows[0], taskCode: 'missing-task' }] }),
+    });
+    assert.equal(bad.statusCode, 400);
+    assert.match(bad.body, /dialogues\.csv/);
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 test('/gm/quest-modules 页面脚本可解析并生成可切换标签', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;

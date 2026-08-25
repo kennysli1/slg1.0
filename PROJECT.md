@@ -47,6 +47,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `alchemy.ts` | 炼金炉输入槽、炼化调度、掉率抽取与收获结果 |
 | `research.ts` | 科研点、研发任务和已完成科技 |
 | `tasks.ts` | 主线/随机任务进度与任务营地 |
+| `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
 

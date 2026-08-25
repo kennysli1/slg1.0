@@ -81,6 +81,7 @@ button.sm{padding:3px 7px;font-size:11px}
       <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务管理</button>
       <button class="warn sm" onclick="window.open('/gm/quest-modules','_blank')">任务模块编辑</button>
       <button class="warn sm" onclick="window.open('/gm/quest-graph','_blank')">任务关系图</button>
+      <button class="warn sm" onclick="window.open('/gm/dialogues','_blank')">对话编辑</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -1124,6 +1125,54 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.type('text/html; charset=utf-8').send(GM_QUEST_MODULES_HTML);
   });
 
+  // GET/POST /gm/dialogues — NPC 对话目录编辑器。写回前复制整份 config 到临时目录校验。
+  fastify.get('/gm/dialogues', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_DIALOGUES_HTML);
+  });
+
+  fastify.get('/gm/dialogues/data', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const doc = parseCsvStructured(readFileSync(join(gameApp.configDir, 'dialogues.csv'), 'utf-8'));
+    void reply.send({ ok: true, header: doc.header, rows: doc.rows });
+  });
+
+  fastify.post('/gm/dialogues/save', (req, reply) => {
+    if (!auth(req, reply)) return;
+    const body = (req.body ?? {}) as { rows?: CsvRow[] };
+    if (!Array.isArray(body.rows)) {
+      void reply.code(400).send({ ok: false, reason: 'rows 必填' });
+      return;
+    }
+    const dir = gameApp.configDir;
+    const tmp = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
+    try {
+      const doc = parseCsvStructured(readFileSync(join(dir, 'dialogues.csv'), 'utf-8'));
+      // 支持新增/删除行：移除旧数据行、保留表头/注释，再把当前编辑器行追加到文档尾。
+      const oldDataIndices = new Set(doc.rowIndices);
+      const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
+      doc.raw = raw;
+      doc.headerIndex = raw.findIndex((line) => line.split(',').map((x) => x.trim()).join(',') === doc.header.join(','));
+      doc.rows = body.rows.map((row) => Object.fromEntries(doc.header.map((h) => [h, row[h] ?? ''])));
+      doc.rowIndices = [];
+      for (let i = 0; i < doc.rows.length; i++) {
+        doc.raw.push('');
+        doc.rowIndices.push(doc.raw.length - 1);
+      }
+      const csv = serializeCsv(doc);
+      cpSync(dir, tmp, { recursive: true });
+      writeFileSync(join(tmp, 'dialogues.csv'), csv, 'utf-8');
+      loadGameConfig(tmp); // 校验失败不写线上配置
+      writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
+      gameApp.reloadConfig();
+      void reply.send({ ok: true, count: doc.rows.length });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      void reply.code(400).send({ ok: false, reason: msg });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   fastify.get('/gm/quest-modules/data', (req, reply) => {
     if (!auth(req, reply)) return;
     const dir = gameApp.configDir;
@@ -1450,6 +1499,28 @@ async function after(r,act){if(!r.ok){statusMsg(act+'失败: '+(r.reason||''),tr
 loadTasks();
 </script>
 </body></html>`;
+
+const GM_DIALOGUES_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>对话编辑</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;vertical-align:top}th{position:sticky;top:0;background:#20354c;color:#8ed5ff;white-space:nowrap}input,textarea{width:190px;min-width:120px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}textarea{height:96px;resize:vertical}.small{width:70px;min-width:70px}.row-actions{min-width:54px;white-space:nowrap}a{color:#79cfff}
+</style></head><body>
+<h1>NPC 对话编辑</h1>
+<p class="hint">每行是一个可复用的对话 session，按“任务代码 + 触发点”绑定。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>；保存前会校验任务引用、文本和回复键，失败时不会写入配置。</p>
+<div class="bar"><button onclick="addRow()">+ 新增行</button><button class="save" onclick="save()">保存并热重载</button><span id="status">加载中…</span></div>
+<div class="table-wrap"><table id="grid"></table></div>
+<script>
+let token=sessionStorage.getItem('gmToken')??'',header=[],rows=[];
+const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},token?{'X-GM-Token':token}: {},opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();sessionStorage.setItem('gmToken',token);return api(url,opt)}}let j=await r.json();if(!r.ok||!j.ok)throw Error(j.reason||'请求失败');return j}
+function render(){let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control=k==='npcText'?'<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>':'<input class="'+(k==='id'?'small':'')+'" data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">';return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已加载 '+rows.length+' 行'}
+function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
+function addRow(){let r={};for(let k of header)r[k]='';rows.push(r);render()}
+function removeRow(i){if(confirm('删除这一行？')){rows.splice(i,1);render()}}
+async function load(){try{let d=await api('/gm/dialogues/data');header=d.header;rows=d.rows||[];render()}catch(e){document.getElementById('status').textContent='加载失败：'+e.message}}
+async function save(){try{document.getElementById('status').textContent='校验并保存中…';let d=await api('/gm/dialogues/save',{method:'POST',body:JSON.stringify({rows})});document.getElementById('status').textContent='已保存并热重载（'+d.count+' 行）'}catch(e){document.getElementById('status').textContent='保存失败：'+e.message}}
+load();
+</script></body></html>`;
 
 const GM_QUESTS_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>任务目录编辑</title>
