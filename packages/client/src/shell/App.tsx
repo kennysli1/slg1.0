@@ -58,8 +58,6 @@ export function App() {
   function startGame() {
     setPhase('game');
     sessionVersion.value++;
-    // 保留原先的首屏行为：报告在登录后播种，核心村庄快照立即加载；
-    // refreshAll 已拆成“核心先返回、地图/次级数据后台补齐”，因此不会再堵住切村。
     void hydrateReports();
     void refreshAll();
   }
