@@ -144,13 +144,15 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
   kind: QuestObjectiveKind;
   /** submit_resources：需上交的资源与数量（key ∈ resources.csv）。 */
   resources?: Record<string, number>;
+  /** repair_buildings：必须完成修复的建筑 code 列表；每个建筑只计一次。 */
+  buildingKinds?: string[];
   /** clear_camp：PvE 营地模板 code（pve_targets.csv）+ 需清理的数量。完全真实化——会在地图上生成真实营地。 */
   campTemplate?: string;
   /** sell_discard_treasure：累计出售/丢弃 count 个 minRarity 及以上品质的宝物（minRarity ∈ common/rare/epic/legendary）。 */
@@ -375,6 +377,8 @@ export interface VillageTemplate {
   startPlaced: Record<string, number>;
   /** 初始资源覆盖（空则各资源用 constants.start_resource_amount） */
   startResources: Record<string, number> | null;
+  /** 开局被破坏到 0 级、可一次性修复到目标等级的建筑。 */
+  startDamaged: Record<string, number>;
 }
 
 /**
@@ -1105,6 +1109,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       tribe: r.tribe,
       startPlaced: parseLeveledList(r.start_placed),
       startResources: parseResourceList(r.start_resources),
+      startDamaged: parseLeveledList(r.start_damaged),
     };
   }
 
@@ -1293,6 +1298,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of edgeRows) questGraph.edges.push({ id: r.id.trim(), fromQuest: r.fromQuest?.trim() || '', toQuest: r.toQuest?.trim() || '', relation: (r.relation as QuestEdgeDef['relation']) || 'requires', order: num(r.order) });
 
   const objectiveOf = (row: QuestObjectiveDef): QuestObjective => {
+    if (row.kind === 'repair_buildings') {
+      return {
+        kind: row.kind,
+        buildingKinds: row.params.split('|').map((kind) => kind.trim()).filter(Boolean),
+      };
+    }
     if (row.kind === 'clear_camp') { const [campTemplate, count] = row.params.split(':'); return { kind: row.kind, campTemplate: campTemplate?.trim(), count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'sell_discard_treasure') { const [minRarity, count] = row.params.split(':'); return { kind: row.kind, minRarity: minRarity?.trim() || 'rare', count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'carry_flag') { const [flagCode, minTroops] = row.params.split(':'); return { kind: row.kind, flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) }; }
@@ -1580,6 +1591,14 @@ export function validateGameConfig(config: GameConfig): void {
         if (!resourceKeys.has(code)) errors.push(`village_templates.csv[${t.tribe}] start_resources 含未知资源 ${code}`);
       }
     }
+    for (const [code, target] of Object.entries(t.startDamaged ?? {})) {
+      const def = config.buildings[code];
+      if (!def) { errors.push(`village_templates.csv[${t.tribe}] start_damaged 含未知建筑 ${code}`); continue; }
+      if (!Number.isInteger(target) || target < 1 || target > def.maxLevel) {
+        errors.push(`village_templates.csv[${t.tribe}] start_damaged.${code} 修复目标等级 ${target} 超出 1..${def.maxLevel}`);
+      }
+      if (t.startPlaced[code] !== 0) errors.push(`village_templates.csv[${t.tribe}] start_damaged.${code} 必须在 start_placed 中以 0 级占位`);
+    }
   }
 
   // constants：关键范围
@@ -1683,7 +1702,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1698,6 +1717,10 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.resources || Object.keys(q.objective.resources).length === 0) {
         errors.push(`quests.csv[${q.code}] submit_resources 必须指定资源(objParam)`);
       }
+    } else if (q.objective.kind === 'repair_buildings') {
+      const kinds = q.objective.buildingKinds ?? [];
+      if (!kinds.length) errors.push(`quests.csv[${q.code}] repair_buildings 必须指定建筑列表(objParam)`);
+      for (const kind of kinds) if (!config.buildings[kind]) errors.push(`quests.csv[${q.code}] repair_buildings 建筑 ${kind} 不在 buildings.csv`);
     } else if (q.objective.kind === 'clear_camp') {
       const tmpl = q.objective.campTemplate;
       if (!tmpl || !config.pveTemplates[tmpl]) errors.push(`quests.csv[${q.code}] clear_camp 模板 ${tmpl} 不在 pve_targets.csv`);

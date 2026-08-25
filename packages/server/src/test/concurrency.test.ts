@@ -151,6 +151,18 @@ test('Population: 多次 RecoverCasualties 各自即时结算，无伤兵池无�
   const vid = (reg.payload as any).player.villageId;
   await flush();
 
+  // 本测试验证人口回收与硬上限关系；显式恢复新村四块受损资源田，避免开局模板变化改变该回归的住房容量前提。
+  const buildingState = app.store.get<any>('building', vid);
+  for (const p of buildingState.placed) {
+    if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+      p.level = 1;
+      delete p.repairTargetLevel;
+    }
+  }
+  app.store.set('building', vid, buildingState);
+  app.building.reReportProduction(vid);
+  await app.population.refreshHardCap(vid);
+
   const c = app.config.constants;
   const legDef = app.config.units['legionnaire'];
   const recoveryRatio = Math.min(c.popHospitalRecoveryMax, c.popHospitalRecoveryBase);

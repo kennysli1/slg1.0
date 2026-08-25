@@ -6,6 +6,7 @@ import type { WireRequest, WireResponse, WirePush } from '@slg/shared';
 import { WIRE_VERSION } from '@slg/shared';
 
 let clock = 1_000_000;
+const setClock = (t: number) => (clock = t);
 function freshApp(): GameApp {
   clock = 1_000_000;
   const app = createGameApp({ now: () => clock, manualScheduler: true });
@@ -14,6 +15,17 @@ function freshApp(): GameApp {
 }
 async function send(app: GameApp, action: string, payload: any) {
   return app.commands.send({ name: action, from: 'test', payload });
+}
+async function repairM1Fields(app: GameApp, villageId: string): Promise<void> {
+  await send(app, 'economy.Grant', { villageId, gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+  for (const kind of ['woodcutter', 'claypit', 'ironmine', 'cropland']) {
+    const layout = (await send(app, 'building.GetLayout', { villageId })).payload as any;
+    const field = layout.zones.outer.placed.find((item: any) => item.kind === kind);
+    assert.ok(field, `应存在 ${kind} 资源田`);
+    const repair = await send(app, 'building.Repair', { villageId, slotId: field.slotId });
+    assert.equal(repair.ok, true, `${kind} 修复应成功: ${repair.reason ?? ''}`);
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
+  }
 }
 
 test('注册：单主城 + villages 列表 + 新 id 格式', async () => {
@@ -260,8 +272,7 @@ test('任务归属：全局主线可在分城执行，奖励发给最后执行�
   assert.ok(board0.villages.every((v: any) => !v.active.some((x: any) => x.code === 'm1')), '全局任务不应进入村庄任务区');
 
   await send(app, 'economy.Grant', { villageId: branch, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
-  const submit = await send(app, 'task.SubmitResources', { villageId: branch, code: 'm1', resources: { wood: 200, clay: 200 } });
-  assert.equal(submit.ok, true, submit.reason);
+  await repairM1Fields(app, branch);
   const branchBefore = (await send(app, 'economy.GetResources', { villageId: branch })).payload as any;
   const deliver = await send(app, 'task.Deliver', { villageId: branch, code: 'm1' });
   assert.equal(deliver.ok, true, deliver.reason);

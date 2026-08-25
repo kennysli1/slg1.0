@@ -12,7 +12,7 @@ import { act, setMapCenter } from '../../app/refresh.js';
 import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
-import { resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
+import { buildingInfo, resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
 import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
@@ -46,6 +46,7 @@ async function ensureTaskExecution(task: any): Promise<boolean> {
 function objText(task: any): string {
   const o = task.objective;
   if (o.kind === 'submit_resources') return '上交资源';
+  if (o.kind === 'repair_buildings') return `修复资源田（${(o.buildingKinds ?? []).map((kind: string) => buildingInfo(kind).name).join('、')}）`;
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
@@ -312,6 +313,21 @@ function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolea
               );
             })}
           </div>
+        </div>
+      )}
+      {o.kind === 'repair_buildings' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            {((o.buildingKinds ?? []) as string[]).map((kind) => {
+              const done = (task.repairedBuildings ?? []).includes(kind);
+              return (
+                <span key={kind} class={`task-prog-chip${done ? ' done' : ''}`}>
+                  {buildingInfo(kind).name} {done ? '已修复' : '待修复'}
+                </span>
+              );
+            })}
+          </div>
+          <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
         </div>
       )}
       {o.kind === 'clear_camp' && (

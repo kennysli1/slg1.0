@@ -18,7 +18,20 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const grant = (app: GameApp, vid: string, gain: Record<string, number>) =>
   send(app, 'economy.Grant', { villageId: vid, gain });
 
-test('建村即自动解锁主线 m1（submit_resources），不自动接随机', async () => {
+const m1Fields = ['woodcutter', 'claypit', 'ironmine', 'cropland'];
+async function repairM1Fields(app: GameApp, villageId: string): Promise<void> {
+  await grant(app, villageId, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
+  for (const kind of m1Fields) {
+    const layout = (await send(app, 'building.GetLayout', { villageId })).payload as any;
+    const field = layout.zones.outer.placed.find((item: any) => item.kind === kind);
+    assert.ok(field, `应存在 ${kind} 资源田`);
+    const repair = await send(app, 'building.Repair', { villageId, slotId: field.slotId });
+    assert.equal(repair.ok, true, `${kind} 修复应成功: ${repair.reason ?? ''}`);
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
+  }
+}
+
+test('建村即自动解锁主线 m1（repair_buildings），不自动接随机', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试1');
   assert.equal(regRes.ok, true, `注册应成功: ${regRes.reason ?? ''}`);
@@ -34,16 +47,13 @@ test('建村即自动解锁主线 m1（submit_resources），不自动接随机'
   assert.deepEqual(p.completedMain, []);
 });
 
-test('上交资源 m1 → 就绪 → 交付后解锁 m2/m3 并发放奖励', async () => {
+test('修复四块资源田 m1 → 就绪 → 交付后解锁 m2/m3 并发放奖励', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试2');
   const va = (regRes.payload as any).player.villageId;
-  await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
 
-  const sub = await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { wood: 200, clay: 200 } });
-  assert.equal(sub.ok, true, `上交应成功: ${sub.reason ?? ''}`);
-  assert.equal((sub.payload as any).completed, true, 'm1 目标应达成（就绪）');
+  await repairM1Fields(app, va);
 
   // 未交付：m1 仍 active 且就绪，未进 completedMain，m2 未解锁，无奖励
   const st0 = await send(app, 'task.GetState', { villageId: va });
@@ -78,7 +88,7 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
   // 完成并交付 m1 → m3 解锁并生成营地
-  await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { wood: 200, clay: 200 } });
+  await repairM1Fields(app, va);
   await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
 
   const st = await send(app, 'task.GetState', { villageId: va });
@@ -361,30 +371,22 @@ test('主线任务不可放弃；随机任务可放弃且移除营地', async ()
   }
 });
 
-test('上交资源只扣到「剩余需求」，不超额扣资源', async () => {
+test('修复资源田只计入目标建筑，重复修复事件不会重复推进', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试6');
   const va = (regRes.payload as any).player.villageId;
-  await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
 
-  // m1 需要 wood:200 clay:200；先只交 wood:200 clay:50（部分）
-  const sub1 = await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { wood: 200, clay: 50 } });
-  assert.equal(sub1.ok, true);
-  assert.equal((sub1.payload as any).completed, false, '部分上交不应完成');
-  assert.deepEqual((sub1.payload as any).submitted, { wood: 200, clay: 50 });
-
-  // 再多交 clay:500（远超剩余 150），应只扣 150
-  const before = await send(app, 'economy.GetResources', { villageId: va });
-  const b = before.payload as any;
-  const sub2 = await send(app, 'task.SubmitResources', { villageId: va, code: 'm1', resources: { clay: 500 } });
-  assert.equal(sub2.ok, true);
-  assert.equal((sub2.payload as any).completed, true, '补齐后应完成');
-  assert.deepEqual((sub2.payload as any).submitted, { wood: 200, clay: 200 });
-  // 验证未超额扣：clay 仅减少 150（而非 500）
-  const after = await send(app, 'economy.GetResources', { villageId: va });
-  const a = after.payload as any;
-  assert.equal(b.resources.clay - a.resources.clay, 150, 'clay 只应扣 150（剩余需求）');
+  const layout = (await send(app, 'building.GetLayout', { villageId: va })).payload as any;
+  const wood = layout.zones.outer.placed.find((item: any) => item.kind === 'woodcutter');
+  const before = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.deepEqual(before.active.find((item: any) => item.code === 'm1').repairedBuildings, []);
+  const repair = await send(app, 'building.Repair', { villageId: va, slotId: wood.slotId });
+  assert.equal(repair.ok, true);
+  await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
+  const after = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.deepEqual(after.active.find((item: any) => item.code === 'm1').repairedBuildings, ['woodcutter']);
+  assert.equal(after.active.find((item: any) => item.code === 'm1').ready, false);
 });
 
 test('支线任务：触发出现(offeredSide) → 接取 → 放弃后永久不再出现', async () => {

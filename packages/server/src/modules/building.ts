@@ -172,7 +172,14 @@ export class BuildingModule {
       const def = this.config.buildings[kind];
       if (!def) continue;
       const slotId = def.zone === 'center' ? CENTER_SLOT : `${def.zone}-${idx[def.zone]++}`;
-      placed.push({ slotId, zone: def.zone, kind, level });
+      const repairTargetLevel = tpl?.startDamaged?.[kind];
+      placed.push({
+        slotId,
+        zone: def.zone,
+        kind,
+        level,
+        ...(level === 0 && repairTargetLevel && repairTargetLevel > 0 ? { repairTargetLevel } : {}),
+      });
     }
     const s: BuildingState = { villageId, tribe, placed, queue: [] };
     this.store.set(COLLECTION, villageId, s);

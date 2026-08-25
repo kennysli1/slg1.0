@@ -29,6 +29,9 @@ test('notifications: 建筑升级事件被记录', async () => {
   await send(app, 'economy.Grant', { villageId: vid, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
   const layout = (await send(app, 'building.GetLayout', { villageId: vid })).payload as any;
   const wood = layout.zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+  const repair = await send(app, 'building.Repair', { villageId: vid, slotId: wood.slotId });
+  assert.equal(repair.ok, true, `修复田应成功: ${repair.reason ?? ''}`);
+  await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
   const up = await send(app, 'building.Upgrade', { villageId: vid, slotId: wood.slotId });
   assert.equal(up.ok, true, `升级田应成功: ${up.reason ?? ''}`);
   await drain(app);
