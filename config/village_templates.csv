@@ -1,6 +1,6 @@
-tribe,start_placed,start_resources
-#部族(romans/gauls/teutons),开局预置建筑(code:等级,用|分隔;zone由buildings.csv自动归区),初始资源(可选,res:量,用|分隔;空=用全局start_resource_amount)
-romans,main:1|rallypoint:1|barracks:1|woodcutter:1|claypit:1|ironmine:1|cropland:1,
-gauls,main:1|rallypoint:1|woodcutter:1|claypit:1|ironmine:1|cropland:2,wood:1000|clay:1000|iron:500|crop:500
-teutons,main:1|rallypoint:1|woodcutter:2|claypit:1|ironmine:1|cropland:1,wood:500|clay:500|iron:1000|crop:1000
+tribe,start_placed,start_resources,start_damaged
+#部族(romans/gauls/teutons),开局预置建筑(code:等级,用|分隔;zone由buildings.csv自动归区),初始资源(可选,res:量,用|分隔;空=用全局start_resource_amount),开局被破坏建筑(code:修复目标等级,用|分隔)
+romans,main:1|rallypoint:1|woodcutter:0|claypit:0|ironmine:0|cropland:0,,woodcutter:1|claypit:1|ironmine:1|cropland:1
+gauls,main:1|rallypoint:1|woodcutter:0|claypit:0|ironmine:0|cropland:0,wood:1000|clay:1000|iron:500|crop:500,woodcutter:1|claypit:1|ironmine:1|cropland:1
+teutons,main:1|rallypoint:1|woodcutter:0|claypit:0|ironmine:0|cropland:0,wood:500|clay:500|iron:1000|crop:1000,woodcutter:1|claypit:1|ironmine:1|cropland:1
 

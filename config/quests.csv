@@ -1,6 +1,6 @@
 id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCooldownSec
 #数字ID,稳定任务代码,所属任务线代码,名称,描述,类型,归属范围(global=玩家全局/village=村庄),随机权重,可重复(0/1),完成冷却秒,放弃冷却秒
-1,m1,main_foundation,初出茅庐,上交基础资源以启动村庄建设,main,global,0,0,0,0
+1,m1,main_foundation,初出茅庐,修复新村四块被破坏的资源田,main,global,0,0,0,0
 2,m2,main_foundation,物资筹备,为扩张积累更多资源,main,global,0,0,0,0
 3,m3,main_foundation,清剿野兽,清理一处骚扰村落的营地,main,global,0,0,0,0
 4,m4,main_foundation,稳固边疆,持续清剿营地保障村落安全,main,global,0,0,0,0

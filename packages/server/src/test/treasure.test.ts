@@ -20,6 +20,15 @@ async function freshApp(rng?: () => number): Promise<GameApp> {
   // 必须 await —— treasure.createVillage 在 doCreateVillage 的首个 await 之后执行，
   // 不同步等待会导致宝物状态尚未写入，Grant 报 village_not_found。
   await app.createVillage('v1', 0, 0, '测试村');
+  const raw = app.store.get<any>('building', 'v1');
+  for (const p of raw.placed) {
+    if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+      p.level = 1;
+      delete p.repairTargetLevel;
+    }
+  }
+  app.store.set('building', 'v1', raw);
+  app.building.reReportProduction('v1');
   return app;
 }
 async function send(app: GameApp, action: string, payload: any) {

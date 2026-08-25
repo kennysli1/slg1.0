@@ -22,6 +22,17 @@ async function buildBarracks(app: GameApp, villageId: string): Promise<void> {
   assert.equal(r.ok, true, `建兵营应成功: ${r.reason ?? ''}`);
   await app.scheduler.advanceTo(clock + 10_000, setClock);
 }
+function activateFields(app: GameApp, villageId: string): void {
+  const raw = app.store.get<any>('building', villageId);
+  for (const p of raw?.placed ?? []) {
+    if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+      p.level = 1;
+      delete p.repairTargetLevel;
+    }
+  }
+  app.store.set('building', villageId, raw);
+  app.building.reReportProduction(villageId);
+}
 /** 玩家坐标读取（六边形轴坐标 q/r，兼容旧 x/y）。 */
 const px = (p: any) => p.q ?? p.x ?? 0;
 const py = (p: any) => p.r ?? p.y ?? 0;
@@ -82,6 +93,7 @@ test('PvP：A 攻击 B，双方战报、掠夺、返程', async () => {
   const a = (await reg(app, '进攻方', 'p1234')).payload as any;
   const b = (await reg(app, '防守方', 'p1234')).payload as any;
   const va = a.player.villageId, vb = b.player.villageId;
+  activateFields(app, vb);
 
   await send(app, 'economy.Grant', { villageId: va, gain: { wood: 800, clay: 800, iron: 800, crop: 800 } });
   await buildBarracks(app, va);
@@ -120,6 +132,7 @@ test('PvP 掠夺：守方可关闭防守，战后只拆城外建筑且不拿仓�
   const a = (await reg(app, '掠夺方', 'p1234')).payload as any;
   const b = (await reg(app, '被掠夺方', 'p1234')).payload as any;
   const va = a.player.villageId, vb = b.player.villageId;
+  activateFields(app, vb);
   await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 5 } });
   const defense = await send(app, 'military.SetRaidDefense', { villageId: vb, enabled: false, troops: {} });
   assert.equal(defense.ok, true);

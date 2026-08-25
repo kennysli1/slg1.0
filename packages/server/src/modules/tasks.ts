@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃，自动解锁（m1-m4 无需酒馆）。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - v1 目标种类：submit_resources（上交资源）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offered / offeredSide / completed*）
@@ -62,6 +62,8 @@ interface TaskInstance {
   acceptedAt: number;
   /** submit_resources：已上交的资源累计。 */
   submitted: Record<string, number>;
+  /** repair_buildings：已修复的建筑 code；每个建筑只计一次。 */
+  repairedBuildings?: string[];
   /** clear_camp：已生成的营地。 */
   camps: TaskCamp[];
   /** clear_camp：已清理的营地数。 */
@@ -205,6 +207,8 @@ export class TasksModule {
 
     // 建筑建成 → 触发带 building_built 触发条件的随机任务（如 宝库→祭祀筹备）
     this.bus.on('building.Built', (evt: DomainEvent) => void this.onBuildingBuilt(evt));
+    // 建筑修复完成 → 推进 repair_buildings 类任务（如新村开局主线 m1）
+    this.bus.on('building.Repaired', (evt: DomainEvent) => void this.onBuildingRepaired(evt));
 
     // 出售/丢弃宝物 → 推进 sell_discard_treasure 任务
     this.bus.on('treasure.SoldDiscarded', (evt: DomainEvent) => void this.onTreasureSoldDiscarded(evt));
@@ -709,6 +713,7 @@ export class TasksModule {
       spawnVillageId: villageId,
       acceptedAt: this.now(),
       submitted: {},
+      repairedBuildings: [],
       camps: [],
       campCleared: 0,
       progress: 0,
@@ -1340,6 +1345,34 @@ export class TasksModule {
     await this.unlockSideQuests(villageId);
   }
 
+  /** 建筑修复完成 → 推进 repair_buildings 目标。全局任务可由任一玩家村庄执行。 */
+  private async onBuildingRepaired(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; kind?: string };
+    const villageId = p.villageId;
+    const kind = p.kind;
+    if (!villageId || !kind) return;
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || q.objective.kind !== 'repair_buildings') continue;
+        if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        const required = q.objective.buildingKinds ?? [];
+        if (!required.includes(kind)) continue;
+        inst.repairedBuildings ??= [];
+        if (inst.repairedBuildings.includes(kind)) continue;
+        inst.repairedBuildings.push(kind);
+        inst.executionVillageId = villageId;
+        this.store.set(COLLECTION, storageVillageId, state);
+        if (required.every((requiredKind) => inst.repairedBuildings?.includes(requiredKind))) {
+          await this.markReady(villageId, code);
+        } else {
+          await this.pushList(villageId);
+        }
+        return;
+      }
+    }
+  }
+
   /** 出售/丢弃宝物 → 推进 sell_discard_treasure 任务的累计计数。 */
   private async onTreasureSoldDiscarded(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { villageId: string; code: string; rarity: string };
@@ -1728,6 +1761,7 @@ export class TasksModule {
     return {
       kind: q.objective.kind,
       resources: q.objective.resources ?? null,
+      buildingKinds: q.objective.buildingKinds ?? null,
       campTemplate: q.objective.campTemplate ?? null,
       minRarity: q.objective.minRarity ?? null,
       count: q.objective.count ?? 0,
@@ -1755,6 +1789,7 @@ export class TasksModule {
       objective,
       rewards: q ? this.serializeRewards(q) : null,
       submitted: { ...inst.submitted },
+      repairedBuildings: [...(inst.repairedBuildings ?? [])],
       required: q?.objective.resources ?? {},
       campCleared: inst.campCleared,
       campTotal: inst.camps.length,

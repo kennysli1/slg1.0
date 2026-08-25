@@ -34,6 +34,9 @@ test('重启后：账号/资源/建筑保留，密码仍可登录，在途建造
     await app.commands.send({ name: 'economy.Grant', from: 't', payload: { villageId: vid, gain: { wood: 500, clay: 500, iron: 500, crop: 500 } } });
     const layout0 = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
     const wood0 = (layout0.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
+    const repair = await app.commands.send({ name: 'building.Repair', from: 't', payload: { villageId: vid, slotId: wood0.slotId } });
+    assert.equal(repair.ok, true, `修复应成功: ${repair.reason ?? ''}`);
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
     const up = await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: vid, slotId: wood0.slotId } });
     assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
 
