@@ -109,11 +109,11 @@ test('拓荒：成功建第二村', async () => {
   const army = (await send(app, 'military.GetArmy', { villageId: vid })).payload as any;
   assert.equal(army.troops?.settler ?? 0, 0);
 
-  // 新村有经济且以 5 人口开局
+  // 新村有经济且至少以 5 人口开局；行军期间人口可能已自然增长。
   const eco = await send(app, 'economy.GetResources', { villageId: branch.id });
   assert.equal(eco.ok, true);
   const branchPop = (await send(app, 'population.GetSnapshot', { villageId: branch.id })).payload as any;
-  assert.equal(Math.round(branchPop.currentPop), 5, '新城初始人口应为5');
+  assert.ok(Math.round(branchPop.currentPop) >= 5, '新城初始人口应至少为5');
 });
 
 test('拓荒：距离过近拒绝', async () => {

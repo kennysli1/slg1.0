@@ -27,8 +27,9 @@ async function seed(app: GameApp) {
     await app.commands.send({ name: 'economy.Grant', from: 't', payload: { villageId: p.villageId, gain: { wood: 500, clay: 500, iron: 500, crop: 500 } } });
     const layout = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: p.villageId } });
     const wood = (layout.payload as any).zones.outer.placed.find((f: any) => f.kind === 'woodcutter');
-    const up = await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: p.villageId, slotId: wood.slotId } });
-    assert.equal(up.ok, true, `升级应成功: ${up.reason ?? ''}`);
+    const repair = await app.commands.send({ name: 'building.Repair', from: 't', payload: { villageId: p.villageId, slotId: wood.slotId } });
+    assert.equal(repair.ok, true, `修复应成功: ${repair.reason ?? ''}`);
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, (t) => { clock = t; });
     return p as { id: string; villageId: string; q: number; r: number; name: string };
   };
   const a = await reg('阿甲', 'romans');
@@ -75,11 +76,12 @@ test('reset:season — 保留账号+地图位置，进度归零', async () => {
     const restoredTile = await app.commands.send({ name: 'world.GetTile', from: 't', payload: { q: a.q, r: a.r } });
     assert.equal((restoredTile.payload as any).tile.refId, a.villageId, 'season 必须先恢复旧村，PvE 不得抢占碰撞坐标');
 
-    // 进度归零：村庄按开局模板重建，资源田回到开局 1 级（升过的那块也被重置）
+    // 进度归零：村庄按开局模板重建，四块资源田回到 0 级受损状态（升过的那块也被重置）
     const vill = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: a.villageId } });
     assert.equal(vill.ok, true);
-    const fields = (vill.payload as any).zones.outer.placed.filter((f: any) => f.producing) as { level: number }[];
-    assert.ok(fields.length > 0 && fields.every((f) => f.level === 1), '所有资源田应回到开局 1 级');
+    const fields = (vill.payload as any).zones.outer.placed.filter((f: any) => ['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(f.kind)) as { level: number; damaged?: boolean; repairTargetLevel?: number }[];
+    assert.equal(fields.length, 4, '重置后应有四块资源田占位');
+    assert.ok(fields.every((f) => f.level === 0 && f.damaged === true && f.repairTargetLevel === 1), '所有资源田应回到开局 0 级受损状态');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

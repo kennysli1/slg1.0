@@ -50,6 +50,15 @@ describe('modifier 覆盖率', () => {
     world.setup(41, 41);
     economy.createVillage(vid);
     building.createVillage(vid, 'romans');
+    const raw = store.get<any>('building', vid)!;
+    for (const p of raw.placed) {
+      if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+        p.level = 1;
+        delete p.repairTargetLevel;
+      }
+    }
+    store.set('building', vid, raw);
+    building.reReportProduction(vid);
     military.createVillage(vid, 'romans');
     treasure.createVillage(vid);
 

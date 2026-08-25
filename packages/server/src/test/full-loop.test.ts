@@ -13,6 +13,16 @@ function freshApp(): GameApp {
   const app = createGameApp({ now: () => clock, manualScheduler: true });
   app.setupWorld();
   app.createVillage('v1', 0, 0, '测试村');
+  // 旧循环测试关注经济/军事链路；新村资源田默认是受损 0 级，这里显式恢复到 1 级测试旧链路。
+  const raw = app.store.get<any>('building', 'v1');
+  for (const p of raw.placed) {
+    if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+      p.level = 1;
+      delete p.repairTargetLevel;
+    }
+  }
+  app.store.set('building', 'v1', raw);
+  app.building.reReportProduction('v1');
   return app;
 }
 const setClock = (t: number) => (clock = t);
@@ -173,6 +183,7 @@ test('军队：训练由服务端稳定选择空闲最高等级队列，并只�
 test('军队：旧存档单训练队列可通过稳定 queueId 展示和取消', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99_999, clay: 99_999, iron: 99_999, crop: 99_999 } });
+  await buildBarracks(app);
   const state = app.store.get<any>('military', 'v1');
   state.training = {
     unit: 'legionnaire', slotId: 'old-slot', remaining: 2, nextDoneAt: clock + 30_000,
@@ -212,6 +223,7 @@ test('军队：未建所需建筑时拒绝训练', async () => {
 
 test('军队：GetArmy 对未解锁兵种下发 lockReason', async () => {
   const app = freshApp();
+  await buildBarracks(app);
   const army = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   const legion = (army.trainable || []).find((u: any) => u.key === 'legionnaire');
   const cavalry = (army.trainable || []).find((u: any) => u.key === 'equimperatoris');

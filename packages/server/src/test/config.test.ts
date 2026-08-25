@@ -25,7 +25,13 @@ test('开局模板：village_templates.csv 展开预置建筑', () => {
   assert.ok(t, '应有罗马模板');
   assert.equal(t.startPlaced.main, 1, '城镇中心 1 级');
   assert.equal(t.startPlaced.rallypoint, 1, '集结点 1 级');
-  assert.equal(t.startPlaced.woodcutter, 1, '伐木场 1 级');
+  assert.equal(t.startPlaced.woodcutter, 0, '伐木场以 0 级受损占位');
+  assert.deepEqual(t.startDamaged, {
+    woodcutter: 1,
+    claypit: 1,
+    ironmine: 1,
+    cropland: 1,
+  }, '四种资源田应可修复至 1 级');
 });
 
 test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', () => {
@@ -61,6 +67,8 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.s3.rewards.reputation, -1, 'S3 完成应从任务效果结算 -1 声望');
   assert.deepEqual(cfg.quests.s3.failureRewards?.treasures, ['secret_note'], 'S3 失败应显示秘密字条');
   assert.equal(cfg.quests.s4.failureRewards?.reputation, -2, 'S4 收纳失败应从任务效果结算 -2 声望');
+  assert.equal(cfg.quests.m1.objective.kind, 'repair_buildings');
+  assert.deepEqual(cfg.quests.m1.objective.buildingKinds, ['woodcutter', 'claypit', 'ironmine', 'cropland']);
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
 });

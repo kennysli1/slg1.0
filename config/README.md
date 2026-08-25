@@ -320,6 +320,7 @@
 | tribe | 部族（语义串 romans/gauls/teutons） |
 | start_placed | 开局预置建筑（含资源田），格式 `code:等级`，多段用 `\|` 分隔，如 `main:1\|rallypoint:1\|woodcutter:1\|claypit:1\|ironmine:1\|cropland:1`。zone 由 buildings.csv 自动归区；开局预置数量不能超过 tcLevel=1 的城内/城外槽位上限 |
 | start_resources | 初始资源覆盖（**可选**），格式 `res:量`，留空则各资源用 `game_constants` 的 `start_resource_amount` |
+| start_damaged | 开局以 0 级受损状态占位、可修复到指定等级的建筑，格式 `code:修复目标等级`，多段用 `\|` 分隔；对应 code 必须同时在 `start_placed` 中为 0 级。 |
 
 > 铁匠铺只承担建筑介绍与繁荣度，不再承载锻造玩法；军事攻防与行军速度加成统一配置在 `research.csv` / `research_effects.csv`。
 

@@ -38,6 +38,8 @@ test('resetWorld: 刷档后 scheduler.pending 为 0（遗留任务被清除）',
   const layout = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
   const wood = (layout.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
   if (wood) {
+    const repair = await app.commands.send({ name: 'building.Repair', from: 't', payload: { villageId: vid, slotId: wood.slotId } });
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
     await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: vid, slotId: wood.slotId } });
   }
 
@@ -76,6 +78,8 @@ test('deletePlayer: 取消该玩家相关的 Scheduler 任务', async () => {
   const layout = await app.commands.send({ name: 'building.GetLayout', from: 't', payload: { villageId: vid } });
   const wood = (layout.payload as any).zones.outer.placed.find((p: any) => p.kind === 'woodcutter');
   if (wood) {
+    const repair = await app.commands.send({ name: 'building.Repair', from: 't', payload: { villageId: vid, slotId: wood.slotId } });
+    await app.scheduler.advanceTo((repair.payload as any).finishAt, setClock);
     await app.commands.send({ name: 'building.Upgrade', from: 't', payload: { villageId: vid, slotId: wood.slotId } });
   }
 

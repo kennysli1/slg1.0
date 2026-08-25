@@ -31,9 +31,9 @@ test('三区布局：开局有城镇中心 + 城内/城外槽位 + 预置资源�
   assert.ok(l.zones.inner.slots > 0, '城内有槽位');
   assert.ok(l.zones.outer.slots > 0, '城外有槽位');
   // 4 种资源田预置在城外
-  const fields = l.zones.outer.placed.filter((p: any) => p.producing);
+  const fields = l.zones.outer.placed.filter((p: any) => ['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind));
   assert.equal(fields.length, 4, '开局 4 种资源田');
-  assert.ok(fields.every((f: any) => f.level === 1), '资源田开局 1 级');
+  assert.ok(fields.every((f: any) => f.level === 0 && f.damaged && f.repairTargetLevel === 1), '资源田开局应为 0 级受损并可修复至 1 级');
   assert.ok(l.queue.capacity >= 2, '开局队列容量≥2');
 });
 
@@ -122,11 +122,11 @@ test('多队列并发：可同时排两条（开局容量2），第三条被拒'
   const cap = l0.queue.capacity;
   assert.ok(cap >= 2, '开局容量应≥2');
   // 用升级已有资源田排队（不占用空槽，纯测队列容量）
-  const fields = l0.zones.outer.placed.filter((p: any) => p.producing);
+  const fields = l0.zones.outer.placed.filter((p: any) => ['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind));
   assert.ok(fields.length >= 3, '需要至少 3 块资源田来测队列');
 
-  const r1 = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: fields[0].slotId });
-  const r2 = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: fields[1].slotId });
+  const r1 = await send(app, 'building.Repair', { villageId: 'v1', slotId: fields[0].slotId });
+  const r2 = await send(app, 'building.Repair', { villageId: 'v1', slotId: fields[1].slotId });
   assert.equal(r1.ok, true, '第一条应入队');
   assert.equal(r2.ok, true, '第二条应入队');
 
@@ -134,7 +134,7 @@ test('多队列并发：可同时排两条（开局容量2），第三条被拒'
   assert.equal(l.queue.items.length, 2, '两条并行');
 
   if (cap === 2) {
-    const r3 = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: fields[2].slotId });
+    const r3 = await send(app, 'building.Repair', { villageId: 'v1', slotId: fields[2].slotId });
     assert.equal(r3.ok, false, '超容量应拒绝');
     assert.equal(r3.reason, 'queue_full');
   }
@@ -175,8 +175,9 @@ test('迁移：旧存档军事建筑从城外归位到城内（reconcileZones）
   // 模拟 CSV 改区前创建的旧存档：兵营被持久化为城外（zone/slotId 冻结在原区）
   const raw = app.store.get('building', 'v1') as any;
   assert.ok(raw, '应有建筑存档');
-  const barracks = raw.placed.find((p: any) => p.kind === 'barracks');
-  assert.ok(barracks, '开局应有兵营');
+  // 兵营不再属于新村固定开局建筑，先注入一条旧存档记录来模拟迁移。
+  const barracks = { slotId: 'outer-9', zone: 'outer', kind: 'barracks', level: 1 };
+  raw.placed.push(barracks);
   barracks.zone = 'outer';
   barracks.slotId = 'outer-9';
   app.store.set('building', 'v1', raw);
@@ -318,7 +319,7 @@ test('战斗破坏：建筑保留在槽位、不可升级，可按累计成本�
   const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
   assert.ok(wood);
   wood.level = 3;
-  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  for (const p of raw.placed) if (p.zone === 'outer') { p.level = p === wood ? 3 : 0; delete p.repairTargetLevel; }
   app.store.set('building', 'v1', raw);
 
   const hit = await send(app, 'building.ApplyBattleDamage', {
@@ -355,7 +356,7 @@ test('战斗拆除：攻城武器可以移除已经被普通部队打到0级的�
   const wood = raw.placed.find((p: any) => p.kind === 'woodcutter');
   assert.ok(wood);
   wood.level = 1;
-  for (const p of raw.placed) if (p.zone === 'outer' && p !== wood) p.level = 0;
+  for (const p of raw.placed) if (p.zone === 'outer') { p.level = p === wood ? 1 : 0; delete p.repairTargetLevel; }
   app.store.set('building', 'v1', raw);
 
   await send(app, 'building.ApplyBattleDamage', {

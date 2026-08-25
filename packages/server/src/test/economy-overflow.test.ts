@@ -12,6 +12,15 @@ function freshApp(): GameApp {
   const app = createGameApp({ now: () => clock, manualScheduler: true });
   app.setupWorld();
   app.createVillage('v1', 0, 0, '测试村');
+  const raw = app.store.get<any>('building', 'v1');
+  for (const p of raw.placed) {
+    if (['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(p.kind)) {
+      p.level = 1;
+      delete p.repairTargetLevel;
+    }
+  }
+  app.store.set('building', 'v1', raw);
+  app.building.reReportProduction('v1');
   return app;
 }
 const setClock = (t: number) => (clock = t);
