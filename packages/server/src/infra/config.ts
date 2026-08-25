@@ -306,6 +306,8 @@ export interface DialogueDef {
   code: string;
   taskCode: string;
   trigger: string;
+  /** 同一对话对象内的顺序，从 1 开始；旧配置缺列时默认为 1。 */
+  segment: number;
   npcName: string;
   npcText: string;
   replies: DialogueReplyDef[];
@@ -651,7 +653,7 @@ export interface GameConfig {
   quests: Record<string, QuestDef>;
   /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
   questGraph: QuestGraphDef;
-  /** 对话目录（dialogues.csv）：按任务 code + trigger 查找可启动的对话。 */
+  /** 对话目录（dialogues.csv）：按任务 code + trigger 查找有序对话段落组。 */
   dialogues: Record<string, DialogueDef>;
   pvpPowerCurve: { maxRatio: number; lootMult: number }[];
 }
@@ -1405,15 +1407,22 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   const dialogues: Record<string, DialogueDef> = {};
   // 旧配置目录可能尚未包含新表；空目录仍可启动，仓库配置则必须通过下方完整校验。
   const dialogueRows = existsSync(p('dialogues.csv')) ? loadCsv(p('dialogues.csv')) : [];
-  assertUniqueRows(dialogueRows, 'dialogues.csv', 'id', 'code');
+  const dialogueKeys = new Set<string>();
   for (const r of dialogueRows) {
     const code = r.code?.trim();
     if (!code) continue;
-    dialogues[code] = {
-      id: num(r.id),
+    const id = num(r.id);
+    const rawSegment = r.segment === undefined || r.segment === '' ? 1 : Number(r.segment);
+    const segment = Number.isFinite(rawSegment) ? Math.floor(rawSegment) : 0;
+    const key = `${code}:${segment}`;
+    if (dialogueKeys.has(key)) throw new Error(`dialogues.csv 存在重复段落：${code}#${segment}`);
+    dialogueKeys.add(key);
+    dialogues[key] = {
+      id,
       code,
       taskCode: r.taskCode?.trim() ?? '',
       trigger: r.trigger?.trim() || 'accept',
+      segment,
       npcName: r.npcName?.trim() ?? '',
       npcText: r.npcText?.trim() ?? '',
       replies: parseDialogueReplies(r.replies ?? ''),
@@ -1821,16 +1830,32 @@ export function validateGameConfig(config: GameConfig): void {
   // 空白的支线接取模板不会阻塞直接接取，主线模板会保留为待弹对话。
   const dialogueCodes = new Set<string>();
   const dialogueTriggers = new Set<string>();
+  const dialogueGroups = new Map<string, DialogueDef[]>();
   for (const d of Object.values(config.dialogues ?? {})) {
-    if (dialogueCodes.has(d.code)) errors.push(`dialogues.csv[${d.code}] code 重复`);
     dialogueCodes.add(d.code);
+    if (!Number.isInteger(d.id) || d.id < 1) errors.push(`dialogues.csv[${d.code}] id 必须为正整数`);
+    if (!Number.isInteger(d.segment) || d.segment < 1) errors.push(`dialogues.csv[${d.code}] segment 必须为正整数`);
     if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
     if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
     dialogueTriggers.add(`${d.taskCode}:${d.trigger}`);
+    const group = dialogueGroups.get(d.code) ?? [];
+    group.push(d);
+    dialogueGroups.set(d.code, group);
     const replyKeys = new Set<string>();
     for (const reply of d.replies) {
       if (replyKeys.has(reply.key)) errors.push(`dialogues.csv[${d.code}] 回复键重复：${reply.key}`);
       replyKeys.add(reply.key);
+    }
+  }
+  for (const [code, group] of dialogueGroups) {
+    group.sort((a, b) => a.segment - b.segment);
+    const first = group[0];
+    for (let i = 0; i < group.length; i++) {
+      const d = group[i];
+      if (d.id !== first.id || d.taskCode !== first.taskCode || d.trigger !== first.trigger) {
+        errors.push(`dialogues.csv[${code}] 同一对话对象的 id/taskCode/trigger 必须一致`);
+      }
+      if (d.segment !== i + 1) errors.push(`dialogues.csv[${code}] 段落必须从 1 连续编号`);
     }
   }
   // 每个主线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
