@@ -2,12 +2,9 @@ id,questCode,phase,kind,params,order
 #稳定效果ID,任务代码,触发阶段,效果类型,参数,同阶段顺序
 e-m1-res,m1,deliver,grant_resources,wood:100|gold:50,1
 e-m2-res,m2,deliver,grant_resources,iron:200|gold:150,1
-e-m3-res,m3,deliver,grant_resources,gold:200,1
-e-m3-token,m3,deliver,grant_treasure,warrior_token,2
-e-m3-pop,m3,deliver,grant_population,5,3
+e-m3-pop,m3,deliver,grant_population,5,1
 e-m4-res,m4,deliver,grant_resources,gold:400|crop:500,1
-e-m5-res,m5,deliver,grant_resources,gold:600,1
-e-m5-pop-growth,m5,deliver,grant_population_growth,10:86400,2
+e-m5-pop-growth,m5,deliver,grant_population_growth,10:86400,1
 e-d1-res,d1,deliver,grant_resources,gold:40,1
 e-d2-res,d2,deliver,grant_resources,gold:80,1
 e-d3-res,d3,deliver,grant_resources,gold:60,1
