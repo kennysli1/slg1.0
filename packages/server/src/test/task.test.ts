@@ -47,7 +47,7 @@ test('建村即自动解锁主线 m1（repair_buildings），不自动接随机'
   assert.deepEqual(p.completedMain, []);
 });
 
-test('修复四块资源田 m1 → 就绪 → 交付后解锁 m2/m3 并发放奖励', async () => {
+test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 并发放奖励', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试2');
   const va = (regRes.payload as any).player.villageId;
@@ -75,8 +75,10 @@ test('修复四块资源田 m1 → 就绪 → 交付后解锁 m2/m3 并发放奖
   const p = st.payload as any;
   assert.ok(p.completedMain.includes('m1'), 'm1 应在 completedMain');
   const activeCodes = p.active.map((a: any) => a.code).sort();
-  assert.ok(activeCodes.includes('m2'), 'm2 应解锁');
-  assert.ok(activeCodes.includes('m3'), 'm3 应解锁');
+  const offeredMainCodes = p.offeredMain.map((a: any) => a.code).sort();
+  assert.ok(!activeCodes.includes('m2'), 'm2 解锁后不应自动激活');
+  assert.ok(!activeCodes.includes('m3'), 'm3 解锁后不应自动激活');
+  assert.deepEqual(offeredMainCodes, ['m2', 'm3'], 'm2/m3 应进入可接取主线提示');
   const after = await send(app, 'economy.GetResources', { villageId: va });
   assert.ok((after.payload as any).resources.gold >= (before.payload as any).resources.gold + 50, 'gold 应 +50');
 });
@@ -87,10 +89,14 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const va = (regRes.payload as any).player.villageId;
   await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
-  // 完成并交付 m1 → m3 解锁并生成营地
+  // 完成并交付 m1 → m3 进入可接取提示；手动接受后才生成营地
   await repairM1Fields(app, va);
   await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
 
+  const offered = await send(app, 'task.GetState', { villageId: va });
+  assert.ok((offered.payload as any).offeredMain.some((item: any) => item.code === 'm3'), 'm3 应先显示可接取');
+  const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm3' });
+  assert.equal(accepted.ok, true, `手动接取 m3 应成功: ${accepted.reason ?? ''}`);
   const st = await send(app, 'task.GetState', { villageId: va });
   const m3 = (st.payload as any).active.find((a: any) => a.code === 'm3');
   assert.ok(m3, 'm3 应处于 active');
@@ -155,7 +161,8 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   const p2 = st2.payload as any;
   assert.ok(p2.completedMain.includes('m3'), 'm3 应已完成');
   assert.ok(!p2.active.find((a: any) => a.code === 'm3'), 'm3 应从 active 移除');
-  assert.ok(p2.active.find((a: any) => a.code === 'm4'), 'm4 应解锁');
+  assert.ok(!p2.active.find((a: any) => a.code === 'm4'), 'm4 解锁后不应自动激活');
+  assert.ok(p2.offeredMain.find((a: any) => a.code === 'm4'), 'm4 应进入可接取主线提示');
 
   // 营地地块应被移除
   const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });

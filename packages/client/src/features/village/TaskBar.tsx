@@ -5,7 +5,7 @@
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
@@ -16,6 +16,7 @@ import { buildingInfo, resInfo, treasureInfo, treasureEffectText } from '../../a
 import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation.js';
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
+import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -434,13 +435,14 @@ function categoryName(type: TaskCategory): string {
 function categoryItems(state: any, type: TaskCategory): { active: any[]; offers: any[] } {
   const active = (state?.active ?? []).filter((task: any) => task.type === type);
   const offers = [
+    ...(type === 'main' ? (state?.offeredMain ?? []) : []),
     ...(type === 'daily' ? (state?.offered ?? []) : []),
     ...(type === 'side' ? (state?.offeredSide ?? []) : []),
   ].filter((task: any) => task.type === type);
   return { active, offers };
 }
 
-function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: any; defaultOpen?: boolean }) {
+function TaskEntry({ task, offer, openState = true, onToggle = () => {} }: { task?: any; offer?: any; openState?: boolean; onToggle?: (event: Event) => void }) {
   const item = task ?? offer;
   if (!item) return null;
   const isOffer = !task;
@@ -459,7 +461,7 @@ function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: an
     await act(req('task.Accept', { code: q.code }), { okToast: '已接取任务' });
   };
   return (
-    <details class="task-menu task-menu--task" open={defaultOpen}>
+    <details class="task-menu task-menu--task" open={openState} onToggle={onToggle}>
       <summary>
         <span class="task-menu-summary-name">{item.name}</span>
         {typeTag(item.type)}
@@ -467,6 +469,7 @@ function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: an
           ? <Tag kind="steel">全局</Tag>
           : item.villageId && <span class="task-card-village">{villageName(item.villageId)}</span>}
         <span class="task-menu-summary-state">{isOffer ? '可接取' : item.ready ? '待领取' : '进行中'}</span>
+        {isOffer && !openState && <span class="task-menu-alert" aria-label="有可接取任务">!</span>}
       </summary>
       <div class="task-menu-task-body">
         {isOffer
@@ -477,19 +480,28 @@ function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: an
   );
 }
 
-function TaskCategoryMenu({ type, state }: { type: TaskCategory; state: any }) {
+function TaskCategoryMenu({ type, state, openState, onToggle, taskOpenState, onTaskToggle }: {
+  type: TaskCategory;
+  state: any;
+  openState: boolean;
+  onToggle: (event: Event) => void;
+  taskOpenState: TaskMenuOpenState;
+  onTaskToggle: (key: string, event: Event) => void;
+}) {
   const { active, offers } = categoryItems(state, type);
   const count = active.length + offers.length;
+  const offerCount = offers.length;
   if (count === 0) return null;
   return (
-    <details class="task-menu task-menu--category" open={count > 0}>
+    <details class="task-menu task-menu--category" open={openState} onToggle={onToggle}>
       <summary>
         <span>{categoryName(type)}</span>
         <span class="task-menu-count">{count}</span>
+        {!openState && offerCount > 0 && <span class="task-menu-alert" aria-label={`${offerCount} 个可接取任务`}>{offerCount}</span>}
       </summary>
       <div class="task-menu-body">
-        {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} />)}
-        {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} />)}
+        {active.map((item) => <TaskEntry key={`active:${item.code}`} task={item} openState={taskOpenState[`task:${item.code}`] ?? true} onToggle={(event) => onTaskToggle(`task:${item.code}`, event)} />)}
+        {offers.map((item) => <TaskEntry key={`offer:${item.code}`} offer={item} openState={taskOpenState[`task:${item.code}`] ?? true} onToggle={(event) => onTaskToggle(`task:${item.code}`, event)} />)}
       </div>
     </details>
   );
@@ -503,7 +515,12 @@ function kingdomObjective(task: any): string {
   return '等待封地领主指令';
 }
 
-function KingdomTaskMenu() {
+function KingdomTaskMenu({ openState, onToggle, taskOpenState, onTaskToggle }: {
+  openState: boolean;
+  onToggle: (event: Event) => void;
+  taskOpenState: TaskMenuOpenState;
+  onTaskToggle: (key: string, event: Event) => void;
+}) {
   tick.value;
   const state = kingdomState.value;
   if (!state) return null;
@@ -524,10 +541,10 @@ function KingdomTaskMenu() {
     : task?.status === 'failed' ? '已过期'
       : task?.status === 'claimed' ? '已领取' : task ? '进行中' : '等待指令';
   return (
-    <details class="task-menu task-menu--category" open>
+    <details class="task-menu task-menu--category" open={openState} onToggle={onToggle}>
       <summary><span>王国任务</span><span class="task-menu-count">{task ? 1 : 0}</span></summary>
       <div class="task-menu-body">
-        <details class="task-menu task-menu--task" open>
+        <details class="task-menu task-menu--task" open={taskOpenState['task:kingdom'] ?? true} onToggle={(event) => onTaskToggle('task:kingdom', event)}>
           <summary>
             <span class="task-menu-summary-name">{state.fiefName}领主的指令</span>
             <Tag kind="gold">王国</Tag>
@@ -566,26 +583,53 @@ function KingdomTaskMenu() {
   );
 }
 
-function TaskScopeMenu({ scope, state, currentVillageId }: { scope: 'global' | 'village'; state: any; currentVillageId?: string }) {
+function TaskScopeMenu({ scope, state, currentVillageId, openState, onMenuToggle, taskOpenState, onTaskToggle }: {
+  scope: 'global' | 'village';
+  state: any;
+  currentVillageId?: string;
+  openState: boolean;
+  onMenuToggle: (key: string, event: Event) => void;
+  taskOpenState: TaskMenuOpenState;
+  onTaskToggle: (key: string, event: Event) => void;
+}) {
   const categories: TaskCategory[] = scope === 'global' ? ['main', 'side', 'daily'] : ['side', 'daily'];
   const count = categories.reduce((total, type) => {
     const { active, offers } = categoryItems(state, type);
     return total + active.length + offers.length;
   }, 0) + (scope === 'global' && kingdomState.value?.task ? 1 : 0);
+  const offerCount = categories.reduce((total, type) => total + categoryItems(state, type).offers.length, 0);
   const label = scope === 'global' ? '全局任务' : '村庄任务';
   const sub = scope === 'global'
     ? '主线、全局支线与全局日常；可从任意村庄执行'
     : `${currentVillageId ? villageName(currentVillageId) : '当前村庄'} · 仅显示本村支线与日常任务`;
   return (
-    <details class="task-menu task-menu--scope" open>
+    <details class="task-menu task-menu--scope" open={openState} onToggle={(event) => onMenuToggle(scope, event)}>
       <summary>
         <span class="task-menu-scope-title">{label}</span>
         <span class="task-menu-scope-sub">{sub}</span>
         <span class="task-menu-count">{count}</span>
+        {!openState && offerCount > 0 && <span class="task-menu-alert" aria-label={`${offerCount} 个可接取任务`}>{offerCount}</span>}
       </summary>
       <div class="task-menu-body task-menu-scope-body">
-        {categories.map((type) => <TaskCategoryMenu key={type} type={type} state={state} />)}
-        {scope === 'global' && <KingdomTaskMenu />}
+        {categories.map((type) => (
+          <TaskCategoryMenu
+            key={type}
+            type={type}
+            state={state}
+            openState={taskOpenState[`${scope}.${type}`] ?? true}
+            onToggle={(event) => onMenuToggle(`${scope}.${type}`, event)}
+            taskOpenState={taskOpenState}
+            onTaskToggle={onTaskToggle}
+          />
+        ))}
+        {scope === 'global' && (
+          <KingdomTaskMenu
+            openState={taskOpenState['global.kingdom'] ?? true}
+            onToggle={(event) => onMenuToggle('global.kingdom', event)}
+            taskOpenState={taskOpenState}
+            onTaskToggle={onTaskToggle}
+          />
+        )}
       </div>
     </details>
   );
@@ -609,6 +653,7 @@ function legacyScopeState(state: any, scope: 'global' | 'village', villageId?: s
     && (!villageId || scope === 'global' || task.villageId === villageId);
   return {
     active: (state?.active ?? []).filter(matches),
+    offeredMain: (state?.offeredMain ?? []).filter(matches),
     offered: (state?.offered ?? []).filter(matches),
     offeredSide: (state?.offeredSide ?? []).filter(matches),
   };
@@ -620,10 +665,42 @@ function TaskBoard({ state }: { state: any }) {
   const villageState = state?.villages?.find((v: any) => v.villageId === currentVillageId)
     ?? state?.village
     ?? legacyScopeState(state, 'village', currentVillageId);
+  const playerId = String(state?.playerId ?? me?.id ?? 'guest');
+  const [prefsPlayerId, setPrefsPlayerId] = useState(playerId);
+  const [openState, setOpenState] = useState<TaskMenuOpenState>(() => readTaskMenuOpenState(playerId));
+  useEffect(() => {
+    if (prefsPlayerId === playerId) return;
+    setPrefsPlayerId(playerId);
+    setOpenState(readTaskMenuOpenState(playerId));
+  }, [playerId, prefsPlayerId]);
+  const setMenuOpen = (key: string, event: Event) => {
+    const open = (event.currentTarget as HTMLDetailsElement).open;
+    setOpenState((prev) => {
+      const next = { ...prev, [key]: open };
+      writeTaskMenuOpenState(playerId, next);
+      return next;
+    });
+  };
   return (
     <section class="task-bar">
-      <TaskScopeMenu scope="global" state={globalState} currentVillageId={currentVillageId} />
-      <TaskScopeMenu scope="village" state={villageState} currentVillageId={currentVillageId} />
+      <TaskScopeMenu
+        scope="global"
+        state={globalState}
+        currentVillageId={currentVillageId}
+        openState={openState.global ?? true}
+        onMenuToggle={setMenuOpen}
+        taskOpenState={openState}
+        onTaskToggle={setMenuOpen}
+      />
+      <TaskScopeMenu
+        scope="village"
+        state={villageState}
+        currentVillageId={currentVillageId}
+        openState={openState.village ?? true}
+        onMenuToggle={setMenuOpen}
+        taskOpenState={openState}
+        onTaskToggle={setMenuOpen}
+      />
     </section>
   );
 }

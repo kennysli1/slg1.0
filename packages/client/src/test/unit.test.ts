@@ -20,6 +20,7 @@ import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -554,5 +555,21 @@ describe('secLeft（收目标时刻）', () => {
 
   it('已过去的时刻返回 0秒', () => {
     assert.equal(secLeft(Date.now() - 10_000), '0秒');
+  });
+});
+
+describe('任务页菜单折叠偏好', () => {
+  it('按玩家保存并恢复一级/二级/三级菜单状态，非法值不污染状态', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+    const state = { global: false, 'global.daily': false, 'task:d1': true };
+    writeTaskMenuOpenState('player-1', state, storage);
+    assert.deepEqual(readTaskMenuOpenState('player-1', storage), state);
+    assert.deepEqual(readTaskMenuOpenState('player-2', storage), {});
+    data.set(taskMenuStorageKey('player-1'), JSON.stringify({ global: 'yes', village: true, nested: 1 }));
+    assert.deepEqual(readTaskMenuOpenState('player-1', storage), { village: true });
   });
 });

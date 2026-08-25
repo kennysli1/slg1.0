@@ -1063,6 +1063,22 @@
   font-size: var(--f-2xs);
   text-align: center;
 }
+.task-menu-alert {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  margin-left: var(--s-1);
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--c-ink);
+  background: var(--status-danger);
+  font-family: var(--ff-num);
+  font-size: var(--f-2xs);
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+}
 .task-menu-scope-body {
   display: flex;
   flex-direction: column;
