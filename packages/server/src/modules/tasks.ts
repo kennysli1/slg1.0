@@ -1188,7 +1188,14 @@ export class TasksModule {
     const villageIds = [...new Set(playerRows.flatMap((p) => (p.villages ?? []).map((v) => String(v.id ?? '')).filter(Boolean)))];
     const existingIds = this.store.all<TaskState>(COLLECTION).map((state) => state.villageId).filter(Boolean);
     const allIds = [...new Set([...existingIds, ...villageIds])];
+    // 旧版本曾出现 task 状态与 pve 任务营地脱节：只遍历 active.camps 会留下孤儿营地。
+    // 全量重置必须以 pve 目录为最终边界，逐个调用 owner 模块的 Remove，连同地图地块一起清理。
+    const targets = await this.commands.send({ name: 'pve.ListTargets', from: TasksModule.NAME, payload: {} });
+    const taskCampIds = targets.ok
+      ? (((targets.payload as any)?.targets ?? []) as Array<{ id?: string; task?: boolean }>).filter((target) => target.task && target.id).map((target) => String(target.id))
+      : [];
     for (const villageId of allIds) this.wipeSingleVillage(villageId);
+    for (const id of taskCampIds) await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
     for (const villageId of villageIds) {
       this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
       await this.unlockMainQuests(villageId);
@@ -1196,7 +1203,7 @@ export class TasksModule {
     }
     return {
       ok: true,
-      payload: { resetPlayers: playerRows.length, resetVillages: villageIds.length, clearedTaskStates: existingIds.length },
+      payload: { resetPlayers: playerRows.length, resetVillages: villageIds.length, clearedTaskStates: existingIds.length, clearedTaskCamps: taskCampIds.length },
     };
   }
 
