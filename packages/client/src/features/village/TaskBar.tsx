@@ -192,6 +192,54 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
     </Modal>
   );
 }
+
+// ── 任务 NPC 对话弹窗 ────────────────────────────────────────────────────────
+function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; close: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const onReply = async (key: string) => {
+    if (busy) return;
+    // “离开”只关闭对话；StartAccept 没有修改任务 offer，之后仍可再次点击接取。
+    if (key === 'leave') {
+      close();
+      return;
+    }
+    if (key !== 'accept') {
+      showToast('该回复暂未绑定任务行为', 'bad');
+      return;
+    }
+    setBusy(true);
+    if (!await ensureTaskExecution(task)) {
+      setBusy(false);
+      return;
+    }
+    await act(req('task.Accept', { code: task.code }), {
+      okToast: '已接取任务',
+      onOk: () => close(),
+    });
+    setBusy(false);
+  };
+
+  return (
+    <Modal title={dialogue.npcName} sub={task.name} onClose={close}>
+      <div class="dialogue-session">
+        <div class="dialogue-npc-text">{dialogue.npcText}</div>
+        <div class="dialogue-replies" aria-label="玩家回复">
+          {(dialogue.replies ?? []).map((reply: any) => (
+            <Btn
+              key={reply.key}
+              variant={reply.key === 'leave' ? 'ghost' : 'primary'}
+              disabled={busy}
+              onClick={() => void onReply(reply.key)}
+            >
+              {reply.label}
+            </Btn>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolean }) {
   const o = task.objective;
   const isMain = task.type === 'main';
@@ -382,6 +430,16 @@ function TaskEntry({ task, offer, defaultOpen = true }: { task?: any; offer?: an
   const isOffer = !task;
   const onAccept = async (q: any) => {
     if (!await ensureTaskExecution(q)) return;
+    const started = await req('task.StartAccept', { code: q.code });
+    if (!started.ok) {
+      await act(Promise.resolve(started), { silent: true });
+      return;
+    }
+    const dialogue = (started.payload as any)?.dialogue;
+    if (dialogue) {
+      openModal((close) => <DialogueModal dialogue={dialogue} task={q} close={close} />, `dialogue-${dialogue.id}`);
+      return;
+    }
     await act(req('task.Accept', { code: q.code }), { okToast: '已接取任务' });
   };
   return (

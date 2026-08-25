@@ -159,6 +159,7 @@ export class TasksModule {
   async init(): Promise<void> {
     this.commands.register('task.GetState', (c: Command) => this.getState(c));
     this.commands.register('task.GetPlayerState', (c: Command) => this.getPlayerState(c));
+    this.commands.register('task.StartAccept', (c: Command) => this.startAccept(c));
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
@@ -461,9 +462,9 @@ export class TasksModule {
     };
   }
 
-  // ── 命令：Accept（接取日常/支线任务）──
-  private async accept(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+  private async validateAccept(villageId: string, code: string): Promise<
+    { ok: true; q: QuestDef; storageVillageId: string; s: TaskState } | CommandResult
+  > {
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
     const storageVillageId = this.storageVillageForQuest(villageId, code);
@@ -477,12 +478,38 @@ export class TasksModule {
       if (info.maxTasks <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
       const dailyActive = Object.values(s.active).filter((i) => i.type === 'daily').length;
       if (dailyActive >= info.maxTasks) return { ok: false, payload: {}, reason: 'too_many_active' };
-      s.offered = s.offered.filter((c) => c !== code);
     } else if (q.type === 'side') {
       if (!s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
-      if (this.sideClaimedByPlayer(villageId, code)) {
-        return { ok: false, payload: {}, reason: 'already_claimed' };
-      }
+      if (this.sideClaimedByPlayer(villageId, code)) return { ok: false, payload: {}, reason: 'already_claimed' };
+    } else {
+      return { ok: false, payload: {}, reason: 'main_auto_activated' };
+    }
+    return { ok: true, q, storageVillageId, s };
+  }
+
+  // ── 命令：StartAccept（检查接取资格并返回可选对话，不改变任务状态）──
+  private async startAccept(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const check = await this.validateAccept(villageId, code);
+    if (!check.ok) return check;
+    const dialogue = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: { taskCode: code, trigger: 'accept' },
+    });
+    if (!dialogue.ok) return dialogue;
+    return { ok: true, payload: { code, dialogue: (dialogue.payload as any).dialogue ?? null } };
+  }
+
+  // ── 命令：Accept（接取日常/支线任务）──
+  private async accept(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const check = await this.validateAccept(villageId, code);
+    if (!('q' in check)) return check;
+    const { q, storageVillageId, s } = check;
+
+    if (q.type === 'daily') {
+      s.offered = s.offered.filter((c) => c !== code);
+    } else if (q.type === 'side') {
       // 先从所有村庄移除 offer，再异步生成任务营地，避免同一玩家多村重复接取。
       this.clearPlayerSideOffers(villageId, code);
     } else {

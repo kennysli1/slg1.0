@@ -418,6 +418,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     publicActions: {
       'task.GetState': { command: 'task.GetState', ownVillage: true, needAuth: true, schema: {} },
       'task.GetPlayerState': { command: 'task.GetPlayerState', needAuth: true, injectPlayerId: true, schema: {} },
+      'task.StartAccept': { command: 'task.StartAccept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Accept': { command: 'task.Accept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Abandon': { command: 'task.Abandon', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.SubmitResources': {

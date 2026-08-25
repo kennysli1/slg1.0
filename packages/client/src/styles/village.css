@@ -1339,3 +1339,12 @@
   color: var(--c-ink-soft);
   white-space: nowrap;
 }
+
+/* NPC 任务对话：文本与回复选项保持在同一层弹窗内，便于以后扩展多分支对话。 */
+.dialogue-session { display: flex; flex-direction: column; gap: var(--s-4); }
+.dialogue-npc-text {
+  white-space: pre-wrap; line-height: 1.8; color: var(--c-text); font-size: 15px;
+  background: var(--c-panel-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+  padding: var(--s-4);
+}
+.dialogue-replies { display: flex; flex-direction: column; gap: var(--s-2); }
