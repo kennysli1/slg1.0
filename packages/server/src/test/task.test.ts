@@ -59,11 +59,16 @@ test('GM 可一次性重置所有玩家和村庄任务进度而保留其他存�
     state.offeredMain = ['m3'];
     app.store.set('task', villageId, state);
   }
+  const orphan = await send(app, 'pve.Spawn', {
+    id: 'taskcamp-orphan-reset', type: 'rats', q: 11, r: 11, task: true, ownerVillageId: villages[0],
+  });
+  assert.equal(orphan.ok, true, '应能建立用于回归的孤儿任务营地');
   const beforeEconomy = app.store.get<any>('economy', villages[0]);
   const reset = await send(app, 'task.GmResetAll', {});
   assert.equal(reset.ok, true);
   assert.equal((reset.payload as any).resetPlayers, 2);
   assert.equal((reset.payload as any).resetVillages, 2);
+  assert.equal((reset.payload as any).clearedTaskCamps, 1, '重置应统计并清理 pve 目录中的任务营地');
   for (const villageId of villages) {
     const state = app.store.get<any>('task', villageId);
     assert.ok(state, '每个玩家村庄都应重新建立任务状态');
@@ -71,6 +76,8 @@ test('GM 可一次性重置所有玩家和村庄任务进度而保留其他存�
     assert.deepEqual(state.completedMain, []);
     assert.deepEqual(state.offeredMain, []);
   }
+  const orphanAfter = await send(app, 'pve.GetTarget', { id: 'taskcamp-orphan-reset' });
+  assert.equal(orphanAfter.ok, false, '与任务状态脱节的孤儿任务营地也必须被移除');
   assert.deepEqual(app.store.get<any>('economy', villages[0]), beforeEconomy, '任务重置不应修改资源存档');
 });
 
