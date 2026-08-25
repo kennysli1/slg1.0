@@ -3,7 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
 import { tab, tick, sessionVersion, villageSwitching } from '../app/store.js';
-import { refreshAll, refreshInitial, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
+import { refreshAll, refreshInitial, handlePush, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
 import { TabBar } from './TabBar.js';
@@ -58,14 +58,14 @@ export function App() {
   function startGame() {
     setPhase('game');
     sessionVersion.value++;
-    // 先让村庄页拿到最小可渲染快照；地图、军队、任务和历史战报在后台补齐。
+    // 先让村庄页拿到最小可渲染快照；地图、军队、任务和历史战报由各页按需加载。
     // 避免首屏同时压入同村串行车道，导致后续请求排队超时。
     void (async () => {
       if (!await refreshInitial()) return;
-      // 历史战报和完整村庄快照都是后台任务，不能阻塞人口/声望已经显示的首屏。
-      void hydrateReports({ notifyOnError: false });
-      // 地图大包进入地图页后再拉，避免它占用同村串行车道拖住军队/任务等快照。
-      void refreshAll({ silent: true, includeArea: false, waitForTasks: false });
+      // 不在登录后立刻压入整包后台刷新。Gateway 对同一村庄的请求使用串行车道，
+      // 一次排队军队/行军/宝物/炼金/王国/任务等十余个请求会把刚点击的页面
+      // 排在队尾，客户端 10 秒超时后就表现为“除了村庄页都加载不出来”。
+      // 各页面现在在挂载时按需拉取自己的快照，页面之间不会互相堵塞。
     })();
   }
 

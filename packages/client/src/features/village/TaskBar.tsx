@@ -5,10 +5,10 @@
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
-import { act, setMapCenter } from '../../app/refresh.js';
+import { act, reloadPlayerTasks, setMapCenter } from '../../app/refresh.js';
 import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
@@ -609,11 +609,20 @@ function TaskBoard({ state }: { state: any }) {
 /** 玩家绑定的独立任务页。 */
 export function TasksScreen() {
   dataVersion.value;
-  playerTaskState.value;
+  const currentVillageId = me?.villageId ?? '';
+  const taskState = playerTaskState.value;
+  const [loaded, setLoaded] = useState(taskState !== null);
+  useEffect(() => {
+    setLoaded(false);
+    void reloadPlayerTasks().finally(() => setLoaded(true));
+  }, [currentVillageId]);
+  if (!loaded && !taskState) {
+    return <div class="loading">任务数据加载中…</div>;
+  }
   return (
     <>
       <VillageList />
-      <TaskBoard state={playerTaskState.value} />
+      <TaskBoard state={taskState} />
     </>
   );
 }

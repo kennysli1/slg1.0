@@ -17,8 +17,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { dataVersion, showToast } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { req } from '../../api.js';
-import { act, refreshAll } from '../../app/refresh.js';
+import { me, req } from '../../api.js';
+import { act, refreshAll, refreshArmySnapshot, refreshMovements } from '../../app/refresh.js';
 import {
   unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
 } from '../../app/config.js';
@@ -35,6 +35,13 @@ import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 export function ArmyScreen() {
   dataVersion.value; // 订阅快照刷新
+
+  const currentVillageId = me?.villageId ?? '';
+  // 登录后不再由 App 预加载整包快照；军队页自己拉驻军和行军数据，
+  // 切村后也会重新请求，避免展示上一座村的旧兵力。
+  useEffect(() => {
+    void Promise.all([refreshArmySnapshot(), refreshMovements()]);
+  }, [currentVillageId]);
 
   const army = getCache().army;
   if (!army) {
