@@ -1,10 +1,11 @@
 id,questCode,kind,params,order
 #稳定目标ID,任务代码,目标类型,目标参数,同任务展示顺序
 o-m1,m1,repair_buildings,woodcutter|claypit|ironmine|cropland,1
-o-m2,m2,submit_resources,wood:500|clay:500|iron:300,1
-o-m3,m3,clear_camp,task_camp:1,1
-o-m4,m4,clear_camp,task_camp:2,1
-o-m5,m5,submit_resources,wood:1000|clay:1000|iron:1000|crop:1000,1
+o-m2,m2,build_buildings,inner:2,1
+o-m3,m3,population_reached,30,1
+o-m4,m4,clear_camp,rats:1,1
+o-m5,m5,explore_tiles,100,1
+o-m6,m6,resource_owned,gold:100,1
 o-d1,d1,submit_resources,wood:150|clay:150,1
 o-d2,d2,clear_camp,task_camp:1,1
 o-d3,d3,submit_resources,crop:300,1

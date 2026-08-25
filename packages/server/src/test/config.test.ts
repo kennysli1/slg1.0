@@ -57,6 +57,11 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.questGraph.lines.main_foundation.entryQuest, 'm1');
   assert.equal(cfg.questGraph.quests.s2.lineCode, 'show_of_force');
   assert.equal(cfg.quests.m1.scope, 'global', '主线必须是全局任务');
+  assert.deepEqual(
+    ['m1', 'm2', 'm3', 'm4', 'm5', 'm6'].map((code) => cfg.quests[code].name),
+    ['初来乍到', '大兴土木', '人丁兴旺', '排除威胁', '那边有什么？', '国库充盈'],
+    '主线名称应使用最新任务目录',
+  );
   assert.equal(cfg.quests.d1.scope, 'village', '每日任务必须绑定村庄');
   assert.equal(cfg.quests.s4.scope, 'village', '当前支线默认绑定村庄');
   assert.ok(cfg.questGraph.objectives.some((x) => x.questCode === 's2' && x.kind === 'carry_flag'));
@@ -69,6 +74,18 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.s4.failureRewards?.reputation, -2, 'S4 收纳失败应从任务效果结算 -2 声望');
   assert.equal(cfg.quests.m1.objective.kind, 'repair_buildings');
   assert.deepEqual(cfg.quests.m1.objective.buildingKinds, ['woodcutter', 'claypit', 'ironmine', 'cropland']);
+  assert.equal(cfg.quests.m2.objective.kind, 'build_buildings');
+  assert.equal(cfg.quests.m2.objective.buildingZone, 'inner');
+  assert.equal(cfg.quests.m2.objective.count, 2);
+  assert.equal(cfg.quests.m3.objective.kind, 'population_reached');
+  assert.equal(cfg.quests.m3.objective.count, 30);
+  assert.equal(cfg.quests.m4.objective.kind, 'clear_camp');
+  assert.equal(cfg.quests.m4.objective.campTemplate, 'rats');
+  assert.equal(cfg.quests.m5.objective.kind, 'explore_tiles');
+  assert.equal(cfg.quests.m5.objective.count, 100);
+  assert.equal(cfg.quests.m6.objective.kind, 'resource_owned');
+  assert.equal(cfg.quests.m6.objective.resourceKey, 'gold');
+  assert.equal(cfg.quests.m6.objective.count, 100);
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
 });
