@@ -1461,6 +1461,7 @@ function render(s){
     h+='<div class="card" data-code="'+esc(c)+'"><b>'+esc(t.name)+'</b> ['+esc(t.type)+'] code='+esc(c);
     if(t.objective&&t.objective.kind==='submit_resources')h+=' 已交:'+esc(JSON.stringify(t.submitted))+' / 需'+esc(JSON.stringify(t.required));
     if(t.objective&&t.objective.kind==='clear_camp')h+=' 营地'+esc(t.campCleared)+'/'+esc(t.campTotal);
+    if(t.objective&&['build_buildings','population_reached','resource_owned','explore_tiles'].indexOf(t.objective.kind)>=0)h+=' 进度'+esc(t.progress||0)+'/'+esc(t.objective.count||0);
     if(t.awaitingNatalieDecision)h+=' <div>当前阶段：2/2 · 等待报告中选择「释放」或「放入宝库」</div>';
     else if(t.natalieDecision==='release')h+=' <div>当前阶段：2/2 · 已释放，等待领取任务奖励</div>';
     h+=' <button class="act" data-act="complete" data-code="'+esc(c)+'">完成</button>';
@@ -1559,6 +1560,10 @@ th{background:#16213e;color:#a0a8c0;text-align:left}
 <div style="font-size:12px;color:#8a7a5a;margin:6px 0 12px;line-height:1.7">
   目标类型 objKind：<b>submit_resources</b>=上交资源(objParam 形如 wood:200|clay:200) ·
   <b>clear_camp</b>=清剿营地(objParam 形如 task_camp:1) ·
+  <b>build_buildings</b>=建造建筑(objParam 形如 inner:2/outer:1) ·
+  <b>population_reached</b>=人口达到数量(objParam 形如 30) ·
+  <b>resource_owned</b>=拥有资源且不扣除(objParam 形如 gold:100) ·
+  <b>explore_tiles</b>=累计探索格数(objParam 形如 100) ·
   <b>sell_discard_treasure</b>=出售/丢弃稀有+宝物(objParam 形如 rare:2，minRarity:count)。<br>
   触发条件 trigger（仅随机任务）：<b>building_built:&lt;建筑code&gt;</b> = 建造完成该建筑后才进酒馆（如 building_built:treasury=建好宝库）；留空=无触发常驻可刷。
 </div>

@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
@@ -70,6 +70,8 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
+  /** build_buildings：接取时已有城内建筑数；目标只累计接取后新建的建筑。 */
+  buildingBaseline?: number;
   /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
   qualifiedMovements?: string[];
   /** carry_flag：已合格且已存回本村的军旗对应出征；每项代表一面可用于交付的军旗。 */
@@ -211,6 +213,10 @@ export class TasksModule {
     this.bus.on('building.Built', (evt: DomainEvent) => void this.onBuildingBuilt(evt));
     // 建筑修复完成 → 推进 repair_buildings 类任务（如新村开局主线 m1）
     this.bus.on('building.Repaired', (evt: DomainEvent) => void this.onBuildingRepaired(evt));
+    // 建筑建成、人口变化、行军视野更新 → 推进门槛类主线目标。
+    this.bus.on('building.Built', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
+    this.bus.on('population.Changed', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
+    this.bus.on('movement.VisionUpdated', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
 
     // 出售/丢弃宝物 → 推进 sell_discard_treasure 任务
     this.bus.on('treasure.SoldDiscarded', (evt: DomainEvent) => void this.onTreasureSoldDiscarded(evt));
@@ -438,16 +444,18 @@ export class TasksModule {
   }
 
   // ── 命令：GetState ──
-  private getState(cmd: Command): CommandResult {
+  private async getState(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
+    await this.syncThresholdObjectives(villageId);
     return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /** 玩家任务板：聚合该玩家全部村庄的任务；执行动作仍携带来源村庄并走原有村庄状态。 */
-  private getPlayerState(cmd: Command): CommandResult {
+  private async getPlayerState(cmd: Command): Promise<CommandResult> {
     const { playerId } = cmd.payload as { playerId?: string };
     if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
     const villageIds = [...new Set(this.playerVillages(playerId))];
+    for (const villageId of villageIds) await this.syncThresholdObjectives(villageId);
     const anchor = villageIds[0];
     const global = anchor ? this.snapshot(anchor, this.ensureState(anchor), 'global') : this.emptySnapshot(anchor ?? null);
     const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId), 'village'));
@@ -579,6 +587,7 @@ export class TasksModule {
 
     this.store.set(COLLECTION, storageVillageId, s);
     await this.activateQuest(villageId, code);
+    await this.syncThresholdObjectives(villageId);
     return { ok: true, payload: { code } };
   }
 
@@ -663,6 +672,7 @@ export class TasksModule {
   // ── 命令：Deliver（手动交付就绪任务，领取奖励）──
   private async deliver(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    await this.syncThresholdObjectives(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -689,7 +699,22 @@ export class TasksModule {
       inst.qualifiedFlagMovements = returned.filter((id) => id !== picked);
     }
     const rewards = await this.completeQuest(villageId, code);
-    return { ok: true, payload: { code, type: q.type, rewards } };
+    // 交付对话与奖励同一响应返回。模板默认为空，因此不会改变现有领取流程；
+    // GM 填写后客户端会在奖励明细中展示 NPC 对话，且不会再次执行任务逻辑。
+    const rewardVillageId = (rewards as any)?.rewardVillageId ?? villageId;
+    const dialogue = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: { taskCode: code, trigger: 'deliver', villageName: this.villageName(rewardVillageId) },
+    });
+    return {
+      ok: true,
+      payload: {
+        code,
+        type: q.type,
+        rewards,
+        dialogue: dialogue.ok ? (dialogue.payload as any)?.dialogue ?? null : null,
+      },
+    };
   }
 
   /** 目标已达成 → 标记就绪可交付（不自动发奖），并推送给客户端。 */
@@ -740,6 +765,66 @@ export class TasksModule {
     else if (q.type === 'side') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
+  }
+
+  /**
+   * 门槛类目标统一从各自 owner 模块读取结果快照，不复制建筑、人口、资源或战争迷雾状态。
+   * 这些目标是“拥有/累计”而不是提交消耗；达到门槛后只标记 ready，仍需玩家手动交付。
+   */
+  private async syncThresholdObjectives(villageId: string): Promise<void> {
+    if (!villageId) return;
+    const storageIds = [...new Set(this.playerTaskStorageIds(villageId, 'm1'))];
+    for (const storageVillageId of storageIds) {
+      const state = this.ensureState(storageVillageId);
+      let changed = false;
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || inst.readyToDeliver) continue;
+        const kind = q.objective.kind;
+        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles') continue;
+        const sourceVillageId = q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId;
+        let current = 0;
+        if (kind === 'build_buildings') {
+          const layout = await this.commands.send({ name: 'building.GetLayout', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+          const zone = q.objective.buildingZone ?? 'inner';
+          const placed = ((layout.payload as any)?.zones?.[zone]?.placed ?? []) as Array<{ level?: number; demolishing?: boolean }>;
+          const builtNow = placed.filter((p) => Number(p.level) >= 1 && !p.demolishing).length;
+          // “建造”是接取后的行为，不把开局已有建筑算入目标；进度保持单调，
+          // 即使之后拆除建筑，已经完成的建造也不会倒退。
+          if (inst.buildingBaseline === undefined) {
+            inst.buildingBaseline = builtNow;
+            changed = true;
+          }
+          current = Math.max(0, builtNow - inst.buildingBaseline);
+        } else if (kind === 'population_reached') {
+          const pop = await this.commands.send({ name: 'population.GetSnapshot', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+          current = Math.max(0, Math.floor(Number((pop.payload as any)?.totalPop) || Number((pop.payload as any)?.currentPop) || 0));
+        } else if (kind === 'resource_owned') {
+          const resources = await this.commands.send({ name: 'economy.GetResources', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+          current = Math.max(0, Number((resources.payload as any)?.resources?.[q.objective.resourceKey ?? '']) || 0);
+        } else {
+          const playerId = this.villageOwner(sourceVillageId);
+          if (playerId) {
+            const explored = await this.commands.send({ name: 'vision.GetExploredCount', from: TasksModule.NAME, payload: { playerId } });
+            current = Math.max(0, Math.floor(Number((explored.payload as any)?.count) || 0));
+          }
+        }
+        const target = q.objective.count ?? 1;
+        const nextProgress = kind === 'build_buildings'
+          ? Math.max(inst.progress ?? 0, current)
+          : current;
+        if (nextProgress !== (inst.progress ?? 0)) {
+          inst.progress = nextProgress;
+          changed = true;
+        }
+        if (nextProgress >= target) {
+          inst.executionVillageId = sourceVillageId;
+          this.store.set(COLLECTION, storageVillageId, state);
+          await this.markReady(sourceVillageId, code);
+        }
+      }
+      if (changed) this.store.set(COLLECTION, storageVillageId, state);
+    }
   }
 
   private queueDialogue(storageVillageId: string, taskCode: string, trigger: string, villageId: string): void {
@@ -1768,6 +1853,8 @@ export class TasksModule {
       kind: q.objective.kind,
       resources: q.objective.resources ?? null,
       buildingKinds: q.objective.buildingKinds ?? null,
+      buildingZone: q.objective.buildingZone ?? null,
+      resourceKey: q.objective.resourceKey ?? null,
       campTemplate: q.objective.campTemplate ?? null,
       minRarity: q.objective.minRarity ?? null,
       count: q.objective.count ?? 0,
@@ -1800,6 +1887,7 @@ export class TasksModule {
       campCleared: inst.campCleared,
       campTotal: inst.camps.length,
       progress: inst.progress ?? 0,
+      buildingBaseline: inst.buildingBaseline ?? null,
       awaitingReturn: inst.qualifiedMovements?.length ?? 0,
       deliverableFlags: inst.qualifiedFlagMovements?.length ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),

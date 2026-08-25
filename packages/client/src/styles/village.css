@@ -1358,6 +1358,8 @@
 
 /* NPC 任务对话：文本与回复选项保持在同一层弹窗内，便于以后扩展多分支对话。 */
 .dialogue-session { display: flex; flex-direction: column; gap: var(--s-4); }
+.task-delivery-dialogue { margin-top: var(--s-4); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--c-panel-2); }
+.dialogue-npc-name { color: var(--gold); font-weight: 700; }
 .dialogue-npc-text {
   white-space: pre-wrap; line-height: 1.8; color: var(--c-text); font-size: 15px;
   background: var(--c-panel-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm);

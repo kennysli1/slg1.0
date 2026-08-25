@@ -6,6 +6,13 @@ id,code,taskCode,trigger,npcName,npcText,replies
 4,m3_accept,m3,accept,,,
 5,m4_accept,m4,accept,,,
 6,m5_accept,m5,accept,,,
+12,m6_accept,m6,accept,,,
+18,m1_deliver,m1,deliver,,,
+13,m2_deliver,m2,deliver,,,
+14,m3_deliver,m3,deliver,,,
+15,m4_deliver,m4,deliver,,,
+16,m5_deliver,m5,deliver,,,
+17,m6_deliver,m6,deliver,,,
 7,s1_accept,s1,accept,,,accept:接受任务|leave:离开
 8,s2_accept,s2,accept,,,accept:接受任务|leave:离开
 9,s4_accept,s4,accept,,,accept:接受任务|leave:离开

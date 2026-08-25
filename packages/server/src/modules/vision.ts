@@ -22,6 +22,7 @@ export class VisionModule {
     this.commands.register('vision.Reveal', (c) => this.reveal(c));
     this.commands.register('vision.ForgetReveal', (c) => this.forgetReveal(c));
     this.commands.register('vision.GetVisibleTiles', (c) => this.getVisibleTiles(c));
+    this.commands.register('vision.GetExploredCount', (c) => this.getExploredCount(c));
     this.commands.register('vision.GetObservers', (c) => this.getObservers(c));
   }
 
@@ -76,6 +77,20 @@ export class VisionModule {
       }
     }
     return { ok: true, payload: { tiles } };
+  }
+
+  /** 返回玩家累计已探索格数；当前城镇/行军视野中的格子也计入，供任务进度使用。 */
+  private async getExploredCount(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    const sources = await this.sourcesFor(playerId);
+    if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const { W, H } = await this.worldDimensions();
+    const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
+    const count = new Set(Object.keys(state.explored));
+    for (let r = 0; r < H; r++) for (let q = 0; q < W; q++) {
+      if (sources.some((s) => hexDistanceWrapped({ q, r }, s, W, H) <= s.radius)) count.add(`${q},${r}`);
+    }
+    return { ok: true, payload: { count: count.size } };
   }
 
   /** 行军每到一格即把它当刻视野内的地块写为已探索，保证玩家不打开地图也不会丢探索进度。 */

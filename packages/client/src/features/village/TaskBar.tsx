@@ -48,6 +48,10 @@ function objText(task: any): string {
   const o = task.objective;
   if (o.kind === 'submit_resources') return '上交资源';
   if (o.kind === 'repair_buildings') return `修复资源田（${(o.buildingKinds ?? []).map((kind: string) => buildingInfo(kind).name).join('、')}）`;
+  if (o.kind === 'build_buildings') return `建造城内建筑 ×${o.count}`;
+  if (o.kind === 'population_reached') return `主城人口达到 ${o.count}`;
+  if (o.kind === 'resource_owned') return `主城拥有${resInfo(o.resourceKey).name} ${o.count}`;
+  if (o.kind === 'explore_tiles') return `累计探索地图 ${o.count} 格`;
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
@@ -173,7 +177,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
 }
 
 // ── 交付奖励弹窗 ───────────────────────────────────────────────────────────────
-function RewardModal({ task, rewards, close }: { task: any; rewards: any; close: () => void }) {
+function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
   const res = rewards?.resources ?? null;
   const tres: string[] = rewards?.treasures ?? [];
   const hasRes = res && Object.keys(res).length > 0;
@@ -187,6 +191,12 @@ function RewardModal({ task, rewards, close }: { task: any; rewards: any; close:
       <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation }} label="本次获得" />
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
+      )}
+      {dialogue && (dialogue.npcName || dialogue.npcText) && (
+        <div class="dialogue-session task-delivery-dialogue">
+          {dialogue.npcName && <div class="dialogue-npc-name">{dialogue.npcName}</div>}
+          {dialogue.npcText && <div class="dialogue-npc-text">{dialogue.npcText}</div>}
+        </div>
       )}
       <div class="modal-foot">
         <Btn variant="primary" onClick={close}>收下</Btn>
@@ -279,7 +289,9 @@ function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolea
       await act(req('task.Deliver', { code: task.code }), {
       okToast: '任务完成',
       onOk: (payload) => {
-        openModal((close) => <RewardModal task={task} rewards={payload?.rewards} close={close} />, `task-reward-${task.code}`);
+        openModal((close) => (
+          <RewardModal task={task} rewards={payload?.rewards} dialogue={payload?.dialogue} close={close} />
+        ), `task-reward-${task.code}`);
       },
       });
     })();
@@ -329,6 +341,19 @@ function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolea
             })}
           </div>
           <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
+        </div>
+      )}
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles') && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
+              当前进度 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)}
+            </span>
+            {o.kind === 'build_buildings' && <span class="task-prog-hint">主城城内已建成建筑</span>}
+            {o.kind === 'population_reached' && <span class="task-prog-hint">主城总人口（含军队人口）</span>}
+            {o.kind === 'resource_owned' && <span class="task-prog-hint">不消耗资源，只检查主城当前拥有量</span>}
+            {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
+          </div>
         </div>
       )}
       {o.kind === 'clear_camp' && (

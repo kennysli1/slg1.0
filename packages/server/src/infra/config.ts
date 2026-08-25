@@ -144,7 +144,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -153,6 +153,12 @@ export interface QuestObjective {
   resources?: Record<string, number>;
   /** repair_buildings：必须完成修复的建筑 code 列表；每个建筑只计一次。 */
   buildingKinds?: string[];
+  /** build_buildings：在指定区域新建 count 栋建筑；当前主线使用 inner（城内）。 */
+  buildingZone?: 'inner' | 'outer';
+  /** population_reached：人口总量达到 count。 */
+  /** resource_owned：拥有指定资源 count；不扣除资源。 */
+  resourceKey?: string;
+  /** explore_tiles：累计已探索格数达到 count（包含城镇视野）。 */
   /** clear_camp：PvE 营地模板 code（pve_targets.csv）+ 需清理的数量。完全真实化——会在地图上生成真实营地。 */
   campTemplate?: string;
   /** sell_discard_treasure：累计出售/丢弃 count 个 minRarity 及以上品质的宝物（minRarity ∈ common/rare/epic/legendary）。 */
@@ -1304,6 +1310,17 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         buildingKinds: row.params.split('|').map((kind) => kind.trim()).filter(Boolean),
       };
     }
+    if (row.kind === 'build_buildings') {
+      const [buildingZone, count] = row.params.split(':');
+      return { kind: row.kind, buildingZone: (buildingZone?.trim() || 'inner') as 'inner' | 'outer', count: Math.max(1, num(count, 1)) };
+    }
+    if (row.kind === 'population_reached' || row.kind === 'explore_tiles') {
+      return { kind: row.kind, count: Math.max(1, num(row.params, 1)) };
+    }
+    if (row.kind === 'resource_owned') {
+      const [resourceKey, count] = row.params.split(':');
+      return { kind: row.kind, resourceKey: resourceKey?.trim(), count: Math.max(1, num(count, 1)) };
+    }
     if (row.kind === 'clear_camp') { const [campTemplate, count] = row.params.split(':'); return { kind: row.kind, campTemplate: campTemplate?.trim(), count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'sell_discard_treasure') { const [minRarity, count] = row.params.split(':'); return { kind: row.kind, minRarity: minRarity?.trim() || 'rare', count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'carry_flag') { const [flagCode, minTroops] = row.params.split(':'); return { kind: row.kind, flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) }; }
@@ -1702,7 +1719,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1721,6 +1738,14 @@ export function validateGameConfig(config: GameConfig): void {
       const kinds = q.objective.buildingKinds ?? [];
       if (!kinds.length) errors.push(`quests.csv[${q.code}] repair_buildings 必须指定建筑列表(objParam)`);
       for (const kind of kinds) if (!config.buildings[kind]) errors.push(`quests.csv[${q.code}] repair_buildings 建筑 ${kind} 不在 buildings.csv`);
+    } else if (q.objective.kind === 'build_buildings') {
+      if (q.objective.buildingZone !== 'inner' && q.objective.buildingZone !== 'outer') errors.push(`quests.csv[${q.code}] build_buildings 区域必须是 inner/outer`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] build_buildings 数量必须≥1`);
+    } else if (q.objective.kind === 'population_reached' || q.objective.kind === 'explore_tiles') {
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 数量必须≥1`);
+    } else if (q.objective.kind === 'resource_owned') {
+      if (!q.objective.resourceKey || !resourceKeys.has(q.objective.resourceKey)) errors.push(`quests.csv[${q.code}] resource_owned 资源 ${q.objective.resourceKey} 不在 resources.csv`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] resource_owned 数量必须≥1`);
     } else if (q.objective.kind === 'clear_camp') {
       const tmpl = q.objective.campTemplate;
       if (!tmpl || !config.pveTemplates[tmpl]) errors.push(`quests.csv[${q.code}] clear_camp 模板 ${tmpl} 不在 pve_targets.csv`);
@@ -1783,15 +1808,27 @@ export function validateGameConfig(config: GameConfig): void {
   // GM 可先建立空白模板（npcName/npcText/replies 均为空），填完后热重载即可生效；
   // 空白的支线接取模板不会阻塞直接接取，主线模板会保留为待弹对话。
   const dialogueCodes = new Set<string>();
+  const dialogueTriggers = new Set<string>();
   for (const d of Object.values(config.dialogues ?? {})) {
     if (dialogueCodes.has(d.code)) errors.push(`dialogues.csv[${d.code}] code 重复`);
     dialogueCodes.add(d.code);
     if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
     if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
+    dialogueTriggers.add(`${d.taskCode}:${d.trigger}`);
     const replyKeys = new Set<string>();
     for (const reply of d.replies) {
       if (replyKeys.has(reply.key)) errors.push(`dialogues.csv[${d.code}] 回复键重复：${reply.key}`);
       replyKeys.add(reply.key);
+    }
+  }
+  // 每个主线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
+  // 但缺行会让新主线无法在两处挂接对话，因此在配置阶段直接阻止发布。
+  for (const q of Object.values(config.quests)) {
+    if (q.type !== 'main') continue;
+    for (const trigger of ['accept', 'deliver']) {
+      if (!dialogueTriggers.has(`${q.code}:${trigger}`)) {
+        errors.push(`主线任务 ${q.code} 缺少 dialogues.csv ${trigger} 对话模板`);
+      }
     }
   }
 

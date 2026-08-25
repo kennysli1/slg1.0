@@ -83,13 +83,59 @@ test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 
   assert.ok((after.payload as any).resources.gold >= (before.payload as any).resources.gold + 50, 'gold 应 +50');
 });
 
-test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发锁定宝物', async () => {
+test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 检查主城金币而非扣除', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务门槛测试');
+  const va = (regRes.payload as any).player.villageId;
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
+  await tick();
+  await repairM1Fields(app, va);
+  await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+
+  const acceptedM2 = await send(app, 'task.Accept', { villageId: va, code: 'm2' });
+  assert.equal(acceptedM2.ok, true, 'm2 应可手动接取');
+  const first = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  const second = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(first.ok, true, '第一栋城内建筑应可建造');
+  assert.equal(second.ok, true, '第二栋城内建筑应可建造');
+  await app.scheduler.advanceTo(Math.max((first.payload as any).finishAt, (second.payload as any).finishAt), setClock);
+  const afterBuild = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const m2 = afterBuild.active.find((item: any) => item.code === 'm2');
+  assert.ok(m2?.ready, '两栋城内建筑完成后 m2 应就绪');
+  assert.equal(m2.progress, 2, 'm2 进度应为 2/2');
+  await send(app, 'task.Deliver', { villageId: va, code: 'm2' });
+
+  const acceptedM5 = await send(app, 'task.Accept', { villageId: va, code: 'm5' });
+  assert.equal(acceptedM5.ok, true, 'm5 应可手动接取');
+  const exploredAtStart = await send(app, 'vision.GetExploredCount', { playerId: (regRes.payload as any).player.id });
+  assert.ok((exploredAtStart.payload as any).count > 0, '城镇初始视野应计入已探索格数');
+  const vision = app.store.get<any>('vision', (regRes.payload as any).player.id) ?? { playerId: (regRes.payload as any).player.id, explored: {} };
+  for (let i = 0; i < 110; i++) vision.explored[`${i % 96},${Math.floor(i / 96)}`] ??= { q: i % 96, r: Math.floor(i / 96), kind: 'empty' };
+  app.store.set('vision', vision.playerId, vision);
+  const afterExplore = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const m5 = afterExplore.active.find((item: any) => item.code === 'm5');
+  assert.ok(m5?.ready, '累计探索达到 100 格后 m5 应就绪');
+  assert.ok(m5.progress >= 100, 'm5 应记录累计探索进度');
+  await send(app, 'task.Deliver', { villageId: va, code: 'm5' });
+
+  const acceptedM6 = await send(app, 'task.Accept', { villageId: va, code: 'm6' });
+  assert.equal(acceptedM6.ok, true, 'm6 应可手动接取');
+  const afterGold = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const m6 = afterGold.active.find((item: any) => item.code === 'm6');
+  assert.ok(m6?.ready, '主城拥有至少 100 金币时 m6 应立即就绪');
+  const beforeDeliver = (await send(app, 'economy.GetResources', { villageId: va })).payload as any;
+  await send(app, 'task.Deliver', { villageId: va, code: 'm6' });
+  const afterDeliver = (await send(app, 'economy.GetResources', { villageId: va })).payload as any;
+  assert.ok(afterDeliver.resources.gold >= beforeDeliver.resources.gold, 'm6 目标检查不应扣除金币');
+});
+
+test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试3');
   const va = (regRes.payload as any).player.villageId;
   await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
-  // 完成并交付 m1 → m3 进入可接取提示；手动接受后才生成营地
+  // 完成并交付 m1 → m3 进入可接取提示；手动接受后检查主城人口门槛。
   await repairM1Fields(app, va);
   await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
 
@@ -97,11 +143,28 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   assert.ok((offered.payload as any).offeredMain.some((item: any) => item.code === 'm3'), 'm3 应先显示可接取');
   const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm3' });
   assert.equal(accepted.ok, true, `手动接取 m3 应成功: ${accepted.reason ?? ''}`);
+  const pop = app.store.get<any>('population', va);
+  assert.ok(pop, '应存在主城人口状态');
+  pop.hardCap = 30;
+  pop.currentPop = 30;
+  app.store.set('population', va, pop);
   const st = await send(app, 'task.GetState', { villageId: va });
   const m3 = (st.payload as any).active.find((a: any) => a.code === 'm3');
   assert.ok(m3, 'm3 应处于 active');
-  assert.equal(m3.campTotal, 1, 'm3 应生成 1 个营地');
-  const camp = m3.camps[0];
+  assert.equal(m3.progress, 30, 'm3 应记录主城人口进度');
+  assert.equal(m3.ready, true, '主城人口达到 30 后 m3 应就绪');
+  await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
+
+  const offeredM4 = await send(app, 'task.GetState', { villageId: va });
+  assert.ok((offeredM4.payload as any).offeredMain.some((item: any) => item.code === 'm4'), 'm4 应在 m3 交付后进入可接取');
+  const acceptedM4 = await send(app, 'task.Accept', { villageId: va, code: 'm4' });
+  assert.equal(acceptedM4.ok, true, `手动接取 m4 应成功: ${acceptedM4.reason ?? ''}`);
+  const stM4 = await send(app, 'task.GetState', { villageId: va });
+  const m4 = (stM4.payload as any).active.find((a: any) => a.code === 'm4');
+  assert.ok(m4, 'm4 应处于 active');
+  assert.equal(m4.campTotal, 1, 'm4 应生成 1 个附近老鼠窝强度营地');
+  assert.equal(m4.objective.campTemplate, 'rats', 'm4 营地模板应为 rats');
+  const camp = m4.camps[0];
   assert.ok(camp && camp.id, '营地应有 id 与坐标');
   const campId = camp.id;
   let latestMapUpdate: any;
@@ -147,30 +210,27 @@ test('clear_camp 主线 m3 战斗清空营地后就绪；交付后完成并发�
   // 战斗后就绪，但未交付前不完成、不移除营地、不发宝物
   const st1 = await send(app, 'task.GetState', { villageId: va });
   const p1 = st1.payload as any;
-  const m3a = p1.active.find((a: any) => a.code === 'm3');
-  assert.ok(m3a && m3a.ready === true, 'm3 战斗后应就绪可交付');
-  assert.ok(!p1.completedMain.includes('m3'), '未交付 m3 不应完成');
+  const m4a = p1.active.find((a: any) => a.code === 'm4');
+  assert.ok(m4a && m4a.ready === true, 'm4 战斗后应就绪可交付');
+  assert.ok(!p1.completedMain.includes('m4'), '未交付 m4 不应完成');
   assert.deepEqual(latestMapUpdate?.camps, [], '已清理营地不得继续出现在 TaskMapUpdated 地图标记中');
   stopWatchingTaskMap();
 
-  // 交付 m3 → 完成 + 移除营地 + 发宝物 + 解锁 m4
-  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
-  assert.equal(dv.ok, true, `交付 m3 应成功: ${dv.reason ?? ''}`);
+  // 交付 m4 → 完成 + 移除营地
+  const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm4' });
+  assert.equal(dv.ok, true, `交付 m4 应成功: ${dv.reason ?? ''}`);
 
   const st2 = await send(app, 'task.GetState', { villageId: va });
   const p2 = st2.payload as any;
-  assert.ok(p2.completedMain.includes('m3'), 'm3 应已完成');
-  assert.ok(!p2.active.find((a: any) => a.code === 'm3'), 'm3 应从 active 移除');
-  assert.ok(!p2.active.find((a: any) => a.code === 'm4'), 'm4 解锁后不应自动激活');
-  assert.ok(p2.offeredMain.find((a: any) => a.code === 'm4'), 'm4 应进入可接取主线提示');
+  assert.ok(p2.completedMain.includes('m4'), 'm4 应已完成');
+  assert.ok(!p2.active.find((a: any) => a.code === 'm4'), 'm4 应从 active 移除');
 
   // 营地地块应被移除
   const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tileAfter.ok, false, '营地地块应已被清除');
 
-  // 任务宝物与普通宝物共用栏位；有空位时应进入宝物栏，而不绕过栏位锁定保存。
-  const tr = app.store.get<any>('treasure', va);
-  assert.ok(tr && [...tr.town, ...tr.treasury].includes('warrior_token'), 'warrior_token 应进入宝物栏');
+  const afterM4 = await send(app, 'economy.GetResources', { villageId: va });
+  assert.ok((afterM4.payload as any).resources.gold >= 500, 'm4 交付应发放金币奖励');
 });
 
 test('任务营地战败不推进任务，营地仍在地图上等待再次出征', async () => {
@@ -181,13 +241,13 @@ test('任务营地战败不推进任务，营地仍在地图上等待再次出�
   app.store.set('task', va, {
     villageId: va, completedMain: [], completedSide: [], abandonedSide: [], offered: [], offeredSide: [], firedTriggers: [],
     active: {
-      m3: {
-        code: 'm3', type: 'main', acceptedAt: clock, spawnVillageId: va,
+      m4: {
+        code: 'm4', type: 'main', acceptedAt: clock, spawnVillageId: va,
         submitted: {}, camps: [{ id: campId, q: 6, r: 6, cleared: false }], campCleared: 0, progress: 0,
       },
     },
   });
-  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'task_camp', q: 6, r: 6, task: true, ownerVillageId: va });
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'rats', q: 6, r: 6, task: true, ownerVillageId: va });
   assert.equal(spawned.ok, true, `测试任务营地生成失败: ${spawned.reason ?? ''}`);
 
   // 模拟战败链路中旧逻辑已经清掉实体；战败事件本身不应推进任务，且应自动补回营地。
@@ -204,10 +264,10 @@ test('任务营地战败不推进任务，营地仍在地图上等待再次出�
   const tile = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tile.ok, true, '战败后任务营地地块必须仍存在');
   const state = await send(app, 'task.GetState', { villageId: va });
-  const m3 = (state.payload as any).active.find((item: any) => item.code === 'm3');
-  assert.ok(m3, '战败后任务仍应 active');
-  assert.equal(m3.campCleared, 0, '战败不应推进清营进度');
-  assert.equal(m3.camps[0].cleared, false, '战败不应标记营地已清理');
+  const m4 = (state.payload as any).active.find((item: any) => item.code === 'm4');
+  assert.ok(m4, '战败后任务仍应 active');
+  assert.equal(m4.campCleared, 0, '战败不应推进清营进度');
+  assert.equal(m4.camps[0].cleared, false, '战败不应标记营地已清理');
 });
 
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
