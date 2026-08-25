@@ -71,8 +71,10 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
   const res: Record<string, number> = rewards.resources ?? {};
   const tres: string[] = rewards.treasures ?? [];
   const reputation = Number(rewards.reputation) || 0;
+  const population = Number(rewards.population) || 0;
+  const populationGrowth = rewards.populationGrowth ?? null;
   const resEntries = Object.entries(res);
-  if (resEntries.length === 0 && tres.length === 0 && reputation === 0) return null;
+  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && !populationGrowth) return null;
   return (
     <div class="task-card-reward">
       <span class="task-reward-label">{label}</span>
@@ -98,6 +100,16 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
         {reputation !== 0 && (
           <span class="task-reward-chip task-reward-chip--reputation">
             声望 {reputation > 0 ? '+' : ''}{reputation}
+          </span>
+        )}
+        {population !== 0 && (
+          <span class="task-reward-chip task-reward-chip--population">
+            人口 {population > 0 ? '+' : ''}{fmt(population)}
+          </span>
+        )}
+        {populationGrowth && Number(populationGrowth.percent) > 0 && (
+          <span class="task-reward-chip task-reward-chip--population-growth">
+            人口增长 +{fmt(populationGrowth.percent)}%（{Math.round(Number(populationGrowth.durationSec) / 3600)}小时）
           </span>
         )}
       </div>
@@ -183,9 +195,11 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasRes = res && Object.keys(res).length > 0;
   const hasTres = tres.length > 0;
   const hasReputation = Number(rewards?.reputation) !== 0;
+  const hasPopulation = Number(rewards?.population) !== 0;
+  const hasPopulationGrowth = !!rewards?.populationGrowth;
   return (
     <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation
+      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
       <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation }} label="本次获得" />

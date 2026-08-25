@@ -47,6 +47,25 @@ test('建村即自动解锁主线 m1（repair_buildings），不自动接随机'
   assert.deepEqual(p.completedMain, []);
 });
 
+test('M1 隐藏 success 兜底：没有仍需修复的1级资源田即可交付', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务隐藏条件');
+  const va = (regRes.payload as any).player.villageId;
+  const building = app.store.get<any>('building', va);
+  assert.ok(building, '应存在建筑状态');
+  for (const item of building.placed) {
+    if (m1Fields.includes(item.kind)) {
+      item.level = 1;
+      delete item.repairTargetLevel;
+    }
+  }
+  app.store.set('building', va, building);
+  const state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const m1 = state.active.find((item: any) => item.code === 'm1');
+  assert.equal(m1?.ready, true, '隐藏条件满足时 M1 应可直接领取');
+  assert.equal(m1?.objective.kind, 'repair_buildings', '玩家仍只看到原有修复目标');
+});
+
 test('GM 可一次性重置所有玩家和村庄任务进度而保留其他存档', async () => {
   const app = freshApp();
   const a = (await reg(app, '任务重置甲')).payload as any;
@@ -150,7 +169,17 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   const m5 = afterExplore.active.find((item: any) => item.code === 'm5');
   assert.ok(m5?.ready, '累计探索达到 100 格后 m5 应就绪');
   assert.ok(m5.progress >= 100, 'm5 应记录累计探索进度');
-  await send(app, 'task.Deliver', { villageId: va, code: 'm5' });
+  const m5Delivery = await send(app, 'task.Deliver', { villageId: va, code: 'm5' });
+  assert.deepEqual(
+    { percent: (m5Delivery.payload as any).rewards.populationGrowth.percent, durationSec: (m5Delivery.payload as any).rewards.populationGrowth.durationSec },
+    { percent: 10, durationSec: 86400 },
+    'M5 交付应返回 +10%/24小时人口增长奖励',
+  );
+  const growthSnapshot = await send(app, 'population.GetSnapshot', { villageId: va });
+  assert.equal((growthSnapshot.payload as any).taskGrowthBuff.mult, 1.1, 'M5 交付后应启用 1.1 倍临时增长');
+  await app.scheduler.advanceTo(clock + 86_400_000, setClock);
+  const expiredSnapshot = await send(app, 'population.GetSnapshot', { villageId: va });
+  assert.equal((expiredSnapshot.payload as any).taskGrowthBuff, null, 'M5 临时增长奖励 24 小时后应失效');
 
   const acceptedM6 = await send(app, 'task.Accept', { villageId: va, code: 'm6' });
   assert.equal(acceptedM6.ok, true, 'm6 应可手动接取');
@@ -179,7 +208,7 @@ test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', 
   assert.equal(accepted.ok, true, `手动接取 m3 应成功: ${accepted.reason ?? ''}`);
   const pop = app.store.get<any>('population', va);
   assert.ok(pop, '应存在主城人口状态');
-  pop.hardCap = 30;
+  pop.hardCap = 40;
   pop.currentPop = 30;
   app.store.set('population', va, pop);
   const st = await send(app, 'task.GetState', { villageId: va });
@@ -187,7 +216,10 @@ test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', 
   assert.ok(m3, 'm3 应处于 active');
   assert.equal(m3.progress, 30, 'm3 应记录主城人口进度');
   assert.equal(m3.ready, true, '主城人口达到 30 后 m3 应就绪');
-  await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
+  const m3Delivery = await send(app, 'task.Deliver', { villageId: va, code: 'm3' });
+  assert.equal((m3Delivery.payload as any).rewards.population, 5, 'M3 交付应实际增加 5 人口');
+  const afterM3Pop = await send(app, 'population.GetSnapshot', { villageId: va });
+  assert.equal((afterM3Pop.payload as any).currentPop, 35, 'M3 人口奖励应加入平民人口');
 
   const offeredM4 = await send(app, 'task.GetState', { villageId: va });
   assert.ok((offeredM4.payload as any).offeredMain.some((item: any) => item.code === 'm4'), 'm4 应在 m3 交付后进入可接取');

@@ -178,6 +178,10 @@ export interface QuestRewards {
   resources?: Record<string, number>;
   treasures?: string[];
   reputation?: number;
+  /** grant_population：交付时直接加入的平民人口数量。 */
+  population?: number;
+  /** grant_population_growth：人口增长速率临时倍率；percent=10 表示 +10%。 */
+  populationGrowth?: { percent: number; durationSec: number };
 }
 
 /** 多阶段任务的分支结局奖励（例如 S4 释放/收纳）。 */
@@ -685,6 +689,34 @@ function parseResourceList(s: string): Record<string, number> | null {
     if (code) out[code.trim()] = num(amt);
   }
   return out;
+}
+
+/**
+ * 解析任务人口增长奖励参数。
+ * GM/CSV 统一推荐 `percent:durationSec`（例如 `10:86400` = +10% 持续24小时），
+ * 同时兼容带字段名的 `percent:10|durationSec:86400`，便于人工审查时不混淆列含义。
+ */
+function parsePopulationGrowthReward(s: string): { percent: number; durationSec: number } | null {
+  if (!s?.trim()) return null;
+  const parts = s.split('|').map((v) => v.trim()).filter(Boolean);
+  let percent = 0;
+  let durationSec = 0;
+  if (parts.some((part) => part.includes(':') && ['percent', 'durationSec'].includes(part.slice(0, part.indexOf(':'))))) {
+    for (const part of parts) {
+      const separator = part.indexOf(':');
+      if (separator <= 0) continue;
+      const key = part.slice(0, separator).trim();
+      const value = num(part.slice(separator + 1), 0);
+      if (key === 'percent') percent = value;
+      if (key === 'durationSec') durationSec = value;
+    }
+  } else {
+    const [rawPercent, rawDuration] = parts[0]?.split(':') ?? [];
+    percent = num(rawPercent, 0);
+    durationSec = num(rawDuration, 0);
+  }
+  if (!Number.isFinite(percent) || !Number.isFinite(durationSec) || percent <= 0 || durationSec <= 0) return null;
+  return { percent, durationSec };
 }
 
 /** 解析 dialogues.csv 的 replies：accept:接受任务|leave:离开。 */
@@ -1345,10 +1377,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
     const treasures = rows.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
     const reputation = rows.filter((x) => x.kind === 'adjust_reputation').reduce((sum, x) => sum + num(x.params, 0), 0);
+    const population = rows.filter((x) => x.kind === 'grant_population').reduce((sum, x) => sum + Math.max(0, num(x.params, 0)), 0);
+    const populationGrowth = rows
+      .map((x) => x.kind === 'grant_population_growth' ? parsePopulationGrowthReward(x.params) : null)
+      .find((value): value is { percent: number; durationSec: number } => !!value);
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
     if (reputation !== 0) out.reputation = reputation;
+    if (population > 0) out.population = population;
+    if (populationGrowth) out.populationGrowth = populationGrowth;
     return out;
   };
   const choiceRewardsOf = (rows: QuestEffectDef[]): QuestChoiceReward[] => {
@@ -1811,6 +1849,10 @@ export function validateGameConfig(config: GameConfig): void {
   for (const row of config.questGraph.conditions) {
     if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_conditions.csv[${row.id}] 任务不存在：${row.questCode}`);
     if (!row.kind) errors.push(`quest_conditions.csv[${row.id}] 缺少 kind`);
+    if (!['offer', 'accept', 'success', 'failure'].includes(row.phase)) errors.push(`quest_conditions.csv[${row.id}] phase 无效：${row.phase}`);
+    if (row.phase === 'success' && row.kind === 'no_damaged_resource_level' && !row.value) {
+      errors.push(`quest_conditions.csv[${row.id}] no_damaged_resource_level 必须指定资源田代码列表`);
+    }
   }
   for (const row of config.questGraph.objectives) {
     if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_objectives.csv[${row.id}] 任务不存在：${row.questCode}`);
@@ -1819,6 +1861,12 @@ export function validateGameConfig(config: GameConfig): void {
   for (const row of config.questGraph.effects) {
     if (!graphQuestCodes.has(row.questCode)) errors.push(`quest_effects.csv[${row.id}] 任务不存在：${row.questCode}`);
     if (!row.kind) errors.push(`quest_effects.csv[${row.id}] 缺少 kind`);
+    if (row.kind === 'grant_population' && num(row.params, 0) <= 0) {
+      errors.push(`quest_effects.csv[${row.id}] grant_population 参数必须是正数`);
+    }
+    if (row.kind === 'grant_population_growth' && !parsePopulationGrowthReward(row.params)) {
+      errors.push(`quest_effects.csv[${row.id}] grant_population_growth 参数必须是 percent:durationSec（如 10:86400）`);
+    }
   }
   for (const row of config.questGraph.edges) {
     if (!graphQuestCodes.has(row.fromQuest)) errors.push(`quest_edges.csv[${row.id}] 起点任务不存在：${row.fromQuest}`);

@@ -53,6 +53,10 @@ interface PopulationState {
   reputationGrowthMult?: number;
   /** 科技人口增长倍率（乘数，默认 1；由 research 模块推送，无环）。 */
   techGrowthMult?: number;
+  /** 任务奖励提供的临时人口增长倍率（乘数，默认 1）。 */
+  taskGrowthMult?: number;
+  /** 任务人口增长倍率到期时间（epoch ms）；空值表示没有临时任务加成。 */
+  taskGrowthBuffExpiresAt?: number;
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
   treasureGoldMult?: number;
   /** 正负声望对金币税的最终倍率（正声望会降低税收，默认 1）。 */
@@ -109,6 +113,8 @@ export class PopulationModule {
     this.commands.register('population.SetReputationGrowthMult', (c) => this.setReputationGrowthMult(c));
     this.commands.register('population.SetReputationGoldTaxMult', (c) => this.setReputationGoldTaxMult(c));
     this.commands.register('population.SetConscriptionMult', (c) => this.setConscriptionMult(c));
+    this.commands.register('population.GrantPopulation', (c) => this.grantPopulation(c));
+    this.commands.register('population.ApplyTaskGrowthBuff', (c) => this.applyTaskGrowthBuff(c));
 
     // 建筑建造/升级 → 硬上限或主城等级可能变化 → 重算繁荣度并广播
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -142,6 +148,7 @@ export class PopulationModule {
       if (s.treasureGrowthMult === undefined) s.treasureGrowthMult = 1;
       if (s.reputationGrowthMult === undefined) s.reputationGrowthMult = 1;
       if (s.techGrowthMult === undefined) s.techGrowthMult = 1;
+      if (s.taskGrowthMult === undefined) s.taskGrowthMult = 1;
       if (s.treasureGoldMult === undefined) s.treasureGoldMult = 1;
       if (s.reputationGoldTaxMult === undefined) s.reputationGoldTaxMult = 1;
       if (s.tribe === undefined) s.tribe = 'romans';
@@ -159,6 +166,13 @@ export class PopulationModule {
         );
       }
       this.store.set(COLLECTION, s.villageId, s);
+      if (s.taskGrowthBuffExpiresAt && s.taskGrowthBuffExpiresAt > this.now()) {
+        this.scheduleTaskGrowthExpiry(s.villageId, s.taskGrowthBuffExpiresAt);
+      } else if (s.taskGrowthBuffExpiresAt) {
+        s.taskGrowthBuffExpiresAt = undefined;
+        s.taskGrowthMult = 1;
+        this.store.set(COLLECTION, s.villageId, s);
+      }
       // 派生硬上限是建筑等级的纯函数，重启时一律从 building 重算（旧存档缺字段也能补全）
       void this.refreshHardCap(s.villageId);
     }
@@ -307,7 +321,7 @@ export class PopulationModule {
   /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。再乘宝物人口增长倍率。 */
   private growthRateRaw(s: PopulationState): number {
     const base = (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel;
-    return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1) * (s.reputationGrowthMult ?? 1);
+    return base * (s.treasureGrowthMult ?? 1) * (s.techGrowthMult ?? 1) * (s.reputationGrowthMult ?? 1) * (s.taskGrowthMult ?? 1);
   }
 
   /** 每小时有效增长速率（不按 popCeiling 剩余缺口截断）。粮荒期间不增长（否则会与减员相互抵消）。 */
@@ -419,6 +433,10 @@ export class PopulationModule {
       growthPerHour: Math.max(0, Math.round(growth * (1 - (s.storedOverflowRatio ?? 0)))),
       /** 原始增长速率（未夹紧到硬上限缺口）：达上限时仍展示人口流动潜力。 */
       potentialGrowthPerHour: Math.round(this.growthRateRaw(s) * (1 - (s.storedOverflowRatio ?? 0))),
+      /** 任务提供的临时人口增长奖励；仅在有效期内显示。 */
+      taskGrowthBuff: s.taskGrowthBuffExpiresAt && s.taskGrowthBuffExpiresAt > this.now()
+        ? { mult: s.taskGrowthMult ?? 1, expiresAt: s.taskGrowthBuffExpiresAt }
+        : null,
       /** 本部族最大动员比例（士兵占总人口上限）；用于前端展示/校验。 */
       mobilizeCap: this.mobilizeCap(s),
       /** 繁荣度满值阈值（平民占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
@@ -833,5 +851,69 @@ export class PopulationModule {
     s.conscriptionBonus = Number.isFinite(bonus) ? bonus : 0;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /** 任务奖励直接增加平民人口；人口仍受当前村可用人口上限约束。 */
+  private async grantPopulation(cmd: Command): Promise<CommandResult> {
+    const { villageId, amount } = cmd.payload as { villageId: string; amount: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const requested = Math.max(0, Math.floor(Number(amount) || 0));
+    if (requested <= 0) return { ok: true, payload: { requested: 0, applied: 0 } };
+    await this.settle(s);
+    const available = Math.max(0, this.popCeiling(s) - s.currentPop);
+    const applied = Math.min(requested, Math.floor(available));
+    if (applied <= 0) return { ok: true, payload: { requested, applied: 0 } };
+    s.currentPop += applied;
+    await this.reportToEconomy(s);
+    this.store.set(COLLECTION, villageId, s);
+    await this.bus.emit({
+      name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
+      payload: { ...this.publicPayload(s), event: 'reward', delta: applied },
+    } as DomainEvent);
+    return { ok: true, payload: { requested, applied } };
+  }
+
+  /** 任务奖励提供临时人口增长倍率；到期由 Scheduler 清理，重启后 resume 会恢复剩余计时。 */
+  private async applyTaskGrowthBuff(cmd: Command): Promise<CommandResult> {
+    const { villageId, percent, durationSec } = cmd.payload as { villageId: string; percent: number; durationSec: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const pct = Number(percent);
+    const duration = Math.floor(Number(durationSec));
+    if (!Number.isFinite(pct) || pct <= 0 || !Number.isFinite(duration) || duration <= 0) {
+      return { ok: false, payload: {}, reason: 'invalid_growth_buff' };
+    }
+    await this.settle(s);
+    const expiresAt = this.now() + duration * 1000;
+    s.taskGrowthMult = 1 + pct / 100;
+    s.taskGrowthBuffExpiresAt = expiresAt;
+    this.store.set(COLLECTION, villageId, s);
+    this.scheduleTaskGrowthExpiry(villageId, expiresAt);
+    return { ok: true, payload: { percent: pct, durationSec: duration, expiresAt } };
+  }
+
+  private scheduleTaskGrowthExpiry(villageId: string, expiresAt: number): void {
+    const owner = `population:task-growth:${villageId}`;
+    this.scheduler.cancelByOwner(owner);
+    this.scheduler.schedule(
+      Math.max(0, expiresAt - this.now()),
+      () => { void this.expireTaskGrowthBuff(villageId, expiresAt); },
+      owner,
+      `village:${villageId}`,
+    );
+  }
+
+  private async expireTaskGrowthBuff(villageId: string, expiresAt: number): Promise<void> {
+    const s = this.load(villageId);
+    if (!s || s.taskGrowthBuffExpiresAt !== expiresAt) return;
+    await this.settle(s);
+    s.taskGrowthMult = 1;
+    s.taskGrowthBuffExpiresAt = undefined;
+    this.store.set(COLLECTION, villageId, s);
+    await this.bus.emit({
+      name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
+      payload: { ...this.publicPayload(s), event: 'taskGrowthExpired' },
+    } as DomainEvent);
   }
 }
