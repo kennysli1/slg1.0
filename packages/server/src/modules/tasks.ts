@@ -464,6 +464,7 @@ export class TasksModule {
   private async getState(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     await this.syncThresholdObjectives(villageId);
+    await this.syncSuccessConditions(villageId);
     return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
@@ -472,7 +473,10 @@ export class TasksModule {
     const { playerId } = cmd.payload as { playerId?: string };
     if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
     const villageIds = [...new Set(this.playerVillages(playerId))];
-    for (const villageId of villageIds) await this.syncThresholdObjectives(villageId);
+    for (const villageId of villageIds) {
+      await this.syncThresholdObjectives(villageId);
+      await this.syncSuccessConditions(villageId);
+    }
     const anchor = villageIds[0];
     const global = anchor ? this.snapshot(anchor, this.ensureState(anchor), 'global') : this.emptySnapshot(anchor ?? null);
     const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId), 'village'));
@@ -690,6 +694,7 @@ export class TasksModule {
   private async deliver(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     await this.syncThresholdObjectives(villageId);
+    await this.syncSuccessConditions(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -747,6 +752,45 @@ export class TasksModule {
     await this.pushMap(villageId);
   }
 
+  /**
+   * 任务图 success 条件是隐藏的运行时兜底条件，不序列化到玩家任务卡。
+   * 当前用于测试账号的 M1：没有任何仍需修复到 1 级的资源田时，
+   * 与原有“四块资源田均已修复”目标二选一即可交付。
+   */
+  private async successConditionMet(villageId: string, code: string): Promise<boolean> {
+    const rows = this.config.questGraph.conditions.filter((row) => row.questCode === code && row.phase === 'success');
+    if (!rows.length) return false;
+    const q = this.quest(code);
+    const sourceVillageId = q?.scope === 'global' ? this.anchorVillage(villageId) : villageId;
+    for (const row of rows) {
+      if (row.kind !== 'no_damaged_resource_level') continue;
+      const kinds = row.value.split('|').map((kind) => kind.trim()).filter(Boolean);
+      // 旧存档/测试夹具可能没有完整的建筑队列字段；隐藏兜底条件不能阻断
+      // 正常任务板读取。完整建筑状态仍按正常路径校验，异常状态视为条件未满足。
+      let layout: CommandResult;
+      try {
+        layout = await this.commands.send({ name: 'building.GetLayout', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+      } catch {
+        continue;
+      }
+      if (!layout.ok) continue;
+      const zones = ((layout.payload as any)?.zones ?? {}) as Record<string, { placed?: Array<{ kind?: string; repairTargetLevel?: number }> }>;
+      const placed = Object.values(zones).flatMap((zone) => zone?.placed ?? []);
+      const damagedLevel = placed.some((building) => kinds.includes(String(building.kind ?? '')) && Number(building.repairTargetLevel) === 1);
+      if (!damagedLevel) return true;
+    }
+    return false;
+  }
+
+  private async syncSuccessConditions(villageId: string): Promise<void> {
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        if (inst.readyToDeliver || this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
+      }
+    }
+  }
+
   // ── 激活任务（m1 自动 / 其余任务手动接取共用）──
   private async activateQuest(villageId: string, code: string): Promise<void> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
@@ -776,6 +820,7 @@ export class TasksModule {
     } else if (q.objective.kind === 'deliver_to_npc') {
       await this.spawnNpcVillage(villageId, s, inst);
     }
+    if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
     // 仅建村自动激活的 m1 展示一次自动对话；手动接取的主线由 StartAccept 返回接取对话。
     // 对话定义可为空，GM 填写后仍可通过未消费的 pending 记录热生效。
     if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
@@ -904,7 +949,7 @@ export class TasksModule {
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; rewardVillageId?: string } | null> {
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; rewardVillageId?: string } | null> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -919,11 +964,30 @@ export class TasksModule {
     }
     this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
 
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
     // 资源奖励
     if (q.rewards.resources && Object.keys(q.rewards.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: q.rewards.resources } });
       granted.resources = { ...q.rewards.resources };
+    }
+    if (q.rewards.population && q.rewards.population > 0) {
+      const population = await this.commands.send({
+        name: 'population.GrantPopulation', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, amount: q.rewards.population },
+      });
+      if (population.ok) granted.population = Number((population.payload as any)?.applied) || 0;
+    }
+    if (q.rewards.populationGrowth) {
+      const growth = await this.commands.send({
+        name: 'population.ApplyTaskGrowthBuff', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, percent: q.rewards.populationGrowth.percent, durationSec: q.rewards.populationGrowth.durationSec },
+      });
+      if (growth.ok) {
+        granted.populationGrowth = {
+          ...q.rewards.populationGrowth,
+          expiresAt: Number((growth.payload as any)?.expiresAt) || undefined,
+        };
+      }
     }
     if (q.rewards.reputation) {
       await this.commands.send({
@@ -1481,6 +1545,13 @@ export class TasksModule {
     const villageId = p.villageId;
     const kind = p.kind;
     if (!villageId || !kind) return;
+    // 隐藏 success 兜底条件也随建筑变更重算；不会写入玩家可见目标文本。
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        if (inst.readyToDeliver || this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
+      }
+    }
     for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
       for (const [code, inst] of Object.entries(state.active)) {
         const q = this.quest(code);
@@ -1972,6 +2043,8 @@ export class TasksModule {
       resources: rewards?.resources ?? null,
       treasures: rewards?.treasures ?? [],
       reputation: rewards?.reputation ?? 0,
+      population: rewards?.population ?? 0,
+      populationGrowth: rewards?.populationGrowth ?? null,
     };
   }
 

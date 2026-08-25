@@ -86,6 +86,9 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m6.objective.kind, 'resource_owned');
   assert.equal(cfg.quests.m6.objective.resourceKey, 'gold');
   assert.equal(cfg.quests.m6.objective.count, 100);
+  assert.equal(cfg.quests.m3.rewards.population, 5, 'M3 应奖励 5 人口');
+  assert.deepEqual(cfg.quests.m5.rewards.populationGrowth, { percent: 10, durationSec: 86400 }, 'M5 应奖励 +10% 人口增长24小时');
+  assert.ok(cfg.questGraph.conditions.some((x) => x.id === 'c-m1-clean' && x.phase === 'success' && x.kind === 'no_damaged_resource_level'), 'M1 应有隐藏 success 兜底条件');
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
 });

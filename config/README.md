@@ -366,7 +366,7 @@
 |----|------|
 | id | 稳定条件 ID |
 | questCode | 所属任务代码 |
-| phase | 当前支持 `offer`（出现条件）；预留 `accept` / `success` / `failure` 供条件审查 |
+| phase | `offer`（出现条件）；`accept` / `success` / `failure` 可用于运行时条件审查。`success` 条件不会自动显示在玩家任务目标卡；例如 `no_damaged_resource_level` 可作为隐藏测试兜底 |
 | group | 同组条件的组合语义；当前填 `all` |
 | kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20` |
 
@@ -385,7 +385,7 @@
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
 | phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
-| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token` |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时） |
 | order | 同阶段的执行顺序 |
 
 ### quest_edges.csv — 关系边
