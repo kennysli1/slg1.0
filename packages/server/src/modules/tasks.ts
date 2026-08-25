@@ -7,14 +7,14 @@
  * 设计要点（来自策划）：
  *  - 任务会给接了该任务的玩家在地图上显示专属内容；任务专属宝物不可出售/遗弃/丢失/超时。
  *  - 城内建筑「酒馆」用于接取日常任务：酒馆升级使日常任务刷新更频繁，且可同时接取的任务数变多。
- *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃，自动解锁（m1-m4 无需酒馆）。
+ *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
  *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
- *   task.GetState       → 完整快照（active / offered / offeredSide / completed*）
- *   task.Accept        → 接取日常(酒馆)/支线(任务栏)任务
+ *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
+ *   task.Accept        → 接取主线（M1 除外）/日常(酒馆)/支线(任务栏)任务
  *   task.Abandon       → 放弃日常/支线任务（主线不可放弃）
  *   task.SubmitResources → 上交资源推进 submit_resources 类任务
  *
@@ -123,8 +123,10 @@ interface TaskState {
   completedSide: string[];
   /** 已放弃的支线任务 code（一次性，永久不再出现）。 */
   abandonedSide: string[];
-  /** 进行中任务：code → 实例（主线自动激活 + 接取的日常/支线）。 */
+  /** 进行中任务：code → 实例（m1 自动激活，其余任务手动接取）。 */
   active: Record<string, TaskInstance>;
+  /** 已满足前置、等待玩家手动接取的主线任务 code。 */
+  offeredMain: string[];
   /** 酒馆当前展示、未接取的日常任务 code。 */
   offered: string[];
   /** 已触发、可接取的支线任务 code（不占酒馆，直接在任务栏展示）。 */
@@ -263,9 +265,9 @@ export class TasksModule {
     this.store.delete(COLLECTION, villageId);
   }
 
-  // ── 建村：初始化 + 自动解锁主线 ──
+  // ── 建村：初始化 + M1 自动解锁 ──
   createVillage(villageId: string): void {
-    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
+    const s: TaskState = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offeredMain: [], offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
     this.store.set(COLLECTION, villageId, s);
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
@@ -275,13 +277,14 @@ export class TasksModule {
   private ensureState(villageId: string): TaskState {
     let s = this.store.get<TaskState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
+      s = { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offeredMain: [], offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [] };
       this.store.set(COLLECTION, villageId, s);
     }
     if (!Array.isArray(s.completedMain)) s.completedMain = [];
     if (!Array.isArray(s.completedSide)) s.completedSide = [];
     if (!Array.isArray(s.abandonedSide)) s.abandonedSide = [];
     if (!s.active || typeof s.active !== 'object') s.active = {};
+    if (!Array.isArray(s.offeredMain)) s.offeredMain = [];
     if (!Array.isArray(s.offered)) s.offered = [];
     if (!Array.isArray(s.offeredSide)) s.offeredSide = [];
     if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
@@ -312,6 +315,7 @@ export class TasksModule {
     s.completedSide = s.completedSide.map(remapCode);
     s.abandonedSide = s.abandonedSide.map(remapCode);
     s.offered = s.offered.map(remapCode);
+    s.offeredMain = s.offeredMain.map(remapCode);
     s.offeredSide = s.offeredSide.map(remapCode);
     for (const old of Object.keys(s.active)) {
       const neu = remapCode(old);
@@ -465,6 +469,10 @@ export class TasksModule {
         const code = String(item.code ?? '');
         if (!offeredByCode.has(code)) offeredByCode.set(code, item);
       }
+      for (const item of ((snap.offeredMain as Record<string, unknown>[] | undefined) ?? [])) {
+        const code = String(item.code ?? '');
+        if (!offeredByCode.has(`main:${code}`)) offeredByCode.set(`main:${code}`, item);
+      }
       for (const item of (snap.offeredSide as Record<string, unknown>[])) {
         const code = String(item.code ?? '');
         if (!offeredSideByCode.has(code)) offeredSideByCode.set(code, item);
@@ -485,7 +493,8 @@ export class TasksModule {
         villages,
         global,
         active: [...activeByCode.values()],
-        offered: [...offeredByCode.values()],
+        offered: [...offeredByCode.values()].filter((item) => (item as any).type !== 'main'),
+        offeredMain: [...offeredByCode.values()].filter((item) => (item as any).type === 'main'),
         offeredSide: [...offeredSideByCode.values()],
         completedMain: [...completedMain],
         completedSide: [...completedSide],
@@ -515,7 +524,8 @@ export class TasksModule {
       if (!s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
       if (this.sideClaimedByPlayer(villageId, code)) return { ok: false, payload: {}, reason: 'already_claimed' };
     } else {
-      return { ok: false, payload: {}, reason: 'main_auto_activated' };
+      if (code === 'm1') return { ok: false, payload: {}, reason: 'main_auto_activated' };
+      if (!s.offeredMain.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
     }
     return { ok: true, q, storageVillageId, s };
   }
@@ -563,8 +573,8 @@ export class TasksModule {
       // 先从所有村庄移除 offer，再异步生成任务营地，避免同一玩家多村重复接取。
       this.clearPlayerSideOffers(villageId, code);
     } else {
-      // 主线自动激活，不走接取
-      return { ok: false, payload: {}, reason: 'main_auto_activated' };
+      if (code === 'm1') return { ok: false, payload: {}, reason: 'main_auto_activated' };
+      s.offeredMain = s.offeredMain.filter((c) => c !== code);
     }
 
     this.store.set(COLLECTION, storageVillageId, s);
@@ -695,7 +705,7 @@ export class TasksModule {
     await this.pushMap(villageId);
   }
 
-  // ── 激活任务（主线自动 / 随机接取共用）──
+  // ── 激活任务（m1 自动 / 其余任务手动接取共用）──
   private async activateQuest(villageId: string, code: string): Promise<void> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
@@ -724,9 +734,9 @@ export class TasksModule {
     } else if (q.objective.kind === 'deliver_to_npc') {
       await this.spawnNpcVillage(villageId, s, inst);
     }
-    // 主线自动激活时展示“接取”对话；支线接取后展示可选的后续对话。
+    // 仅建村自动激活的 m1 展示一次自动对话；手动接取的主线由 StartAccept 返回接取对话。
     // 对话定义可为空，GM 填写后仍可通过未消费的 pending 记录热生效。
-    if (q.type === 'main') this.queueDialogue(storageVillageId, code, 'accept', villageId);
+    if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
     else if (q.type === 'side') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
@@ -1080,17 +1090,21 @@ export class TasksModule {
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
-  // ── 主线自动解锁（科技树式前置）──
+  // ── 主线解锁（m1 自动激活，其余进入手动接取列表）──
   private async unlockMainQuests(villageId: string): Promise<void> {
     for (const q of Object.values(this.config.quests)) {
       if (q.type !== 'main') continue;
       const storageVillageId = this.storageVillageForQuest(villageId, q.code);
       const s = this.ensureState(storageVillageId);
       if (s.completedMain.includes(q.code)) continue;
-      if (s.active[q.code]) continue;
+      if (s.active[q.code] || s.offeredMain.includes(q.code)) continue;
       if (this.prereqsMet(villageId, q.requires)) {
         try {
-          await this.activateQuest(villageId, q.code);
+          if (q.code === 'm1') await this.activateQuest(villageId, q.code);
+          else {
+            s.offeredMain.push(q.code);
+            this.store.set(COLLECTION, storageVillageId, s);
+          }
         } catch { /* 忽略单条失败，继续其它 */ }
       }
     }
@@ -1659,7 +1673,7 @@ export class TasksModule {
 
   // ── 序列化 + 推送 ──
   private emptySnapshot(villageId: string | null): Record<string, unknown> {
-    return { villageId, active: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [], pendingDialogues: [] };
+    return { villageId, active: [], offeredMain: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [], pendingDialogues: [] };
   }
 
   /** 当前村任务页快照：本村 village 任务 + 玩家锚点上的 global 任务。 */
@@ -1670,6 +1684,7 @@ export class TasksModule {
     return {
       villageId,
       active: [...(global.active as unknown[]), ...(local.active as unknown[])],
+      offeredMain: [...(global.offeredMain as unknown[])],
       offered: [...(global.offered as unknown[]), ...(local.offered as unknown[])],
       offeredSide: [...(global.offeredSide as unknown[]), ...(local.offeredSide as unknown[])],
       completedMain: [...(global.completedMain as string[])],
@@ -1703,6 +1718,11 @@ export class TasksModule {
     return {
       villageId,
       active,
+      offeredMain: s.offeredMain
+        .filter(include)
+        .map((code) => this.quest(code))
+        .filter((q): q is QuestDef => !!q)
+        .map((q) => this.serializeOffer(q, villageId)),
       offered,
       offeredSide,
       completedMain: s.completedMain.filter(include),

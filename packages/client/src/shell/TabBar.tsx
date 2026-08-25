@@ -19,14 +19,17 @@ export function TabBar() {
   playerTaskState.value;
   const pending = getPendingTreasures().length;
   const marching = (getCache().moves?.movements ?? []).length;
-  const sideOffers = (playerTaskState.value?.offeredSide ?? [])
-    .filter((task: any) => task?.type === 'side').length;
+  const taskOffers = [
+    ...(playerTaskState.value?.offeredMain ?? []),
+    ...(playerTaskState.value?.offeredSide ?? []),
+    ...(playerTaskState.value?.offered ?? []),
+  ].length;
   return (
     <nav class="tabbar" aria-label="主要功能">
       {tabs.map((item) => {
         const badge = item.key === 'reports' ? pending
           : item.key === 'map' ? marching
-            : item.key === 'tasks' ? sideOffers : 0;
+            : item.key === 'tasks' ? taskOffers : 0;
         return (
           <button
             key={item.key}
@@ -37,7 +40,7 @@ export function TabBar() {
           >
             <Icon icon={item.icon} label="" decorative size="sm" />
             <span>{item.name}</span>
-            {badge > 0 && <span class="tab-badge" aria-label={item.key === 'tasks' ? `${badge} 个可接受支线任务` : `${badge} 条待处理信息`}>{badge}</span>}
+            {badge > 0 && <span class="tab-badge" aria-label={item.key === 'tasks' ? `${badge} 个可接受任务` : `${badge} 条待处理信息`}>{badge}</span>}
           </button>
         );
       })}
