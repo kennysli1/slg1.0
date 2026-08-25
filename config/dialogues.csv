@@ -10,3 +10,4 @@ id,code,taskCode,trigger,npcName,npcText,replies
 8,s2_accept,s2,accept,,,accept:接受任务|leave:离开
 9,s4_accept,s4,accept,,,accept:接受任务|leave:离开
 10,s3_after_accept,s3,after_accept,{villageName}的村民,领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？,
+11,s4_natalies_returned,s4,natalies_returned,被囚禁的娜塔莉们,多谢你拯救了我们，我们都是被那个恶魔村，也就是自称幸福村的那帮恶霸绑架到他们村子并囚禁起来的。那帮畜生强迫我们为他们的人口计划而劳动，甚至导致吃饭的嘴太多了把粮食都吃完了。他们是罪有应得。请释放我们让我们回家，我们的家人会给你丰盛的报酬的。,

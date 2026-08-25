@@ -439,6 +439,19 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'dialogue',
+    publicActions: {
+      // 报告页的任务对话入口：只读取已配置的对话文本，不改变任务状态。
+      StartTaskDialogue: {
+        command: 'dialogue.StartForTask', needAuth: true,
+        schema: {
+          taskCode: { type: 'string', minLen: 1, maxLen: 32 },
+          trigger: { type: 'string', minLen: 1, maxLen: 64 },
+        },
+      },
+    },
+    },
+  {
     moduleName: 'trade',
     publicActions: {
       GetTradeCenter: { command: 'trade.GetCenter', ownVillage: true, needAuth: true, schema: {} },
