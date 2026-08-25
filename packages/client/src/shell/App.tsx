@@ -3,7 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
 import { tab, tick, sessionVersion, villageSwitching } from '../app/store.js';
-import { refreshAll, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
+import { refreshAll, refreshInitial, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
 import { TabBar } from './TabBar.js';
@@ -58,8 +58,13 @@ export function App() {
   function startGame() {
     setPhase('game');
     sessionVersion.value++;
-    void hydrateReports();
-    void refreshAll();
+    // 先让村庄页拿到最小可渲染快照；地图、军队、任务和历史战报在后台补齐。
+    // 避免首屏同时压入同村串行车道，导致后续请求排队超时。
+    void (async () => {
+      if (!await refreshInitial()) return;
+      await hydrateReports({ notifyOnError: false });
+      await refreshAll({ silent: true });
+    })();
   }
 
   if (phase !== 'game') {

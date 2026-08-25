@@ -76,8 +76,83 @@ export function setMapCenter(c: { q: number; r: number } | null): void {
 let onSessionLost: ((msg: string) => void) | null = null;
 export function setSessionLostHandler(fn: (msg: string) => void): void { onSessionLost = fn; }
 
-/** 一次性拉齐主界面所需的全部快照。 */
-export async function refreshAll(options: { includeArea?: boolean; waitForTasks?: boolean } = {}): Promise<void> {
+export interface RefreshOptions {
+  includeArea?: boolean;
+  waitForTasks?: boolean;
+  /** 后台补齐数据时不把瞬时网络错误写进玩家战报。 */
+  silent?: boolean;
+}
+
+/**
+ * 首屏关键快照：只取资源和村庄布局。
+ *
+ * Gateway 会把同一村庄的请求放进串行车道。首屏原来一次发十多个请求，
+ * 其中全量地图和历史任务会让后续请求在 10 秒客户端超时之前一直排队，
+ * 用户看到的就是长时间 loading 以及误报的“网络连接异常”。
+ * 先提交这两个渲染村庄页必需的快照，地图/军队/任务等由后台刷新补齐。
+ */
+export async function refreshInitial(): Promise<boolean> {
+  if (!me) return false;
+  try {
+    const [res, vil] = await Promise.all([
+      req('GetResources'),
+      req('GetVillageLayout'),
+    ]);
+    if (!res.ok || !vil.ok) {
+      const failed = !res.ok ? res : vil;
+      const code = failed.error?.code ?? 'failed';
+      if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
+      else pushReport(`刷新失败：${errText(code)}`);
+      return false;
+    }
+    setCache({ ...getCache(), res: res.payload, vil: vil.payload });
+    // 地图尚未补齐；若玩家立刻切到地图页，MapScreen 会主动重试全量区域。
+    mapAreaStale.value = true;
+    bumpData();
+    return true;
+  } catch {
+    pushReport('刷新失败：网络连接异常');
+    return false;
+  }
+}
+
+let refreshInFlight: Promise<void> | null = null;
+let queuedRefresh: RefreshOptions | null = null;
+
+export function mergeRefreshOptions(a: RefreshOptions, b: RefreshOptions): RefreshOptions {
+  return {
+    includeArea: a.includeArea !== false || b.includeArea !== false,
+    waitForTasks: a.waitForTasks === true || b.waitForTasks === true,
+    // 只要有一个前台请求需要反馈，就保留错误提示；纯后台刷新才静默。
+    silent: a.silent === true && b.silent === true,
+  };
+}
+
+/** 一次性拉齐主界面所需的全部快照，并合并同时到来的刷新请求。 */
+export function refreshAll(options: RefreshOptions = {}): Promise<void> {
+  if (refreshInFlight) {
+    queuedRefresh = queuedRefresh ? mergeRefreshOptions(queuedRefresh, options) : options;
+    return refreshInFlight;
+  }
+
+  refreshInFlight = (async () => {
+    let next: RefreshOptions | null = options;
+    while (next) {
+      const current = next;
+      next = null;
+      await performRefreshAll(current);
+      if (queuedRefresh) {
+        next = queuedRefresh;
+        queuedRefresh = null;
+      }
+    }
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function performRefreshAll(options: RefreshOptions = {}): Promise<void> {
   if (!me) return;
   const includeArea = options.includeArea !== false;
   try {
@@ -103,7 +178,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     if (failed) {
       const code = failed.error?.code ?? 'failed';
       if (code === 'not_logged_in') onSessionLost?.('连接已断开，请重新登录');
-      else pushReport(`刷新失败：${errText(code)}`);
+      else if (!options.silent) pushReport(`刷新失败：${errText(code)}`);
       return;
     }
 
@@ -129,7 +204,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     const taskRefresh = reloadPlayerTasks();
     if (options.waitForTasks !== false) await taskRefresh;
   } catch {
-    pushReport('刷新失败：网络连接异常');
+    if (!options.silent) pushReport('刷新失败：网络连接异常');
   }
 }
 
@@ -335,7 +410,7 @@ export function scheduleForeignRefresh(delayMs = 1000): void {
 }
 
 /** 登录后拉一次历史通知，播种战报列表。 */
-export async function hydrateReports(): Promise<void> {
+export async function hydrateReports(options: { notifyOnError?: boolean } = {}): Promise<void> {
   try {
     const res = await req('GetNotifications');
     if (!res.ok) return;
@@ -351,7 +426,7 @@ export async function hydrateReports(): Promise<void> {
     seedReports(seeded);
     bumpReports();
   } catch {
-    pushReport('历史战报加载失败：网络连接异常');
+    if (options.notifyOnError !== false) pushReport('历史战报加载失败：网络连接异常');
   }
 }
 
