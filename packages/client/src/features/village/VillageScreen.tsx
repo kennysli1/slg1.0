@@ -1,18 +1,18 @@
 /**
- * 村庄页：以场景为主的城市经营驾驶舱。
- * 列表视图保留为完整、可键盘访问的建筑管理入口。
+ * 村庄页：以任务和建筑列表为主的村庄经营指挥台。
+ * 村庄场景保留为独立组件，但不再占用村庄页首屏空间。
  */
 import { dataVersion, tick } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { buildingInfo } from '../../app/config.js';
 import { Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
-import { VillageScene } from './VillageScene.js';
 import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
-import { VillageList } from '../../shared/ui/VillageList.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
+import { VillageSwitcher } from './VillageSwitcher.js';
+import { VillageTaskSummary } from './VillageTaskSummary.js';
 
 import '../../styles/village.css';
 
@@ -120,60 +120,58 @@ export function VillageScreen() {
   const vil = getCache().vil;
   if (!vil || !vil.zones) return <div class="loading">村庄数据加载中…</div>;
 
-  const hasQueue = !!(vil.queue?.items?.length);
   const hasTreasures = !!(getCache().treasures);
   const placedCount = (vil.zones?.inner?.placed?.length ?? 0) + (vil.zones?.outer?.placed?.length ?? 0) + (vil.townCenter ? 1 : 0);
   const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0) + (vil.townCenter ? 1 : 0);
 
   return (
     <div class="vil-dashboard">
-      <VillageList />
-      <div class="vil-primary-column">
-        <IncomingWarnings />
-        <header class="vil-dashboard-head">
-          <span class="vil-eyebrow">城务总览</span>
-          <SectionHead>城池详情</SectionHead>
-        </header>
-
-        <div class="vil-dashboard-stage">
-          <VillageScene vil={vil} />
+      <div class="vil-dashboard-topline">
+        <div class="vil-dashboard-task-wrap">
+          <IncomingWarnings />
+          <VillageTaskSummary />
         </div>
-
-        <VillageCommandDeck vil={vil} />
-
-        <section class="vil-detail-section">
-          <SectionHead>人口 · 文明活力</SectionHead>
-          <Panel pad>
-            <PopPanel />
-          </Panel>
-        </section>
-
-        {hasTreasures && (
-          <section class="vil-detail-section">
-            <SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>
-              宝物栏
-            </SectionHead>
-            <Panel variant="flat" pad>
-              <TreasurePanel />
-            </Panel>
-          </section>
-        )}
+        <VillageSwitcher />
       </div>
 
-      <aside id="village-building-management" class="vil-management-column" aria-label="建筑清单管理">
-        <header class="vil-management-head">
-          <span class="vil-eyebrow">建造清单</span>
-          <SectionHead sub={`${placedCount}/${slotCount}`}>建筑管理</SectionHead>
-        </header>
+      <div class="vil-dashboard-grid">
+        <aside class="vil-overview-column" aria-label="村庄概览">
+          <VillageCommandDeck vil={vil} />
 
-        {hasQueue && (
-          <Panel pad class="vil-queue-panel">
-            <QueueStrip queue={vil.queue} />
-          </Panel>
-        )}
+          <section class="vil-detail-section">
+            <SectionHead>人口 · 文明活力</SectionHead>
+            <Panel pad>
+              <PopPanel />
+            </Panel>
+          </section>
 
-        <VillageListView vil={vil} />
-      </aside>
+          {hasTreasures && (
+            <section class="vil-detail-section">
+              <SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>
+                宝物栏
+              </SectionHead>
+              <Panel variant="flat" pad>
+                <TreasurePanel />
+              </Panel>
+            </section>
+          )}
+        </aside>
+
+        <section id="village-building-management" class="vil-management-column" aria-label="建筑清单管理">
+          <header class="vil-management-head">
+            <span class="vil-eyebrow">建造清单</span>
+            <SectionHead sub={`${placedCount}/${slotCount}`}>建筑管理</SectionHead>
+          </header>
+
+          {vil.queue?.items?.length > 0 && (
+            <Panel pad class="vil-queue-panel">
+              <QueueStrip queue={vil.queue} />
+            </Panel>
+          )}
+
+          <VillageListView vil={vil} />
+        </section>
+      </div>
     </div>
   );
 }
