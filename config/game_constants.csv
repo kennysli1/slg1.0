@@ -122,5 +122,5 @@ kingdom_task_eliminate_troops_reward_reputation,5,number,完成消灭负声望�
 kingdom_reinforcement_duration_sec,3600,number,议会厅购买的王国增援抵达后临时驻防时长秒数
 m8_attack_delay_sec,28800,number,m8接受任务后天王老子村发动攻城的延迟秒数
 m8_task_village_spawn_radius,8,number,m8任务村相对主城的随机生成半径
-m8_task_village_resource_amount,10000,number,m8任务村每种资源初始库存
+m8_task_village_resource_amount,500,number,m8任务村每种资源初始库存
 m8_task_village_gold,500,number,m8任务村初始金币
