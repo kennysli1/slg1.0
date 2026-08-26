@@ -77,7 +77,7 @@ export interface GameApp {
   config: GameConfig;
   /** 启动时使用的配置目录（config/*.csv 所在），热重载与平衡调参写回都基于它。 */
   configDir: string;
-  /** 平衡调参覆盖文件路径（持久化在 data/balance_overrides.json，git 忽略）。null 表示关闭覆盖。 */
+  /** 平衡调参兼容覆盖文件路径（CSV 是事实源；JSON 仅用于旧 release 迁移，git 忽略）。null 表示关闭持久化。 */
   balanceOverridePath: string | null;
   store: Store;
   bus: EventBus;
@@ -151,7 +151,7 @@ export function createGameApp(opts?: {
   configDir?: string;
   /** 数据落盘路径。给了就用 JSON 文件持久化；不给用内存（测试）。 */
   storePath?: string;
-  /** 平衡调参覆盖文件路径。默认 <storePath 目录>/balance_overrides.json。 */
+  /** 平衡调参兼容文件路径。默认 <storePath 目录>/balance_overrides.json；CSV 才是默认事实源。 */
   balanceOverridePath?: string;
   /** 随机数生成器（默认 Math.random）。测试可注入确定性 RNG 以复现掉落/加权结果。 */
   rng?: () => number;

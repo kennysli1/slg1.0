@@ -70,8 +70,14 @@ interface TaskInstance {
   campCleared: number;
   /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
   progress: number;
-  /** build_buildings：接取时已有城内建筑数；目标只累计接取后新建的建筑。 */
+  /** build_buildings：接取时已有城内建筑数（旧存档兼容字段）。 */
   buildingBaseline?: number;
+  /** build_buildings：接取时已被占用的槽位；这些槽位拆除后重建不计入新建。 */
+  buildingInitialSlots?: string[];
+  /** build_buildings：本任务已计数过的空槽位；同一槽位拆除后重建不重复计数。 */
+  buildingCountedSlots?: string[];
+  /** build_buildings：接取后在此前空槽完成 1 级新建的次数。 */
+  buildingBuiltCount?: number;
   /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
   qualifiedMovements?: string[];
   /** carry_flag：已合格且已存回本村的军旗对应出征；每项代表一面可用于交付的军旗。 */
@@ -819,6 +825,16 @@ export class TasksModule {
       await this.spawnCamps(villageId, inst, storageVillageId);
     } else if (q.objective.kind === 'deliver_to_npc') {
       await this.spawnNpcVillage(villageId, s, inst);
+    } else if (q.objective.kind === 'build_buildings') {
+      // 记录接取时已经占用的槽位（包括正在建造的建筑）。只有此前真正
+      // 空着的槽位第一次建成 1 级才算 M2 的一次建造，拆除后重建不重复计数。
+      const sourceVillageId = q.scope === 'global' ? this.anchorVillage(villageId) : villageId;
+      const layout = await this.commands.send({ name: 'building.GetLayout', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+      const zone = q.objective.buildingZone ?? 'inner';
+      const placed = ((layout.payload as any)?.zones?.[zone]?.placed ?? []) as Array<{ slotId?: string }>;
+      inst.buildingInitialSlots = placed.map((p) => p.slotId).filter((slotId): slotId is string => Boolean(slotId));
+      inst.buildingCountedSlots = [];
+      this.store.set(COLLECTION, storageVillageId, s);
     }
     if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
     // 仅建村自动激活的 m1 展示一次自动对话；手动接取的主线由 StartAccept 返回接取对话。
@@ -851,16 +867,24 @@ export class TasksModule {
           const zone = q.objective.buildingZone ?? 'inner';
           const placed = ((layout.payload as any)?.zones?.[zone]?.placed ?? []) as Array<{ level?: number; demolishing?: boolean }>;
           const builtNow = placed.filter((p) => Number(p.level) >= 1 && !p.demolishing).length;
-          // “建造”是接取后的行为，不把开局已有建筑算入目标；进度保持单调，
-          // 即使之后拆除建筑，已经完成的建造也不会倒退。
+          // 新版按 building.Built 事件累计，且只接受接取时真正空槽的首次新建；
+          // 旧存档没有 buildingBuiltCount 时，用旧 baseline 推导一次初始值。
           if (inst.buildingBaseline === undefined) {
             inst.buildingBaseline = builtNow;
             changed = true;
           }
-          current = Math.max(0, builtNow - inst.buildingBaseline);
+          if (inst.buildingBuiltCount === undefined) {
+            inst.buildingBuiltCount = Math.max(inst.progress ?? 0, builtNow - inst.buildingBaseline);
+            changed = true;
+          }
+          current = Math.max(0, inst.buildingBuiltCount);
         } else if (kind === 'population_reached') {
           const pop = await this.commands.send({ name: 'population.GetSnapshot', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
-          current = Math.max(0, Math.floor(Number((pop.payload as any)?.totalPop) || Number((pop.payload as any)?.currentPop) || 0));
+          // currentPop 是任务“人口达到”目标的权威平民人口；旧快照中的 totalPop
+          // 可能是尚未重算的派生缓存，优先使用 currentPop 避免把过期值计入进度。
+          const currentPop = Number((pop.payload as any)?.currentPop);
+          const totalPop = Number((pop.payload as any)?.totalPop);
+          current = Math.max(0, Math.floor(Number.isFinite(currentPop) ? currentPop : (Number.isFinite(totalPop) ? totalPop : 0)));
         } else if (kind === 'resource_owned') {
           const resources = await this.commands.send({ name: 'economy.GetResources', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
           current = Math.max(0, Number((resources.payload as any)?.resources?.[q.objective.resourceKey ?? '']) || 0);
@@ -1145,18 +1169,20 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, state);
 
     if (inst.campCleared >= inst.camps.length) {
-      // 任务营地的待领取报告也归任务村；普通战利品仍由 Movement 按出兵村返还。
-      await this.commands.send({
-        name: 'treasure.RollDrop', from: TasksModule.NAME,
-        payload: {
-          villageId: updateVillageId,
-          source: 'camp',
-          movementId: payload.movementId,
-          forceCode: 'captured_natalies',
-          taskRelated: true,
-        },
-      });
+      // 临时任务营地不走普通 droprate，也不能随机掉落其它任务专属宝物。
+      // 只有 S4 的最后一处营地明确配置了“被囚禁的娜塔莉们”阶段性道具，
+      // 该道具仍通过报告等待处理；M4/D2 等其它任务营地完全不产宝物。
       if (q.code === 's4') {
+        await this.commands.send({
+          name: 'treasure.RollDrop', from: TasksModule.NAME,
+          payload: {
+            villageId: updateVillageId,
+            source: 'camp',
+            movementId: payload.movementId,
+            forceCode: 'captured_natalies',
+            taskRelated: true,
+          },
+        });
         inst.awaitingNatalieDecision = true;
         inst.awaitingNatalieCode = 'captured_natalies';
         this.store.set(COLLECTION, storageVillageId, state);
@@ -1424,11 +1450,12 @@ export class TasksModule {
         inst.campCleared = (inst.campCleared ?? 0) + 1;
         this.store.set(COLLECTION, storageVillageId, state);
         if (inst.campCleared >= inst.camps.length) {
-          await this.commands.send({
-            name: 'treasure.RollDrop', from: TasksModule.NAME,
-            payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies', taskRelated: true },
-          });
+          // 任务营地不按宝物 droprate 抽取；S4 仅在最后一处营地发放其明确定义的阶段道具。
           if (code === 's4') {
+            await this.commands.send({
+              name: 'treasure.RollDrop', from: TasksModule.NAME,
+              payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'captured_natalies', taskRelated: true },
+            });
             inst.awaitingNatalieDecision = true;
             inst.awaitingNatalieCode = 'captured_natalies';
             this.store.set(COLLECTION, storageVillageId, state);
@@ -1515,7 +1542,7 @@ export class TasksModule {
 
   /** 建筑建成 → 标记已触发的支线任务触发条件，并解锁满足条件的支线任务。 */
   private async onBuildingBuilt(evt: DomainEvent): Promise<void> {
-    const p = evt.payload as { villageId: string; kind: string };
+    const p = evt.payload as { villageId: string; kind: string; level?: number; slotId?: string };
     const villageId = p.villageId;
     const kind = p.kind;
     if (!villageId || !kind) return;
@@ -1526,6 +1553,38 @@ export class TasksModule {
         if (inst.npcPending) await this.retryNpcSpawn(villageId, s, inst);
       }
     }
+    // 建筑完成事件只在新建至 1 级时推进 build_buildings；升级不会计数。
+    // 接取时已有建筑被拆除后重建，或任务期间同一槽位反复拆建，均不重复计数。
+    if (Number(p.level) === 1) {
+      const builtDef = this.config.buildings[kind];
+      for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+        for (const [code, inst] of Object.entries(state.active)) {
+          const q = this.quest(code);
+          if (!q || q.objective.kind !== 'build_buildings' || inst.readyToDeliver) continue;
+          if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+          const expectedZone = q.objective.buildingZone ?? 'inner';
+          if (!builtDef || builtDef.zone !== expectedZone) continue;
+          // global 目标“主城建造”明确只统计锚定主城；村庄级目标统计所属村。
+          const sourceVillageId = q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId;
+          if (sourceVillageId !== villageId) continue;
+          const slotId = p.slotId;
+          if (!slotId) continue;
+          const initialSlots = inst.buildingInitialSlots ?? [];
+          if (initialSlots.includes(slotId)) continue;
+          inst.buildingCountedSlots ??= [];
+          if (inst.buildingCountedSlots.includes(slotId)) continue;
+          const target = q.objective.count ?? 1;
+          inst.buildingCountedSlots.push(slotId);
+          inst.buildingBuiltCount = (inst.buildingBuiltCount ?? 0) + 1;
+          inst.progress = Math.max(inst.progress ?? 0, inst.buildingBuiltCount);
+          inst.executionVillageId = villageId;
+          this.store.set(COLLECTION, storageVillageId, state);
+          if (inst.progress >= target) await this.markReady(villageId, code);
+          else await this.pushList(villageId);
+        }
+      }
+    }
+
     const triggerKey = `building_built:${kind}`;
     const matched = Object.values(this.config.quests).filter((q) => q.trigger === triggerKey);
     if (!matched.length) return;
@@ -2019,6 +2078,9 @@ export class TasksModule {
       campTotal: inst.camps.length,
       progress: inst.progress ?? 0,
       buildingBaseline: inst.buildingBaseline ?? null,
+      buildingInitialSlots: inst.buildingInitialSlots ?? null,
+      buildingCountedSlots: inst.buildingCountedSlots ?? null,
+      buildingBuiltCount: inst.buildingBuiltCount ?? null,
       awaitingReturn: inst.qualifiedMovements?.length ?? 0,
       deliverableFlags: inst.qualifiedFlagMovements?.length ?? 0,
       camps: inst.camps.map((c) => ({ id: c.id, q: c.q, r: c.r, cleared: c.cleared })),

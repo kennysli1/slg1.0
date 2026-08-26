@@ -195,6 +195,47 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   assert.ok(afterDeliver.resources.gold >= beforeDeliver.resources.gold, 'm6 目标检查不应扣除金币');
 });
 
+test('M2：已有建筑拆除后重建不计数，新的空槽 1 级建造才计数', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'M2 重建计数');
+  const va = (regRes.payload as any).player.villageId;
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
+  await tick();
+  await repairM1Fields(app, va);
+  await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+  assert.equal((await send(app, 'task.Accept', { villageId: va, code: 'm2' })).ok, true);
+
+  const first = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  assert.equal(first.ok, true, `首次建造应成功: ${first.reason ?? ''}`);
+  await app.scheduler.advanceTo((first.payload as any).finishAt, setClock);
+  let state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  let m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 1, '第一次建造应计数 1');
+
+  const layout = (await send(app, 'building.GetLayout', { villageId: va })).payload as any;
+  const warehouse = layout.zones.inner.placed.find((p: any) => p.kind === 'warehouse' && p.level >= 1);
+  assert.ok(warehouse, '应能找到已建成的仓库');
+  const demolition = await send(app, 'building.Demolish', { villageId: va, slotId: warehouse.slotId });
+  assert.equal(demolition.ok, true, `拆除应成功: ${demolition.reason ?? ''}`);
+  await app.scheduler.advanceTo((demolition.payload as any).finishAt, setClock);
+
+  const rebuilt = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  assert.equal(rebuilt.ok, true, `重建应成功: ${rebuilt.reason ?? ''}`);
+  await app.scheduler.advanceTo((rebuilt.payload as any).finishAt, setClock);
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 1, '已有建筑拆除后在原槽位重建不应计数');
+  assert.equal(m2.ready, false, '尚未在新的空槽完成第二次新建');
+
+  const second = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(second.ok, true, `新的空槽建造应成功: ${second.reason ?? ''}`);
+  await app.scheduler.advanceTo((second.payload as any).finishAt, setClock);
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 2, '新的空槽建成 1 级应计数');
+  assert.equal(m2.ready, true, '达到 2 次新空槽建造后应就绪');
+});
+
 test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试3');
@@ -292,6 +333,8 @@ test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', 
   const m4a = p1.active.find((a: any) => a.code === 'm4');
   assert.ok(m4a && m4a.ready === true, 'm4 战斗后应就绪可交付');
   assert.ok(!p1.completedMain.includes('m4'), '未交付 m4 不应完成');
+  assert.equal((app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va).length, 0,
+    'M4 临时任务营地不应按 droprate 或其它任务规则掉落宝物');
   assert.deepEqual(latestMapUpdate?.camps, [], '已清理营地不得继续出现在 TaskMapUpdated 地图标记中');
   stopWatchingTaskMap();
 
