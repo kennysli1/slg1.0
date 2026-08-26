@@ -3,31 +3,34 @@
    Only uses tokens from tokens.css. No hardcoded colours, px spacing, or font sizes.
    ============================================================ */
 
-/* ---- Village command dashboard ---- */
+/* ---- List-first village command dashboard ---- */
 .vil-dashboard {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
-  gap: var(--s-5);
-  align-items: start;
-}
-.vil-primary-column,
-.vil-management-column {
   display: flex;
-  min-width: 0;
   flex-direction: column;
   gap: var(--s-4);
 }
+.vil-dashboard-topline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: var(--s-3);
+  align-items: start;
+}
+.vil-dashboard-task-wrap,
+.vil-overview-column,
+.vil-management-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.vil-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr);
+  gap: var(--s-5);
+  align-items: start;
+}
 .vil-management-column {
   scroll-margin-top: calc(var(--topbar-h) + var(--tabbar-h) + var(--s-4));
-}
-.vil-dashboard-head {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--s-1);
-}
-.vil-dashboard-stage {
-  min-width: 0;
 }
 .vil-eyebrow,
 .vil-deck-kicker {
@@ -43,6 +46,206 @@
 }
 .vil-queue-panel .vil-queue {
   margin-bottom: 0;
+}
+
+/* ---- Current task ---- */
+.vil-current-task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  overflow: hidden;
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--c-gold) 12%, transparent), transparent 48%),
+    linear-gradient(180deg, var(--c-panel-2), var(--c-panel));
+}
+.vil-current-task-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.vil-current-task-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin-top: var(--s-1);
+}
+.vil-current-task-title h1,
+.vil-current-task-head > div > h1 {
+  margin: 0;
+  color: var(--c-ink);
+  font-family: var(--ff-han);
+  font-size: var(--f-lg);
+  line-height: 1.2;
+}
+.vil-current-task-link {
+  flex: none;
+  min-height: 44px;
+  padding: var(--s-2) 0 var(--s-2) var(--s-2);
+  border: 0;
+  color: var(--c-gold);
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--f-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.vil-current-task-link:hover,
+.vil-current-task-link:focus-visible {
+  color: var(--c-gold-hi);
+}
+.vil-current-task-link:focus-visible {
+  outline: 2px solid var(--c-gold);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.vil-current-task-body .task-card {
+  padding: var(--s-2) 0 0;
+  border: 0;
+  background: transparent;
+}
+.vil-current-task-body .task-card-desc {
+  color: var(--c-ink-soft);
+}
+.vil-current-task-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+  color: var(--c-ink-dim);
+  font-size: var(--f-sm);
+}
+
+/* ---- Compact village switcher ---- */
+.vil-switcher {
+  position: relative;
+  min-width: 0;
+  z-index: var(--z-dropdown);
+}
+.vil-switcher-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 76px;
+  padding: var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--c-ink);
+  background: linear-gradient(180deg, var(--c-panel-2), var(--c-panel));
+  box-shadow: var(--sh-1);
+  cursor: pointer;
+  list-style: none;
+}
+.vil-switcher-trigger::-webkit-details-marker { display: none; }
+.vil-switcher-trigger:hover,
+.vil-switcher[open] .vil-switcher-trigger {
+  border-color: var(--c-gold-dim);
+  box-shadow: var(--sh-2), var(--glow-gold);
+}
+.vil-switcher-mark,
+.vil-switcher-option-icon {
+  display: grid;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-sm);
+  color: var(--c-gold);
+  font-size: var(--f-md);
+}
+.vil-switcher-copy,
+.vil-switcher-option-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.vil-switcher-label,
+.vil-switcher-menu-head,
+.vil-switcher-option-copy small,
+.vil-switcher-copy small {
+  color: var(--c-ink-dim);
+  font-size: var(--f-2xs);
+}
+.vil-switcher-copy strong,
+.vil-switcher-option-copy strong {
+  overflow: hidden;
+  color: var(--c-ink);
+  font-size: var(--f-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vil-switcher-chevron {
+  flex: none;
+  color: var(--c-gold);
+  font-size: var(--f-lg);
+  transition: transform var(--t-fast);
+}
+.vil-switcher[open] .vil-switcher-chevron { transform: rotate(180deg); }
+.vil-switcher-menu {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 240px;
+  padding: var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--c-panel-2);
+  box-shadow: var(--sh-3);
+}
+.vil-switcher-menu-head {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-1) var(--s-2);
+  font-weight: 700;
+}
+.vil-switcher-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--c-ink);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.vil-switcher-option:hover,
+.vil-switcher-option:focus-visible,
+.vil-switcher-option.is-current {
+  border-color: var(--c-gold-dim);
+  background: color-mix(in srgb, var(--c-gold) 9%, transparent);
+}
+.vil-switcher-option:focus-visible {
+  outline: 2px solid var(--c-gold);
+  outline-offset: -2px;
+}
+.vil-switcher-option:disabled { cursor: wait; opacity: .6; }
+.vil-switcher-option.is-current .vil-switcher-option-icon {
+  color: var(--c-gold-hi);
+  border-color: var(--c-gold);
+}
+.vil-switcher-current {
+  flex: none;
+  color: var(--c-jade);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+}
+.vil-switcher-loading {
+  padding: var(--s-2);
+  color: var(--c-ember);
+  font-size: var(--f-xs);
 }
 
 /* ---- Command deck ---- */
@@ -951,9 +1154,13 @@
 }
 
 /* ---- Responsive ---- */
-@media (max-width: 960px) {
-  .vil-dashboard {
-    grid-template-columns: minmax(0, 1fr);
+@media (max-width: 980px) {
+  .vil-dashboard-grid {
+    grid-template-columns: minmax(250px, .72fr) minmax(0, 1.28fr);
+    gap: var(--s-3);
+  }
+  .vil-dashboard-topline {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
   }
 }
 
@@ -961,8 +1168,21 @@
   .vil-dashboard {
     gap: var(--s-3);
   }
-  .vil-primary-column,
+  .vil-dashboard-topline,
+  .vil-dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vil-overview-column,
   .vil-management-column { gap: var(--s-3); }
+  .vil-switcher-trigger { min-height: 64px; }
+  .vil-switcher-menu {
+    position: static;
+    min-width: 0;
+    margin-top: var(--s-1);
+  }
+  .vil-current-task-title h1,
+  .vil-current-task-head > div > h1 { font-size: var(--f-md); }
+  .vil-current-task-empty { align-items: flex-start; flex-direction: column; }
   .vil-deck-panel { gap: var(--s-2); }
   .vil-deck-kicker,
   .vil-deck-title-row p { display: none; }
@@ -978,22 +1198,6 @@
   .vil-deck-action:last-child:nth-child(odd) {
     grid-column: 1 / -1;
   }
-  /* 手机不再强制横向滚动：完整场景以响应式画布收进视口，并缩小建筑层。 */
-  .vil-scene-wrap {
-    width: 100%;
-    min-width: 0;
-    aspect-ratio: 3 / 2;
-    --pad-mult: .64;
-  }
-  .vil-pad { padding: var(--s-1); }
-  .vil-scene-caption { align-items: start; }
-  .vil-scene-caption strong { text-align: right; }
-  .vil-scene-status {
-    right: var(--s-2);
-    bottom: var(--s-2);
-    max-width: calc(100% - var(--s-4));
-  }
-  .vil-scene-status span { padding: 3px var(--s-1); }
   .vil-zone-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .trs-grid { grid-template-columns: 1fr; }
   .pop-mults-grid { grid-template-columns: repeat(3, 1fr); }
