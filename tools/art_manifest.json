@@ -1102,5 +1102,21 @@
     "mode": "icon",
     "size": 256,
     "subject": "restrained bronze frontier crown insignia; modern restrained tactical icon, bone white, oxidized bronze, muted teal and frontier red on transparent background, no text"
+  },
+  {
+    "base": "map_marker_own",
+    "zh": "己方行军标记",
+    "category": "map",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a compact heraldic field-army marker: one dark bronze spear with a folded triangular deep-crimson war pennant trimmed in antique gold, plus a small faceted bronze shield-diamond finial at the base, bold readable silhouette, no circular badge"
+  },
+  {
+    "base": "map_marker_enemy",
+    "zh": "敌方行军标记",
+    "category": "map",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a compact hostile field-army marker: one blackened iron spear with a torn angular dark wine-red pennant edged in ember orange, plus a faceted iron shield-diamond finial at the base, bold readable silhouette, no circular badge"
   }
 ]
