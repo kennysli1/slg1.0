@@ -1549,8 +1549,11 @@ async function loadTasks(){
 }
 function render(s){
   var h='';
-  h+='<h2>进行中 ('+Object.keys(s.active||{}).length+')</h2>';
-  for(var c in (s.active||{})){var t=s.active[c];
+  // task.GetState 返回 active 数组（旧版 GM 曾按 Record 遍历，导致数组下标
+  // 0/1 被当成任务 code，点击“回退主线”就会收到 unknown_quest）。
+  var active=Array.isArray(s.active)?s.active:Object.keys(s.active||{}).map(function(k){var t=s.active[k];return Object.assign({code:k},t);});
+  h+='<h2>进行中 ('+active.length+')</h2>';
+  for(var ai=0;ai<active.length;ai++){var t=active[ai];var c=String(t.code||'');
     h+='<div class="card" data-code="'+esc(c)+'"><b>'+esc(t.name)+'</b> ['+esc(t.type)+'] code='+esc(c);
     if(t.objective&&t.objective.kind==='submit_resources')h+=' 已交:'+esc(JSON.stringify(t.submitted))+' / 需'+esc(JSON.stringify(t.required));
     if(t.objective&&t.objective.kind==='clear_camp')h+=' 营地'+esc(t.campCleared)+'/'+esc(t.campTotal);

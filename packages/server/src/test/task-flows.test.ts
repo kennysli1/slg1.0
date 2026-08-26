@@ -123,6 +123,21 @@ test('③ GM 重新触发已放弃支线 -> 移出 abandonedSide 并重新可接
   assert.ok(st.offeredSide.some((o: any) => o.code === 's4'), '应重新进入可接取列表');
 });
 
+test('主线人口门槛包含驻军人口', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'population-task');
+  app.store.set('task', va, baseState(va, {
+    m3: { code: 'm3', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0, progress: 0 },
+  }));
+  const trained = await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 10 } });
+  assert.equal(trained.ok, true);
+  await tick();
+  const state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const task = state.active.find((item: any) => item.code === 'm3');
+  assert.equal(task.progress, 30, '20 平民 + 10 士兵应按总人口达到 30');
+  assert.equal(task.ready, true);
+});
+
 test('M8：玩家主动清空天王老子村也会记录为成功并保留任务村', async () => {
   const app = freshApp();
   const va = await reg(app, 'm8-direct');
@@ -151,6 +166,51 @@ test('M8：玩家主动清空天王老子村也会记录为成功并保留任务
   assert.equal(target.cleared, false, '天王老子村不应因 M8 战斗消失');
   assert.equal(Object.values(target.defender).reduce((sum: number, unit: any) => sum + Number(unit.count ?? 0), 0), 0, '主动清空后任务村守军应归零');
   assert.deepEqual(target.loot, { wood: 250, clay: 250, iron: 250, crop: 250, gold: 0 }, 'M8 结算后资源应减半且金币归零');
+});
+
+test('M8 旧任务村的过量初始库存在重启恢复时迁移到 CSV 默认值', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8-loot-migrate');
+  const targetId = 'taskvillage-legacy-m8';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 8, r: 8, task: true, ownerVillageId: va,
+    loot: { wood: 9000, clay: 9100, iron: 9200, crop: 9300, gold: 9500 },
+  });
+  assert.equal(spawned.ok, true);
+  const old = app.store.get<any>('pve', targetId)!;
+  delete old.taskVillageLootInitialized;
+  app.store.set('pve', targetId, old);
+  app.pve.resume();
+  const migrated = app.store.get<any>('pve', targetId)!;
+  assert.deepEqual(migrated.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(migrated.taskVillageLootInitialized, true);
+});
+
+test('M8 到时会生成 NPC 攻城行军并向目标村提供可见预警', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8sched');
+  const state = baseState(va, {});
+  (state as any).offeredMain = ['m8'];
+  app.store.set('task', va, state);
+  const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm8' });
+  assert.equal(accepted.ok, true);
+  clock += app.config.constants.m8AttackDelaySec * 1000;
+  await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+  await tick();
+  let movement = app.store.all<any>('movement').find((item) => item.npcService && item.taskCode === 'm8');
+  assert.ok(movement, '倒计时结束后应生成天王老子村 NPC 攻城行军');
+  const warnings: any[] = [];
+  for (let i = 0; i < movement.path.length && movement.status === 'marching'; i++) {
+    const listed = await send(app, 'movement.List', { villageId: va });
+    warnings.push(...(((listed.payload as any)?.incomingWarnings ?? [])));
+    clock = Math.max(clock, movement.nextStepAt);
+    await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+    await tick();
+    movement = app.store.all<any>('movement').find((item) => item.npcService && item.taskCode === 'm8') ?? movement;
+  }
+  assert.ok(warnings.some((item) => item.id === movement.id), 'NPC 攻城路径进入城市视野时应出现在来袭预警');
+  const battle = app.store.all<any>('battle').find((item) => item.taskCode === 'm8');
+  assert.ok(battle, 'NPC 攻城行军抵达后应创建战场');
 });
 
 test('天王老子村侦察目标坐标以 World 地块为准并回写 PvE 状态', async () => {

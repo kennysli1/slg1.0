@@ -98,3 +98,29 @@ test('PvP 建筑侦察：城内外建筑报告同时包含守军快照', async (
   assert.ok(report.buildings?.center && report.buildings?.inner && report.buildings?.outer, '报告应包含城内外建筑');
   assert.equal(report.defenderTroops.legionnaire, 4, '建筑侦察报告应同时包含守军兵力');
 });
+
+test('PvP 侦察不受防御掠夺配置影响', async () => {
+  let clock = 9_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true }); app.setupWorld();
+  const attacker = (await send(app, 'player.Register', { name: '侦察配置甲', password: 'p1234' })).payload as any;
+  const defender = (await send(app, 'player.Register', { name: '侦察配置乙', password: 'p1234' })).payload as any;
+  const villageId = attacker.player.villageId;
+  const targetVillage = defender.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId, delta: { equlegati: 1 } });
+  await send(app, 'military.AdjustTroops', { villageId: targetVillage, delta: { legionnaire: 4 } });
+  // 防御掠夺可被关闭/设为空，但不应改变侦察看到的实际驻军。
+  await send(app, 'military.SetRaidDefense', { villageId: targetVillage, enabled: false, troops: {} });
+  const reports: any[] = [];
+  app.bus.on('movement.ScoutReport', (event: any) => { reports.push(event.payload); });
+  const scout = await send(app, 'movement.SendScout', {
+    villageId, targetVillage, troops: { equlegati: 1 }, scoutType: 'scout_resources',
+  });
+  assert.equal(scout.ok, true);
+  for (let i = 0; i < 20 && !reports.some((report) => report.side === 'attacker'); i++) {
+    clock += 3_600_000;
+    await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+  }
+  const report = reports.find((candidate) => candidate.side === 'attacker');
+  assert.ok(report, '应收到侦察报告');
+  assert.equal(report.defenderTroops.legionnaire, 4, '侦察应报告实际驻军而非防御掠夺分配池');
+});

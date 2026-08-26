@@ -27,7 +27,7 @@ import { fmt } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
 import { TrainPanel } from './TrainPanel.js';
 import {
-  Panel, SectionHead, Divider, Empty, Tag, IconPlate, Stat, Btn,
+  Panel, SectionHead, Divider, Empty, Tag, IconPlate, Stat, Btn, confirmDanger,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 import { VillageList } from '../../shared/ui/VillageList.js';
@@ -53,7 +53,92 @@ export function ArmyScreen() {
       <ReinforcementSection army={army} />
       <RaidDefenseSection army={army} />
       <TrainingCenterSection />
+      <DisbandSection army={army} />
     </div>
+  );
+}
+
+// ============================================================
+// § 3  解散驻军（默认折叠）
+// ============================================================
+
+/**
+ * 解散只作用于本村驻军；已经派出、驻扎在野外或作为援军的部队由行军
+ * 系统分别管理。使用 details 保留旧版“页面最底部、默认折叠”的交互。
+ */
+function DisbandSection({ army }: { army: any }) {
+  const troops: Record<string, number> = army.troops ?? {};
+  const entries = Object.entries(troops).filter(([, count]) => Number(count) > 0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const snapshotKey = JSON.stringify(troops);
+
+  useEffect(() => {
+    setCounts((current) => {
+      const next: Record<string, number> = {};
+      for (const [unit, raw] of Object.entries(troops)) {
+        const max = Math.max(0, Math.floor(Number(raw) || 0));
+        if (max > 0) next[unit] = Math.min(Math.max(1, Math.floor(Number(current[unit]) || max)), max);
+      }
+      return next;
+    });
+  }, [snapshotKey]);
+
+  async function disband(unit: string, max: number) {
+    const count = Math.min(max, Math.max(1, Math.floor(Number(counts[unit]) || 1)));
+    const name = unitInfo(unit).name ?? unit;
+    const returned = Math.max(0, Number(unitInfo(unit).popCost ?? 0) * count);
+    const confirmed = await confirmDanger({
+      title: `解散${name}`,
+      body: `确认解散 ${count} 名${name}？资源不会返还，将立即返还 ${returned} 人口。`,
+      confirmText: '确认解散',
+    });
+    if (!confirmed) return;
+    await act(req('DisbandTroops', { units: { [unit]: count } }), {
+      okToast: `已解散 ${name} ×${count}`,
+    });
+  }
+
+  return (
+    <Panel pad class="army-management-panel">
+      <details class="disband-details">
+        <summary class="section-head section-head--toggle">
+          <span>解散军队</span>
+          <small>仅本村驻军 · 出征部队不能在此解散</small>
+        </summary>
+        <div class="disband-section">
+          {entries.length === 0
+            ? <div class="disband-hint">当前没有可解散的驻军。</div>
+            : entries.map(([unit, raw]) => {
+              const max = Math.max(0, Math.floor(Number(raw) || 0));
+              const count = Math.min(max, Math.max(1, Math.floor(Number(counts[unit]) || max)));
+              const popReturn = Math.max(0, Number(unitInfo(unit).popCost ?? 0) * count);
+              return (
+                <div class="disband-row" key={unit}>
+                  <IconPlate icon={unitInfo(unit).icon} label={unitInfo(unit).name} size="sm" plate="stone" />
+                  <div class="disband-row__info">
+                    <div class="disband-row__name">{unitInfo(unit).name}</div>
+                    <div class="disband-row__count">驻军 ×{fmt(max)}</div>
+                  </div>
+                  <div class="disband-row__controls">
+                    <input
+                      class="disband-input"
+                      type="number"
+                      min="1"
+                      max={max}
+                      value={count}
+                      aria-label={`解散${unitInfo(unit).name}数量`}
+                      onInput={(event) => setCounts({ ...counts, [unit]: Number((event.currentTarget as HTMLInputElement).value) })}
+                    />
+                    <span class="disband-row__pop">返还 {fmt(popReturn)} 人口</span>
+                    <Btn size="sm" variant="danger" onClick={() => void disband(unit, max)}>解散</Btn>
+                  </div>
+                </div>
+              );
+            })}
+          <div class="disband-hint">解散会返还训练时占用的人口，但不会返还训练资源。</div>
+        </div>
+      </details>
+    </Panel>
   );
 }
 
