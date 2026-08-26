@@ -6,6 +6,9 @@ id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCoold
 4,m4,main_foundation,排除威胁,清理附近随机出现的一个老鼠窝强度的PvE营地,main,global,0,0,0,0
 5,m5,main_foundation,那边有什么？,累计探索100格地图（包括城镇初始视野）,main,global,0,0,0,0
 6,m6,main_foundation,国库充盈,主城拥有100金币,main,global,0,0,0,0
+7,m7,main_foundation,我们需要进步,拥有学院并研发一项科技,main,global,0,0,0,0
+8,m8,main_foundation,冤家路窄,守住天王老子村发动的攻城,main,global,0,0,0,0
+9,m9,main_foundation,反击,掠夺天王老子村,main,global,0,0,0,0
 6,d1,tavern_commissions,临时征收,酒馆临时委托上缴部分资源,daily,village,3,1,21600,7200
 7,d2,tavern_commissions,讨伐游匪,酒馆悬赏清掉一支游匪营地,daily,village,2,1,28800,7200
 8,d3,tavern_commissions,紧急补给,酒馆急令调拨粮食应急,daily,village,3,1,21600,7200

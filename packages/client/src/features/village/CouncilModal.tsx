@@ -5,14 +5,15 @@ import { dataVersion, kingdomState, openModal, tick } from '../../app/store.js';
 import { act, reloadKingdom } from '../../app/refresh.js';
 import { Btn, Tag } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
+import { BuildingManagement } from './BuildingManagement.js';
 import { resInfo, treasureInfo } from '../../app/config.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
 
 const KEY = 'council';
 
-export function openCouncil(): void {
+export function openCouncil(slotId?: string): void {
   void reloadKingdom();
-  openModal((close) => <CouncilModal onClose={close} />, KEY);
+  openModal((close) => <CouncilModal slotId={slotId} onClose={close} />, KEY);
 }
 
 function categoryName(category: string): string {
@@ -30,7 +31,7 @@ function serviceContent(service: any): string {
     .map(([key, n]) => `${key === 'gold' ? '金币' : resInfo(key).name} ${fmt(Number(n))}`).join(' · ');
 }
 
-function CouncilModal({ onClose }: { onClose: () => void }) {
+function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => void }) {
   dataVersion.value;
   tick.value;
   const state = kingdomState.value;
@@ -115,6 +116,7 @@ function CouncilModal({ onClose }: { onClose: () => void }) {
               ))}
             </>
           )}
+          {slotId && <BuildingManagement slotId={slotId} name="议会厅" onClose={onClose} />}
         </>
       )}
     </Modal>

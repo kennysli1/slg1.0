@@ -6,6 +6,9 @@ o-m3,m3,population_reached,30,1
 o-m4,m4,clear_camp,rats:1,1
 o-m5,m5,explore_tiles,100,1
 o-m6,m6,resource_owned,gold:100,1
+o-m7,m7,research_completed,1,1
+o-m8,m8,defend_task_village,tianwang_village,1
+o-m9,m9,raid_task_village,tianwang_village,1
 o-d1,d1,submit_resources,wood:150|clay:150,1
 o-d2,d2,clear_camp,task_camp:1,1
 o-d3,d3,submit_resources,crop:300,1

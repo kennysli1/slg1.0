@@ -8,7 +8,7 @@ import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { buildingInfo } from '../../app/config.js';
 import {
-  Panel, IconPlate, Btn, Tag, CostRow, canAfford, TimerBar, confirmDanger,
+  Panel, IconPlate, Btn, Tag, CostRow, canAfford, TimerBar,
 } from '../../ui/index.js';
 import { fmt } from '../../shared/utils/format.js';
 import { openBuilding } from './BuildingModal.js';
@@ -61,10 +61,6 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
   const repairAfford = canAfford(b.repairCost ?? null);
   const hasRepairRow = isDamaged && !isDemolishing && !isBusy && b.repairCost && b.repairTargetLevel;
   const hasCostRow = !isDemolishing && !isDamaged && !isConstructing && !isMax && !isBusy && b.nextCost;
-  // 所有已落成/受损的非城镇中心建筑都在卡片上提供统一拆除入口。
-  // 特殊建筑弹窗也保留各自管理内容；这里的入口避免玩家因弹窗路由而找不到拆除键。
-  const canDemolish = !isCenter && !isDemolishing && !isBusy && !isConstructing
-    && (b.level >= 1 || !!b.repairTargetLevel);
   const treasures = getCache().treasures as any;
   const reserveCount = (treasures?.treasuryReserve ?? []).length;
   const mainFree = isCenter
@@ -173,27 +169,6 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
             }}
           >
             修复至 Lv{b.repairTargetLevel}
-          </Btn>
-        </div>
-      )}
-      {canDemolish && (
-        <div class="vil-card-foot" onClick={(e) => e.stopPropagation()}>
-          <Btn
-            size="sm"
-            variant="danger"
-            title={`拆除${b.name}`}
-            onClick={async (e: MouseEvent) => {
-              e.stopPropagation();
-              const ok = await confirmDanger({
-                title: `拆除${b.name}`,
-                body: '整栋建筑会被完全拆除，不消耗也不返还资源；拆除开始后不可取消。',
-                confirmText: '确认拆除',
-              });
-              if (!ok) return;
-              await act(req('DemolishBuilding', { slotId: b.slotId }), { okToast: '拆除已开始' });
-            }}
-          >
-            拆除建筑
           </Btn>
         </div>
       )}

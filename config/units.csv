@@ -30,3 +30,4 @@ id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,u
 28,teucatapult,teutons,投石机,unit_teucatapult,ranged,10,50,60,10,3,0,6,90,120,60,6,18,6,,5,1
 29,teuchief,teutons,首领,unit_teuchief,melee,40,0,60,40,4,0,4,3550,2660,2500,2720,60,1,,10,2
 30,teusettler,teutons,拓荒者,unit_teusettler,melee,10,0,80,80,5,3000,1,580,440,460,520,40,1
+31,adventurer,all,冒险者,unit_adventurer,melee,0,0,4,4,7,0,1,20,20,10,15,4,24,,1,3

@@ -144,7 +144,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -171,6 +171,10 @@ export interface QuestObjective {
   /** deliver_to_npc：向 NPC 村庄（幸福村）运送的资源种类与数量（deliverResource∈resources.csv）。 */
   deliverResource?: string;
   deliverAmount?: number;
+  /** research_completed：完成任意（或指定）科技的数量。params 为 count 或 techCode:count。 */
+  researchCode?: string;
+  /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
+  taskVillageCode?: string;
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -182,6 +186,14 @@ export interface QuestRewards {
   population?: number;
   /** grant_population_growth：人口增长速率临时倍率；percent=10 表示 +10%。 */
   populationGrowth?: { percent: number; durationSec: number };
+  /** grant_research_points：交付时加入学院科研点。 */
+  researchPoints?: number;
+}
+
+/** 按前置任务 m8 结局选择的奖励。key 使用 m8_success / m8_failure。 */
+export interface QuestConditionalRewards {
+  m8_success?: QuestRewards;
+  m8_failure?: QuestRewards;
 }
 
 /** 多阶段任务的分支结局奖励（例如 S4 释放/收纳）。 */
@@ -189,6 +201,7 @@ export interface QuestChoiceReward {
   key: string;
   label: string;
   rewards: QuestRewards;
+  conditionalRewards?: QuestConditionalRewards;
 }
 
 /** 任务类型：main=主线；daily=日常；side=支线。 */
@@ -213,6 +226,8 @@ export interface QuestDef {
   rewards: QuestRewards;
   /** 任务失败时保留/获得的资源、宝物和声望。 */
   failureRewards?: QuestRewards;
+  /** 按前置任务结局选择的奖励（例如 m8 成功/失败影响 m9）。 */
+  conditionalRewards?: QuestConditionalRewards;
   /** 多阶段任务各分支的结局奖励预览。 */
   choiceRewards?: QuestChoiceReward[];
   /** 随机任务刷新权重（越大越常出现）；主线忽略。 */
@@ -532,6 +547,14 @@ export interface GameConstants {
   pvpSiegeWeaponPowerPerBuildingLevel: number;
   /** 攻城可从仓库/粮仓取走的存量比例。 */
   pvpSiegeStorageLootRatio: number;
+  /** m8：接受任务后任务村发动攻城的延迟（秒）。 */
+  m8AttackDelaySec: number;
+  /** m8：任务村相对玩家主城的随机生成半径（格）。 */
+  m8TaskVillageSpawnRadius: number;
+  /** m8：任务村各资源初始库存。 */
+  m8TaskVillageResourceAmount: number;
+  /** m8：任务村初始金币。 */
+  m8TaskVillageGold: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -1148,6 +1171,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
     pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
     pvpSiegeStorageLootRatio: Math.max(0, Math.min(1, cn('pvp_siege_storage_loot_ratio', 1))),
+    m8AttackDelaySec: Math.max(1, cn('m8_attack_delay_sec', 28800)),
+    m8TaskVillageSpawnRadius: Math.max(1, cn('m8_task_village_spawn_radius', 8)),
+    m8TaskVillageResourceAmount: Math.max(0, cn('m8_task_village_resource_amount', 10000)),
+    m8TaskVillageGold: Math.max(0, cn('m8_task_village_gold', 500)),
     raw,
   };
 
@@ -1371,6 +1398,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'sell_discard_treasure') { const [minRarity, count] = row.params.split(':'); return { kind: row.kind, minRarity: minRarity?.trim() || 'rare', count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'carry_flag') { const [flagCode, minTroops] = row.params.split(':'); return { kind: row.kind, flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) }; }
     if (row.kind === 'deliver_to_npc') { const [deliverResource, deliverAmount] = row.params.split(':'); return { kind: row.kind, deliverResource: deliverResource?.trim() || 'crop', deliverAmount: Math.max(1, num(deliverAmount, 1)) }; }
+    if (row.kind === 'research_completed') {
+      const [researchCode, count] = row.params.includes(':') ? row.params.split(':') : ['', row.params];
+      return { kind: row.kind, researchCode: researchCode?.trim() || undefined, count: Math.max(1, num(count, 1)) };
+    }
+    if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
+    if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
@@ -1378,6 +1411,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const treasures = rows.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
     const reputation = rows.filter((x) => x.kind === 'adjust_reputation').reduce((sum, x) => sum + num(x.params, 0), 0);
     const population = rows.filter((x) => x.kind === 'grant_population').reduce((sum, x) => sum + Math.max(0, num(x.params, 0)), 0);
+    const researchPoints = rows.filter((x) => x.kind === 'grant_research_points').reduce((sum, x) => sum + Math.max(0, num(x.params, 0)), 0);
     const populationGrowth = rows
       .map((x) => x.kind === 'grant_population_growth' ? parsePopulationGrowthReward(x.params) : null)
       .find((value): value is { percent: number; durationSec: number } => !!value);
@@ -1386,8 +1420,18 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (treasures.length) out.treasures = treasures;
     if (reputation !== 0) out.reputation = reputation;
     if (population > 0) out.population = population;
+    if (researchPoints > 0) out.researchPoints = researchPoints;
     if (populationGrowth) out.populationGrowth = populationGrowth;
     return out;
+  };
+  const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
+    const out: QuestConditionalRewards = {};
+    for (const row of rows) {
+      if (row.kind !== 'grant_population_m8_success' && row.kind !== 'grant_treasure_m8_failure') continue;
+      if (row.kind === 'grant_population_m8_success') out.m8_success = { ...(out.m8_success ?? {}), population: Math.max(0, num(row.params, 0)) };
+      else out.m8_failure = { ...(out.m8_failure ?? {}), treasures: row.params.split('|').map((v) => v.trim()).filter(Boolean) };
+    }
+    return out.m8_success || out.m8_failure ? out : undefined;
   };
   const choiceRewardsOf = (rows: QuestEffectDef[]): QuestChoiceReward[] => {
     const choice = rows.find((x) => x.kind === 'natalie_choice');
@@ -1429,6 +1473,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const rewards = rewardsOf(genericEffects);
     const failureRows = allEffects.filter((x) => x.phase === 'failure');
     const failureRewards = rewardsOf(failureRows);
+    const conditionalRewards = conditionalRewardsOf(allEffects);
     const requires = questGraph.edges.filter((x) => x.toQuest === def.code && x.relation === 'requires').sort((a, b) => a.order - b.order).map((x) => x.fromQuest);
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
     if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
@@ -1438,6 +1483,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     quests[def.code] = {
       id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
+      conditionalRewards,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
       abandonCooldownSec: def.abandonCooldownSec, dailyRewardValue: 0, campSearchRadius: 4, campRetrySec: 300, campMaxRadius: 12,
     };
@@ -1592,8 +1638,8 @@ export function validateGameConfig(config: GameConfig): void {
 
   // units：所需建筑必须存在；form 枚举；traits 引用存在；范围
   for (const u of Object.values(config.units)) {
-    if (!u.isMercenary && !knownTribes.has(u.tribe)) {
-      errors.push(`units.csv[${u.key}] tribe=${u.tribe} 必须是 romans/gauls/teutons`);
+    if (!u.isMercenary && !knownTribes.has(u.tribe) && u.tribe !== 'all') {
+      errors.push(`units.csv[${u.key}] tribe=${u.tribe} 必须是 romans/gauls/teutons/all`);
     }
     if (u.building && !buildingCodes.has(u.building)) {
       errors.push(`units.csv[${u.key}] building=${u.building} 不在 buildings.csv`);
@@ -1778,7 +1824,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1820,6 +1866,13 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'deliver_to_npc') {
       if (!q.objective.deliverResource || !resourceKeys.has(q.objective.deliverResource)) errors.push(`quests.csv[${q.code}] deliver_to_npc 资源 ${q.objective.deliverResource} 不在 resources.csv`);
       if (!q.objective.deliverAmount || q.objective.deliverAmount < 1) errors.push(`quests.csv[${q.code}] deliver_to_npc 数量必须≥1`);
+    } else if (q.objective.kind === 'research_completed') {
+      if (q.objective.researchCode && !config.research[q.objective.researchCode]) errors.push(`quests.csv[${q.code}] research_completed 科技 ${q.objective.researchCode} 不在 research.csv`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] research_completed 数量必须≥1`);
+    } else if (q.objective.kind === 'raid_task_village') {
+      if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] raid_task_village 必须指定任务村代码`);
+    } else if (q.objective.kind === 'defend_task_village') {
+      if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
     }
     // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
     if (q.trigger) {
@@ -1830,10 +1883,13 @@ export function validateGameConfig(config: GameConfig): void {
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
     }
-    if (q.rewards.resources) {
-      for (const k of Object.keys(q.rewards.resources)) if (!resourceKeys.has(k)) errors.push(`quests.csv[${q.code}] 奖励资源 ${k} 不在 resources.csv`);
+   if (q.rewards.resources) {
+     for (const k of Object.keys(q.rewards.resources)) if (!resourceKeys.has(k)) errors.push(`quests.csv[${q.code}] 奖励资源 ${k} 不在 resources.csv`);
+   }
+    for (const rewards of [q.conditionalRewards?.m8_success, q.conditionalRewards?.m8_failure]) {
+      for (const t of rewards?.treasures ?? []) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 条件奖励宝物 ${t} 不在 treasures.csv`);
     }
-    for (const req of q.requires) if (!questCodes.has(req)) errors.push(`quests.csv[${q.code}] requires 引用不存在的任务: ${req}`);
+   for (const req of q.requires) if (!questCodes.has(req)) errors.push(`quests.csv[${q.code}] requires 引用不存在的任务: ${req}`);
   }
   const questCycle = findQuestCycle(config.quests);
   if (questCycle) errors.push(`quests.csv 主线前置存在循环依赖: ${questCycle.join(' → ')}`);

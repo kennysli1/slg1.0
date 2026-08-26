@@ -19,6 +19,7 @@ import { errText } from '../../shared/ui/text.js';
 import {
   Modal, Panel, SectionHead, Empty, Btn, Tag, Icon, IconPlate, Bar,
 } from '../../ui/index.js';
+import { BuildingManagement } from '../village/BuildingManagement.js';
 import '../../styles/trade.css';
 
 // ---- 常量 ----
@@ -34,14 +35,14 @@ const fmtRemaining = fmtDur;
 // ---- 公共入口 ----
 
 /** 打开贸易中心弹窗（供村庄建筑弹窗调用，签名固定）。 */
-export function openTradeCenter(): void {
+export function openTradeCenter(slotId?: string): void {
   void reloadTrade();
-  openModal((close) => <TradeCenterModal onClose={close} />, 'trade-center');
+  openModal((close) => <TradeCenterModal slotId={slotId} onClose={close} />, 'trade-center');
 }
 
 // ---- 主组件 ----
 
-function TradeCenterModal({ onClose }: { onClose: () => void }) {
+function TradeCenterModal({ slotId, onClose }: { slotId?: string; onClose: () => void }) {
   // 订阅 tradeCenter 信号（push 后自动重渲）
   const c = tradeCenter.value as any;
 
@@ -361,6 +362,7 @@ function TradeCenterModal({ onClose }: { onClose: () => void }) {
         }
         onSubmit={handleCreateOrder}
       />
+      {slotId && <BuildingManagement slotId={slotId} name="贸易中心" onClose={onClose} />}
     </Modal>
   );
 }

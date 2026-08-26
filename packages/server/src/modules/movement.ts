@@ -80,6 +80,10 @@ interface MovementRecord {
   transportMode?: 'transfer' | 'transport' | 'reinforce';
   /** 增援不并入目标村驻军；兵力仍由来源村承担口粮，抵达后在目标村临时驻留。 */
   npcService?: boolean;
+  /** 任务模块发起的 NPC 行军标识（当前用于 m8 攻城）。 */
+  taskCode?: string;
+  /** NPC 行军的真实出发任务村，用于读取任务村守军快照。 */
+  taskVillageId?: string;
   reinforcementUntil?: number;
   reinforcementSnapshot?: Snapshot;
   /** 该支增援独立的掠夺防守配置；旧记录缺省为全军参与。 */
@@ -170,6 +174,7 @@ export class MovementModule {
     this.commands.register('movement.SendAmbush', (c) => this.sendAmbush(c));
     this.commands.register('movement.SendExplore', (c) => this.sendExplore(c));
     this.commands.register('movement.SendAutoExplore', (c) => this.sendAutoExplore(c));
+    this.commands.register('movement.SendTaskVillageAttack', (c) => this.sendTaskVillageAttack(c));
     this.commands.register('movement.StopMarch', (c) => this.stopMarch(c));
     this.commands.register('movement.ResumeMarch', (c) => this.resumeMarch(c));
     this.commands.register('movement.RecallMarch', (c) => this.recallMarch(c));
@@ -419,7 +424,9 @@ export class MovementModule {
   }
 
   /** 更新某村的在途总 popCost 与在途兵力，通知 population（动员足迹）与 military（粮耗）。 */
-  private updateEnRoutePop(villageId: string): void {
+  private updateEnRoutePop(villageId: string | undefined): void {
+    // 任务村的 NPC 行军不属于任何玩家村庄，不应向人口/军粮模块写入伪造村庄状态。
+    if (!villageId || villageId.startsWith('task:')) return;
     let total = 0;
     const marching: Record<string, number> = {};
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
@@ -1295,7 +1302,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
@@ -1434,6 +1441,31 @@ export class MovementModule {
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
+  /** m8 内部行军：从任务村取当前守军作为 NPC 攻城军，八小时后攻击玩家主城。 */
+  private async sendTaskVillageAttack(cmd: Command): Promise<CommandResult> {
+    const { taskVillageId, targetVillage, taskCode } = cmd.payload as { taskVillageId?: string; targetVillage?: string; taskCode?: string };
+    if (!taskVillageId || !targetVillage) return { ok: false, payload: {}, reason: 'task_attack_target_required' };
+    const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: taskVillageId } });
+    if (!target.ok) return { ok: false, payload: {}, reason: 'task_village_not_found' };
+    const source = target.payload as any;
+    const fromXY: Hex = { q: Number(source.q), r: Number(source.r) };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const snap = (source.defender ?? {}) as Record<string, { count?: number }>;
+    const troops = Object.fromEntries(
+      Object.entries(snap)
+        .map(([code, unit]) => [code, Math.max(0, Math.floor(Number(unit.count) || 0))] as const)
+        .filter(([, count]) => count > 0),
+    ) as Record<string, number>;
+    if (Object.keys(troops).length === 0) return { ok: false, payload: {}, reason: 'task_village_no_troops' };
+    const id = this.nextId();
+    // 战斗目标必须使用玩家主城 ID，Combat 才能读取主城守军/城墙；任务村
+    // ID 通过 taskCode 及任务状态保留，仅用于战后更新任务村剩余兵力和库存。
+    const mv = await this.launch({ id, type: 'attack', battleType: 'siege', fromVillage: `task:${taskVillageId}`, fromXY, toXY, targetVillage, targetId: targetVillage, troops, npcService: true, taskCode: taskCode ?? 'm8', taskVillageId, departAt: this.now() });
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', taskCode: mv.taskCode, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
   private async getRallyLevel(villageId: string): Promise<number> {
     const res = await this.commands.send({ name: 'building.GetBuildingLevel', from: MovementModule.NAME, payload: { villageId, kind: 'rallypoint' } });
     return res.ok ? Math.max(0, Number((res.payload as any)?.level) || 0) : 0;
@@ -1553,7 +1585,7 @@ export class MovementModule {
   }
 
   /**
-   * 发起侦察：只接受三族侦察兵（equlegati/pathfinder/teuscout），不宣战、不拆建筑。
+   * 发起侦察：接受三族侦察兵与冒险者，不宣战、不拆建筑。
    * PvP 目标用 targetVillage；PvE 营地用 targetId。PvE 强制资源/守军报告，
    * 侦察战斗与 PvP 采用同一套「守方侦察兵反侦察」规则。
    */
@@ -1566,7 +1598,7 @@ export class MovementModule {
     if ((!targetVillage && !targetId) || (targetVillage === villageId)) return { ok: false, payload: {}, reason: 'not_enemy_village' };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
-    if (Object.keys(valid.troops).some((code) => !this.isScoutUnit(code))) {
+    if (Object.keys(valid.troops).some((code) => !this.isScoutUnit(code) && !this.isAdventurerUnit(code))) {
       return { ok: false, payload: {}, reason: 'scout_units_only' };
     }
     const fromXY = await this.villageXY(villageId);
@@ -1669,9 +1701,15 @@ export class MovementModule {
   }
 
   private isScoutUnit(code: string): boolean {
+    // 冒险者是零战斗力的探索/侦察替代兵种，但不具备发现其他侦察部队的能力。
+    if (this.isAdventurerUnit(code)) return false;
     if (['equlegati', 'pathfinder', 'teuscout'].includes(code)) return true;
     const def = this.config.units[code];
     return !!def && /侦察|探路/.test(def.name) && (def.meleeAtk + def.rangedAtk) <= 0;
+  }
+
+  private isAdventurerUnit(code: string): boolean {
+    return code === 'adventurer' || this.config.units[code]?.name === '冒险者';
   }
 
   private async validatePvPRelation(villageId: string, targetVillage: string, declareWar: boolean): Promise<CommandResult> {
@@ -2532,8 +2570,7 @@ export class MovementModule {
     );
     const attackerTotal = Object.values(attackerBefore).reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
     const defenderScoutTotal = Object.values(defenderScoutBefore).reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
-    const attackerLostCount = Math.min(attackerTotal, defenderScoutTotal);
-    const attackerAfter = this.allocateScoutSurvivors(attackerBefore, attackerLostCount);
+    const { survivors: attackerAfter, losses: attackerLostCount } = this.applyScoutDefense(attackerBefore, defenderScoutTotal);
     const attackerLosses = this.troopLosses(attackerBefore, attackerAfter);
     const defenderLosses: Record<string, number> = {};
     const attackerAlive = Object.values(attackerAfter).reduce((sum, count) => sum + count, 0);
@@ -2663,6 +2700,7 @@ export class MovementModule {
         movementId: mv.id, fromVillage: mv.fromVillage, fromXY: mv.fromXY,
         originalFromXY: mv.originalFromXY ?? mv.fromXY,
         troops: mv.troops, attackerSnapshot: await this.attackerSnapshot(mv),
+        npcService: mv.npcService, taskCode: mv.taskCode,
         treasures: carried,
       },
     });
@@ -2692,8 +2730,7 @@ export class MovementModule {
       .reduce((sum, [, unit]) => sum + Math.max(0, Number(unit.count) || 0), 0);
     const attackerTotal = Object.values(mv.troops).reduce((sum, n) => sum + Math.max(0, Math.floor(n)), 0);
     // 侦察兵互相反侦察：守方每名侦察兵消灭一名来袭侦察兵；无守方侦察兵则无人伤亡。
-    const losses = Math.min(attackerTotal, defenderScouts);
-    const survivors = this.allocateScoutSurvivors(mv.troops, losses);
+    const { survivors, losses } = this.applyScoutDefense(mv.troops, defenderScouts);
     const scoutType = mv.scoutType ?? 'scout_resources';
     const report: Record<string, unknown> = {
       scoutType,
@@ -2749,6 +2786,22 @@ export class MovementModule {
     return out;
   }
 
+  /** 侦察战损失：冒险者没有侦察战斗力，有守方侦察兵时会被全部发现。 */
+  private applyScoutDefense(troops: Record<string, number>, defenderScouts: number): { survivors: Record<string, number>; losses: number } {
+    const normalized = Object.fromEntries(Object.entries(troops).map(([code, raw]) => [code, Math.max(0, Math.floor(Number(raw) || 0))]));
+    if (defenderScouts <= 0) return { survivors: normalized, losses: 0 };
+    const adventurerLosses = Object.entries(normalized)
+      .filter(([code]) => this.isAdventurerUnit(code))
+      .reduce((sum, [, count]) => sum + count, 0);
+    const scoutTroops = Object.fromEntries(Object.entries(normalized).filter(([code]) => this.isScoutUnit(code)));
+    const scoutTotal = Object.values(scoutTroops).reduce((sum, count) => sum + count, 0);
+    const scoutLosses = Math.min(scoutTotal, Math.max(0, Math.floor(defenderScouts)));
+    return {
+      survivors: this.allocateScoutSurvivors(scoutTroops, scoutLosses),
+      losses: adventurerLosses + scoutLosses,
+    };
+  }
+
   private emitScoutReport(villageId: string, side: 'attacker' | 'defender', report: Record<string, unknown>, losses: number, deployed: number): void {
     void this.bus.emit({
       name: 'movement.ScoutReport', source: MovementModule.NAME, ts: this.now(),
@@ -2762,6 +2815,11 @@ export class MovementModule {
    * 修复：此前直接用 buildSnapshot 导致铁匠加成只作用于防守、进攻无效。
    */
   private async attackerSnapshot(mv: MovementRecord): Promise<Snapshot> {
+    if (mv.npcService && mv.taskVillageId) {
+      const npc = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: mv.taskVillageId } });
+      const snapshot = (npc.ok ? (npc.payload as any)?.snapshot : undefined) as Snapshot | undefined;
+      if (snapshot && Object.keys(snapshot).length > 0) return snapshot;
+    }
     const res = await this.commands.send({
       name: 'military.GetCombatSnapshot', from: MovementModule.NAME,
       payload: { villageId: mv.fromVillage, units: mv.troops },
@@ -2791,7 +2849,7 @@ export class MovementModule {
    * 返回对手 movement 或 undefined。
    */
   private async findEncounter(mv: MovementRecord): Promise<MovementRecord | undefined> {
-    if (mv.type === 'scout' || mv.type === 'incoming_scout') return undefined;
+    if (mv.npcService || mv.type === 'scout' || mv.type === 'incoming_scout') return undefined;
     const myOwner = await this.ownerOf(mv.fromVillage);
     const ids = this.posIndex.get(this.posKey(mv.pos.q, mv.pos.r));
     if (!ids) return undefined;
@@ -2808,7 +2866,7 @@ export class MovementModule {
 
   /** 找出一格内的敌方驻扎伏击军；行军中的伏击军不参与此检测。 */
   private async findAmbush(mv: MovementRecord): Promise<MovementRecord | undefined> {
-    if (mv.status !== 'marching' || mv.type === 'return' || mv.type === 'caravan' || mv.type === 'transport' || mv.type === 'scout' || mv.type === 'incoming_scout' || mv.type === 'ambush') return undefined;
+    if (mv.npcService || mv.status !== 'marching' || mv.type === 'return' || mv.type === 'caravan' || mv.type === 'transport' || mv.type === 'scout' || mv.type === 'incoming_scout' || mv.type === 'ambush') return undefined;
     const myOwner = await this.ownerOf(mv.fromVillage);
     for (const other of this.store.all<MovementRecord>(COLLECTION)) {
       if (other.id === mv.id || other.type !== 'ambush' || other.status !== 'stationed') continue;
@@ -2908,7 +2966,7 @@ export class MovementModule {
       side: string; fromVillage: string; fromXY: Hex; toXY: Hex;
       survivors?: Record<string, number>; loot?: Record<string, number>;
       treasures?: string[]; targetKind?: string; targetId?: string; battleType?: string; movementId: string;
-      originalFromXY?: Hex;
+      originalFromXY?: Hex; npcService?: boolean; taskCode?: string;
     };
 
     // 野战（field）分支：普通相遇战幸存者继续原路线；伏击战双方幸存者都原路返城。
@@ -2949,6 +3007,11 @@ export class MovementModule {
     }
 
     if (p.side !== 'attacker') return;
+    // 任务 NPC 攻城军不属于玩家人口，也不需要返程；任务模块会依据同一场战斗记录结局。
+    if (p.npcService && p.taskCode) {
+      this.remove(p.movementId, 'returned');
+      return;
+    }
     const treasures = p.treasures ?? [];
     const survivors = p.survivors ?? {};
     if (Object.keys(survivors).length === 0) {

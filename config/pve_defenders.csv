@@ -32,3 +32,4 @@ targetId,unitCode,name,count,form,meleeAtk,rangedAtk,meleeDef,rangedDef,carry
 105,fiefGuardNw,西北封地卫队,260,melee,170,0,180,160,0
 105,fiefArcherNw,西北封地弓手,120,ranged,35,140,100,150,0
 105,fiefKnightNw,西北封地骑士,40,melee,240,0,210,180,0
+106,club,棍棒兵,15,melee,20,0,15,15,0

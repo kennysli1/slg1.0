@@ -451,8 +451,8 @@ export function HexMap() {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
               icon = 'bld_main';
             } else if (taskCamp) {
-              kind = 'pve'; refId = taskCamp.id; name = '任务营地';
-              icon = pveIcon('任务营地');
+              kind = 'pve'; refId = taskCamp.id; name = taskCamp.name ?? (taskCamp.taskVillage ? '天王老子村' : '任务营地');
+              icon = taskCamp.icon ?? pveIcon(name);
             } else if (t?.kind === 'village') {
               kind = 'village'; refId = t.refId; name = t.name;
               icon = 'bld_main';

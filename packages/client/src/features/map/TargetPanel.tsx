@@ -262,7 +262,8 @@ function TroopPlanner({
   troops, setTroops, transport, scoutOnly,
 }: { troops: NumberMap; setTroops: (troops: NumberMap) => void; transport: boolean; scoutOnly?: boolean }) {
   const army = getCache().army;
-  const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout']);
+  // 冒险者可执行探索/侦察行军，但不参与侦察战，也不能发现其他侦察部队。
+  const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout', 'adventurer']);
   const entries = Object.entries(army?.troops ?? {}).filter(([code, amount]) => Number(amount) > 0 && (!scoutOnly || scoutCodes.has(code)));
   if (!entries.length) return <p class="expedition-empty">无可用兵力，先去军队页训练。</p>;
 

@@ -637,7 +637,7 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.trainingBySlot = s.trainingBySlot || {};
 
-    const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe);
+    const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe || u.tribe === 'all');
     const { slots, kindLevels } = await this.resolveLayout(s.villageId);
 
     // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
@@ -763,7 +763,7 @@ export class MilitaryModule {
 
     const def = this.config.units[unit];
     if (!def) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
-    if (def.tribe !== s.tribe) return { ok: false, payload: {}, reason: 'wrong_tribe_unit' };
+    if (def.tribe !== s.tribe && def.tribe !== 'all') return { ok: false, payload: {}, reason: 'wrong_tribe_unit' };
     if (this.needsTechUnlock(unit) && !(s.techUnlockedUnits ?? []).includes(unit)) {
       return { ok: false, payload: {}, reason: 'tech_not_unlocked' };
     }

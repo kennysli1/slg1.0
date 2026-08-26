@@ -55,6 +55,9 @@ function objText(task: any): string {
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
+  if (o.kind === 'research_completed') return `拥有学院并研发科技 ×${o.count}`;
+  if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
+  if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   return o.kind;
 }
 
@@ -73,8 +76,9 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
   const reputation = Number(rewards.reputation) || 0;
   const population = Number(rewards.population) || 0;
   const populationGrowth = rewards.populationGrowth ?? null;
+  const researchPoints = Number(rewards.researchPoints) || 0;
   const resEntries = Object.entries(res);
-  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && !populationGrowth) return null;
+  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && researchPoints === 0 && !populationGrowth) return null;
   return (
     <div class="task-card-reward">
       <span class="task-reward-label">{label}</span>
@@ -102,6 +106,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
             声望 {reputation > 0 ? '+' : ''}{reputation}
           </span>
         )}
+        {researchPoints > 0 && <span class="task-reward-chip">科研点 {fmt(researchPoints)}</span>}
         {population !== 0 && (
           <span class="task-reward-chip task-reward-chip--population">
             人口 {population > 0 ? '+' : ''}{fmt(population)}
@@ -197,12 +202,13 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasReputation = Number(rewards?.reputation) !== 0;
   const hasPopulation = Number(rewards?.population) !== 0;
   const hasPopulationGrowth = !!rewards?.populationGrowth;
+  const hasResearchPoints = Number(rewards?.researchPoints) !== 0;
   return (
     <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth
+      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth || hasResearchPoints
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation }} label="本次获得" />
+      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, population: rewards?.population, populationGrowth: rewards?.populationGrowth, researchPoints: rewards?.researchPoints }} label="本次获得" />
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
       )}
@@ -278,11 +284,16 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
 }
 
 export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolean }) {
+  // m8 攻城倒计时按秒刷新；不依赖服务端重复推送任务快照。
+  tick.value;
   const o = task.objective;
   const isMain = task.type === 'main';
   const camps = o.kind === 'clear_camp'
     ? pendingTaskCamps(task.camps as TaskCampCoordinate[] | undefined)
     : [];
+  const taskVillage = (o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.taskVillageXY
+    ? { id: String(task.taskVillageId ?? `${task.taskVillageXY.q},${task.taskVillageXY.r}`), q: Number(task.taskVillageXY.q), r: Number(task.taskVillageXY.r) }
+    : undefined;
 
   const onAbandon = async () => {
     const isSide = task.type === 'side';
@@ -300,12 +311,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const onSubmit = () => {
     openModal((close) => <SubmitModal task={task} close={close} />, `task-submit-${task.code}`);
   };
-  const onGoMap = async (camp = camps[0]) => {
+  const onGoMap = async (camp = camps[0] ?? taskVillage) => {
     if (!camp) return;
     if (!await ensureTaskExecution(task)) return;
     // 设置地图初始视角与选中目标：地图挂载后会显示既有的金色选中环和目标面板。
     setMapCenter({ q: camp.q, r: camp.r });
-    selected.value = { refId: camp.id, kind: 'pve', q: camp.q, r: camp.r, name: '任务营地', icon: 'pve_bandits' };
+    selected.value = { refId: camp.id, kind: 'pve', q: camp.q, r: camp.r, name: taskVillage && camp.id === taskVillage.id ? '天王老子村' : '任务营地', icon: 'pve_bandits' };
     tab.value = 'map';
   };
   const onDeliver = () => {
@@ -337,6 +348,14 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
         </div>
       )}
       <div class="task-card-desc">{task.desc}</div>
+      {o.kind === 'defend_task_village' && task.taskVillageAttackAt && !task.outcome && (
+        <div class="task-card-obj"><span class="task-prog-hint task-prog-hint--warn">
+          {task.taskVillageAttackAt > Date.now() ? `天王老子村将在 ${secLeft(task.taskVillageAttackAt)} 后发动攻城` : '天王老子村已发动攻城，等待战斗结果'}
+        </span></div>
+      )}
+      {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.taskVillageXY && (
+        <div class="task-card-obj"><span class="task-prog-hint">任务村坐标 X {task.taskVillageXY.q} · Y {task.taskVillageXY.r}</span>{task.outcome && <span class="task-prog-hint">m8 结局：{task.outcome === 'success' ? '防守成功' : '防守失败'}</span>}<Btn size="sm" variant="ghost" onClick={() => void onGoMap(taskVillage)}>前往地图</Btn></div>
+      )}
 
       {o.kind === 'submit_resources' && (
         <div class="task-card-obj">
@@ -380,6 +399,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
           </div>
         </div>
+      )}
+      {o.kind === 'research_completed' && (
+        <div class="task-card-obj"><div class="task-card-prog"><span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>已研发 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)} 项科技</span><span class="task-prog-hint">需要先建造学院</span></div></div>
+      )}
+      {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.ready && (
+        <div class="task-card-obj"><span class="task-prog-hint task-prog-hint--ok">目标已达成，请领取奖励</span></div>
       )}
       {o.kind === 'clear_camp' && (
         <div class="task-card-obj">
