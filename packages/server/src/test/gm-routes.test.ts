@@ -9,12 +9,13 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import { registerGmRoutes } from '../gateway/gm.js';
 import { createGameApp } from '../app.js';
+import { parseCsvStructured } from '../infra/csv.js';
 
 const SECRET = 'test-gm-token-xyz';
 
@@ -199,6 +200,9 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     assert.match(res.body, /found_resource_cost_base/, 'GM 页面应提供第2座城每种资源成本参数');
     assert.match(res.body, /found_resource_cost_growth/, 'GM 页面应提供后续城成本增长倍率参数');
     assert.match(res.body, /第2座城为木材\/泥土\/钢\/粮食各 3000/, 'GM 页面应说明当前默认拓荒成本');
+    assert.match(res.body, /kingdom_services/, 'GM 页面应提供议会厅服务参数表');
+    assert.match(res.body, /pve_targets/, 'GM 页面应提供 PvE 目标参数表');
+    assert.match(res.body, /pve_defenders/, 'GM 页面应提供 PvE 守军参数表');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -327,9 +331,13 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   const dataDir = mkdtempSync(join(tmpdir(), 'kow-gm-'));
+  const tempConfig = mkdtempSync(join(tmpdir(), 'kow-gm-config-'));
   const storePath = join(dataDir, 'game.json');
   try {
-    const { fastify, app } = buildFastify(storePath);
+    // GM 保存现在会写回配置 CSV；测试必须使用隔离副本，不能污染仓库 config/。
+    const seed = createGameApp({ now: () => 1_000_000, manualScheduler: true });
+    cpSync(seed.configDir, tempConfig, { recursive: true });
+    const { fastify, app } = buildFastify(storePath, tempConfig);
     await fastify.ready();
 
     // 取 main 建筑 id 以作主键
@@ -365,6 +373,11 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
       999,
       'balance/data 中 main.popGrowthPerLevel 应为 999',
     );
+    const savedBuildings = readFileSync(join(app.configDir, 'buildings.csv'), 'utf8');
+    assert.match(savedBuildings, /,main,[^\r\n]*,999,/,
+      'GM 平衡参数必须写回当前 release 的默认 buildings.csv');
+    assert.ok(existsSync(join(dataDir, 'config', 'buildings.csv')),
+      'GM 平衡 CSV 必须镜像到 shared/config 以跨部署保留');
 
     // 宝库每级的 treasureSlots 是复合主键字段；GM 修改后应热重载，
     // 且该增量同时作为主宝物栏与备用宝物栏的容量来源。
@@ -376,6 +389,10 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     });
     assert.equal(treasurySave.statusCode, 200, `宝库槽位覆盖应成功：${treasurySave.body}`);
     assert.equal(app.config.buildings.treasury.levels[1].treasureSlots, 7, '宝库 L1 treasureSlots 应热重载为 7');
+    const savedLevels = parseCsvStructured(readFileSync(join(app.configDir, 'building_levels.csv'), 'utf8'));
+    const savedTreasuryLevel = savedLevels.rows.find((row) => row.code === 'treasury' && row.level === '1');
+    assert.equal(savedTreasuryLevel?.treasureSlots, '7',
+      '逐级平衡参数必须写回默认 building_levels.csv');
 
     const levelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
       building_levels?: Array<Record<string, unknown>>;
@@ -425,6 +442,10 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     assert.equal(foundingSave.statusCode, 200, `拓荒成本覆盖应成功：${foundingSave.body}`);
     assert.equal(app.config.constants.foundResourceCostBase, 4321, '第2座城每种资源成本应热重载');
     assert.equal(app.config.constants.foundResourceCostGrowth, 1.5, '后续城成本增长倍率应热重载');
+    const savedConstants = parseCsvStructured(readFileSync(join(app.configDir, 'game_constants.csv'), 'utf8'));
+    const savedFoundBase = savedConstants.rows.find((row) => row.key === 'found_resource_cost_base');
+    assert.equal(savedFoundBase?.value, '4321',
+      '常量参数必须写回默认 game_constants.csv');
     const foundingData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
       constants?: Array<Record<string, unknown>>;
     };
@@ -434,9 +455,15 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
 
     await fastify.close();
+    // 模拟删档/重启：game.json 会换新，但同一 configDir 和共享 CSV 必须继续作为默认值。
+    const restarted = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath: join(dataDir, 'fresh-game.json'), configDir: tempConfig });
+    assert.equal(restarted.config.buildings.main.popGrowthPerLevel, 999, '重启后应读取 GM 写回的 buildings.csv');
+    assert.equal(restarted.config.buildings.treasury.levels[1].treasureSlots, 7, '重启后应读取 GM 写回的 building_levels.csv');
+    assert.equal(restarted.config.constants.foundResourceCostBase, 4321, '重启后应读取 GM 写回的 game_constants.csv');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
     rmSync(dataDir, { recursive: true, force: true });
+    rmSync(tempConfig, { recursive: true, force: true });
   }
 });

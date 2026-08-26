@@ -785,7 +785,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   // 先读建筑原始行，建立 数字ID→code 映射，再解析 requires（前置也是数字ID引用）
   let buildingRows = loadCsv(p('buildings.csv'));
   assertUniqueRows(buildingRows, 'buildings.csv');
-  // 应用平衡覆盖（玩家在 /gm/balance 的手动修改；持久化在 data/balance_overrides.json，git 忽略）
+  // 应用遗留平衡覆盖（玩家在 /gm/balance 的旧版本手动修改；CSV 是当前默认事实源，JSON 仅作兼容）
   if (overrides?.buildings) {
     buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
   }
@@ -1480,7 +1480,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
 /**
  * 热重载入口：重新从目录加载整套配置（含 validateGameConfig 校验；失败抛出 Error）。
  * 配合 app.reloadConfig() 使用——先在此校验通过，再写回磁盘，避免半截配置。
- * overrides 来自 data/balance_overrides.json（玩家在 /gm/balance 的手动修改）。
+ * overrides 来自旧版本的 data/balance_overrides.json；当前 GM 保存会先写回 CSV，再保留该文件兼容旧 release。
  */
 export function reloadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   return loadGameConfig(configDir, overrides);
