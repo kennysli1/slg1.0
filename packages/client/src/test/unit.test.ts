@@ -19,7 +19,7 @@ import { notificationText, notificationKind } from '../features/reports/notifica
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { shouldRenderMarchPath, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 
 describe('modalLayerZ', () => {
@@ -49,6 +49,12 @@ describe('地图定位', () => {
     assert.equal(shouldRenderMarchPath({ status: 'stationed', path }), false);
     assert.equal(shouldRenderMarchPath({ status: 'paused', path }), false);
     assert.equal(shouldRenderMarchPath({ status: 'marching', path: [{ q: 0, r: 0 }] }), false);
+  });
+
+  it('探索过但暂时失去视野的地形仍显示轻雾，未探索格显示重雾', () => {
+    assert.equal(shouldRenderTerrainFog('visible'), false);
+    assert.equal(shouldRenderTerrainFog('explored'), true);
+    assert.equal(shouldRenderTerrainFog('unexplored'), true);
   });
 
   it('任务营地导航只保留未清理的营地', () => {

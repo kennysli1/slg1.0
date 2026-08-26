@@ -49,10 +49,10 @@
 .terrain-surface--plain { fill: var(--terrain-plain); }
 .terrain-surface--forest { fill: var(--terrain-forest); }
 .terrain-surface--hills { fill: var(--terrain-hills); }
-/* 已探索地形不再被黑雾盖住；地貌记忆通过细节层的轻微降饱和表达。 */
-.terrain-surface--plain.terrain-surface--explored { fill: var(--terrain-plain); }
-.terrain-surface--forest.terrain-surface--explored { fill: var(--terrain-forest); }
-.terrain-surface--hills.terrain-surface--explored { fill: var(--terrain-hills); }
+/* 已探索地形保留辨识度；当前无视野时由下方轻雾层进一步压低亮度。 */
+.terrain-surface--plain.terrain-surface--explored { fill: var(--terrain-plain-explored); }
+.terrain-surface--forest.terrain-surface--explored { fill: var(--terrain-forest-explored); }
+.terrain-surface--hills.terrain-surface--explored { fill: var(--terrain-hills-explored); }
 .terrain-plain-texture { fill: url("#plain-contours"); }
 .terrain-plain-contour {
   fill: none;
@@ -68,7 +68,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.terrain-detail--explored { opacity: .76; filter: saturate(.82) brightness(1.04); }
+.terrain-detail--explored { opacity: .78; filter: saturate(.86) brightness(1.04); }
 .terrain-fog { pointer-events: none; }
 .terrain-fog--explored { fill: var(--terrain-fog-explored); }
 .terrain-fog--unexplored { fill: var(--terrain-fog-unexplored); }
@@ -232,6 +232,25 @@
   filter: drop-shadow(0 2px 3px var(--c-void));
   transition: filter var(--t-fast), transform var(--t-fast);
 }
+.march-marker-base,
+.march-marker-base-ring {
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.march-marker-base {
+  stroke: var(--c-ink);
+  stroke-width: 2.4;
+  filter: drop-shadow(0 2px 3px var(--c-void));
+}
+.march-marker-base--own { fill: var(--c-jade); fill-opacity: .92; }
+.march-marker-base--enemy { fill: var(--c-crimson); fill-opacity: .92; }
+.march-marker-base-ring {
+  fill: none;
+  stroke-width: 1.4;
+  opacity: .9;
+}
+.march-marker-base-ring--own { stroke: var(--c-gold-hi); }
+.march-marker-base-ring--enemy { stroke: var(--c-ember); }
 .own-march-mk:hover .march-marker-art {
   filter: drop-shadow(0 3px 5px var(--c-void)) brightness(1.12);
   transform: translateY(-1px) scale(1.06);

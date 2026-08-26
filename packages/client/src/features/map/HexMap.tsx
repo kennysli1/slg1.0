@@ -61,6 +61,11 @@ export function shouldRenderMarchPath(movement: { status?: unknown; path?: unkno
   return movement.status === 'marching' && Array.isArray(movement.path) && movement.path.length >= 2;
 }
 
+/** 可见地形不加雾；探索过但暂时失去视野的格子仍保留记忆雾，未探索格使用重雾。 */
+export function shouldRenderTerrainFog(visibility: Visibility): visibility is Exclude<Visibility, 'visible'> {
+  return visibility !== 'visible';
+}
+
 /** 仅用于地貌装饰的稳定世界坐标散点，不参与决定地形类型。 */
 function terrainNoise(q: number, r: number, salt: number): number {
   return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
@@ -493,7 +498,7 @@ export function HexMap() {
     const plainTexture = new Map<Visibility, string[]>();
     const forestCanopy = new Map<Visibility, string[]>();
     const hillRidges = new Map<Visibility, string[]>();
-    const fog = new Map<'unexplored', string[]>();
+    const fog = new Map<Exclude<Visibility, 'visible'>, string[]>();
     const cellsByWorldCoordinate = new Map<string, HexCell[]>();
 
     for (const c of cells) {
@@ -525,12 +530,12 @@ export function HexMap() {
         }
       }
 
-      // 已探索地块仍然显示完整地貌；只有未探索区域需要遮罩，避免“记忆中的地形”
-      // 被黑雾压成无法辨认的色块，同时不泄露服务器没有下发的地貌事实。
-      if (c.visibility === 'unexplored') {
-        const paths = fog.get('unexplored') ?? [];
+      // 已探索地块保留服务端下发的地貌记忆，但失去当前视野时仍加一层轻雾；
+      // 未探索区域使用重雾，避免泄露服务器没有下发的地貌事实。
+      if (shouldRenderTerrainFog(c.visibility)) {
+        const paths = fog.get(c.visibility) ?? [];
         paths.push(hexPath(c, 1.025));
-        fog.set('unexplored', paths);
+        fog.set(c.visibility, paths);
       }
     }
 
@@ -617,6 +622,8 @@ export function HexMap() {
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>{m.type ?? 'return'} · {m.status === 'stationed' ? '驻扎中' : '行军中'}</title>
+          <circle class="march-marker-base march-marker-base--own" cx="0" cy="7" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--own" cx="0" cy="7" r="9.2" />
           <image
             class={`march-marker-art march-marker-art--${t}`}
             href={artPath('map_marker_own')}
@@ -671,6 +678,8 @@ export function HexMap() {
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>敌方军队 · {m.type ?? 'return'}</title>
+          <circle class="march-marker-base march-marker-base--enemy" cx="0" cy="7" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="0" cy="7" r="9.2" />
           <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
@@ -1179,8 +1188,9 @@ export function HexMap() {
             })}
           </g>
 
-          {/* 服务器权威迷雾只覆盖未探索格；已探索地形保持可辨识，快照 POI 仍单独降级。 */}
+          {/* 服务器权威迷雾：已探索格使用轻雾，未探索格使用重雾。 */}
           <g class="layer-fog" aria-hidden="true">
+            {terrainLayers.fog.get('explored') && <path class="terrain-fog terrain-fog--explored" d={terrainLayers.fog.get('explored')!.join('')} />}
             {terrainLayers.fog.get('unexplored') && <path class="terrain-fog terrain-fog--unexplored" d={terrainLayers.fog.get('unexplored')!.join('')} />}
           </g>
 
