@@ -236,6 +236,55 @@ test('M2：已有建筑拆除后重建不计数，新的空槽 1 级建造才计
   assert.equal(m2.ready, true, '达到 2 次新空槽建造后应就绪');
 });
 
+test('M2：接取时城内槽位已满，拆除释放槽位后新建仍按完成事件计数', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'M2 满槽计数');
+  const va = (regRes.payload as any).player.villageId;
+  await repairM1Fields(app, va);
+  await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
+
+  // 1 级主城有 4 个城内槽位：集结点 + 三栋新建筑，先把槽位填满。
+  const first = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  const second = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'granary' });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  await app.scheduler.advanceTo(Math.max((first.payload as any).finishAt, (second.payload as any).finishAt), setClock);
+  const third = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'barracks' });
+  assert.equal(third.ok, true);
+  await app.scheduler.advanceTo((third.payload as any).finishAt, setClock);
+  const full = (await send(app, 'building.GetLayout', { villageId: va })).payload as any;
+  assert.equal(full.zones.inner.placed.length, 4, '接取前城内槽位应已全部占用');
+
+  assert.equal((await send(app, 'task.Accept', { villageId: va, code: 'm2' })).ok, true);
+  const warehouse = full.zones.inner.placed.find((item: any) => item.kind === 'warehouse');
+  assert.ok(warehouse, '应能找到接取前的建筑');
+  const demolition = await send(app, 'building.Demolish', { villageId: va, slotId: warehouse.slotId });
+  assert.equal(demolition.ok, true);
+  await app.scheduler.advanceTo((demolition.payload as any).finishAt, setClock);
+
+  const rebuilt = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(rebuilt.ok, true, `释放槽位后应能新建: ${rebuilt.reason ?? ''}`);
+  await app.scheduler.advanceTo((rebuilt.payload as any).finishAt, setClock);
+  let state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  let m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 1, '接取时已满槽，拆除后在空槽完成 1 级新建应计数');
+  assert.equal(m2.ready, false);
+
+  const granary = (await send(app, 'building.GetLayout', { villageId: va })).payload.zones.inner.placed.find((item: any) => item.kind === 'granary');
+  assert.ok(granary);
+  const demolition2 = await send(app, 'building.Demolish', { villageId: va, slotId: granary.slotId });
+  assert.equal(demolition2.ok, true);
+  await app.scheduler.advanceTo((demolition2.payload as any).finishAt, setClock);
+  const rebuilt2 = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  assert.equal(rebuilt2.ok, true);
+  await app.scheduler.advanceTo((rebuilt2.payload as any).finishAt, setClock);
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 2, '第二个被释放的空槽完成新建后应累计到 2');
+  assert.equal(m2.ready, true, '达到两次新建完成事件后 m2 应就绪');
+});
+
 test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试3');

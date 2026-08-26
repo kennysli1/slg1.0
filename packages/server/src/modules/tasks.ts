@@ -72,11 +72,13 @@ interface TaskInstance {
   progress: number;
   /** build_buildings：接取时已有城内建筑数（旧存档兼容字段）。 */
   buildingBaseline?: number;
-  /** build_buildings：接取时已被占用的槽位；这些槽位拆除后重建不计入新建。 */
+  /** build_buildings：接取时已被占用的槽位；没有发生拆除时不计入新建。 */
   buildingInitialSlots?: string[];
-  /** build_buildings：本任务已计数过的空槽位；同一槽位拆除后重建不重复计数。 */
+  /** build_buildings：接取后已释放、可作为新建计数的槽位。 */
+  buildingFreedSlots?: string[];
+  /** build_buildings：本任务已计数过的槽位；同一槽位重复拆建不重复计数。 */
   buildingCountedSlots?: string[];
-  /** build_buildings：接取后在此前空槽完成 1 级新建的次数。 */
+  /** build_buildings：接取后完成 1 级新建的次数。 */
   buildingBuiltCount?: number;
   /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
   qualifiedMovements?: string[];
@@ -242,6 +244,8 @@ export class TasksModule {
 
     // 建筑建成 → 触发带 building_built 触发条件的随机任务（如 宝库→祭祀筹备）
     this.bus.on('building.Built', (evt: DomainEvent) => void this.onBuildingBuilt(evt));
+    // 建筑完整拆除后释放槽位；build_buildings 任务把该槽位视为可重新建造的空地。
+    this.bus.on('building.Demolished', (evt: DomainEvent) => void this.onBuildingDemolished(evt));
     // 建筑修复完成 → 推进 repair_buildings 类任务（如新村开局主线 m1）
     this.bus.on('building.Repaired', (evt: DomainEvent) => void this.onBuildingRepaired(evt));
     // 建筑建成、人口变化、行军视野更新 → 推进门槛类主线目标。
@@ -848,6 +852,11 @@ export class TasksModule {
       const zone = q.objective.buildingZone ?? 'inner';
       const placed = ((layout.payload as any)?.zones?.[zone]?.placed ?? []) as Array<{ slotId?: string }>;
       inst.buildingInitialSlots = placed.map((p) => p.slotId).filter((slotId): slotId is string => Boolean(slotId));
+      // 新任务从 0 开始累计完成事件；不能用接取后的建筑总数差值代替，
+      // 否则接取时槽位已满、拆除后再建会永远无法完成目标。
+      inst.buildingBaseline = placed.length;
+      inst.buildingBuiltCount = 0;
+      inst.buildingFreedSlots = [];
       inst.buildingCountedSlots = [];
       this.store.set(COLLECTION, storageVillageId, s);
     } else if (code === 'm8') {
@@ -899,14 +908,16 @@ export class TasksModule {
           const zone = q.objective.buildingZone ?? 'inner';
           const placed = ((layout.payload as any)?.zones?.[zone]?.placed ?? []) as Array<{ level?: number; demolishing?: boolean }>;
           const builtNow = placed.filter((p) => Number(p.level) >= 1 && !p.demolishing).length;
-          // 新版按 building.Built 事件累计，且只接受接取时真正空槽的首次新建；
-          // 旧存档没有 buildingBuiltCount 时，用旧 baseline 推导一次初始值。
+          // 新版只按 building.Built 事件累计，不再以当前建筑总数与 baseline
+          // 做差值。这样接取时槽位已满，拆除释放后仍可在空槽完成新建。
+          // 旧存档没有新字段时保留一次性 baseline 兼容；新任务在激活时已
+          // 初始化 buildingInitialSlots/buildingBuiltCount，不会走这条分支。
           if (inst.buildingBaseline === undefined) {
             inst.buildingBaseline = builtNow;
             changed = true;
           }
           if (inst.buildingBuiltCount === undefined) {
-            inst.buildingBuiltCount = Math.max(inst.progress ?? 0, builtNow - inst.buildingBaseline);
+            inst.buildingBuiltCount = inst.buildingInitialSlots ? Math.max(0, inst.progress ?? 0) : Math.max(inst.progress ?? 0, builtNow - inst.buildingBaseline);
             changed = true;
           }
           current = Math.max(0, inst.buildingBuiltCount);
@@ -1728,7 +1739,8 @@ export class TasksModule {
       }
     }
     // 建筑完成事件只在新建至 1 级时推进 build_buildings；升级不会计数。
-    // 接取时已有建筑被拆除后重建，或任务期间同一槽位反复拆建，均不重复计数。
+    // 接取前已有建筑不会计数；接取后完整拆除释放的槽位再次建成时，
+    // 视为空槽上的一次新建，从而避免接取时槽位全满把任务锁死。
     if (Number(p.level) === 1) {
       const builtDef = this.config.buildings[kind];
       for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
@@ -1744,7 +1756,8 @@ export class TasksModule {
           const slotId = p.slotId;
           if (!slotId) continue;
           const initialSlots = inst.buildingInitialSlots ?? [];
-          if (initialSlots.includes(slotId)) continue;
+          const freedSlots = inst.buildingFreedSlots ?? [];
+          if (initialSlots.includes(slotId) && !freedSlots.includes(slotId)) continue;
           inst.buildingCountedSlots ??= [];
           if (inst.buildingCountedSlots.includes(slotId)) continue;
           const target = q.objective.count ?? 1;
@@ -1770,6 +1783,35 @@ export class TasksModule {
       this.store.set(COLLECTION, storageVillageId, s);
     }
     await this.unlockSideQuests(villageId);
+  }
+
+  /**
+   * 完整拆除建筑后，接取中的 build_buildings 任务把原本占用的槽位记为
+   * “已释放空槽”。这只改变本任务的计数资格，不修改建筑模块的状态；
+   * 同一槽位一旦已计数，后续重复拆建仍由 buildingCountedSlots 去重。
+   */
+  private async onBuildingDemolished(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; slotId?: string };
+    const villageId = p.villageId;
+    const slotId = p.slotId;
+    if (!villageId || !slotId) return;
+    let changed = false;
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || q.objective.kind !== 'build_buildings' || inst.readyToDeliver) continue;
+        if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        const sourceVillageId: string = q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId;
+        if (sourceVillageId !== villageId) continue;
+        if (!(inst.buildingInitialSlots ?? []).includes(slotId)) continue;
+        inst.buildingFreedSlots ??= [];
+        if (inst.buildingFreedSlots.includes(slotId)) continue;
+        inst.buildingFreedSlots.push(slotId);
+        changed = true;
+      }
+      if (changed) this.store.set(COLLECTION, storageVillageId, state);
+    }
+    if (changed) await this.pushList(villageId);
   }
 
   /** 建筑修复完成 → 推进 repair_buildings 目标。全局任务可由任一玩家村庄执行。 */
@@ -2255,6 +2297,7 @@ export class TasksModule {
       progress: inst.progress ?? 0,
       buildingBaseline: inst.buildingBaseline ?? null,
       buildingInitialSlots: inst.buildingInitialSlots ?? null,
+      buildingFreedSlots: inst.buildingFreedSlots ?? null,
       buildingCountedSlots: inst.buildingCountedSlots ?? null,
       buildingBuiltCount: inst.buildingBuiltCount ?? null,
       awaitingReturn: inst.qualifiedMovements?.length ?? 0,

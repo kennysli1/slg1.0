@@ -578,10 +578,12 @@ function sectionGeneric(table){
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
     var kingdomKeys = {}; for (var ki=0;ki<KINGDOM_ROWS.length;ki++) kingdomKeys[KINGDOM_ROWS[ki][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -650,6 +652,26 @@ var KINGDOM_ROWS = [
   ['kingdom_task_attack_evil_reward_reputation','攻打玩家奖励声望','手动领取时结算'],
   ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力奖励声望','手动领取时结算'],
 ];
+
+// ── M8 专用视图：避免在长的全局常量表里漏看任务村攻城倒计时。 ──
+var M8_ROWS = [
+  ['m8_attack_delay_sec','M8 攻城倒计时（秒）','接受 M8 后天王老子村等待多久再向玩家主城发动全军攻城；默认 28800 秒（8 小时）'],
+];
+
+function sectionM8(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">M8「冤家路窄」的任务村与攻城调度参数集中在此。修改倒计时后，新接取的 M8 立即使用新值；已生成任务村的既有倒计时不会被重新计算。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<M8_ROWS.length;j++){
+    var item = M8_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="1" step="1" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>M8 任务村参数</h2>'+h+'</div>';
+}
 
 function sectionKingdom(){
   var rows = DATA.constants || [], byKey = {};
@@ -891,6 +913,7 @@ function render(){
   html += sectionFounding();
   html += sectionReputation();
   html += sectionKingdom();
+  html += sectionM8();
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];

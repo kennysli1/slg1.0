@@ -203,6 +203,9 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
     assert.match(res.body, /kingdom_services/, 'GM 页面应提供议会厅服务参数表');
     assert.match(res.body, /pve_targets/, 'GM 页面应提供 PvE 目标参数表');
     assert.match(res.body, /pve_defenders/, 'GM 页面应提供 PvE 守军参数表');
+    assert.match(res.body, /M8 任务村参数/, 'GM 页面应提供 M8 任务村专用参数板块');
+    assert.match(res.body, /M8 攻城倒计时（秒）/, 'GM 页面应提供 M8 攻城倒计时编辑项');
+    assert.match(res.body, /m8_attack_delay_sec/, 'GM 页面应提供 M8 攻城倒计时参数键');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
