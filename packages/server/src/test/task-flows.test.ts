@@ -137,7 +137,6 @@ test('主线人口门槛包含驻军人口', async () => {
   assert.equal(task.progress, 30, '20 平民 + 10 士兵应按总人口达到 30');
   assert.equal(task.ready, true);
 });
-
 test('M8：玩家主动清空天王老子村也会记录为成功并保留任务村', async () => {
   const app = freshApp();
   const va = await reg(app, 'm8-direct');
@@ -212,7 +211,6 @@ test('M8 到时会生成 NPC 攻城行军并向目标村提供可见预警', asy
   const battle = app.store.all<any>('battle').find((item) => item.taskCode === 'm8');
   assert.ok(battle, 'NPC 攻城行军抵达后应创建战场');
 });
-
 test('天王老子村侦察目标坐标以 World 地块为准并回写 PvE 状态', async () => {
   const app = freshApp();
   const va = await reg(app, 'm8-coordinate');
