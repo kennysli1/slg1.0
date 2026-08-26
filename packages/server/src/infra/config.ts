@@ -1173,7 +1173,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     pvpSiegeStorageLootRatio: Math.max(0, Math.min(1, cn('pvp_siege_storage_loot_ratio', 1))),
     m8AttackDelaySec: Math.max(1, cn('m8_attack_delay_sec', 28800)),
     m8TaskVillageSpawnRadius: Math.max(1, cn('m8_task_village_spawn_radius', 8)),
-    m8TaskVillageResourceAmount: Math.max(0, cn('m8_task_village_resource_amount', 10000)),
+    m8TaskVillageResourceAmount: Math.max(0, cn('m8_task_village_resource_amount', 500)),
     m8TaskVillageGold: Math.max(0, cn('m8_task_village_gold', 500)),
     raw,
   };

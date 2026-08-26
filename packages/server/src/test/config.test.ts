@@ -117,7 +117,7 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
 test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
   assert.equal(cfg.constants.m8AttackDelaySec, 28_800);
-  assert.equal(cfg.constants.m8TaskVillageResourceAmount, 10_000);
+  assert.equal(cfg.constants.m8TaskVillageResourceAmount, 500);
   assert.equal(cfg.constants.m8TaskVillageGold, 500);
   assert.equal(cfg.buildings.explorers_guild.zone, 'outer');
   assert.equal(cfg.buildings.explorers_guild.maxLevel, 1);

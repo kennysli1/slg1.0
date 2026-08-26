@@ -261,7 +261,7 @@
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 10000）、`m8_task_village_gold`（初始金币，默认 500）。GM 平衡面板提供独立的“M8 任务村参数”区编辑攻城倒计时；其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
+M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；GM 平衡面板提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
 ## trade_center.csv — 贸易中心逐级参数
 | 列 | 含义 |

@@ -228,6 +228,8 @@ export class TasksModule {
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
+    this.commands.register('task.GmRetriggerCompletedMain', (c: Command) => this.gmRetriggerCompletedMain(c));
+    this.commands.register('task.GmUntriggerMain', (c: Command) => this.gmUntriggerMain(c));
     this.commands.register('task.GmRefreshRandom', (c: Command) => this.gmRefreshRandom(c));
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
     this.commands.register('task.GmResetAll', (c: Command) => this.gmResetAll(c));
@@ -290,6 +292,7 @@ export class TasksModule {
         }
       }
       // 支线门槛可能在本次部署/重启前已经达到；恢复时补查，不能只依赖新训练事件。
+      await this.syncTaskVillageCoordinates(s.villageId);
       await this.checkTroopTriggers(s.villageId);
     }
   }
@@ -490,6 +493,7 @@ export class TasksModule {
     const { villageId } = cmd.payload as { villageId: string };
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
+    await this.syncTaskVillageCoordinates(villageId);
     return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
@@ -501,6 +505,7 @@ export class TasksModule {
     for (const villageId of villageIds) {
       await this.syncThresholdObjectives(villageId);
       await this.syncSuccessConditions(villageId);
+      await this.syncTaskVillageCoordinates(villageId);
     }
     const anchor = villageIds[0];
     const global = anchor ? this.snapshot(anchor, this.ensureState(anchor), 'global') : this.emptySnapshot(anchor ?? null);
@@ -775,6 +780,32 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
+  }
+
+  /** M8 战斗结算统一入口：保留任务村、记录结局并等待玩家手动领取。 */
+  private async resolveM8Battle(
+    storageVillageId: string,
+    inst: TaskInstance,
+    executionVillageId: string,
+    outcome: 'success' | 'failure',
+    survivors: Record<string, number>,
+  ): Promise<void> {
+    if (!inst.taskVillageId || inst.outcome) return;
+    await this.commands.send({
+      name: 'pve.ApplyTaskVillageOutcome', from: TasksModule.NAME,
+      payload: { id: inst.taskVillageId, survivors },
+    });
+    inst.outcome = outcome;
+    inst.executionVillageId = executionVillageId;
+    inst.readyToDeliver = true;
+    const state = this.ensureState(storageVillageId);
+    state.outcomes ??= {};
+    state.outcomes.m8 = outcome;
+    this.scheduler.cancelByOwner(`task-m8-attack:${storageVillageId}`);
+    this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.pushList(executionVillageId);
+    await this.pushMap(executionVillageId);
   }
 
   /**
@@ -1418,6 +1449,28 @@ export class TasksModule {
     camp.r = Number(current.r);
   }
 
+  /** M8/M9 任务村坐标统一以 PvE/World 的 refId 查询结果为准。 */
+  private async syncTaskVillageCoordinates(villageId: string): Promise<void> {
+    const seen = new Set<string>();
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      for (const inst of Object.values(state.active)) {
+        if ((inst.code !== 'm8' && inst.code !== 'm9') || !inst.taskVillageId) continue;
+        const key = `${storageVillageId}:${inst.code}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const target = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+        if (!target.ok) continue;
+        const row = target.payload as { q?: number; r?: number };
+        const q = Number(row.q), r = Number(row.r);
+        if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
+        if (inst.taskVillageXY?.q === q && inst.taskVillageXY?.r === r && state.taskVillages?.m8?.q === q && state.taskVillages?.m8?.r === r) continue;
+        inst.taskVillageXY = { q, r };
+        if (state.taskVillages?.m8?.id === inst.taskVillageId) state.taskVillages.m8 = { ...state.taskVillages.m8, q, r };
+        this.store.set(COLLECTION, storageVillageId, state);
+      }
+    }
+  }
+
   /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
   private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
@@ -1535,18 +1588,24 @@ export class TasksModule {
       const state = this.ensureState(storageVillageId);
       const inst = state.active.m8;
       if (!inst || !inst.taskVillageId || inst.outcome) return;
-      await this.commands.send({ name: 'pve.ApplyTaskVillageOutcome', from: TasksModule.NAME, payload: { id: inst.taskVillageId, survivors: p.survivors ?? {} } });
-      inst.outcome = p.attackerWins ? 'failure' : 'success';
-      inst.executionVillageId = targetId;
-      inst.readyToDeliver = true;
-      state.outcomes ??= {};
-      state.outcomes.m8 = inst.outcome;
-      this.store.set(COLLECTION, storageVillageId, state);
-      await this.pushList(targetId);
-      await this.pushMap(targetId);
+      await this.resolveM8Battle(storageVillageId, inst, targetId, p.attackerWins ? 'failure' : 'success', p.survivors ?? {});
       return;
     }
     if (!villageId || !targetId) return;
+
+    // 玩家在 NPC 预定攻城前主动清空天王老子村，也算 M8 防守成功。
+    // Combat 已先调用 pve.ApplyResult；这里把任务村恢复为“战后幸存者”状态，
+    // 保留实体与剩余任务村，避免被普通 PvE 清空逻辑删除。
+    if (p.targetKind === 'pve' && p.attackerWins && p.campCleared === true) {
+      const state = this.stateForQuest(villageId, 'm8');
+      const inst = state.active.m8;
+      if (inst?.taskVillageId === targetId && !inst.outcome) {
+        // ApplyResult 已将任务村守军全部扣除；此处传空快照，不能误把进攻方幸存者
+        // 当成任务村守军，否则任务村会凭空复活一批玩家自己的兵。
+        await this.resolveM8Battle(this.storageVillageForQuest(villageId, 'm8'), inst, villageId, 'success', {});
+        return;
+      }
+    }
 
     // m9 只要求成功抵达并掠夺任务村；不要求把战后残余守军清零。
     if (p.targetKind === 'pve' && p.attackerWins && targetId) {
@@ -1783,6 +1842,62 @@ export class TasksModule {
       this.store.set(COLLECTION, storageVillageId, s);
     }
     await this.unlockSideQuests(villageId);
+  }
+
+  /** 已完成主线重新置为可接取；M1 遵循其自动激活规则。 */
+  private async gmRetriggerCompletedMain(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'main') return { ok: false, payload: {}, reason: 'only_completed_main_supported' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
+    if (!s.completedMain.includes(code)) return { ok: false, payload: {}, reason: 'not_completed_main' };
+    s.completedMain = s.completedMain.filter((item) => item !== code);
+    s.offeredMain = s.offeredMain.filter((item) => item !== code);
+    this.store.set(COLLECTION, storageVillageId, s);
+    if (code === 'm1') {
+      await this.activateQuest(villageId, code);
+    } else {
+      s.offeredMain.push(code);
+      this.store.set(COLLECTION, storageVillageId, s);
+      await this.pushList(villageId);
+      await this.pushMap(villageId);
+    }
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
+  }
+
+  /** 进行中的主线回退为未触发：清理实例/任务营地，不自动重新放入可接取列表。 */
+  private async gmUntriggerMain(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'main') return { ok: false, payload: {}, reason: 'only_active_main_supported' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
+    const inst = s.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active_main' };
+    for (const camp of inst.camps ?? []) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
+    }
+    if (inst.npcVillageId) await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
+    if (code === 'm8' && inst.taskVillageId) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+      if (s.taskVillages) delete s.taskVillages.m8;
+      if (s.outcomes) delete s.outcomes.m8;
+    }
+    this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
+    this.scheduler.cancelByOwner(`task-m8-attack:${storageVillageId}`);
+    this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
+    delete s.active[code];
+    s.offeredMain = s.offeredMain.filter((item) => item !== code);
+    s.completedMain = s.completedMain.filter((item) => item !== code);
+    this.store.set(COLLECTION, storageVillageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return { ok: true, payload: this.snapshotForVillage(villageId) };
   }
 
   /**
@@ -2344,6 +2459,7 @@ export class TasksModule {
   }
 
   private async pushList(villageId: string): Promise<void> {
+    await this.syncTaskVillageCoordinates(villageId);
     await this.bus.emit({
       name: 'task.ListChanged', source: TasksModule.NAME, ts: this.now(),
       payload: this.snapshotForVillage(villageId),
@@ -2351,6 +2467,7 @@ export class TasksModule {
   }
 
   private async pushMap(villageId: string): Promise<void> {
+    await this.syncTaskVillageCoordinates(villageId);
     const camps: Array<{ id: string; q: number; r: number; cleared: boolean; name?: string; taskVillage?: boolean }> = [];
     for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
       for (const inst of Object.values(state.active)) {

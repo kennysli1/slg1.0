@@ -163,9 +163,25 @@ export class PveModule {
     return this.store.get<PveState>(COLLECTION, id);
   }
 
-  private getTarget(cmd: Command): CommandResult {
+  private async getTarget(cmd: Command): Promise<CommandResult> {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    // World owns the displayed tile coordinate. Older task-village records can
+    // retain stale q/r after a map edit or a failed asynchronous PlacePve;
+    // resolve the refId through World so scouting, raiding and map details agree.
+    const tile = await this.commands.send({
+      name: 'world.GetTileByRef', from: PveModule.NAME,
+      payload: { refId: s.id },
+    });
+    const mapped = (tile.payload as any)?.tile;
+    if (tile.ok && mapped && Number.isFinite(Number(mapped.q)) && Number.isFinite(Number(mapped.r))) {
+      const q = Number(mapped.q), r = Number(mapped.r);
+      if (q !== s.q || r !== s.r) {
+        const next = { ...s, q, r };
+        this.store.set(COLLECTION, s.id, next);
+        return { ok: true, payload: { ...next } };
+      }
+    }
     return { ok: true, payload: { ...s } };
   }
 
