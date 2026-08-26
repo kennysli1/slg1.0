@@ -21,7 +21,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
@@ -343,7 +343,20 @@ const QUEST_MODULE_TABLES = [
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
 function persistentConfigDir(gameApp: GameApp): string | null {
-  return gameApp.balanceOverridePath ? join(dirname(gameApp.balanceOverridePath), 'config') : null;
+  if (!gameApp.balanceOverridePath) return null;
+  const dataDir = dirname(gameApp.balanceOverridePath);
+  // 生产 release 的 current/data 是指向 shared/data 的符号链接。必须先解析
+  // 该链接，再取 shared 的同级 config；否则会误写到 shared/data/config，下一次
+  // 发布的 overlay（shared/config）就看不到 GM 保存的 CSV。普通测试目录没有
+  // 符号链接时仍沿用 data/config，便于隔离测试和本地开发。
+  try {
+    if (lstatSync(dataDir).isSymbolicLink()) {
+      return join(dirname(realpathSync(dataDir)), 'config');
+    }
+  } catch {
+    // 路径尚未创建时回退到本地 data/config；调用方随后会 mkdir。
+  }
+  return join(dataDir, 'config');
 }
 
 function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
