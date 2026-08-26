@@ -239,6 +239,9 @@ export class MovementModule {
   private movementPushVillages(mv: MovementRecord): string[] {
     const ids = [mv.fromVillage];
     if (mv.type === 'transport' && mv.targetVillage) ids.push(mv.targetVillage);
+    // 王国任务 NPC 行军没有真实出发村；把步进/发出/移除推送给
+    // 受袭村，确保其地图和来袭预警在首次出现时立即刷新。
+    if (mv.npcService && mv.targetVillage) ids.push(mv.targetVillage);
     return [...new Set(ids.filter((id) => typeof id === 'string' && id.length > 0))];
   }
 
@@ -580,6 +583,11 @@ export class MovementModule {
         this.villageTile(mv.fromVillage),
         this.villageTile(villageId),
       ]);
+      // NPC 任务村没有 player/village 记录，不能让预警把内部 task:* id
+      // 当成出发村名称；坐标和路径仍使用该 movement 的权威快照。
+      const originName = mv.npcService && mv.taskVillageId
+        ? '天王老子村'
+        : (origin?.name ?? mv.fromVillage);
       out.push({
         id: mv.id,
         type: mv.type as 'raid' | 'attack',
@@ -587,7 +595,7 @@ export class MovementModule {
         targetVillage: villageId,
         targetVillageName: target?.name ?? villageId,
         fromVillage: mv.fromVillage,
-        fromVillageName: origin?.name ?? mv.fromVillage,
+        fromVillageName: originName,
         from: mv.originalFromXY ?? mv.fromXY,
         to: mv.toXY,
         path: mv.path,
@@ -2718,7 +2726,9 @@ export class MovementModule {
     if (!reportTarget) return;
     const armyRes = isPve
       ? await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: targetId } })
-      : await this.commands.send({ name: 'military.GetCombatSnapshot', from: MovementModule.NAME, payload: { villageId: targetVillage, purpose: 'raid' } });
+      // 侦察应读取村庄实际驻军，而不是“防御掠夺”分配池。后者可以被
+      // 玩家关闭或设为空，不能让侦察报告把真实守军误报为无。
+      : await this.commands.send({ name: 'military.GetCombatSnapshot', from: MovementModule.NAME, payload: { villageId: targetVillage } });
     if (!armyRes.ok) {
       // 目标可能在最后一格与移除事件竞争；沿用目标消失规则从当前位置返程。
       await this.startReturn(mv);

@@ -108,6 +108,8 @@ interface TaskInstance {
   taskVillageXY?: { q: number; r: number };
   /** m8 接取后 NPC 攻城的计划时间。 */
   taskVillageAttackAt?: number;
+  /** m8 NPC 攻城已经发出；用于重启恢复时避免重复生成来袭军。 */
+  taskVillageAttackDispatched?: boolean;
   /** m8 结局；success=玩家守住，failure=玩家防守失败。 */
   outcome?: 'success' | 'failure';
 }
@@ -286,8 +288,14 @@ export class TasksModule {
           if (inst.camps.length < (this.quest(inst.code)?.objective.count ?? 1)) this.scheduleCampRetry(s.villageId, inst);
         }
         if (inst.npcPending) await this.retryNpcSpawn(s.villageId, s, inst);
-        if (inst.code === 'm8' && !inst.outcome) {
-          if (inst.taskVillageId && inst.taskVillageAttackAt) this.scheduleM8Attack(s.villageId, inst);
+        if (inst.code === 'm8' && !inst.outcome && !inst.taskVillageAttackDispatched) {
+          if (inst.taskVillageId && !inst.taskVillageAttackAt) {
+            // 旧存档可能在“任务村已生成、攻城时间尚未写入”的窗口中停机。
+            // 不能让这类任务永久停在进行中；恢复时立即补上一次攻城调度。
+            inst.taskVillageAttackAt = this.now();
+            this.store.set(COLLECTION, s.villageId, s);
+            this.scheduleM8Attack(s.villageId, inst);
+          } else if (inst.taskVillageId) this.scheduleM8Attack(s.villageId, inst);
           else if (!inst.taskVillageId) this.scheduleM8VillageRetry(s.villageId, inst);
         }
       }
@@ -954,11 +962,19 @@ export class TasksModule {
           current = Math.max(0, inst.buildingBuiltCount);
         } else if (kind === 'population_reached') {
           const pop = await this.commands.send({ name: 'population.GetSnapshot', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
-          // currentPop 是任务“人口达到”目标的权威平民人口；旧快照中的 totalPop
-          // 可能是尚未重算的派生缓存，优先使用 currentPop 避免把过期值计入进度。
+          // 人口门槛按 PopulationModule 的 totalPop 口径计算：平民、驻军、
+          // 在途和训练中的士兵都属于村庄总人口。此前优先使用 currentPop
+          // 会漏掉已训练士兵，导致“人丁兴旺”进度少算兵力。
           const currentPop = Number((pop.payload as any)?.currentPop);
+          const soldierPop = Number((pop.payload as any)?.soldierPop);
+          const trainingPop = Number((pop.payload as any)?.trainingPop);
           const totalPop = Number((pop.payload as any)?.totalPop);
-          current = Math.max(0, Math.floor(Number.isFinite(currentPop) ? currentPop : (Number.isFinite(totalPop) ? totalPop : 0)));
+          const derivedTotal = Number.isFinite(currentPop) && Number.isFinite(soldierPop)
+            ? currentPop + soldierPop + (Number.isFinite(trainingPop) ? trainingPop : 0)
+            : Number.NaN;
+          current = Math.max(0, Math.floor(
+            Number.isFinite(totalPop) ? totalPop : (Number.isFinite(derivedTotal) ? derivedTotal : (Number.isFinite(currentPop) ? currentPop : 0)),
+          ));
         } else if (kind === 'resource_owned') {
           const resources = await this.commands.send({ name: 'economy.GetResources', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
           current = Math.max(0, Number((resources.payload as any)?.resources?.[q.objective.resourceKey ?? '']) || 0);
@@ -1087,8 +1103,14 @@ export class TasksModule {
       const targetVillage = this.anchorVillage(storageVillageId);
       const sent = await this.commands.send({ name: 'movement.SendTaskVillageAttack', from: TasksModule.NAME, payload: { taskVillageId: current.taskVillageId, targetVillage, taskCode: 'm8' } });
       if (!sent.ok) {
-        // 目标实体仍在地图上，重试而不把任务静默判为完成。
+        // 目标实体仍在地图上，延迟重试而不把任务静默判为完成；
+        // 避免旧档守军为空时 delay=0 的忙循环占满调度器。
+        current.taskVillageAttackAt = this.now() + 60_000;
+        this.store.set(COLLECTION, storageVillageId, state);
         this.scheduleM8Attack(storageVillageId, current);
+      } else {
+        current.taskVillageAttackDispatched = true;
+        this.store.set(COLLECTION, storageVillageId, state);
       }
     }, owner, `village:${storageVillageId}`);
   }
@@ -2427,6 +2449,7 @@ export class TasksModule {
       taskVillageId: inst.taskVillageId ?? null,
       taskVillageXY: inst.taskVillageXY ?? null,
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
+      taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,

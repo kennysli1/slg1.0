@@ -299,6 +299,25 @@ test('/gm/quest-modules 页面脚本可解析并生成可切换标签', async ()
   }
 });
 
+test('/gm/tasks 使用任务 code 而不是 active 数组下标', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const page = await fastify.inject({ method: 'GET', url: '/gm/tasks' });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /Array\.isArray\(s\.active\)/);
+    const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    assert.doesNotThrow(() => new Function(script), '任务管理脚本必须是合法 JavaScript');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
 test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;

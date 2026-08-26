@@ -35,6 +35,8 @@ interface PveState {
   ownerVillageId?: string;
   /** 不重生标记：幸福村（happy_village）这类 0 守军 NPC 村庄清空后不重生、不掉落普通宝物，生命周期由任务模块接管。 */
   noRespawn?: boolean;
+  /** 天王老子村库存已按 M8 配置初始化；旧存档缺失时由 resume 惰性迁移。 */
+  taskVillageLootInitialized?: boolean;
 }
 
 const COLLECTION = 'pve';
@@ -130,6 +132,7 @@ export class PveModule {
   /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。任务营地不在此重生。 */
   resume(): void {
     for (const s of this.store.all<PveState>(COLLECTION)) {
+      this.migrateTaskVillageLoot(s);
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
       if (s.cleared && !s.task && !s.noRespawn) this.respawn(s.id);
     }
@@ -150,6 +153,7 @@ export class PveModule {
       task: task || undefined,
       ownerVillageId: ownerVillageId || undefined,
       noRespawn: noRespawn || undefined,
+      taskVillageLootInitialized: task && type === 'tianwang_village' ? true : undefined,
     };
     this.store.set(COLLECTION, id, s);
     void this.commands.send({
@@ -163,26 +167,59 @@ export class PveModule {
     return this.store.get<PveState>(COLLECTION, id);
   }
 
+  /**
+   * M8 初始库存曾经随模板/旧代码写成过万。只迁移尚未发生战斗的旧任务村：
+   * clearCount=0 且守军仍是模板满编时才覆盖库存，战后剩余兵力/资源绝不回滚。
+   * 迁移结果写回 JSON，因此后续删档/重启继续以当前 CSV 数值为默认值。
+   */
+  private migrateTaskVillageLoot(s: PveState): void {
+    if (!s.task || s.type !== 'tianwang_village' || s.taskVillageLootInitialized) return;
+    const tpl = this.config.pveTemplates[s.type];
+    if (!tpl) return;
+    const defenderFull = Object.keys(tpl.defender).every((unit) =>
+      Number(s.defender?.[unit]?.count ?? 0) === Number(tpl.defender[unit]?.count ?? 0),
+    ) && Object.keys(s.defender).every((unit) =>
+      Number(s.defender[unit]?.count ?? 0) === Number(tpl.defender[unit]?.count ?? 0),
+    );
+    const amount = this.config.constants.m8TaskVillageResourceAmount;
+    const gold = this.config.constants.m8TaskVillageGold;
+    const currentResources = ['wood', 'clay', 'iron', 'crop'].map((key) => Number(s.loot?.[key] ?? 0));
+    const looksLikeLegacyInventory = currentResources.some((value) => value > amount) || Number(s.loot?.gold ?? 0) > gold;
+    if ((s.clearCount ?? 0) !== 0 || !defenderFull || !looksLikeLegacyInventory) {
+      this.store.set(COLLECTION, s.id, { ...s, taskVillageLootInitialized: true });
+      return;
+    }
+    this.store.set(COLLECTION, s.id, {
+      ...s,
+      loot: { wood: amount, clay: amount, iron: amount, crop: amount, gold },
+      taskVillageLootInitialized: true,
+    });
+  }
+
   private async getTarget(cmd: Command): Promise<CommandResult> {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    // 读路径也执行一次惰性迁移，确保没有走完整 resume（例如 GM/API
+    // 直接查看目标）时，旧 M8 库存仍会立即切到当前 CSV 默认值。
+    this.migrateTaskVillageLoot(s);
+    const current = this.load(s.id) ?? s;
     // World owns the displayed tile coordinate. Older task-village records can
     // retain stale q/r after a map edit or a failed asynchronous PlacePve;
     // resolve the refId through World so scouting, raiding and map details agree.
     const tile = await this.commands.send({
       name: 'world.GetTileByRef', from: PveModule.NAME,
-      payload: { refId: s.id },
+      payload: { refId: current.id },
     });
     const mapped = (tile.payload as any)?.tile;
     if (tile.ok && mapped && Number.isFinite(Number(mapped.q)) && Number.isFinite(Number(mapped.r))) {
       const q = Number(mapped.q), r = Number(mapped.r);
-      if (q !== s.q || r !== s.r) {
-        const next = { ...s, q, r };
-        this.store.set(COLLECTION, s.id, next);
+      if (q !== current.q || r !== current.r) {
+        const next = { ...current, q, r };
+        this.store.set(COLLECTION, current.id, next);
         return { ok: true, payload: { ...next } };
       }
     }
-    return { ok: true, payload: { ...s } };
+    return { ok: true, payload: { ...current } };
   }
 
   /** 内部目录：供王国等系统从地图已有普通 PvE 中选择目标，不暴露守军详情给客户端。 */
