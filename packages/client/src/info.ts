@@ -50,6 +50,7 @@ export const UNIT_INFO: Record<string, { name: string; icon: string; form: strin
   phalanx: { name: '方阵兵', icon: 'unit_phalanx', form: 'melee' },
   swordsman: { name: '剑士', icon: 'unit_swordsman', form: 'melee' },
   pathfinder: { name: '探路者', icon: 'unit_pathfinder', form: 'melee' },
+  adventurer: { name: '冒险者', icon: 'unit_adventurer', form: 'melee' },
   theutates: { name: '雷神骑兵', icon: 'unit_theutates', form: 'melee' },
   druidrider: { name: '德鲁伊骑兵', icon: 'unit_druidrider', form: 'melee' },
   haeduan: { name: '海杜安骑兵', icon: 'unit_haeduan', form: 'melee' },

@@ -2576,7 +2576,6 @@ export class MovementModule {
     const defenderScoutBefore = Object.fromEntries(
       Object.entries(incoming.troops).filter(([code, count]) => this.isScoutUnit(code) && Number(count) > 0),
     );
-    const attackerTotal = Object.values(attackerBefore).reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
     const defenderScoutTotal = Object.values(defenderScoutBefore).reduce((sum, count) => sum + Math.max(0, Math.floor(count)), 0);
     const { survivors: attackerAfter, losses: attackerLostCount } = this.applyScoutDefense(attackerBefore, defenderScoutTotal);
     const attackerLosses = this.troopLosses(attackerBefore, attackerAfter);
@@ -2738,12 +2737,12 @@ export class MovementModule {
     const defenderScouts = Object.entries(defenderSnapshot)
       .filter(([code]) => this.isScoutUnit(code))
       .reduce((sum, [, unit]) => sum + Math.max(0, Number(unit.count) || 0), 0);
-    const attackerTotal = Object.values(mv.troops).reduce((sum, n) => sum + Math.max(0, Math.floor(n)), 0);
     // 侦察兵互相反侦察：守方每名侦察兵消灭一名来袭侦察兵；无守方侦察兵则无人伤亡。
-    const { survivors, losses } = this.applyScoutDefense(mv.troops, defenderScouts);
+    const { survivors, losses, lossMap } = this.applyScoutDefense(mv.troops, defenderScouts);
     const scoutType = mv.scoutType ?? 'scout_resources';
     const report: Record<string, unknown> = {
       scoutType,
+      attackerVillage: mv.fromVillage,
       ...(targetVillage ? { targetVillage } : { targetId }),
       targetKind: isPve ? 'pve' : 'village',
       defenderTroops: Object.fromEntries(Object.entries(defenderSnapshot).map(([code, unit]) => [code, unit.count])),
@@ -2770,12 +2769,12 @@ export class MovementModule {
         await this.commands.send({ name: 'treasure.LoseCarried', from: MovementModule.NAME, payload: { movementId: mv.id, mode: isPve ? 'pve' : 'pvp', defenderVillage: targetVillage } });
       }
       // 进攻方没有幸存者，不收到报告；守方仅在确实击落侦察兵时收到一份报告。
-      if (losses > 0 && targetVillage) this.emitScoutReport(targetVillage, 'defender', report, losses, attackerTotal);
+      if (losses > 0 && targetVillage) this.emitScoutReport(targetVillage, 'defender', report, lossMap, { ...mv.troops });
       return;
     }
     // 侦察成功时向双方（守方仅在有损失时）推送同一份快照；宝物随幸存者返程。
-    this.emitScoutReport(mv.fromVillage, 'attacker', report, losses, attackerTotal);
-    if (losses > 0 && targetVillage) this.emitScoutReport(targetVillage, 'defender', report, losses, attackerTotal);
+    this.emitScoutReport(mv.fromVillage, 'attacker', report, lossMap, { ...mv.troops });
+    if (losses > 0 && targetVillage) this.emitScoutReport(targetVillage, 'defender', report, lossMap, { ...mv.troops });
     const returnId = await this.scheduleReturn(mv.fromVillage, mv.toXY, mv.originalFromXY ?? mv.fromXY, survivors, {}, treasures, mv.id, mv.originalFromXY ?? mv.fromXY, undefined, true);
     const returnMv = returnId ? this.load(returnId) : undefined;
     if (returnMv) {
@@ -2797,25 +2796,24 @@ export class MovementModule {
   }
 
   /** 侦察战损失：冒险者没有侦察战斗力，有守方侦察兵时会被全部发现。 */
-  private applyScoutDefense(troops: Record<string, number>, defenderScouts: number): { survivors: Record<string, number>; losses: number } {
+  private applyScoutDefense(troops: Record<string, number>, defenderScouts: number): { survivors: Record<string, number>; losses: number; lossMap: Record<string, number> } {
     const normalized = Object.fromEntries(Object.entries(troops).map(([code, raw]) => [code, Math.max(0, Math.floor(Number(raw) || 0))]));
-    if (defenderScouts <= 0) return { survivors: normalized, losses: 0 };
+    if (defenderScouts <= 0) return { survivors: normalized, losses: 0, lossMap: {} };
     const adventurerLosses = Object.entries(normalized)
       .filter(([code]) => this.isAdventurerUnit(code))
       .reduce((sum, [, count]) => sum + count, 0);
     const scoutTroops = Object.fromEntries(Object.entries(normalized).filter(([code]) => this.isScoutUnit(code)));
     const scoutTotal = Object.values(scoutTroops).reduce((sum, count) => sum + count, 0);
     const scoutLosses = Math.min(scoutTotal, Math.max(0, Math.floor(defenderScouts)));
-    return {
-      survivors: this.allocateScoutSurvivors(scoutTroops, scoutLosses),
-      losses: adventurerLosses + scoutLosses,
-    };
+    const survivors = this.allocateScoutSurvivors(scoutTroops, scoutLosses);
+    const lossMap = this.troopLosses(normalized, survivors);
+    return { survivors, losses: adventurerLosses + scoutLosses, lossMap };
   }
 
-  private emitScoutReport(villageId: string, side: 'attacker' | 'defender', report: Record<string, unknown>, losses: number, deployed: number): void {
+  private emitScoutReport(villageId: string, side: 'attacker' | 'defender', report: Record<string, unknown>, losses: Record<string, number>, deployed: Record<string, number>): void {
     void this.bus.emit({
       name: 'movement.ScoutReport', source: MovementModule.NAME, ts: this.now(),
-      payload: { villageId, side, scoutType: report.scoutType, targetKind: report.targetKind, targetId: report.targetId, targetVillage: report.targetVillage, buildings: report.buildings, resources: report.resources, defenderTroops: report.defenderTroops, attackerLosses: side === 'attacker' ? losses : undefined, deployedTroops: deployed, detected: side === 'defender' },
+      payload: { villageId, side, scoutType: report.scoutType, targetKind: report.targetKind, targetId: report.targetId, targetVillage: report.targetVillage, attackerVillage: report.attackerVillage, buildings: report.buildings, resources: report.resources, defenderTroops: report.defenderTroops, attackerLosses: losses, deployedTroops: deployed, detected: side === 'defender' },
     } as DomainEvent);
   }
 

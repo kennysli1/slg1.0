@@ -124,3 +124,57 @@ test('PvP 侦察不受防御掠夺配置影响', async () => {
   assert.ok(report, '应收到侦察报告');
   assert.equal(report.defenderTroops.legionnaire, 4, '侦察应报告实际驻军而非防御掠夺分配池');
 });
+
+test('冒险者可主动侦察无侦察兵的村庄，并按兵种记录零战损', async () => {
+  let clock = 11_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true }); app.setupWorld();
+  const attacker = (await send(app, 'player.Register', { name: '冒险者侦察甲', password: 'p1234' })).payload as any;
+  const defender = (await send(app, 'player.Register', { name: '冒险者侦察乙', password: 'p1234' })).payload as any;
+  const villageId = attacker.player.villageId;
+  const targetVillage = defender.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId, delta: { adventurer: 100 } });
+  await send(app, 'military.AdjustTroops', { villageId: targetVillage, delta: { legionnaire: 4 } });
+  const reports: any[] = [];
+  app.bus.on('movement.ScoutReport', (event: any) => { reports.push(event.payload); });
+  const scout = await send(app, 'movement.SendScout', {
+    villageId, targetVillage, troops: { adventurer: 100 }, scoutType: 'scout_resources',
+  });
+  assert.equal(scout.ok, true, `冒险者主动侦察应成功: ${scout.reason ?? ''}`);
+  for (let i = 0; i < 20 && !reports.length; i++) {
+    clock += 3_600_000;
+    await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+  }
+  const report = reports.find((candidate) => candidate.side === 'attacker');
+  assert.ok(report, '目标没有侦察兵时冒险者应收到侦察报告');
+  assert.deepEqual(report.attackerLosses, {}, '没有守方侦察兵时冒险者不应损失');
+  assert.deepEqual(report.deployedTroops, { adventurer: 100 }, '报告应保留冒险者兵种与数量');
+  assert.equal(report.defenderTroops.legionnaire, 4);
+});
+
+test('冒险者遇到守方侦察兵会全部被发现并歼灭，只向守方发反侦察报告', async () => {
+  let clock = 13_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true }); app.setupWorld();
+  const attacker = (await send(app, 'player.Register', { name: '冒险者送死甲', password: 'p1234' })).payload as any;
+  const defender = (await send(app, 'player.Register', { name: '冒险者送死乙', password: 'p1234' })).payload as any;
+  const villageId = attacker.player.villageId;
+  const targetVillage = defender.player.villageId;
+  await send(app, 'military.AdjustTroops', { villageId, delta: { adventurer: 100 } });
+  await send(app, 'military.AdjustTroops', { villageId: targetVillage, delta: { equlegati: 1, legionnaire: 10 } });
+  const reports: any[] = [];
+  app.bus.on('movement.ScoutReport', (event: any) => { reports.push(event.payload); });
+  const scout = await send(app, 'movement.SendScout', {
+    villageId, targetVillage, troops: { adventurer: 100 }, scoutType: 'scout_resources',
+  });
+  assert.equal(scout.ok, true, `冒险者主动侦察应成功: ${scout.reason ?? ''}`);
+  for (let i = 0; i < 20 && !reports.length; i++) {
+    clock += 3_600_000;
+    await app.scheduler.advanceTo(clock, (next) => { clock = next; });
+  }
+  assert.equal(reports.some((candidate) => candidate.side === 'attacker'), false, '冒险者全灭时进攻方不应收到侦察报告');
+  const defenderReport = reports.find((candidate) => candidate.side === 'defender');
+  assert.ok(defenderReport, '守方侦察兵发现冒险者后应收到反侦察报告');
+  assert.deepEqual(defenderReport.attackerLosses, { adventurer: 100 });
+  assert.deepEqual(defenderReport.deployedTroops, { adventurer: 100 });
+  assert.equal(defenderReport.detected, true);
+  assert.equal(app.store.all<any>('battle').some((battle) => battle.targetKind === 'village'), false, '侦察战不得创建普通战斗');
+});

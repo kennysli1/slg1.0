@@ -8,6 +8,18 @@ import { escapeHtml } from '../../shared/ui/widgets.js';
 import { fmt } from '../../shared/utils/format.js';
 import { rerenderPopPanel } from '../village/population.js';
 
+/** 兼容新旧侦察战报：新载荷按兵种记录战损，旧载荷仍可能是总数。 */
+function troopMapText(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([code, raw]) => [code, Math.max(0, Math.floor(Number(raw) || 0))] as const)
+      .filter(([, count]) => count > 0);
+    return entries.map(([code, count]) => `${unitName(code)}${fmt(count)}`).join('、') || '无';
+  }
+  const count = Math.max(0, Math.floor(Number(value) || 0));
+  return count > 0 ? fmt(count) : '无';
+}
+
 export function renderReports(): string {
   const reports = getReports();
   if (!reports.length) return `<div class="empty empty-hero">
@@ -63,16 +75,21 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join('、') || '无';
       return `${time}🔭 途中侦察${payload.perfectVictory ? '完胜' : '报告'}：${at}｜来袭兵力 ${troops}｜我方损失 ${ownLoss}｜敌方侦察兵损失 ${enemyLoss}`;
     }
-    const losses = Number(payload.attackerLosses ?? 0);
+    const losses = troopMapText(payload.attackerLosses);
+    if (payload.side === 'defender' || payload.detected) {
+      const deployed = troopMapText(payload.deployedTroops);
+      const source = payload.attackerVillage ? `（来自 ${payload.attackerVillage}）` : '';
+      return `${time}🔭 反侦察报告：发现敌方侦察部队${source} ${deployed}｜敌方损失 ${losses}`;
+    }
     if (payload.scoutType === 'scout_buildings') {
       const b = payload.buildings ?? {};
       const list = [...(b.center ?? []), ...(b.inner ?? []), ...(b.outer ?? [])].map((x: any) => `${x.name ?? x.kind}${x.level}级`).join('、') || '无';
       const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
-      return `${time}🔭 侦察报告：发现城内外建筑 ${list}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+      return `${time}🔭 侦察报告：发现城内外建筑 ${list}｜守军 ${troops}｜我方损失 ${losses}`;
     }
     const resources = Object.entries(payload.resources ?? {}).map(([k, n]: any) => `${resInfo(k).name}${fmt(Number(n) || 0)}`).join(' ') || '无';
     const troops = Object.entries(payload.defenderTroops ?? {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
-    return `${time}🔭 侦察报告：资源 ${resources}｜守军 ${troops}${losses ? `｜侦察兵损失：${losses}` : ''}`;
+    return `${time}🔭 侦察报告：资源 ${resources}｜守军 ${troops}｜我方损失 ${losses}`;
   } else if (event === 'BuildingBattleDamaged') {
     const damage = (payload.destroyed ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.mode === 'demolish' ? (d.removed ? '拆除（建筑移除）' : '拆除') : '破坏'} ${d.fromLevel}→${d.toLevel}`).join('、');
     return `${time}🏚️ 战斗建筑${payload.mode === 'demolish' ? '拆除' : '损坏'}：${damage || '无'}`;

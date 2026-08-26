@@ -434,6 +434,15 @@ describe('notificationText - 建筑侦察报告', () => {
     assert.ok(result?.includes('城镇中心1级'), `应含建筑快照，实际：${result}`);
     assert.ok(result?.includes('军团兵4'), `应含守军兵力，实际：${result}`);
   });
+
+  it('反侦察报告按兵种显示冒险者战损', () => {
+    const result = notificationText('ScoutReport', {
+      side: 'defender', detected: true, attackerVillage: 'village-a',
+      deployedTroops: { adventurer: 100 }, attackerLosses: { adventurer: 100 },
+    });
+    assert.match(result ?? '', /冒险者100/);
+    assert.match(result ?? '', /敌方损失 冒险者100/);
+  });
 });
 
 describe('notificationText - 来袭预警与途中侦察', () => {
