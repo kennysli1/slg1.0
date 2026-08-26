@@ -64,6 +64,8 @@ interface Battle {
   targetKind: 'village' | 'pve' | 'field';
   /** 玩家村战斗模式；PvE/野战没有该字段。 */
   battleType?: 'raid' | 'siege' | 'ambush';
+  /** 任务标识，供任务模块识别 NPC 攻城等特殊战斗。 */
+  taskCode?: string;
   targetId: string; // 防守方村 id、PvE 目标 id 或野战时的 defender movement id
   targetXY: { q: number; r: number }; // 六边形轴坐标（不透明透传）
   wallLevel: number;
@@ -258,6 +260,7 @@ export class CombatModule {
         troops: Record<string, number>; attackerSnapshot: Snapshot; treasures?: string[];
       };
       npcService?: boolean;
+      taskCode?: string;
     };
 
     const contribId = p.movementId;
@@ -319,7 +322,7 @@ export class CombatModule {
       const battle: Battle = {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
-        battleType: p.battleType,
+        battleType: p.battleType, taskCode: p.taskCode,
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
@@ -377,6 +380,7 @@ export class CombatModule {
       id,
       targetKind: p.targetKind,
       battleType: p.battleType ?? (p.targetKind === 'village' ? 'siege' : undefined),
+      taskCode: p.taskCode,
       targetId: p.targetId,
       targetXY: p.targetXY,
       wallLevel,
@@ -708,6 +712,7 @@ export class CombatModule {
       defenderLosses,
       targetKind: b.targetKind,
       targetId: b.targetId,
+      taskCode: b.taskCode,
       battleType: b.battleType,
       battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : b.battleType === 'ambush' ? '伏击' : undefined,
       attackerLineup: b.initialAttacker,

@@ -4,13 +4,13 @@
  */
 import { useEffect } from 'preact/hooks';
 import { openModal, closeModalByKey, researchState, tab, tick } from '../../app/store.js';
-import { reloadResearch, act } from '../../app/refresh.js';
-import { req } from '../../api.js';
+import { reloadResearch } from '../../app/refresh.js';
 import { buildingInfo } from '../../app/config.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import {
-  Modal, IconPlate, Btn, Bar, TimerBar, StatGrid, Stat, Divider, SecondaryActions, confirmDanger,
+  Modal, IconPlate, Btn, Bar, TimerBar, StatGrid, Stat, Divider,
 } from '../../ui/index.js';
+import { BuildingManagement } from '../village/BuildingManagement.js';
 import '../../styles/research.css';
 
 const KEY = 'academy';
@@ -39,17 +39,6 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
   const baseProb = 0.10 + Math.max(0, highest - 1) * 0.01;
   const maxProb = 0.30 + Math.max(0, highest - 1) * 0.02;
   const curProb = count > 0 ? Math.min(maxProb, baseProb + failStreak * 0.02) : 0;
-
-  async function demolish() {
-    const ok = await confirmDanger({
-      title: '拆除学院',
-      body: '拆除后本村学院数量减少，科研点判定会变慢甚至停止。已研发完成的科技不会丢失。',
-      confirmText: '确认拆除',
-    });
-    if (!ok) return;
-    await act(req('DemolishBuilding', { slotId }), { okToast: '已开始拆除学院' });
-    onClose();
-  }
 
   function gotoTechTree() {
     closeModalByKey(KEY);
@@ -110,10 +99,7 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
         所以长期期望是稳定的；多建学院会缩短判定间隔。
       </p>
 
-      <SecondaryActions label="学院管理" hint="拆除学院">
-        <p class="secondary-actions__hint">拆除会降低本村科研点判定效率，已完成的科技不会丢失。</p>
-        <Btn variant="danger" size="sm" onClick={demolish}>拆除学院</Btn>
-      </SecondaryActions>
+      <BuildingManagement slotId={slotId} name="学院" onClose={onClose} />
     </Modal>
   );
 }

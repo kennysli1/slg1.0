@@ -97,6 +97,7 @@ export class ResearchModule {
     this.commands.register('research.GetTechMult', (c: Command) => this.getTechMult(c));
     // 宝物（正直的心）下发科技点判定间隔倍率
     this.commands.register('research.SetTreasureTechInterval', (c: Command) => this.setTreasureTechInterval(c));
+    this.commands.register('research.GrantPoints', (c: Command) => this.grantPoints(c));
 
     // 学院建造/升级/拆除 → 刷新 academy 参数并重调度 RP
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -184,6 +185,19 @@ export class ResearchModule {
       ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1)))
       : 0;
     return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
+  }
+
+  /** 任务等系统发放科研点；科研点归属执行任务的村庄。 */
+  private grantPoints(cmd: Command): CommandResult {
+    const { villageId, amount } = cmd.payload as { villageId?: string; amount?: number };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const n = Math.floor(Number(amount) || 0);
+    if (n <= 0) return { ok: false, payload: {}, reason: 'bad_amount' };
+    const s = this.ensureState(villageId);
+    s.rp += n;
+    this.store.set(COLLECTION, villageId, s);
+    void this.pushRp(villageId, s.rp);
+    return { ok: true, payload: { amount: n, rp: s.rp } };
   }
 
   private getTechTree(cmd: Command): CommandResult {

@@ -31,7 +31,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `player.ts` | 账号、登录凭据、玩家与村庄归属 |
 | `economy.ts` | 五类资源、产率、容量、维护费与经济加成 |
 | `building.ts` | 建筑实例、区域槽位与建造队列 |
-| `military.ts` | 常规兵力、训练队列与铁匠养成 |
+| `military.ts` | 常规兵力、训练队列与铁匠养成（含探险家协会的冒险者） |
 | `population.ts` | 劳动人口、士兵人口、硬上限与繁荣倍率 |
 | `world.ts` | 六边形地图、地块与坐标 |
 | `vision.ts` | 玩家探索记录、城池/行军视野与地图战争迷雾 |
@@ -46,7 +46,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |
 | `alchemy.ts` | 炼金炉输入槽、炼化调度、掉率抽取与收获结果 |
 | `research.ts` | 科研点、研发任务和已完成科技 |
-| `tasks.ts` | 主线/随机任务进度与任务营地 |
+| `tasks.ts` | 主线/随机任务进度、任务营地与 M8/M9 任务村生命周期 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |

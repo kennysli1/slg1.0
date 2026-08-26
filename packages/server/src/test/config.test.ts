@@ -94,6 +94,16 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m6.objective.kind, 'resource_owned');
   assert.equal(cfg.quests.m6.objective.resourceKey, 'gold');
   assert.equal(cfg.quests.m6.objective.count, 100);
+  assert.equal(cfg.quests.m7.objective.kind, 'research_completed');
+  assert.equal(cfg.quests.m7.objective.count, 1);
+  assert.equal(cfg.quests.m8.objective.kind, 'defend_task_village');
+  assert.equal(cfg.quests.m8.objective.taskVillageCode, 'tianwang_village');
+  assert.equal(cfg.quests.m9.objective.kind, 'raid_task_village');
+  assert.equal(cfg.quests.m9.objective.taskVillageCode, 'tianwang_village');
+  assert.deepEqual(cfg.quests.m7.rewards, { researchPoints: 3 }, 'M7 应奖励 3 科技点');
+  assert.deepEqual(cfg.quests.m8.rewards.treasures, ['iron_wall_medal'], 'M8 应奖励铁壁勋章');
+  assert.equal(cfg.quests.m9.conditionalRewards?.m8_success?.population, 5, 'M8 成功时 M9 应奖励 5 人口');
+  assert.deepEqual(cfg.quests.m9.conditionalRewards?.m8_failure?.treasures, ['iron_wall_medal'], 'M8 失败时 M9 应奖励铁壁勋章');
   assert.equal(cfg.quests.m3.rewards.population, 5, 'M3 应奖励 5 人口');
   assert.equal(cfg.quests.m3.rewards.resources, undefined, 'M3 改为人口奖励后不应再发旧资源');
   assert.deepEqual(cfg.quests.m3.rewards.treasures, undefined, 'M3 改为人口奖励后不应再发旧宝物');
@@ -102,6 +112,21 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.ok(cfg.questGraph.conditions.some((x) => x.id === 'c-m1-clean' && x.phase === 'success' && x.kind === 'no_damaged_resource_level'), 'M1 应有隐藏 success 兜底条件');
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
+});
+
+test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.equal(cfg.constants.m8AttackDelaySec, 28_800);
+  assert.equal(cfg.constants.m8TaskVillageResourceAmount, 10_000);
+  assert.equal(cfg.constants.m8TaskVillageGold, 500);
+  assert.equal(cfg.buildings.explorers_guild.zone, 'outer');
+  assert.equal(cfg.buildings.explorers_guild.maxLevel, 1);
+  assert.equal(cfg.units.adventurer.tribe, 'all');
+  assert.equal(cfg.units.adventurer.building, 'explorers_guild');
+  assert.equal(cfg.units.adventurer.meleeAtk, 0);
+  assert.equal(cfg.units.adventurer.rangedAtk, 0);
+  assert.equal(cfg.pveTemplates.tianwang_village.name, '天王老子村');
+  assert.equal(cfg.pveTemplates.tianwang_village.defender.club.count, 15);
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {

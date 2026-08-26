@@ -165,24 +165,36 @@ export interface TaskCampInfo {
 
 function decorateTaskCamps(active: any[]): any[] {
   return active
-    .flatMap((task: any) => (task?.camps ?? []).map((camp: any) => {
+    .flatMap((task: any) => {
       const hasInfo = Boolean(task.code || task.name || task.desc || task.objective);
-      if (!hasInfo) return { ...camp };
-      return {
+      const taskInfo = hasInfo ? {
+        code: String(task.code ?? ''),
+        name: String(task.name ?? task.code ?? '任务'),
+        desc: String(task.desc ?? ''),
+        type: typeof task.type === 'string' ? task.type : undefined,
+        scope: typeof task.scope === 'string' ? task.scope : undefined,
+        campCleared: Number(task.campCleared ?? 0),
+        campTotal: Number(task.campTotal ?? task.camps?.length ?? 0),
+        villageId: typeof task.villageId === 'string' ? task.villageId : undefined,
+        objective: task.objective ?? null,
+      } satisfies TaskCampInfo : undefined;
+      const camps = (task?.camps ?? []).map((camp: any) => ({
         ...camp,
-        taskInfo: {
-          code: String(task.code ?? ''),
-          name: String(task.name ?? task.code ?? '任务'),
-          desc: String(task.desc ?? ''),
-          type: typeof task.type === 'string' ? task.type : undefined,
-          scope: typeof task.scope === 'string' ? task.scope : undefined,
-          campCleared: Number(task.campCleared ?? 0),
-          campTotal: Number(task.campTotal ?? task.camps?.length ?? 0),
-          villageId: typeof task.villageId === 'string' ? task.villageId : undefined,
-          objective: task.objective ?? null,
-        } satisfies TaskCampInfo,
-      };
-    }))
+        ...(taskInfo ? { taskInfo } : {}),
+      }));
+      const taskVillage = task?.taskVillageId && task?.taskVillageXY
+        ? [{
+          id: String(task.taskVillageId),
+          q: Number(task.taskVillageXY.q),
+          r: Number(task.taskVillageXY.r),
+          cleared: false,
+          taskVillage: true,
+          name: '天王老子村',
+          ...(taskInfo ? { taskInfo } : {}),
+        }]
+        : [];
+      return [...camps, ...taskVillage];
+    })
     .filter((camp: any) => !camp?.cleared);
 }
 

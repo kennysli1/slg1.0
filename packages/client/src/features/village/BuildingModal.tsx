@@ -538,11 +538,11 @@ export function openBuilding(slotId: string): void {
   }
 
   // Route special buildings
-  if (kind === 'mercenarycamp') { openMercCamp(); return; }
-  if (kind === 'tradecenter') { openTradeCenter(); return; }
+  if (kind === 'mercenarycamp') { openMercCamp(slotId); return; }
+  if (kind === 'tradecenter') { openTradeCenter(slotId); return; }
   if (kind === 'academy') { openAcademy(slotId); return; }
   if (kind === 'alchemy') { openAlchemy(slotId); return; }
-  if (kind === 'council') { openCouncil(); return; }
+  if (kind === 'council') { openCouncil(slotId); return; }
 
   // Open generic detail modal
   openModal(

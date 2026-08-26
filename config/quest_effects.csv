@@ -16,3 +16,7 @@ e-villager-note,s3,failure,grant_treasure,secret_note,1
 e-investigate-choice,s4,success,natalie_choice,captured_natalies|store:natalie|release:honest_heart|gold:500,1
 e-investigate-store-reputation,s4,failure,adjust_reputation,-2,2
 e-m6-res,m6,deliver,grant_resources,wood:200|clay:200|iron:200|crop:200,1
+e-m7-tech,m7,deliver,grant_research_points,3,1
+e-m8-medal,m8,deliver,grant_treasure,iron_wall_medal,1
+e-m9-success,m9,deliver,grant_population_m8_success,5,1
+e-m9-failure,m9,deliver,grant_treasure_m8_failure,iron_wall_medal,2

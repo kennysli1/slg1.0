@@ -18,6 +18,7 @@ import {
   Modal, SectionHead, Empty, Btn, Tag, Icon, IconPlate,
   Bar, StatGrid, Stat,
 } from '../../ui/index.js';
+import { BuildingManagement } from '../village/BuildingManagement.js';
 import '../../styles/trade.css';
 
 // ---- 工具 ----
@@ -28,14 +29,14 @@ const fmtRemaining = fmtDur;
 // ---- 公共入口 ----
 
 /** 打开雇佣兵营地弹窗（供村庄建筑弹窗调用，签名固定）。 */
-export function openMercCamp(): void {
+export function openMercCamp(slotId?: string): void {
   void reloadMercCamp();
-  openModal((close) => <MercCampModal onClose={close} />, 'merc-camp');
+  openModal((close) => <MercCampModal slotId={slotId} onClose={close} />, 'merc-camp');
 }
 
 // ---- 主组件 ----
 
-function MercCampModal({ onClose }: { onClose: () => void }) {
+function MercCampModal({ slotId, onClose }: { slotId?: string; onClose: () => void }) {
   // 订阅 mercCamp 信号（push 后自动重渲）
   const c = mercCamp.value as any;
 
@@ -158,6 +159,7 @@ function MercCampModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         )}
+      {slotId && <BuildingManagement slotId={slotId} name="雇佣兵营地" onClose={onClose} />}
     </Modal>
   );
 }

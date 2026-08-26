@@ -64,6 +64,7 @@ export class PveModule {
     this.commands.register('pve.ListTargets', () => this.listTargets());
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
+    this.commands.register('pve.ApplyTaskVillageOutcome', (c) => this.applyTaskVillageOutcome(c));
     // 任务模块运行时生成/移除任务营地（内部命令）
     this.commands.register('pve.Spawn', (c) => this.spawn(c));
     this.commands.register('pve.AssignTaskOwner', (c) => this.assignTaskOwner(c));
@@ -222,6 +223,21 @@ export class PveModule {
     }
     this.store.set(COLLECTION, id, s);
     return { ok: true, payload: { looted, cleared: s.cleared, task: !!s.task, noRespawn: !!s.noRespawn } };
+  }
+
+  /** m8 战斗结束后的任务村持久化：保留实体，守军变为战后幸存者，资源减半且金币归零。 */
+  private applyTaskVillageOutcome(cmd: Command): CommandResult {
+    const { id, survivors } = cmd.payload as { id?: string; survivors?: Record<string, number> };
+    if (!id) return { ok: false, payload: {}, reason: 'target_id_required' };
+    const s = this.load(id);
+    if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (!s.task || s.type !== 'tianwang_village') return { ok: false, payload: {}, reason: 'not_tianwang_task_village' };
+    const alive = survivors ?? {};
+    for (const [unit, entry] of Object.entries(s.defender)) entry.count = Math.max(0, Math.floor(Number(alive[unit]) || 0));
+    for (const key of Object.keys(s.loot)) s.loot[key] = key === 'gold' ? 0 : Math.floor(Math.max(0, Number(s.loot[key]) || 0) / 2);
+    s.cleared = false;
+    this.store.set(COLLECTION, id, s);
+    return { ok: true, payload: { id, survivors: alive, loot: { ...s.loot } } };
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {

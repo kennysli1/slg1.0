@@ -5,4 +5,7 @@ q-m2-m3,m2,m3,requires,1
 q-m3-m4,m3,m4,requires,1
 q-m4-m5,m4,m5,requires,1
 q-m5-m6,m5,m6,requires,1
+q-m6-m7,m6,m7,requires,1
+q-m7-m8,m7,m8,requires,1
+q-m8-m9,m8,m9,requires,1
 q-villager-investigate,s3,s4,failure_unlock,1

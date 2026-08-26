@@ -35,13 +35,13 @@
 | # | 文件 | 配什么（一句话） | 想改这些就动它 |
 |---|------|----------------|---------------|
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
-| 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分城镇中心/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、改科技树前置、改归属区 |
+| 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分城镇中心/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、改科技树前置、改归属区；探险家协会在此配置 |
 | 表3 | `town_center_slots.csv` | **城镇中心各级开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
-| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族 |
+| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
-| 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸等） | 调平衡参数；原先写死在代码里的常量都在这 |
+| 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸、M8任务村参数等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
 | 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量、宝库槽位或保险库资源保护量 |
 | 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
@@ -125,12 +125,12 @@
 > **发育节奏与取舍强度的总阀门**：槽位总量始终 < 想盖的建筑总数 → 玩家必须放弃某些流派。
 > 想让玩家发育更快就调大 slots；想让城内外取舍更狠就压低满级 slots。
 
-## units.csv — 兵种（含三部族）
+## units.csv — 兵种（含三部族与通用兵种）
 | 列 | 含义 |
 |----|------|
 | id | 数字主键 |
 | code | 英文代码（程序/存档用，勿改） |
-| tribe | 所属部族（语义串 romans/gauls/teutons） |
+| tribe | 所属部族（语义串 romans/gauls/teutons；`all` 表示所有部族可训练） |
 | name / icon | 显示名 / 图标基名 |
 | form | 形态：`melee`(近战/前排) 或 `ranged`(远程/后排)。取代旧的 cat |
 | meleeAtk | 近战攻击力（近战兵永远用它；远程兵被迫肉搏时用它） |
@@ -147,7 +147,7 @@
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
 | traits | 特性ID列表（逗号分隔，引用 **unit_traits.csv 的数字 id**，可空） |
 
-> 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。
+> 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
 
 ## mercenaries.csv — 雇佣兵目录
 | 列 | 含义 |
@@ -197,6 +197,8 @@
 | name / icon | 显示名 / 图标基名 |
 | respawnSec | 被清空后重生秒数 |
 | lootWood/Clay/Iron/Crop | 战利品总量 |
+
+配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
 ## pve_defenders.csv — PvE 守军（与上表一对多）
 | 列 | 含义 |
@@ -258,6 +260,8 @@
 | march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
+
+M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 10000）、`m8_task_village_gold`（初始金币，默认 500）。GM 平衡面板会在全局常量表中直接编辑这些值，保存后写回默认 CSV，删档/重启仍沿用。
 
 ## trade_center.csv — 贸易中心逐级参数
 | 列 | 含义 |
@@ -374,7 +378,7 @@
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`task_camp`、`clear_pve`、`rare_treasure`、`war_flag` |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`defend_task_village`、`raid_task_village` |
 | params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
@@ -385,7 +389,7 @@
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
 | phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
-| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时） |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
 | order | 同阶段的执行顺序 |
 
 ### quest_edges.csv — 关系边
@@ -409,7 +413,7 @@
 |----|------|
 | id / code / segment | 对话对象数字主键 / 稳定对话代码 / 对象内段落序号（从 1 连续编号；同一对象可有多行） |
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
-| trigger | 触发点，例如 `accept`（点击接取任务） |
+| trigger | 触发点，例如 `accept`（点击接取任务）或 `accept_success` / `accept_failure`、`deliver_success` / `deliver_failure`（按 M8 结局选择文本） |
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
