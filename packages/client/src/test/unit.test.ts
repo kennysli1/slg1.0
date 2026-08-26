@@ -19,7 +19,7 @@ import { notificationText, notificationKind } from '../features/reports/notifica
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { shouldRenderMarchPath, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 
 describe('modalLayerZ', () => {
@@ -41,6 +41,14 @@ describe('地图定位', () => {
     assert.equal(terrainDisplayName('forest'), '森林');
     assert.equal(terrainDisplayName('hills'), '丘陵');
     assert.equal(terrainDisplayName(null), '未探索区域');
+  });
+
+  it('抵达驻扎点后保留路径数据但不再显示活动路线', () => {
+    const path = [{ q: 0, r: 0 }, { q: 1, r: 0 }];
+    assert.equal(shouldRenderMarchPath({ status: 'marching', path }), true);
+    assert.equal(shouldRenderMarchPath({ status: 'stationed', path }), false);
+    assert.equal(shouldRenderMarchPath({ status: 'paused', path }), false);
+    assert.equal(shouldRenderMarchPath({ status: 'marching', path: [{ q: 0, r: 0 }] }), false);
   });
 
   it('任务营地导航只保留未清理的营地', () => {

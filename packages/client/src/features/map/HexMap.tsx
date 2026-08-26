@@ -53,6 +53,14 @@ export function terrainDisplayName(terrain: Terrain | null): string {
   return '未探索区域';
 }
 
+/**
+ * 路线只代表“正在行军”的计划；抵达后服务端会保留 path 供召回/续行，
+ * 但地图上不应继续把它当成活动路线绘制。
+ */
+export function shouldRenderMarchPath(movement: { status?: unknown; path?: unknown }): boolean {
+  return movement.status === 'marching' && Array.isArray(movement.path) && movement.path.length >= 2;
+}
+
 /** 仅用于地貌装饰的稳定世界坐标散点，不参与决定地形类型。 */
 function terrainNoise(q: number, r: number, salt: number): number {
   return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
@@ -485,7 +493,7 @@ export function HexMap() {
     const plainTexture = new Map<Visibility, string[]>();
     const forestCanopy = new Map<Visibility, string[]>();
     const hillRidges = new Map<Visibility, string[]>();
-    const fog = new Map<Exclude<Visibility, 'visible'>, string[]>();
+    const fog = new Map<'unexplored', string[]>();
     const cellsByWorldCoordinate = new Map<string, HexCell[]>();
 
     for (const c of cells) {
@@ -517,10 +525,12 @@ export function HexMap() {
         }
       }
 
-      if (c.visibility !== 'visible') {
-        const paths = fog.get(c.visibility) ?? [];
+      // 已探索地块仍然显示完整地貌；只有未探索区域需要遮罩，避免“记忆中的地形”
+      // 被黑雾压成无法辨认的色块，同时不泄露服务器没有下发的地貌事实。
+      if (c.visibility === 'unexplored') {
+        const paths = fog.get('unexplored') ?? [];
         paths.push(hexPath(c, 1.025));
-        fog.set(c.visibility, paths);
+        fog.set('unexplored', paths);
       }
     }
 
@@ -562,8 +572,7 @@ export function HexMap() {
     const paths: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
-      if (!m.path || m.path.length < 2) return;
-      if (m.status === 'paused') return;
+      if (!shouldRenderMarchPath(m)) return;
       const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
         .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
         .join(' ');
@@ -598,17 +607,6 @@ export function HexMap() {
     moves.forEach((m, i) => {
       if (!m.pos) return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
-      const emoji = m.type === 'attack' ? '⚔'
-        : m.type === 'raid'      ? '⚡'
-        : m.type === 'found'     ? '🚩'
-        : m.type === 'transport' ? '📦'
-        : m.type === 'caravan'   ? '💰'
-        : m.type === 'garrison'  ? '⚑'
-        : m.type === 'ambush'    ? '🗡'
-        : m.type === 'explore'   ? '🔭'
-        : m.type === 'auto_explore' ? '🔭'
-        : m.type === 'incoming_scout' ? '🔎'
-        : '🏠';
       const t = m.type ?? 'return';
       markers.push(
         <g
@@ -618,8 +616,16 @@ export function HexMap() {
           class="own-march-mk"
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <circle r={10} class={`march-dot march-dot--${t}${m.status === 'paused' ? ' paused' : ''}`} />
-          <text class="march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
+          <title>{m.type ?? 'return'} · {m.status === 'stationed' ? '驻扎中' : '行军中'}</title>
+          <image
+            class={`march-marker-art march-marker-art--${t}`}
+            href={artPath('map_marker_own')}
+            x={-16}
+            y={-30}
+            width={32}
+            height={42}
+            preserveAspectRatio="xMidYMid meet"
+          />
         </g>,
       );
     });
@@ -634,16 +640,6 @@ export function HexMap() {
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
       const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
-      const emoji = m.type === 'attack' ? '⚔'
-        : m.type === 'raid'      ? '⚡'
-        : m.type === 'found'     ? '🚩'
-        : m.type === 'transport' ? '📦'
-        : m.type === 'caravan'   ? '💰'
-        : m.type === 'garrison'  ? '⚑'
-        : m.type === 'ambush'    ? '🗡'
-        : m.type === 'explore'   ? '🔭'
-        : m.type === 'auto_explore' ? '🔭'
-        : '🏠';
       const t = m.type ?? 'return';
 
       // 朝向箭头：heading 指向下一格，计算像素方向后绘制小三角
@@ -674,8 +670,16 @@ export function HexMap() {
           class={`enemy-march-mk enemy-march-mk--${t}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <circle r={11} class="enemy-march-ring" />
-          <text class="enemy-march-emoji" textAnchor="middle" dy={4}>{emoji}</text>
+          <title>敌方军队 · {m.type ?? 'return'}</title>
+          <image
+            class={`enemy-march-art enemy-march-art--${t}`}
+            href={artPath('map_marker_enemy')}
+            x={-16}
+            y={-30}
+            width={32}
+            height={42}
+            preserveAspectRatio="xMidYMid meet"
+          />
           {arrowEl}
         </g>,
       );
@@ -1175,9 +1179,8 @@ export function HexMap() {
             })}
           </g>
 
-          {/* 服务器权威迷雾覆盖地貌与快照 POI；未探索层为统一暗雾。 */}
+          {/* 服务器权威迷雾只覆盖未探索格；已探索地形保持可辨识，快照 POI 仍单独降级。 */}
           <g class="layer-fog" aria-hidden="true">
-            {terrainLayers.fog.get('explored') && <path class="terrain-fog terrain-fog--explored" d={terrainLayers.fog.get('explored')!.join('')} />}
             {terrainLayers.fog.get('unexplored') && <path class="terrain-fog terrain-fog--unexplored" d={terrainLayers.fog.get('unexplored')!.join('')} />}
           </g>
 
