@@ -21,9 +21,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
 import { loadGameConfig, loadBalanceOverrides, saveBalanceOverrides, mergeBalanceOverrides, mergeOverridesIntoRows, type BalanceOverrides } from '../infra/config.js';
 
@@ -335,6 +335,54 @@ const QUEST_MODULE_TABLES = [
   'quest_edges.csv',
 ] as const;
 
+/**
+ * GM 编辑后的配置不能只停留在当前 release：release 目录会在下一次部署时
+ * 被新的 git 包替换。把已编辑的 CSV 镜像到 shared/data 同级的 config 目录，
+ * 由 remote-release.sh 在后续 release 构建前覆盖回去；manifest 只记录允许
+ * 覆盖的配置文件名，避免把整套旧配置冻结住而遮蔽新的代码/配置变更。
+ */
+const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
+function persistentConfigDir(gameApp: GameApp): string | null {
+  if (!gameApp.balanceOverridePath) return null;
+  const dataDir = dirname(gameApp.balanceOverridePath);
+  // 生产 release 的 current/data 是指向 shared/data 的符号链接。必须先解析
+  // 该链接，再取 shared 的同级 config；否则会误写到 shared/data/config，下一次
+  // 发布的 overlay（shared/config）就看不到 GM 保存的 CSV。普通测试目录没有
+  // 符号链接时仍沿用 data/config，便于隔离测试和本地开发。
+  try {
+    if (lstatSync(dataDir).isSymbolicLink()) {
+      return join(dirname(realpathSync(dataDir)), 'config');
+    }
+  } catch {
+    // 路径尚未创建时回退到本地 data/config；调用方随后会 mkdir。
+  }
+  return join(dataDir, 'config');
+}
+
+function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
+  const targetDir = persistentConfigDir(gameApp);
+  if (!targetDir || files.length === 0) return;
+  mkdirSync(targetDir, { recursive: true });
+  const manifestPath = join(dirname(gameApp.balanceOverridePath!), GM_CONFIG_MANIFEST);
+  let existing: string[] = [];
+  try {
+    existing = readFileSync(manifestPath, 'utf8')
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  } catch {
+    // 首次保存时 manifest 尚不存在，按空列表初始化。
+  }
+  const all = new Set(existing);
+  for (const file of files) {
+    // 调用方只传入固定的 CSV 表名；再次限制路径，防止 GM 请求借此越界写文件。
+    if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名: ${file}`);
+    copyFileSync(join(gameApp.configDir, file), join(targetDir, file));
+    all.add(file);
+  }
+  writeFileSync(manifestPath, [...all].sort().join('\n') + '\n', 'utf8');
+}
+
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
@@ -506,8 +554,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','treasures','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, treasures:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','constants','research','academy'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, constants:{}, research:{}, academy:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -619,7 +667,7 @@ function sectionKingdom(){
 }
 
 // ── 拓荒专用视图：把开城包的真实成本集中展示，避免在全局常量长表中漏看。 ──
-// 每个键仍然写入同一张 game_constants.csv，并沿用 balance_overrides.json 的持久化覆盖机制。
+// 每个键仍然写入同一张 game_constants.csv；保存后 CSV 会被镜像到共享配置，JSON 仅作兼容兜底。
 var FOUND_ROWS = [
   ['found_resource_cost_base','第2座城每种资源成本','木材、泥土、钢、粮食各需多少；第2座城（N=2）使用此值'],
   ['found_resource_cost_growth','后续城成本增长倍率','第N座城每种资源 = base × growth^(N-2)，按最终结果四舍五入'],
@@ -629,7 +677,7 @@ var FOUND_ROWS = [
 function sectionFounding(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会热重载，并写入持久化 balance_overrides.json；删档不会清除。</div>';
+  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会校验并写回默认 CSV，同时保留兼容性覆盖；删档和后续部署都会沿用。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<FOUND_ROWS.length;j++){
     var item = FOUND_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -713,7 +761,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。GM 保存的覆盖值写入持久化 balance_overrides.json，删档不会清除。</div>';
+  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。GM 保存会校验并写回默认 CSV，同时保留兼容性覆盖；删档和后续部署都会沿用。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -1181,6 +1229,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(tmp, 'dialogues.csv'), csv, 'utf-8');
       loadGameConfig(tmp); // 校验失败不写线上配置
       writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
+      persistConfigFiles(gameApp, ['dialogues.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: doc.rows.length });
     } catch (e) {
@@ -1234,6 +1283,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(tmp, file), csvByFile[file], 'utf-8');
       loadGameConfig(tmp); // 整图校验失败时绝不写入线上 configDir。
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
+      persistConfigFiles(gameApp, QUEST_MODULE_TABLES);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
     } catch (e) {
@@ -1290,6 +1340,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(tmp, 'quests.csv'), csv, 'utf-8');
       loadGameConfig(tmp); // 校验：失败在此抛出（不落盘）
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
+      persistConfigFiles(gameApp, ['quests.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
     } catch (e) {
@@ -1306,8 +1357,8 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // GET /gm/balance/data — 返回可编辑配置行（建筑 / 建筑逐级 / 兵种 / 全局常量）
-  // 必须把 data/balance_overrides.json 的覆盖叠在 CSV 之上后再返回，否则编辑器会一直显示 CSV 默认值，
-  // 而实际 app.config（meta + 游戏逻辑）已是覆盖后的值——造成「编辑器与游戏不一致」的误导。
+  // 兼容旧 release：把 data/balance_overrides.json 的遗留覆盖叠在 CSV 之上后再返回，
+  // 直到下一次 GM 保存将其迁移到 CSV；否则编辑器会显示过期默认值。
   fastify.get('/gm/balance/data', (req, reply) => {
     if (!auth(req, reply)) return;
     const dir = gameApp.configDir;
@@ -1330,7 +1381,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.send({ ok: true, ...data });
   });
 
-  // POST /gm/balance/save — 校验 → 写覆盖到 data/balance_overrides.json → 热重载（失败绝不留半截配置）
+  // POST /gm/balance/save — 校验 → 写回 CSV + 兼容性覆盖 → 热重载（失败绝不留半截配置）
   fastify.post('/gm/balance/save', (req, reply) => {
     if (!auth(req, reply)) return;
     const body = (req.body ?? {}) as Record<string, Record<string, Record<string, string>>>;
@@ -1355,16 +1406,28 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       const incoming: BalanceOverrides = {};
       for (const [name, , changes] of edits) incoming[name] = changes;
       const merged = mergeBalanceOverrides(current, incoming);
-      // 2) 校验：把合并后的覆盖应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚
+      // 2) 校验：把本次表的合并覆盖应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
+      //    使用 merged 而不是只使用 incoming，确保历史 JSON 覆盖也会被一次性迁移到 CSV。
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
         cpSync(dir, tmp, { recursive: true });
-        for (const [name, table, changes] of edits) applyBalanceEdits(dir, tmp, table, changes);
+        for (const [name, table] of edits) {
+          const tableChanges = merged[name] ?? {};
+          applyBalanceEdits(dir, tmp, table, tableChanges);
+        }
         loadGameConfig(tmp); // 失败在此抛出
+
+        // 校验通过后将同一份 CSV 写回当前配置目录，并镜像到共享配置目录。
+        // balance_overrides.json 仍保留一份，兼容旧版本/旧 release；CSV 是新的默认事实源。
+        for (const [, table] of edits) {
+          copyFileSync(join(tmp, table.file), join(dir, table.file));
+        }
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      // 3) 校验通过 → 持久化覆盖（data/balance_overrides.json，git 忽略，wipe:all 不动）
+      persistConfigFiles(gameApp, edits.map(([, table]) => table.file));
+      // 3) 兼容性持久化覆盖（data/balance_overrides.json，wipe:all 不动）。
+      //    新写入的 CSV 与覆盖值相同；旧进程仍能读取覆盖，升级过程不丢调参。
       saveBalanceOverrides(overridePath, merged);
       // 4) 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();

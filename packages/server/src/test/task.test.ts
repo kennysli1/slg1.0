@@ -100,7 +100,7 @@ test('GM 可一次性重置所有玩家和村庄任务进度而保留其他存�
   assert.deepEqual(app.store.get<any>('economy', villages[0]), beforeEconomy, '任务重置不应修改资源存档');
 });
 
-test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 并发放奖励', async () => {
+test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2 并发放 GM 配置奖励', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试2');
   const va = (regRes.payload as any).player.villageId;
@@ -117,12 +117,11 @@ test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 
   assert.ok(!p0.active.find((a: any) => a.code === 'm2'), '未交付 m2 不应解锁');
 
   // 交付 → 发放奖励 + 解锁下游
-  const before = await send(app, 'economy.GetResources', { villageId: va });
   const dv = await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
   assert.equal(dv.ok, true, `交付应成功: ${dv.reason ?? ''}`);
   const rewards = (dv.payload as any).rewards;
   assert.ok(rewards && rewards.resources, '交付应返回资源奖励');
-  assert.equal(rewards.resources.gold, 50, '应发放 gold:50');
+  assert.deepEqual(rewards.resources, { wood: 100, clay: 100, iron: 100, crop: 100 }, '应发放 GM 配置的四种资源');
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
@@ -131,9 +130,9 @@ test('修复四块资源田 m1 → 就绪 → 交付后提示手动接取 m2/m3 
   const offeredMainCodes = p.offeredMain.map((a: any) => a.code).sort();
   assert.ok(!activeCodes.includes('m2'), 'm2 解锁后不应自动激活');
   assert.ok(!activeCodes.includes('m3'), 'm3 解锁后不应自动激活');
-  assert.deepEqual(offeredMainCodes, ['m2', 'm3'], 'm2/m3 应进入可接取主线提示');
-  const after = await send(app, 'economy.GetResources', { villageId: va });
-  assert.ok((after.payload as any).resources.gold >= (before.payload as any).resources.gold + 50, 'gold 应 +50');
+  assert.deepEqual(offeredMainCodes, ['m2'], '当前 GM 主线关系应只提示 m2');
+  // 资源可能因容量上限被截留；交付回执中的奖励对象才是本次配置实际结算值。
+  assert.equal((rewards.resources as any).wood, 100, 'wood 应按 GM 配置发放 +100');
 });
 
 test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 检查主城金币而非扣除', async () => {
@@ -158,6 +157,10 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   assert.equal(m2.progress, 2, 'm2 进度应为 2/2');
   await send(app, 'task.Deliver', { villageId: va, code: 'm2' });
 
+  // 主线前置由 GM 关系表控制；为隔离 m5 目标测试，模拟前置任务已解锁 m5。
+  const taskState = app.store.get<any>('task', va)!;
+  taskState.offeredMain = ['m5'];
+  app.store.set('task', va, taskState);
   const acceptedM5 = await send(app, 'task.Accept', { villageId: va, code: 'm5' });
   assert.equal(acceptedM5.ok, true, 'm5 应可手动接取');
   const exploredAtStart = await send(app, 'vision.GetExploredCount', { playerId: (regRes.payload as any).player.id });
@@ -192,15 +195,66 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   assert.ok(afterDeliver.resources.gold >= beforeDeliver.resources.gold, 'm6 目标检查不应扣除金币');
 });
 
+test('M2：已有建筑拆除后重建不计数，新的空槽 1 级建造才计数', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'M2 重建计数');
+  const va = (regRes.payload as any).player.villageId;
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
+  await tick();
+  await repairM1Fields(app, va);
+  await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+  assert.equal((await send(app, 'task.Accept', { villageId: va, code: 'm2' })).ok, true);
+
+  const first = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  assert.equal(first.ok, true, `首次建造应成功: ${first.reason ?? ''}`);
+  await app.scheduler.advanceTo((first.payload as any).finishAt, setClock);
+  let state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  let m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 1, '第一次建造应计数 1');
+
+  const layout = (await send(app, 'building.GetLayout', { villageId: va })).payload as any;
+  const warehouse = layout.zones.inner.placed.find((p: any) => p.kind === 'warehouse' && p.level >= 1);
+  assert.ok(warehouse, '应能找到已建成的仓库');
+  const demolition = await send(app, 'building.Demolish', { villageId: va, slotId: warehouse.slotId });
+  assert.equal(demolition.ok, true, `拆除应成功: ${demolition.reason ?? ''}`);
+  await app.scheduler.advanceTo((demolition.payload as any).finishAt, setClock);
+
+  const rebuilt = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  assert.equal(rebuilt.ok, true, `重建应成功: ${rebuilt.reason ?? ''}`);
+  await app.scheduler.advanceTo((rebuilt.payload as any).finishAt, setClock);
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 1, '已有建筑拆除后在原槽位重建不应计数');
+  assert.equal(m2.ready, false, '尚未在新的空槽完成第二次新建');
+
+  const second = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(second.ok, true, `新的空槽建造应成功: ${second.reason ?? ''}`);
+  await app.scheduler.advanceTo((second.payload as any).finishAt, setClock);
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  m2 = state.active.find((item: any) => item.code === 'm2');
+  assert.equal(m2.progress, 2, '新的空槽建成 1 级应计数');
+  assert.equal(m2.ready, true, '达到 2 次新空槽建造后应就绪');
+});
+
 test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试3');
   const va = (regRes.payload as any).player.villageId;
   await grant(app, va, { wood: 9999, clay: 9999, iron: 9999, crop: 9999 });
   await tick();
-  // 完成并交付 m1 → m3 进入可接取提示；手动接受后检查主城人口门槛。
+  // 完成并交付 m1 → 按当前 GM 关系先完成 m2，再让 m3 进入可接取提示。
   await repairM1Fields(app, va);
   await send(app, 'task.Deliver', { villageId: va, code: 'm1' });
+
+  const acceptedM2 = await send(app, 'task.Accept', { villageId: va, code: 'm2' });
+  assert.equal(acceptedM2.ok, true, `手动接取 m2 应成功: ${acceptedM2.reason ?? ''}`);
+  const first = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'warehouse' });
+  const second = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(first.ok, true, 'm2 第一栋城内建筑应可建造');
+  assert.equal(second.ok, true, 'm2 第二栋城内建筑应可建造');
+  await app.scheduler.advanceTo(Math.max((first.payload as any).finishAt, (second.payload as any).finishAt), setClock);
+  const m2Delivery = await send(app, 'task.Deliver', { villageId: va, code: 'm2' });
+  assert.equal(m2Delivery.ok, true, `交付 m2 应成功: ${m2Delivery.reason ?? ''}`);
 
   const offered = await send(app, 'task.GetState', { villageId: va });
   assert.ok((offered.payload as any).offeredMain.some((item: any) => item.code === 'm3'), 'm3 应先显示可接取');
@@ -279,6 +333,8 @@ test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', 
   const m4a = p1.active.find((a: any) => a.code === 'm4');
   assert.ok(m4a && m4a.ready === true, 'm4 战斗后应就绪可交付');
   assert.ok(!p1.completedMain.includes('m4'), '未交付 m4 不应完成');
+  assert.equal((app.store.all('treasure_pending') as any[]).filter((p) => p.villageId === va).length, 0,
+    'M4 临时任务营地不应按 droprate 或其它任务规则掉落宝物');
   assert.deepEqual(latestMapUpdate?.camps, [], '已清理营地不得继续出现在 TaskMapUpdated 地图标记中');
   stopWatchingTaskMap();
 
@@ -295,8 +351,7 @@ test('主线 m3 人口门槛与 m4 老鼠窝营地目标按顺序手动接取', 
   const tileAfter = await send(app, 'world.GetTileByRef', { refId: campId, kind: 'taskcamp' });
   assert.equal(tileAfter.ok, false, '营地地块应已被清除');
 
-  const afterM4 = await send(app, 'economy.GetResources', { villageId: va });
-  assert.ok((afterM4.payload as any).resources.gold >= 500, 'm4 交付应发放金币奖励');
+  assert.ok((dv.payload as any).rewards.resources.gold >= 40, 'm4 交付应按 GM 配置发放金币奖励');
 });
 
 test('任务营地战败不推进任务，营地仍在地图上等待再次出征', async () => {
