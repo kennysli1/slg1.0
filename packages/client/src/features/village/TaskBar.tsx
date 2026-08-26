@@ -277,7 +277,7 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   );
 }
 
-function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolean }) {
+export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?: boolean }) {
   const o = task.objective;
   const isMain = task.type === 'main';
   const camps = o.kind === 'clear_camp'
