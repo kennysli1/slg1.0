@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, readFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
@@ -464,6 +464,44 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
     rmSync(dataDir, { recursive: true, force: true });
+    rmSync(tempConfig, { recursive: true, force: true });
+  }
+});
+
+test('生产式 data 符号链接：GM CSV 镜像写入 shared/config 而不是 shared/data/config', { skip: process.platform === 'win32' }, async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const root = mkdtempSync(join(tmpdir(), 'kow-gm-link-'));
+  const sharedData = join(root, 'shared', 'data');
+  const sharedConfig = join(root, 'shared', 'config');
+  const linkedData = join(root, 'current-data');
+  const tempConfig = mkdtempSync(join(tmpdir(), 'kow-gm-link-config-'));
+  try {
+    // 与生产 current/data -> ../../shared/data 相同：balanceOverridePath 保留
+    // 符号链接路径，GM 持久化逻辑必须解析到 shared 的同级 config。
+    mkdirSync(sharedData, { recursive: true });
+    mkdirSync(sharedConfig, { recursive: true });
+    symlinkSync(sharedData, linkedData, 'dir');
+    const seed = createGameApp({ now: () => 1_000_000, manualScheduler: true });
+    cpSync(seed.configDir, tempConfig, { recursive: true });
+    const { fastify, app } = buildFastify(join(linkedData, 'game.json'), tempConfig);
+    await fastify.ready();
+    const mainId = String(app.config.buildings.main.id);
+    const res = await fastify.inject({
+      method: 'POST',
+      url: '/gm/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ buildings: { [mainId]: { popGrowthPerLevel: '321' } } }),
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.ok(existsSync(join(sharedConfig, 'buildings.csv')), '生产式符号链接必须写到 shared/config');
+    assert.equal(existsSync(join(sharedData, 'config', 'buildings.csv')), false,
+      '不能把持久化配置误写进 shared/data/config');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(root, { recursive: true, force: true });
     rmSync(tempConfig, { recursive: true, force: true });
   }
 });
