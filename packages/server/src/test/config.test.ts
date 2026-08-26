@@ -65,10 +65,18 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.d1.scope, 'village', '每日任务必须绑定村庄');
   assert.equal(cfg.quests.s4.scope, 'village', '当前支线默认绑定村庄');
   assert.ok(cfg.questGraph.objectives.some((x) => x.questCode === 's2' && x.kind === 'carry_flag'));
-  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm2' && x.params === 'iron:200|gold:150'));
+  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm1' && x.params === 'wood:100|clay:100|iron:100|crop:100'));
+  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm2' && x.params === 'wood:150|clay:150|iron:150'));
+  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm4' && x.params === 'gold:40'));
+  assert.ok(cfg.questGraph.effects.some((x) => x.questCode === 'm6' && x.params === 'wood:200|clay:200|iron:200|crop:200'));
   assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm1' && x.toQuest === 'm2' && x.relation === 'requires'));
+  assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm2' && x.toQuest === 'm3' && x.relation === 'requires'));
+  assert.ok(cfg.questGraph.edges.some((x) => x.fromQuest === 'm4' && x.toQuest === 'm5' && x.relation === 'requires'));
   // 旧运行时仍从编译后的兼容定义取得完全相同的实际奖励。
-  assert.deepEqual(cfg.quests.m2.rewards.resources, { iron: 200, gold: 150 });
+  assert.deepEqual(cfg.quests.m1.rewards.resources, { wood: 100, clay: 100, iron: 100, crop: 100 });
+  assert.deepEqual(cfg.quests.m2.rewards.resources, { wood: 150, clay: 150, iron: 150 });
+  assert.deepEqual(cfg.quests.m4.rewards.resources, { gold: 40 });
+  assert.deepEqual(cfg.quests.m6.rewards.resources, { wood: 200, clay: 200, iron: 200, crop: 200 });
   assert.equal(cfg.quests.s3.rewards.reputation, -1, 'S3 完成应从任务效果结算 -1 声望');
   assert.deepEqual(cfg.quests.s3.failureRewards?.treasures, ['secret_note'], 'S3 失败应显示秘密字条');
   assert.equal(cfg.quests.s4.failureRewards?.reputation, -2, 'S4 收纳失败应从任务效果结算 -2 声望');

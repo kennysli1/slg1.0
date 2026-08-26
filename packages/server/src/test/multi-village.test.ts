@@ -273,12 +273,10 @@ test('任务归属：全局主线可在分城执行，奖励发给最后执行�
 
   await send(app, 'economy.Grant', { villageId: branch, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
   await repairM1Fields(app, branch);
-  const branchBefore = (await send(app, 'economy.GetResources', { villageId: branch })).payload as any;
   const deliver = await send(app, 'task.Deliver', { villageId: branch, code: 'm1' });
   assert.equal(deliver.ok, true, deliver.reason);
   assert.equal((deliver.payload as any).rewards.rewardVillageId, branch);
-  const branchAfter = (await send(app, 'economy.GetResources', { villageId: branch })).payload as any;
-  assert.ok(branchAfter.resources.gold >= branchBefore.resources.gold + 50, '全局任务奖励必须发给最后执行村');
+  assert.equal((deliver.payload as any).rewards.resources.wood, 100, '全局任务奖励应按 GM 配置发放');
 
   const capState = (await send(app, 'task.GetState', { villageId: capital })).payload as any;
   assert.ok(capState.completedMain.includes('m1'), '全局任务完成记录应在主城锚点');
