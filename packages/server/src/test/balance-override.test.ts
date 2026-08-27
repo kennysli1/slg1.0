@@ -100,6 +100,31 @@ test('旧覆盖迁移：已删除的历史常量只归档、不阻塞有效覆�
   }
 });
 
+test('旧覆盖迁移：已删除字段只归档、同一行的有效字段仍会迁移', () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-migration-removed-field-');
+  const overridePath = join(state, 'balance_overrides.json');
+  try {
+    writeFileSync(overridePath, JSON.stringify({
+      research: {
+        '14': { effectValue: '99', durationSec: '123' },
+      },
+    }));
+    const result = migrateLegacyBalanceOverrides({ configDir: cfg.dir, persistentConfigDir: join(state, 'config'), overridePath, backupDir: state });
+    assert.equal(result.migrated, true);
+    assert.deepEqual(result.files, ['research.csv']);
+    assert.match(result.reason ?? '', /research\.14\.effectValue/);
+    assert.equal(existsSync(overridePath), false);
+    assert.ok(result.backupPath && existsSync(result.backupPath), '原始 JSON 必须完整归档');
+    const row = parseCsvStructured(readFileSync(join(cfg.dir, 'research.csv'), 'utf8')).rows.find((entry) => entry.id === '14');
+    assert.equal(row?.durationSec, '123');
+    assert.equal('effectValue' in (row ?? {}), false);
+  } finally {
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
 test('旧覆盖迁移：未知表或非法 JSON 会中止且保留原文件', () => {
   const cfg = seedConfig();
   const state = tempDir('kow-config-migration-bad-');
