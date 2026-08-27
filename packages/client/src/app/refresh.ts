@@ -24,7 +24,7 @@ import {
   kingdomState,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
-import { notificationText, notificationKind } from '../features/reports/notification-text.js';
+import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 
 let mapCenterLegacy: { q: number; r: number } | null = null;
 
@@ -352,9 +352,10 @@ export async function hydrateReports(): Promise<void> {
     const list = ((res.payload as any).notifications ?? []) as StoredNotification[];
     const seeded: StoredReport[] = [];
     for (const n of list) {
+      if (!isReportEvent(n.event)) continue;
       const text = notificationText(n.event, n.payload);
       if (text) {
-        const details = n.event === 'BattleStarted' || n.event === 'BattleEnded' ? n.payload : undefined;
+        const details = n.event === 'BattleEnded' ? n.payload : undefined;
         seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts, ...(details ? { details } : {}) });
       }
     }
@@ -368,9 +369,9 @@ export async function hydrateReports(): Promise<void> {
 /** 推送分发：把服务端事件变成战报文案 + 必要的数据刷新。 */
 export function handlePush(event: string, payload: any): void {
   // 战报文案 + 语义分类（分类来自事件名，不靠猜文案）
-  const text = notificationText(event, payload);
+  const text = isReportEvent(event) ? notificationText(event, payload) : null;
   if (text) {
-    const details = event === 'BattleStarted' || event === 'BattleEnded' ? payload : undefined;
+    const details = event === 'BattleEnded' ? payload : undefined;
     pushReport(text, notificationKind(event, payload), details);
   }
 

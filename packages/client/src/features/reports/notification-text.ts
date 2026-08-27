@@ -27,6 +27,11 @@ function troopMapText(value: unknown): string {
 /** 战报语义分类：驱动列表的图标、色带与筛选。类型定义在 app/state 以守住依赖方向。 */
 export type { ReportKind };
 
+/** 报告页只展示可复盘的战斗结算与侦察情报。 */
+export function isReportEvent(event: string): boolean {
+  return event === 'BattleEnded' || event === 'ScoutReport';
+}
+
 export function notificationKind(event: string, payload?: any): ReportKind {
   if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingRepaired' || event === 'BuildingDemolished' || event === 'BuildingDemolishing') return 'build';
   if (event === 'BuildingBattleDamaged') return 'battle';

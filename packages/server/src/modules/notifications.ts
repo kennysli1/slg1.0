@@ -25,26 +25,16 @@ interface VillageNotifications {
   seq: number;
 }
 
-/** 内部事件名 → 对外推送名的映射（与各模块 MANIFEST.eventPushMap 保持一致）。 */
+/**
+ * 战报只保留可复盘的战斗结算与侦察情报。
+ * 其他领域事件仍由 gateway 实时推送给各自页面刷新，但不会进入历史报告。
+ */
 export const EVENT_MAP: Record<string, string> = {
   'combat.BattleEnded':       'BattleEnded',
-  'combat.BattleStarted':     'BattleStarted',
-  'building.Built':           'BuildingBuilt',
-  'building.Upgraded':        'BuildingUpgraded',
-  'building.Repaired':        'BuildingRepaired',
-  'building.BattleDamaged':   'BuildingBattleDamaged',
-  'military.TroopTrained':    'TroopTrained',
-  'movement.Sent':            'MarchSent',
-  'movement.Returned':        'MarchReturned',
-  'movement.Intercepted':     'MarchIntercepted',
   'movement.ScoutReport':     'ScoutReport',
-  'movement.Recalled':        'MarchRecalled',
-  'treasure.PendingDropped':   'TreasurePendingDropped',
-  'treasure.PendingExpired':   'TreasurePendingExpired',
-  'treasure.CarriedArrived':   'TreasureCarriedArrived',
-  'treasure.DemolishRedistributed': 'TreasureDemolishRedistributed',
-  'treasure.ReportCoords':      'TreasureReport',
 };
+
+const REPORT_EVENTS = new Set(Object.values(EVENT_MAP));
 
 export class NotificationsModule {
   static readonly NAME = 'notifications';
@@ -98,7 +88,8 @@ export class NotificationsModule {
 
   /**
    * 兼容旧存档：历史极端战斗曾把最多 20,000 个逐轮快照写进单条通知，
-   * 导致登录时 GetNotifications 占住同村串行队列。启动时只压缩回放数组，保留战报本身及全部结算摘要。
+   * 导致登录时 GetNotifications 占住同村串行队列。启动时压缩回放、
+   * 清理旧版写入的非战斗/侦察通知，保留战报结算摘要。
    */
   private compactHistoricalBattleReports(): void {
     for (const villageId of this.store.keys(COLLECTION)) this.compactVillageBucket(villageId);
@@ -108,12 +99,15 @@ export class NotificationsModule {
     const bucket = this.store.get<VillageNotifications>(COLLECTION, villageId);
     if (!bucket?.items?.length) return bucket;
     let changed = false;
-    const items = bucket.items.map((item) => {
+    const items = bucket.items
+      .filter((item) => REPORT_EVENTS.has(item.event))
+      .map((item) => {
       const compacted = compactBattlePayload(item.event, item.payload);
       if (!compacted.changed) return item;
       changed = true;
       return { ...item, payload: compacted.payload };
-    });
+      });
+    if (items.length !== bucket.items.length) changed = true;
     if (!changed) return bucket;
     const compactedBucket = { ...bucket, items };
     this.store.set(COLLECTION, villageId, compactedBucket);
