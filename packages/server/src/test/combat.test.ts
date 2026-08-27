@@ -112,6 +112,37 @@ test('PvE 掠夺：运力足够时可搬空营地全部资源且不超过 carry'
   assert.deepEqual((target.payload as any).loot, { wood: 0, clay: 0, iron: 0, crop: 0 }, '搬空后营地库存应归零');
 });
 
+test('PvE 失败战斗：幸存守军不能因快照引用被结算重复扣除', async () => {
+  const app = freshApp();
+  const targetId = 'pve-defender-snapshot-isolation';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 6, r: 6, task: true, ownerVillageId: 'v1',
+  });
+  assert.equal(spawned.ok, true);
+  // 10 个军团兵对 13 个棍棒兵时，战斗失败但应留下 3 个守军。
+  const targetState = app.store.get<any>('pve', targetId)!;
+  targetState.defender.clubswinger.count = 13;
+  app.store.set('pve', targetId, targetState);
+
+  let ended: any;
+  app.bus.on('combat.BattleEnded', (event) => {
+    if ((event.payload as any).side === 'attacker') ended = event.payload;
+  });
+  await send(app, 'combat.Engage', {
+    targetKind: 'pve', targetId, targetXY: { q: 6, r: 6 },
+    movementId: 'pve-defender-snapshot-attack', fromVillage: 'v1', fromXY: { q: 5, r: 6 },
+    troops: { legionnaire: 10 },
+    attackerSnapshot: { legionnaire: melee(10, 40.4, 35.35) },
+  });
+  await drain(app);
+
+  assert.equal(ended?.attackerWins, false, '该配置应由守方获胜');
+  assert.deepEqual(ended?.defenderLosses, { clubswinger: 10 }, '战报应记录实际守军损失');
+  const after = (await send(app, 'pve.GetTarget', { id: targetId })).payload as any;
+  assert.equal(after.cleared, false, '失败战斗不应清空任务村');
+  assert.equal(after.defender.clubswinger.count, 3, '失败战斗后 3 个幸存守军必须保留');
+});
+
 test('战斗：势均力敌打得久、一边倒打得快（tick 数对比）', async () => {
   // 一边倒：50 打 10 老鼠
   const app1 = freshApp();
