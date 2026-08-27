@@ -299,6 +299,40 @@ test('GM 可重新触发已完成主线，或将进行中主线回退为未触�
   assert.ok(!after.offeredMain.some((item: any) => item.code === 'm2'));
 });
 
+test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与库存', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-m8-retrigger');
+  const targetId = 'taskvillage-gm-m8';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 6, r: 6, task: true, ownerVillageId: va,
+    loot: { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 },
+  });
+  assert.equal(spawned.ok, true);
+  const state: any = baseState(va, {});
+  state.completedMain = ['m8'];
+  state.taskVillages = { m8: { id: targetId, q: 6, r: 6, name: '天王老子村' } };
+  state.outcomes = { m8: 'failure' };
+  app.store.set('task', va, state);
+  const old = app.store.get<any>('pve', targetId)!;
+  old.defender.clubswinger.count = 0;
+  old.loot = { wood: 2498, clay: 2497, iron: 2498, crop: 2497, gold: 0 };
+  app.store.set('pve', targetId, old);
+
+  const retrigger = await send(app, 'task.GmRetriggerCompletedMain', { villageId: va, code: 'm8' });
+  assert.equal(retrigger.ok, true, `M8 应能重新触发: ${retrigger.reason ?? ''}`);
+  assert.ok((retrigger.payload as any).offeredMain.some((item: any) => item.code === 'm8'));
+  assert.equal(app.store.get<any>('pve', targetId), undefined, '重新触发前一轮任务村应先移除');
+
+  const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm8' });
+  assert.equal(accepted.ok, true, `重新接取 M8 应成功: ${accepted.reason ?? ''}`);
+  const active = app.store.get<any>('task', va)?.active?.m8;
+  assert.ok(active?.taskVillageId, '重新接取后应绑定新任务村实体');
+  const fresh = (await send(app, 'pve.GetTarget', { id: active.taskVillageId })).payload as any;
+  assert.deepEqual(fresh.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(fresh.defender.clubswinger.count, 15);
+  assert.equal(fresh.defender.club, undefined);
+});
+
 test('任务代码迁移：旧 villager_request / investigate_coords 自动映射到 s3 / s4', async () => {
   const app = freshApp();
   const va = await reg(app, 'code-migrate');

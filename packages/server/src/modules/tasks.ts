@@ -1990,6 +1990,15 @@ export class TasksModule {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     if (!s.completedMain.includes(code)) return { ok: false, payload: {}, reason: 'not_completed_main' };
+    // M8 的任务村在结局后按设计保留，便于 M9 反击；但 GM 重新触发
+    // M8 意味着开启一轮全新的冤家路窄流程，不能把上一轮战后的守军/库存
+    // 带入新任务。先移除旧实体，再由 activateQuest 按当前 CSV/GM 模板重建。
+    if (code === 'm8' && s.taskVillages?.m8) {
+      const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: s.taskVillages.m8.id } });
+      if (!removed.ok) return removed;
+      delete s.taskVillages.m8;
+      if (s.outcomes) delete s.outcomes.m8;
+    }
     s.completedMain = s.completedMain.filter((item) => item !== code);
     s.offeredMain = s.offeredMain.filter((item) => item !== code);
     this.store.set(COLLECTION, storageVillageId, s);
