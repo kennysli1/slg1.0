@@ -3272,7 +3272,7 @@ export class MovementModule {
         payload: { villageId: mv.fromVillage, gain: mv.cargo },
       });
     }
-    // 携带宝物随军返程到家 → 存回该村（优先宝库）。按出征 id 匹配，避免返程新 id 不匹配丢失宝物。
+    // 携带宝物随军返程到家 → 存回该村（优先城镇中心，其次宝库主栏）。按出征 id 匹配，避免返程新 id 不匹配丢失宝物。
     // 注意：此处不能用「返程 movement 是否带战利品」来门控——携带宝物与战利品是两套追踪，
     // 军队只带回自己带出去的宝物、但没抢到任何战利品时（mv.treasures 为空），也必须把携带宝物存回，否则会静默丢失。
     // treasure.StoreCarried 在「该出征 id 没有携带记录」时是安全的空操作，故无条件调用。

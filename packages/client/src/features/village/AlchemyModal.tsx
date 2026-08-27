@@ -91,7 +91,7 @@ function AlchemyModal({ slotId, onClose }: { slotId: string; onClose: () => void
             <Btn variant="primary" onClick={() => void claim()}>收获</Btn>
           </> : <span style={{ color: 'var(--c-ink-dim)' }}>炼化结果槽</span>}
         </div>
-        {data.result && <p style={{ color: 'var(--c-ink-dim)', fontSize: 'var(--f-xs)' }}>收获时会按宝物栏优先级存入；没有空位时提示宝库已满。</p>}
+        {data.result && <p style={{ color: 'var(--c-ink-dim)', fontSize: 'var(--f-xs)' }}>收获时按城镇中心→宝库主栏→备用栏存入；没有空位时提示宝库已满。</p>}
         <Divider />
         <BuildingManagement slotId={slotId} name="炼金炉" onClose={onClose} />
       </>}

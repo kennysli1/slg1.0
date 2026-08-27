@@ -381,15 +381,18 @@ test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主�
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
+  const stored = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(stored.town, ['war_flag'], '新获得的宝物应优先进入城镇中心');
+  assert.deepEqual(stored.treasury, ['chainsaw'], '城镇中心满后才进入宝库主栏');
   const before = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   const baseAtk = before.trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
   assert.ok(baseAtk > 0);
 
-  const unload = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'treasury' });
+  const unload = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'town' });
   assert.equal(unload.ok, true, `主栏宝物应可卸下: ${unload.reason ?? ''}`);
   const parked = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(parked.treasury, [], '卸下后宝库主栏应为空');
-  assert.deepEqual(parked.town, ['chainsaw'], '城镇中心主栏宝物不应被隐式搬运');
+  assert.deepEqual(parked.treasury, ['chainsaw'], '宝库主栏宝物不应被隐式搬运');
+  assert.deepEqual(parked.town, [], '卸下后城镇中心主栏应为空');
   assert.deepEqual(parked.treasuryReserve, ['war_flag'], '卸下后应进入备用栏');
   assert.equal(parked.needsLoad, true, '主栏出现空位且备用栏有宝物时应提醒');
   const parkedAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
@@ -398,10 +401,27 @@ test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主�
   const load = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
   assert.equal(load.ok, true, `备用栏宝物应可装载: ${load.reason ?? ''}`);
   const active = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(active.treasury, ['war_flag'], '装载后应回到宝库主栏');
+  assert.deepEqual(active.town, ['war_flag'], '装载后有城镇中心空位时应优先回到城镇中心');
+  assert.deepEqual(active.treasury, ['chainsaw'], '装载不应挪动原宝库主栏宝物');
   assert.deepEqual(active.treasuryReserve, [], '装载后备用栏应为空');
   const activeAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
   assert.equal(activeAtk, baseAtk, '装载后攻防加成应恢复');
+});
+
+test('宝库：备用栏装载在城镇中心和宝库主栏都有空位时优先城镇中心', async () => {
+  const app = await freshApp();
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const unload = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'town' });
+  assert.equal(unload.ok, true);
+
+  const load = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
+  assert.equal(load.ok, true, `备用栏有宝物且两个主栏都有空位时应可装载: ${load.reason ?? ''}`);
+  assert.equal(load.payload.to, 'town', '装载落点应优先为城镇中心');
+  const listed = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(listed.town, ['war_flag']);
+  assert.deepEqual(listed.treasury, []);
+  assert.deepEqual(listed.treasuryReserve, []);
 });
 
 test('宝库：备用栏已满或主栏已满时移动返回明确错误', async () => {
@@ -409,13 +429,13 @@ test('宝库：备用栏已满或主栏已满时移动返回明确错误', async
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
-  const u1 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'treasury' });
+  const u1 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'town' });
   assert.equal(u1.ok, true);
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'spear_of_ares' });
-  const u2 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'spear_of_ares', from: 'treasury' });
+  const u2 = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'spear_of_ares', from: 'town' });
   assert.equal(u2.ok, false);
   assert.equal(u2.reason, 'no_reserve_room');
-  await send(app, 'treasure.Discard', { villageId: 'v1', code: 'spear_of_ares', location: 'treasury' });
+  await send(app, 'treasure.Discard', { villageId: 'v1', code: 'spear_of_ares', location: 'town' });
   const l = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
   assert.equal(l.ok, true, '主栏有空位时应可装载');
 });
@@ -746,7 +766,7 @@ test('携带：超过携带上限被拒（carry_cap_exceeded）', async () => {
   assert.equal(l.codes.length, 2, '宝物应仍留在城镇栏');
 });
 
-test('携带：StoreCarried 返程到家存回城镇栏（优先宝库格）', async () => {
+test('携带：StoreCarried 返程到家存回城镇栏（优先城镇中心格）', async () => {
   const app = await freshApp();
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 }); // 宝库 1 格
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });
