@@ -8,7 +8,7 @@ import { req, me } from '../../api.js';
 import { Btn, Modal, Panel } from '../../ui/index.js';
 import { fmt } from '../utils/format.js';
 
-const SCOUT_CODES = new Set(['equlegati', 'pathfinder', 'teuscout']);
+const SCOUT_CODES = new Set(['equlegati', 'pathfinder', 'teuscout', 'adventurer']);
 
 function etaText(arriveAt: number): string {
   const seconds = Math.max(0, Math.ceil((arriveAt - Date.now()) / 1000));
@@ -54,9 +54,9 @@ function IncomingScoutModal({ warning, close }: { warning: IncomingWarning; clos
       title="侦察来袭部队"
       sub={`沿 ${warning.fromVillageName} 的来袭路径相会；侦察战不会中断敌军行军。`}
       onClose={close}
-      foot={<><Btn onClick={close}>取消</Btn><Btn variant="primary" disabled={total <= 0} onClick={() => void dispatch()}>派出侦察兵</Btn></>}
+      foot={<><Btn onClick={close}>取消</Btn><Btn variant="primary" disabled={total <= 0} onClick={() => void dispatch()}>派出侦察兵/冒险者</Btn></>}
     >
-      {available.length === 0 ? <p class="incoming-empty">当前村庄没有可用侦察兵。</p> : (
+      {available.length === 0 ? <p class="incoming-empty">当前村庄没有可用侦察兵或冒险者。</p> : (
         <div class="incoming-scout-units">
           {available.map(({ code, max }) => (
             <label key={code} class="incoming-scout-unit">
