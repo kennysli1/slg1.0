@@ -143,6 +143,11 @@ const REMOVED_LEGACY_ROWS: Record<string, ReadonlySet<string>> = {
   constants: new Set(['treasure_trade_drop_chance']),
 };
 
+/** 旧版表中曾存在、但当前 CSV 已删除的字段；原始 JSON 仍会完整归档。 */
+const REMOVED_LEGACY_FIELDS: Record<string, ReadonlySet<string>> = {
+  research: new Set(['effectValue']),
+};
+
 export interface LegacyMigrationResult {
   migrated: boolean;
   files: string[];
@@ -176,11 +181,24 @@ export function migrateLegacyBalanceOverrides(opts: {
   const entries = nonEmptyEntries
     .map(([name, changes]) => {
       const removed = REMOVED_LEGACY_ROWS[name];
-      if (!removed || !changes || typeof changes !== 'object' || Array.isArray(changes)) return [name, changes] as const;
+      const removedFields = REMOVED_LEGACY_FIELDS[name];
+      if ((!removed && !removedFields) || !changes || typeof changes !== 'object' || Array.isArray(changes)) return [name, changes] as const;
       const kept: Record<string, Record<string, string>> = {};
       for (const [rowKey, fields] of Object.entries(changes)) {
-        if (removed.has(rowKey)) ignoredRemoved.push(`${name}.${rowKey}`);
-        else kept[rowKey] = fields as Record<string, string>;
+        if (removed?.has(rowKey)) {
+          ignoredRemoved.push(`${name}.${rowKey}`);
+          continue;
+        }
+        if (removedFields && fields && typeof fields === 'object' && !Array.isArray(fields)) {
+          const keptFields: Record<string, string> = {};
+          for (const [field, value] of Object.entries(fields)) {
+            if (removedFields.has(field)) ignoredRemoved.push(`${name}.${rowKey}.${field}`);
+            else keptFields[field] = value as string;
+          }
+          if (Object.keys(keptFields).length > 0) kept[rowKey] = keptFields;
+        } else {
+          kept[rowKey] = fields as Record<string, string>;
+        }
       }
       return [name, kept] as const;
     })
