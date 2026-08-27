@@ -15,7 +15,7 @@ import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
-import { notificationText, notificationKind } from '../features/reports/notification-text.js';
+import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
@@ -538,6 +538,13 @@ describe('人口资源条红框说明', () => {
 // ─── notificationKind：战报语义分类 ────────────────────────────────
 
 describe('notificationKind', () => {
+  it('only admits battle settlements and scout intel to reports', () => {
+    assert.equal(isReportEvent('BattleEnded'), true);
+    assert.equal(isReportEvent('ScoutReport'), true);
+    assert.equal(isReportEvent('BuildingUpgraded'), false);
+    assert.equal(isReportEvent('TroopTrained'), false);
+  });
+
   it('建造类事件归 build', () => {
     assert.equal(notificationKind('BuildingBuilt'), 'build');
     assert.equal(notificationKind('BuildingUpgraded'), 'build');

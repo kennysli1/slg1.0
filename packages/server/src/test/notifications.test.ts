@@ -22,7 +22,7 @@ async function drain(app: GameApp): Promise<void> {
   while (app.scheduler.pending > 0 && i < 30000) { await app.scheduler.advanceTo(clock + 3_600_000, setClock); i++; }
 }
 
-test('notifications: 建筑升级事件被记录', async () => {
+test('notifications: 建筑升级事件不进入战报', async () => {
   const app = freshApp();
   const r = (await reg(app, '建村人')).payload as any;
   const vid = r.player.villageId;
@@ -38,7 +38,7 @@ test('notifications: 建筑升级事件被记录', async () => {
 
   const res = (await send(app, 'notifications.List', { villageId: vid })).payload as any;
   const events = (res.notifications as any[]).map((n: any) => n.event);
-  assert.ok(events.includes('BuildingUpgraded'), `应有 BuildingUpgraded，实际: ${JSON.stringify(events)}`);
+  assert.ok(!events.includes('BuildingUpgraded'), `建造事件不应进入战报，实际: ${JSON.stringify(events)}`);
 });
 
 test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
@@ -69,7 +69,7 @@ test('notifications: PvP 攻守双方各收一条 BattleEnded', async () => {
   assert.ok(Object.hasOwn(attackerReport.payload, 'defenderLineup'), '战斗结束战报应包含防守方阵容字段（即使为空）');
   assert.ok(Array.isArray(attackerReport.payload.rounds) && attackerReport.payload.rounds.length > 0, '战斗结束战报应包含逐轮回放');
   assert.equal(attackerReport.payload.rounds.at(-1).round, attackerReport.payload.totalRounds, '逐轮回放应保留最终轮并声明总轮数');
-  assert.ok(atkEvents.includes('MarchReturned'), `攻方应有 MarchReturned，实际: ${JSON.stringify(atkEvents)}`);
+  assert.ok(!atkEvents.includes('MarchReturned'), `行军返回不应进入战报，实际: ${JSON.stringify(atkEvents)}`);
   assert.ok(!defEvents.includes('IncomingAttack'), `实时来袭预警不得写入战报，实际: ${JSON.stringify(defEvents)}`);
 });
 
@@ -101,23 +101,21 @@ test('notifications: 旧存档的超长战斗回放会压缩为关键轮次且�
   assert.equal(report.payload.attackerWins, true, '压缩回放不能丢失战斗结算摘要');
 });
 
-test('notifications: 超过上限时丢最旧条目', async () => {
+test('notifications: 旧版非战斗侦察通知会在读取时清理', async () => {
   const app = freshApp();
   const r = (await reg(app, '压测')).payload as any;
   const vid = r.player.villageId;
-  const cap = app.config.constants.notificationsPerVillage;
-
-  // 直接往 bus 发超量的 building.Upgraded 事件
-  for (let i = 0; i < cap + 10; i++) {
-    await app.bus.emit({ name: 'building.Upgraded', source: 'test', ts: clock + i, payload: { villageId: vid, kind: 'field_wood', level: i + 1 } } as any);
-  }
+  app.store.set('notifications', vid, {
+    seq: 3,
+    items: [
+      { id: `nt-${vid}-1`, event: 'BuildingUpgraded', payload: { villageId: vid }, ts: clock },
+      { id: `nt-${vid}-2`, event: 'TroopTrained', payload: { villageId: vid }, ts: clock + 1 },
+      { id: `nt-${vid}-3`, event: 'ScoutReport', payload: { villageId: vid }, ts: clock + 2 },
+    ],
+  });
 
   const res = (await send(app, 'notifications.List', { villageId: vid })).payload as any;
-  assert.equal((res.notifications as any[]).length, cap, `应恰好保留 ${cap} 条`);
-  // 最旧的(level=1)应被丢弃，最新的(level=cap+10)应留着
-  const levels = (res.notifications as any[]).map((n: any) => n.payload.level);
-  assert.ok(!levels.includes(1), '最旧条目应被丢弃');
-  assert.ok(levels.includes(cap + 10), '最新条目应保留');
+  assert.deepEqual((res.notifications as any[]).map((n: any) => n.event), ['ScoutReport']);
 });
 
 test('notifications: 没有 villageId 的事件不记录', async () => {
