@@ -41,7 +41,7 @@ printf 'process.exit(0);\n' > "$FIXTURE/packages/server/dist/infra/config-author
 # 模拟 GM 已保存的共享 CSV：后续 release 必须以它覆盖仓库默认值。
 printf 'buildings.csv\n' > "$BASE/shared/data/balance_csv_files.list"
 printf 'gm-persisted' > "$BASE/shared/config/buildings.csv"
-COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$FIXTURE" ecosystem.config.cjs config
+COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$FIXTURE" ecosystem.config.cjs config packages
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$KOW_TEST_PM2_LOG"\n' > "$FAKE_PM2"
 chmod +x "$FAKE_PM2"
 export KOW_TEST_PM2_LOG="$PM2_LOG"
