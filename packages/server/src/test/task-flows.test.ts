@@ -333,6 +333,73 @@ test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与�
   assert.equal(fresh.defender.club, undefined);
 });
 
+test('GM 重置本村任务也会清理 M8 任务村，避免稳定 id 复用空营地', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-m8-reset');
+  const targetId = 'taskvillage-gm-reset-m8';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 7, r: 7, task: true, ownerVillageId: va,
+    loot: { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 },
+  });
+  assert.equal(spawned.ok, true);
+  const state: any = baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, taskVillageId: targetId, taskVillageXY: { q: 7, r: 7 },
+    },
+  });
+  state.taskVillages = { m8: { id: targetId, q: 7, r: 7, name: '天王老子村' } };
+  app.store.set('task', va, state);
+
+  const reset = await send(app, 'task.GmReset', { villageId: va });
+  assert.equal(reset.ok, true, `本村任务重置应成功: ${reset.reason ?? ''}`);
+  assert.equal(app.store.get<any>('pve', targetId), undefined, '本村任务重置必须移除 M8 任务村实体');
+
+  // 模拟前置主线已完成后重新接取 M8，验证不会复用旧的空库存/空守军实体。
+  const afterReset: any = app.store.get('task', va)!;
+  afterReset.completedMain = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'];
+  afterReset.offeredMain = ['m8'];
+  app.store.set('task', va, afterReset);
+  const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm8' });
+  assert.equal(accepted.ok, true, `重置后重新接取 M8 应成功: ${accepted.reason ?? ''}`);
+  const active = app.store.get<any>('task', va)?.active?.m8;
+  const fresh = (await send(app, 'pve.GetTarget', { id: active.taskVillageId })).payload as any;
+  assert.deepEqual(fresh.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(fresh.defender.clubswinger.count, 15);
+});
+
+test('重启恢复会修复 active M8 指向已清空任务村的旧半结算状态', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8-resume-repair');
+  const targetId = 'taskvillage-m8-resume-repair';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 9, r: 9, task: true, ownerVillageId: va,
+    loot: { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 },
+  });
+  assert.equal(spawned.ok, true);
+  const target = app.store.get<any>('pve', targetId)!;
+  target.defender.clubswinger.count = 0;
+  target.loot = { wood: 6, clay: 0, iron: 8, crop: 0, gold: 0 };
+  target.cleared = true;
+  target.clearCount = 2;
+  app.store.set('pve', targetId, target);
+  const state: any = baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, taskVillageId: targetId, taskVillageXY: { q: 9, r: 9 },
+    },
+  });
+  state.taskVillages = { m8: { id: targetId, q: 9, r: 9, name: '天王老子村' } };
+  app.store.set('task', va, state);
+
+  await app.task.resume();
+  const active = app.store.get<any>('task', va)?.active?.m8;
+  const repaired = (await send(app, 'pve.GetTarget', { id: active.taskVillageId })).payload as any;
+  assert.deepEqual(repaired.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(repaired.defender.clubswinger.count, 15);
+  assert.equal(repaired.cleared, false);
+});
+
 test('M8 奖励领取并发时铁壁勋章只发放一次', async () => {
   const app = freshApp();
   const va = await reg(app, 'm8-reward-once');
