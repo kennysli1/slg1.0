@@ -60,7 +60,8 @@
 | 我要… | 只读这些 | 改这里 |
 |-------|---------|--------|
 | 开始 / 继续 / 合并 / 提交任何修改 | `docs/Git协作规范.md` | 非 main 长期分支开发；开工先同步 main，checks 通过后默认 squash merge |
-| 改数值 / 加兵种·建筑·PvE | `config/README.md` | `config/*.csv` 加一行，重启后端。**前端不用改**（走服务端 `GetGameConfig` 下发） |
+| 改数值 / 加兵种·建筑·PvE | `config/README.md` | 配置中心修改 `config/*.csv`，校验后走配置 PR；合并并部署后生效 |
+| 改 GM 实时状态 / 任务进度 | `03_GM调试手册.md` | GM 只写 `game.json/WAL`，保存后立即生效，不改变 CSV 默认值 |
 | 加全局常量 / 平衡参数 | `config/README.md` | `config/game_constants.csv` + `infra/config.ts` 的 `GameConstants` 加字段 |
 | 加新系统（工会 / 邮件） | `docs/2_2.0设计/07_扩展与代码规范.md`、`03_架构总览.md` | 加 owner 模块并挂 `app.ts`；外部 action 只登记到 `gateway/routes.ts` |
 | 改某个系统的逻辑 | PROJECT.md §四 找 owner 模块 | 只改该模块的私有方法，要别人的数据就发 Command |

@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-08-15
+updated: 2026-08-28
 owner: ops
 summary: 双人和多 AI 开发的分支、worktree、提交、同步、PR 与恢复流程
 ---
@@ -268,6 +268,10 @@ npm run deploy:prod
 ```
 
 部署脚本只发布 `origin/main`。禁止直接部署功能分支，也禁止用“功能分支线上可见”代替 PR。
+
+### 配置中心变更
+
+配置中心产生的 CSV 变更也必须遵循同一条链路：配置中心先做隔离校验并写入共享配置，再由异步队列创建独立配置 PR；配置 PR 合并到 `main` 后才能通过 `npm run deploy:prod` 发布。GM 的实时状态修改写入 `game.json/WAL`，不创建配置 PR，也不会改变 CSV 默认值。`balance_overrides.json` 只允许由部署迁移器一次性处理，禁止手动恢复为运行时覆盖源。
 
 ## 六、冲突处理
 

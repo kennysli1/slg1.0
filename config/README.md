@@ -1,6 +1,6 @@
 # 配置表说明（config/）
 
-> 游戏所有数值都在这些 CSV 里。**双击用 Excel 打开编辑，保存即可，改完重启后端生效**，无需改代码。
+> 游戏静态数值都在这些 CSV 里。正式修改请使用 `/config` 配置中心：保存会校验并进入配置同步/PR流程；直接编辑 CSV 仅适合本地开发服。
 > 编辑注意：① 保持首行表头不动 ② 用英文逗号分隔（Excel 另存为 CSV 会自动处理）③ 文字不要含逗号 ④ 存为「CSV UTF-8」编码避免中文乱码。
 >
 > **编码已修复**：所有 CSV 已写入 UTF-8 BOM，Excel 双击打开不再中文乱码。另存时请保持「CSV UTF-8(逗号分隔)」格式。
@@ -229,7 +229,7 @@
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。配置中心 `/config/balance` 会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
 
 王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
@@ -241,9 +241,9 @@
 
 ### 拓荒成本参数
 
-拓荒开城包按每种资源（木材、泥土、钢、粮食）分别收取：第 `N` 座城（`N≥2`）每种资源的需求量为 `round(found_resource_cost_base × found_resource_cost_growth^(N-2))`。当前默认第 2 座城每种资源 3000（四种资源合计 12000），第 3 座城每种资源 6000（合计 24000）。GM 平衡面板的“拓荒参数”板块可直接修改并持久化这两个值，删档不会清除覆盖。
+拓荒开城包按每种资源（木材、泥土、钢、粮食）分别收取：第 `N` 座城（`N≥2`）每种资源的需求量为 `round(found_resource_cost_base × found_resource_cost_growth^(N-2))`。当前默认第 2 座城每种资源 3000（四种资源合计 12000），第 3 座城每种资源 6000（合计 24000）。配置中心 `/config/balance` 的“拓荒参数”板块可直接修改并持久化，删档不会清除 CSV 默认值。
 
-当前常量（改完重启即生效，默认值与重构前行为一致）：
+当前常量（配置中心保存后热重载，默认值与重构前行为一致）：
 
 | key | 默认 | 作用 |
 |-----|------|------|
@@ -261,7 +261,7 @@
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；GM 平衡面板提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
+M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
 ## trade_center.csv — 贸易中心逐级参数
 | 列 | 含义 |
@@ -342,7 +342,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 
 ## 任务图配置（`quest_*.csv`）
 
-任务系统以 **任务线 → 任务节点 → 条件 / 目标 / 效果 → 关系边** 为唯一配置事实源。`tasks.ts` 只持有玩家任务实例、事件推进和任务营地；不得再把任务定义散落进运行时代码。GM 的“任务模块编辑”和“任务关系图”分别用于修改与审查这六张表。
+任务系统以 **任务线 → 任务节点 → 条件 / 目标 / 效果 → 关系边** 为唯一配置事实源。`tasks.ts` 只持有玩家任务实例、事件推进和任务营地；不得再把任务定义散落进运行时代码。配置中心的“任务模块编辑”和“任务关系图”分别用于修改与审查这六张表；GM 只管理任务实例状态，不编辑这些定义。
 
 ### quest_lines.csv — 任务线
 | 列 | 含义 |
@@ -351,7 +351,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name | 任务显示名 |
 | kind | `main` / `daily` / `side`，用于展示与刷新策略 |
 | entryQuest | 此任务线入口任务的 `code` |
-| order | GM 图和客户端目录的显示顺序 |
+| order | 配置中心关系图和客户端目录的显示顺序 |
 
 ### quests.csv — 任务节点
 | 列 | 含义 |
@@ -406,7 +406,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | maxRatio | 攻击方与防守方出征初始战力比的区间上限；最后一档留空表示无上限 |
 | lootMult | 该区间最终可掠夺量倍率 |
 
-> 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在 GM 关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
+> 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在配置中心关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
 
 ### dialogues.csv — NPC 对话
 | 列 | 含义 |
@@ -417,7 +417,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
-同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。GM 对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
+同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
 
 M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8_success`、`m9_accept_m8_failure`、`m9_deliver_m8_success`、`m9_deliver_m8_failure`。其 `trigger` 仍分别使用 `accept_success`、`accept_failure`、`deliver_success`、`deliver_failure`，由任务模块按 M8 结局调用。
 
@@ -437,7 +437,8 @@ M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8
 ---
 
 ## 改了之后怎么生效
-- 后端启动时一次性读取。直接编辑仓库 CSV 后重启后端（`npm run dev:server` 会自动重启，或 Ctrl+C 后重跑）。
-- GM 面板保存会先做完整配置校验，再写回当前 release 的 CSV，并镜像到生产共享配置；因此 GM 调整在重启、删档和后续发布后仍是默认值。`data/balance_overrides.json` 只作旧版本兼容，不再是唯一事实源。
+- 配置中心（`/config`）保存先做完整校验并热重载当前进程，同时写入 `shared/config`；异步同步队列只上传 CSV 差异，不阻塞 GM 或玩家请求。
+- GitHub 配置 PR 合并、`npm run deploy:prod` 发布后，新 release 读取同一份 CSV；删档/重启只处理 `game.json` 进度，不回退配置。
+- 本地直接编辑仓库 CSV 仍可在开发服重启后生效，但正式环境应使用配置中心的 PR 流程。
 - 改 CSV **不需要改任何代码、不需要重新编译**。
 - ⚠️ **改了 id/code 或新增/删除目录行，相当于改了数据契约**：开发期建议清空旧存档 `data/game.json` 再重启，避免老村庄里残留的 code 找不到定义。

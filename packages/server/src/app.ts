@@ -5,7 +5,8 @@ import { CommandBus } from './infra/command-bus.js';
 import { Scheduler } from './infra/scheduler.js';
 import { KeyedSerialQueue } from './infra/keyed-serial-queue.js';
 import { MemoryStore, JsonFileStore, type Store } from './infra/store.js';
-import { loadGameConfig, loadBalanceOverrides, type GameConfig, type BalanceOverrides } from './infra/config.js';
+import { loadGameConfig, type GameConfig } from './infra/config.js';
+import { ConfigAuthority } from './infra/config-authority.js';
 import { EconomyModule } from './modules/economy.js';
 import { BuildingModule } from './modules/building.js';
 import { MilitaryModule } from './modules/military.js';
@@ -77,8 +78,10 @@ export interface GameApp {
   config: GameConfig;
   /** 启动时使用的配置目录（config/*.csv 所在），热重载与平衡调参写回都基于它。 */
   configDir: string;
-  /** 平衡调参兼容覆盖文件路径（CSV 是事实源；JSON 仅用于旧 release 迁移，git 忽略）。null 表示关闭持久化。 */
+  /** 旧版 balance_overrides.json 路径（仅部署迁移兼容；运行时永不读取/写入）。null 表示关闭旧兼容路径。 */
   balanceOverridePath: string | null;
+  /** 配置中心使用的 CSV 版本、共享镜像和 GitHub 异步同步队列。 */
+  configAuthority: ConfigAuthority;
   store: Store;
   bus: EventBus;
   commands: CommandBus;
@@ -151,7 +154,7 @@ export function createGameApp(opts?: {
   configDir?: string;
   /** 数据落盘路径。给了就用 JSON 文件持久化；不给用内存（测试）。 */
   storePath?: string;
-  /** 平衡调参兼容文件路径。默认 <storePath 目录>/balance_overrides.json；CSV 才是默认事实源。 */
+  /** 旧版 balance_overrides.json 路径，仅供部署迁移；运行时不会读取或写入。 */
   balanceOverridePath?: string;
   /** 随机数生成器（默认 Math.random）。测试可注入确定性 RNG 以复现掉落/加权结果。 */
   rng?: () => number;
@@ -161,13 +164,17 @@ export function createGameApp(opts?: {
   // 平衡覆盖路径：与 game.json 同目录（在 data/ 下，git 忽略，wipe:all 不动）
   const balanceOverridePath = opts?.balanceOverridePath
     ?? (opts?.storePath ? join(dirname(opts.storePath), 'balance_overrides.json') : null);
-  // 启动时加载一次覆盖，灌进初始 config
-  const initialOverrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
-  let config = loadGameConfig(configDir, initialOverrides);
+  // CSV 是唯一运行时配置事实源。旧版 balance_overrides.json 由部署阶段一次性迁移，
+  // 这里刻意不再读取，避免删档/重启时被隐藏的 JSON 覆盖配置中心的 CSV。
+  let config = loadGameConfig(configDir);
   let configuredWorldW = config.constants.worldW;
   let configuredWorldH = config.constants.worldH;
 
   const store: Store = opts?.storePath ? new JsonFileStore(opts.storePath) : new MemoryStore();
+  const configAuthority = new ConfigAuthority({
+    configDir,
+    stateDir: opts?.storePath ? dirname(opts.storePath) : null,
+  });
   const existingWorldMeta = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
   if (Number.isFinite(existingWorldMeta?.w) && Number.isFinite(existingWorldMeta?.h)) {
     config = {
@@ -343,7 +350,7 @@ export function createGameApp(opts?: {
   };
 
   return {
-    config, configDir, balanceOverridePath, store, bus, commands, scheduler, serialQueue,
+    config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
     economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
@@ -380,9 +387,8 @@ export function createGameApp(opts?: {
       for (const module of resumableModules) void module.resume();
     },
     reloadConfig() {
-      // 每次热重载都重新读覆盖文件，玩家运行时改的 /gm/balance 立即生效
-      const overrides = balanceOverridePath ? loadBalanceOverrides(balanceOverridePath) : {};
-      let newConfig = loadGameConfig(configDir, overrides);
+      // 热重载始终读取 CSV；配置中心保存后显式调用此方法即可生效。
+      let newConfig = loadGameConfig(configDir);
       configuredWorldW = newConfig.constants.worldW;
       configuredWorldH = newConfig.constants.worldH;
       const actualWorld = store.get<{ w?: number; h?: number }>('world_meta', 'meta');
