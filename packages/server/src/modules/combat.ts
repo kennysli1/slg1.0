@@ -605,7 +605,10 @@ export class CombatModule {
       });
       looted = (apply.payload as any)?.looted ?? {};
       campCleared = !!((apply.payload as any)?.cleared);
-      isTaskCamp = !!((apply.payload as any)?.task);
+      // M8/M9 的天王老子村是任务专属目标，不应触发普通 PvE 宝物掉落。
+      // 旧存档可能没有 task=true 标记，因此同时按模板类型兜底识别。
+      isTaskCamp = !!((apply.payload as any)?.task)
+        || (apply.payload as any)?.taskType === 'tianwang_village';
       isNoRespawn = !!((apply.payload as any)?.noRespawn);
       // 不重生的 NPC（当前为幸福村）被清空后即代表实体被摧毁：移除地图地块并
       // 发出 pve.TargetRemoved，让所有仍在前往该目标的商队/军队立即从当前位置返程。

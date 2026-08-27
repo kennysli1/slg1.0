@@ -198,6 +198,8 @@ export class TasksModule {
   private scheduler: Scheduler;
   private now: () => number;
   private rng: () => number;
+  /** 同一任务的奖励领取互斥，避免两个并发 Deliver 在删除 active 前各发一遍奖励。 */
+  private readonly deliveryInFlight = new Set<string>();
 
   constructor(
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
@@ -737,6 +739,21 @@ export class TasksModule {
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const lockKey = `${storageVillageId}:${code}`;
+    if (this.deliveryInFlight.has(lockKey)) {
+      return { ok: false, payload: {}, reason: 'delivery_in_progress' };
+    }
+    this.deliveryInFlight.add(lockKey);
+    try {
+      return await this.deliverUnlocked(cmd, storageVillageId);
+    } finally {
+      this.deliveryInFlight.delete(lockKey);
+    }
+  }
+
+  /** Deliver 的实际逻辑由上层互斥包裹，保证任务奖励（尤其 m8/m9 铁壁勋章）最多发放一次。 */
+  private async deliverUnlocked(cmd: Command, storageVillageId: string): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return { ok: false, payload: {}, reason: 'not_active' };

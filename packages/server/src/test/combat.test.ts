@@ -134,3 +134,33 @@ test('战斗：防守方全胜时进攻方全灭、无返程', async () => {
   assert.equal(ended.attackerWins, false, '弱兵应败');
   assert.equal(Object.keys(ended.survivors).length, 0, '败方应全灭无幸存');
 });
+
+test('M8/M9 天王老子村即使缺少旧 task 标记也不直接掉落宝物', async () => {
+  // 旧存档可能只有 tianwang_village 类型，没有 task=true。即使强制让普通
+  // 掉落概率命中，也不能把铁壁勋章（或其它宝物）作为清营战利品直接发放；
+  // 铁壁勋章只能由 m8/m9 的手动领取奖励路径产生。
+  const app = createGameApp({ now: () => clock, manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const targetId = 'legacy-tianwang-no-task';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId,
+    type: 'tianwang_village',
+    q: 20,
+    r: 20,
+    ownerVillageId: 'legacy-owner',
+  });
+  assert.equal(spawned.ok, true);
+
+  const pending: any[] = [];
+  app.bus.on('treasure.PendingDropped', (evt) => { pending.push(evt.payload); });
+  await send(app, 'combat.Engage', {
+    targetKind: 'pve', targetId, targetXY: { q: 20, r: 20 },
+    movementId: 'legacy-tianwang-attack', fromVillage: 'legacy-owner', fromXY: { q: 19, r: 20 },
+    troops: { legionnaire: 100 }, attackerSnapshot: { legionnaire: melee(100, 1000, 100) },
+  });
+  await drain(app);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(pending.length, 0, '天王老子村清空不能走普通 PvE 宝物掉落');
+  assert.equal(app.store.all<any>('treasure_pending').length, 0, '不能创建直接掉落的待领取宝物');
+});
