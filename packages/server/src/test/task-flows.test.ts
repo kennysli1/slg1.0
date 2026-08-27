@@ -214,6 +214,44 @@ test('M8 到时会生成 NPC 攻城行军并向目标村提供可见预警', asy
   const battle = app.store.all<any>('battle').find((item) => item.taskCode === 'm8');
   assert.ok(battle, 'NPC 攻城行军抵达后应创建战场');
 });
+
+test('M8 守城失败须手动确认，确认后无奖励并解锁按结局分支的 M9', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8-fail');
+  const targetId = 'taskvillage-failure-m8';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 6, r: 6, task: true, ownerVillageId: va,
+    loot: { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 },
+    defenders: { club: 15 },
+  });
+  assert.equal(spawned.ok, true);
+  app.store.set('task', va, baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, taskVillageId: targetId, taskVillageXY: { q: 6, r: 6 },
+      taskVillageAttackAt: clock + app.config.constants.m8AttackDelaySec * 1000,
+    },
+  }));
+  await emit(app, 'combat.BattleEnded', {
+    villageId: `task:${targetId}`, side: 'attacker', targetKind: 'village', targetId: va,
+    attackerWins: true, npcService: true, taskCode: 'm8', movementId: 'm8-attack',
+    survivors: { club: 15 },
+  });
+  await tick();
+  let state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  const failed = state.active.find((item: any) => item.code === 'm8');
+  assert.ok(failed, '守城失败后 M8 应保留在任务栏');
+  assert.equal(failed.failureReady, true);
+  assert.equal(failed.ready, false);
+  const confirm = await send(app, 'task.Fail', { villageId: va, code: 'm8' });
+  assert.equal(confirm.ok, true, `M8 失败确认应成功: ${confirm.reason ?? ''}`);
+  assert.deepEqual((confirm.payload as any).rewards.treasures, [], 'M8 失败不应发放宝物');
+  state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(!state.active.some((item: any) => item.code === 'm8'));
+  assert.ok(state.completedMain.includes('m8'));
+  assert.equal(app.store.get<any>('task', va)?.outcomes?.m8, 'failure');
+  assert.ok(state.offeredMain.some((item: any) => item.code === 'm9'), `确认 M8 失败后应解锁 M9，当前 offeredMain=${JSON.stringify(state.offeredMain)} completedMain=${JSON.stringify(state.completedMain)}`);
+});
 test('天王老子村侦察目标坐标以 World 地块为准并回写 PvE 状态', async () => {
   const app = freshApp();
   const va = await reg(app, 'm8-coordinate');

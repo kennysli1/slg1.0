@@ -420,6 +420,19 @@
 
 /* ---------- 解散面板 ---------- */
 .army-management-panel { overflow: hidden; }
+.disband-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.disband-details > summary::-webkit-details-marker { display: none; }
+.disband-details > summary::before {
+  content: '›';
+  display: inline-block;
+  width: 1em;
+  color: var(--c-ink-dim);
+  transition: transform var(--t-fast);
+}
+.disband-details[open] > summary::before { transform: rotate(90deg); }
 .disband-section {
   display: flex;
   flex-direction: column;

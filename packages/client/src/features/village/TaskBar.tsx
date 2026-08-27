@@ -122,8 +122,9 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
   );
 }
 
-function OutcomeRows({ rewards }: { rewards: any }) {
+function OutcomeRows({ rewards, failed = false }: { rewards: any; failed?: boolean }) {
   if (!rewards) return null;
+  if (failed) return <RewardRow rewards={rewards.failure} label="任务失败可得" />;
   return (
     <>
       <RewardRow rewards={rewards} label="完成可得" />
@@ -220,6 +221,45 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
       )}
       <div class="modal-foot">
         <Btn variant="primary" onClick={close}>收下</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── 失败确认弹窗 ─────────────────────────────────────────────────────────────
+// 失败奖励和失败对话在点击“任务失败”后一次性展示；没有配置奖励/文本时仍明确告知玩家任务已失败。
+function FailureModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
+    .filter((item: any) => item && (item.npcName || item.npcText));
+  const current = segments[segmentIndex];
+  const hasRewards = Boolean(
+    rewards?.resources && Object.keys(rewards.resources).length
+      || rewards?.treasures?.length
+      || Number(rewards?.reputation)
+      || Number(rewards?.population)
+      || rewards?.populationGrowth
+      || Number(rewards?.researchPoints),
+  );
+  const next = () => {
+    if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
+    else close();
+  };
+  return (
+    <Modal title={`任务失败 · ${task.name}`} onClose={close}>
+      <p class="task-reward-hint">{hasRewards ? '任务失败后获得以下物品：' : '任务已失败，本次没有奖励。'}</p>
+      {hasRewards && <RewardRow rewards={rewards} label="失败获得" />}
+      {(rewards?.rewardVillageId || task?.rewardVillageId) && (
+        <p class="task-reward-hint">物品发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
+      )}
+      {current && (
+        <div class="dialogue-session task-delivery-dialogue">
+          {current.npcName && <div class="dialogue-npc-name">{current.npcName}</div>}
+          {current.npcText && <div class="dialogue-npc-text">{current.npcText}</div>}
+        </div>
+      )}
+      <div class="modal-foot">
+        <Btn variant="primary" onClick={next}>{segmentIndex < segments.length - 1 ? '继续' : '关闭'}</Btn>
       </div>
     </Modal>
   );
@@ -332,6 +372,19 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       });
     })();
   };
+  const onFail = () => {
+    void (async () => {
+      if (!await ensureTaskExecution(task)) return;
+      await act(req('task.Fail', { code: task.code }), {
+        okToast: '任务已确认失败',
+        onOk: (payload) => {
+          openModal((close) => (
+            <FailureModal task={task} rewards={payload?.rewards} dialogue={payload?.dialogue} close={close} />
+          ), `task-failure-${task.code}`);
+        },
+      });
+    })();
+  };
   const onOpenTrade = async () => {
     if (await ensureTaskExecution(task)) openTradeCenter();
   };
@@ -403,8 +456,10 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       {o.kind === 'research_completed' && (
         <div class="task-card-obj"><div class="task-card-prog"><span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>已研发 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)} 项科技</span><span class="task-prog-hint">需要先建造学院</span></div></div>
       )}
-      {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.ready && (
-        <div class="task-card-obj"><span class="task-prog-hint task-prog-hint--ok">目标已达成，请领取奖励</span></div>
+      {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && (task.ready || task.failureReady) && (
+        <div class="task-card-obj"><span class={`task-prog-hint ${task.failureReady ? 'task-prog-hint--warn' : 'task-prog-hint--ok'}`}>
+          {task.failureReady ? '任务失败，请确认任务失败' : '目标已达成，请领取奖励'}
+        </span></div>
       )}
       {o.kind === 'clear_camp' && (
         <div class="task-card-obj">
@@ -453,10 +508,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
         </div>
       )}
 
-      <OutcomeRows rewards={task.rewards} />
+      <OutcomeRows rewards={task.rewards} failed={task.failureReady === true} />
 
       <div class="task-card-actions">
-        {task.ready ? (
+        {task.failureReady ? (
+          <Btn size="sm" variant="danger" onClick={onFail}>任务失败</Btn>
+        ) : task.ready ? (
           <Btn size="sm" variant="primary" onClick={onDeliver}>{task.natalieDecision === 'release' ? '领取奖励' : '完成任务'}</Btn>
         ) : (
           <>
@@ -471,7 +528,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             )}
           </>
         )}
-        {!isMain && (
+        {!isMain && !task.failureReady && (
           <Btn size="sm" variant="danger" onClick={onAbandon}>放弃</Btn>
         )}
       </div>
@@ -543,7 +600,7 @@ function TaskEntry({ task, offer, openState = true, onToggle = () => {}, showOff
         {item.scope === 'global'
           ? <Tag kind="steel">全局</Tag>
           : item.villageId && <span class="task-card-village">{villageName(item.villageId)}</span>}
-        <span class="task-menu-summary-state">{isOffer ? '可接取' : item.ready ? '待领取' : '进行中'}</span>
+        <span class="task-menu-summary-state">{isOffer ? '可接取' : item.failureReady ? '任务失败' : item.ready ? '待领取' : '进行中'}</span>
         {isOffer && showOfferAlert && <span class="task-menu-alert" aria-label="有可接取任务">!</span>}
       </summary>
       <div class="task-menu-task-body">

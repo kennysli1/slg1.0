@@ -764,10 +764,19 @@ test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获�
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok(!p.active.some((a: any) => a.code === 's3'), '掠夺幸福村后任务应终止');
-  assert.ok(p.abandonedSide.includes('s3'), '失败路径应记入 abandonedSide（不再出现）');
-  const pending = app.store.all<any>('treasure_pending').filter((x) => x.villageId === va && x.code === 'secret_note');
-  assert.equal(pending.length, 1, '失败应在报告中显示带回的秘密字条');
+  const failed = p.active.find((a: any) => a.code === 's3');
+  assert.ok(failed, '失败确认前任务应保留在任务栏');
+  assert.equal(failed.failureReady, true, '失败路径应等待玩家手动确认');
+  assert.equal(failed.ready, false, '失败任务不应显示为可领奖');
+  let pending = app.store.all<any>('treasure_pending').filter((x) => x.villageId === va && x.code === 'secret_note');
+  assert.equal(pending.length, 0, '确认失败前不应提前发放秘密字条');
+  const failedResult = await send(app, 'task.Fail', { villageId: va, code: 's3' });
+  assert.equal(failedResult.ok, true, `确认失败应成功: ${failedResult.reason ?? ''}`);
+  const afterFail = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(!afterFail.active.some((a: any) => a.code === 's3'), '确认失败后任务应终止');
+  assert.ok(afterFail.abandonedSide.includes('s3'), '确认失败应记入 abandonedSide（不再出现）');
+  pending = app.store.all<any>('treasure_pending').filter((x) => x.villageId === va && x.code === 'secret_note');
+  assert.equal(pending.length, 1, '确认失败后应在报告中显示带回的秘密字条');
   const npc = await send(app, 'pve.GetTarget', { id: npcId });
   assert.equal(npc.ok, false, '幸福村地块应已被移除');
 });
