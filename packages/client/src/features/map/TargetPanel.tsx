@@ -420,13 +420,15 @@ function Confirmation({
 }
 
 function ExpeditionWorkflow({
-  meta, onClose, initialStep = 1, modeOptions, onSelectMode,
+  meta, onClose, initialStep = 1, modeOptions, onSelectMode, onModeBack,
 }: {
   meta: TargetMeta;
   onClose: () => void;
   initialStep?: WorkflowStep;
   modeOptions?: ModeOption[];
   onSelectMode?: (option: ModeOption) => void;
+  /** When the preparation screen is entered from the mode menu, return to that menu. */
+  onModeBack?: () => void;
 }) {
   const [step, setStep] = useState<WorkflowStep>(initialStep);
   const [troops, setTroops] = useState<NumberMap>({});
@@ -471,7 +473,7 @@ function ExpeditionWorkflow({
       {step === 1 && (modeOptions
         ? <TargetAssessment meta={meta} options={modeOptions} onChoose={(option) => onSelectMode?.(option)} />
         : <Assessment meta={meta} onNext={() => setStep(2)} />)}
-      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => { if (onModeBack) onModeBack(); else setStep(1); }} onNext={() => setStep(3)} />}
       {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
   );
@@ -506,6 +508,7 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
       initialStep={2}
       modeOptions={options ?? []}
       onSelectMode={setChoice}
+      onModeBack={() => setChoice(null)}
       onClose={onClose}
     />
   );

@@ -94,6 +94,24 @@ test('战斗：压倒性兵力速胜且几乎无损', async () => {
   assert.ok(lost < 5, `压倒性胜利损失应很小，实际损失 ${lost}`);
 });
 
+test('PvE 掠夺：运力足够时可搬空营地全部资源且不超过 carry', async () => {
+  const app = freshApp();
+  // 用任务标记的测试营地避免 drain 快进触发普通营地的自动重生，便于核对库存归零。
+  const spawned = await send(app, 'pve.Spawn', { id: 'pve-loot-all', type: 'rats', q: 20, r: 20, task: true, ownerVillageId: 'v1' });
+  assert.equal(spawned.ok, true, '测试营地应生成成功');
+  const ended = await engagePve(app, 'pve-loot-all', { legionnaire: melee(100, 40, 35) }, { legionnaire: 100 });
+  assert.equal(ended.attackerWins, true, '应清空老鼠窝');
+  assert.deepEqual(
+    { wood: ended.looted.wood, clay: ended.looted.clay, iron: ended.looted.iron, crop: ended.looted.crop },
+    { wood: 200, clay: 200, iron: 100, crop: 100 },
+    '运力足够时四种营地资源都应完整带回',
+  );
+  const totalLoot = Object.values(ended.looted as Record<string, number>).reduce((sum, amount) => sum + amount, 0);
+  assert.ok(totalLoot <= 1000, `带回总量 ${totalLoot} 不得超过 100 个单位的 carry=1000`);
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-loot-all' });
+  assert.deepEqual((target.payload as any).loot, { wood: 0, clay: 0, iron: 0, crop: 0 }, '搬空后营地库存应归零');
+});
+
 test('战斗：势均力敌打得久、一边倒打得快（tick 数对比）', async () => {
   // 一边倒：50 打 10 老鼠
   const app1 = freshApp();
