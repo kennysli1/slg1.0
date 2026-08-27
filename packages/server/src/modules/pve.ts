@@ -307,7 +307,18 @@ export class PveModule {
       }
     }
     this.store.set(COLLECTION, id, s);
-    return { ok: true, payload: { looted, cleared: s.cleared, task: !!s.task, noRespawn: !!s.noRespawn } };
+    // 返回模板类型给 Combat：历史存档可能缺少 task 标记，但天王老子村仍
+    // 必须按任务村处理，不能走普通 PvE 的随机宝物掉落路径。
+    return {
+      ok: true,
+      payload: {
+        looted,
+        cleared: s.cleared,
+        task: !!s.task,
+        taskType: s.type,
+        noRespawn: !!s.noRespawn,
+      },
+    };
   }
 
   /** m8 战斗结束后的任务村持久化：保留实体，守军变为战后幸存者，资源减半且金币归零。 */

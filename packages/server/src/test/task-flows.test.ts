@@ -333,6 +333,55 @@ test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与�
   assert.equal(fresh.defender.club, undefined);
 });
 
+test('M8 奖励领取并发时铁壁勋章只发放一次', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8-reward-once');
+  app.store.set('task', va, baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, readyToDeliver: true, outcome: 'success',
+    },
+  }));
+
+  // 两个请求同时到达时，只有一个可以进入奖励结算；另一个会在任务被删除
+  // 后得到 not_active，不能再次创建铁壁勋章。
+  const results = await Promise.all([
+    send(app, 'task.Deliver', { villageId: va, code: 'm8' }),
+    send(app, 'task.Deliver', { villageId: va, code: 'm8' }),
+  ]);
+  assert.equal(results.filter((result) => result.ok).length, 1, '并发领取只能成功一次');
+  const stored = app.store.get<any>('treasure', va);
+  const storedMedals = [...(stored?.town ?? []), ...(stored?.treasury ?? []), ...(stored?.treasuryReserve ?? [])]
+    .filter((code) => code === 'iron_wall_medal').length;
+  const pendingMedals = app.store.all<any>('treasure_pending').filter((item) => item.villageId === va && item.code === 'iron_wall_medal').length;
+  assert.equal(storedMedals + pendingMedals, 1, 'M8 奖励路径最多产生一枚铁壁勋章');
+});
+
+test('M9（M8 失败分支）奖励领取并发时铁壁勋章只发放一次', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm9-reward-once');
+  app.store.set('task', va, {
+    ...baseState(va, {
+      m9: {
+        code: 'm9', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+        progress: 0, readyToDeliver: true,
+      },
+    }),
+    outcomes: { m8: 'failure' },
+  });
+
+  const results = await Promise.all([
+    send(app, 'task.Deliver', { villageId: va, code: 'm9' }),
+    send(app, 'task.Deliver', { villageId: va, code: 'm9' }),
+  ]);
+  assert.equal(results.filter((result) => result.ok).length, 1, '并发领取只能成功一次');
+  const stored = app.store.get<any>('treasure', va);
+  const storedMedals = [...(stored?.town ?? []), ...(stored?.treasury ?? []), ...(stored?.treasuryReserve ?? [])]
+    .filter((code) => code === 'iron_wall_medal').length;
+  const pendingMedals = app.store.all<any>('treasure_pending').filter((item) => item.villageId === va && item.code === 'iron_wall_medal').length;
+  assert.equal(storedMedals + pendingMedals, 1, 'M9 失败分支奖励路径最多产生一枚铁壁勋章');
+});
+
 test('任务代码迁移：旧 villager_request / investigate_coords 自动映射到 s3 / s4', async () => {
   const app = freshApp();
   const va = await reg(app, 'code-migrate');
