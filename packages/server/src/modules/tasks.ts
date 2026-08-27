@@ -36,150 +36,16 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { GameConfig, QuestDef, QuestRewards, QuestScope } from '../infra/config.js';
-
-const COLLECTION = 'task';
-
-/** 已生成的任务营地（运行时，存于实例以便 resume 与客户端取坐标）。 */
-interface TaskCamp {
-  id: string;
-  q: number;
-  r: number;
-  cleared: boolean;
-}
-
-/** 一个进行中的任务实例。 */
-interface TaskInstance {
-  code: string;
-  /** 声明式任务图中的所属任务线；运行时只存引用，不复制配置。 */
-  lineCode?: string;
-  /** 接取时采用的任务图版本，GM 审查时可识别旧实例与新定义。 */
-  definitionRevision?: string;
-  type: 'main' | 'daily' | 'side';
-  /** global 任务的逻辑实例存于玩家主城，但记录最后实际执行目标的村庄。 */
-  executionVillageId?: string;
-  /** 任务营地/NPC 生成时所在村庄；用于跨村事件和清理。 */
-  spawnVillageId?: string;
-  acceptedAt: number;
-  /** submit_resources：已上交的资源累计。 */
-  submitted: Record<string, number>;
-  /** repair_buildings：已修复的建筑 code；每个建筑只计一次。 */
-  repairedBuildings?: string[];
-  /** clear_camp：已生成的营地。 */
-  camps: TaskCamp[];
-  /** clear_camp：已清理的营地数。 */
-  campCleared: number;
-  /** sell_discard_treasure：已累计出售/丢弃的稀有+宝物数量。 */
-  progress: number;
-  /** build_buildings：接取时已有城内建筑数（旧存档兼容字段）。 */
-  buildingBaseline?: number;
-  /** build_buildings：接取时已被占用的槽位；没有发生拆除时不计入新建。 */
-  buildingInitialSlots?: string[];
-  /** build_buildings：接取后已释放、可作为新建计数的槽位。 */
-  buildingFreedSlots?: string[];
-  /** build_buildings：本任务已计数过的槽位；同一槽位重复拆建不重复计数。 */
-  buildingCountedSlots?: string[];
-  /** build_buildings：接取后完成 1 级新建的次数。 */
-  buildingBuiltCount?: number;
-  /** carry_flag：已完成胜利、等待携旗归城的出征 movementId。 */
-  qualifiedMovements?: string[];
-  /** carry_flag：已合格且已存回本村的军旗对应出征；每项代表一面可用于交付的军旗。 */
-  qualifiedFlagMovements?: string[];
-  /** 目标已达成、等待玩家手动交付领取奖励。 */
-  readyToDeliver?: boolean;
-  /** 任务已进入失败确认状态，等待玩家在任务页确认失败。 */
-  failureReady?: boolean;
-  spawnAttempts?: number;
-  /** deliver_to_npc：NPC 村庄（幸福村）refId 与目标坐标。 */
-  npcVillageId?: string;
-  npcXY?: { q: number; r: number };
-  /** deliver_to_npc：注入到贸易中心的幸福村订单 id。 */
-  npcOrderId?: string;
-  /** deliver_to_npc：订单要求的资源种类与数量。 */
-  npcRes?: string;
-  npcAmt?: number;
-  /** deliver_to_npc：等待贸易中心建成后再生成幸福村的挂起标记。 */
-  npcPending?: boolean;
-  /** ② 调查坐标末营清剿后掉落的 captured_natalies 待玩家抉择（入库=完成任务 / 释放=领取奖励）。 */
-  awaitingNatalieDecision?: boolean;
-  /** 与 awaitingNatalieDecision 配套：等待抉择的宝物 code（当前固定 captured_natalies）。 */
-  awaitingNatalieCode?: string;
-  /** 玩家对 captured_natalies 的抉择结果：'store'=入库完成任务 / 'release'=释放领取奖励。 */
-  natalieDecision?: 'store' | 'release';
-  /** m8/m9：绑定的天王老子任务村实体。 */
-  taskVillageId?: string;
-  taskVillageXY?: { q: number; r: number };
-  /** m8 接取后 NPC 攻城的计划时间。 */
-  taskVillageAttackAt?: number;
-  /** m8 NPC 攻城已经发出；用于重启恢复时避免重复生成来袭军。 */
-  taskVillageAttackDispatched?: boolean;
-  /** m8 结局；success=玩家守住，failure=玩家防守失败。 */
-  outcome?: 'success' | 'failure';
-}
-
-/** 自动触发、尚未在客户端关闭的一次性任务对话。 */
-interface PendingTaskDialogue {
-  id: string;
-  taskCode: string;
-  trigger: string;
-  /** 对话发生时的村庄；全局任务也要保留实际执行村。 */
-  villageId: string;
-  createdAt: number;
-}
-
-interface SerializedDialogueSession {
-  id: string;
-  code: string;
-  taskCode: string;
-  trigger: string;
-  segment: number;
-  segmentCount: number;
-  npcName: string;
-  npcText: string;
-  replies: { key: string; label: string }[];
-  segments: SerializedDialogueSegment[];
-}
-
-interface SerializedDialogueSegment {
-  code: string;
-  taskCode: string;
-  trigger: string;
-  segment: number;
-  npcName: string;
-  npcText: string;
-  replies: { key: string; label: string }[];
-}
-
-interface TaskState {
-  villageId: string;
-  /** 已完成的主线任务 code。 */
-  completedMain: string[];
-  /** 已完成的支线任务 code（一次性，不再出现）。 */
-  completedSide: string[];
-  /** 已放弃的支线任务 code（一次性，永久不再出现）。 */
-  abandonedSide: string[];
-  /** 进行中任务：code → 实例（m1 自动激活，其余任务手动接取）。 */
-  active: Record<string, TaskInstance>;
-  /** 已满足前置、等待玩家手动接取的主线任务 code。 */
-  offeredMain: string[];
-  /** 酒馆当前展示、未接取的日常任务 code。 */
-  offered: string[];
-  /** 已触发、可接取的支线任务 code（不占酒馆，直接在任务栏展示）。 */
-  offeredSide: string[];
-  /** 已触发的支线任务触发条件 key（如 `building_built:treasury`）；触发后对应支线进入可接取。 */
-  firedTriggers: string[];
-  cooldownUntil?: Record<string, number>;
-  pendingDialogues?: PendingTaskDialogue[];
-  /** 已完成的条件任务结局，供后续任务选择文本/奖励。 */
-  outcomes?: Record<string, 'success' | 'failure'>;
-  /** 任务专属地图实体，任务完成前持续存在。 */
-  taskVillages?: Record<string, { id: string; q: number; r: number; name: string }>;
-}
-
-interface TavernInfo {
-  level: number;
-  refreshSec: number;
-  maxTasks: number;
-}
+// eslint-disable-next-line no-restricted-imports -- task/state 是同一 task owner 的内部持久化边界；architecture.test.ts 同时校验其 owner 一致性。
+import {
+  TASK_COLLECTION as COLLECTION, emptyTaskState, ensureTaskState,
+  type PendingTaskDialogue, type SerializedDialogueSegment, type SerializedDialogueSession,
+  type TaskCamp, type TaskInstance, type TaskState, type TavernInfo,
+} from './task/state.js';
+// eslint-disable-next-line no-restricted-imports -- task/player-directory 是同一 task owner 的内部 Command 适配器；architecture.test.ts 校验其 owner 一致性。
+import { TaskPlayerDirectory } from './task/player-directory.js';
+// eslint-disable-next-line no-restricted-imports -- task/catalog 是同一 task owner 的配置适配器；architecture.test.ts 校验其 owner 一致性。
+import { TaskCatalog } from './task/catalog.js';
 
 /** 稀有度排序：普通0/稀有1/史诗2/传说3（用于「稀有及以上」判定）。 */
 function rarityRank(rarity: string): number {
@@ -198,15 +64,14 @@ export class TasksModule {
   private scheduler: Scheduler;
   private now: () => number;
   private rng: () => number;
+  private readonly playerDirectory: TaskPlayerDirectory;
+  private catalog: TaskCatalog;
   /** 同一任务的奖励领取互斥，避免两个并发 Deliver 在删除 active 前各发一遍奖励。 */
   private readonly deliveryInFlight = new Set<string>();
 
   constructor(
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
     now: () => number, config: GameConfig, rng: () => number = Math.random,
-    private playerVillages: (playerId: string) => string[] = () => [],
-    private villageOwner: (villageId: string) => string | null = () => null,
-    private villageName: (villageId: string) => string = (villageId) => villageId,
   ) {
     this.config = config;
     this.store = store;
@@ -215,11 +80,14 @@ export class TasksModule {
     this.scheduler = scheduler;
     this.now = now;
     this.rng = rng;
+    this.playerDirectory = new TaskPlayerDirectory(commands);
+    this.catalog = new TaskCatalog(config);
   }
 
   /** GM 热重载时更新配置。 */
   setConfig(config: GameConfig): void {
     this.config = config;
+    this.catalog = new TaskCatalog(config);
   }
 
   async init(): Promise<void> {
@@ -277,9 +145,14 @@ export class TasksModule {
     this.bus.on('treasure.ReportCoords', (evt: DomainEvent) => void this.onReportCoords(evt));
     // ② captured_natalies 报告被玩家抉择（入库/释放）→ 决定是否标记任务就绪
     this.bus.on('treasure.PendingClaimed', (evt: DomainEvent) => void this.onNatalieDecision(evt));
+    // player owner 的公开变更仅刷新 task 的只读目录镜像，绝不读取 player 集合。
+    this.bus.on('player.Registered', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
+    this.bus.on('player.VillageAttached', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
+    this.bus.on('player.VillageRenamed', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
   }
 
   async resume(): Promise<void> {
+    await this.playerDirectory.refreshAll();
     for (const s of this.store.all<TaskState>(COLLECTION)) {
       // 任务营地持久化在 pve 集合。为旧存档回填 owner，并把历史遗留的全局 pve 地块收回私有 taskcamp。
       // 仅重排酒馆刷新节奏（若存在酒馆）。
@@ -294,6 +167,7 @@ export class TasksModule {
         }
         if (inst.npcPending) await this.retryNpcSpawn(s.villageId, s, inst);
         if (inst.code === 'm8' && !inst.outcome && !inst.taskVillageAttackDispatched) {
+          await this.repairM8TaskVillage(s.villageId, s, inst);
           if (inst.taskVillageId && !inst.taskVillageAttackAt) {
             // 旧存档可能在“任务村已生成、攻城时间尚未写入”的窗口中停机。
             // 不能让这类任务永久停在进行中；恢复时立即补上一次攻城调度。
@@ -310,90 +184,50 @@ export class TasksModule {
     }
   }
 
-  /** 清档 / 删号：取消刷新调度、移除仍存在的任务营地、删本村 task 状态。 */
-  wipeSingleVillage(villageId: string): void {
+  /** 返回本村任务状态中登记的所有运行时实体（营地、NPC 村、M8 任务村）。 */
+  private taskEntityIds(state: TaskState): string[] {
+    const ids = new Set<string>();
+    for (const inst of Object.values(state.active)) {
+      for (const camp of inst.camps ?? []) if (camp.id) ids.add(camp.id);
+      if (inst.npcVillageId) ids.add(inst.npcVillageId);
+      if (inst.taskVillageId) ids.add(inst.taskVillageId);
+    }
+    for (const entity of Object.values(state.taskVillages ?? {})) {
+      if (entity?.id) ids.add(entity.id);
+    }
+    return [...ids];
+  }
+
+  /** 通过 PvE owner 命令移除任务实体，必须等待完成才能安全重建同一稳定 id。 */
+  private async removeTaskEntities(state: TaskState): Promise<void> {
+    for (const id of this.taskEntityIds(state)) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
+    }
+  }
+
+  /** 清档 / 删号：取消刷新调度、移除仍存在的任务实体、删本村 task 状态。 */
+  private async wipeSingleVillageAsync(villageId: string): Promise<void> {
     this.scheduler.cancelByOwner(`task-refresh:${villageId}`);
     const s = this.store.get<TaskState>(COLLECTION, villageId);
-    if (s) {
-      for (const inst of Object.values(s.active)) {
-        for (const c of inst.camps ?? []) {
-          void this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
-        }
-      }
-    }
+    if (s) await this.removeTaskEntities(s);
     this.store.delete(COLLECTION, villageId);
+  }
+
+  /** 兼容删号生命周期的同步入口；GM 重置使用上面的 await 版本。 */
+  wipeSingleVillage(villageId: string): void {
+    void this.wipeSingleVillageAsync(villageId).catch(() => {});
   }
 
   // ── 建村：初始化 + M1 自动解锁 ──
   createVillage(villageId: string): void {
-    this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
+    this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
     // 解锁前置已满足的主线（建村时通常仅 m1 无前置）。异步但无需等待。
     void this.unlockMainQuests(villageId).catch(() => {});
   }
 
-  private emptyTaskState(villageId: string): TaskState {
-    return { villageId, completedMain: [], completedSide: [], abandonedSide: [], active: {}, offeredMain: [], offered: [], offeredSide: [], firedTriggers: [], pendingDialogues: [], outcomes: {}, taskVillages: {} };
-  }
-
   // ── 状态读写 ──
   private ensureState(villageId: string): TaskState {
-    let s = this.store.get<TaskState>(COLLECTION, villageId);
-    if (!s) {
-      s = this.emptyTaskState(villageId);
-      this.store.set(COLLECTION, villageId, s);
-    }
-    if (!Array.isArray(s.completedMain)) s.completedMain = [];
-    if (!Array.isArray(s.completedSide)) s.completedSide = [];
-    if (!Array.isArray(s.abandonedSide)) s.abandonedSide = [];
-    if (!s.active || typeof s.active !== 'object') s.active = {};
-    if (!Array.isArray(s.offeredMain)) s.offeredMain = [];
-    if (!Array.isArray(s.offered)) s.offered = [];
-    if (!Array.isArray(s.offeredSide)) s.offeredSide = [];
-    if (!Array.isArray(s.firedTriggers)) s.firedTriggers = [];
-    if (!Array.isArray(s.pendingDialogues)) s.pendingDialogues = [];
-    s.outcomes ??= {};
-    s.taskVillages ??= {};
-    // 迁移旧字段 completedRandom → completedSide（支线）/ 丢弃（日常可反复）；旧 offered 中的支线 → offeredSide
-    const legacy = s as unknown as { completedRandom?: string[] };
-    if (Array.isArray(legacy.completedRandom)) {
-      for (const code of legacy.completedRandom) {
-        if (this.config.quests[code]?.type === 'side' && !s.completedSide.includes(code)) s.completedSide.push(code);
-      }
-      delete legacy.completedRandom;
-    }
-    if (s.offered.some((c) => this.config.quests[c]?.type === 'side')) {
-      const remaining: string[] = [];
-      for (const code of s.offered) {
-        if (this.config.quests[code]?.type === 'side') { if (!s.offeredSide.includes(code)) s.offeredSide.push(code); }
-        else remaining.push(code);
-      }
-      s.offered = remaining;
-    }
-    // 迁移旧任务 code（r1→d1, r2→d2, r3→d3, r4→s1；长支线代码→s3/s4）。
-    // 任务 ID 是存档引用，改名时必须在读取路径完成惰性迁移，不能让旧实例变成“未知任务”。
-    const CODE_MAP: Record<string, string> = {
-      r1: 'd1', r2: 'd2', r3: 'd3', r4: 's1',
-      villager_request: 's3', investigate_coords: 's4',
-    };
-    const remapCode = (c: string) => CODE_MAP[c] ?? c;
-    s.completedSide = s.completedSide.map(remapCode);
-    s.abandonedSide = s.abandonedSide.map(remapCode);
-    s.offered = s.offered.map(remapCode);
-    s.offeredMain = s.offeredMain.map(remapCode);
-    s.offeredSide = s.offeredSide.map(remapCode);
-    for (const old of Object.keys(s.active)) {
-      const neu = remapCode(old);
-      if (neu !== old) {
-        s.active[neu] = { ...s.active[old], code: neu, lineCode: this.config.questGraph.quests[neu]?.lineCode };
-        delete s.active[old];
-      }
-    }
-    s.cooldownUntil ??= {};
-    for (const old of Object.keys(s.cooldownUntil)) {
-      const neu = remapCode(old);
-      if (neu !== old) { s.cooldownUntil[neu] = s.cooldownUntil[old]; delete s.cooldownUntil[old]; }
-    }
-    return s;
+    return ensureTaskState(this.store, villageId, this.config);
   }
 
   private load(villageId: string): TaskState | undefined {
@@ -401,7 +235,7 @@ export class TasksModule {
   }
 
   private quest(code: string): QuestDef | undefined {
-    return this.config.quests[code];
+    return this.catalog.legacy(code);
   }
 
   private questScope(code: string): QuestScope {
@@ -411,9 +245,9 @@ export class TasksModule {
 
   /** 全局任务以玩家第一座（主城）为持久化锚点；没有玩家索引的旧档退回调用村。 */
   private anchorVillage(villageId: string): string {
-    const owner = this.villageOwner(villageId);
+    const owner = this.playerDirectory.villageOwner(villageId);
     if (!owner) return villageId;
-    return this.playerVillages(owner)[0] ?? villageId;
+    return this.playerDirectory.villages(owner)[0] ?? villageId;
   }
 
   private storageVillageForQuest(villageId: string, code: string): string {
@@ -431,8 +265,8 @@ export class TasksModule {
 
   /** 返回玩家名下的所有村庄；旧档或测试没有归属索引时至少保留调用村。 */
   private playerVillageIds(villageId: string): string[] {
-    const owner = this.villageOwner(villageId);
-    const ids = owner ? this.playerVillages(owner) : [];
+    const owner = this.playerDirectory.villageOwner(villageId);
+    const ids = owner ? this.playerDirectory.villages(owner) : [];
     return [...new Set([...ids, villageId])];
   }
 
@@ -452,7 +286,7 @@ export class TasksModule {
   } | undefined {
     const seen = new Set<string>();
     for (const taskVillageId of this.playerVillageIds(villageId)) {
-      for (const q of Object.values(this.config.quests)) {
+      for (const q of this.catalog.all()) {
         if (q.objective.kind !== 'clear_camp') continue;
         const storageVillageId = this.storageVillageForQuest(taskVillageId, q.code);
         const key = `${storageVillageId}:${q.code}`;
@@ -504,6 +338,7 @@ export class TasksModule {
   // ── 命令：GetState ──
   private async getState(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
+    await this.playerDirectory.refreshVillage(villageId);
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     await this.syncTaskVillageCoordinates(villageId);
@@ -514,7 +349,8 @@ export class TasksModule {
   private async getPlayerState(cmd: Command): Promise<CommandResult> {
     const { playerId } = cmd.payload as { playerId?: string };
     if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
-    const villageIds = [...new Set(this.playerVillages(playerId))];
+    await this.playerDirectory.refreshPlayer(playerId);
+    const villageIds = [...new Set(this.playerDirectory.villages(playerId))];
     for (const villageId of villageIds) {
       await this.syncThresholdObjectives(villageId);
       await this.syncSuccessConditions(villageId);
@@ -579,6 +415,7 @@ export class TasksModule {
   private async validateAccept(villageId: string, code: string): Promise<
     { ok: true; q: QuestDef; storageVillageId: string; s: TaskState } | CommandResult
   > {
+    await this.playerDirectory.refreshVillage(villageId);
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
     const storageVillageId = this.storageVillageForQuest(villageId, code);
@@ -609,17 +446,18 @@ export class TasksModule {
     if (!check.ok) return check;
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.dialogueTrigger(villageId, code, 'accept'), villageName: this.villageName(villageId) },
+      payload: { taskCode: code, trigger: this.dialogueTrigger(villageId, code, 'accept'), villageName: this.playerDirectory.villageName(villageId) },
     });
     if (!dialogue.ok) return dialogue;
     return { ok: true, payload: { code, dialogue: (dialogue.payload as any).dialogue ?? null } };
   }
 
   /** 客户端关闭自动对话后确认一次；只允许从该玩家名下的任务状态移除。 */
-  private consumeDialogue(cmd: Command): CommandResult {
+  private async consumeDialogue(cmd: Command): Promise<CommandResult> {
     const { playerId, dialogueId } = cmd.payload as { playerId?: string; dialogueId?: string };
     if (!playerId || !dialogueId) return { ok: false, payload: {}, reason: 'playerId_and_dialogueId_required' };
-    for (const villageId of this.playerVillages(playerId)) {
+    await this.playerDirectory.refreshPlayer(playerId);
+    for (const villageId of this.playerDirectory.villages(playerId)) {
       const s = this.ensureState(villageId);
       const before = s.pendingDialogues?.length ?? 0;
       if (!before) continue;
@@ -658,6 +496,7 @@ export class TasksModule {
   // ── 命令：Abandon（放弃日常/支线任务；主线不可放弃）──
   private async abandon(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    await this.playerDirectory.refreshVillage(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -690,6 +529,7 @@ export class TasksModule {
   // ── 命令：SubmitResources（上交资源）──
   private async submitResources(cmd: Command): Promise<CommandResult> {
     const { villageId, code, resources } = cmd.payload as { villageId: string; code: string; resources: Record<string, number> };
+    await this.playerDirectory.refreshVillage(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -736,6 +576,7 @@ export class TasksModule {
   // ── 命令：Deliver（手动交付就绪任务，领取奖励）──
   private async deliver(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    await this.playerDirectory.refreshVillage(villageId);
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
@@ -784,7 +625,7 @@ export class TasksModule {
     const rewardVillageId = (rewards as any)?.rewardVillageId ?? villageId;
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.dialogueTrigger(rewardVillageId, code, 'deliver', inst), villageName: this.villageName(rewardVillageId) },
+      payload: { taskCode: code, trigger: this.dialogueTrigger(rewardVillageId, code, 'deliver', inst), villageName: this.playerDirectory.villageName(rewardVillageId) },
     });
     return {
       ok: true,
@@ -804,6 +645,7 @@ export class TasksModule {
    */
   private async fail(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    await this.playerDirectory.refreshVillage(villageId);
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const state = this.ensureState(storageVillageId);
     const inst = state.active[code];
@@ -886,7 +728,7 @@ export class TasksModule {
 
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.failureDialogueTrigger(code, inst), villageName: this.villageName(rewardVillageId) },
+      payload: { taskCode: code, trigger: this.failureDialogueTrigger(code, inst), villageName: this.playerDirectory.villageName(rewardVillageId) },
     });
     return {
       ok: true,
@@ -1117,7 +959,7 @@ export class TasksModule {
             ? (q.objective.researchCode ? (completed.has(q.objective.researchCode) ? 1 : 0) : completed.size)
             : 0;
         } else {
-          const playerId = this.villageOwner(sourceVillageId);
+          const playerId = this.playerDirectory.villageOwner(sourceVillageId);
           if (playerId) {
             const explored = await this.commands.send({ name: 'vision.GetExploredCount', from: TasksModule.NAME, payload: { playerId } });
             current = Math.max(0, Math.floor(Number((explored.payload as any)?.count) || 0));
@@ -1174,21 +1016,53 @@ export class TasksModule {
 
   /** 生成 m8 的天王老子任务村并把实体坐标绑定到全局任务状态。 */
   private async spawnTaskVillage(villageId: string, state: TaskState, inst: TaskInstance): Promise<boolean> {
-    if (state.taskVillages?.m8 && inst.taskVillageId) return true;
+    if (state.taskVillages?.m8 && inst.taskVillageId) {
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+      if (existing.ok) {
+        const target = existing.payload as { type?: string; task?: boolean; ownerVillageId?: string; cleared?: boolean };
+        // 活跃 M8 不应指向已清空的任务村。旧版重置漏删实体时，清空营地
+        // 会被错误复用；清掉同属本村的残留实体后重新按当前 GM/CSV 生成。
+        if (target.type === 'tianwang_village' && target.task === true && target.ownerVillageId === villageId && !target.cleared) return true;
+        if (target.type !== 'tianwang_village' || (target.task !== true && target.ownerVillageId !== villageId) || (target.ownerVillageId && target.ownerVillageId !== villageId)) return false;
+        const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+        if (!removed.ok) return false;
+      }
+      delete state.taskVillages.m8;
+      inst.taskVillageId = undefined;
+      inst.taskVillageXY = undefined;
+      this.store.set(COLLECTION, this.storageVillageForQuest(villageId, 'm8'), state);
+    }
     const xy = await this.getVillageXY(villageId);
     if (!xy) return false;
     const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius: this.config.constants.m8TaskVillageSpawnRadius } });
     if (!free.ok) return false;
     const point = free.payload as { q: number; r: number };
     const id = `taskvillage-${this.anchorVillage(villageId)}-m8`;
-    const spawned = await this.commands.send({
+    let spawned = await this.commands.send({
       name: 'pve.Spawn', from: TasksModule.NAME,
       payload: {
         id, type: 'tianwang_village', q: point.q, r: point.r, task: true, ownerVillageId: villageId,
         loot: { wood: this.config.constants.m8TaskVillageResourceAmount, clay: this.config.constants.m8TaskVillageResourceAmount, iron: this.config.constants.m8TaskVillageResourceAmount, crop: this.config.constants.m8TaskVillageResourceAmount, gold: this.config.constants.m8TaskVillageGold },
       },
     });
-    if (!spawned.ok && spawned.reason !== 'already_exists') return false;
+    if (!spawned.ok && spawned.reason === 'already_exists') {
+      // GM 重置/删档的旧实现可能没有及时移除稳定 id 对应的实体。只允许
+      // 删除同属当前村、同类型的残留任务村，避免覆盖别的玩家的实体。
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id } });
+      if (!existing.ok) return false;
+      const target = existing.payload as { type?: string; task?: boolean; ownerVillageId?: string };
+      if (target.type !== 'tianwang_village' || target.task !== true || (target.ownerVillageId && target.ownerVillageId !== villageId)) return false;
+      const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
+      if (!removed.ok) return false;
+      spawned = await this.commands.send({
+        name: 'pve.Spawn', from: TasksModule.NAME,
+        payload: {
+          id, type: 'tianwang_village', q: point.q, r: point.r, task: true, ownerVillageId: villageId,
+          loot: { wood: this.config.constants.m8TaskVillageResourceAmount, clay: this.config.constants.m8TaskVillageResourceAmount, iron: this.config.constants.m8TaskVillageResourceAmount, crop: this.config.constants.m8TaskVillageResourceAmount, gold: this.config.constants.m8TaskVillageGold },
+        },
+      });
+    }
+    if (!spawned.ok) return false;
     state.taskVillages ??= {};
     state.taskVillages.m8 = { id, q: point.q, r: point.r, name: '天王老子村' };
     inst.taskVillageId = id;
@@ -1197,6 +1071,42 @@ export class TasksModule {
     await this.pushList(villageId);
     await this.pushMap(villageId);
     return true;
+  }
+
+  /**
+   * 启动恢复时修复旧版“任务状态仍 active、但任务村已被清空”的半结算状态。
+   * 正常的 M8 战斗会由 resolveM8Battle 写入 outcome 并把营地置回 cleared=false；
+   * 只有旧重置漏删或进程在两个 owner 写入之间退出时才会命中这里。已发出的
+   * NPC 攻城不在此自动改写，避免覆盖正在结算的战斗。
+   */
+  private async repairM8TaskVillage(storageVillageId: string, state: TaskState, inst: TaskInstance): Promise<void> {
+    if (!inst.taskVillageId) return;
+    const current = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+    let recreate = !current.ok;
+    if (current.ok) {
+      const target = current.payload as { type?: string; task?: boolean; ownerVillageId?: string; cleared?: boolean };
+      recreate = target.type !== 'tianwang_village'
+        || (target.ownerVillageId && target.ownerVillageId !== (inst.spawnVillageId ?? storageVillageId))
+        || target.cleared === true;
+    }
+    if (!recreate) return;
+
+    // 归属不匹配时绝不删除别的玩家的实体；清理自己的旧实体后再按稳定 id 重建。
+    const target = current.ok ? current.payload as { type?: string; task?: boolean; ownerVillageId?: string } : undefined;
+    const ownerVillageId = inst.spawnVillageId ?? storageVillageId;
+    const ownsTarget = !target?.ownerVillageId || target.ownerVillageId === ownerVillageId;
+    if (current.ok && !ownsTarget) return;
+    if (current.ok) await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+
+    if (state.taskVillages?.m8?.id === inst.taskVillageId) delete state.taskVillages.m8;
+    inst.taskVillageId = undefined;
+    inst.taskVillageXY = undefined;
+    this.store.set(COLLECTION, storageVillageId, state);
+    const spawned = await this.spawnTaskVillage(ownerVillageId, state, inst);
+    if (spawned) {
+      inst.taskVillageAttackAt = this.now() + this.config.constants.m8AttackDelaySec * 1000;
+      this.store.set(COLLECTION, storageVillageId, state);
+    }
   }
 
   /** M8 生成失败时保留任务并稍后重试，避免地图满/落位时静默卡死。 */
@@ -1636,8 +1546,11 @@ export class TasksModule {
   private async gmReset(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
-    this.wipeSingleVillage(villageId);
-    this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
+    // 必须先等待旧实体从 pve/world 两个 owner 中移除，再允许 M8 重新生成。
+    // 旧实现只异步删除 active.camps，漏掉 taskVillages.m8，导致稳定 id 复用
+    // 已清空的天王老子村，表现为“重置后再次接取但守军/资源全为空”。
+    await this.wipeSingleVillageAsync(villageId);
+    this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
     await this.unlockMainQuests(villageId);
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
   }
@@ -1656,10 +1569,10 @@ export class TasksModule {
     const taskCampIds = targets.ok
       ? (((targets.payload as any)?.targets ?? []) as Array<{ id?: string; task?: boolean }>).filter((target) => target.task && target.id).map((target) => String(target.id))
       : [];
-    for (const villageId of allIds) this.wipeSingleVillage(villageId);
+    for (const villageId of allIds) await this.wipeSingleVillageAsync(villageId);
     for (const id of taskCampIds) await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
     for (const villageId of villageIds) {
-      this.store.set(COLLECTION, villageId, this.emptyTaskState(villageId));
+      this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
       await this.unlockMainQuests(villageId);
       await this.pushList(villageId);
     }
@@ -1671,7 +1584,7 @@ export class TasksModule {
 
   // ── 主线解锁（m1 自动激活，其余进入手动接取列表）──
   private async unlockMainQuests(villageId: string): Promise<void> {
-    for (const q of Object.values(this.config.quests)) {
+    for (const q of this.catalog.all()) {
       if (q.type !== 'main') continue;
       const storageVillageId = this.storageVillageForQuest(villageId, q.code);
       const s = this.ensureState(storageVillageId);
@@ -1691,7 +1604,7 @@ export class TasksModule {
 
   /** 支线任务解锁（一次性 + 触发条件 + 前置链）：满足条件的支线进入可接取列表。 */
   private async unlockSideQuests(villageId: string): Promise<void> {
-    for (const q of Object.values(this.config.quests)) {
+    for (const q of this.catalog.all()) {
       if (q.type !== 'side') continue;
       const storageVillageId = this.storageVillageForQuest(villageId, q.code);
       const s = this.ensureState(storageVillageId);
@@ -1734,8 +1647,9 @@ export class TasksModule {
     // m8 的 NPC 攻城贡献没有真实出发村；通过目标村反查玩家任务锚点，
     // 战斗结束后保存任务村剩余兵力/减半资源，并把 m8 置为可手动领取。
     if (p.taskCode === 'm8' && p.npcService && p.targetKind === 'village' && targetId) {
-      const owner = this.villageOwner(targetId);
-      const storageVillageId = owner ? (this.playerVillages(owner)[0] ?? targetId) : targetId;
+      await this.playerDirectory.refreshVillage(targetId);
+      const owner = this.playerDirectory.villageOwner(targetId);
+      const storageVillageId = owner ? (this.playerDirectory.villages(owner)[0] ?? targetId) : targetId;
       const state = this.ensureState(storageVillageId);
       const inst = state.active.m8;
       if (!inst || !inst.taskVillageId || inst.outcome) return;
@@ -1789,7 +1703,7 @@ export class TasksModule {
     if (residentPveCleared) {
       const chance = this.gmNum('villager_request_trigger_chance', 0.3);
       if (this.rng() < chance) {
-        for (const q of Object.values(this.config.quests).filter((x) => x.trigger === 'pve_camp_cleared')) {
+        for (const q of this.catalog.all().filter((x) => x.trigger === 'pve_camp_cleared')) {
           const storageVillageId = this.storageVillageForQuest(villageId, q.code);
           const state = this.ensureState(storageVillageId);
           if (!state.firedTriggers.includes('pve_camp_cleared')) {
@@ -1891,7 +1805,7 @@ export class TasksModule {
     const army = await this.commands.send({ name: 'military.GetArmy', from: TasksModule.NAME, payload: { villageId } });
     const troops = ((army.payload as { troops?: Record<string, number> } | undefined)?.troops) ?? {};
     const total = Object.values(troops).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
-    for (const q of Object.values(this.config.quests)) {
+    for (const q of this.catalog.all()) {
       if (q.type !== 'side' || !q.trigger?.startsWith('troops_reached:')) continue;
       const storageVillageId = this.storageVillageForQuest(villageId, q.code);
       const s = this.ensureState(storageVillageId);
@@ -1994,7 +1908,7 @@ export class TasksModule {
     }
 
     const triggerKey = `building_built:${kind}`;
-    const matched = Object.values(this.config.quests).filter((q) => q.trigger === triggerKey);
+    const matched = this.catalog.all().filter((q) => q.trigger === triggerKey);
     if (!matched.length) return;
     for (const q of matched) {
       const storageVillageId = this.storageVillageForQuest(villageId, q.code);
@@ -2212,7 +2126,7 @@ export class TasksModule {
     const need = info.maxTasks - s.offered.length;
     if (need <= 0) return;
 
-    const pool = Object.values(this.config.quests).filter((q) =>
+    const pool = this.catalog.all().filter((q) =>
       q.type === 'daily' &&
       (s.cooldownUntil?.[q.code] ?? 0) <= this.now() &&
       !s.active[q.code] &&
@@ -2500,7 +2414,7 @@ export class TasksModule {
       .sort((a, b) => a.segment - b.segment)
       .filter((dialogue) => dialogue.npcName || dialogue.npcText);
     if (!defs.length) return { ...item, dialogue: null };
-    const render = (value: string) => value.replaceAll('{villageName}', this.villageName(item.villageId));
+    const render = (value: string) => value.replaceAll('{villageName}', this.playerDirectory.villageName(item.villageId));
     const segments = defs.map((def): SerializedDialogueSegment => ({
       code: def.code,
       taskCode: def.taskCode,

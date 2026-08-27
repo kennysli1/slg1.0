@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadGameConfig, validateGameConfig, type GameConfig } from '../infra/config.js';
+import { TaskCatalog } from '../modules/task/catalog.js';
 
 /**
  * 配置中心测试：常量/模板被正确解析；校验器能在非法配置时抛错（启动即失败）。
@@ -113,6 +114,18 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.ok(cfg.questGraph.conditions.some((x) => x.id === 'c-m1-clean' && x.phase === 'success' && x.kind === 'no_damaged_resource_level'), 'M1 应有隐藏 success 兜底条件');
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
+});
+
+test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼容投影', () => {
+  const cfg = loadGameConfig(configDir);
+  const catalog = new TaskCatalog(cfg);
+  const s4 = catalog.get('s4');
+  assert.ok(s4, '配置中的每个任务图节点都应有运行时目录项');
+  assert.equal(s4.node, cfg.questGraph.quests.s4, '图节点保持为 CSV 编译结果');
+  assert.equal(s4.legacy, cfg.quests.s4, '旧执行器继续使用相同的兼容投影');
+  assert.ok(s4.objectives.some((row) => row.kind === 'clear_camp'));
+  assert.ok(s4.effects.some((row) => row.kind === 'natalie_choice'));
+  assert.ok(s4.edges.length >= 1, '任务关系不应在运行时目录中丢失');
 });
 
 test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
