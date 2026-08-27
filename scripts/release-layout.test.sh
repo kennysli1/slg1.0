@@ -26,7 +26,7 @@ SHA2=2222222222222222222222222222222222222222
 SHA3=3333333333333333333333333333333333333333
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-mkdir -p "$BASE/.git" "$BASE/data" "$BASE/logs" "$BASE/shared/data" "$BASE/shared/config" "$FIXTURE/config"
+mkdir -p "$BASE/.git" "$BASE/data" "$BASE/logs" "$BASE/shared/data" "$BASE/shared/config" "$FIXTURE/config" "$FIXTURE/packages/server/dist/infra"
 BASE="$(cd "$BASE" && pwd -P)"
 printf 'legacy-save' > "$BASE/data/game.json"
 printf 'legacy-balance' > "$BASE/data/balance_overrides.json"
@@ -34,6 +34,10 @@ printf 'legacy-log' > "$BASE/logs/out.log"
 printf 'legacy-config' > "$BASE/ecosystem.config.cjs"
 printf "module.exports = { apps: [{ name: 'kow' }, { name: 'kow-test-01' }] };\n" > "$FIXTURE/ecosystem.config.cjs"
 printf 'release-default' > "$FIXTURE/config/buildings.csv"
+# 发布布局测试不需要重复加载完整游戏配置；这里提供一个最小迁移入口，
+# 真实迁移逻辑由 server 的 config-authority 单测覆盖。测试仍会验证发布器
+# 在启动前强制要求并调用这个编译产物，避免漏打包导致半套发布。
+printf 'process.exit(0);\n' > "$FIXTURE/packages/server/dist/infra/config-authority.js"
 # 模拟 GM 已保存的共享 CSV：后续 release 必须以它覆盖仓库默认值。
 printf 'buildings.csv\n' > "$BASE/shared/data/balance_csv_files.list"
 printf 'gm-persisted' > "$BASE/shared/config/buildings.csv"
