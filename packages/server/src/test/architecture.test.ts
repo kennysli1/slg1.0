@@ -2,7 +2,7 @@
  * 架构守卫测试：把"四条架构铁律"从"人得记得遵守"变成"违反就红灯，提交不过去"。
  * 对应设计文档 docs/2_2.0设计/07_扩展与代码规范.md 的四铁律。
  *
- * 静态扫描 src/modules/*.ts 源码文本（不执行、不依赖运行时），检查：
+ * 静态扫描 src/modules/ 下所有 owner 文件（含同 owner 子目录；不执行、不依赖运行时），检查：
  *   铁律#2 跨模块只传 Command/Event —— 模块之间不互相 import
  *   铁律#3 时间统一走 Scheduler   —— 模块内禁 setTimeout/setInterval
  *   铁律#1 状态归属唯一          —— 每个 store 集合名(COLLECTION 字面量)只在其 owner 文件出现
@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 const MODULES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'modules');
 
@@ -26,31 +26,43 @@ const MODULES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'modules
 const IMPORT_WHITELIST = new Set<string>([]);
 
 interface ModuleFile {
-  name: string; // 文件名，如 'economy.ts'
-  base: string; // 去后缀，如 'economy'
+  name: string; // 相对 modules/ 的路径，如 'task/state.ts'
+  owner: string; // task/** 与 tasks.ts 仍属于同一个领域 owner
   text: string; // 源码全文
 }
 
+function ownerOf(name: string): string {
+  const top = name.split('/')[0]!.replace(/\.ts$/, '');
+  return top === 'tasks' || top === 'task' ? 'task' : top;
+}
+
+function walkModules(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return walkModules(path);
+    return entry.name.endsWith('.ts') ? [path] : [];
+  });
+}
+
 function loadModules(): ModuleFile[] {
-  return readdirSync(MODULES_DIR)
-    .filter((f) => f.endsWith('.ts'))
-    .map((name) => ({
-      name,
-      base: name.replace(/\.ts$/, ''),
-      text: readFileSync(join(MODULES_DIR, name), 'utf8'),
-    }));
+  return walkModules(MODULES_DIR).map((path) => {
+    const name = relative(MODULES_DIR, path).replaceAll('\\', '/');
+    return { name, owner: ownerOf(name), text: readFileSync(path, 'utf8') };
+  });
 }
 
 test('铁律#2：模块之间不互相 import（combat 纯函数除外）', () => {
   const mods = loadModules();
   const offenders: string[] = [];
-  // 匹配从兄弟模块相对导入：from './xxx.js'
-  const relImport = /from\s+['"]\.\/([\w-]+\.js)['"]/g;
+  const relImport = /from\s+['"](\.{1,2}\/[^'"]+\.js)['"]/g;
   for (const m of mods) {
     for (const match of m.text.matchAll(relImport)) {
-      const target = match[1];
-      if (!IMPORT_WHITELIST.has(target)) {
-        offenders.push(`${m.name} → ${target}`);
+      const target = match[1]!;
+      const sourcePath = join(MODULES_DIR, m.name);
+      const resolved = resolve(dirname(sourcePath), target).replace(/\.js$/, '.ts');
+      const rel = relative(MODULES_DIR, resolved).replaceAll('\\', '/');
+      if (!rel.startsWith('..') && ownerOf(rel) !== m.owner && !IMPORT_WHITELIST.has(target)) {
+        offenders.push(`${m.name} → ${rel}`);
       }
     }
   }
@@ -89,18 +101,18 @@ test('铁律#1：每个 store 集合(COLLECTION 字面量)只属于一个 owner 
   const mods = loadModules();
   // 抽取每个文件里声明的集合名常量：const COLLECTION... = 'xxx'
   // 覆盖 COLLECTION / COLLECTION_BYNAME / COLLECTION_META 等命名变体。
-  const declRe = /const\s+COLLECTION\w*\s*=\s*['"]([\w-]+)['"]/g;
-  const owner = new Map<string, string>(); // 集合名 → owner 文件
+  const declRe = /const\s+(?:TASK_)?COLLECTION\w*\s*=\s*['"]([\w-]+)['"]/g;
+  const owner = new Map<string, string>(); // 集合名 → owner 领域
   for (const m of mods) {
     for (const match of m.text.matchAll(declRe)) {
       const coll = match[1];
-      const prev = owner.get(coll);
+      const previousOwner = owner.get(coll);
       assert.equal(
-        prev,
+        previousOwner,
         undefined,
-        `store 集合 '${coll}' 被多个模块声明为 owner：${prev} 与 ${m.name}。一块状态只能有一个 owner。`,
+        `store 集合 '${coll}' 被多个模块声明为 owner：${previousOwner} 与 ${m.owner}。一块状态只能有一个 owner。`,
       );
-      owner.set(coll, m.name);
+      owner.set(coll, m.owner);
     }
   }
 
@@ -108,13 +120,13 @@ test('铁律#1：每个 store 集合(COLLECTION 字面量)只属于一个 owner 
   // 只匹配 store.<method>('coll' 形态（get/set/all/delete/clear，可带 <泛型>），
   // 避免与恰好同名的普通字符串字面量(如 tile 的 kind:'pve')误撞。
   const offenders: string[] = [];
-  for (const [coll, ownerFile] of owner) {
+  for (const [coll, ownerName] of owner) {
     const storeAccess = new RegExp(`store\\s*\\.\\s*\\w+\\s*(<[^>]*>)?\\s*\\(\\s*['"]${coll}['"]`);
     for (const m of mods) {
-      if (m.name === ownerFile) continue;
+      if (m.owner === ownerName) continue;
       m.text.split('\n').forEach((line, i) => {
         if (storeAccess.test(line)) {
-          offenders.push(`${m.name}:${i + 1} 通过 store 访问了 '${coll}'（owner 是 ${ownerFile}）`);
+          offenders.push(`${m.name}:${i + 1} 通过 store 访问了 '${coll}'（owner 是 ${ownerName}）`);
         }
       });
     }

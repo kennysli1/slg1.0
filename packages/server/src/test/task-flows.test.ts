@@ -80,6 +80,47 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
 
+test('② 释放路径：真实 pending 领取后仅交付任务时结算金币、声望与正直的心', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'natalie-release');
+  await send(app, 'population.GetState', { villageId: va });
+  await send(app, 'military.GetState', { villageId: va });
+  await send(app, 'research.GetState', { villageId: va });
+  app.store.set('task', va, baseState(va, {
+    s4: {
+      code: 's4', type: 'side', acceptedAt: clock,
+      submitted: {}, camps: [], campCleared: 3, progress: 3,
+      awaitingNatalieDecision: true, awaitingNatalieCode: 'captured_natalies',
+    },
+  }));
+  const before = await send(app, 'economy.GetResources', { villageId: va });
+  const beforeGold = Number((before.payload as any).resources.gold ?? 0);
+
+  const rolled = await send(app, 'treasure.RollDrop', {
+    villageId: va, source: 'camp', movementId: 'release-chain',
+    forceCode: 'captured_natalies', taskRelated: true,
+  });
+  assert.equal(rolled.ok, true, '应创建真实待领取宝物');
+  assert.equal((await send(app, 'treasure.MarkPendingArrived', { movementId: 'release-chain' })).ok, true);
+  const released = await send(app, 'treasure.ClaimPending', { movementId: 'release-chain', decision: 'release' });
+  assert.equal(released.ok, true, '释放应成功: ' + (released.reason ?? ''));
+  await tick();
+
+  const beforeDeliver = await send(app, 'economy.GetResources', { villageId: va });
+  assert.equal(Number((beforeDeliver.payload as any).resources.gold ?? 0), beforeGold, '释放本身不得发金币');
+  const ready = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.equal(ready.active.find((task: any) => task.code === 's4')?.ready, true, '释放后必须等待手动交付');
+
+  const delivered = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
+  assert.equal(delivered.ok, true, '交付应成功: ' + (delivered.reason ?? ''));
+  assert.deepEqual((delivered.payload as any).rewards.resources, { gold: 500 });
+  assert.equal((delivered.payload as any).rewards.reputation, 2);
+  const after = await send(app, 'economy.GetResources', { villageId: va });
+  assert.equal(Number((after.payload as any).resources.gold ?? 0), beforeGold + 500);
+  const treasure = app.store.get<any>('treasure', va);
+  assert.ok([...treasure.town, ...treasure.treasury].includes('honest_heart'), '交付后才应发放正直的心');
+});
+
 // ② 变体：入库 → 任务失败（只保留宝物）
 test('② 变体：放入宝库 -> 调查坐标失败且不可领取奖励', async () => {
   const app = freshApp();
