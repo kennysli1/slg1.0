@@ -75,6 +75,31 @@ test('旧覆盖迁移：合法 balance_overrides.json 折叠进 CSV，成功后�
   }
 });
 
+test('旧覆盖迁移：已删除的历史常量只归档、不阻塞有效覆盖迁移', () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-migration-removed-');
+  const overridePath = join(state, 'balance_overrides.json');
+  try {
+    writeFileSync(overridePath, JSON.stringify({
+      constants: {
+        treasure_trade_drop_chance: { value: '1' },
+        ritual_buff_pop_cost: { value: '21' },
+      },
+    }));
+    const result = migrateLegacyBalanceOverrides({ configDir: cfg.dir, persistentConfigDir: join(state, 'config'), overridePath, backupDir: state });
+    assert.equal(result.migrated, true);
+    assert.deepEqual(result.files, ['game_constants.csv']);
+    assert.match(result.reason ?? '', /treasure_trade_drop_chance/);
+    assert.equal(existsSync(overridePath), false);
+    assert.ok(result.backupPath && existsSync(result.backupPath), '原始 JSON 必须完整归档');
+    const app = createGameApp({ now: () => 1, manualScheduler: true, configDir: cfg.dir });
+    assert.equal(app.config.constants.ritualBuffPopCost, 21);
+  } finally {
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
 test('旧覆盖迁移：未知表或非法 JSON 会中止且保留原文件', () => {
   const cfg = seedConfig();
   const state = tempDir('kow-config-migration-bad-');

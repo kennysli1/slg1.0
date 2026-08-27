@@ -134,6 +134,15 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   academy: { file: 'academy.csv', key: 'level', numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'] },
 };
 
+/**
+ * 旧版曾存在、但已经从运行时和 CSV 正式删除的覆盖键。
+ * 这些键不能再映射到一个含义不同的新参数；迁移时仅从待应用集合中
+ * 排除并把原始 JSON 完整归档，避免服务器因历史遗留值无法发布。
+ */
+const REMOVED_LEGACY_ROWS: Record<string, ReadonlySet<string>> = {
+  constants: new Set(['treasure_trade_drop_chance']),
+};
+
 export interface LegacyMigrationResult {
   migrated: boolean;
   files: string[];
@@ -163,11 +172,28 @@ export function migrateLegacyBalanceOverrides(opts: {
   const nonEmptyEntries = Object.entries(overrides).filter(([, changes]) => Object.keys(changes ?? {}).length > 0);
   const unknown = nonEmptyEntries.filter(([name]) => !LEGACY_TABLES[name]).map(([name]) => name);
   if (unknown.length > 0) throw new Error(`旧配置包含未知表，已停止迁移以避免丢值：${unknown.join(', ')}`);
-  const entries = nonEmptyEntries;
+  const ignoredRemoved: string[] = [];
+  const entries = nonEmptyEntries
+    .map(([name, changes]) => {
+      const removed = REMOVED_LEGACY_ROWS[name];
+      if (!removed || !changes || typeof changes !== 'object' || Array.isArray(changes)) return [name, changes] as const;
+      const kept: Record<string, Record<string, string>> = {};
+      for (const [rowKey, fields] of Object.entries(changes)) {
+        if (removed.has(rowKey)) ignoredRemoved.push(`${name}.${rowKey}`);
+        else kept[rowKey] = fields as Record<string, string>;
+      }
+      return [name, kept] as const;
+    })
+    .filter(([, changes]) => Object.keys(changes ?? {}).length > 0);
   if (entries.length === 0) {
     const backup = `${opts.overridePath}.migrated.${Date.now()}`;
     renameSync(opts.overridePath, backup);
-    return { migrated: true, files: [], backupPath: backup, reason: 'empty_or_unknown' };
+    return {
+      migrated: true,
+      files: [],
+      backupPath: backup,
+      reason: ignoredRemoved.length > 0 ? `removed_legacy_rows:${ignoredRemoved.join(',')}` : 'empty_or_unknown',
+    };
   }
 
   const tmp = `${opts.configDir}.legacy-migrate-${process.pid}-${Date.now()}`;
@@ -217,7 +243,12 @@ export function migrateLegacyBalanceOverrides(opts: {
     mkdirSync(backupDir, { recursive: true });
     const backup = join(backupDir, `balance_overrides.migrated.${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
     renameSync(opts.overridePath, backup);
-    return { migrated: true, files: changedFiles, backupPath: backup };
+    return {
+      migrated: true,
+      files: changedFiles,
+      backupPath: backup,
+      ...(ignoredRemoved.length > 0 ? { reason: `ignored_removed_rows:${ignoredRemoved.join(',')}` } : {}),
+    };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
