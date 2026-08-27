@@ -112,6 +112,24 @@ test('PvE 掠夺：运力足够时可搬空营地全部资源且不超过 carry'
   assert.deepEqual((target.payload as any).loot, { wood: 0, clay: 0, iron: 0, crop: 0 }, '搬空后营地库存应归零');
 });
 
+test('PvE 掠夺：金币优先，余下运力平均带回四种资源', async () => {
+  const app = freshApp();
+  const targetId = 'pve-loot-gold-first';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'rats', q: 21, r: 21, task: true, ownerVillageId: 'v1',
+    loot: { wood: 100, clay: 100, iron: 100, crop: 100, gold: 3 },
+  });
+  assert.equal(spawned.ok, true, '测试营地应生成成功');
+  const ended = await engagePve(app, targetId, { legionnaire: melee(2, 40, 35) }, { legionnaire: 2 });
+  assert.equal(ended.attackerWins, true, '应清空测试营地');
+  assert.deepEqual(
+    ended.looted,
+    { gold: 3, wood: 5, clay: 4, iron: 4, crop: 4 },
+    '应先带走全部金币，再将剩余运力平均分给四种资源',
+  );
+  assert.equal(Object.values(ended.looted as Record<string, number>).reduce((sum, amount) => sum + amount, 0), 20, '不得超过两名军团兵的 carry=20');
+});
+
 test('PvE 失败战斗：幸存守军不能因快照引用被结算重复扣除', async () => {
   const app = freshApp();
   const targetId = 'pve-defender-snapshot-isolation';

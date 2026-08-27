@@ -26,7 +26,7 @@ interface PveState {
   loot: Record<string, number>;
   /** 是否已被清空（待重生） */
   cleared: boolean;
-  /** 累计被清空次数（战利品浮动的确定性 LCG 种子，保证可复现） */
+  /** 累计被清空次数（保留用于兼容历史存档与重生统计） */
   clearCount: number;
   /** 任务营地标记：由任务模块运行时生成（pve.Spawn task=true）。任务营地清空后不触发普通掉落、
    *  不自动重生（由任务模块在目标达成后显式 pve.Remove 清除），resume 也不自动重生。 */
@@ -40,6 +40,42 @@ interface PveState {
 }
 
 const COLLECTION = 'pve';
+const PVE_BASIC_LOOT_RESOURCES = ['wood', 'clay', 'iron', 'crop'] as const;
+
+function positiveInt(value: unknown): number {
+  return Math.max(0, Math.floor(Number(value) || 0));
+}
+
+/** 在四种基础资源之间尽量平均分配有限运力，库存短缺时自动让位。 */
+function allocateAveragePve(available: Record<string, number>, capacity: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  let remaining = Math.max(0, Math.floor(Number(capacity) || 0));
+  while (remaining > 0) {
+    const active = PVE_BASIC_LOOT_RESOURCES.filter((type) => (available[type] ?? 0) > (out[type] ?? 0));
+    if (active.length === 0) break;
+    const share = Math.floor(remaining / active.length);
+    if (share <= 0) {
+      for (const type of active) {
+        if (remaining <= 0) break;
+        if ((out[type] ?? 0) < (available[type] ?? 0)) {
+          out[type] = (out[type] ?? 0) + 1;
+          remaining -= 1;
+        }
+      }
+      continue;
+    }
+    for (const type of active) {
+      if (remaining <= 0) break;
+      const room = (available[type] ?? 0) - (out[type] ?? 0);
+      const take = Math.min(room, share);
+      if (take > 0) {
+        out[type] = (out[type] ?? 0) + take;
+        remaining -= take;
+      }
+    }
+  }
+  return out;
+}
 
 export class PveModule {
   static readonly NAME = 'pve';
@@ -342,65 +378,31 @@ export class PveModule {
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {
-    const capacity = Math.max(0, Math.floor(Number(carry) || 0));
-    const entries = Object.entries(s.loot)
-      .map(([type, raw]) => ({ type, available: Math.max(0, Math.floor(Number(raw) || 0)) }))
-      .filter((entry) => entry.available > 0);
-    const total = entries.reduce((sum, entry) => sum + entry.available, 0);
     const looted: Record<string, number> = {};
-    if (capacity <= 0 || total <= 0) return looted;
+    let remaining = Math.max(0, Math.floor(Number(carry) || 0));
+    if (remaining <= 0) return looted;
 
-    // 载货足够时必须可以搬空营地的全部资源；随机浮动只影响“运力不足时”
-    // 的资源分配，不能让战利品凭空超过库存或超过部队 carry。
-    const target = Math.min(capacity, total);
-    if (target === total) {
-      for (const entry of entries) {
-        looted[entry.type] = entry.available;
-        s.loot[entry.type] = 0;
-      }
-      return looted;
+    // PvE 与 PvP 使用同一条装载优先级：金币价值最高，先占用全部可用运力。
+    const goldAvailable = positiveInt(s.loot.gold);
+    const goldTake = Math.min(goldAvailable, remaining);
+    if (goldTake > 0) {
+      looted.gold = goldTake;
+      s.loot.gold = goldAvailable - goldTake;
+      remaining -= goldTake;
     }
+    if (remaining <= 0) return looted;
 
-    // 运力不足时按带确定性浮动权重的比例分配，并用余数补齐到恰好 target。
-    // 这样仍保留 pve_loot_variance 的可复现随机性，同时严格满足 carry 上限。
-    const weighted = entries.map((entry, index) => ({
-      ...entry,
-      weight: entry.available * Math.max(0.0001, this.lootFactor(s, index)),
-    }));
-    const weightTotal = weighted.reduce((sum, entry) => sum + entry.weight, 0);
-    const allocations = weighted.map((entry) => Math.min(entry.available, Math.floor(target * entry.weight / weightTotal)));
-    let remaining = target - allocations.reduce((sum, amount) => sum + amount, 0);
-    while (remaining > 0) {
-      let progressed = false;
-      for (let i = 0; i < weighted.length && remaining > 0; i++) {
-        if (allocations[i]! >= weighted[i]!.available) continue;
-        allocations[i]! += 1;
-        remaining -= 1;
-        progressed = true;
-      }
-      if (!progressed) break;
-    }
-    for (let i = 0; i < weighted.length; i++) {
-      const entry = weighted[i]!;
-      const take = allocations[i]!;
+    // 金币装载完后，四种基础资源尽量平均分配；资源短缺时让位给库存充足的资源。
+    const available: Record<string, number> = {};
+    for (const type of PVE_BASIC_LOOT_RESOURCES) available[type] = positiveInt(s.loot[type]);
+    const allocations = allocateAveragePve(available, remaining);
+    for (const type of PVE_BASIC_LOOT_RESOURCES) {
+      const take = allocations[type] ?? 0;
       if (take <= 0) continue;
-      looted[entry.type] = take;
-      s.loot[entry.type] = Math.max(0, entry.available - take);
+      looted[type] = take;
+      s.loot[type] = Math.max(0, available[type]! - take);
     }
     return looted;
-  }
-
-  /**
-   * 确定性伪随机浮动系数 ∈ [1-variance, 1+variance)。
-   * 用 LCG（种子=clearCount×资源槽位偏移）而非 Math.random，保证存档/测试可复现（同 world/player 口径）。
-   */
-  private lootFactor(s: PveState, slot: number): number {
-    const v = this.config.constants.pveLootVariance;
-    if (v <= 0) return 1;
-    const seed = (s.clearCount * 4 + slot + 1) >>> 0;
-    const x = (seed * 1103515245 + 12345) & 0x7fffffff;
-    const u = (x % 1000) / 1000; // [0,1)
-    return 1 - v + u * 2 * v;
   }
 
   private respawn(id: string): void {
