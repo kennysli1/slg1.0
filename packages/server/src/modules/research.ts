@@ -84,7 +84,7 @@ export class ResearchModule {
     this.playerByVillage = playerByVillage;
   }
 
-  /** GM 热重载时更新配置（含 balance_overrides.json 覆盖后的新值）。 */
+  /** 配置中心热重载时更新 CSV 配置。 */
   setConfig(config: GameConfig): void {
     this.config = config;
   }

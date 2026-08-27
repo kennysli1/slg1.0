@@ -1,165 +1,138 @@
-/**
- * 平衡调参覆盖持久化测试（用户需求 A）：
- *  GM 面板 /gm/balance 的手动修改必须写入 data/balance_overrides.json，
- *  该文件在 .gitignore 中，故「部署（git reset --hard）」与「wipe:all 刷档」都不会动它。
- *
- *  覆盖不变量：
- *   P1  保存覆盖后 reloadConfig，应用生效（内存 config 反映修改）。
- *   P2  覆盖文件真实落盘，loadBalanceOverrides 可原样读回（round-trip）。
- *   P3  wipe（resetWorld）不清空/删除 balance_overrides.json，重载后修改依旧生效。
- *   P4  全新进程（再 createGameApp 同 storePath）启动时即读取已有覆盖，无需手动 reload。
- *   P5  mergeOverridesIntoRows 对非法数值（非数字）抛出，防止写坏配置被静默接受。
- *   P6  后一次保存对同字段深合并覆盖前一次（不丢其他字段）。
- */
-
+/** 配置中心权威、旧覆盖迁移和 revision/outbox 回归测试。 */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createGameApp, type GameApp } from '../app.js';
-import {
-  loadBalanceOverrides, saveBalanceOverrides, mergeOverridesIntoRows, mergeBalanceOverrides,
-  type BalanceOverrides,
-} from '../infra/config.js';
-import { parseCsvStructured, serializeCsv } from '../infra/csv.js';
-import { writeFileSync } from 'node:fs';
+import { createGameApp } from '../app.js';
+import { applyBalanceEdits, BALANCE_TABLES } from '../gateway/gm.js';
+import { mergeOverridesIntoRows } from '../infra/config.js';
+import { ConfigAuthority, migrateLegacyBalanceOverrides } from '../infra/config-authority.js';
+import { parseCsvStructured } from '../infra/csv.js';
 
-let clock = 1_000_000;
-
-/** 取真实 config 目录（与运行时默认一致）。 */
-function realConfigDir(): string {
-  const probe = createGameApp({ now: () => 1, manualScheduler: true });
-  const dir = probe.configDir;
-  return dir;
+function tempDir(prefix: string): string { return mkdtempSync(join(tmpdir(), prefix)); }
+function seedConfig(): { dir: string; cleanup: () => void } {
+  const seed = createGameApp({ now: () => 1, manualScheduler: true });
+  const dir = tempDir('kow-config-');
+  cpSync(seed.configDir, dir, { recursive: true });
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-function tmpDataDir(): string {
-  return mkdtempSync(join(tmpdir(), 'kow-bal-'));
+function applyConfigEdit(configDir: string, tableName: string, changes: Record<string, Record<string, string>>): void {
+  const table = BALANCE_TABLES[tableName];
+  const tmp = tempDir('kow-config-edit-');
+  try {
+    cpSync(configDir, tmp, { recursive: true });
+    applyBalanceEdits(configDir, tmp, table, changes);
+    cpSync(join(tmp, table.file), join(configDir, table.file));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
-test('P1+P2+P3+P4：覆盖写入→重载生效→wipe 不动→重启仍生效', async () => {
-  const dataDir = tmpDataDir();
+test('配置中心：CSV 是唯一运行时来源，GM 不再读取或写入 balance_overrides.json', async () => {
+  const cfg = seedConfig();
+  const dataDir = tempDir('kow-config-state-');
   const storePath = join(dataDir, 'game.json');
   try {
-    const app = createGameApp({ now: () => clock, manualScheduler: true, storePath });
-    const overridePath = app.balanceOverridePath;
-    assert.ok(overridePath, 'balanceOverridePath 应已配置（storePath 给定）');
-    assert.equal(existsSync(overridePath!), false, '初始不应有覆盖文件');
-
-    const before = app.config.buildings.main.popGrowthPerLevel;
-    assert.ok(before > 0, 'main.popGrowthPerLevel 应有默认值');
-
-    // 模拟 GM 保存：把 main 的 popGrowthPerLevel 改成 99
-    const edits: BalanceOverrides = {
-      buildings: { '1': { popGrowthPerLevel: '99' } },
-      // units 表的覆盖主键必须与 GM 面板一致，重启/删档后仍要生效。
-      units: { '1': { vision: '7' } },
-      // 用户手填的祭祀人口成本必须和其他 GM 覆盖一样跨 wipe、生效于新进程。
-      constants: { ritual_buff_pop_cost: { value: '20' } },
-    };
-    saveBalanceOverrides(overridePath!, edits);
-
-    // P1：reloadConfig 后应用生效
+    const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath, configDir: cfg.dir });
+    assert.equal(existsSync(app.balanceOverridePath!), false);
+    applyConfigEdit(cfg.dir, 'buildings', { '1': { popGrowthPerLevel: '99' } });
+    app.configAuthority.recordChange(['buildings.csv']);
     app.reloadConfig();
-    assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, 'reload 后覆盖应生效（P1）');
-    assert.equal(app.config.units.legionnaire.vision, 7, 'GM 的兵种视野覆盖应生效（P1）');
-    assert.equal(app.config.constants.ritualBuffPopCost, 20, 'GM 的祭祀人口成本应生效（P1）');
-
-    // P2：文件真实落盘且可原样读回
-    assert.ok(existsSync(overridePath!), '覆盖文件应已落盘');
-    const rt = loadBalanceOverrides(overridePath!);
-    assert.deepEqual(rt, edits, 'loadBalanceOverrides 应原样读回（P2）');
-
-    // P3：wipe（resetWorld）不应删除覆盖文件，重载后修改依旧
+    assert.equal(app.config.buildings.main.popGrowthPerLevel, 99);
+    assert.ok(existsSync(join(dataDir, 'config', 'buildings.csv')));
+    assert.ok(existsSync(join(dataDir, 'config_revision.json')));
+    assert.ok(existsSync(join(dataDir, 'config_sync_outbox.json')));
     await app.resetWorld({ keepAccounts: false });
-    assert.ok(existsSync(overridePath!), 'wipe 不应删除 balance_overrides.json（P3）');
     app.reloadConfig();
-    assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, 'wipe 后重载覆盖应依旧生效（P3）');
-    assert.equal(app.config.units.legionnaire.vision, 7, 'wipe 后兵种视野覆盖应依旧生效（P3）');
-    assert.equal(app.config.constants.ritualBuffPopCost, 20, 'wipe 后 GM 的祭祀人口成本仍应生效（P3）');
-
-    // P4：全新进程启动即读取已有覆盖
-    const app2 = createGameApp({ now: () => clock, manualScheduler: true, storePath });
-    assert.equal(app2.config.buildings.main.popGrowthPerLevel, 99, '新进程启动应读取已有覆盖（P4）');
-    assert.equal(app2.config.units.legionnaire.vision, 7, '新进程应读取 GM 的兵种视野覆盖（P4）');
-    assert.equal(app2.config.constants.ritualBuffPopCost, 20, '新进程应读取 GM 的祭祀人口成本（P4）');
+    assert.equal(app.config.buildings.main.popGrowthPerLevel, 99, '删档只清进度，不回退 CSV');
+    const app2 = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath: join(dataDir, 'fresh.json'), configDir: cfg.dir });
+    assert.equal(app2.config.buildings.main.popGrowthPerLevel, 99, '新进程读取同一 CSV 默认值');
   } finally {
+    cfg.cleanup();
     rmSync(dataDir, { recursive: true, force: true });
   }
 });
 
-test('P5：mergeOverridesIntoRows 对非法数值抛出', () => {
-  const configDir = realConfigDir();
-  const raw = readFileSync(join(configDir, 'buildings.csv'), 'utf8');
-  const doc = parseCsvStructured(raw);
-  // 合法：数值应通过
-  const okRows = mergeOverridesIntoRows(doc.rows, { file: 'buildings.csv', key: 'id', numeric: ['popGrowthPerLevel'] }, {
-    '1': { popGrowthPerLevel: '42' },
-  });
-  const mainRow = okRows.find((r) => String(r.id) === '1');
-  assert.equal(mainRow?.popGrowthPerLevel, '42', '合法数值应被写入');
-
-  // 非法：非数字应抛出
-  assert.throws(() => {
-    mergeOverridesIntoRows(doc.rows, { file: 'buildings.csv', key: 'id', numeric: ['popGrowthPerLevel'] }, {
-      '1': { popGrowthPerLevel: 'abc' },
-    });
-  }, /不是合法数字/, '非数字覆盖应抛错（P5）');
-});
-
-test('P6：连续两次保存对同/异字段深合并', () => {
-  const dataDir = tmpDataDir();
-  const storePath = join(dataDir, 'game.json');
+test('旧覆盖迁移：合法 balance_overrides.json 折叠进 CSV，成功后带时间戳归档', () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-migration-');
+  const overridePath = join(state, 'balance_overrides.json');
   try {
-    const app = createGameApp({ now: () => clock, manualScheduler: true, storePath });
-    const overridePath = app.balanceOverridePath!;
-
-    // 第一次：改 main.popGrowthPerLevel + residence.maxLevel
-    saveBalanceOverrides(overridePath, { buildings: { '1': { popGrowthPerLevel: '10' }, '16': { maxLevel: '5' } } });
-    app.reloadConfig();
-    assert.equal(app.config.buildings.main.popGrowthPerLevel, 10, '第一次保存应生效');
-    assert.equal(app.config.buildings.residence.maxLevel, 5, '第一次保存应生效（另一行）');
-
-    // 第二次：只改 main.popGrowthPerLevel，residence 行应保留（模拟 GM 端点深合并）
-    const current = loadBalanceOverrides(overridePath);
-    const merged = mergeBalanceOverrides(current, { buildings: { '1': { popGrowthPerLevel: '20' } } });
-    saveBalanceOverrides(overridePath, merged);
-    app.reloadConfig();
-    assert.equal(app.config.buildings.main.popGrowthPerLevel, 20, '第二次保存覆盖同字段');
-    assert.equal(app.config.buildings.residence.maxLevel, 5, '第二次保存不应丢失其他字段（P6）');
-
-    // 落盘文件应含两行
-    const rt = loadBalanceOverrides(overridePath);
-    assert.equal(rt.buildings['1'].popGrowthPerLevel, '20');
-    assert.equal(rt.buildings['16'].maxLevel, '5');
+    writeFileSync(overridePath, JSON.stringify({ buildings: { '1': { popGrowthPerLevel: '77' } }, constants: { ritual_buff_pop_cost: { value: '20' } } }));
+    const result = migrateLegacyBalanceOverrides({ configDir: cfg.dir, persistentConfigDir: join(state, 'config'), overridePath, backupDir: state });
+    assert.equal(result.migrated, true);
+    assert.deepEqual(result.files.sort(), ['buildings.csv', 'game_constants.csv']);
+    assert.equal(existsSync(overridePath), false);
+    assert.ok(result.backupPath && existsSync(result.backupPath));
+    const app = createGameApp({ now: () => 1, manualScheduler: true, configDir: cfg.dir });
+    assert.equal(app.config.buildings.main.popGrowthPerLevel, 77);
+    assert.equal(app.config.constants.ritualBuffPopCost, 20);
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
   }
 });
 
-test('P7：meta.GetGameConfig 下发的 popCapByLevel 反映平衡覆盖（per-level）', async () => {
-  const dataDir = tmpDataDir();
-  const storePath = join(dataDir, 'game.json');
+test('旧覆盖迁移：未知表或非法 JSON 会中止且保留原文件', () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-migration-bad-');
+  const overridePath = join(state, 'balance_overrides.json');
   try {
-    const app = createGameApp({ now: () => clock, manualScheduler: true, storePath });
-    const overridePath = app.balanceOverridePath!;
-    const baseline = app.config.buildings.woodcutter.levels[1].popCap;
-    assert.ok(baseline > 0, 'woodcutter L1 默认 popCap 应 > 0');
-    saveBalanceOverrides(overridePath, {
-      building_levels: { 'woodcutter|1': { popCap: '99' }, 'woodcutter|2': { popCap: '88' } },
-    });
-    app.reloadConfig();
-    const r = await app.commands.send({ name: 'meta.GetGameConfig', from: 'test', payload: {} });
-    assert.equal(r.ok, true);
-    const payload = r.payload as any;
-    const wc = (payload.buildings as any[]).find((b) => b.kind === 'woodcutter');
-    assert.ok(wc, 'meta 应含 woodcutter');
-    assert.ok(Array.isArray(wc.popCapByLevel), 'popCapByLevel 应为数组');
-    assert.equal(wc.popCapByLevel[0], 99, 'woodcutter L1 覆盖 99 应反映到 meta.popCapByLevel[0]');
-    assert.equal(wc.popCapByLevel[1], 88, 'woodcutter L2 覆盖 88 应反映到 meta.popCapByLevel[1]');
-    assert.notEqual(wc.popCapByLevel[0], baseline, 'meta 不应回退到默认 CSV 值');
+    writeFileSync(overridePath, JSON.stringify({ unknown_table: { x: { value: '1' } } }));
+    assert.throws(() => migrateLegacyBalanceOverrides({ configDir: cfg.dir, overridePath }), /未知表/);
+    assert.ok(existsSync(overridePath));
+    writeFileSync(overridePath, JSON.stringify({ buildings: { '1': { notAColumn: '1' } } }));
+    assert.throws(() => migrateLegacyBalanceOverrides({ configDir: cfg.dir, overridePath }), /不存在的字段/);
+    assert.ok(existsSync(overridePath));
+    writeFileSync(overridePath, '{broken');
+    assert.throws(() => migrateLegacyBalanceOverrides({ configDir: cfg.dir, overridePath }), /无法解析/);
+    assert.ok(existsSync(overridePath));
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('mergeOverridesIntoRows：非法数值仍被拒绝', () => {
+  const cfg = seedConfig();
+  try {
+    const doc = parseCsvStructured(readFileSync(join(cfg.dir, 'buildings.csv'), 'utf8'));
+    const rows = mergeOverridesIntoRows(doc.rows, { file: 'buildings.csv', key: 'id', numeric: ['popGrowthPerLevel'] }, { '1': { popGrowthPerLevel: '42' } });
+    assert.equal(rows.find((row) => row.id === '1')?.popGrowthPerLevel, '42');
+    assert.throws(() => mergeOverridesIntoRows(doc.rows, { file: 'buildings.csv', key: 'id', numeric: ['popGrowthPerLevel'] }, { '1': { popGrowthPerLevel: 'abc' } }), /不是合法数字/);
+  } finally {
+    cfg.cleanup();
+  }
+});
+
+test('配置同步 outbox：只合并未发送的差异，不重复上传上次成功文件', () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-outbox-');
+  try {
+    const authority = new ConfigAuthority({ configDir: cfg.dir, stateDir: state, syncDelayMs: 60_000 });
+    authority.recordChange(['buildings.csv']);
+    const first = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[] };
+    assert.deepEqual(first.files, ['buildings.csv']);
+    authority.recordChange(['units.csv']);
+    const second = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[] };
+    assert.deepEqual(second.files, ['buildings.csv', 'units.csv']);
+    authority.close();
+
+    // 模拟上一批成功：状态文件保留历史 files，但新批次只应从 pending 合并。
+    writeFileSync(join(state, 'config_sync_status.json'), JSON.stringify({
+      revision: 2, files: ['buildings.csv', 'units.csv'], lastSuccessAt: new Date().toISOString(),
+    }));
+    rmSync(join(state, 'config_sync_outbox.json'), { force: true });
+    const next = new ConfigAuthority({ configDir: cfg.dir, stateDir: state, syncDelayMs: 60_000 });
+    next.recordChange(['dialogues.csv']);
+    const third = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[]; lastSuccessAt?: string };
+    assert.deepEqual(third.files, ['dialogues.csv']);
+    assert.ok(third.lastSuccessAt, '新批次仍应保留最近一次成功时间');
+    next.close();
+  } finally {
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
   }
 });

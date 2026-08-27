@@ -14,12 +14,22 @@ die() { echo "✖ $*" >&2; exit 1; }
 mkdir -p "$BASE_INPUT"
 BASE="$(cd "$BASE_INPUT" && pwd -P)"
 [[ "$BASE" != / && "$BASE" != /home && "$BASE" != /root ]] || die "拒绝使用过宽的生产目录：$BASE"
+# 生产机可在 shared/config.env 放置非 Git 管理的运行时密钥（例如
+# GITHUB_CONFIG_SYNC_TOKEN）。发布/PM2 重启时加载它，但绝不打包或输出文件内容。
+DEPLOY_ENV_FILE="${KOW_DEPLOY_ENV_FILE:-$BASE/shared/config.env}"
+if [[ -f "$DEPLOY_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$DEPLOY_ENV_FILE"
+  set +a
+fi
 STATE="$STATE_INPUT"
 RELEASES="$BASE/releases"
 SHARED="$BASE/shared"
 CURRENT="$BASE/current"
 LOCK="$BASE/.deploy-lock"
 NPM_BIN="${KOW_DEPLOY_NPM_BIN:-npm}"
+NODE_BIN="${KOW_DEPLOY_NODE_BIN:-node}"
 PM2_BIN="${KOW_DEPLOY_PM2_BIN:-pm2}"
 CURL_BIN="${KOW_DEPLOY_CURL_BIN:-curl}"
 
@@ -129,6 +139,21 @@ apply_persisted_config() {
   done < "$manifest"
 }
 
+# 首次升级到 CSV 权威模式时，把旧 shared/data/balance_overrides.json 原子迁移到
+# CSV，并留存带时间戳的备份。迁移失败会触发发布回滚，绝不启动半套配置。
+migrate_legacy_config() {
+  local target="$1"
+  local legacy="$SHARED/data/balance_overrides.json"
+  [[ -f "$legacy" ]] || return 0
+  [[ -f "$target/packages/server/dist/infra/config-authority.js" ]] || die "缺少配置迁移程序：$target"
+  KOW_CONFIG_DIR="$target/config" \
+  KOW_SHARED_CONFIG="$SHARED/config" \
+  KOW_LEGACY_OVERRIDES="$legacy" \
+  KOW_STATE_DIR="$SHARED/data" \
+  KOW_MIGRATION_BACKUP_DIR="$SHARED/data" \
+    "$NODE_BIN" "$target/packages/server/dist/infra/config-authority.js" --migrate
+}
+
 PREVIOUS_MODE=legacy
 PREVIOUS_PATH="$BASE"
 if [[ -L "$CURRENT" ]]; then
@@ -188,6 +213,9 @@ else
 fi
 
 # 目标 release 已存在时也要重新套用最新 GM CSV（例如同一 SHA 重试发布）。
+apply_persisted_config "$TARGET"
+migrate_legacy_config "$TARGET"
+# 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
 apply_persisted_config "$TARGET"
 
 activate "$TARGET"

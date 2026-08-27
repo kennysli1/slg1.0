@@ -36,7 +36,8 @@
     "verify": "npm run guard && npm run verify:quick && npm audit --omit=dev --audit-level=high",
     "reset:season": "node --import tsx packages/server/src/admin.ts --mode=season",
     "reset:respawn": "node --import tsx packages/server/src/admin.ts --mode=respawn",
-    "wipe:all": "node --import tsx packages/server/src/admin.ts --mode=wipe"
+    "wipe:all": "node --import tsx packages/server/src/admin.ts --mode=wipe",
+    "config:migrate": "node packages/server/dist/infra/config-authority.js --migrate"
   },
   "devDependencies": {
     "ws": "^8.18.0"

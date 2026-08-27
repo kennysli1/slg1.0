@@ -1526,7 +1526,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
 /**
  * 热重载入口：重新从目录加载整套配置（含 validateGameConfig 校验；失败抛出 Error）。
  * 配合 app.reloadConfig() 使用——先在此校验通过，再写回磁盘，避免半截配置。
- * overrides 来自旧版本的 data/balance_overrides.json；当前 GM 保存会先写回 CSV，再保留该文件兼容旧 release。
+ * `overrides` 参数仅为旧版本迁移/兼容测试保留；生产运行时只调用不带 overrides
+ * 的入口，CSV 是唯一配置事实源。部署迁移器会在启动新 release 前将旧
+ * data/balance_overrides.json 一次性折叠到 CSV，之后不再读取该文件。
  */
 export function reloadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   return loadGameConfig(configDir, overrides);
