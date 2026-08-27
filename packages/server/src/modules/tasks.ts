@@ -167,6 +167,7 @@ export class TasksModule {
         }
         if (inst.npcPending) await this.retryNpcSpawn(s.villageId, s, inst);
         if (inst.code === 'm8' && !inst.outcome && !inst.taskVillageAttackDispatched) {
+          await this.repairM8TaskVillage(s.villageId, s, inst);
           if (inst.taskVillageId && !inst.taskVillageAttackAt) {
             // 旧存档可能在“任务村已生成、攻城时间尚未写入”的窗口中停机。
             // 不能让这类任务永久停在进行中；恢复时立即补上一次攻城调度。
@@ -183,18 +184,38 @@ export class TasksModule {
     }
   }
 
-  /** 清档 / 删号：取消刷新调度、移除仍存在的任务营地、删本村 task 状态。 */
-  wipeSingleVillage(villageId: string): void {
+  /** 返回本村任务状态中登记的所有运行时实体（营地、NPC 村、M8 任务村）。 */
+  private taskEntityIds(state: TaskState): string[] {
+    const ids = new Set<string>();
+    for (const inst of Object.values(state.active)) {
+      for (const camp of inst.camps ?? []) if (camp.id) ids.add(camp.id);
+      if (inst.npcVillageId) ids.add(inst.npcVillageId);
+      if (inst.taskVillageId) ids.add(inst.taskVillageId);
+    }
+    for (const entity of Object.values(state.taskVillages ?? {})) {
+      if (entity?.id) ids.add(entity.id);
+    }
+    return [...ids];
+  }
+
+  /** 通过 PvE owner 命令移除任务实体，必须等待完成才能安全重建同一稳定 id。 */
+  private async removeTaskEntities(state: TaskState): Promise<void> {
+    for (const id of this.taskEntityIds(state)) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
+    }
+  }
+
+  /** 清档 / 删号：取消刷新调度、移除仍存在的任务实体、删本村 task 状态。 */
+  private async wipeSingleVillageAsync(villageId: string): Promise<void> {
     this.scheduler.cancelByOwner(`task-refresh:${villageId}`);
     const s = this.store.get<TaskState>(COLLECTION, villageId);
-    if (s) {
-      for (const inst of Object.values(s.active)) {
-        for (const c of inst.camps ?? []) {
-          void this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: c.id } });
-        }
-      }
-    }
+    if (s) await this.removeTaskEntities(s);
     this.store.delete(COLLECTION, villageId);
+  }
+
+  /** 兼容删号生命周期的同步入口；GM 重置使用上面的 await 版本。 */
+  wipeSingleVillage(villageId: string): void {
+    void this.wipeSingleVillageAsync(villageId).catch(() => {});
   }
 
   // ── 建村：初始化 + M1 自动解锁 ──
@@ -995,21 +1016,53 @@ export class TasksModule {
 
   /** 生成 m8 的天王老子任务村并把实体坐标绑定到全局任务状态。 */
   private async spawnTaskVillage(villageId: string, state: TaskState, inst: TaskInstance): Promise<boolean> {
-    if (state.taskVillages?.m8 && inst.taskVillageId) return true;
+    if (state.taskVillages?.m8 && inst.taskVillageId) {
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+      if (existing.ok) {
+        const target = existing.payload as { type?: string; task?: boolean; ownerVillageId?: string; cleared?: boolean };
+        // 活跃 M8 不应指向已清空的任务村。旧版重置漏删实体时，清空营地
+        // 会被错误复用；清掉同属本村的残留实体后重新按当前 GM/CSV 生成。
+        if (target.type === 'tianwang_village' && target.task === true && target.ownerVillageId === villageId && !target.cleared) return true;
+        if (target.type !== 'tianwang_village' || (target.task !== true && target.ownerVillageId !== villageId) || (target.ownerVillageId && target.ownerVillageId !== villageId)) return false;
+        const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+        if (!removed.ok) return false;
+      }
+      delete state.taskVillages.m8;
+      inst.taskVillageId = undefined;
+      inst.taskVillageXY = undefined;
+      this.store.set(COLLECTION, this.storageVillageForQuest(villageId, 'm8'), state);
+    }
     const xy = await this.getVillageXY(villageId);
     if (!xy) return false;
     const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius: this.config.constants.m8TaskVillageSpawnRadius } });
     if (!free.ok) return false;
     const point = free.payload as { q: number; r: number };
     const id = `taskvillage-${this.anchorVillage(villageId)}-m8`;
-    const spawned = await this.commands.send({
+    let spawned = await this.commands.send({
       name: 'pve.Spawn', from: TasksModule.NAME,
       payload: {
         id, type: 'tianwang_village', q: point.q, r: point.r, task: true, ownerVillageId: villageId,
         loot: { wood: this.config.constants.m8TaskVillageResourceAmount, clay: this.config.constants.m8TaskVillageResourceAmount, iron: this.config.constants.m8TaskVillageResourceAmount, crop: this.config.constants.m8TaskVillageResourceAmount, gold: this.config.constants.m8TaskVillageGold },
       },
     });
-    if (!spawned.ok && spawned.reason !== 'already_exists') return false;
+    if (!spawned.ok && spawned.reason === 'already_exists') {
+      // GM 重置/删档的旧实现可能没有及时移除稳定 id 对应的实体。只允许
+      // 删除同属当前村、同类型的残留任务村，避免覆盖别的玩家的实体。
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id } });
+      if (!existing.ok) return false;
+      const target = existing.payload as { type?: string; task?: boolean; ownerVillageId?: string };
+      if (target.type !== 'tianwang_village' || target.task !== true || (target.ownerVillageId && target.ownerVillageId !== villageId)) return false;
+      const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
+      if (!removed.ok) return false;
+      spawned = await this.commands.send({
+        name: 'pve.Spawn', from: TasksModule.NAME,
+        payload: {
+          id, type: 'tianwang_village', q: point.q, r: point.r, task: true, ownerVillageId: villageId,
+          loot: { wood: this.config.constants.m8TaskVillageResourceAmount, clay: this.config.constants.m8TaskVillageResourceAmount, iron: this.config.constants.m8TaskVillageResourceAmount, crop: this.config.constants.m8TaskVillageResourceAmount, gold: this.config.constants.m8TaskVillageGold },
+        },
+      });
+    }
+    if (!spawned.ok) return false;
     state.taskVillages ??= {};
     state.taskVillages.m8 = { id, q: point.q, r: point.r, name: '天王老子村' };
     inst.taskVillageId = id;
@@ -1018,6 +1071,42 @@ export class TasksModule {
     await this.pushList(villageId);
     await this.pushMap(villageId);
     return true;
+  }
+
+  /**
+   * 启动恢复时修复旧版“任务状态仍 active、但任务村已被清空”的半结算状态。
+   * 正常的 M8 战斗会由 resolveM8Battle 写入 outcome 并把营地置回 cleared=false；
+   * 只有旧重置漏删或进程在两个 owner 写入之间退出时才会命中这里。已发出的
+   * NPC 攻城不在此自动改写，避免覆盖正在结算的战斗。
+   */
+  private async repairM8TaskVillage(storageVillageId: string, state: TaskState, inst: TaskInstance): Promise<void> {
+    if (!inst.taskVillageId) return;
+    const current = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+    let recreate = !current.ok;
+    if (current.ok) {
+      const target = current.payload as { type?: string; task?: boolean; ownerVillageId?: string; cleared?: boolean };
+      recreate = target.type !== 'tianwang_village'
+        || (target.ownerVillageId && target.ownerVillageId !== (inst.spawnVillageId ?? storageVillageId))
+        || target.cleared === true;
+    }
+    if (!recreate) return;
+
+    // 归属不匹配时绝不删除别的玩家的实体；清理自己的旧实体后再按稳定 id 重建。
+    const target = current.ok ? current.payload as { type?: string; task?: boolean; ownerVillageId?: string } : undefined;
+    const ownerVillageId = inst.spawnVillageId ?? storageVillageId;
+    const ownsTarget = !target?.ownerVillageId || target.ownerVillageId === ownerVillageId;
+    if (current.ok && !ownsTarget) return;
+    if (current.ok) await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+
+    if (state.taskVillages?.m8?.id === inst.taskVillageId) delete state.taskVillages.m8;
+    inst.taskVillageId = undefined;
+    inst.taskVillageXY = undefined;
+    this.store.set(COLLECTION, storageVillageId, state);
+    const spawned = await this.spawnTaskVillage(ownerVillageId, state, inst);
+    if (spawned) {
+      inst.taskVillageAttackAt = this.now() + this.config.constants.m8AttackDelaySec * 1000;
+      this.store.set(COLLECTION, storageVillageId, state);
+    }
   }
 
   /** M8 生成失败时保留任务并稍后重试，避免地图满/落位时静默卡死。 */
@@ -1457,7 +1546,10 @@ export class TasksModule {
   private async gmReset(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
-    this.wipeSingleVillage(villageId);
+    // 必须先等待旧实体从 pve/world 两个 owner 中移除，再允许 M8 重新生成。
+    // 旧实现只异步删除 active.camps，漏掉 taskVillages.m8，导致稳定 id 复用
+    // 已清空的天王老子村，表现为“重置后再次接取但守军/资源全为空”。
+    await this.wipeSingleVillageAsync(villageId);
     this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
     await this.unlockMainQuests(villageId);
     return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
@@ -1477,7 +1569,7 @@ export class TasksModule {
     const taskCampIds = targets.ok
       ? (((targets.payload as any)?.targets ?? []) as Array<{ id?: string; task?: boolean }>).filter((target) => target.task && target.id).map((target) => String(target.id))
       : [];
-    for (const villageId of allIds) this.wipeSingleVillage(villageId);
+    for (const villageId of allIds) await this.wipeSingleVillageAsync(villageId);
     for (const id of taskCampIds) await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id } });
     for (const villageId of villageIds) {
       this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
