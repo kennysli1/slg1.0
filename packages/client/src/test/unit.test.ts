@@ -12,7 +12,7 @@ import { escapeHtml, escapeAttr } from '../shared/utils/escape.js';
 import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
-import { setPopState, getPopState, interpolatePop } from '../app/state.js';
+import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind } from '../features/reports/notification-text.js';
@@ -31,6 +31,23 @@ describe('modalLayerZ', () => {
 });
 
 describe('地图定位', () => {
+  it('MarchStep 同时更新己方行军和来袭预警，任务村 NPC 图标不会停在首次预警位置', () => {
+    const previous = getCache();
+    const warning = {
+      id: 'm8-incoming', type: 'attack', battleType: 'siege', targetVillage: 'v1',
+      targetVillageName: '主城', fromVillage: 'task:pve-1', fromVillageName: '天王老子村',
+      from: { q: 0, r: 0 }, to: { q: 3, r: 0 }, path: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 }],
+      pos: { q: 0, r: 0 }, stepIndex: 0, perStepMs: 1000, nextStepAt: 1000, arriveAt: 4000,
+    } as any;
+    setCache({ moves: { movements: [], incomingWarnings: [warning] }, playerMoves: { movements: [], incomingWarnings: [warning] } });
+    patchMovement({ id: warning.id, villageId: 'v1', pos: { q: 1, r: 0 }, stepIndex: 1, nextStepAt: 2000, perStepMs: 1000, status: 'marching', arriveAt: 4000 });
+    for (const source of [getCache().moves, getCache().playerMoves]) {
+      assert.deepEqual(source.incomingWarnings[0].pos, { q: 1, r: 0 });
+      assert.equal(source.incomingWarnings[0].stepIndex, 1);
+    }
+    setCache(previous);
+  });
+
   it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {
     assert.equal(terrainFromTile({ terrain: 'forest' }, 'visible'), 'forest');
     assert.equal(terrainFromTile({ terrain: 'hills' }, 'explored'), 'hills');

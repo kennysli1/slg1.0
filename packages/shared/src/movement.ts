@@ -119,7 +119,7 @@ export interface ListForeignPayload {
   movements: ForeignArmy[];
 }
 
-/** 增量推送载荷（己方逐格推进）。 */
+/** 增量推送载荷（己方逐格推进，或定向发送给受袭村的来袭预警逐格推进）。 */
 export interface MarchStepPush {
   villageId: string;
   id: string;
