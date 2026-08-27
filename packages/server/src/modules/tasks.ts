@@ -1139,7 +1139,8 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
   }
 
-  /** M8/M9 的对话按 M8 结局选择 GM 中对应的触发文本；未有结局时回退通用模板。 */
+  /** M8/M9 的对话按 M8 结局选择 GM 中对应的触发文本；M9 的稳定 code
+   * 以 m8_ 前缀明确标注依据，trigger 保持 accept/deliver + outcome 兼容协议。 */
   private dialogueTrigger(villageId: string, code: string, phase: 'accept' | 'deliver', inst?: TaskInstance): string {
     if (code !== 'm8' && code !== 'm9') return phase;
     const storage = this.storageVillageForQuest(villageId, code);

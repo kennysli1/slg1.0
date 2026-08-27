@@ -198,7 +198,7 @@
 | respawnSec | 被清空后重生秒数 |
 | lootWood/Clay/Iron/Crop | 战利品总量 |
 
-配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
+配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
 ## pve_defenders.csv — PvE 守军（与上表一对多）
 | 列 | 含义 |
@@ -418,6 +418,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
 同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。GM 对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
+
+M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8_success`、`m9_accept_m8_failure`、`m9_deliver_m8_success`、`m9_deliver_m8_failure`。其 `trigger` 仍分别使用 `accept_success`、`accept_failure`、`deliver_success`、`deliver_failure`，由任务模块按 M8 结局调用。
 
 ## kingdom_services.csv — 议会厅服务
 
