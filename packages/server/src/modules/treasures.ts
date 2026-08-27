@@ -19,7 +19,7 @@ import type { GameConfig, TreasureDef } from '../infra/config.js';
  *      · 声望被动修正 → reputation.SetTreasureDelta
  *      · 攻防倍率     → military.SetTreasureCombatMult（作用于防守快照）
  *  - 宝物存放分三处：城镇中心主栏(town, 基础1格)、宝库主栏(treasury, 等级提供额外格)与宝库备用栏(treasuryReserve, 同等容量)。
- *    新宝物优先入宝库主栏，其次城镇中心，最后备用栏；备用栏不会自动装载。
+ *    新宝物（含返程/跨村交付）优先入城镇中心，其次宝库主栏，最后备用栏；备用栏不会自动装载。
  *  - 军队携带宝物（出征/运输）：treasure.AssignToArmy 把宝物装上军队（上限随兵力，
  *    min(treasureCarryMaxSlots, floor(总兵力/treasureCarryTroopsPerSlot))），在途时城镇失去加成、军队获得加成
  *    （movement 在出征快照叠加携带效果）。返程到家经 StoreCarried 存回；抵达另一村庄经 OffloadForeign
@@ -462,7 +462,8 @@ export class TreasureModule {
       await this.emitChanged(villageId);
       return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };
     }
-    // 重建顺序与新宝物入库一致：宝库主栏 → 城镇中心 → 宝库备用栏。
+    // 缩容时按价值重建：宝库主栏 → 城镇中心 → 宝库备用栏；这是保留既有宝物的容量迁移规则，
+    // 与新宝物入库/备用栏装载的“城镇中心优先”落点规则不同。
     s.treasury = all.slice(0, next);
     const townIndex = next;
     if (all.length > townIndex) s.town = [all[townIndex]];
@@ -631,11 +632,11 @@ export class TreasureModule {
     } as DomainEvent);
   }
 
-  /** 把宝物存进村庄：优先宝库主栏，其次城镇中心，最后宝库备用栏；满则失败。 */
+  /** 把新入库宝物存进村庄：优先城镇中心，其次宝库主栏，最后宝库备用栏；满则失败。 */
   private storeIfRoom(s: TreasureState, code: string): boolean {
     if (!code) return false;
-    if (s.treasury.length < s.extraSlots) s.treasury.push(code);
-    else if (s.town.length < TOWN_CENTER_BASE_SLOTS) s.town.push(code);
+    if (s.town.length < TOWN_CENTER_BASE_SLOTS) s.town.push(code);
+    else if (s.treasury.length < s.extraSlots) s.treasury.push(code);
     else if (s.treasuryReserve.length < s.extraSlots) s.treasuryReserve.push(code);
     else return false;
     return true;
@@ -690,9 +691,9 @@ export class TreasureModule {
     const i = s.treasuryReserve.indexOf(code);
     if (i < 0) return { ok: false, payload: {}, reason: 'not_in_reserve' };
     s.treasuryReserve.splice(i, 1);
-    const to: TreasureLocation = s.treasury.length < s.extraSlots ? 'treasury' : 'town';
-    if (to === 'treasury') s.treasury.push(code);
-    else s.town.push(code);
+    const to: TreasureLocation = s.town.length < TOWN_CENTER_BASE_SLOTS ? 'town' : 'treasury';
+    if (to === 'town') s.town.push(code);
+    else s.treasury.push(code);
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
@@ -804,7 +805,7 @@ export class TreasureModule {
     return { ok: true, payload: { movementId, codes: entry.codes, cap } };
   }
 
-  /** 返程到家：把携带宝物存回该村（优先宝库）；multiset 下重复直接再入一份，满则转 deliver 报告。 */
+  /** 返程到家：把携带宝物存回该村（优先城镇中心，其次宝库主栏）；multiset 下重复直接再入一份，满则转 deliver 报告。 */
   private async storeCarried(cmd: Command): Promise<CommandResult> {
     const { movementId, villageId } = cmd.payload as { movementId: string; villageId: string };
     const s = this.ensureState(villageId);
