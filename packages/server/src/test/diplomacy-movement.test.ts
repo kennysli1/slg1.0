@@ -151,7 +151,7 @@ test('冒险者可主动侦察无侦察兵的村庄，并按兵种记录零战�
   assert.equal(report.defenderTroops.legionnaire, 4);
 });
 
-test('冒险者遇到守方侦察兵会全部被发现并歼灭，只向守方发反侦察报告', async () => {
+test('冒险者遇到守方侦察兵会全部被发现并歼灭，双方收到侦察战结果报告', async () => {
   let clock = 13_000_000;
   const app = createGameApp({ now: () => clock, manualScheduler: true }); app.setupWorld();
   const attacker = (await send(app, 'player.Register', { name: '冒险者送死甲', password: 'p1234' })).payload as any;
@@ -170,11 +170,19 @@ test('冒险者遇到守方侦察兵会全部被发现并歼灭，只向守方�
     clock += 3_600_000;
     await app.scheduler.advanceTo(clock, (next) => { clock = next; });
   }
-  assert.equal(reports.some((candidate) => candidate.side === 'attacker'), false, '冒险者全灭时进攻方不应收到侦察报告');
+  const attackerReport = reports.find((candidate) => candidate.side === 'attacker');
+  assert.ok(attackerReport, '冒险者全灭时进攻方仍应收到失败战报');
+  assert.equal(attackerReport.context, 'village_scout');
+  assert.equal(attackerReport.outcome, 'attacker_destroyed');
+  assert.deepEqual(attackerReport.attackerLosses, { adventurer: 100 });
+  assert.equal(attackerReport.defenderTroops, undefined, '全灭时不得泄露未取得的守方情报');
   const defenderReport = reports.find((candidate) => candidate.side === 'defender');
-  assert.ok(defenderReport, '守方侦察兵发现冒险者后应收到反侦察报告');
+  assert.ok(defenderReport, '守方侦察兵发现冒险者后应收到侦察战报告');
+  assert.equal(defenderReport.context, 'village_scout');
+  assert.equal(defenderReport.outcome, 'attacker_destroyed');
   assert.deepEqual(defenderReport.attackerLosses, { adventurer: 100 });
   assert.deepEqual(defenderReport.deployedTroops, { adventurer: 100 });
+  assert.deepEqual(defenderReport.defenderScoutTroops, { equlegati: 1 });
   assert.equal(defenderReport.detected, true);
   assert.equal(app.store.all<any>('battle').some((battle) => battle.targetKind === 'village'), false, '侦察战不得创建普通战斗');
 });
