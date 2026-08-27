@@ -129,16 +129,37 @@ let popState: PopSnapshot | null = null;
 export function getCache(): any { return cache; }
 export function setCache(c: any): void { cache = c; }
 
-/** 增量更新：将 MarchStep 推送的字段合并到 cache.moves.movements 中对应的行军条目。 */
+/** 增量更新：将 MarchStep 推送的字段合并到己方行军或 incomingWarnings 中对应的条目。 */
 export function patchMovement(push: MarchStepPush): void {
   const patchOne = (source: ListMovementsPayload | undefined): ListMovementsPayload | undefined => {
-    if (!source?.movements) return source;
-    const idx = source.movements.findIndex((m) => m.id === push.id);
-    if (idx < 0) return source;
-    const prev = source.movements[idx];
-    const next = [...source.movements];
-    next[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
-    return { ...source, movements: next };
+    if (!source) return source;
+    let changed = false;
+    const next: ListMovementsPayload = { ...source };
+
+    // 普通己方行军在 movements 中；任务村 NPC 攻城军没有玩家出发村，
+    // 因此只会出现在 incomingWarnings。两者都必须消费同一条 MarchStep，
+    // 否则路线会更新而预警图标会停在首次出现的位置。
+    if (source.movements) {
+      const idx = source.movements.findIndex((m) => m.id === push.id);
+      if (idx >= 0) {
+        const movements = [...source.movements];
+        const prev = movements[idx];
+        movements[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
+        next.movements = movements;
+        changed = true;
+      }
+    }
+    if (source.incomingWarnings) {
+      const idx = source.incomingWarnings.findIndex((warning) => warning.id === push.id);
+      if (idx >= 0) {
+        const incomingWarnings = [...source.incomingWarnings];
+        const prev = incomingWarnings[idx];
+        incomingWarnings[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, arriveAt: push.arriveAt };
+        next.incomingWarnings = incomingWarnings;
+        changed = true;
+      }
+    }
+    return changed ? next : source;
   };
   cache.moves = patchOne(cache.moves);
   cache.playerMoves = patchOne(cache.playerMoves);
