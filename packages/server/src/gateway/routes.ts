@@ -431,6 +431,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
+      'task.Fail': { command: 'task.Fail', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
     // 左=内部事件名，右=推给客户端的裸名（与 research/tech 等保持一致）
     eventPushMap: {

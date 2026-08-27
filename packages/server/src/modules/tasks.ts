@@ -86,6 +86,8 @@ interface TaskInstance {
   qualifiedFlagMovements?: string[];
   /** 目标已达成、等待玩家手动交付领取奖励。 */
   readyToDeliver?: boolean;
+  /** 任务已进入失败确认状态，等待玩家在任务页确认失败。 */
+  failureReady?: boolean;
   spawnAttempts?: number;
   /** deliver_to_npc：NPC 村庄（幸福村）refId 与目标坐标。 */
   npcVillageId?: string;
@@ -227,6 +229,7 @@ export class TasksModule {
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
+    this.commands.register('task.Fail', (c: Command) => this.fail(c));
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
@@ -777,13 +780,114 @@ export class TasksModule {
     };
   }
 
+  /**
+   * 手动确认任务失败：失败状态先保留在任务卡，避免战斗/错误选择后任务凭空消失。
+   * 失败奖励仍由 quest_effects.csv 的 failure 阶段定义；没有失败奖励（如 M8）则只
+   * 触发失败对话并结束任务。M8 失败会记录结局并解锁 M9，M9 再按该结局选择奖励。
+   */
+  private async fail(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (!inst.failureReady || inst.outcome !== 'failure') return { ok: false, payload: {}, reason: 'not_failed' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+
+    const rewardVillageId = q.scope === 'global' ? (inst.executionVillageId ?? villageId) : (inst.spawnVillageId ?? villageId);
+    const rewardsDef = q.failureRewards;
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; researchPoints?: number; rewardVillageId?: string } = {
+      resources: null, treasures: [], rewardVillageId,
+    };
+
+    if (rewardsDef?.resources && Object.keys(rewardsDef.resources).length) {
+      await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: rewardsDef.resources } });
+      granted.resources = { ...rewardsDef.resources };
+    }
+    if (rewardsDef?.population && rewardsDef.population > 0) {
+      const population = await this.commands.send({
+        name: 'population.GrantPopulation', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, amount: rewardsDef.population },
+      });
+      if (population.ok) granted.population = Number((population.payload as any)?.applied) || 0;
+    }
+    if (rewardsDef?.populationGrowth) {
+      const growth = await this.commands.send({
+        name: 'population.ApplyTaskGrowthBuff', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, percent: rewardsDef.populationGrowth.percent, durationSec: rewardsDef.populationGrowth.durationSec },
+      });
+      if (growth.ok) {
+        granted.populationGrowth = {
+          ...rewardsDef.populationGrowth,
+          expiresAt: Number((growth.payload as any)?.expiresAt) || undefined,
+        };
+      }
+    }
+    if (rewardsDef?.reputation) {
+      await this.commands.send({
+        name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, delta: rewardsDef.reputation, reason: `task_${code}_failure` },
+      });
+      granted.reputation = rewardsDef.reputation;
+    }
+    if (rewardsDef?.researchPoints && rewardsDef.researchPoints > 0) {
+      const rp = await this.commands.send({ name: 'research.GrantPoints', from: TasksModule.NAME, payload: { villageId: rewardVillageId, amount: rewardsDef.researchPoints } });
+      if (rp.ok) granted.researchPoints = Number((rp.payload as any)?.amount) || rewardsDef.researchPoints;
+    }
+    for (const treasure of rewardsDef?.treasures ?? []) {
+      // 失败确认的任务专属宝物沿用旧失败路径，进入报告待处理；玩家可明确领取/丢弃。
+      await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, code: treasure, pendingIfFull: true, alwaysPending: true, rewardVillageId } });
+      granted.treasures.push(treasure);
+    }
+
+    for (const camp of inst.camps ?? []) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
+    }
+    if (inst.npcVillageId) await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
+    this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
+    this.scheduler.cancelByOwner(`task-m8-attack:${storageVillageId}`);
+    this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
+
+    delete state.active[code];
+    if (q.type === 'main') {
+      // 失败确认是主线终点，同样推进主线链；outcomes 保留实际结局供 M9 选奖励。
+      if (!state.completedMain.includes(code)) state.completedMain.push(code);
+      state.outcomes ??= {};
+      state.outcomes[code] = 'failure';
+    } else if (q.type === 'side') {
+      if (!state.abandonedSide.includes(code)) state.abandonedSide.push(code);
+    } else {
+      state.cooldownUntil ??= {};
+      state.cooldownUntil[code] = this.now() + q.cooldownSec * 1000;
+    }
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    if (q.type === 'main') await this.unlockMainQuests(villageId);
+    else if (q.type === 'side') await this.unlockSideQuests(villageId);
+
+    const dialogue = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: { taskCode: code, trigger: this.failureDialogueTrigger(code, inst), villageName: this.villageName(rewardVillageId) },
+    });
+    return {
+      ok: true,
+      payload: {
+        code, type: q.type, rewards: granted,
+        dialogue: dialogue.ok ? (dialogue.payload as any)?.dialogue ?? null : null,
+      },
+    };
+  }
+
   /** 目标已达成 → 标记就绪可交付（不自动发奖），并推送给客户端。 */
   private async markReady(villageId: string, code: string): Promise<void> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
-    if (!inst || inst.readyToDeliver) return; // 幂等
+    if (!inst || inst.readyToDeliver || inst.failureReady) return; // 幂等
     inst.readyToDeliver = true;
+    inst.failureReady = false;
     inst.executionVillageId ??= villageId;
     this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
@@ -805,7 +909,8 @@ export class TasksModule {
     });
     inst.outcome = outcome;
     inst.executionVillageId = executionVillageId;
-    inst.readyToDeliver = true;
+    inst.readyToDeliver = outcome === 'success';
+    inst.failureReady = outcome === 'failure';
     const state = this.ensureState(storageVillageId);
     state.outcomes ??= {};
     state.outcomes.m8 = outcome;
@@ -1041,6 +1146,12 @@ export class TasksModule {
     const outcome = inst?.outcome ?? this.ensureState(storage).outcomes?.m8;
     if (!outcome) return phase;
     return `${phase}_${outcome}`;
+  }
+
+  /** 失败确认统一使用 deliver_failure；M8/M9 按结局复用同名触发器。 */
+  private failureDialogueTrigger(code: string, inst: TaskInstance): string {
+    if (code === 'm8' || code === 'm9') return this.dialogueTrigger(inst.executionVillageId ?? '', code, 'deliver', inst);
+    return 'deliver_failure';
   }
 
   /** 生成 m8 的天王老子任务村并把实体坐标绑定到全局任务状态。 */
@@ -1681,13 +1792,15 @@ export class TasksModule {
         const q = this.quest(code);
         if (!q) continue;
         if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
-        // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 任务失败，改发「秘密字条」
+        // 失败路径：玩家选择掠夺幸福村（而非送达粮食）→ 进入任务失败确认，
+        // 由玩家在任务页点击“任务失败”后才发放 failure 阶段奖励/对话。
         if (p.targetKind === 'pve' && q.objective.kind === 'deliver_to_npc' && inst.npcVillageId && targetId === inst.npcVillageId && p.attackerWins) {
           const rewardVillageId = inst.spawnVillageId ?? villageId;
           await this.removeNpc(rewardVillageId, inst);
-          await this.commands.send({ name: 'treasure.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, code: 'secret_note', pendingIfFull: true, alwaysPending: true, rewardVillageId } });
-          if (!state.abandonedSide.includes(code)) state.abandonedSide.push(code);
-          delete state.active[code];
+          inst.executionVillageId = villageId;
+          inst.outcome = 'failure';
+          inst.failureReady = true;
+          inst.readyToDeliver = false;
           this.store.set(COLLECTION, storageVillageId, state);
           await this.pushList(villageId);
           await this.pushMap(villageId);
@@ -2451,9 +2564,11 @@ export class TasksModule {
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
       taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
+      failureReady: inst.failureReady === true,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,
       canDeliver: inst.readyToDeliver === true,
+      canFail: inst.failureReady === true,
       awaitingNatalieDecision: inst.awaitingNatalieDecision === true,
       natalieDecision: inst.natalieDecision ?? null,
       acceptedAt: inst.acceptedAt,
