@@ -19,7 +19,7 @@ import { notificationText, notificationKind } from '../features/reports/notifica
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 
 describe('modalLayerZ', () => {
@@ -46,6 +46,12 @@ describe('地图定位', () => {
       assert.equal(source.incomingWarnings[0].stepIndex, 1);
     }
     setCache(previous);
+  });
+
+  it('来袭预警动画态补齐 marching，图标会在两个 step 之间插值', () => {
+    const warning = normalizeIncomingWarningForRender({ id: 'm8-incoming', type: 'attack', stepIndex: 0 });
+    assert.equal(warning.type, 'incoming_warning');
+    assert.equal(warning.status, 'marching');
   });
 
   it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {
