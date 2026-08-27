@@ -14,19 +14,27 @@ export function ResourceBar() {
   tick.value;
   dataVersion.value;
   const villagePicker = <VillagePicker />;
-  const resource = getCache().res;
-  if (!resource) return <div class="resbar" aria-label="资源概览">{villagePicker}</div>;
+  const overview = getCache().kingdomOverview as any;
+  if (!overview) {
+    return (
+      <div class="resbar" aria-label="王国资源概览">
+        {villagePicker}
+        <ReputationCell />
+        <span class="resbar-scope" title="王国总览暂时不可用，正在等待下一次刷新">王国资源载入中</span>
+      </div>
+    );
+  }
+  const resource = overview;
   return (
-    <div class="resbar" aria-label="资源概览">
+    <div class="resbar" aria-label="王国资源概览">
       {villagePicker}
       <ReputationCell />
+      <span class="resbar-scope" title="这是全部村庄的资源合计，不随当前操作村庄切换">王国合计</span>
       {resourceKeys().map((type) => (
         type === 'gold'
-          ? <GoldCell key={type} />
-          : <ResCell key={type} type={type} res={resource} />
+          ? <GoldCell key={type} resource={resource} global />
+          : <ResCell key={type} type={type} res={resource} global />
       ))}
-      <UpkeepCell crop={resource.cropUpkeep} />
-      <PopCell />
     </div>
   );
 }
@@ -97,9 +105,9 @@ function ReputationCell() {
   );
 }
 
-function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapshot> }) {
+function ResCell({ type, res, global = false }: { type: string; res: NonNullable<ResourceSnapshot>; global?: boolean }) {
   const info = resInfo(type);
-  const have = liveResource(type);
+  const have = global ? Number((res as any).resources?.[type] ?? 0) : liveResource(type);
   const capacity = res.capacity?.[type] ?? 0;
   const rate = (res.netRate?.[type] ?? 0) * 3600;
   const rawRate = res.rawRate?.[type] ?? rate; // 原始产率（停产时用于显示本可产出多少）
@@ -115,7 +123,7 @@ function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapsho
     <div class={`res ${state}`} title={title}>
       <Icon icon={info.icon} label="" decorative size="sm" />
       <div class="res-value">
-        <span class="res-label">{info.name}</span>
+        <span class="res-label">{info.name}{global ? '·全' : ''}</span>
         <span class="res-num">{fmt(have)}<small>/{fmt(capacity)}</small></span>
       </div>
       <div class="res-meta">
@@ -128,15 +136,15 @@ function ResCell({ type, res }: { type: string; res: NonNullable<ResourceSnapsho
   );
 }
 
-function GoldCell() {
+function GoldCell({ resource, global = false }: { resource?: any; global?: boolean }) {
   const info = resInfo('gold');
-  const gold = liveResource('gold');
-  const rate = getPopState()?.goldPerHour ?? 0;
+  const gold = global ? Number(resource?.resources?.gold ?? 0) : liveResource('gold');
+  const rate = global ? Number(resource?.netRate?.gold ?? 0) * 3600 : getPopState()?.goldPerHour ?? 0;
   return (
     <div class="res res--gold" title={`金币：${fmt(gold)}；每小时 ${rate >= 0 ? '+' : ''}${rate.toFixed(0)}`}>
       <Icon icon={info.icon} label="" decorative size="sm" />
       <div class="res-value">
-        <span class="res-label">金币</span>
+        <span class="res-label">金币{global ? '·全' : ''}</span>
         <span class="res-num">{fmt(gold)}</span>
       </div>
       <div class="res-meta"><span class="res-rate">{rate >= 0 ? '+' : ''}{rate.toFixed(0)}/时</span></div>
@@ -144,7 +152,7 @@ function GoldCell() {
   );
 }
 
-function UpkeepCell({ crop }: { crop: number }) {
+function _UpkeepCell({ crop }: { crop: number }) {
   return (
     <div class="res" title="全军与平民每小时口粮消耗">
       <Icon icon="ui_icon_upkeep" label="" decorative size="sm" />
@@ -174,7 +182,7 @@ export function populationTooltip(
     : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(civilian)}；军队 ${fmt(state.soldierPop)}${alarm}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
 }
 
-function PopCell() {
+function _PopCell() {
   const state = getPopState();
   if (!state) return null;
   const population = interpolateTotalPop();

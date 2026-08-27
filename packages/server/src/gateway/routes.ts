@@ -376,6 +376,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     moduleName: 'kingdom',
     publicActions: {
       GetKingdomState: { command: 'kingdom.GetState', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
+      GetKingdomOverview: { command: 'kingdom.GetOverview', needAuth: true, injectPlayerId: true, schema: {} },
       SubmitKingdomTribute: { command: 'kingdom.SubmitTribute', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
       ClaimKingdomTask: { command: 'kingdom.ClaimTask', ownVillage: true, needAuth: true, injectPlayerId: true, schema: {} },
       BuyKingdomService: {

@@ -30,7 +30,7 @@ function taskTag(task: any) {
   return <Tag kind="jade">日常</Tag>;
 }
 
-/** 村庄页首屏的单任务聚焦区，完整任务管理仍在任务页。 */
+/** 王国页首屏的单任务聚焦区；任务仍可从此处进入原有任务簿。 */
 export function VillageTaskSummary() {
   dataVersion.value;
   playerTaskState.value;
@@ -45,7 +45,7 @@ export function VillageTaskSummary() {
       <Panel variant="gold" corners pad class="vil-current-task-panel">
         <div class="vil-current-task-head">
           <div>
-            <span class="vil-eyebrow">当前任务</span>
+            <span class="vil-eyebrow">王国事务 · 当前任务</span>
             {task ? (
               <div class="vil-current-task-title">
                 <h1>{task.name}</h1>
@@ -53,7 +53,7 @@ export function VillageTaskSummary() {
                 {task.scope === 'global' && <Tag kind="steel">全局</Tag>}
               </div>
             ) : (
-              <h1>村庄暂无待处理任务</h1>
+              <h1>当前没有待处理事务</h1>
             )}
           </div>
           <button class="vil-current-task-link" type="button" onClick={() => { tab.value = 'tasks'; }}>

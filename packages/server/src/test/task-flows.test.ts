@@ -80,6 +80,47 @@ test('② 调查坐标：末营清剿后等待玩家抉择 captured_natalies 才
   assert.ok(st3.completedSide.includes('s4'), '完成后应进 completedSide');
 });
 
+test('② 释放路径：真实 pending 领取后仅交付任务时结算金币、声望与正直的心', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'natalie-release');
+  await send(app, 'population.GetState', { villageId: va });
+  await send(app, 'military.GetState', { villageId: va });
+  await send(app, 'research.GetState', { villageId: va });
+  app.store.set('task', va, baseState(va, {
+    s4: {
+      code: 's4', type: 'side', acceptedAt: clock,
+      submitted: {}, camps: [], campCleared: 3, progress: 3,
+      awaitingNatalieDecision: true, awaitingNatalieCode: 'captured_natalies',
+    },
+  }));
+  const before = await send(app, 'economy.GetResources', { villageId: va });
+  const beforeGold = Number((before.payload as any).resources.gold ?? 0);
+
+  const rolled = await send(app, 'treasure.RollDrop', {
+    villageId: va, source: 'camp', movementId: 'release-chain',
+    forceCode: 'captured_natalies', taskRelated: true,
+  });
+  assert.equal(rolled.ok, true, '应创建真实待领取宝物');
+  assert.equal((await send(app, 'treasure.MarkPendingArrived', { movementId: 'release-chain' })).ok, true);
+  const released = await send(app, 'treasure.ClaimPending', { movementId: 'release-chain', decision: 'release' });
+  assert.equal(released.ok, true, '释放应成功: ' + (released.reason ?? ''));
+  await tick();
+
+  const beforeDeliver = await send(app, 'economy.GetResources', { villageId: va });
+  assert.equal(Number((beforeDeliver.payload as any).resources.gold ?? 0), beforeGold, '释放本身不得发金币');
+  const ready = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.equal(ready.active.find((task: any) => task.code === 's4')?.ready, true, '释放后必须等待手动交付');
+
+  const delivered = await send(app, 'task.Deliver', { villageId: va, code: 's4' });
+  assert.equal(delivered.ok, true, '交付应成功: ' + (delivered.reason ?? ''));
+  assert.deepEqual((delivered.payload as any).rewards.resources, { gold: 500 });
+  assert.equal((delivered.payload as any).rewards.reputation, 2);
+  const after = await send(app, 'economy.GetResources', { villageId: va });
+  assert.equal(Number((after.payload as any).resources.gold ?? 0), beforeGold + 500);
+  const treasure = app.store.get<any>('treasure', va);
+  assert.ok([...treasure.town, ...treasure.treasury].includes('honest_heart'), '交付后才应发放正直的心');
+});
+
 // ② 变体：入库 → 任务失败（只保留宝物）
 test('② 变体：放入宝库 -> 调查坐标失败且不可领取奖励', async () => {
   const app = freshApp();
@@ -331,6 +372,73 @@ test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与�
   assert.deepEqual(fresh.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
   assert.equal(fresh.defender.clubswinger.count, 15);
   assert.equal(fresh.defender.club, undefined);
+});
+
+test('GM 重置本村任务也会清理 M8 任务村，避免稳定 id 复用空营地', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-m8-reset');
+  const targetId = 'taskvillage-gm-reset-m8';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 7, r: 7, task: true, ownerVillageId: va,
+    loot: { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 },
+  });
+  assert.equal(spawned.ok, true);
+  const state: any = baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, taskVillageId: targetId, taskVillageXY: { q: 7, r: 7 },
+    },
+  });
+  state.taskVillages = { m8: { id: targetId, q: 7, r: 7, name: '天王老子村' } };
+  app.store.set('task', va, state);
+
+  const reset = await send(app, 'task.GmReset', { villageId: va });
+  assert.equal(reset.ok, true, `本村任务重置应成功: ${reset.reason ?? ''}`);
+  assert.equal(app.store.get<any>('pve', targetId), undefined, '本村任务重置必须移除 M8 任务村实体');
+
+  // 模拟前置主线已完成后重新接取 M8，验证不会复用旧的空库存/空守军实体。
+  const afterReset: any = app.store.get('task', va)!;
+  afterReset.completedMain = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'];
+  afterReset.offeredMain = ['m8'];
+  app.store.set('task', va, afterReset);
+  const accepted = await send(app, 'task.Accept', { villageId: va, code: 'm8' });
+  assert.equal(accepted.ok, true, `重置后重新接取 M8 应成功: ${accepted.reason ?? ''}`);
+  const active = app.store.get<any>('task', va)?.active?.m8;
+  const fresh = (await send(app, 'pve.GetTarget', { id: active.taskVillageId })).payload as any;
+  assert.deepEqual(fresh.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(fresh.defender.clubswinger.count, 15);
+});
+
+test('重启恢复会修复 active M8 指向已清空任务村的旧半结算状态', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'm8-resume-repair');
+  const targetId = 'taskvillage-m8-resume-repair';
+  const spawned = await send(app, 'pve.Spawn', {
+    id: targetId, type: 'tianwang_village', q: 9, r: 9, task: true, ownerVillageId: va,
+    loot: { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 },
+  });
+  assert.equal(spawned.ok, true);
+  const target = app.store.get<any>('pve', targetId)!;
+  target.defender.clubswinger.count = 0;
+  target.loot = { wood: 6, clay: 0, iron: 8, crop: 0, gold: 0 };
+  target.cleared = true;
+  target.clearCount = 2;
+  app.store.set('pve', targetId, target);
+  const state: any = baseState(va, {
+    m8: {
+      code: 'm8', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0,
+      progress: 0, taskVillageId: targetId, taskVillageXY: { q: 9, r: 9 },
+    },
+  });
+  state.taskVillages = { m8: { id: targetId, q: 9, r: 9, name: '天王老子村' } };
+  app.store.set('task', va, state);
+
+  await app.task.resume();
+  const active = app.store.get<any>('task', va)?.active?.m8;
+  const repaired = (await send(app, 'pve.GetTarget', { id: active.taskVillageId })).payload as any;
+  assert.deepEqual(repaired.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(repaired.defender.clubswinger.count, 15);
+  assert.equal(repaired.cleared, false);
 });
 
 test('M8 奖励领取并发时铁壁勋章只发放一次', async () => {
