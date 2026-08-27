@@ -162,6 +162,15 @@ function cameraPixelForHex(
   return wrapPixelNearRef(p.x + ox, p.y + oy, refX, refY, W, H);
 }
 
+/**
+ * 来袭预警的协议类型只有 attack/raid，没有 Movement.status；地图动画仍需要
+ * 把它当作 marching 处理。统一在所有渲染路径补齐渲染态，避免 rAF 只看到
+ * 未定义 status 而把图标锁在当前 stepIndex。
+ */
+export function normalizeIncomingWarningForRender(warning: Record<string, unknown>): Record<string, unknown> {
+  return { ...warning, type: 'incoming_warning', status: 'marching' };
+}
+
 // ─── tile index ──────────────────────────────────────────────────────────────
 let _tilesRef: any = null;
 let _tileIndex: Map<string, any> | null = null;
@@ -568,11 +577,8 @@ export function HexMap() {
   // ─── march path + marker rendering ────────────────────────────────────────
   function buildMarchPaths() {
     const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
-    const incoming = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []).map((warning: any) => ({
-      ...warning,
-      type: 'incoming_warning',
-      status: 'marching',
-    }));
+    const incoming = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+      .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const moves: any[] = [...ownMoves, ...incoming];
     const paths: preact.VNode[] = [];
     const ref = viewRef();
@@ -608,7 +614,7 @@ export function HexMap() {
   function buildMarchMarkers() {
     const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
     const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
-      .map((warning: any) => ({ ...warning, type: 'incoming_warning', status: 'marching' }));
+      .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
@@ -828,7 +834,11 @@ export function HexMap() {
   function startMarchAnimation() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     const frame = () => {
-      if (!markerEl.current) return;
+      // 首帧可能早于 SVG ref 挂载；不能直接 return，否则整个地图动画循环会永久停止。
+      if (!markerEl.current) {
+        rafRef.current = requestAnimationFrame(frame);
+        return;
+      }
       const ref = viewRef();
       const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
       const now = Date.now();
@@ -838,7 +848,8 @@ export function HexMap() {
         if (!el || !px) return;
         setMarkerTransform(el, px.x, px.y);
       });
-      const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []);
+      const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+        .map((warning: any) => normalizeIncomingWarningForRender(warning));
       incoming.forEach((m) => {
         if (!m.id) return;
         const el = markerEl.current?.querySelector(`#incoming-march-mk-${m.id}`) as SVGGElement | null;

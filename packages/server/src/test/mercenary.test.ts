@@ -31,7 +31,7 @@ async function drain(app: GameApp, step = 3_600_000, maxIters = 500): Promise<vo
 }
 
 async function buildMercCamp(app: GameApp, villageId: string): Promise<boolean> {
-  const r = await send(app, 'building.Build', { villageId, zone: 'inner', kind: 'mercenarycamp' });
+  const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'mercenarycamp' });
   if (!r.ok) return false;
   await drain(app, 60_000);
   return true;
