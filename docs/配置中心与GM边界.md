@@ -39,6 +39,8 @@ GM 只允许修改 `game.json/WAL` 所属集合，例如资源、人口、村庄
 
 旧版本的 `balance_overrides.json` 不是运行时事实源。部署升级时先在临时配置目录应用并校验全部旧覆盖，然后复制到 CSV 和 `shared/config/`，记录 revision/同步 outbox，最后把原文件改名为 `balance_overrides.migrated.<时间>.json`。任何未知表、未知行、非法 JSON 或校验失败都会中止发布并保留原文件。迁移后的后端不读取也不写入该文件。
 
+历史上已经从配置表删除的键（例如 `treasure_trade_drop_chance`）不会被错误映射到含义不同的新参数：有效覆盖继续迁移，已删除键只在原始归档中保留并记录原因。未知表、未知行和未知字段仍然硬失败，确保真正的拼写错误或数据丢失不会被静默吞掉。
+
 `config_revision.json`、`config_sync_outbox.json`、`config_sync_status.json` 属于运维元数据，不是平衡参数；它们可以是 JSON，但不能被 GM 当作游戏状态编辑，也不会成为配置覆盖来源。
 
 ## 排查优先级
