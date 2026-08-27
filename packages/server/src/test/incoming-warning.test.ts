@@ -150,3 +150,18 @@ test('途中侦察完胜：零损失且有幸存者时识别宝物；无敌方�
   assert.equal(reports.filter((report) => report.side === 'attacker').length, 1);
   assert.equal(reports.filter((report) => report.side === 'defender').length, 0, '来袭军无侦察兵时不能发现反侦察行动');
 });
+
+test('冒险者不能执行途中侦察或担任防守侦察兵', async () => {
+  const app = freshApp();
+  const attacker = await register(app, '冒险者来袭方');
+  const defender = await register(app, '冒险者防守方');
+  await send(app, 'military.AdjustTroops', { villageId: defender.villageId, delta: { adventurer: 1 } });
+  const incoming = incomingRecord(app, attacker, defender, { legionnaire: 5 });
+  app.store.set('movement', incoming.id, incoming);
+  await (app.movement as any).syncIncomingWarningVisibility(incoming);
+  const sent = await send(app, 'movement.SendIncomingScout', {
+    villageId: defender.villageId, movementId: incoming.id, troops: { adventurer: 1 },
+  });
+  assert.equal(sent.ok, false);
+  assert.equal(sent.reason, 'scout_units_only');
+});
