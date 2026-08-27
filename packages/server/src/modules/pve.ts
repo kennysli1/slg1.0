@@ -271,7 +271,12 @@ export class PveModule {
   private getDefenderSnapshot(cmd: Command): CommandResult {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
-    return { ok: true, payload: { snapshot: s.cleared ? {} : s.defender, loot: { ...s.loot }, noRespawn: !!s.noRespawn } };
+    // 快照是跨模块的只读边界，不能把 PvE 存档里的守军对象直接交给 Combat。
+    // Combat 会在逐 tick 结算时原地修改快照；若这里返回原引用，Pve 状态会先被
+    // 战斗过程扣减，随后 ApplyResult 再按 defenderLosses 扣一次，导致失败战斗
+    // 也把幸存守军清成 0（例如 13 -> 3 后又 3 -> 0）。
+    const snapshot = s.cleared ? {} : structuredClone(s.defender);
+    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn } };
   }
 
   /**
