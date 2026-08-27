@@ -630,8 +630,9 @@ export function HexMap() {
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>{m.type ?? 'return'} · {m.status === 'stationed' ? '驻扎中' : '行军中'}</title>
-          <circle class="march-marker-base march-marker-base--own" cx="0" cy="7" r="12.5" />
-          <circle class="march-marker-base-ring march-marker-base-ring--own" cx="0" cy="7" r="9.2" />
+          {/* 圆底对齐战旗的视觉重心，而不是把旗杆脚点放在圆心。 */}
+          <circle class="march-marker-base march-marker-base--own" cx="-2" cy="-9" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--own" cx="-2" cy="-9" r="9.2" />
           <image
             class={`march-marker-art march-marker-art--${t}`}
             href={artPath('map_marker_own')}
@@ -657,8 +658,8 @@ export function HexMap() {
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>来袭军队 · {m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
-          <circle class="march-marker-base march-marker-base--enemy" cx="0" cy="7" r="12.5" />
-          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="0" cy="7" r="9.2" />
+          <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
           <image
             class="enemy-march-art enemy-march-art--attack"
             href={artPath('map_marker_enemy')}
@@ -713,8 +714,8 @@ export function HexMap() {
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>敌方军队 · {m.type ?? 'return'}</title>
-          <circle class="march-marker-base march-marker-base--enemy" cx="0" cy="7" r="12.5" />
-          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="0" cy="7" r="9.2" />
+          <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
           <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
