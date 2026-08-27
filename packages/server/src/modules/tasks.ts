@@ -1776,8 +1776,17 @@ export class TasksModule {
       return;
     }
 
-    // 村民的请求：成功掠夺(清空)普通 PvE 营地后，按 GM 概率触发支线任务。
-    if (p.targetKind === 'pve' && p.campCleared === true && !targetId.startsWith('happy-')) {
+    // 村民的请求：只有清空常驻普通 PvE 营地后，才按 GM 概率触发支线任务。
+    // 任务模块生成的临时营地（task=true）与幸福村等不重生 NPC（noRespawn=true）
+    // 都不是常驻营地，不能意外推进“村民的请求”。Combat 的事件只携带通用字段，
+    // 因此这里回查 PvE owner 的快照作为唯一判定依据，而不是依赖 targetId 命名约定。
+    let residentPveCleared = false;
+    if (p.targetKind === 'pve' && p.campCleared === true) {
+      const target = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: targetId } });
+      const targetState = target.payload as { task?: boolean; noRespawn?: boolean } | undefined;
+      residentPveCleared = target.ok && !!targetState && targetState.task !== true && targetState.noRespawn !== true;
+    }
+    if (residentPveCleared) {
       const chance = this.gmNum('villager_request_trigger_chance', 0.3);
       if (this.rng() < chance) {
         for (const q of Object.values(this.config.quests).filter((x) => x.trigger === 'pve_camp_cleared')) {

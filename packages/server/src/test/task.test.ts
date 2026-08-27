@@ -17,6 +17,8 @@ const reg = (app: GameApp, name: string, pwd = 'pass1') =>
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const grant = (app: GameApp, vid: string, gain: Record<string, number>) =>
   send(app, 'economy.Grant', { villageId: vid, gain });
+const spawnResidentCamp = (app: GameApp, id = 'camp-other') =>
+  send(app, 'pve.Spawn', { id, type: 'rats', q: 30, r: 30, task: false, noRespawn: false });
 
 const m1Fields = ['woodcutter', 'claypit', 'ironmine', 'cropland'];
 async function repairM1Fields(app: GameApp, villageId: string): Promise<void> {
@@ -699,7 +701,9 @@ test('村民的请求：接取即生成幸福村；贸易中心只决定送达�
   // 强制触发概率=1，消除随机性
   app.config.constants.raw['villager_request_trigger_chance'] = 1;
 
-  // 模拟成功掠夺一个普通 PvE 营地（targetId 不以 happy- 开头）
+  // 模拟成功掠夺一个真实存在的常驻普通 PvE 营地
+  const camp = await spawnResidentCamp(app);
+  assert.equal(camp.ok, true, '测试用常驻营地应生成成功');
   await app.bus.emit({
     name: 'combat.BattleEnded', source: 'test', ts: clock,
     payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' },
@@ -740,12 +744,32 @@ test('村民的请求：接取即生成幸福村；贸易中心只决定送达�
   assert.equal(orders[0].npcId, npcId, '订单应指向幸福村');
 });
 
+test('村民的请求：任务临时营地清理不触发支线', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务营地不触发村民请求');
+  const va = (regRes.payload as any).player.villageId;
+  await tick();
+  app.config.constants.raw['villager_request_trigger_chance'] = 1;
+  const camp = await send(app, 'pve.Spawn', {
+    id: 'task-camp-no-s3', type: 'rats', q: 31, r: 31, task: true, ownerVillageId: va,
+  });
+  assert.equal(camp.ok, true, '测试用任务营地应生成成功');
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'task-camp-no-s3', attackerWins: true, campCleared: true, battleId: 'task-camp-b1' },
+  } as any);
+  const state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(!(state.offeredSide ?? []).some((item: any) => item.code === 's3'), '任务临时营地不应触发村民的请求');
+});
+
 test('村民的请求：掠夺幸福村（而非送达）→ 任务失败且获得秘密字条', async () => {
   const app = freshApp();
   const regRes = await reg(app, '村民请求失败测试');
   const va = (regRes.payload as any).player.villageId;
   await tick();
   app.config.constants.raw['villager_request_trigger_chance'] = 1;
+  const camp = await spawnResidentCamp(app);
+  assert.equal(camp.ok, true, '测试用常驻营地应生成成功');
   await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' } } as any);
   await tick();
   app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
@@ -787,6 +811,8 @@ test('村民的请求：接单送粮完成 → 获得娜塔莉，幸福村与订
   const va = (regRes.payload as any).player.villageId;
   await tick();
   app.config.constants.raw['villager_request_trigger_chance'] = 1;
+  const camp = await spawnResidentCamp(app);
+  assert.equal(camp.ok, true, '测试用常驻营地应生成成功');
   await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: { villageId: va, side: 'attacker', targetKind: 'pve', targetId: 'camp-other', attackerWins: true, campCleared: true, battleId: 'b1' } } as any);
   await tick();
   app.store.set('building', va, { villageId: va, placed: [{ kind: 'tradecenter', level: 1, slotId: 't0', pos: { q: 0, r: 0 } }] });
