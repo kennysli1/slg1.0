@@ -337,18 +337,50 @@ export class PveModule {
   }
 
   private takeLoot(s: PveState, carry: number): Record<string, number> {
-    const types = Object.keys(s.loot);
-    const total = types.reduce((a, t) => a + s.loot[t], 0);
+    const capacity = Math.max(0, Math.floor(Number(carry) || 0));
+    const entries = Object.entries(s.loot)
+      .map(([type, raw]) => ({ type, available: Math.max(0, Math.floor(Number(raw) || 0)) }))
+      .filter((entry) => entry.available > 0);
+    const total = entries.reduce((sum, entry) => sum + entry.available, 0);
     const looted: Record<string, number> = {};
-    if (total <= 0) return looted;
-    const ratio = Math.min(1, carry / total);
-    // 每种资源乘一个确定性浮动系数（±variance，均值1），消除重复攻打的无聊确定性又不破坏可复现
-    let i = 0;
-    for (const t of types) {
-      const factor = this.lootFactor(s, i++);
-      const take = Math.floor(s.loot[t] * ratio * factor);
-      looted[t] = take;
-      s.loot[t] = Math.max(0, s.loot[t] - take);
+    if (capacity <= 0 || total <= 0) return looted;
+
+    // 载货足够时必须可以搬空营地的全部资源；随机浮动只影响“运力不足时”
+    // 的资源分配，不能让战利品凭空超过库存或超过部队 carry。
+    const target = Math.min(capacity, total);
+    if (target === total) {
+      for (const entry of entries) {
+        looted[entry.type] = entry.available;
+        s.loot[entry.type] = 0;
+      }
+      return looted;
+    }
+
+    // 运力不足时按带确定性浮动权重的比例分配，并用余数补齐到恰好 target。
+    // 这样仍保留 pve_loot_variance 的可复现随机性，同时严格满足 carry 上限。
+    const weighted = entries.map((entry, index) => ({
+      ...entry,
+      weight: entry.available * Math.max(0.0001, this.lootFactor(s, index)),
+    }));
+    const weightTotal = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    const allocations = weighted.map((entry) => Math.min(entry.available, Math.floor(target * entry.weight / weightTotal)));
+    let remaining = target - allocations.reduce((sum, amount) => sum + amount, 0);
+    while (remaining > 0) {
+      let progressed = false;
+      for (let i = 0; i < weighted.length && remaining > 0; i++) {
+        if (allocations[i]! >= weighted[i]!.available) continue;
+        allocations[i]! += 1;
+        remaining -= 1;
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    for (let i = 0; i < weighted.length; i++) {
+      const entry = weighted[i]!;
+      const take = allocations[i]!;
+      if (take <= 0) continue;
+      looted[entry.type] = take;
+      s.loot[entry.type] = Math.max(0, entry.available - take);
     }
     return looted;
   }
