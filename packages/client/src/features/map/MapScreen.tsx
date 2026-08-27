@@ -10,6 +10,7 @@ import { TargetPanel } from './TargetPanel.js';
 import { MarchList } from './MarchList.js';
 import { refreshMapArea } from '../../app/refresh.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
+import { MapVillageIndex } from './MapVillageIndex.js';
 
 export function MapScreen() {
   void selected.value;
@@ -26,6 +27,7 @@ export function MapScreen() {
 
       <aside class="map-tactical-stack" aria-label="地图战术面板">
         <IncomingWarnings />
+        <MapVillageIndex />
         {showPanel && <TargetPanel />}
         <MarchList />
       </aside>

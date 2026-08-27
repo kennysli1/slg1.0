@@ -13,6 +13,8 @@ import { VillageCommandDeck } from './VillageCommandDeck.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 import { VillageSwitcher } from './VillageSwitcher.js';
 import { VillageTaskSummary } from './VillageTaskSummary.js';
+import { VillageResourceLedger } from './VillageResourceLedger.js';
+import { VillageArmyManagement } from '../army/ArmyScreen.js';
 
 import '../../styles/village.css';
 
@@ -134,6 +136,8 @@ export function VillageScreen() {
         <VillageSwitcher />
       </div>
 
+      <VillageResourceLedger />
+
       <div class="vil-dashboard-grid">
         <aside class="vil-overview-column" aria-label="村庄概览">
           <VillageCommandDeck vil={vil} />
@@ -172,6 +176,8 @@ export function VillageScreen() {
           <VillageListView vil={vil} />
         </section>
       </div>
+
+      <VillageArmyManagement />
     </div>
   );
 }

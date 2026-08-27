@@ -1087,3 +1087,14 @@
     transition: none;
   }
 }
+
+/* 己方村庄索引是空间定位工具，不复刻王国页的治理清单。 */
+.map-village-index { width: 100%; max-height: min(34vh, 280px); overflow: auto; }
+.map-village-index-list { display: grid; gap: var(--s-1); margin-top: var(--s-2); }
+.map-village-index-item { display: flex; align-items: center; min-height: calc(var(--s-7) - var(--s-1)); gap: var(--s-2); width: 100%; padding: var(--s-2); border: 1px solid var(--line); border-left: 2px solid var(--c-steel); border-radius: var(--r-sm); color: var(--c-ink); background: var(--c-panel-3); text-align: left; cursor: pointer; }
+.map-village-index-item:hover, .map-village-index-item.is-current { border-color: var(--c-gold-dim); background: var(--c-panel-2); }
+.map-village-index-marker { color: var(--c-gold); font-size: var(--f-md); }
+.map-village-index-copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.map-village-index-copy strong { overflow: hidden; font-size: var(--f-sm); text-overflow: ellipsis; white-space: nowrap; }
+.map-village-index-copy small, .map-village-index-copy em { color: var(--c-ink-dim); font-family: var(--ff-num); font-size: var(--f-2xs); font-style: normal; }
+@media (max-width: 720px) { .map-village-index { position: absolute; top: max(var(--s-3), var(--safe-t)); left: var(--s-3); right: var(--s-3); width: auto; max-height: 180px; } .map-tactical-stack:has(.map-village-index) .map-march-list { top: min(calc(180px + var(--s-5)), 36vh); } }
