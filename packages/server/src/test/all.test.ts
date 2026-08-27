@@ -66,4 +66,5 @@ import './vision-multivillage.test.js';
 import './incoming-warning.test.js';
 import './world-generation.test.js';
 import './kingdom.test.js';
+import './kingdom-overview.test.js';
 import './dialogue.test.js';

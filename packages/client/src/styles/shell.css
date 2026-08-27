@@ -14,6 +14,7 @@
 
 .resbar { display: flex; flex: 1 1 auto; align-items: stretch; justify-content: flex-end; min-width: 0; gap: var(--s-1); }
 .res { display: grid; grid-template-columns: 26px minmax(0, 1fr); grid-template-areas: "icon value" "icon detail"; align-items: center; min-width: 108px; padding: var(--s-1) var(--s-2); border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; }
+.resbar-scope { align-self: center; flex: none; padding: var(--s-1) var(--s-2); border: 1px solid var(--line-strong); border-radius: var(--r-pill); color: var(--c-gold-hi); font-size: var(--f-2xs); font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
 .res--village-picker { display: flex; flex: 0 1 210px; align-self: center; flex-direction: row; align-items: stretch; justify-content: flex-start; width: 210px; min-width: 170px; height: 40px; min-height: 40px; box-sizing: border-box; margin-right: auto; padding: 2px var(--s-2); gap: var(--s-1); border-color: var(--border-subtle); background: rgb(255 255 255 / 3%); cursor: pointer; }
 .res-village-heading { flex: none; color: var(--text-muted); font-size: var(--f-2xs); line-height: 1.1; white-space: nowrap; }
 .village-picker-select { align-self: stretch; width: 100%; min-width: 0; min-height: 0; height: 100%; padding: 0 20px 0 0; overflow: hidden; border: 0; color: var(--text-strong); background: transparent; font: inherit; font-size: var(--f-xs); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }

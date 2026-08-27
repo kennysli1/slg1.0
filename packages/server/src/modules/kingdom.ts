@@ -62,7 +62,15 @@ interface KingdomState {
 const COLLECTION = 'kingdom';
 const LANDMARK_IDS = new Set(['kingdom-capital', 'kingdom-fief-ne', 'kingdom-fief-se', 'kingdom-fief-sw', 'kingdom-fief-nw']);
 const RESOURCE_KEYS = ['wood', 'clay', 'iron', 'crop'] as const;
+const OVERVIEW_RESOURCE_KEYS = ['wood', 'clay', 'iron', 'crop', 'gold'] as const;
 const FIEF_NAMES: Record<Fief, string> = { ne: '东北封地', se: '东南封地', sw: '西南封地', nw: '西北封地' };
+
+type OverviewResourceKey = (typeof OVERVIEW_RESOURCE_KEYS)[number];
+type OverviewResourceMap = Record<OverviewResourceKey, number>;
+
+function emptyOverviewResources(): OverviewResourceMap {
+  return { wood: 0, clay: 0, iron: 0, crop: 0, gold: 0 };
+}
 
 /** 王国系统唯一 owner：玩家封地归属、循环王国任务与议会厅服务订单。 */
 export class KingdomModule {
@@ -82,6 +90,7 @@ export class KingdomModule {
 
   init(): void {
     this.commands.register('kingdom.GetState', (c) => this.getState(c));
+    this.commands.register('kingdom.GetOverview', (c) => this.getOverview(c));
     this.commands.register('kingdom.SubmitTribute', (c) => this.submitTribute(c));
     this.commands.register('kingdom.ClaimTask', (c) => this.claimTask(c));
     this.commands.register('kingdom.BuyService', (c) => this.buyService(c));
@@ -159,6 +168,71 @@ export class KingdomModule {
     const village = player?.villages?.find((v: any) => v.id === player.villageId) ?? player?.villages?.[0];
     if (!village) return undefined;
     return this.createState(playerId, village.id, village.q, village.r);
+  }
+
+  /**
+   * 王国管理页只读快照：Player 持有村庄归属，Economy 持有每村资源。
+   * 本模块不缓存或持久化汇总结果，避免复制 owner 状态；每次均经 CommandBus 读取。
+   */
+  private async getOverview(cmd: Command): Promise<CommandResult> {
+    const playerId = String((cmd.payload as { playerId?: unknown }).playerId ?? '');
+    if (!playerId) return { ok: false, payload: {}, reason: 'player_id_required' };
+
+    const playerResult = await this.commands.send({
+      name: 'player.Get', from: KingdomModule.NAME, payload: { playerId },
+    });
+    if (!playerResult.ok) return { ok: false, payload: {}, reason: playerResult.reason ?? 'player_not_found' };
+
+    const player = (playerResult.payload as any).player as {
+      villages?: Array<{ id: string; name: string; q: number; r: number; isCapital: boolean }>;
+    } | undefined;
+    if (!player?.villages) return { ok: false, payload: {}, reason: 'player_not_found' };
+
+    const resources = emptyOverviewResources();
+    const capacity = emptyOverviewResources();
+    const netRate = emptyOverviewResources();
+    const villages: Array<{
+      villageId: string;
+      name: string;
+      q: number;
+      r: number;
+      isCapital: boolean;
+      resources: OverviewResourceMap;
+      capacity: OverviewResourceMap;
+      netRate: OverviewResourceMap;
+    }> = [];
+
+    for (const village of player.villages) {
+      const economy = await this.commands.send({
+        name: 'economy.GetResources', from: KingdomModule.NAME, payload: { villageId: village.id },
+      });
+      if (!economy.ok) return { ok: false, payload: {}, reason: economy.reason ?? 'village_not_found' };
+
+      const snapshot = economy.payload as Partial<Record<'resources' | 'capacity' | 'netRate', Partial<OverviewResourceMap>>>;
+      const villageResources = emptyOverviewResources();
+      const villageCapacity = emptyOverviewResources();
+      const villageNetRate = emptyOverviewResources();
+      for (const key of OVERVIEW_RESOURCE_KEYS) {
+        villageResources[key] = Number(snapshot.resources?.[key] ?? 0);
+        villageCapacity[key] = Number(snapshot.capacity?.[key] ?? 0);
+        villageNetRate[key] = Number(snapshot.netRate?.[key] ?? 0);
+        resources[key] += villageResources[key];
+        capacity[key] += villageCapacity[key];
+        netRate[key] += villageNetRate[key];
+      }
+      villages.push({
+        villageId: village.id,
+        name: village.name,
+        q: village.q,
+        r: village.r,
+        isCapital: village.isCapital,
+        resources: villageResources,
+        capacity: villageCapacity,
+        netRate: villageNetRate,
+      });
+    }
+
+    return { ok: true, payload: { resources, capacity, netRate, villages } };
   }
 
   private async onPlayerRegistered(evt: DomainEvent): Promise<void> {

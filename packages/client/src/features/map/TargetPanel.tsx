@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { getCache, type SelectedTarget } from '../../app/state.js';
-import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast, type TaskCampInfo } from '../../app/store.js';
+import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast, tab, type TaskCampInfo } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
   unitInfo,
@@ -801,6 +801,10 @@ export function TargetPanel() {
   if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />;
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
+  if (sel.kind === 'own_village' || isOwnVillageId(sel.refId)) {
+    return <OwnVillagePanel village={sel} onClose={clearSelection} />;
+  }
+
   const meta: TargetMeta = {
     refId: sel.refId,
     q: sel.q,
@@ -815,4 +819,44 @@ export function TargetPanel() {
   };
 
   return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />;
+}
+
+function OwnVillagePanel({ village, onClose }: { village: SelectedTarget; onClose: () => void }) {
+  const isCurrent = village.refId === me?.villageId;
+  const enter = async () => {
+    // 地图上选中的己方村庄是进入管理页的明确对象。若它尚不是当前村庄，
+    // 先完成上下文切换，避免管理页仍显示之前村庄的数据。
+    if (!isCurrent) {
+      const result = await switchVillage(village.refId);
+      if (!result.ok) {
+        showToast('切换村庄失败，请稍后重试', 'bad');
+        return;
+      }
+    }
+    tab.value = 'village';
+  };
+  const choose = async () => {
+    if (isCurrent) return;
+    const result = await switchVillage(village.refId);
+    if (!result.ok) showToast('切换村庄失败，请稍后重试', 'bad');
+  };
+  return (
+    <Panel class="map-target-panel own-village-target" pad>
+      <div class="target-head">
+        <IconPlate icon={(village as any).icon ?? getCache().vil?.townCenter?.icon ?? 'ui_logo'} label={village.name} size="sm" plate="gold" />
+        <div class="target-heading-copy">
+          <div class="target-title">{village.name}</div>
+          <div class="target-coord">己方村庄 · X {village.q} · Y {village.r}</div>
+        </div>
+        <button type="button" class="target-close" onClick={onClose} aria-label="关闭村庄信息">×</button>
+      </div>
+      <div class="target-body">
+        <p class="expedition-modal-copy">{isCurrent ? '这是当前操作村庄。可进入王国页处理建设、驻军与训练。' : '选择它会切换资源、驻军、建造队列与训练上下文；地图视角不会离开。'}</p>
+        <div class="target-actions">
+          {!isCurrent && <Btn variant="primary" onClick={() => void choose()}>设为当前村庄</Btn>}
+          <Btn variant={isCurrent ? 'primary' : 'default'} onClick={() => void enter()}>进入王国管理</Btn>
+        </div>
+      </div>
+    </Panel>
+  );
 }

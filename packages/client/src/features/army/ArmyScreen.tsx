@@ -34,27 +34,40 @@ import { VillageList } from '../../shared/ui/VillageList.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 
 export function ArmyScreen() {
+  return (
+    <div class="army-page">
+      <VillageList />
+      <IncomingWarnings />
+      <VillageArmyManagement />
+    </div>
+  );
+}
+
+/**
+ * 当前村庄的完整军务区。王国页复用它，保留训练、援军、防御与解散等所有旧操作。
+ */
+export function VillageArmyManagement() {
   dataVersion.value; // 订阅快照刷新
 
   const army = getCache().army;
   if (!army) {
     return (
-      <div class="army-page">
-        <Empty icon="⚔️" title="加载中…">正在获取军队数据</Empty>
-      </div>
+      <section class="kingdom-army-management"><Empty icon="⚔️" title="军务数据加载中…">正在获取当前村庄军队数据</Empty></section>
     );
   }
 
   return (
-    <div class="army-page">
-      <VillageList />
-      <IncomingWarnings />
+    <section class="kingdom-army-management" aria-label="当前村庄军务">
+      <div class="kingdom-section-intro">
+        <span>村庄军务</span>
+        <small>驻军、训练、援军与防御都归属当前村庄</small>
+      </div>
       <GarrisonSection army={army} />
       <ReinforcementSection army={army} />
       <RaidDefenseSection army={army} />
       <TrainingCenterSection />
       <DisbandSection army={army} />
-    </div>
+    </section>
   );
 }
 
