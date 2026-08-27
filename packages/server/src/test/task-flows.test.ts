@@ -208,6 +208,9 @@ test('M8 到时会生成 NPC 攻城行军并向目标村提供可见预警', asy
     movement = app.store.all<any>('movement').find((item) => item.npcService && item.taskCode === 'm8') ?? movement;
   }
   assert.ok(warnings.some((item) => item.id === movement.id), 'NPC 攻城路径进入城市视野时应出现在来袭预警');
+  const warning = warnings.find((item) => item.id === movement.id);
+  assert.ok(warning?.pos, '来袭预警必须下发 NPC 攻城军当前位置，地图才能绘制实时图标');
+  assert.deepEqual(warning.pos, warning.path[warning.stepIndex], '来袭预警当前位置必须与路径步进索引一致');
   const battle = app.store.all<any>('battle').find((item) => item.taskCode === 'm8');
   assert.ok(battle, 'NPC 攻城行军抵达后应创建战场');
 });

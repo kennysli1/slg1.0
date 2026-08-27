@@ -1671,7 +1671,9 @@ export class MovementModule {
     }
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
-    if (Object.keys(valid.troops).some((code) => !this.isScoutUnit(code))) {
+    // 冒险者可以沿来袭路径执行侦察，但不具备侦察战斗力；若来袭军有真实侦察兵，
+    // resolveIncomingScout 会按既有规则将冒险者全部发现并歼灭。冒险者仍不能担任防守侦察兵。
+    if (Object.keys(valid.troops).some((code) => !this.isScoutUnit(code) && !this.isAdventurerUnit(code))) {
       return { ok: false, payload: {}, reason: 'scout_units_only' };
     }
     const fromXY = await this.villageXY(villageId);

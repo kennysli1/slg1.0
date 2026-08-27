@@ -607,6 +607,8 @@ export function HexMap() {
 
   function buildMarchMarkers() {
     const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+    const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+      .map((warning: any) => ({ ...warning, type: 'incoming_warning', status: 'marching' }));
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
@@ -627,6 +629,33 @@ export function HexMap() {
           <image
             class={`march-marker-art march-marker-art--${t}`}
             href={artPath('map_marker_own')}
+            x={-16}
+            y={-30}
+            width={32}
+            height={42}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        </g>,
+      );
+    });
+    // 来袭预警与路线使用同一份服务器权威快照；单独绘制敌方标记，避免
+    // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
+    incoming.forEach((m) => {
+      if (!m.pos || !m.id) return;
+      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      markers.push(
+        <g
+          key={`incoming-mk-${m.id}`}
+          id={`incoming-march-mk-${m.id}`}
+          class="enemy-march-mk enemy-march-mk--attack incoming-march-mk"
+          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
+        >
+          <title>来袭军队 · {m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
+          <circle class="march-marker-base march-marker-base--enemy" cx="0" cy="7" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="0" cy="7" r="9.2" />
+          <image
+            class="enemy-march-art enemy-march-art--attack"
+            href={artPath('map_marker_enemy')}
             x={-16}
             y={-30}
             width={32}
@@ -805,6 +834,14 @@ export function HexMap() {
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
+        const px = marchMarkerPixel(m, now, ref.x, ref.y);
+        if (!el || !px) return;
+        setMarkerTransform(el, px.x, px.y);
+      });
+      const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []);
+      incoming.forEach((m) => {
+        if (!m.id) return;
+        const el = markerEl.current?.querySelector(`#incoming-march-mk-${m.id}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
         setMarkerTransform(el, px.x, px.y);
