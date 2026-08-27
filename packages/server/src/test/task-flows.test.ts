@@ -176,12 +176,20 @@ test('M8 旧任务村的过量初始库存在重启恢复时迁移到 CSV 默认
     loot: { wood: 9000, clay: 9100, iron: 9200, crop: 9300, gold: 9500 },
   });
   assert.equal(spawned.ok, true);
+  const freshTarget = (await send(app, 'pve.GetTarget', { id: targetId })).payload as any;
+  assert.deepEqual(freshTarget.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 }, '新建天王老子村必须固定使用各 500 初始库存');
   const old = app.store.get<any>('pve', targetId)!;
+  // 模拟部署前已写入存档的旧库存；新创建的任务村始终忽略调用方库存。
+  old.loot = { wood: 9000, clay: 9100, iron: 9200, crop: 9300, gold: 9500 };
+  old.defender = { club: { count: 15, form: 'melee', meleeAtk: 20, rangedAtk: 0, meleeDef: 15, rangedDef: 15, carry: 0 } };
   delete old.taskVillageLootInitialized;
   app.store.set('pve', targetId, old);
   app.pve.resume();
   const migrated = app.store.get<any>('pve', targetId)!;
   assert.deepEqual(migrated.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
+  assert.equal(migrated.defender.clubswinger.count, 15, '旧 club 守军应迁移为条顿 clubswinger');
+  assert.equal(migrated.defender.clubswinger.meleeAtk, 45, '迁移后的守军应使用条顿棍棒兵攻击力');
+  assert.equal(migrated.defender.club, undefined, '存档不应继续保留旧 club 标签');
   assert.equal(migrated.taskVillageLootInitialized, true);
 });
 
@@ -222,7 +230,7 @@ test('M8 守城失败须手动确认，确认后无奖励并解锁按结局分�
   const spawned = await send(app, 'pve.Spawn', {
     id: targetId, type: 'tianwang_village', q: 6, r: 6, task: true, ownerVillageId: va,
     loot: { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 },
-    defenders: { club: 15 },
+    defenders: { clubswinger: 15 },
   });
   assert.equal(spawned.ok, true);
   app.store.set('task', va, baseState(va, {
@@ -235,7 +243,7 @@ test('M8 守城失败须手动确认，确认后无奖励并解锁按结局分�
   await emit(app, 'combat.BattleEnded', {
     villageId: `task:${targetId}`, side: 'attacker', targetKind: 'village', targetId: va,
     attackerWins: true, npcService: true, taskCode: 'm8', movementId: 'm8-attack',
-    survivors: { club: 15 },
+    survivors: { clubswinger: 15 },
   });
   await tick();
   let state = (await send(app, 'task.GetState', { villageId: va })).payload as any;

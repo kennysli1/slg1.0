@@ -104,6 +104,7 @@ function DisbandSection({ army }: { army: any }) {
         <summary class="section-head section-head--toggle">
           <span>解散军队</span>
           <small>仅本村驻军 · 出征部队不能在此解散</small>
+          <i aria-hidden="true">›</i>
         </summary>
         <div class="disband-section">
           {entries.length === 0

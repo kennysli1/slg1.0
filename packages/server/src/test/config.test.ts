@@ -126,7 +126,13 @@ test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者�
   assert.equal(cfg.units.adventurer.meleeAtk, 0);
   assert.equal(cfg.units.adventurer.rangedAtk, 0);
   assert.equal(cfg.pveTemplates.tianwang_village.name, '天王老子村');
-  assert.equal(cfg.pveTemplates.tianwang_village.defender.club.count, 15);
+  assert.deepEqual(cfg.pveTemplates.tianwang_village.loot, { wood: 500, clay: 500, iron: 500, crop: 500 }, '天王老子村模板应标记四种资源各 500');
+  assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.count, 15);
+  assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.meleeAtk, cfg.units.clubswinger.meleeAtk, '天王老子村应使用条顿棍棒兵战斗属性');
+  assert.ok(cfg.dialogues['m9_accept_m8_success:1'], 'M9 成功分支对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m9_accept_m8_failure:1'], 'M9 失败分支对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m9_deliver_m8_success:1'], 'M9 成功交付对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m9_deliver_m8_failure:1'], 'M9 失败交付对话代码应明确标注 M8 结局');
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {

@@ -132,7 +132,9 @@ export class PveModule {
   /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。任务营地不在此重生。 */
   resume(): void {
     for (const s of this.store.all<PveState>(COLLECTION)) {
-      this.migrateTaskVillageLoot(s);
+      this.migrateTaskVillageDefender(s);
+      const current = this.load(s.id) ?? s;
+      this.migrateTaskVillageLoot(current);
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
       if (s.cleared && !s.task && !s.noRespawn) this.respawn(s.id);
     }
@@ -147,7 +149,18 @@ export class PveModule {
       q,
       r,
       defender: structuredClone(tpl.defender),
-      loot: loot ? { ...loot } : { ...tpl.loot },
+      // M8 任务村的初始库存只能来自 GM/CSV 常量；忽略调用方携带的旧模板库存，
+      // 避免历史代码或手工请求把“各 500”重新写成过万。战斗后的库存仍由
+      // applyTaskVillageOutcome 结算，不会在这里被覆盖。
+      loot: task && type === 'tianwang_village'
+        ? {
+          wood: this.config.constants.m8TaskVillageResourceAmount,
+          clay: this.config.constants.m8TaskVillageResourceAmount,
+          iron: this.config.constants.m8TaskVillageResourceAmount,
+          crop: this.config.constants.m8TaskVillageResourceAmount,
+          gold: this.config.constants.m8TaskVillageGold,
+        }
+        : (loot ? { ...loot } : { ...tpl.loot }),
       cleared: false,
       clearCount: 0,
       task: task || undefined,
@@ -165,6 +178,23 @@ export class PveModule {
 
   private load(id: string): PveState | undefined {
     return this.store.get<PveState>(COLLECTION, id);
+  }
+
+  /**
+   * 旧版 M8 曾把条顿棍棒兵错误写成独立的 club 标签。只迁移仍保留该标签
+   * 的天王老子村：保留存档中的数量，战斗属性统一替换为 units.csv 的
+   * clubswinger 模板，并从存档中删除 club，避免继续向地图/战报泄露旧兵种。
+   */
+  private migrateTaskVillageDefender(s: PveState): void {
+    if (!s.task || s.type !== 'tianwang_village' || !s.defender?.club) return;
+    const legacy = s.defender.club;
+    const template = this.config.pveTemplates[s.type]?.defender?.clubswinger;
+    const clubswinger = {
+      ...(template ?? legacy),
+      count: Math.max(0, Math.floor(Number(s.defender.clubswinger?.count ?? legacy.count) || 0)),
+    };
+    const { club: _removed, ...withoutLegacy } = s.defender;
+    this.store.set(COLLECTION, s.id, { ...s, defender: { ...withoutLegacy, clubswinger } });
   }
 
   /**
@@ -201,8 +231,10 @@ export class PveModule {
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
     // 读路径也执行一次惰性迁移，确保没有走完整 resume（例如 GM/API
     // 直接查看目标）时，旧 M8 库存仍会立即切到当前 CSV 默认值。
-    this.migrateTaskVillageLoot(s);
-    const current = this.load(s.id) ?? s;
+    this.migrateTaskVillageDefender(s);
+    const afterDefender = this.load(s.id) ?? s;
+    this.migrateTaskVillageLoot(afterDefender);
+    const current = this.load(s.id) ?? afterDefender;
     // World owns the displayed tile coordinate. Older task-village records can
     // retain stale q/r after a map edit or a failed asynchronous PlacePve;
     // resolve the refId through World so scouting, raiding and map details agree.
