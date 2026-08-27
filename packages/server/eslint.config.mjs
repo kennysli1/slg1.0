@@ -18,7 +18,7 @@ export default tseslint.config(
   // 领域模块禁定时器（铁律#3）。infra/ 下的 scheduler.ts / store.ts 是定时器的
   // 唯一合法归宿(Scheduler 本体 / 落盘防抖)，不在此约束——铁律说的是"模块内"。
   {
-    files: ['src/modules/*.ts'],
+    files: ['src/modules/**/*.ts'],
     languageOptions: {
       parser: tseslint.parser,
     },
@@ -33,7 +33,7 @@ export default tseslint.config(
 
   // 仅 modules/ 下：禁止 import 兄弟模块（铁律#2）。combat 是无状态纯函数，是唯一例外。
   {
-    files: ['src/modules/*.ts'],
+    files: ['src/modules/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

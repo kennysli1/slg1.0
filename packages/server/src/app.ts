@@ -230,17 +230,7 @@ export function createGameApp(opts?: {
       .find((p) => p.id === playerId);
     return owner?.ownedVillages?.map((v) => typeof v === 'string' ? v : v.id).filter((id): id is string => typeof id === 'string') ?? [];
   };
-  const villageOwner = (villageId: string): string | null => {
-    return store.get<string>('player_byvillage', villageId) ?? null;
-  };
-  const villageName = (villageId: string): string => {
-    for (const raw of store.all<{ ownedVillages?: Array<{ id?: string; name?: string }> }>('player')) {
-      const village = raw.ownedVillages?.find((item) => item.id === villageId);
-      if (village?.name) return village.name;
-    }
-    return villageId;
-  };
-  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random, playerVillages, villageOwner, villageName);
+  const task = new TasksModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   const dialogue = new DialoguesModule(commands, now, config);
   const vision = new VisionModule(store, commands, config);
   const research = new ResearchModule(store, bus, commands, scheduler, now, config, playerVillages, (vid) => {

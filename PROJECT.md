@@ -46,7 +46,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |
 | `alchemy.ts` | 炼金炉输入槽、炼化调度、掉率抽取与收获结果 |
 | `research.ts` | 科研点、研发任务和已完成科技 |
-| `tasks.ts` | 主线/随机任务进度、任务营地与 M8/M9 任务村生命周期 |
+| `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
