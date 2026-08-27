@@ -75,6 +75,16 @@ export function notificationText(event: string, payload: any, ts?: number): stri
       return `${time}被进攻结束（${mode}${win}）攻${payload.attackPower} vs 防${payload.defensePower}｜守军损失：${lossStr}｜建筑损坏：${damage || '无'}｜被抢：${loot || '无'}`;
     }
   } else if (event === 'ScoutReport') {
+    if (payload.context === 'village_scout' && payload.outcome === 'attacker_destroyed' && payload.side === 'attacker') {
+      const deployed = troopMapText(payload.deployedTroops);
+      const losses = troopMapText(payload.attackerLosses);
+      return `${time}侦察战失败：我方侦察部队全灭｜派出 ${deployed}｜阵亡 ${losses}`;
+    }
+    if (payload.context === 'village_scout' && payload.side === 'defender') {
+      const incoming = troopMapText(payload.deployedTroops);
+      const losses = troopMapText(payload.attackerLosses);
+      return `${time}侦察战报告：来袭侦察兵 ${incoming}｜死亡 ${losses}`;
+    }
     if (payload.context === 'incoming_intercept') {
       const ownLosses = payload.side === 'attacker' ? payload.attackerLosses : payload.defenderLosses;
       const enemyLosses = payload.side === 'attacker' ? payload.defenderLosses : payload.attackerLosses;

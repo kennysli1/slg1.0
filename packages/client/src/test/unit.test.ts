@@ -443,6 +443,27 @@ describe('notificationText - 建筑侦察报告', () => {
     assert.match(result ?? '', /冒险者100/);
     assert.match(result ?? '', /敌方损失 冒险者100/);
   });
+
+  it('侦察失败时进攻方收到全灭战报，防守方只看到来袭兵力与死亡数', () => {
+    const attacker = notificationText('ScoutReport', {
+      context: 'village_scout', side: 'attacker', outcome: 'attacker_destroyed',
+      deployedTroops: { adventurer: 100 }, attackerLosses: { adventurer: 100 },
+      defenderTroops: { legionnaire: 10 },
+    });
+    assert.match(attacker ?? '', /侦察战失败/);
+    assert.match(attacker ?? '', /全灭/);
+    assert.match(attacker ?? '', /阵亡 冒险者100/);
+    assert.doesNotMatch(attacker ?? '', /军团兵10/);
+
+    const defender = notificationText('ScoutReport', {
+      context: 'village_scout', side: 'defender', outcome: 'attacker_destroyed',
+      deployedTroops: { adventurer: 100 }, attackerLosses: { adventurer: 100 },
+    });
+    assert.match(defender ?? '', /侦察战报告/);
+    assert.match(defender ?? '', /来袭侦察兵 冒险者100/);
+    assert.match(defender ?? '', /死亡 冒险者100/);
+    assert.doesNotMatch(defender ?? '', /发现敌方侦察部队/);
+  });
 });
 
 describe('notificationText - 来袭预警与途中侦察', () => {
