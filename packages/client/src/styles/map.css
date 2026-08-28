@@ -1098,3 +1098,8 @@
 .map-village-index-copy strong { overflow: hidden; font-size: var(--f-sm); text-overflow: ellipsis; white-space: nowrap; }
 .map-village-index-copy small, .map-village-index-copy em { color: var(--c-ink-dim); font-family: var(--ff-num); font-size: var(--f-2xs); font-style: normal; }
 @media (max-width: 720px) { .map-village-index { position: absolute; top: max(var(--s-3), var(--safe-t)); left: var(--s-3); right: var(--s-3); width: auto; max-height: 180px; } .map-tactical-stack:has(.map-village-index) .map-march-list { top: min(calc(180px + var(--s-5)), 36vh); } }
+
+/* 己方村点击是地图观察态，不把“当前操作村”误做成即时切换。 */
+.map-village-index-item:not(.is-current) { border-left-color: var(--status-info); }
+.own-village-target { border-top: calc(var(--s-1) / 2) solid var(--accent); }
+.own-village-target .target-actions { align-items: stretch; }

@@ -2,16 +2,16 @@
  * 村庄页：以任务和建筑列表为主的村庄经营指挥台。
  * 村庄场景保留为独立组件，但不再占用村庄页首屏空间。
  */
-import { dataVersion, tick } from '../../app/store.js';
+import { dataVersion, tab, tick } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { buildingInfo } from '../../app/config.js';
-import { Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { buildingInfo, unitInfo } from '../../app/config.js';
+import { Btn, Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { fmt } from '../../shared/utils/format.js';
 import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
-import { VillageSwitcher } from './VillageSwitcher.js';
 import { VillageTaskSummary } from './VillageTaskSummary.js';
 import { VillageResourceLedger } from './VillageResourceLedger.js';
 import { VillageArmyManagement } from '../army/ArmyScreen.js';
@@ -114,6 +114,40 @@ function VillageListView({ vil }: { vil: any }) {
   );
 }
 
+/** 王国页只给出当前村的军务态势；训练、援军与防御配置在下方档案完整保留。 */
+function VillageMilitaryBrief() {
+  dataVersion.value;
+  const army = getCache().army;
+  const troops = Object.entries(army?.troops ?? {}) as Array<[string, number]>;
+  const activeTroops = troops.filter(([, amount]) => Number(amount) > 0);
+  const total = activeTroops.reduce((sum, [, amount]) => sum + Number(amount), 0);
+  const queues = army?.trainingQueues ?? [];
+  const leading = activeTroops
+    .sort(([, a], [, b]) => Number(b) - Number(a))
+    .slice(0, 3)
+    .map(([key, amount]) => `${unitInfo(key).name} ${fmt(Number(amount))}`)
+    .join(' · ');
+
+  return (
+    <section class="empire-military-brief" aria-label="当前村军务摘要">
+      <SectionHead
+        sub={queues.length ? `${queues.length} 项训练进行中` : '暂无训练队列'}
+        actions={<Btn size="sm" variant="ghost" onClick={() => { tab.value = 'army'; }}>完整军务</Btn>}
+      >
+        军务态势
+      </SectionHead>
+      <Panel variant="flat" pad>
+        <div class="empire-military-count">
+          <Icon icon="ui_icon_def" label="" decorative size="sm" />
+          <div><span>本村驻军</span><strong>{fmt(total)}</strong></div>
+        </div>
+        <p>{leading || '尚无驻军；训练与调度可在完整军务中安排。'}</p>
+        {queues.length > 0 && <div class="empire-military-queue">训练队列正在推进，详细兵种与取消操作请展开军务档案。</div>}
+      </Panel>
+    </section>
+  );
+}
+
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function VillageScreen() {
@@ -127,20 +161,23 @@ export function VillageScreen() {
   const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0) + (vil.townCenter ? 1 : 0);
 
   return (
-    <div class="vil-dashboard">
-      <div class="vil-dashboard-topline">
-        <div class="vil-dashboard-task-wrap">
-          <IncomingWarnings />
-          <VillageTaskSummary />
-        </div>
-        <VillageSwitcher />
+    <div class="vil-dashboard empire-command-desk">
+      <div class="vil-dashboard-task-wrap empire-task-banner">
+        <IncomingWarnings />
+        <VillageTaskSummary />
       </div>
 
       <VillageResourceLedger />
 
-      <div class="vil-dashboard-grid">
-        <aside class="vil-overview-column" aria-label="村庄概览">
+      <div class="vil-dashboard-grid empire-workbench">
+        <aside class="vil-overview-column empire-operations-column" aria-label="当前村庄概览与进行中事项">
           <VillageCommandDeck vil={vil} />
+
+          {vil.queue?.items?.length > 0 && (
+            <Panel pad class="vil-queue-panel empire-active-panel">
+              <QueueStrip queue={vil.queue} />
+            </Panel>
+          )}
 
           <section class="vil-detail-section">
             <SectionHead>人口 · 文明活力</SectionHead>
@@ -161,23 +198,27 @@ export function VillageScreen() {
           )}
         </aside>
 
-        <section id="village-building-management" class="vil-management-column" aria-label="建筑清单管理">
+        <section id="village-building-management" class="vil-management-column empire-development-column" aria-label="发展工作区">
           <header class="vil-management-head">
-            <span class="vil-eyebrow">建造清单</span>
-            <SectionHead sub={`${placedCount}/${slotCount}`}>建筑管理</SectionHead>
+            <span class="vil-eyebrow">发展工作区</span>
+            <SectionHead sub={`${placedCount}/${slotCount} · 可直接安排建设`}>建筑与城务</SectionHead>
           </header>
-
-          {vil.queue?.items?.length > 0 && (
-            <Panel pad class="vil-queue-panel">
-              <QueueStrip queue={vil.queue} />
-            </Panel>
-          )}
 
           <VillageListView vil={vil} />
         </section>
+
+        <aside class="empire-military-column">
+          <VillageMilitaryBrief />
+        </aside>
       </div>
 
-      <VillageArmyManagement />
+      <details class="empire-army-archive">
+        <summary>
+          <span>军务档案</span>
+          <small>训练、驻军、援军、防御与解散</small>
+        </summary>
+        <VillageArmyManagement />
+      </details>
     </div>
   );
 }

@@ -177,6 +177,14 @@
 .tech-requires em { font-style: normal; padding: 1px var(--s-1); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .tech-node-action { display: flex; align-items: center; min-height: 32px; margin-top: auto; padding-top: var(--s-1); }
 
+/* 科技页先交代当前研究和下一步，再展开完整树。 */
+.tech-command-desk { display: flex; flex-direction: column; gap: var(--s-5); }
+.tech-next-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); }
+.tech-next-grid .tech-node { height: 100%; }
+.tech-full-tree { display: flex; flex-direction: column; gap: var(--s-3); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+@media (max-width: 960px) { .tech-next-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .tech-next-grid { grid-template-columns: minmax(0, 1fr); } .tech-command-desk { gap: var(--s-4); } }
+
 /* ---------- 学院弹窗 ---------- */
 .acad-rp { display: flex; align-items: baseline; gap: var(--s-2); justify-content: center; margin-bottom: var(--s-3); }
 .acad-rp .num {

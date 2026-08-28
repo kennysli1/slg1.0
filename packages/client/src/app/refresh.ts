@@ -87,7 +87,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
     // 全图模式：一次拉全部非空地块（full=true），之后拖拽/缩放/跳转都是纯视觉变换。
-    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom, kingdomOverview] = await Promise.all([
+    const [res, vil, army, area, moves, playerMoves, pop, treasures, reputation, alchemy, kingdom] = await Promise.all([
       req('GetResources'),
       req('GetVillageLayout'),
       req('GetArmy'),
@@ -101,8 +101,6 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
       req('GetReputation').catch(() => ({ ok: false } as any)),
       req('GetAlchemy').catch(() => ({ ok: false } as any)),
       req('GetKingdomState').catch(() => ({ ok: false } as any)),
-      // 王国资源总览是只读聚合快照；失败时不阻塞当前村的核心操作。
-      req('GetKingdomOverview').catch(() => ({ ok: false } as any)),
     ]);
 
     const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
@@ -114,9 +112,6 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     }
 
     if (area.ok) reconcileVillagesFromArea(area.payload);
-    // 王国总览是附加的只读信息：短暂失败时保留上一次成功快照，
-    // 不能让顶部资源栏退回到当前村庄资源却仍标为「王国合计」。
-    const previousKingdomOverview = getCache().kingdomOverview;
     setCache({
       ...getCache(),
       res: res.payload, vil: vil.payload, army: army.payload,
@@ -125,7 +120,6 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
       reputation: reputation.ok ? reputation.payload : null,
       alchemy: alchemy.ok ? alchemy.payload : null,
       kingdom: kingdom.ok ? kingdom.payload : null,
-      kingdomOverview: kingdomOverview.ok ? kingdomOverview.payload : previousKingdomOverview ?? null,
     });
     kingdomState.value = kingdom.ok ? kingdom.payload : null;
     if (area.ok) mapAreaStale.value = false;

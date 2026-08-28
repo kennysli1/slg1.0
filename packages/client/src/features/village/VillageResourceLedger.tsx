@@ -1,4 +1,4 @@
-/** 当前操作村的资源账本；与顶栏的王国合计刻意并列而不混用。 */
+/** 当前操作村的资源账本；顶部只保留战略上下文，资源只在所属村展示。 */
 import { dataVersion, tick } from '../../app/store.js';
 import { getCache, getPopState, liveResource } from '../../app/state.js';
 import { resInfo, resourceKeys } from '../../app/config.js';
@@ -13,7 +13,7 @@ export function VillageResourceLedger() {
 
   return (
     <section class="kingdom-resource-ledger" aria-label="当前村庄资源">
-      <SectionHead sub="随当前操作村庄切换；王国合计见顶栏">本村资源账本</SectionHead>
+      <SectionHead sub="随当前操作村庄切换；建造、训练与行军均使用这些库存">当前村庄 · 资源账本</SectionHead>
       <Panel variant="flat" pad>
         <div class="kingdom-resource-grid">
           {resourceKeys().map((key) => {
