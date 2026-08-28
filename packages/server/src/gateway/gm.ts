@@ -435,8 +435,8 @@ const QUEST_MODULE_TABLES = [
 /**
  * GM 编辑后的配置不能只停留在当前 release：release 目录会在下一次部署时
  * 被新的 git 包替换。把已编辑的 CSV 镜像到 shared/data 同级的 config 目录，
- * 由 remote-release.sh 在后续 release 构建前覆盖回去；manifest 只记录允许
- * 覆盖的配置文件名，避免把整套旧配置冻结住而遮蔽新的代码/配置变更。
+ * 由 remote-release.sh 在后续 release 构建完成后按稳定主键合并回去；manifest
+ * 只记录允许合并的配置文件名，避免旧整文件遮蔽新的代码/配置变更。
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
 function persistentConfigDir(gameApp: GameApp): string | null {
