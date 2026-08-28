@@ -52,7 +52,10 @@ if (unstaged || untracked) {
 run('npm', ['run', 'guard'], 'G1 · 变更契约');
 const paths = stagedPaths();
 const touchesRuntime = paths.some((path) => path.startsWith('packages/') || path.startsWith('config/'));
-const baseSubject = output('git', ['log', '-1', '--format=%s', 'HEAD']);
+const baseRef = spawnSync('git', ['rev-parse', '--verify', 'origin/main'], { cwd: ROOT, stdio: 'ignore' }).status === 0
+  ? 'origin/main'
+  : 'HEAD';
+const baseSubject = output('git', ['log', '-1', '--format=%s', baseRef]);
 if (!touchesRuntime && /^config: sync /.test(baseSubject)) {
   // 配置同步后仓库里的 CSV 是管理员确认过的运行时事实，不能再用出厂
   // 默认值行为断言阻断仅工具/文档改动的提交；配置结构仍需完整校验。
