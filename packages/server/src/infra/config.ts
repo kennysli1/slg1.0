@@ -90,6 +90,8 @@ export interface BuildingDef {
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
+  /** 建造该建筑所需的主基地最低等级；默认 1，配置中心可调。 */
+  mainBaseLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
   /** 每级贡献的繁荣度（按建筑主题分档，见 buildings.csv）。 */
   prosperityPerLevel: number;
@@ -616,6 +618,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
+  mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
   requires: string[];
   desc: string;
@@ -812,7 +816,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   assertUniqueRows(buildingRows, 'buildings.csv');
   // 应用遗留平衡覆盖（玩家在 /gm/balance 的旧版本手动修改；CSV 是当前默认事实源，JSON 仅作兼容）
   if (overrides?.buildings) {
-    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
+    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
   }
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
@@ -870,6 +874,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       },
       timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
+      mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
       popGrowthPerLevel: num(r.popGrowthPerLevel, 0),
@@ -1132,7 +1137,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     popHospitalRecoveryBase: cn('pop_hospital_recovery_base', 0.20),
     popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
-    foundMinMainLevel: cn('found_min_main_level', 10),
+    foundMinMainLevel: cn('found_min_main_level', 4),
     foundSettlerCount: cn('found_settler_count', 1),
     foundResourceCostBase: cn('found_resource_cost_base', 3000),
     foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
@@ -1234,7 +1239,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.research) {
     researchRows = mergeOverridesIntoRows(researchRows, {
       file: 'research.csv', key: 'id',
-      numeric: ['tier', 'durationSec', 'rpCost'],
+      numeric: ['tier', 'mainBaseLevel', 'durationSec', 'rpCost'],
     }, overrides.research);
   }
   assertUniqueRows(researchRows, 'research.csv');
@@ -1248,6 +1253,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
       effectType: 'resource_rate',
@@ -1581,6 +1587,7 @@ export function validateGameConfig(config: GameConfig): void {
       if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
     }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    if (!Number.isInteger(b.mainBaseLevel) || b.mainBaseLevel < 1) errors.push(`buildings.csv[${b.kind}] mainBaseLevel 必须是≥1的整数`);
     // 逐等级参数（building_levels.csv）：必须覆盖 1..maxLevel；popCap≥0；prod 仅资源田且≥0
     for (let lv = 1; lv <= b.maxLevel; lv++) {
       const ld = b.levels[lv];
@@ -1620,6 +1627,9 @@ export function validateGameConfig(config: GameConfig): void {
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
+  for (const b of Object.values(config.buildings)) {
+    if (centerMaxLevel > 0 && b.mainBaseLevel > centerMaxLevel) errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
 
   // town_center_slots：覆盖 1..城镇中心maxLevel；槽位单调不减；queue≥1
   if (centerMaxLevel > 0) {
@@ -1805,6 +1815,8 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (!RESEARCH_SCOPES.has(t.scope)) errors.push(`research.csv[${t.code}] scope=${t.scope} 必须是 village/player`);
     if (t.tier < 1) errors.push(`research.csv[${t.code}] tier=${t.tier} 必须≥1`);
+    if (!Number.isInteger(t.mainBaseLevel) || t.mainBaseLevel < 1) errors.push(`research.csv[${t.code}] mainBaseLevel 必须是≥1的整数`);
+    if (centerMaxLevel > 0 && t.mainBaseLevel > centerMaxLevel) errors.push(`research.csv[${t.code}] mainBaseLevel=${t.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
     if (t.durationSec < 1) errors.push(`research.csv[${t.code}] durationSec=${t.durationSec} 必须>0`);
     if (t.rpCost < 1) errors.push(`research.csv[${t.code}] rpCost=${t.rpCost} 必须>0`);
     for (const req of t.requires) {

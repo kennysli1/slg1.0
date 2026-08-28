@@ -85,7 +85,7 @@ function VillageListView({ vil }: { vil: any }) {
       {/* Town centre */}
       {tc && (
         <div>
-          <SectionHead>城镇中心</SectionHead>
+        <SectionHead>{tc.name ?? '主基地'}</SectionHead>
           <div class="vil-zone-grid" style={{ gridTemplateColumns: '1fr' }}>
             <BuildingCard building={tc} isCenter />
           </div>

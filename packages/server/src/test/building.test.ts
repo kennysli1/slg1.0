@@ -198,7 +198,7 @@ test('城镇中心升级逐等级开放城内槽位（无平坡）', async () =>
   assert.equal(l0.townCenter.level, 1);
   // 逐等级升城镇中心，记录城内槽位变化
   let prev = inner1;
-  for (let target = 2; target <= 5; target++) {
+  for (let target = 2; target <= 4; target++) {
     const r = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: 'center' });
     assert.equal(r.ok, true, `升城镇中心到 ${target} 应成功: ${r.reason ?? ''}`);
     await app.scheduler.advanceTo(clock + 300_000, setClock);
@@ -207,8 +207,8 @@ test('城镇中心升级逐等级开放城内槽位（无平坡）', async () =>
     assert.ok(l.zones.inner.slots >= prev, `城内槽位不应减少（TC${target}）`);
     prev = l.zones.inner.slots;
   }
-  // TC1->TC5 至少应净增多个城内槽位（曲线早期逐等级+1）
-  assert.ok(prev > inner1, `城镇中心升级应开放更多城内槽位（TC1=${inner1} -> TC5=${prev}）`);
+  // 1→4 本至少应净增多个城内槽位
+  assert.ok(prev > inner1, `主基地升级应开放更多城内槽位（1本=${inner1} -> 4本=${prev}）`);
 });
 
 // ── 拆除（DemolishBuilding）────────────────────────────────────────

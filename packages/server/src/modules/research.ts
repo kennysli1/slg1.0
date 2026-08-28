@@ -201,17 +201,19 @@ export class ResearchModule {
     return { ok: true, payload: { amount: n, rp: s.rp } };
   }
 
-  private getTechTree(cmd: Command): CommandResult {
+  private async getTechTree(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
     const completed = this.effectiveCompleted(villageId);
+    const mainLevelRes = await this.commands.send({ name: 'building.GetBuildingLevel', from: ResearchModule.NAME, payload: { villageId, kind: 'main' } });
+    const mainLevel = mainLevelRes.ok ? Number((mainLevelRes.payload as any).level ?? 1) : 1;
     const techs = Object.values(this.config.research).map((t) => {
       let status: string;
       if (completed.has(t.code)) status = 'completed';
       else if (s.researching?.code === t.code) status = 'researching';
-      else if (this.prereqsMet(villageId, t.requires)) status = 'available';
+      else if (mainLevel >= t.mainBaseLevel && this.prereqsMet(villageId, t.requires)) status = 'available';
       else status = 'locked';
-      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, effects: t.effects, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
+      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, mainBaseLevel: t.mainBaseLevel, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, effects: t.effects, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
     });
     return { ok: true, payload: { techs, rp: s.rp, researching: s.researching?.code ?? null } };
   }
@@ -222,6 +224,7 @@ export class ResearchModule {
     const tech = this.config.research[techCode];
     if (!tech) return { ok: false, payload: {}, reason: 'unknown_tech' };
     if (s.academy.academyCount < 1) return { ok: false, payload: {}, reason: 'academy_required' };
+    if (!(await this.mainBaseLevelMet(villageId, tech.mainBaseLevel))) return { ok: false, payload: {}, reason: 'main_base_level_too_low' };
     if (s.researching) return { ok: false, payload: {}, reason: 'already_researching' };
     // scope=player 科技的完成记录来自玩家全部村庄；避免在分城重复研发全局科技。
     if (this.effectiveCompleted(villageId).has(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
@@ -493,6 +496,15 @@ export class ResearchModule {
       if (!orParts.some((p) => completed.has(p.trim()))) return false;
     }
     return true;
+  }
+
+  private async mainBaseLevelMet(villageId: string, required: number): Promise<boolean> {
+    const minLevel = Math.max(1, Number(required) || 1);
+    const result = await this.commands.send({
+      name: 'building.GetBuildingLevel', from: ResearchModule.NAME,
+      payload: { villageId, kind: 'main' },
+    });
+    return result.ok && Number((result.payload as any).level ?? 1) >= minLevel;
   }
 
   private effectiveCompleted(villageId: string): Set<string> {

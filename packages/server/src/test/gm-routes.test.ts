@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, rmSync, readFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
@@ -69,7 +69,7 @@ test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
     assert.equal(response.statusCode, 200, response.body);
     const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
     assert.equal(moved.ok, true);
-    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村' });
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'bld_main' });
     const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
     assert.equal(previous.ok, true);
     assert.equal((previous.payload as any).tile.kind, 'empty');
@@ -461,8 +461,20 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     // GM 保存现在会写回配置 CSV；测试必须使用隔离副本，不能污染仓库 config/。
     const seed = createGameApp({ now: () => 1_000_000, manualScheduler: true });
     cpSync(seed.configDir, tempConfig, { recursive: true });
+    // 模拟历史 shared/config：新增的酒馆支线概率列存在但整列是空值。
+    // 配置中心应显示运行时默认 0.5，而不是让管理员看到空白。
+    const staleLevelsPath = join(tempConfig, 'building_levels.csv');
+    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.5,', ',,'));
+    writeFileSync(staleLevelsPath, staleLevels, 'utf8');
     const { fastify, app } = buildFastify(storePath, tempConfig);
     await fastify.ready();
+
+    const initialLevelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const initialTavernRows = (initialLevelData.building_levels ?? []).filter((r) => r.code === 'tavern');
+    assert.equal(initialTavernRows.length, 5, '配置中心应返回全部酒馆等级');
+    assert.ok(initialTavernRows.every((r) => Number(r.taskSideQuestChance) === 0.5), '历史空值应展示酒馆支线默认概率 0.5');
 
     // 取 main 建筑 id 以作主键
     const mainId = String(app.config.buildings['main'].id);

@@ -103,7 +103,7 @@ test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 resid
     applyBalanceEdits(configDir, tmp, table, { [resId]: { maxLevel: '5' } });
     const cfg = loadGameConfig(tmp);
     assert.equal(cfg.buildings['residence'].maxLevel, 5, 'residence maxLevel 应改为 5');
-    assert.equal(cfg.buildings['main'].maxLevel, 10, 'main maxLevel 应保持不变(10)');
+    assert.equal(cfg.buildings['main'].maxLevel, 4, 'main maxLevel 应保持新版四级主基地');
   });
 });
 

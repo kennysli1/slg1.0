@@ -122,8 +122,8 @@ export function VillageCommandDeck({ vil }: VillageCommandDeckProps) {
           {vil.townCenter && (
             <DeckAction
               icon={vil.townCenter.icon ?? buildingInfo(vil.townCenter.kind).icon}
-              label="城镇中心"
-              detail={`Lv${vil.townCenter.level} · 管理核心`}
+              label={vil.townCenter.name ?? '主基地'}
+              detail={`Lv${vil.townCenter.level} · 发展阶段核心`}
               onClick={() => openBuilding(vil.townCenter.slotId)}
             />
           )}
