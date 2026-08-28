@@ -1601,12 +1601,28 @@
 .empire-operation-item { display: flex; min-width: 0; align-items: flex-start; gap: var(--s-2); padding-right: var(--s-3); border-right: 1px solid var(--line); }
 .empire-operation-item > div { display: grid; min-width: 0; gap: var(--s-1); }
 .empire-operation-item span,
-.empire-operation-guide > span { color: var(--c-ink-dim); font-size: var(--f-2xs); }
-.empire-operation-item strong,
-.empire-operation-guide strong { overflow: hidden; color: var(--c-ink); font-size: var(--f-sm); text-overflow: ellipsis; white-space: nowrap; }
+.empire-village-task-head span { color: var(--c-ink-dim); font-size: var(--f-2xs); }
+.empire-operation-item strong { overflow: hidden; color: var(--c-ink); font-size: var(--f-sm); text-overflow: ellipsis; white-space: nowrap; }
 .empire-operation-item small { color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.4; }
-.empire-operation-guide { display: grid; align-content: center; gap: var(--s-1); min-width: 0; }
-.empire-operation-guide strong { white-space: normal; line-height: 1.4; }
+.empire-village-task-showcase { display: flex; min-width: 0; flex-direction: column; gap: var(--s-2); padding-left: var(--s-3); border-left: 1px solid var(--line); }
+.empire-village-task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-2); }
+.empire-village-task-head > div { display: grid; min-width: 0; gap: 2px; }
+.empire-village-task-head strong { color: var(--c-ink); font-size: var(--f-sm); }
+.empire-village-task-head button { flex: none; padding: 0; border: 0; color: var(--c-gold); background: transparent; cursor: pointer; font: inherit; font-size: var(--f-2xs); }
+.empire-village-task-head button:hover,
+.empire-village-task-head button:focus-visible { color: var(--c-gold-hi); text-decoration: underline; }
+.empire-village-task-head button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.empire-village-task-list { display: grid; min-width: 0; gap: var(--s-1); max-height: 120px; overflow-y: auto; padding-right: var(--s-1); }
+.empire-village-task-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: var(--s-2); padding: var(--s-1) var(--s-2); border: 1px solid var(--c-border); border-radius: var(--r-sm); color: var(--c-ink); background: color-mix(in srgb, var(--c-panel-2) 72%, transparent); cursor: pointer; text-align: left; }
+.empire-village-task-row:hover,
+.empire-village-task-row:focus-visible { border-color: var(--c-gold-dim); background: color-mix(in srgb, var(--c-gold) 8%, var(--c-panel-2)); }
+.empire-village-task-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.empire-village-task-row__name { display: flex; min-width: 0; align-items: center; gap: var(--s-1); }
+.empire-village-task-row__name .tag { flex: none; }
+.empire-village-task-row__name strong { min-width: 0; overflow: hidden; font-size: var(--f-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.empire-village-task-row__meta { display: flex; flex: none; align-items: center; gap: var(--s-2); color: var(--c-ink-dim); font-family: var(--ff-num); font-size: var(--f-2xs); }
+.empire-village-task-row__meta small { white-space: nowrap; }
+.empire-village-task-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-2xs); line-height: 1.45; }
 .empire-workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s-4); }
 .empire-workspace-entry { min-width: 0; }
 .empire-workspace-panel { display: flex; min-height: 144px; height: 144px; flex-direction: column; }
@@ -1632,7 +1648,7 @@
 
 @media (max-width: 1120px) {
   .empire-operations-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .empire-operation-guide { grid-column: 1 / -1; padding-top: var(--s-2); border-top: 1px solid var(--line); }
+  .empire-village-task-showcase { grid-column: 1 / -1; padding-top: var(--s-2); border-top: 1px solid var(--line); border-left: 0; }
 }
 @media (max-width: 720px) {
   .empire-command-desk { gap: var(--s-3); }
@@ -1652,6 +1668,7 @@
   z-index: calc(var(--z-tabbar) - 1);
   display: grid;
   grid-template-columns: minmax(220px, .38fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(76px, auto);
   align-items: stretch;
   gap: var(--s-3);
   min-height: 104px;
@@ -1668,7 +1685,9 @@
   flex-direction: column;
   gap: var(--s-2);
 }
-.village-command-dock__village { justify-content: center; }
+.village-command-dock__village { align-self: stretch; justify-content: stretch; }
+.village-command-dock__village .vil-switcher,
+.village-command-dock__village .vil-switcher-trigger { height: 100%; box-sizing: border-box; }
 .village-command-dock__resources .kingdom-resource-ledger,
 .village-command-dock__resources .kingdom-resource-ledger > .panel {
   height: 100%;
@@ -1679,6 +1698,7 @@
 .kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
 .kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
 .village-command-dock__eyebrow {
+  grid-column: 1 / -1;
   color: var(--c-gold-dim);
   font-family: var(--ff-display);
   font-size: var(--f-2xs);
@@ -1687,18 +1707,13 @@
   line-height: 1;
 }
 
-/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。 */
+/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
+ * 展开只增加卡片内部内容，始终保留原有双列位置。 */
 .empire-workspace-grid--both-closed,
-.empire-workspace-grid--both-open {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
+.empire-workspace-grid--both-open,
 .empire-workspace-grid--development-open,
 .empire-workspace-grid--military-open {
-  grid-template-columns: minmax(0, 1fr);
-}
-.empire-workspace-grid--development-open .empire-workspace-entry,
-.empire-workspace-grid--military-open .empire-workspace-entry {
-  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .empire-workspace-entry,
 .empire-workspace-entry .empire-workspace-panel { min-width: 0; }
@@ -1720,12 +1735,14 @@
     position: sticky;
     top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--safe-t));
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
     min-height: 0;
     margin-bottom: 0;
     padding: var(--s-2) 0;
     background: var(--c-bg);
     box-shadow: var(--sh-1);
   }
+  .village-command-dock__eyebrow { grid-column: 1; }
   .village-command-dock__village { gap: var(--s-2); }
   .village-command-dock__resources .kingdom-resource-ledger > .panel { padding: var(--s-2); }
   .village-command-dock__resources .kingdom-resource-grid {
