@@ -497,6 +497,7 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
       <div class="unit-card__count">{fmt(count)}</div>
       <div class="unit-card__name">{name}</div>
       <Tag kind={form === 'ranged' ? 'steel' : 'ember'}>{formName(form)}</Tag>
+      <div class="unit-card__inspect" aria-hidden="true">查看兵种详情 ›</div>
       {cropPerHour > 0 && (
         <div class="unit-card__upkeep">{cropPerHour}/时·兵</div>
       )}
