@@ -49,6 +49,24 @@ test('可建清单：城内/城外各只列本区建筑，前置未满足给灰�
   assert.ok(academy && !academy.unlocked && academy.lockReason, '学院应锁定且有理由');
 });
 
+test('建筑门控：议会厅/联盟大厅需要二级主基地且每村限建一座', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 } });
+  await send(app, 'building.UnlockBuildings', { villageId: 'v1', kinds: ['council', 'alliance_hall'] });
+  const before = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'council' });
+  assert.equal(before.ok, false, '一级主基地不能建造议会厅');
+  assert.equal(before.reason, 'requires_not_met');
+
+  const centerUpgrade = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: 'center' });
+  assert.equal(centerUpgrade.ok, true);
+  await app.scheduler.advanceTo((centerUpgrade.payload as any).finishAt, setClock);
+  const council = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'council' });
+  assert.equal(council.ok, true, '二级主基地且任务解锁后可建造议会厅');
+  const options = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'inner' })).payload as any;
+  assert.equal(options.options.some((item: any) => item.kind === 'council'), false, '达到每村上限后建造列表隐藏议会厅');
+  assert.equal(options.options.find((item: any) => item.kind === 'alliance_hall')?.maxCount, 1);
+});
+
 test('点空槽建造：城内建仓库 → 占槽 → 完成落成', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });

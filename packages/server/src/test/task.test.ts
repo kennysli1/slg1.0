@@ -197,6 +197,45 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   assert.ok(afterDeliver.resources.gold >= beforeDeliver.resources.gold, 'm6 目标检查不应扣除金币');
 });
 
+test('主线 m10/m11：二级主基地触发，M10 可立即就绪，M11 交付解锁唯一建筑', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '主基地阶段任务');
+  const player = (regRes.payload as any).player;
+  const villageId = player.villageId as string;
+  await grant(app, villageId, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
+
+  // 二级主基地完成后，M11（无前置、仅主基地门槛）应进入可接取列表。
+  const upgrade = await send(app, 'building.Upgrade', { villageId, slotId: 'center' });
+  assert.equal(upgrade.ok, true, `主基地升级应成功: ${upgrade.reason ?? ''}`);
+  await app.scheduler.advanceTo((upgrade.payload as any).finishAt, setClock);
+  let state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.offeredMain.some((item: any) => item.code === 'm11'), '二级主基地应触发 M11');
+
+  // 模拟前置主线已完成后接取 M10；已有二级主基地应立即就绪。
+  const taskState = app.store.get<any>('task', villageId)!;
+  taskState.completedMain.push('m9');
+  taskState.offeredMain.push('m10');
+  app.store.set('task', villageId, taskState);
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm10' })).ok, true);
+  state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.active.find((item: any) => item.code === 'm10')?.ready, '已有二级主基地的 M10 应直接就绪');
+  const m10 = await send(app, 'task.Deliver', { villageId, code: 'm10' });
+  const m10Growth = (m10.payload as any).rewards.resourceGrowth ?? {};
+  assert.equal(m10Growth.percent, 25, 'M10 应发放四资源 +25%');
+  assert.equal(m10Growth.durationSec, 43200, 'M10 应持续12小时');
+
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm11' })).ok, true);
+  const vision = app.store.get<any>('vision', player.id) ?? { playerId: player.id, explored: {} };
+  for (let i = 0; i < 210; i++) vision.explored[`m11-${i}`] ??= { q: i, r: 0, kind: 'empty' };
+  app.store.set('vision', player.id, vision);
+  state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.active.find((item: any) => item.code === 'm11')?.ready, 'M11 达到 200 格后应就绪');
+  const m11 = await send(app, 'task.Deliver', { villageId, code: 'm11' });
+  assert.deepEqual((m11.payload as any).rewards.buildingUnlocks, ['alliance_hall', 'council']);
+  const building = app.store.get<any>('building', villageId)!;
+  assert.deepEqual(building.unlockedBuildings.sort(), ['alliance_hall', 'council']);
+});
+
 test('M2：已有建筑拆除后重建不计数，新的空槽 1 级建造才计数', async () => {
   const app = freshApp();
   const regRes = await reg(app, 'M2 重建计数');

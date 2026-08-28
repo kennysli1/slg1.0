@@ -22,6 +22,7 @@ const ERR_MSG: Record<string, string> = {
   building_damaged: '建筑已受损，请先修复后再升级',
   not_damaged: '该建筑没有可修复的损坏等级',
   no_free_slot: '该区域没有空槽',
+  max_count: '该建筑已达到本村建造上限',
   bad_zone: '建筑区域不合法',
   zone_mismatch: '不能建在这个区域',
   bad_count: '数量不合法',

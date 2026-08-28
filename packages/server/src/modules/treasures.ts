@@ -335,8 +335,8 @@ export class TreasureModule {
     if (!Array.isArray(s.locked)) { s.locked = []; dirty = true; }
     if (typeof s.victoryFlagBonus !== 'number') { s.victoryFlagBonus = 0; dirty = true; }
     if (!s.victoryFlagQualified || typeof s.victoryFlagQualified !== 'object') { s.victoryFlagQualified = {}; dirty = true; }
-    // 城镇中心与宝库都是主栏；不要在每次读取时自动搬运，避免玩家卸下宝物后又被隐式装载。
-    // 宝库扩容时的存入优先级由 setSlots 仅在扩容事件中处理。
+    // 城镇中心与宝库都是主栏；不要在每次读取或扩容时自动搬运，避免玩家
+    // 卸下宝物后又被隐式装载。新获得/主动装载的宝物才按城镇中心优先落位。
     // multiset 语义：同一宝物可同时存在于城镇中心与宝库、或栏内重复出现（多个拷贝），不再去重；
     // 此处仅做「非字符串/空串」类型清理，剔除历史损坏数据。
     const norm = (arr: unknown[]): string[] =>
@@ -436,12 +436,10 @@ export class TreasureModule {
     const next = Math.max(0, Math.floor(Number(extra) || 0));
     if (s.extraSlots === next) return { ok: true, payload: { slots: this.getTreasureSlots(villageId) } };
 
-    // 增大：宝库扩容 → 城镇中心宝物自动迁入宝库（宝物优先存宝库，城镇中心仅作兜底）
+    // 增大：宝库扩容只增加可用槽位，不搬运既有宝物；既有宝物的生效位置
+    // 由玩家主动装载/卸下决定，新获得宝物仍由 storeIfRoom 按“主基地优先”落位。
     if (next > s.extraSlots) {
       s.extraSlots = next;
-      while (s.treasury.length < s.extraSlots && s.town.length > 0) {
-        s.treasury.push(s.town.pop()!);
-      }
       this.store.set(COLLECTION, villageId, s);
       await this.recomputeAndPush(villageId);
       await this.emitChanged(villageId);

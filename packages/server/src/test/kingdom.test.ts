@@ -5,6 +5,17 @@ import { kingdomLandmarkAnchors } from '../infra/world-generation.js';
 
 const send = (app: ReturnType<typeof createGameApp>, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 
+/** 王国任务在议会厅建成后才启用；测试直接装配一座已建成的议会厅，
+ * 避免为每个任务用例等待建筑队列，同时保持真实的模块门槛。 */
+function addCouncil(app: ReturnType<typeof createGameApp>, villageId: string): void {
+  const state = app.store.get<any>('building', villageId);
+  if (!state) throw new Error(`building state missing: ${villageId}`);
+  if (!state.placed.some((p: any) => p.kind === 'council')) {
+    state.placed.push({ slotId: 'inner-council-test', kind: 'council', zone: 'inner', level: 1 });
+    app.store.set('building', villageId, state);
+  }
+}
+
 test('王国地标：王都位于世界中心，四封地位于四象限中心且成为真实 PvE', () => {
   const app = createGameApp({ manualScheduler: true });
   app.setupWorld();
@@ -173,6 +184,7 @@ test('王国任务：循环上贡有期限，完成后冻结期限并等待手�
   app.setupWorld();
   const reg = await send(app, 'player.Register', { name: '王国任务甲', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 300_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;
@@ -193,6 +205,26 @@ test('王国任务：循环上贡有期限，完成后冻结期限并等待手�
   assert.ok((claimed.payload as any).nextIssueAt > clock, '领取后应安排下一轮任务');
 });
 
+test('王国任务：没有议会厅时不下达也不显示，建成后才启用', async () => {
+  let clock = 1_250_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0 });
+  app.setupWorld();
+  const reg = await send(app, 'player.Register', { name: '王国门槛测试', password: 'p1234', tribe: 'romans' });
+  const player = (reg.payload as any).player;
+  const hidden = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
+  assert.equal((hidden.payload as any).kingdomEnabled, false);
+  assert.equal((hidden.payload as any).task, null);
+  assert.equal(app.store.get<any>('kingdom', player.id)?.task, undefined, '未建议会厅不应生成任务');
+
+  addCouncil(app, player.villageId);
+  const kingdomState = app.store.get<any>('kingdom', player.id)!;
+  kingdomState.nextIssueAt = clock;
+  app.store.set('kingdom', player.id, kingdomState);
+  const shown = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
+  assert.equal((shown.payload as any).kingdomEnabled, true);
+  assert.equal((shown.payload as any).task?.kind, 'tribute');
+});
+
 test('王国任务：指定同象限现有 PvE，清空前不会完成', async () => {
   let clock = 2_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0.5 });
@@ -203,6 +235,7 @@ test('王国任务：指定同象限现有 PvE，清空前不会完成', async (
   app.config.constants.raw.kingdom_task_eliminate_troops_weight = 0;
   const reg = await send(app, 'player.Register', { name: '王国任务乙', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 450_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;
@@ -225,6 +258,7 @@ test('王国任务：超时失败不扣声望，并保留下一轮循环时间',
   app.setupWorld();
   const reg = await send(app, 'player.Register', { name: '王国任务丙', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 300_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;
