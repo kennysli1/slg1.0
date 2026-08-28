@@ -315,7 +315,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
     }
-    for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']) {
+    for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:deliver`), `GM 对话表应预置 ${code} 交付模板`);
     }
     assert.ok(configured.has('s3:accept'), 'GM 对话表应包含 S3 接取模板');
@@ -333,6 +333,40 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
+  }
+});
+
+test('配置中心：新增支线任务时自动补齐空白接取/交付对话模板', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const root = mkdtempSync(join(tmpdir(), 'kow-side-dialogue-default-'));
+  const tempConfig = join(root, 'config');
+  try {
+    const seed = buildFastify();
+    cpSync(seed.app.configDir, tempConfig, { recursive: true });
+    await seed.fastify.close();
+    const { fastify } = buildFastify(undefined, tempConfig);
+    await fastify.ready();
+    const modulesRes = await fastify.inject({ method: 'GET', url: '/config/quest-modules/data' });
+    const modules = JSON.parse(modulesRes.body) as { tables: Record<string, { rows: Array<Record<string, string>> }> };
+    const side = modules.tables['quests.csv'].rows.find((row) => row.code === 's1');
+    const objective = modules.tables['quest_objectives.csv'].rows.find((row) => row.questCode === 's1');
+    assert.ok(side && objective, '测试需要复制现有支线的任务与目标节点');
+    modules.tables['quests.csv'].rows.push({ ...side, id: '99', code: 's_future_test', name: '测试支线' });
+    modules.tables['quest_objectives.csv'].rows.push({ ...objective, id: 'future-objective', questCode: 's_future_test' });
+    const save = await fastify.inject({
+      method: 'POST', url: '/config/quest-modules/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tables: modules.tables }),
+    });
+    assert.equal(save.statusCode, 200, save.body);
+    const dialogues = parseCsvStructured(readFileSync(join(tempConfig, 'dialogues.csv'), 'utf8'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_accept' && row.taskCode === 's_future_test' && row.trigger === 'accept'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver'));
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -506,6 +540,20 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     const vaultLevel = (vaultData.building_levels ?? []).find((r) => r.code === 'vault' && String(r.level) === '1');
     assert.equal(Number(vaultLevel?.vaultProtectWood), 777, 'balance/data 应返回修改后的保险库木材保护量');
 
+    const tavernSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ building_levels: { 'tavern|1': { taskSideQuestChance: '0' } } }),
+    });
+    assert.equal(tavernSave.statusCode, 200, `酒馆支线概率覆盖应成功：${tavernSave.body}`);
+    assert.equal(app.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '酒馆支线概率可配置为 0');
+    const tavernData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const tavernLevel = (tavernData.building_levels ?? []).find((r) => r.code === 'tavern' && String(r.level) === '1');
+    assert.equal(Number(tavernLevel?.taskSideQuestChance), 0, 'balance/data 应返回酒馆支线概率');
+
     const alchemySave = await fastify.inject({
       method: 'POST',
       url: '/config/balance/save',
@@ -549,6 +597,7 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     const restarted = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath: join(dataDir, 'fresh-game.json'), configDir: tempConfig });
     assert.equal(restarted.config.buildings.main.popGrowthPerLevel, 999, '重启后应读取 GM 写回的 buildings.csv');
     assert.equal(restarted.config.buildings.treasury.levels[1].treasureSlots, 7, '重启后应读取 GM 写回的 building_levels.csv');
+    assert.equal(restarted.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '重启后应保留酒馆支线概率');
     assert.equal(restarted.config.constants.foundResourceCostBase, 4321, '重启后应读取 GM 写回的 game_constants.csv');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;

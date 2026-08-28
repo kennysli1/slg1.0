@@ -106,6 +106,8 @@ export interface TavernInfo {
   level: number;
   refreshSec: number;
   maxTasks: number;
+  /** 每个酒馆任务槽刷新为酒馆支线的概率（0..1）。 */
+  sideQuestChance: number;
 }
 
 export function emptyTaskState(villageId: string): TaskState {
@@ -144,15 +146,9 @@ export function ensureTaskState(store: Store, villageId: string, config: GameCon
     }
     delete legacy.completedRandom;
   }
-  if (state.offered.some((code) => config.quests[code]?.type === 'side')) {
-    const remaining: string[] = [];
-    for (const code of state.offered) {
-      if (config.quests[code]?.type === 'side') {
-        if (!state.offeredSide.includes(code)) state.offeredSide.push(code);
-      } else remaining.push(code);
-    }
-    state.offered = remaining;
-  }
+  // `offered` 是酒馆任务槽的混合列表：既可包含日常任务，也可包含由酒馆刷新
+  // 出现的支线任务。不要再把其中的 side 项迁移到 offeredSide；旧档中的这类
+  // 项正是合法的酒馆支线槽位。`offeredSide` 仅保留事件触发型支线。
 
   const codeMap: Record<string, string> = {
     r1: 'd1', r2: 'd2', r3: 'd3', r4: 's1',

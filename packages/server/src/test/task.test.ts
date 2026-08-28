@@ -628,23 +628,26 @@ test('修复资源田只计入目标建筑，重复修复事件不会重复推�
   assert.equal(after.active.find((item: any) => item.code === 'm1').ready, false);
 });
 
-test('支线任务：触发出现(offeredSide) → 接取 → 放弃后永久不再出现', async () => {
+test('酒馆支线：按槽位概率刷新 → 接取 → 放弃后永久不再出现', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试7');
   const va = (regRes.payload as any).player.villageId;
+  // 固定该村酒馆支线概率为 1，验证 S1 进入酒馆 mixed offered，而不是 offeredSide。
+  app.config.buildings.tavern.levels[1].taskSideQuestChance = 1;
   await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
   await tick();
 
-  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'treasury' });
-  assert.equal(build.ok, true, '建宝库应成功');
+  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(build.ok, true, '建酒馆应成功');
   await app.scheduler.advanceTo(clock + 120_000, setClock);
   await tick();
   await tick();
 
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
-  assert.ok((p.offeredSide ?? []).some((o: any) => o.code === 's1'), '宝库建成后 r4 支线应进入 offeredSide');
-  assert.ok(!(p.offered ?? []).some((o: any) => o.code === 's1'), 'r4 支线不应出现在酒馆(offered)');
+  assert.ok((p.offered ?? []).some((o: any) => o.code === 's1'), '酒馆建成后 S1 应进入 mixed offered');
+  assert.ok((p.offered ?? []).some((o: any) => o.type === 'daily'), '支线池抽空后其他槽位仍应补日常任务');
+  assert.ok(!(p.offeredSide ?? []).some((o: any) => o.code === 's1'), '酒馆支线不应进入事件型 offeredSide');
 
   const acc = await send(app, 'task.Accept', { villageId: va, code: 's1' });
   assert.equal(acc.ok, true, '接取支线应成功');
@@ -653,15 +656,18 @@ test('支线任务：触发出现(offeredSide) → 接取 → 放弃后永久不
   assert.equal(ab.ok, true, '支线放弃应成功');
   const st2 = await send(app, 'task.GetState', { villageId: va });
   const p2 = st2.payload as any;
-  assert.ok((p2.abandonedSide ?? []).includes('s1'), '放弃后 r4 应记入 abandonedSide');
-  assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 's1'), '放弃后 r4 不应再在可接取');
-  assert.ok(!(p2.active ?? []).some((a: any) => a.code === 's1'), '放弃后 r4 不应再 active');
+  assert.ok((p2.abandonedSide ?? []).includes('s1'), '放弃后 S1 应记入 abandonedSide');
+  assert.ok(!(p2.offered ?? []).some((o: any) => o.code === 's1'), '放弃后 S1 不应再在酒馆可接取');
+  assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 's1'), '放弃后 S1 不应再在事件型可接取');
+  assert.ok(!(p2.active ?? []).some((a: any) => a.code === 's1'), '放弃后 S1 不应再 active');
 });
 
 test('日常任务可反复：完成后刷新可再次刷出', async () => {
   const app = freshApp();
   const regRes = await reg(app, '任务测试8');
   const va = (regRes.payload as any).player.villageId;
+  // 该回归只验证日常任务循环，关闭支线槽概率避免随机抽到 S1。
+  app.config.buildings.tavern.levels[1].taskSideQuestChance = 0;
   await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
   await tick();
 

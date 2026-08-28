@@ -28,3 +28,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 24,m9_deliver,m9,deliver,1,,敌方已被我们洗劫干净了，但是却没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，有一些有志之士愿意加入我们的村子，一起讨伐共同的仇人。,
 30,m9_deliver_m8_failure,m9,deliver_failure,1,,多么惨烈的战斗，好在最后我们还是棋高一着，将敌人全歼。美中不足的是没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，我们从敌方那里缴获了一个宝物。这宝物可以放在城镇中心让其生效，或者当军队规模足够大的时候随军出征。领主大人可以选择建造宝物用来存放更多的宝物，只不过该上哪里去寻找这些珍宝呢？,
 31,s3_deliver_failure,s3,deliver_failure,1,,,
+32,s1_deliver,s1,deliver,1,,,
+33,s2_deliver,s2,deliver,1,,,
+34,s3_deliver,s3,deliver,1,,,
+35,s4_deliver,s4,deliver,1,,,

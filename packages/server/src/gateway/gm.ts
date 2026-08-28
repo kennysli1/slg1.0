@@ -21,7 +21,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
@@ -47,6 +47,68 @@ function sortDialogueRows(rows: CsvRow[]): CsvRow[] {
     if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) return idA - idB;
     return 0;
   });
+}
+
+/**
+ * 为每个支线任务补齐可编辑的接取/交付对话模板。
+ *
+ * 模板只在配置中心保存任务定义时自动写入；GET 接口仅在内存中补齐，避免
+ * 打开页面产生隐式配置变更。已有自定义 taskCode+trigger 行优先保留。
+ */
+function ensureDefaultSideDialogueRows(rows: CsvRow[], questRows: CsvRow[]): { rows: CsvRow[]; added: number } {
+  const result = rows.map((row) => ({ ...row }));
+  const existing = new Set(result.map((row) => `${row.taskCode ?? ''}:${row.trigger ?? ''}`));
+  let nextId = result.reduce((max, row) => {
+    const id = Number(row.id);
+    return Number.isFinite(id) ? Math.max(max, Math.floor(id)) : max;
+  }, 0) + 1;
+  let added = 0;
+  for (const quest of questRows) {
+    if (String(quest.type ?? '').trim() !== 'side') continue;
+    const taskCode = String(quest.code ?? '').trim();
+    if (!taskCode) continue;
+    for (const trigger of ['accept', 'deliver']) {
+      const key = `${taskCode}:${trigger}`;
+      if (existing.has(key)) continue;
+      result.push({
+        id: String(nextId++), code: `${taskCode}_${trigger}`, taskCode, trigger, segment: '1',
+        npcName: '', npcText: '', replies: '',
+      });
+      existing.add(key);
+      added++;
+    }
+  }
+  return { rows: result, added };
+}
+
+/** 按现有 CSV 文档的表头/注释布局重建数据行。 */
+function replaceCsvRows(text: string, rows: CsvRow[]): string {
+  const doc = parseCsvStructured(text);
+  const oldDataIndices = new Set(doc.rowIndices);
+  const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
+  doc.raw = raw;
+  doc.headerIndex = raw.findIndex((line) => line.split(',').map((x) => x.trim()).join(',') === doc.header.join(','));
+  doc.rows = rows.map((row) => Object.fromEntries(doc.header.map((header) => [header, row[header] ?? ''])));
+  doc.rowIndices = [];
+  for (let i = 0; i < doc.rows.length; i++) {
+    doc.raw.push('');
+    doc.rowIndices.push(doc.raw.length - 1);
+  }
+  return serializeCsv(doc);
+}
+
+/** 任务编辑器保存后，为新增支线任务持久化空白 accept/deliver 模板。 */
+function ensureSideDialogueTemplatesInDir(dir: string): { added: number } {
+  const dialoguePath = join(dir, 'dialogues.csv');
+  const questsPath = join(dir, 'quests.csv');
+  if (!existsSync(dialoguePath) || !existsSync(questsPath)) return { added: 0 };
+  const dialogueText = readFileSync(dialoguePath, 'utf-8');
+  const dialogueDoc = parseCsvStructured(dialogueText);
+  const questRows = loadCsv(questsPath);
+  const ensured = ensureDefaultSideDialogueRows(dialogueDoc.rows, questRows);
+  if (ensured.added === 0) return { added: 0 };
+  writeFileSync(dialoguePath, replaceCsvRows(dialogueText, sortDialogueRows(ensured.rows)), 'utf-8');
+  return { added: ensured.added };
 }
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
@@ -427,7 +489,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'taskRefreshSec', 'taskMaxTasks', 'taskSideQuestChance', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
     labels: ['code', 'level', 'name'],
   },
   units: {
@@ -800,6 +862,11 @@ function sectionBuildings(){
   function bonusCols(code){
     var c = [];
     if (code === 'treasury') c.push({k:'treasureSlots',l:'每级主/备用槽'});
+    if (code === 'tavern') {
+      c.push({k:'taskRefreshSec',l:'任务刷新秒'});
+      c.push({k:'taskMaxTasks',l:'任务槽数'});
+      c.push({k:'taskSideQuestChance',l:'支线概率'});
+    }
     if (code === 'vault') {
       c.push({k:'vaultProtectWood',l:'保木材/级'});
       c.push({k:'vaultProtectClay',l:'保泥土/级'});
@@ -1299,7 +1366,9 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     if (!auth(req, reply)) return;
     if (!requireConfigRoute(req, reply)) return;
     const doc = parseCsvStructured(readFileSync(join(gameApp.configDir, 'dialogues.csv'), 'utf-8'));
-    void reply.send({ ok: true, header: doc.header, rows: sortDialogueRows(doc.rows) });
+    const quests = loadCsv(join(gameApp.configDir, 'quests.csv'));
+    const ensured = ensureDefaultSideDialogueRows(doc.rows, quests);
+    void reply.send({ ok: true, header: doc.header, rows: sortDialogueRows(ensured.rows) });
   });
 
   fastify.post('/gm/dialogues/save', (req, reply) => {
@@ -1364,6 +1433,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     const dir = gameApp.configDir;
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
+    let dialogueAdded = 0;
     try {
       const csvByFile: Record<string, string> = {};
       for (const file of QUEST_MODULE_TABLES) {
@@ -1385,10 +1455,13 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       }
       cpSync(dir, tmp, { recursive: true });
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(tmp, file), csvByFile[file], 'utf-8');
+      dialogueAdded = ensureSideDialogueTemplatesInDir(tmp).added;
       loadGameConfig(tmp); // 整图校验失败时绝不写入线上 configDir。
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
-      persistConfigFiles(gameApp, QUEST_MODULE_TABLES);
-      gameApp.configAuthority.recordChange(QUEST_MODULE_TABLES);
+      const changedFiles = [...QUEST_MODULE_TABLES, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
+      if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
+      persistConfigFiles(gameApp, changedFiles);
+      gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
     } catch (e) {
@@ -1433,6 +1506,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     const dir = gameApp.configDir;
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
+    let dialogueAdded = 0;
     try {
       const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
       const doc = parseCsvStructured(text);
@@ -1446,10 +1520,13 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       const csv = serializeCsv(doc);
       cpSync(dir, tmp, { recursive: true });
       writeFileSync(join(tmp, 'quests.csv'), csv, 'utf-8');
+      dialogueAdded = ensureSideDialogueTemplatesInDir(tmp).added;
       loadGameConfig(tmp); // 校验：失败在此抛出（不落盘）
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
-      persistConfigFiles(gameApp, ['quests.csv']);
-      gameApp.configAuthority.recordChange(['quests.csv']);
+      const changedFiles = ['quests.csv' as const, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
+      if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
+      persistConfigFiles(gameApp, changedFiles);
+      gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
     } catch (e) {
