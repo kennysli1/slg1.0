@@ -22,3 +22,6 @@ e-m9-success,m9,deliver,grant_population_m8_success,5,1
 e-m9-failure,m9,deliver,grant_treasure_m8_failure,iron_wall_medal,2
 e-m10-resource-growth,m10,deliver,grant_resource_growth,25:43200,1
 e-m11-unlock-buildings,m11,deliver,unlock_buildings,alliance_hall|council,1
+e-m12-gold,m12,deliver,grant_resources,gold:50,1
+e-m12-reputation,m12,deliver,adjust_reputation,5,2
+e-m13-reward,m13,deliver,grant_treasure,black_badge,1

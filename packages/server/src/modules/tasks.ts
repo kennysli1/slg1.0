@@ -46,6 +46,7 @@ import {
 import { TaskPlayerDirectory } from './task/player-directory.js';
 // eslint-disable-next-line no-restricted-imports -- task/catalog 是同一 task owner 的配置适配器；architecture.test.ts 校验其 owner 一致性。
 import { TaskCatalog } from './task/catalog.js';
+import { neighborsWrapped, hexDistanceWrapped } from '../infra/hex.js';
 
 /** 稀有度排序：普通0/稀有1/史诗2/传说3（用于「稀有及以上」判定）。 */
 function rarityRank(rarity: string): number {
@@ -148,6 +149,8 @@ export class TasksModule {
     this.bus.on('movement.CaravanArrivedNpc', (evt: DomainEvent) => void this.onCaravanArrivedNpc(evt));
     // 使用秘密字条生成战报 → 解锁「调查坐标」任务
     this.bus.on('treasure.ReportCoords', (evt: DomainEvent) => void this.onReportCoords(evt));
+    this.bus.on('treasure.Used', (evt: DomainEvent) => void this.onTreasureUsed(evt));
+    this.bus.on('movement.Investigated', (evt: DomainEvent) => void this.onInvestigated(evt));
     // ② captured_natalies 报告被玩家抉择（入库/释放）→ 决定是否标记任务就绪
     this.bus.on('treasure.PendingClaimed', (evt: DomainEvent) => void this.onNatalieDecision(evt));
     // player owner 的公开变更仅刷新 task 的只读目录镜像，绝不读取 player 集合。
@@ -182,6 +185,12 @@ export class TasksModule {
             this.scheduleM8Attack(s.villageId, inst);
           } else if (inst.taskVillageId) this.scheduleM8Attack(s.villageId, inst);
           else if (!inst.taskVillageId) this.scheduleM8VillageRetry(s.villageId, inst);
+        }
+        if (inst.code === 'm13' && !inst.outcome && !inst.taskVillageId) {
+          const mainVillageId = this.anchorVillage(s.villageId);
+          inst.spawnVillageId = mainVillageId;
+          const spawned = await this.spawnM13TaskVillage(mainVillageId, s, inst);
+          if (!spawned) this.scheduleM13VillageRetry(s.villageId, inst);
         }
       }
       // 支线门槛可能在本次部署/重启前已经达到；恢复时补查，不能只依赖新训练事件。
@@ -726,6 +735,10 @@ export class TasksModule {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
     }
     if (inst.npcVillageId) await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
+    if (code === 'm13' && inst.taskVillageId) {
+      await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+      if (state.taskVillages) delete state.taskVillages.m13;
+    }
     this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
     this.scheduler.cancelByOwner(`task-m8-attack:${storageVillageId}`);
     this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
@@ -901,6 +914,13 @@ export class TasksModule {
         inst.taskVillageXY = { q: target.q, r: target.r };
       }
       this.store.set(COLLECTION, storageVillageId, s);
+    } else if (code === 'm13') {
+      // M13 的目标位置以玩家主城（全局任务锚点）为中心计算，即使玩家
+      // 从分城接取也不能把“第二近丘陵群”误算成分城附近。
+      const mainVillageId = this.anchorVillage(villageId);
+      inst.spawnVillageId = mainVillageId;
+      const spawned = await this.spawnM13TaskVillage(mainVillageId, s, inst);
+      if (!spawned) this.scheduleM13VillageRetry(storageVillageId, inst);
     }
     if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
     // 仅建村自动激活的 m1 展示一次自动对话；手动接取的任务由 StartAccept 返回接取对话。
@@ -1101,6 +1121,98 @@ export class TasksModule {
     await this.pushList(villageId);
     await this.pushMap(villageId);
     return true;
+  }
+
+  /** 在主城第二近的连片丘陵中随机生成 m13 秘密营地。 */
+  private async spawnM13TaskVillage(villageId: string, state: TaskState, inst: TaskInstance): Promise<boolean> {
+    if (state.taskVillages?.m13 && inst.taskVillageId) {
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
+      if (existing.ok) {
+        const target = existing.payload as { type?: string; task?: boolean; ownerVillageId?: string; q?: number; r?: number };
+        // 稳定 ID 可能被旧档/手工数据占用；只有确认为本玩家的秘密营地
+        // 才可复用，避免把任意 PvE 目标误当成 M13 目标。
+        if (target.type === 'secret_camp' && target.task === true
+          && (!target.ownerVillageId || target.ownerVillageId === villageId)) {
+          inst.taskVillageXY = { q: Number(target.q), r: Number(target.r) };
+          inst.taskVillageName = '秘密营地';
+          state.taskVillages.m13 = { id: inst.taskVillageId, q: inst.taskVillageXY.q, r: inst.taskVillageXY.r, name: '秘密营地' };
+          this.store.set(COLLECTION, this.storageVillageForQuest(villageId, 'm13'), state);
+          return true;
+        }
+      }
+      delete state.taskVillages.m13;
+      inst.taskVillageId = undefined;
+      inst.taskVillageXY = undefined;
+    }
+    const origin = await this.getVillageXY(villageId);
+    if (!origin) return false;
+    const W = this.config.constants.worldW ?? 41;
+    const H = this.config.constants.worldH ?? 41;
+    const area = await this.commands.send({ name: 'world.GetArea', from: TasksModule.NAME, payload: { cq: origin.q, cr: origin.r, r: 0, full: true, includeEmpty: true } });
+    if (!area.ok) return false;
+    const tiles = ((area.payload as any)?.tiles ?? []) as Array<{ q: number; r: number; kind?: string; terrain?: string }>;
+    const hills = new Map<string, { q: number; r: number; kind?: string }>();
+    for (const tile of tiles) if (tile.terrain === 'hills') hills.set(`${tile.q},${tile.r}`, tile);
+    const components: Array<Array<{ q: number; r: number; kind?: string }>> = [];
+    const remaining = new Set(hills.keys());
+    while (remaining.size) {
+      const startKey = remaining.values().next().value as string;
+      const queue = [hills.get(startKey)!];
+      remaining.delete(startKey);
+      const component: Array<{ q: number; r: number; kind?: string }> = [];
+      while (queue.length) {
+        const tile = queue.shift()!;
+        component.push(tile);
+        for (const next of neighborsWrapped(tile, W, H)) {
+          const key = `${next.q},${next.r}`;
+          if (remaining.has(key)) { remaining.delete(key); queue.push(hills.get(key)!); }
+        }
+      }
+      components.push(component);
+    }
+    components.sort((a, b) => {
+      const da = Math.min(...a.map((t) => hexDistanceWrapped(origin, t, W, H)));
+      const db = Math.min(...b.map((t) => hexDistanceWrapped(origin, t, W, H)));
+      return da - db;
+    });
+    const cluster = components[1] ?? components[0];
+    if (!cluster?.length) return false;
+    const free = cluster.filter((tile) => !tile.kind || tile.kind === 'empty');
+    if (!free.length) return false;
+    let point = free[Math.floor(this.rng() * free.length) % free.length];
+    const id = `taskvillage-${this.anchorVillage(villageId)}-m13`;
+    let spawned = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id, type: 'secret_camp', q: point.q, r: point.r, task: true, ownerVillageId: villageId, loot: { wood: 1000, clay: 1000, iron: 1000, crop: 1000, gold: 500 } } });
+    if (!spawned.ok && spawned.reason === 'already_exists') {
+      // 稳定 ID 冲突时只接受同类型、同玩家的任务村；若是其它实体，
+      // 保留它并让调度器稍后重试，绝不覆盖别人的 PvE 目标。
+      const existing = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id } });
+      const target = existing.ok ? existing.payload as { type?: string; task?: boolean; ownerVillageId?: string; q?: number; r?: number } : undefined;
+      if (!target || target.type !== 'secret_camp' || target.task !== true || (target.ownerVillageId && target.ownerVillageId !== villageId)) return false;
+      point.q = Number(target.q);
+      point.r = Number(target.r);
+      spawned = { ok: true, payload: { id, type: 'secret_camp', q: point.q, r: point.r } };
+    }
+    if (!spawned.ok) return false;
+    state.taskVillages ??= {};
+    state.taskVillages.m13 = { id, q: point.q, r: point.r, name: '秘密营地' };
+    inst.taskVillageId = id;
+    inst.taskVillageXY = { q: point.q, r: point.r };
+    inst.taskVillageName = '秘密营地';
+    this.store.set(COLLECTION, this.storageVillageForQuest(villageId, 'm13'), state);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return true;
+  }
+
+  private scheduleM13VillageRetry(storageVillageId: string, inst: TaskInstance): void {
+    const owner = `task-village:${storageVillageId}:m13`;
+    this.scheduler.cancelByOwner(owner);
+    this.scheduler.schedule(30_000, async () => {
+      const state = this.ensureState(storageVillageId);
+      const current = state.active.m13;
+      if (!current || current.outcome || current.taskVillageId) return;
+      if (!(await this.spawnM13TaskVillage(current.spawnVillageId ?? storageVillageId, state, current))) this.scheduleM13VillageRetry(storageVillageId, current);
+    }, owner, `village:${storageVillageId}`);
   }
 
   /**
@@ -1327,9 +1439,9 @@ export class TasksModule {
       granted.treasures.push(t);
     }
 
-    if (code === 'm9' && inst.taskVillageId) {
+    if ((code === 'm9' || code === 'm13') && inst.taskVillageId) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
-      if (s.taskVillages) delete s.taskVillages.m8;
+      if (s.taskVillages) delete s.taskVillages[code === 'm13' ? 'm13' : 'm8'];
     }
 
     // captured_natalies 释放替代丢弃：玩家点「领取奖励」时才发放 500 金币 + 宝物「正直的心」。
@@ -1491,6 +1603,13 @@ export class TasksModule {
         this.store.set(COLLECTION, storageVillageId, state);
         await this.pushList(updateVillageId);
         await this.pushMap(updateVillageId);
+      } else if (q.code === 'm12') {
+        // m12 的最后一个强盗营地固定掉落“我的努力”，走报告待领取流程，
+        // 不参加普通 PvE 掉落表，也不重复发放任务奖励。
+        await this.commands.send({ name: 'treasure.RollDrop', from: TasksModule.NAME, payload: { villageId: updateVillageId, source: 'camp', movementId: payload.movementId, forceCode: 'my_effort', taskRelated: true } });
+        await this.markReady(updateVillageId, q.code);
+        await this.pushList(updateVillageId);
+        await this.pushMap(updateVillageId);
       } else {
         await this.markReady(updateVillageId, q.code);
       }
@@ -1571,7 +1690,7 @@ export class TasksModule {
     const seen = new Set<string>();
     for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
       for (const inst of Object.values(state.active)) {
-        if ((inst.code !== 'm8' && inst.code !== 'm9') || !inst.taskVillageId) continue;
+        if ((inst.code !== 'm8' && inst.code !== 'm9' && inst.code !== 'm13') || !inst.taskVillageId) continue;
         const key = `${storageVillageId}:${inst.code}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1580,9 +1699,10 @@ export class TasksModule {
         const row = target.payload as { q?: number; r?: number };
         const q = Number(row.q), r = Number(row.r);
         if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
-        if (inst.taskVillageXY?.q === q && inst.taskVillageXY?.r === r && state.taskVillages?.m8?.q === q && state.taskVillages?.m8?.r === r) continue;
+        const villageKey = inst.code === 'm13' ? 'm13' : 'm8';
+        if (inst.taskVillageXY?.q === q && inst.taskVillageXY?.r === r && state.taskVillages?.[villageKey]?.q === q && state.taskVillages?.[villageKey]?.r === r) continue;
         inst.taskVillageXY = { q, r };
-        if (state.taskVillages?.m8?.id === inst.taskVillageId) state.taskVillages.m8 = { ...state.taskVillages.m8, q, r };
+        if (state.taskVillages?.[villageKey]?.id === inst.taskVillageId) state.taskVillages[villageKey] = { ...state.taskVillages[villageKey], q, r };
         this.store.set(COLLECTION, storageVillageId, state);
       }
     }
@@ -1648,6 +1768,34 @@ export class TasksModule {
     return level.ok && Number((level.payload as any)?.level) >= required;
   }
 
+  /** 声明式 offer 条件的运行时求值；所有 offer 行必须满足（group=any 的行可作为 OR 组）。 */
+  private async offerConditionsSatisfied(villageId: string, q: QuestDef): Promise<boolean> {
+    const rows = this.config.questGraph.conditions.filter((row) => row.questCode === q.code && row.phase === 'offer');
+    if (!rows.length) return true;
+    const state = this.ensureState(this.storageVillageForQuest(villageId, q.code));
+    const evaluate = async (row: typeof rows[number]): Promise<boolean> => {
+      const value = row.value.trim();
+      if (row.kind === 'main_base_level') {
+        const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind: 'main' } });
+        return level.ok && Number((level.payload as any)?.level) >= Math.max(1, Number(value) || 1);
+      }
+      if (row.kind === 'building_level') {
+        const [kind, rawLevel] = value.split(':');
+        const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind } });
+        return level.ok && Number((level.payload as any)?.level) >= Math.max(1, Number(rawLevel) || 1);
+      }
+      const key = row.kind + (value ? `:${value}` : '');
+      return state.firedTriggers.includes(row.kind) || state.firedTriggers.includes(key);
+    };
+    const grouped = new Map<string, typeof rows>();
+    for (const row of rows) { const list = grouped.get(row.group) ?? []; list.push(row); grouped.set(row.group, list); }
+    for (const [group, groupRows] of grouped) {
+      const results = await Promise.all(groupRows.map(evaluate));
+      if (group.toLowerCase() === 'any' ? !results.some(Boolean) : !results.every(Boolean)) return false;
+    }
+    return true;
+  }
+
   private async unlockMainQuests(villageId: string): Promise<void> {
     for (const q of this.catalog.all()) {
       if (q.type !== 'main') continue;
@@ -1655,7 +1803,7 @@ export class TasksModule {
       const s = this.ensureState(storageVillageId);
       if (s.completedMain.includes(q.code)) continue;
       if (s.active[q.code] || s.offeredMain.includes(q.code)) continue;
-      if (this.prereqsMet(villageId, q.requires) && await this.mainTriggerSatisfied(villageId, q.trigger)) {
+      if (this.prereqsMet(villageId, q.requires) && await this.mainTriggerSatisfied(villageId, q.trigger) && await this.offerConditionsSatisfied(villageId, q)) {
         try {
           if (q.code === 'm1') await this.activateQuest(villageId, q.code);
           else {
@@ -1711,6 +1859,23 @@ export class TasksModule {
     if (p.side !== 'attacker') return;
     const villageId = p.villageId;
     const targetId = p.targetId;
+    // m13 规定只要对秘密营地选择掠夺即失败（无论战斗胜负），
+    // 失败仍需玩家在任务页确认后结束，避免任务凭空消失。
+    if (p.targetKind === 'pve' && targetId) {
+      for (const { storageVillageId, state } of this.taskCandidates(villageId ?? '')) {
+        const inst = state.active.m13;
+        if (inst?.taskVillageId === targetId && !inst.outcome) {
+          inst.executionVillageId = villageId;
+          inst.outcome = 'failure';
+          inst.failureReady = true;
+          inst.readyToDeliver = false;
+          this.store.set(COLLECTION, storageVillageId, state);
+          await this.pushList(villageId ?? storageVillageId);
+          await this.pushMap(villageId ?? storageVillageId);
+          return;
+        }
+      }
+    }
     // m8 的 NPC 攻城贡献没有真实出发村；通过目标村反查玩家任务锚点，
     // 战斗结束后保存任务村剩余兵力/减半资源，并把 m8 置为可手动领取。
     if (p.taskCode === 'm8' && p.npcService && p.targetKind === 'village' && targetId) {
@@ -1848,6 +2013,11 @@ export class TasksModule {
             this.store.set(COLLECTION, storageVillageId, state);
             await this.pushList(villageId);
             await this.pushMap(villageId);
+          } else if (code === 'm12') {
+            await this.commands.send({ name: 'treasure.RollDrop', from: TasksModule.NAME, payload: { villageId, source: 'camp', movementId: p.movementId, forceCode: 'my_effort', taskRelated: true } });
+            await this.markReady(villageId, code);
+            await this.pushList(villageId);
+            await this.pushMap(villageId);
           } else {
             await this.markReady(villageId, code);
           }
@@ -1865,6 +2035,33 @@ export class TasksModule {
     const villageId = (evt.payload as { villageId?: string }).villageId;
     if (!villageId) return;
     await this.checkTroopTriggers(villageId);
+  }
+
+  private async onTreasureUsed(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; code?: string };
+    if (!p.villageId || !p.code) return;
+    const storageVillageId = this.storageVillageForQuest(p.villageId, 'm13');
+    const state = this.ensureState(storageVillageId);
+    const trigger = `treasure_used:${p.code}`;
+    if (!state.firedTriggers.includes(trigger)) {
+      state.firedTriggers.push(trigger);
+      this.store.set(COLLECTION, storageVillageId, state);
+    }
+    await this.unlockMainQuests(p.villageId);
+  }
+
+  private async onInvestigated(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; targetId?: string };
+    if (!p.villageId || !p.targetId) return;
+    for (const { storageVillageId, state } of this.taskCandidates(p.villageId)) {
+      const inst = state.active.m13;
+      const q = this.quest('m13');
+      if (!inst || !q || q.objective.kind !== 'investigate_task_village' || inst.taskVillageId !== p.targetId || inst.readyToDeliver) continue;
+      inst.executionVillageId = p.villageId;
+      this.store.set(COLLECTION, storageVillageId, state);
+      await this.markReady(p.villageId, 'm13');
+      return;
+    }
   }
 
   /** 训练事件与服务器恢复共用的兵力门槛检查。 */
@@ -1974,6 +2171,12 @@ export class TasksModule {
       }
     }
 
+    // Building-level offer conditions (for example M12's council requirement)
+    // are evaluated when the building is completed as well as when the task
+    // list is opened.  Do this independently of legacy building_built
+    // triggers so a newly completed council can expose M12 immediately.
+    await this.unlockMainQuests(villageId);
+
     const triggerKey = `building_built:${kind}`;
     const matched = this.catalog.all().filter((q) => q.trigger === triggerKey);
     if (!matched.length) return;
@@ -2000,11 +2203,11 @@ export class TasksModule {
     // M8 的任务村在结局后按设计保留，便于 M9 反击；但 GM 重新触发
     // M8 意味着开启一轮全新的冤家路窄流程，不能把上一轮战后的守军/库存
     // 带入新任务。先移除旧实体，再由 activateQuest 按当前 CSV/GM 模板重建。
-    if (code === 'm8' && s.taskVillages?.m8) {
-      const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: s.taskVillages.m8.id } });
+    if ((code === 'm8' || code === 'm13') && s.taskVillages?.[code]) {
+      const removed = await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: s.taskVillages[code].id } });
       if (!removed.ok) return removed;
-      delete s.taskVillages.m8;
-      if (s.outcomes) delete s.outcomes.m8;
+      delete s.taskVillages[code];
+      if (s.outcomes) delete s.outcomes[code];
     }
     s.completedMain = s.completedMain.filter((item) => item !== code);
     s.offeredMain = s.offeredMain.filter((item) => item !== code);
@@ -2035,14 +2238,15 @@ export class TasksModule {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: camp.id } });
     }
     if (inst.npcVillageId) await this.removeNpc(inst.spawnVillageId ?? villageId, inst);
-    if (code === 'm8' && inst.taskVillageId) {
+    if ((code === 'm8' || code === 'm13') && inst.taskVillageId) {
       await this.commands.send({ name: 'pve.Remove', from: TasksModule.NAME, payload: { id: inst.taskVillageId } });
-      if (s.taskVillages) delete s.taskVillages.m8;
-      if (s.outcomes) delete s.outcomes.m8;
+      if (s.taskVillages) delete s.taskVillages[code];
+      if (s.outcomes) delete s.outcomes[code];
     }
     this.scheduler.cancelByOwner(`task-camp:${storageVillageId}:${code}`);
     this.scheduler.cancelByOwner(`task-m8-attack:${storageVillageId}`);
     this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
+    this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m13`);
     delete s.active[code];
     s.offeredMain = s.offeredMain.filter((item) => item !== code);
     s.completedMain = s.completedMain.filter((item) => item !== code);
@@ -2599,6 +2803,7 @@ export class TasksModule {
       npcPending: inst.npcPending === true,
       taskVillageId: inst.taskVillageId ?? null,
       taskVillageXY: inst.taskVillageXY ?? null,
+      taskVillageName: inst.taskVillageName ?? null,
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
       taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
@@ -2663,7 +2868,7 @@ export class TasksModule {
             q: inst.taskVillageXY.q,
             r: inst.taskVillageXY.r,
             cleared: false,
-            name: '天王老子村',
+            name: inst.taskVillageName ?? (inst.code === 'm13' ? '秘密营地' : '天王老子村'),
             taskVillage: true,
           });
         }

@@ -46,7 +46,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |
 | `alchemy.ts` | 炼金炉输入槽、炼化调度、掉率抽取与收获结果 |
 | `research.ts` | 科研点、研发任务和已完成科技 |
-| `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
+| `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9/M13 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
@@ -88,7 +88,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `服务器/02_数据库操作手册.md` | 备份、刷档或恢复 |
 | `服务器/03_GM调试手册.md` | GM 联调和故障诊断 |
 | `配置中心与GM边界.md` | 配置中心、GM 实时状态、CSV 权威、旧覆盖迁移与 GitHub 同步 |
-| `任务模块.md` | 修改任务定义、任务图、任务营地或 GM 任务编辑 |
+| `任务模块.md` | 修改任务定义、任务图、任务营地、调查行军或 GM 任务编辑 |
 | `视野模块.md` | 修改战争迷雾、视野参数或探索行军 |
 | `声望模块.md` | 修改玩家声望、声望效果、任务抉择或声望 GM 参数 |
 | `王国模块.md` | 修改王都/封地、王国任务、议会厅服务或王国 GM 参数 |

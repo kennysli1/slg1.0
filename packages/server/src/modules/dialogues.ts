@@ -50,6 +50,7 @@ export class DialoguesModule {
 
   init(): void {
     this.commands.register('dialogue.StartForTask', (c) => this.startForTask(c));
+    this.commands.register('dialogue.StartForTreasure', (c) => this.startForTreasure(c));
   }
 
   private startForTask(cmd: Command): CommandResult {
@@ -61,7 +62,21 @@ export class DialoguesModule {
       .filter((item) => item.taskCode === taskCode && item.trigger === trigger)
       .sort((a, b) => a.segment - b.segment);
     // GM 可以先建立空白模板，等策划填文本/对象；空白模板不阻塞任务接取。
-    const visibleDefs = defs.filter((item) => item.npcName || item.npcText);
+    return this.buildSession(defs, payload.villageName);
+  }
+
+  private startForTreasure(cmd: Command): CommandResult {
+    const payload = cmd.payload as { treasureCode?: string; villageName?: string };
+    const treasureCode = String(payload.treasureCode ?? '').trim();
+    if (!treasureCode) return { ok: false, payload: {}, reason: 'treasureCode_required' };
+    const defs = Object.values(this.config.dialogues ?? {})
+      .filter((item) => item.code === `${treasureCode}_use` && item.trigger === 'use')
+      .sort((a, b) => a.segment - b.segment);
+    return this.buildSession(defs, payload.villageName);
+  }
+
+  private buildSession(defs: GameConfig['dialogues'][string][], villageName?: string): CommandResult {
+    const visibleDefs = defs.filter((item) => item.npcName || item.npcText || item.replies.length);
     if (!visibleDefs.length) return { ok: true, payload: { dialogue: null } };
     const first = visibleDefs[0];
     const segments = visibleDefs.map((def): DialogueSegment => ({
@@ -69,8 +84,8 @@ export class DialoguesModule {
       taskCode: def.taskCode,
       trigger: def.trigger,
       segment: def.segment,
-      npcName: renderVillageTemplate(def.npcName, payload.villageName),
-      npcText: renderVillageTemplate(def.npcText, payload.villageName),
+      npcName: renderVillageTemplate(def.npcName, villageName),
+      npcText: renderVillageTemplate(def.npcText, villageName),
       replies: def.replies.map((reply) => ({ ...reply })),
     }));
     const session: DialogueSession = {

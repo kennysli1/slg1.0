@@ -47,7 +47,7 @@
 | 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
-| 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率 |
+| 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率；`my_effort` 使用 `my_effort_use` 对话，`black_badge` 提供 PvE 掉率与军队加成 |
 | 表15 | `research.csv` | **科技树目录**（分支/层级/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
 | 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
@@ -216,6 +216,8 @@
 | lootWood/Clay/Iron/Crop | 战利品总量 |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
+
+`secret_camp` 是 M13「寻找神秘人」的任务村模板，不应手动添加到 `pve_spawns.csv`。接取 M13 后，任务模块会在玩家主城第二近的连片丘陵中选择一个空闲丘陵格生成它，并锁定任务所属玩家；初始库存为四种资源各 1000、金币 500，守军由 `pve_defenders.csv` 的 `targetId=107`（8 雇佣卫兵、3 雇佣弓手）提供。调查该目标不会进入战斗；选择掠夺会让 M13 进入失败确认状态。
 
 ## pve_defenders.csv — PvE 守军（与上表一对多）
 | 列 | 含义 |
@@ -400,7 +402,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`defend_task_village`、`raid_task_village` |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
 | params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
@@ -435,7 +437,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / code / segment | 对话对象数字主键 / 稳定对话代码 / 对象内段落序号（从 1 连续编号；同一对象可有多行） |
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
-| trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
+| trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；宝物使用对话固定为 `use`，代码为 `<treasureCode>_use`、taskCode 从 `t1` 起独立排序；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 

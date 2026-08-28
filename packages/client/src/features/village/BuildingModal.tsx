@@ -19,6 +19,7 @@ import { dataVersion, openModal, showToast, taskStates } from '../../app/store.j
 import { getCache } from '../../app/state.js';
 import { req, me } from '../../api.js';
 import { act } from '../../app/refresh.js';
+import { useCallback, useState } from 'preact/hooks';
 import { TaskOffers } from './TaskBar.js';
 import {
   buildingInfo,
@@ -127,6 +128,28 @@ function ProvidesSection({ kind, level }: { kind: string; level: number }) {
   );
 }
 
+/** 宝物使用对话：配置中心以 <treasureCode>_use 绑定，可包含连续段落。 */
+function TreasureUseDialogueModal({ dialogue, treasureName, close }: { dialogue: any; treasureName: string; close: () => void }) {
+  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
+    .filter((item: any) => item && (item.npcName || item.npcText || (item.replies ?? []).length));
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const current = segments[segmentIndex] ?? dialogue;
+  const next = useCallback(() => {
+    if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
+    else close();
+  }, [close, segmentIndex, segments.length]);
+  return (
+    <Modal title={current?.npcName || treasureName} sub="宝物使用" onClose={next}>
+      <div class="dialogue-session">
+        {current?.npcText && <div class="dialogue-npc-text">{current.npcText}</div>}
+        {(current?.replies ?? []).length > 0
+          ? <div class="dialogue-replies" aria-label="玩家回复">{current.replies.map((reply: any) => <Btn key={reply.key} variant="primary" onClick={next}>{reply.label}</Btn>)}</div>
+          : <div class="modal-foot"><Btn variant="primary" onClick={next}>{segmentIndex < segments.length - 1 ? '继续' : '关闭'}</Btn></div>}
+      </div>
+    </Modal>
+  );
+}
+
 /** Pop-cap info block for buildings that provide popCap. */
 function PopCapSection({ kind, level }: { kind: string; level: number }) {
   const info = buildingInfo(kind);
@@ -207,8 +230,18 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
                 const effectType = (info as any)?.effectType ?? '';
                 const useToast = effectType === 'ritualBuff'
                   ? `已使用「${info.name}」，全资源产出 +${fmt(info.effectValue ?? 0)}%（持续2小时）`
+                  : effectType === 'dialogue'
+                    ? `已使用「${info.name}」`
                   : `已使用「${info.name}」，获得 ${fmt(info.effectValue ?? 0)} 金币`;
-                await act(req('UseTreasure', { code, location }), { okToast: useToast });
+                await act(req('UseTreasure', { code, location }), {
+                  okToast: useToast,
+                  onOk: (payload) => {
+                    const dialogue = payload?.dialogue;
+                    const visible = dialogue && ((dialogue.npcName || dialogue.npcText || (dialogue.replies ?? []).length)
+                      || (Array.isArray(dialogue.segments) && dialogue.segments.some((item: any) => item?.npcName || item?.npcText || (item?.replies ?? []).length)));
+                    if (visible) openModal((close) => <TreasureUseDialogueModal dialogue={dialogue} treasureName={info.name} close={close} />, `treasure-use-${dialogue.id}`);
+                  },
+                });
               }}>使用</Btn>
             )}
             <Btn size="sm" onClick={async () => { await act(req('SellTreasure', { code, location }), { okToast: `已出售「${info.name}」` }); }}>出售</Btn>

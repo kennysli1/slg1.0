@@ -6,7 +6,7 @@ export interface Hex {
 
 export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
-  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'incoming_scout' | 'ambush';
+  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'incoming_scout' | 'ambush' | 'investigate';
 
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';

@@ -13,7 +13,7 @@ import { applyBalanceEdits, BALANCE_TABLES } from '../gateway/gm.js';
  *   → loadGameConfig(tmp) 校验（对应真实保存前的合法性校验）→ 断言写回结果与注释/表头保留。
  *
  * 注：逐等级 popCap 是「该级相对上一级的增量贡献」，硬上限 = Σ 1..当前等级 popCap。
- *   故 main L1..L4 每级增量均为 20，4 级总和=80；居民楼每级增量 18，10 级总和=180。
+ *   具体增量由配置中心维护；测试只校验编辑目标生效且其余行保持原始配置。
  */
 
 const configDir = join(dirname(fileURLToPath(import.meta.url)), '../../../../config');
@@ -38,6 +38,7 @@ test('GM 面板：building_levels 复合主键编辑 round-trip（改 main|1 pop
   assert.ok(table.keyComposite, 'building_levels 应声明复合主键');
 
   withTmp((tmp) => {
+    const baseline = loadGameConfig(configDir);
     // 编辑复合主键 main|1 的 popCap（增量）
     applyBalanceEdits(configDir, tmp, table, { 'main|1': { popCap: '99' } });
 
@@ -47,12 +48,12 @@ test('GM 面板：building_levels 复合主键编辑 round-trip（改 main|1 pop
 
     // 2) 目标单元格已改，其余不变
     assert.equal(cfg.buildings['main'].levels[1].popCap, 99, 'main L1 popCap 增量应改为 99');
-    assert.equal(cfg.buildings['main'].levels[2].popCap, 20, 'main L2 popCap 增量应保持不变(20)');
+    assert.equal(cfg.buildings['main'].levels[2].popCap, baseline.buildings['main'].levels[2].popCap, 'main L2 popCap 增量应保持不变');
     assert.ok((cfg.buildings['woodcutter'].levels[1].prod ?? 0) > 0, '资源田产量不应受影响');
-    // 居民楼逐等级增量恒为 18，10 级总和=180
-    assert.equal(cfg.buildings['residence'].levels[10].popCap, 18, '居民楼 L10 增量仍为 18');
-    assert.equal(popCapSum(cfg.buildings['residence']), 180, '居民楼 10 级 popCap 增量总和应=180');
-    assert.equal(popCapSum(cfg.buildings['main']), 80 + 79, 'main 改 L1=99 后总和应为 20×3+99=159');
+    // 其它建筑逐等级参数及主基地其余等级都应保持当前配置中心值。
+    assert.equal(cfg.buildings['residence'].levels[10].popCap, baseline.buildings['residence'].levels[10].popCap, '居民楼 L10 增量应保持不变');
+    assert.equal(popCapSum(cfg.buildings['residence']), popCapSum(baseline.buildings['residence']), '居民楼未编辑等级不应受影响');
+    assert.equal(popCapSum(cfg.buildings['main']), popCapSum(baseline.buildings['main']) - baseline.buildings['main'].levels[1].popCap + 99, '主基地总和应只反映被编辑等级');
 
     // 3) 注释与表头原样保留
     const raw = readFileSync(join(tmp, 'building_levels.csv'), 'utf8');
@@ -88,9 +89,10 @@ test('GM 面板：非法数值（popCap=-5）应被校验拦截，绝不写半�
 test('GM 面板：不存在的复合主键应是 no-op（不报错、不新增行、不改已有值）', () => {
   const table = BALANCE_TABLES['building_levels'];
   withTmp((tmp) => {
+    const baseline = loadGameConfig(configDir);
     applyBalanceEdits(configDir, tmp, table, { 'nope|99': { popCap: '1' } });
     const cfg = loadGameConfig(tmp);
-    assert.equal(cfg.buildings['main'].levels[1].popCap, 20, '未改动的行增量应保持 20');
+    assert.equal(cfg.buildings['main'].levels[1].popCap, baseline.buildings['main'].levels[1].popCap, '未改动的行增量应保持配置中心值');
   });
 });
 

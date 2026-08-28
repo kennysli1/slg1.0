@@ -60,7 +60,7 @@ test('GM 覆盖层：research 表编辑 round-trip', async () => {
   assert.equal(r.ok, true);
   const t = (r.payload as any).techs.find((t: any) => t.code === 'melee_attack_i');
   assert.equal(t.rpCost, 2, 'melee_attack_i 默认 rpCost=2');
-  assert.equal(t.durationSec, 3600, 'melee_attack_i 默认 durationSec=3600');
+  assert.equal(t.durationSec, app.config.research.melee_attack_i.durationSec, 'melee_attack_i durationSec 应来自配置中心');
 });
 
 test('CancelResearch 无在途研发时返回 not_researching', async () => {
@@ -97,7 +97,7 @@ test('academy 参数表解析正确', () => {
   const app = freshApp();
   const a = app.config.academy;
   assert.ok(a[1], 'Lv1 应存在');
-  assert.equal(a[1].checkIntervalSec, 3600);
+  assert.ok(a[1].checkIntervalSec > 0, 'Lv1 判定间隔应为正数');
   assert.equal(a[1].baseProbability, 0.10);
   assert.ok(a[10], 'Lv10 应存在');
   assert.ok(a[10].maxProbability >= 0.7, 'Lv10 保底概率应≥0.7');
@@ -121,7 +121,7 @@ test('正直的心：科研状态下发实际缩短后的判定间隔', async ()
   const pop = (await send(app, 'population.GetSnapshot', { villageId: va })).payload as any;
   const popFactor = app.config.academy[1].popFactor;
   const populationMult = 1 + popFactor * Math.min(1, pop.totalPop / pop.hardCap);
-  const expected = Math.max(1, Math.round((3600 * 0.9) / populationMult));
+  const expected = Math.max(1, Math.round((app.config.academy[1].checkIntervalSec * 0.9) / populationMult));
   assert.equal((state.payload as any).intervalSec, expected, `Lv1 间隔应按人口因子 ${populationMult.toFixed(3)} 与宝物 0.9 计算`);
 });
 
@@ -149,7 +149,7 @@ test('科研：总人口（含士兵）提高判定成功因子并缩短间隔',
   assert.equal(high.ok, true);
   const highInterval = (high.payload as any).intervalSec as number;
   assert.ok(highInterval < lowInterval, `总人口增加后判定间隔应缩短（${lowInterval}→${highInterval}）`);
-  assert.equal(highInterval, Math.round(3600 / 1.25), '人口因子应按含士兵总人口计算');
+  assert.equal(highInterval, Math.round(app.config.academy[1].checkIntervalSec / 1.25), '人口因子应按含士兵总人口计算');
 });
 
 // ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────

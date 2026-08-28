@@ -25,3 +25,5 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 23,secret_note,秘密字条,trs_note,special,common,reportCoords,0,0,0,instant,special,secret_note,0,1,
 24,captured_natalies,被囚禁的娜塔莉们,trs_natalie,special,rare,popGrowth,20,0,0,passive,special,captured_natalies,50,1,
 25,honest_heart,正直的心,trs_blessing,special,epic,honestHeart,10,0,0,passive,special,honestHeart,50,1,0
+26,my_effort,我的努力,trs_effort,special,epic,dialogue,0,0,0,instant,special,my_effort,0,1,
+27,black_badge,黑色徽章,trs_black_badge,military,epic,blackBadge,15,0,0,passive,military,blackBadge,100,1,
