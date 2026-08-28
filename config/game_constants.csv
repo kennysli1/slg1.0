@@ -11,21 +11,21 @@ storage_base,800,number,仓库/粮仓基础容量
 storage_growth_per_level,0.5,number,容量每级增长系数(0.5=每级+50%基数)
 start_resource_amount,750,number,新村各资源初始存量
 base_production_per_hour,1000,number,资源田0级基础每小时产量
-map_size,20,number,地图半径(六边形网格,以原点为中心的环数,hexDistance<=size 为合法格)
-map_view_radius,6,number,前端地图视野半径(六边形环数,前端白名单常量)
+map_size,20,number,地图半径(六边形网格
+map_view_radius,6,number,前端地图视野半径(六边形环数
 world_width,96,number,新世界环绕平行四边形宽度(旧世界优先使用world_meta实际尺寸)
 world_height,96,number,新世界环绕平行四边形高度(旧世界优先使用world_meta实际尺寸)
 world_seed,kow-world-v1,string,确定性地貌与出生槽位生成种子
-combat_tick_ms,200,number,战斗每tick间隔(ms,越小越平滑越费算力)
-combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短,待调参)
-ambush_attack_bonus,0.5,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)
+combat_tick_ms,200,number,战斗每tick间隔(ms
+combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短
+ambush_attack_bonus,0.2,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
-march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=原速；单位speed乘以此值得到实际格/小时)
+march_speed_multiplier,10,number,行军速度全局倍率(>1加速
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
-pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%,均值不变;确定性LCG按清空次数取种,可复现)
-pop_prosperity_full_ratio,0.70,number,劳动人口占总人口比例达到此值时繁荣度额外加成满值(默认0.70)
-pop_overcap_penalty_full_ratio,2.0,number,人口超过上限的惩罚拐点：totalPop/hardCap 达到此比例时繁荣度额外加成归零(默认2.0=超出一倍归零)
+pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%
+pop_prosperity_full_ratio,0.70,number,劳动人口占硬上限比例达到此值时繁荣度加成满值(默认0.70)
+pop_overcap_penalty_full_ratio,2.0,number,人口超过上限的惩罚拐点：currentPop/hardCap 达到此比例时繁荣度加成归零(默认2.0=超出一倍归零)
 pop_race_mobilize_max_romans,0.75,number,罗马最大动员比例(士兵占总人口上限);超过则禁止继续征兵
 pop_race_mobilize_max_gauls,0.70,number,高卢最大动员比例(士兵占总人口上限);超过则禁止继续征兵
 pop_race_mobilize_max_teutons,0.80,number,条顿最大动员比例(士兵占总人口上限);超过则禁止继续征兵
@@ -36,14 +36,14 @@ pop_famine_tick_sec,300,number,饥荒减员定时任务间隔(秒;5分钟=300)
 pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口的比例(其余永久扣除;无伤兵池)
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
-found_min_main_level,4,number,拓荒建村：出发村主基地最低等级（四本阶段）
+found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
 found_settler_count,1,number,拓荒建村：所需拓荒者数量（每名拓荒者占用5人口）
-found_resource_cost_base,3000,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
+found_resource_cost_base,100,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
 found_resource_cost_growth,2,number,开城包递增底数
 found_min_tile_distance,3,number,新村与任意已有村庄的最小六边形距离
 found_max_inflight,1,number,每玩家同时在途的拓荒行军上限
 found_abandon_lock_sec,86400,number,新建分城后禁止放弃的秒数
-gold_tax_per_civilian_per_hour,1,number,每个劳动人口每小时交税金币数（绑定主基地 与人口增速同节奏 不受繁荣度影响）
+gold_tax_per_civilian_per_hour,100,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
 start_gold_amount,100,number,新村初始金币存量（让首座建筑可立即开建）
 trade_route_capacity,500,number,每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各算 1 单位 多条路线叠加）
 trade_caravan_speed,12,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
@@ -51,14 +51,14 @@ trade_npc_gold_per_resource,0.5,number,NPC 订单中每个资源单位的金币�
 trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价 0.8=玩家拿到 80% 基准价值）
 trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易订单上限
 trade_order_ttl_sec,86400,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
-treasure_camp_drop_chance,0.15,number,清理野外营地后掉落宝物的总体概率(0-1,越低越稀有)
-treasure_npc_offer_chance,0.18,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1,每条订单独立判定;≠掉落)
-treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值,向上取整;栏满转卖回收价=目录价)
+treasure_camp_drop_chance,1,number,清理野外营地后掉落宝物的总体概率(0-1
+treasure_npc_offer_chance,1,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1
+treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃
-treasure_carry_troops_per_slot,200,number,军队携带宝物容量换算:每多少兵力+1携带格
-treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值,floor(总兵力/每格兵力数)))
+treasure_carry_troops_per_slot,40,number,军队携带宝物容量换算:每多少兵力+1携带格
+treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值
 ritual_buff_duration_sec,7200,number,祭祀台(ritualBuff)buff持续时长(秒;7200=2小时)
-ritual_buff_pop_cost,5,number,祭祀台(ritualBuff)使用时扣除的劳动人口数(不足则扣除士兵人口)
+ritual_buff_pop_cost,20,number,祭祀台(ritualBuff)使用时扣除的劳动人口数(不足则扣除士兵人口)
 alchemy_refine_sec,3600,number,炼金炉炼化三个同品质宝物所需时间（秒）
 pvp_safe_resource_capacity_ratio,0.20,number,PvP四资源安全库存占基础容量比例
 pvp_safe_gold_base,200,number,PvP金币安全库存基础值
@@ -73,7 +73,7 @@ pvp_raid_power_per_building_level,100,number,玩家掠夺战每消耗多少进�
 pvp_siege_power_per_building_level,100,number,玩家攻城战每消耗多少总进攻战力拆除外围建筑一级
 pvp_siege_weapon_power_per_building_level,100,number,玩家攻城战每消耗多少攻城武器战力拆除城内建筑一级
 pvp_siege_storage_loot_ratio,1,number,玩家攻城战可掠夺仓库与粮仓资源的比例
-villager_request_trigger_chance,0.3,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
+villager_request_trigger_chance,1,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
 villager_request_order_resource,crop,string,幸福村贸易订单所需资源种类（key∈resources.csv）
 villager_request_order_amount,500,number,幸福村贸易订单所需资源数量
 villager_request_spawn_radius,3,number,幸福村生成于玩家村庄周围的六边形环数（仅邻近 3 格内）
@@ -101,11 +101,11 @@ reputation_good_gold_tax_penalty_cap,0.5,number,正声望金币税收下降倍�
 reputation_evil_pve_drop_rate_per_point,0.01,number,每点负声望带来的PvE宝物掉落概率倍率
 reputation_evil_pve_drop_rate_cap,0.5,number,负声望PvE宝物掉落倍率上限（0.5=+50%）
 kingdom_fief_offset_ratio,0.25,number,四封地中心相对世界宽高的偏移比例
-kingdom_task_initial_min_sec,300,number,注册或首次进入王国系统后首次任务最短等待秒数
-kingdom_task_initial_max_sec,600,number,注册或首次进入王国系统后首次任务最长等待秒数
-kingdom_task_interval_min_sec,14400,number,王国任务循环发放最短间隔秒数
-kingdom_task_interval_max_sec,28800,number,王国任务循环发放最长间隔秒数
-kingdom_task_duration_sec,21600,number,每个王国任务的有效期秒数
+kingdom_task_initial_min_sec,1,number,注册或首次进入王国系统后首次任务最短等待秒数
+kingdom_task_initial_max_sec,2,number,注册或首次进入王国系统后首次任务最长等待秒数
+kingdom_task_interval_min_sec,1,number,王国任务循环发放最短间隔秒数
+kingdom_task_interval_max_sec,2,number,王国任务循环发放最长间隔秒数
+kingdom_task_duration_sec,10,number,每个王国任务的有效期秒数
 kingdom_task_tribute_weight,35,number,上贡资源任务抽取权重
 kingdom_task_clear_pve_weight,35,number,清理象限现有PvE营地任务抽取权重
 kingdom_task_attack_evil_weight,15,number,攻打负声望玩家任务抽取权重
@@ -120,7 +120,7 @@ kingdom_task_clear_pve_reward_reputation,3,number,完成清理PvE任务获得的
 kingdom_task_attack_evil_reward_reputation,4,number,完成攻打负声望玩家任务获得的声望
 kingdom_task_eliminate_troops_reward_reputation,5,number,完成消灭负声望玩家兵力任务获得的声望
 kingdom_reinforcement_duration_sec,3600,number,议会厅购买的王国增援抵达后临时驻防时长秒数
-m8_attack_delay_sec,28800,number,m8接受任务后天王老子村发动攻城的延迟秒数
+m8_attack_delay_sec,180,number,m8接受任务后天王老子村发动攻城的延迟秒数
 m8_task_village_spawn_radius,8,number,m8任务村相对主城的随机生成半径
 m8_task_village_resource_amount,500,number,m8任务村每种资源初始库存
 m8_task_village_gold,500,number,m8任务村初始金币
