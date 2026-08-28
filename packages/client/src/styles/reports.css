@@ -154,9 +154,14 @@
 }
 
 /* ── 战斗报告回放（只有战斗卡片使用可点击展开态） ─────────── */
-.report-card--battle.is-expanded {
-  background: linear-gradient(180deg, var(--c-panel-3), var(--c-panel));
-  border-color: var(--line-strong);
+.report-card--battle {
+  display: block;
+}
+
+.battle-report-summary-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
 }
 .report-card-toggle {
   display: flex;
@@ -199,6 +204,7 @@
   transform: translateY(calc(var(--s-1) * 0.5)) rotate(225deg);
 }
 .battle-report-replay {
+  width: 100%;
   margin-top: var(--s-4);
   padding-top: var(--s-4);
   border-top: 1px solid var(--line-strong);

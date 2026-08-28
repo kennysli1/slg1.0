@@ -147,25 +147,27 @@ export function BattleReportCard({ report }: { report: StoredReport }) {
   return (
     <div class={`report-card report-card--battle${expanded ? ' is-expanded' : ''}`} role="listitem">
       <div class="rcard-marker" aria-hidden="true"><span class="rcard-marker-dot" /></div>
-      <div class="rcard-icon"><Icon icon="ui_icon_atk" label="战斗" size="xs" /></div>
-      <div class="rcard-body">
-        <button
-          class="report-card-toggle"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <span class="report-card-summary">
-            <span class="rcard-head">
-              <span class="rcard-kind">战斗报告</span>
-              <time class="rcard-time" dateTime={new Date(report.ts).toISOString()}>{new Date(report.ts).toLocaleTimeString()}</time>
+      <div class="battle-report-summary-row">
+        <div class="rcard-icon"><Icon icon="ui_icon_atk" label="战斗" size="xs" /></div>
+        <div class="rcard-body">
+          <button
+            class="report-card-toggle"
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <span class="report-card-summary">
+              <span class="rcard-head">
+                <span class="rcard-kind">战斗报告</span>
+                <time class="rcard-time" dateTime={new Date(report.ts).toISOString()}>{new Date(report.ts).toLocaleTimeString()}</time>
+              </span>
+              <span class="rcard-text">{report.text}</span>
             </span>
-            <span class="rcard-text">{report.text}</span>
-          </span>
-          <span class="report-card-chevron" aria-hidden="true" />
-        </button>
-        {expanded && <BattleReplay details={details} />}
+            <span class="report-card-chevron" aria-hidden="true" />
+          </button>
+        </div>
       </div>
+      {expanded && <BattleReplay details={details} />}
     </div>
   );
 }
