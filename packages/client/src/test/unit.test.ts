@@ -22,7 +22,6 @@ import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseM
 import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
-import { shouldAdvanceDialogueOnClose } from '../features/village/dialogue-flow.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -668,16 +667,5 @@ describe('任务页菜单折叠偏好', () => {
     assert.deepEqual(readTaskMenuOpenState('player-2', storage), {});
     data.set(taskMenuStorageKey('player-1'), JSON.stringify({ global: 'yes', village: true, nested: 1 }));
     assert.deepEqual(readTaskMenuOpenState('player-1', storage), { village: true });
-  });
-});
-
-describe('任务接取对话段落推进', () => {
-  it('未点击接受时关闭 S3 第一段不会提前弹出接受后文本', () => {
-    assert.equal(shouldAdvanceDialogueOnClose({ replies: [{ key: 'accept' }, { key: 'leave' }] }, false), false);
-  });
-
-  it('点击接受后或没有接受回复的后续段落可以正常推进', () => {
-    assert.equal(shouldAdvanceDialogueOnClose({ replies: [{ key: 'accept' }] }, true), true);
-    assert.equal(shouldAdvanceDialogueOnClose({ replies: [] }, false), true);
   });
 });

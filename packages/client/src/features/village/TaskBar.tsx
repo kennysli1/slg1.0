@@ -17,7 +17,6 @@ import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
-import { shouldAdvanceDialogueOnClose } from './dialogue-flow.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -274,22 +273,13 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
     .filter((item: any) => item && (item.npcName || item.npcText));
   const current = segments[segmentIndex] ?? dialogue;
-  const advance = useCallback(() => {
+  const finish = useCallback(() => {
     if (segmentIndex < segments.length - 1) {
       setSegmentIndex((value) => value + 1);
       return;
     }
     close();
   }, [close, segmentIndex, segments.length]);
-  const finish = useCallback(() => {
-    // 接取对话尚未确认时，关闭/离开不能跳过“接受后”段落；
-    // 接受成功后由 onOk 显式推进到下一段。
-    if (!shouldAdvanceDialogueOnClose(current, accepted)) {
-      close();
-      return;
-    }
-    advance();
-  }, [accepted, advance, close, current]);
   const onReply = async (key: string) => {
     if (busy) return;
     // 多段对话中每个回复都会推进到下一段；accept 仅在首次出现时真正接取任务。
@@ -306,7 +296,7 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
       okToast: '已接取任务',
       onOk: () => {
         setAccepted(true);
-        advance();
+        finish();
       },
     });
     setBusy(false);

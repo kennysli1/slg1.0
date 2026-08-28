@@ -419,7 +419,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 
 同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
 
-S3 的接取后追问已并入 `s3_accept` 对话对象的第 2 段；不再单独维护 `s3_after_accept` entry。M8 成功交付文本并入 `m8_deliver`，M9 成功接取/交付文本分别并入 `m9_accept` / `m9_deliver`，因此成功时使用默认 `accept` / `deliver`。M8/M9 的失败文本仍保留 `m8_deliver_failure`、`m9_accept_m8_failure`、`m9_deliver_m8_failure`，由任务模块按 M8 结局调用。
+S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真正接取成功后弹出；`s3_accept` 只包含接取时的文本。M8 成功交付文本并入 `m8_deliver`，M9 成功接取/交付文本分别并入 `m9_accept` / `m9_deliver`，因此成功时使用默认 `accept` / `deliver`。M8/M9 的失败文本仍保留 `m8_deliver_failure`、`m9_accept_m8_failure`、`m9_deliver_m8_failure`，由任务模块按 M8 结局调用。
 
 ## kingdom_services.csv — 议会厅服务
 
