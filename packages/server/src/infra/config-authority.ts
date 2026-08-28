@@ -117,6 +117,25 @@ function tableKey(row: CsvRow, table: BalanceTableMeta): string {
   return row[table.key ?? ''] ?? '';
 }
 
+/**
+ * Rows removed by a deliberate schema/configuration migration may still be
+ * present in the one-time legacy JSON.  They must be archived rather than
+ * aborting startup (otherwise an old main|5 override would prevent every
+ * release after the main-base model changed to four levels).
+ */
+function isRemovedLegacyRow(name: string, rowKey: string, rows: CsvRow[], table: BalanceTableMeta): boolean {
+  if (name !== 'building_levels' || !table.keyComposite?.includes('code') || !table.keyComposite.includes('level')) return false;
+  const [code, rawLevel] = rowKey.split('|');
+  const level = Number(rawLevel);
+  if (code !== 'main' || !Number.isInteger(level)) return false;
+  const mainLevels = rows
+    .filter((row) => row.code === 'main')
+    .map((row) => Number(row.level))
+    .filter((value) => Number.isInteger(value));
+  const maxLevel = Math.max(...mainLevels);
+  return mainLevels.length > 0 && level > maxLevel;
+}
+
 /** 仅供一次性迁移使用的旧 JSON 表映射。迁移后运行时不再读取 JSON。 */
 const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   buildings: { file: 'buildings.csv', key: 'id', numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'] },
@@ -227,8 +246,24 @@ export function migrateLegacyBalanceOverrides(opts: {
       if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
         throw new Error(`旧配置 ${name} 的行覆盖必须是对象`);
       }
-      const keyColumns = table.keyComposite ?? (table.key ? [table.key] : []);
+      // A canonical CSV may intentionally have fewer rows than an old
+      // balance_overrides.json (for example main|5..10 after the four-stage
+      // main-base migration).  Drop only rows that are provably removed by
+      // that migration; unknown/misspelled rows continue to fail loudly.
+      const activeChanges: Record<string, Record<string, string>> = {};
+      const actualKeys = new Set(doc.rows.map((row) => tableKey(row, table)));
       for (const [rowKey, fields] of Object.entries(changes)) {
+        if (!actualKeys.has(rowKey)) {
+          if (isRemovedLegacyRow(name, rowKey, doc.rows, table)) {
+            ignoredRemoved.push(`${name}.${rowKey}`);
+            continue;
+          }
+          throw new Error(`旧配置 ${name} 引用不存在的行：${rowKey}`);
+        }
+        activeChanges[rowKey] = fields;
+      }
+      const keyColumns = table.keyComposite ?? (table.key ? [table.key] : []);
+      for (const [rowKey, fields] of Object.entries(activeChanges)) {
         if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
           throw new Error(`旧配置 ${name} 行 ${rowKey} 的字段覆盖必须是对象`);
         }
@@ -237,12 +272,7 @@ export function migrateLegacyBalanceOverrides(opts: {
           if (keyColumns.includes(field)) throw new Error(`旧配置 ${name} 不允许覆盖主键字段：${field}`);
         }
       }
-      const rows = mergeOverridesIntoRows(doc.rows, table, changes);
-      const incomingKeys = new Set(Object.keys(changes));
-      const actualKeys = new Set(doc.rows.map((row) => tableKey(row, table)));
-      for (const key of incomingKeys) {
-        if (!actualKeys.has(key)) throw new Error(`旧配置 ${name} 引用不存在的行：${key}`);
-      }
+      const rows = mergeOverridesIntoRows(doc.rows, table, activeChanges);
       doc.rows = rows;
       writeFileSync(path, serializeCsv(doc), 'utf8');
       changedFiles.push(table.file);
