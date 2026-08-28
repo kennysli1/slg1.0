@@ -293,6 +293,12 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(page.body, /只有 npcName、npcText、replies 可编辑/);
     assert.equal(parsed.rows[0]?.taskCode, 's3');
     assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const byKey = new Map(parsed.rows.map((row) => [`${row.code}:${row.segment}`, row]));
+    assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
+    assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
+    assert.match(byKey.get('m8_deliver_success:1')?.npcText ?? '', /英明的战略决策/);
+    assert.match(byKey.get('m9_accept_m8_success:1')?.npcText ?? '', /乘胜追击/);
+    assert.match(byKey.get('m9_deliver_m8_failure:1')?.npcText ?? '', /缴获了一个宝物/);
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
@@ -313,6 +319,18 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
   }
+});
+
+test('/config 首页将配置入口置于页面顶部', async () => {
+  const { fastify } = buildFastify();
+  await fastify.ready();
+  const page = await fastify.inject({ method: 'GET', url: '/config' });
+  assert.equal(page.statusCode, 200);
+  const nav = page.body.indexOf('href="/config/balance"');
+  const notice = page.body.indexOf('这里修改的是版本化游戏配置');
+  assert.ok(nav >= 0, '配置中心首页必须保留配置入口');
+  assert.ok(notice >= 0 && nav < notice, '配置入口应出现在说明和状态卡片之前');
+  await fastify.close();
 });
 
 test('/config/quest-modules 页面脚本可解析并生成可切换标签', async () => {
