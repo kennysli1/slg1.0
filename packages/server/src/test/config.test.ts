@@ -47,6 +47,11 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   // 城镇中心 1 级槽位配额
   const t1 = cfg.townCenterSlots[1];
   assert.ok(t1 && t1.inner > 0 && t1.outer > 0 && t1.queue >= 2, '开局应有城内/城外槽位与≥2队列');
+  assert.deepEqual(
+    [1, 2, 3, 4].map((level) => [cfg.townCenterSlots[level]?.inner, cfg.townCenterSlots[level]?.outer]),
+    [[4, 6], [8, 10], [12, 14], [16, 18]],
+    '主基地每升一级应新增4个城内格和4个城外格',
+  );
 });
 
 test('校验器：合法配置不抛错', () => {

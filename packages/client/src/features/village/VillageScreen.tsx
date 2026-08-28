@@ -204,8 +204,12 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
   const hasTreasures = !!getCache().treasures;
   // 主基地是发展阶段核心，不占用城内/城外建造格；总数口径只统计
   // 玩家可以规划的两类建筑格，避免把固定的主基地重复算进“已启用地块”。
-  const placedCount = (vil.zones?.inner?.placed?.length ?? 0) + (vil.zones?.outer?.placed?.length ?? 0);
-  const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0);
+  const innerUsed = vil.zones?.inner?.placed?.length ?? 0;
+  const innerSlots = vil.zones?.inner?.slots ?? 0;
+  const outerUsed = vil.zones?.outer?.placed?.length ?? 0;
+  const outerSlots = vil.zones?.outer?.slots ?? 0;
+  const placedCount = innerUsed + outerUsed;
+  const slotCount = innerSlots + outerSlots;
   const setWorkspace = (field: keyof VillageWorkbenchPreferences, open: boolean) => {
     setPreferences((previous) => {
       const next = { ...previous, [field]: open };
@@ -223,7 +227,7 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
           id="village-building-management"
           eyebrow="发展工作区"
           title="建筑与城务"
-          summary={`${placedCount}/${slotCount} 个城内外建筑格已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
+          summary={`城内 ${innerUsed}/${innerSlots}、城外 ${outerUsed}/${outerSlots}（合计 ${placedCount}/${slotCount}）已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
           open={preferences.developmentOpen}
           onToggle={() => setWorkspace('developmentOpen', !preferences.developmentOpen)}
         >
