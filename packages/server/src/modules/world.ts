@@ -28,7 +28,7 @@ export interface Tile {
   refId?: string;
   /** 展示名 */
   name?: string;
-  /** 图标基名（pve 目标用，渲染时拼 /art/+基名+.png）；村庄不带，前端用默认主基地图 */
+  /** 图标基名（pve/村庄阶段图标，渲染时拼 /art/+基名+.png）。 */
   icon?: string;
   /** 主导地貌；只影响展示与内容分布，当前不参与行军/战斗。 */
   terrain?: Terrain;
@@ -81,6 +81,8 @@ export class WorldModule {
     this.rebuildPlan();
     this.normalizeTiles();
     this._bus.on('player.VillageRenamed', (evt: DomainEvent) => this.onVillageRenamed(evt));
+    this._bus.on('building.Built', (evt: DomainEvent) => this.onMainBaseChanged(evt));
+    this._bus.on('building.Upgraded', (evt: DomainEvent) => this.onMainBaseChanged(evt));
     this.commands.register('world.GetTile', (c) => this.getTile(c));
     this.commands.register('world.GetMeta', (c) => this.getMeta(c));
     this.commands.register('world.AllocateSpawn', (c) => this.allocateSpawn(c));
@@ -92,9 +94,16 @@ export class WorldModule {
     this.commands.register('world.PlaceVillage', (c) => this.placeVillage(c));
     this.commands.register('world.RestoreVillage', (c) => this.restoreVillage(c));
     this.commands.register('world.MoveVillage', (c) => this.moveVillage(c));
+    this.commands.register('world.UpdateVillageStage', (c) => this.updateVillageStage(c));
     this.commands.register('world.PlacePve', (c) => this.placePve(c));
     this.commands.register('world.RemoveTile', (c) => this.removeTile(c));
     this.commands.register('world.FindFreeTile', (c) => this.findFreeTile(c));
+  }
+
+  private onMainBaseChanged(evt: DomainEvent): void {
+    const p = evt.payload as { villageId?: string; kind?: string; level?: number; name?: string; icon?: string };
+    if (p.kind !== 'main' || !p.villageId || !Number.isFinite(Number(p.level))) return;
+    this.updateVillageStage({ payload: p } as Command);
   }
 
   /** Player owns the name; World mirrors it onto its map tile through an event. */
@@ -162,7 +171,7 @@ export class WorldModule {
       const key = hexKey(slot.q, slot.r);
       const tile = this.store.get<Tile>(COLLECTION_TILE, key);
       if (tile && tile.kind !== 'empty') continue;
-      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name });
+      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name, icon: 'bld_main' });
       return { ok: true, payload: { ...slot } };
     }
     return { ok: false, payload: {}, reason: 'world_capacity_exhausted' };
@@ -237,7 +246,7 @@ export class WorldModule {
     if (this.plan!.spawnSlots.some((slot) => slot.q === w.q && slot.r === w.r)) {
       return { ok: false, payload: {}, reason: 'spawn_slot_reserved' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name });
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name, icon: 'bld_main' });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -250,7 +259,7 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty' && exist.refId !== refId) {
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name });
+    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name, icon: 'bld_main' });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -284,7 +293,7 @@ export class WorldModule {
       this.store.set<Tile>(COLLECTION_TILE, sourceKey, { q: source!.q, r: source!.r, kind: 'empty' });
     }
     this.store.set<Tile>(COLLECTION_TILE, targetKey, {
-      q: target.q, r: target.r, kind: 'village', refId, name,
+      q: target.q, r: target.r, kind: 'village', refId, name, icon: source?.icon ?? targetTile?.icon ?? 'bld_main',
     });
     return {
       ok: true,
@@ -294,6 +303,16 @@ export class WorldModule {
         previous: source ? { q: source.q, r: source.r } : undefined,
       },
     };
+  }
+
+  /** 镜像主基地阶段到地图瓦片；名称仍由 Player 的村庄名拥有，这里只更新阶段图标。 */
+  private updateVillageStage(cmd: Command): CommandResult {
+    const p = cmd.payload as { villageId?: string; icon?: string; level?: number };
+    if (!p.villageId || typeof p.icon !== 'string' || !p.icon) return { ok: false, payload: {}, reason: 'bad_village_stage' };
+    const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === p.villageId);
+    if (!tile) return { ok: false, payload: {}, reason: 'village_tile_not_found' };
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, icon: p.icon });
+    return { ok: true, payload: { villageId: p.villageId, q: tile.q, r: tile.r, icon: p.icon, level: p.level } };
   }
 
   /** 查询 (q,r) 到最近村庄的六边形距离；无村庄时 distance=Infinity 用 -1 表示。 */

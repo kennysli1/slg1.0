@@ -108,7 +108,13 @@ for (let i = 0; i < canonical.rows.length; i += 1) {
   // Only fields present in the canonical header can be overlaid. This keeps
   // newly removed fields out while preserving every manually edited value.
   for (const column of canonical.header) {
-    if (persistedColumns.has(column)) target[column] = overlay[column] ?? '';
+    if (!persistedColumns.has(column)) continue;
+    // A blank in an old shared row means “no override” for a newly introduced
+    // numeric/config column. Do not let it erase a non-empty canonical default
+    // (notably tavern.taskSideQuestChance=0.5). Explicit zero remains a real
+    // override because it is serialized as the string "0".
+    if ((overlay[column] ?? '') === '' && (target[column] ?? '') !== '') continue;
+    target[column] = overlay[column] ?? '';
   }
 }
 

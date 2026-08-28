@@ -483,7 +483,7 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['maxLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -544,7 +544,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   // 科研系统
   research: {
     file: 'research.csv', key: 'id',
-    numeric: ['tier', 'effectValue', 'durationSec', 'rpCost'],
+    numeric: ['tier', 'mainBaseLevel', 'effectValue', 'durationSec', 'rpCost'],
     labels: ['id', 'code', 'name', 'branch', 'tier', 'requires', 'effectType', 'effectKey', 'scope'],
   },
   academy: {
@@ -883,8 +883,8 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
+  var bFields = ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','主基地最低级','繁荣/级','人口增长/级·时'];
   var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
@@ -1554,7 +1554,15 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     for (const name of Object.keys(BALANCE_TABLES)) {
       let rows = loadCsv(join(dir, BALANCE_TABLES[name].file));
       if (name === 'building_levels') {
-        for (const r of rows) r.name = buildingNames[r.code] ?? r.code;
+        for (const r of rows) {
+          r.name = buildingNames[r.code] ?? r.code;
+          // 旧版共享 CSV 可能在新增的酒馆专属列留下空值。空值在配置编辑器中
+          // 表示“未覆盖”，运行时会回退到 0.5；直接展示空白会误导管理员，
+          // 因此这里返回实际运行时默认值，保存时仍允许明确填 0 关闭支线刷新。
+          if (r.code === 'tavern' && (r.taskSideQuestChance === undefined || r.taskSideQuestChance.trim() === '')) {
+            r.taskSideQuestChance = '0.5';
+          }
+        }
       }
       data[name] = rows;
     }

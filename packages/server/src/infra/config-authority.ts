@@ -119,7 +119,7 @@ function tableKey(row: CsvRow, table: BalanceTableMeta): string {
 
 /** 仅供一次性迁移使用的旧 JSON 表映射。迁移后运行时不再读取 JSON。 */
 const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
-  buildings: { file: 'buildings.csv', key: 'id', numeric: ['maxLevel', 'prosperityPerLevel', 'popGrowthPerLevel'] },
+  buildings: { file: 'buildings.csv', key: 'id', numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'] },
   building_levels: { file: 'building_levels.csv', keyComposite: ['code', 'level'], numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'taskRefreshSec', 'taskMaxTasks', 'taskSideQuestChance', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'] },
   units: { file: 'units.csv', key: 'id', numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'] },
   mercenaries: { file: 'mercenaries.csv', key: 'id', numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'goldCost'] },
@@ -130,7 +130,7 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   pve_defenders: { file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'], numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'carry'] },
   treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'] },
   constants: { file: 'game_constants.csv', key: 'key', numericByType: true },
-  research: { file: 'research.csv', key: 'id', numeric: ['tier', 'effectValue', 'durationSec', 'rpCost'] },
+  research: { file: 'research.csv', key: 'id', numeric: ['tier', 'mainBaseLevel', 'effectValue', 'durationSec', 'rpCost'] },
   academy: { file: 'academy.csv', key: 'level', numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'] },
 };
 

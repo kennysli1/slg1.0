@@ -216,7 +216,7 @@ test('校验器：building_levels 缺级应抛错', () => {
       ...cfg.buildings,
       main: {
         ...cfg.buildings['main'],
-        levels: (() => { const cp = { ...cfg.buildings['main'].levels }; delete cp[5]; return cp; })(),
+        levels: (() => { const cp = { ...cfg.buildings['main'].levels }; delete cp[3]; return cp; })(),
       },
     },
   };

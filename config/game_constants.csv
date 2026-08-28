@@ -36,7 +36,7 @@ pop_famine_tick_sec,300,number,饥荒减员定时任务间隔(秒;5分钟=300)
 pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口的比例(其余永久扣除;无伤兵池)
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
-found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
+found_min_main_level,4,number,拓荒建村：出发村主基地最低等级（四本阶段）
 found_settler_count,1,number,拓荒建村：所需拓荒者数量（每名拓荒者占用5人口）
 found_resource_cost_base,3000,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
 found_resource_cost_growth,2,number,开城包递增底数
