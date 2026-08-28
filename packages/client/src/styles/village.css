@@ -1644,3 +1644,105 @@
   .empire-workspace-actions { width: 100%; min-width: 0; flex-direction: column; align-items: stretch; }
   .empire-workspace-toggle { min-height: 56px; }
 }
+
+/* ── 王国页村庄指挥条：滚动时保留当前操作上下文 ── */
+.village-command-dock {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--tabbar-h));
+  z-index: calc(var(--z-tabbar) - 1);
+  display: grid;
+  grid-template-columns: minmax(220px, .38fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--s-3);
+  min-height: 104px;
+  margin-bottom: var(--s-1);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--c-bg);
+  box-shadow: var(--sh-2);
+}
+.village-command-dock__village,
+.village-command-dock__resources {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.village-command-dock__village { justify-content: center; }
+.village-command-dock__resources .kingdom-resource-ledger,
+.village-command-dock__resources .kingdom-resource-ledger > .panel {
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
+}
+.village-command-dock__resources .kingdom-resource-grid { height: 100%; align-items: stretch; }
+.kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
+.kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
+.village-command-dock__eyebrow {
+  color: var(--c-gold-dim);
+  font-family: var(--ff-display);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: .14em;
+  line-height: 1;
+}
+
+/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。 */
+.empire-workspace-grid--both-closed,
+.empire-workspace-grid--both-open {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.empire-workspace-grid--development-open,
+.empire-workspace-grid--military-open {
+  grid-template-columns: minmax(0, 1fr);
+}
+.empire-workspace-grid--development-open .empire-workspace-entry,
+.empire-workspace-grid--military-open .empire-workspace-entry {
+  grid-column: 1 / -1;
+}
+.empire-workspace-entry,
+.empire-workspace-entry .empire-workspace-panel { min-width: 0; }
+.empire-workspace-grid--both-closed .empire-workspace-entry,
+.empire-workspace-grid--both-closed .empire-workspace-panel { height: 100%; }
+.empire-workspace-entry {
+  scroll-margin-top: calc(var(--topbar-h) + var(--tabbar-h) + var(--s-7) + var(--s-6) + var(--s-5) + var(--s-4));
+}
+
+@media (max-width: 960px) and (min-width: 721px) {
+  .village-command-dock { grid-template-columns: minmax(190px, .46fr) minmax(0, 1fr); }
+  .village-command-dock__resources .kingdom-resource-grid { gap: var(--s-1); }
+  .kingdom-resource-ledger--embedded .kingdom-resource-row { padding: var(--s-1); }
+}
+
+@media (max-width: 720px) {
+  .village-command-dock {
+    /* Mobile shell stacks brand + resource rows; keep the dock below that header. */
+    position: sticky;
+    top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--safe-t));
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    margin-bottom: 0;
+    padding: var(--s-2) 0;
+    background: var(--c-bg);
+    box-shadow: var(--sh-1);
+  }
+  .village-command-dock__village { gap: var(--s-2); }
+  .village-command-dock__resources .kingdom-resource-ledger > .panel { padding: var(--s-2); }
+  .village-command-dock__resources .kingdom-resource-grid {
+    display: flex;
+    height: auto;
+    align-items: stretch;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .village-command-dock__resources .kingdom-resource-grid::-webkit-scrollbar { display: none; }
+  .kingdom-resource-ledger--embedded .kingdom-resource-row {
+    flex: 0 0 min(42vw, 164px);
+    min-height: 52px;
+  }
+  .empire-workspace-grid--both-closed,
+  .empire-workspace-grid--both-open,
+  .empire-workspace-grid--development-open,
+  .empire-workspace-grid--military-open { grid-template-columns: minmax(0, 1fr); }
+  .empire-workspace-entry { scroll-margin-top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--s-4) + var(--s-3) + var(--s-7)); }
+}

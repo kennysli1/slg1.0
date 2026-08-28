@@ -21,7 +21,7 @@ import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
-import { readVillageWorkbenchPreferences, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
+import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 
 describe('modalLayerZ', () => {
@@ -673,6 +673,13 @@ describe('任务页菜单折叠偏好', () => {
 });
 
 describe('王国工作区折叠偏好', () => {
+  it('用四态纯函数决定工作区布局，单开时可让页面使用全宽', () => {
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: false }), 'empire-workspace-grid--both-closed');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: false }), 'empire-workspace-grid--development-open');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: true }), 'empire-workspace-grid--military-open');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: true }), 'empire-workspace-grid--both-open');
+  });
+
   it('初次读取默认收起，按玩家与村庄隔离保存', () => {
     const data = new Map<string, string>();
     const storage = {

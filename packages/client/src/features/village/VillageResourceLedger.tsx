@@ -5,15 +5,20 @@ import { resInfo, resourceKeys } from '../../app/config.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Bar, Icon, Panel, SectionHead } from '../../ui/index.js';
 
-export function VillageResourceLedger() {
+interface VillageResourceLedgerProps {
+  /** The kingdom dock supplies its own context heading to keep the bar compact. */
+  embedded?: boolean;
+}
+
+export function VillageResourceLedger({ embedded = false }: VillageResourceLedgerProps = {}) {
   tick.value;
   dataVersion.value;
   const resource = getCache().res;
   if (!resource) return null;
 
   return (
-    <section class="kingdom-resource-ledger" aria-label="当前村庄资源">
-      <SectionHead sub="随当前操作村庄切换；建造、训练与行军均使用这些库存">当前村庄 · 资源账本</SectionHead>
+    <section class={`kingdom-resource-ledger${embedded ? ' kingdom-resource-ledger--embedded' : ''}`} aria-label="当前村庄资源">
+      {!embedded && <SectionHead sub="随当前操作村庄切换；建造、训练与行军均使用这些库存">当前村庄 · 资源账本</SectionHead>}
       <Panel variant="flat" pad>
         <div class="kingdom-resource-grid">
           {resourceKeys().map((key) => {
