@@ -3,8 +3,8 @@
  *
  * 覆盖设计文档 13/14「硬上限重做」核心不变量：
  *  C1  三部族 createVillage 开局人口=城镇中心popCap：currentPop=Σmain[1..level].popCap，hardCap>currentPop（其他默认建筑只提供上限），softLimit===availableLabor
- *  C2  平民占比驱动繁荣度：新村无士兵→平民占总人口100%→繁荣度满值1.0；建兵营抬高硬上限不降繁荣度（与上限解耦，原「升级得负收益」bug 已修复）；
- *      征兵(setGarrisonPop)降平民占比→降繁荣度（仍≥popLaborFloor）；四轴统一；开局存在正增长潜力(growthPerHour>0)
+ *  C2  平民占比驱动繁荣度：新村无士兵→平民占总人口100%→获得完整额外加成；建兵营抬高硬上限不降繁荣度（与上限解耦，原「升级得负收益」bug 已修复）；
+ *      征兵(setGarrisonPop)降平民占比→取消繁荣度额外加成；四轴统一；开局存在正增长潜力(growthPerHour>0)
  *  C3  全部兵种 cropPerHourEach>0（士兵以 upkeep 计入口粮，训练严格增加粮食压力）
  *  C4  增长朝 availableLabor 线性收敛：growthPerHour 始终是实际速率，结算时才夹在缺口内
  *  C5  平民口粮口径 = currentPop×popCropPerLabor（快照 civilianCropPerHour）
@@ -74,15 +74,15 @@ for (const tribe of ['romans', 'gauls', 'teutons'] as const) {
 test('v3 C2：平民占比驱动繁荣度——新村满值、升上限不变、征兵下降', async () => {
   const app = freshApp();
   const vid = await reg(app, 'c2', 'romans');
-  const floor = app.config.constants.popLaborFloor;
+  const maxBonus = app.config.constants.popProsperityMaxBonus;
 
   // 1) 新村：无士兵 → 平民占总人口=100% → 繁荣度满值（与硬上限无关）
   const snap0 = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   assert.equal(snap0.soldierPop, 0, '新村应无士兵');
   assert.ok(snap0.laborRatio > 0 && snap0.laborRatio <= 1.0 + 1e-6, `laborRatio 应∈(0,1]，实际 ${snap0.laborRatio}`);
   assert.ok(Math.abs(snap0.laborRatio - 1) < 1e-6, `无士兵→平民占比应≈100%，实际 ${snap0.laborRatio}`);
-  // 平民占比 100% → prosperityBonus=1 → prosperityMult=1.0（满值，与人口上限无关）
-  assert.ok(Math.abs(snap0.prosperityMult - 1) < 1e-6, `无士兵 prosperityMult 应≈1.0，实际 ${snap0.prosperityMult}`);
+  // 平民占比 100% → prosperityBonus=1 → 获得完整额外加成（与人口上限无关）
+  assert.ok(Math.abs(snap0.prosperityMult - (1 + maxBonus)) < 1e-6, `无士兵 prosperityMult 应≈${1 + maxBonus}，实际 ${snap0.prosperityMult}`);
   // 存在增长潜力：growthPerHour>0（速率=main.popGrowthPerLevel×mainLevel，缺口>0）
   assert.ok(snap0.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${snap0.growthPerHour}`);
   // 四轴统一
@@ -110,14 +110,43 @@ test('v3 C2：平民占比驱动繁荣度——新村满值、升上限不变、
     `升上限不应改变平民占比（${before.laborRatio}→${afterBuild.laborRatio}）`,
   );
 
-  // 3) 征兵（SetGarrisonPop）：平民占比下降 → 繁荣度下降（仍≥popLaborFloor）
+  // 3) 征兵（SetGarrisonPop）：平民占比下降 → 额外加成归零，但基础倍率保持 1.0
   await send(app, 'population.SetGarrisonPop', { villageId: vid, popCostSum: 1000 });
   await flush();
   const afterSoldiers = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   assert.ok(afterSoldiers.soldierPop > 0, `应有士兵上报，实际 ${afterSoldiers.soldierPop}`);
   assert.ok(afterSoldiers.laborRatio < before.laborRatio - 1e-6, `征兵后平民占比应下降（${before.laborRatio}→${afterSoldiers.laborRatio}）`);
   assert.ok(afterSoldiers.prosperityMult < before.prosperityMult - 1e-6, `征兵后繁荣度应下降（${before.prosperityMult}→${afterSoldiers.prosperityMult}）`);
-  assert.ok(afterSoldiers.prosperityMult >= floor - 1e-6, `繁荣度不应低于 popLaborFloor(${floor})，实际 ${afterSoldiers.prosperityMult}`);
+  assert.ok(afterSoldiers.prosperityMult >= 1 - 1e-6, `繁荣倍率不应低于基础值 1.0，实际 ${afterSoldiers.prosperityMult}`);
+  assert.equal(afterSoldiers.prosperityMult, 1, '达到动员上限以下的劳动人口占比时，只取消额外加成');
+});
+
+test('v3 C2b：70%劳动人口占比获得完整额外加成，动员上限时仅保留基础倍率', async () => {
+  const app = freshApp();
+  const vid = await reg(app, 'c2b', 'romans');
+  const stored = app.store.get<any>('population', vid);
+  assert.ok(stored, '人口状态应存在');
+  const cap = stored.hardCap;
+  const maxBonus = app.config.constants.popProsperityMaxBonus;
+
+  // 罗马动员上限默认 75%，因此劳动人口占比 70% 已达到繁荣度满值。
+  app.store.set('population', vid, {
+    ...stored, currentPop: cap * 0.70, garrisonPopCost: cap * 0.30,
+    enRoutePopCost: 0, trainingPopCost: 0, lastTick: clock,
+  });
+  const full = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.ok(Math.abs(full.laborRatio - 0.70) < 0.01, `劳动人口占比应约70%，实际 ${full.laborRatio}`);
+  assert.ok(Math.abs(full.prosperityMult - (1 + maxBonus)) < 0.01,
+    `70%劳动人口应获得完整 +${maxBonus * 100}% 额外加成，实际 ${full.prosperityMult}`);
+
+  // 达到罗马 75% 动员上限时，额外加成为 0%，基础倍率仍为 1.0。
+  app.store.set('population', vid, {
+    ...stored, currentPop: cap * 0.25, garrisonPopCost: cap * 0.75,
+    enRoutePopCost: 0, trainingPopCost: 0, lastTick: clock,
+  });
+  const minimum = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.ok(Math.abs(minimum.laborRatio - 0.25) < 0.01, `劳动人口占比应约25%，实际 ${minimum.laborRatio}`);
+  assert.equal(minimum.prosperityMult, 1, '达到动员上限时应仅取消额外加成，保留基础倍率');
 });
 
 // ── C3：兵种口粮 ──────────────────────────────────────────────────────────
@@ -375,8 +404,8 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
   assert.equal(typeof snap.inFamine, 'boolean');
   // 范围
   assert.ok(snap.laborRatio >= 0 && snap.laborRatio <= 1, `laborRatio(${snap.laborRatio}) 应在 [0,1]`);
-  assert.ok(snap.prosperityMult >= app.config.constants.popLaborFloor - 0.01 && snap.prosperityMult <= 1.01,
-    `prosperityMult 应在 [popLaborFloor,1.0]（${snap.prosperityMult}）`);
+  assert.ok(snap.prosperityMult >= 1 - 0.01 && snap.prosperityMult <= 1 + app.config.constants.popProsperityMaxBonus + 0.01,
+    `prosperityMult 应在 [1.0,${1 + app.config.constants.popProsperityMaxBonus}]（${snap.prosperityMult}）`);
   assert.equal(snap.softLimit, snap.hardCap, 'softLimit 应等于 hardCap（拓荒门槛取硬上限）');
 
   // push 事件也含这些字段（通过 ConsumePop 触发）

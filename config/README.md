@@ -233,6 +233,8 @@
 
 声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。配置中心 `/config/balance` 会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
 
+人口繁荣度参数：`pop_prosperity_full_ratio` 是劳动人口占总人口比例达到繁荣满值的阈值（默认 70%），`pop_prosperity_max_bonus` 是满值时资源产量、建造、训练和研究的额外速率加成（默认 +30%）。劳动人口占比在本族动员上限对应的最低值时额外加成为 0；低繁荣度只取消这层额外加成，不降低基础产值或把耗时变长。
+
 王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
 |----|------|
@@ -260,6 +262,8 @@
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 | march_point_base | 0 | 每座城镇的基础行军点数 |
 | march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
+| pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
+| pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
@@ -318,7 +322,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | baseProbability | 基础成功概率（0~1） |
 | probabilityGainPerFail | 每次失败累积的概率增量（保底机制，避免长期不出点） |
 | maxProbability | 概率上限 |
-| popFactor | 人口对概率的影响系数（0=不受影响，1=满人口时概率翻倍） |
+| popFactor | 总人口对科研点判定的影响系数（0=不受影响；按 `totalPop / hardCap` 同时提高成功概率并缩短判定间隔，1=满硬上限时因子翻倍） |
 
 ## village_templates.csv — 各部族开局布局
 | 列 | 含义 |

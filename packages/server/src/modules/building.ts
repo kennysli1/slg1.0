@@ -309,8 +309,8 @@ export class BuildingModule {
     }
     const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
     let timeSec = Math.max(1, Math.round(baseSec * speedup));
-    // 人口建造加速：population.GetLaborMult('main') 返回 prosperityMult ∈ [popLaborFloor,1.0]，
-    // 越高越快 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
+    // 人口建造加速：population.GetLaborMult('main') 返回 1.0 起步的繁荣度倍率，
+    // 只提供额外加速 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
     try {
       const res = await this.commands.send({
         name: 'population.GetLaborMult',

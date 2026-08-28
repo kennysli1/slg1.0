@@ -117,7 +117,39 @@ test('正直的心：科研状态下发实际缩短后的判定间隔', async ()
   assert.equal(applied.ok, true);
   const state = await send(app, 'research.GetState', { villageId: va });
   assert.equal(state.ok, true);
-  assert.equal((state.payload as any).intervalSec, 3240, 'Lv1 基础 3600 秒应按 0.9 倍显示为 3240 秒');
+  // 人口因子按实时总人口/硬上限计算，和宝物倍率一起缩短显示间隔。
+  const pop = (await send(app, 'population.GetSnapshot', { villageId: va })).payload as any;
+  const popFactor = app.config.academy[1].popFactor;
+  const populationMult = 1 + popFactor * Math.min(1, pop.totalPop / pop.hardCap);
+  const expected = Math.max(1, Math.round((3600 * 0.9) / populationMult));
+  assert.equal((state.payload as any).intervalSec, expected, `Lv1 间隔应按人口因子 ${populationMult.toFixed(3)} 与宝物 0.9 计算`);
+});
+
+test('科研：总人口（含士兵）提高判定成功因子并缩短间隔', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '科研人口因子', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId as string;
+  const basePopulation = {
+    villageId: va, currentPop: 10, hardCap: 100, mainLevel: 1,
+    garrisonPopCost: 0, enRoutePopCost: 0, trainingPopCost: 0,
+    tribe: 'romans', lastTick: clock, inFamine: false,
+  };
+  app.store.set('population', va, { ...basePopulation });
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [], treasureTechIntervalMult: 1,
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+  const low = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(low.ok, true);
+  const lowInterval = (low.payload as any).intervalSec as number;
+  // 士兵足迹属于总人口：current=10 + garrison=40 = 50/100，人口因子=1+0.5×0.5=1.25。
+  app.store.set('population', va, { ...basePopulation, garrisonPopCost: 40 });
+  const high = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(high.ok, true);
+  const highInterval = (high.payload as any).intervalSec as number;
+  assert.ok(highInterval < lowInterval, `总人口增加后判定间隔应缩短（${lowInterval}→${highInterval}）`);
+  assert.equal(highInterval, Math.round(3600 / 1.25), '人口因子应按含士兵总人口计算');
 });
 
 // ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────

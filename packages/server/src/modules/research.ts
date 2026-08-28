@@ -175,14 +175,15 @@ export class ResearchModule {
   }
 
   // ── 命令 ──
-  private getState(cmd: Command): CommandResult {
+  private async getState(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     const s = this.ensureState(villageId);
     const params = s.academy.highestLevel > 0 ? this.config.academy[s.academy.highestLevel] : null;
+    const popMult = s.academy.academyCount > 0 && params ? await this.getPopFactor(villageId) : 1;
     // 与 settleRp/tickRp 使用同一倍率，确保「正直的心」在科研页显示实际判定间隔，
-    // 而不是只在后台调度器中生效、页面仍显示基础间隔。
+    // 而不是只在后台调度器中生效、页面仍显示基础间隔。总人口越多，判定间隔越短。
     const intervalSec = s.academy.academyCount > 0 && params
-      ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1)))
+      ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1) / popMult))
       : 0;
     return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
   }
@@ -227,7 +228,12 @@ export class ResearchModule {
     if (!this.prereqsMet(villageId, tech.requires)) return { ok: false, payload: {}, reason: 'prerequisites_not_met' };
     if (s.rp < tech.rpCost) return { ok: false, payload: {}, reason: 'insufficient_rp' };
     s.rp -= tech.rpCost;
-    const durationMs = tech.durationSec * 1000;
+    // 繁荣度只提供研究耗时的额外加速；繁荣度倍率从 1.0 起步，不会让基础研发更慢。
+    const laborRes = await this.commands.send({
+      name: 'population.GetLaborMult', from: ResearchModule.NAME, payload: { villageId, buildingKind: 'academy' },
+    });
+    const laborMult = laborRes.ok ? Math.max(1, Number((laborRes.payload as any).mult) || 1) : 1;
+    const durationMs = Math.max(1, Math.round((tech.durationSec * 1000) / laborMult));
     const taskId = this.scheduler.schedule(durationMs, () => this.completeResearch(villageId, techCode), `research-tech:${villageId}`);
     s.researching = { code: techCode, startedAt: this.now(), durationMs, totalDurationMs: durationMs, taskId };
     this.store.set(COLLECTION, villageId, s);
@@ -400,7 +406,7 @@ export class ResearchModule {
 
     // 惰性回溯：计算从上一次判定到现在的 tick 数
     const now = this.now();
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1)));
+    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
     let lastCheck = s.academy.lastCheckTime || now;
     if (lastCheck > now) lastCheck = now;
     let failStreak = s.academy.failStreak;
@@ -458,19 +464,21 @@ export class ResearchModule {
     s.academy.lastCheckTime = this.now();
     this.store.set(COLLECTION, villageId, s);
 
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1)));
+    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
     this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
   }
 
   // ── 辅助 ──
 
-  /** 查询人口模块获取人口因子：popMult = 1 + popFactor × (currentPop / hardCap)。异常时返回 1（不影响概率）。 */
+  /** 查询人口模块获取科研人口因子：popMult = 1 + popFactor × (totalPop / hardCap)。
+   * totalPop 包括平民、驻军、在途与训练中的士兵；异常时返回 1（不影响概率/间隔）。 */
   private async getPopFactor(villageId: string): Promise<number> {
     try {
       const res = await this.commands.send({ name: 'population.GetSnapshot', from: ResearchModule.NAME, payload: { villageId } });
       if (!res.ok) return 1;
       const p = res.payload as any;
-      const ratio = p.hardCap > 0 ? (p.currentPop ?? 0) / Math.max(1, p.hardCap) : 0;
+      const totalPop = Number(p.totalPop) || (Number(p.currentPop) || 0) + (Number(p.soldierPop) || 0) + (Number(p.trainingPop) || 0);
+      const ratio = p.hardCap > 0 ? Math.min(1, Math.max(0, totalPop / Math.max(1, p.hardCap))) : 0;
       const params = this.config.academy[this.ensureState(villageId).academy.highestLevel];
       const popFactor = params?.popFactor ?? 0;
       return 1 + popFactor * ratio;

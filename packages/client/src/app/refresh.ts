@@ -227,6 +227,7 @@ function applyPopPayload(p: any, merge = false): void {
     // 露天仓库溢出扣减系数（0~1，四资源均溢率）：服务端 publicPayload 携带，逐字段 pick 时必须带上
     overflowRatio: Number(pick(p.overflowRatio, prev?.overflowRatio ?? 0)),
     popProsperityFullRatio: pick(p.popProsperityFullRatio, prev?.popProsperityFullRatio),
+    popProsperityMaxBonus: pick(p.popProsperityMaxBonus, prev?.popProsperityMaxBonus),
     mainLevel: Number(pick(p.mainLevel, prev?.mainLevel ?? 1)),
     inFamine,
     goldPerHour: Number(pick(p.goldPerHour, prev?.goldPerHour ?? 0)),

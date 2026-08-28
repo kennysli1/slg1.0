@@ -2,7 +2,7 @@
  * Population panel — ported from population.ts to Preact + signals.
  * Subscribes to tick (local interpolation) and dataVersion (server updates).
  * Shows: total/hardCap bar, civilian/soldier/training breakdown, growth/h,
- * prosperity (繁荣度), five-axis laborMults, and famine/cap status tags.
+ * prosperity (繁荣度), four-axis laborMults, and famine/cap status tags.
  */
 import { tick, dataVersion } from '../../app/store.js';
 import { getPopState, interpolatePop, interpolateTotalPop } from '../../app/state.js';
@@ -10,7 +10,8 @@ import { fmt } from '../../shared/utils/format.js';
 import { Bar, Panel, SectionHead, StatGrid, Stat, Tag } from '../../ui/index.js';
 
 function multPct(mult: number): string {
-  return `${Math.round(mult * 100)}%`;
+  const extra = Math.round((mult - 1) * 100);
+  return `${extra >= 0 ? '+' : ''}${extra}%`;
 }
 
 export function PopPanel() {
@@ -28,9 +29,10 @@ export function PopPanel() {
   const nearCap = !ps.inFamine && rawRatio >= 0.85 && rawRatio < 1.0;
 
   const growthDisplay = atCap ? (ps.potentialGrowthPerHour ?? 0) : ps.growthPerHour;
-  const prosperityPct = Math.round(ps.prosperityMult * 100);
+  const prosperityPct = Math.round((ps.prosperityMult - 1) * 100);
   const laborRatioPct = Math.round((ps.laborRatio ?? 0) * 100);
   const fullThreshPct = Math.round((ps.popProsperityFullRatio ?? 0.7) * 100);
+  const maxBonusPct = Math.round((ps.popProsperityMaxBonus ?? 0.3) * 100);
 
   const barKind = ps.inFamine ? 'crimson' as const
     : nearCap || atCap ? 'ember' as const
@@ -140,13 +142,13 @@ export function PopPanel() {
           }
         />
         <Stat icon="ui_icon_pop" label="平民占比" value={`${laborRatioPct}%`} title="平民 / 总人口，驱动繁荣度" />
-        <Stat icon="ui_icon_pop" label="繁荣系数" value={`${prosperityPct}%`} title={`平民占比 ≥ ${fullThreshPct}% 时满值 100%，影响五轴生产速率`} />
+        <Stat icon="ui_icon_pop" label="繁荣额外加成" value={`${prosperityPct >= 0 ? '+' : ''}${prosperityPct}%`} title={`劳动人口占比达到 ${fullThreshPct}% 时满值 +${maxBonusPct}%；达到动员上限时为 0%，不降低基础速率`} />
       </StatGrid>
 
       {/* Five-axis prosperity multipliers */}
       <div>
         <div style={{ marginBottom: 'var(--s-2)' }}>
-          <SectionHead sub={`平民占比 ≥ ${fullThreshPct}% 时满值`}>繁荣度系数 · 五轴加速</SectionHead>
+          <SectionHead sub={`劳动人口占比 ≥ ${fullThreshPct}% 时额外 +${maxBonusPct}%`}>繁荣度额外加成 · 四轴</SectionHead>
         </div>
         <div class="pop-mults-grid">
           {AXES.map(({ label, val }) => {
@@ -161,6 +163,7 @@ export function PopPanel() {
         </div>
         <Panel variant="sunken" pad style={{ marginTop: 'var(--s-2)' }}>
           <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)', lineHeight: 1.55, margin: 0 }}>
+            繁荣度只提供额外速率：劳动人口占比达到动员上限对应的最低值时为 0%，达到阈值时为 +{maxBonusPct}%，不会把基础产值降到 100% 以下。
             训练士兵 = 劳动人口转化为军队，总人数守恒（大数字不闪烁）。
             士兵占人口并受本族动员上限 <strong style={{ color: 'var(--c-gold)' }}>{Math.round((ps.mobilizeCap ?? 0) * 100)}%</strong> 约束，
             且按 popCost×(默认口粮 + 军晌) 计耗粮。
