@@ -1,6 +1,6 @@
 id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,upkeep,costWood,costClay,costIron,costCrop,trainSec,building,traits,popCost,vision
 #数字ID(跨表引用用),代码标识(英文,勿改),所属部族(语义串),显示名,图标基名(渲染时拼 /art/+基名+.png),形态(melee近战前排/ranged远程后排),近战攻击力,远程攻击力,近战防御(挨近战时耐久),远程防御(挨远程时耐久),移动速度,负重(掠夺量),每小时耗粮,木材造价,泥土造价,铁矿造价,粮食造价,训练秒数/个,所需建筑(建筑数字ID),特性ID列表(竖线|分隔,引用unit_traits.csv数字id,可空),每兵消耗人口数,视野(六边形格数)
-1,legionnaire,romans,军团兵,unit_legionnaire,melee,40,0,35,50,100,50,1,12,10,15,3,2.7,4,1,1,2
+1,legionnaire,romans,军团兵,unit_legionnaire,melee,40,0,35,50,100,50,1,12,10,15,3,2.7,4,1,1,10
 2,praetorian,romans,禁卫兵,unit_praetorian,melee,20,0,70,65,100,20,1,10,13,16,7,3.3,4,1|2,1,2
 3,imperian,romans,帝国兵,unit_imperian,melee,75,0,40,25,7,50,1,15,16,21,8,3.8,4,9,1,2
 4,equlegati,romans,侦察骑兵,unit_equlegati,melee,0,0,20,10,100,0,2,14,16,2,4,3,5,,2,5
