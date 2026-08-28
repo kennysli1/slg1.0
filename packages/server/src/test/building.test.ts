@@ -206,17 +206,17 @@ test('城镇中心升级逐等级开放城内槽位（无平坡）', async () =>
     await app.scheduler.advanceTo(clock + 300_000, setClock);
     const l = await layout(app);
     assert.equal(l.townCenter.level, target, `城镇中心达 ${target} 级`);
-    assert.equal(l.zones.inner.slots - prevInner, 2, `主基地升到 ${target} 级应新增 2 个城内格`);
-    assert.equal(l.zones.outer.slots - prevOuter, 2, `主基地升到 ${target} 级应新增 2 个城外格`);
+    assert.equal(l.zones.inner.slots - prevInner, 4, `主基地升到 ${target} 级应新增 4 个城内格`);
+    assert.equal(l.zones.outer.slots - prevOuter, 4, `主基地升到 ${target} 级应新增 4 个城外格`);
     assert.equal(
       (l.zones.inner.slots + l.zones.outer.slots) - (prevInner + prevOuter),
-      4,
-      `主基地升到 ${target} 级应新增 4 个建筑格`,
+      8,
+      `主基地升到 ${target} 级应新增 8 个建筑格`,
     );
     prevInner = l.zones.inner.slots;
     prevOuter = l.zones.outer.slots;
   }
-  assert.equal(prevInner + prevOuter, inner1 + outer1 + 12, '1→4 本总共应新增 12 个城内外建筑格');
+  assert.equal(prevInner + prevOuter, inner1 + outer1 + 24, '1→4 本总共应新增 24 个城内外建筑格');
 });
 
 // ── 拆除（DemolishBuilding）────────────────────────────────────────
