@@ -186,8 +186,17 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--c-gold-hi);
-  font-size: var(--f-md);
-  line-height: 1;
+}
+.report-card-chevron::before {
+  content: '';
+  width: var(--s-2);
+  height: var(--s-2);
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(calc(var(--s-1) * -0.5)) rotate(45deg);
+}
+.report-card--battle.is-expanded .report-card-chevron::before {
+  transform: translateY(calc(var(--s-1) * 0.5)) rotate(225deg);
 }
 .battle-report-replay {
   margin-top: var(--s-4);

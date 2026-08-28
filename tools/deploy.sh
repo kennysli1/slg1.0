@@ -34,7 +34,10 @@ ARCHIVE="$DEPLOY_TMP/deploy.tgz"
 REMOTE_ARCHIVE="/tmp/kow-deploy-$$.tgz"
 REMOTE_STATE="/tmp/kow-deploy-$$.state"
 # 明确使用吞吐型 QoS；部分公网链路会将交互式 SSH QoS 限速到几 KB/s，导致发布包上传长时间停滞。
-SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o IPQoS=throughput)
+# Keep long archive uploads alive across brief idle/packet-loss periods on the
+# production link.  Without explicit keepalives sshd/NAT may close an active
+# legacy-SCP stream before the release can be atomically installed.
+SSH_OPTS=(-i "$DEPLOY_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no -o IPQoS=throughput -o ServerAliveInterval=15 -o ServerAliveCountMax=20)
 DEPLOY_PENDING=0
 
 # 在耗时的隔离验证前确认发布通道。失败时绝不切换生产 current。
