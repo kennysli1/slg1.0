@@ -5,6 +5,7 @@ import { Icon } from '../ui/index.js';
 
 const tabs: { key: TabKey; name: string; icon: string }[] = [
   { key: 'village', name: '王国', icon: 'ui_tab_village' },
+  { key: 'tasks', name: '任务', icon: 'ui_seal_gold' },
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
   { key: 'tech', name: '科技', icon: 'bld_academy' },
   { key: 'reports', name: '战报', icon: 'ui_tab_reports' },
@@ -27,7 +28,7 @@ export function TabBar() {
       {tabs.map((item) => {
         const badge = item.key === 'reports' ? pending
           : item.key === 'map' ? marching
-            : item.key === 'village' ? taskOffers : 0;
+            : item.key === 'tasks' ? taskOffers : 0;
         return (
           <button
             key={item.key}
@@ -38,7 +39,7 @@ export function TabBar() {
           >
             <Icon icon={item.icon} label="" decorative size="sm" />
             <span>{item.name}</span>
-            {badge > 0 && <span class="tab-badge" aria-label={item.key === 'village' ? `${badge} 个可接受任务` : `${badge} 条待处理信息`}>{badge}</span>}
+            {badge > 0 && <span class="tab-badge" aria-label={item.key === 'tasks' ? `${badge} 个可接受任务` : `${badge} 条待处理信息`}>{badge}</span>}
           </button>
         );
       })}
