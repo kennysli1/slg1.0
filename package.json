@@ -24,6 +24,7 @@
     "test:all": "npm run test:server && npm run test -w @slg/client",
     "test:deploy": "node scripts/deploy-smoke.mjs",
     "test:ops": "bash scripts/release-layout.test.sh",
+    "verify:config-sync": "node --import tsx scripts/verify-config-sync.mjs",
     "guard": "node scripts/guard/run.mjs",
     "hooks:install": "node scripts/setup-hooks.mjs",
     "worktree:prepare": "npm ci && npm run hooks:install",

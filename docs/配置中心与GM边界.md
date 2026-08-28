@@ -27,6 +27,8 @@ summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 发布时不会再用共享旧 CSV 整文件覆盖新 release。`tools/remote-release.sh` 调用 `scripts/merge-persisted-config.mjs`，以各表稳定主键把共享值叠加到 Git 默认表：已有行保留 GM 数值，Git 新增的行/列自动进入生产，Git 删除的行不会被旧共享文件复活。这样 GM 手调值仍是同一行的权威值，同时不会遮蔽后续新增参数。
 5. PR checks 通过后按 `CLAUDE.md` 的顺序合并和运行 `npm run deploy:prod`。发布脚本会在构建和激活前覆盖共享配置，并校验迁移/配置文件，确保服务器、GitHub 和当前 release 使用同一版本。
 
+配置同步 PR 的 CI 会执行构建、lint、类型检查、所有 CSV 的全图解析/交叉表校验和运维布局测试。普通代码 PR 继续执行完整单元测试；配置值本身允许在配置中心调整，因此不会用针对“出厂默认值”的行为断言阻断合法调参。配置校验通过后仍必须按同一条 PR → squash merge → `deploy:prod` 链路发布。
+
 生产机可把 `GITHUB_CONFIG_SYNC_TOKEN`（以及可选的 repo/API 地址）写入 `shared/config.env`，发布脚本会在 PM2 重启前加载该文件；它不进入 release 压缩包、Git 或日志。没有 token 时仍可运行游戏，管理员可补齐密钥后在配置中心点击重试。
 
 配置中心的“热重载”只表示当前进程重新读取 CSV，不等同于 GitHub 合并或生产发布。发布失败不应手动覆盖 `current`，按部署手册回滚。
