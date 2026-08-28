@@ -126,8 +126,8 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
 fi
 
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
-# 在构建/启动前覆盖回 release，既让 GM 修改跨部署保留，又不会冻结未被 GM
-# 编辑过的其它新配置。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
+# 都把共享 CSV 按主键合并到 Git 的默认 CSV：保留已有手调值，同时带入新增列/行，
+# 不会让旧整文件覆盖遮住新参数。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
 apply_persisted_config() {
   local target="$1"
   local manifest="$SHARED/data/balance_csv_files.list"
@@ -135,7 +135,14 @@ apply_persisted_config() {
   while IFS= read -r file || [[ -n "$file" ]]; do
     [[ "$file" =~ ^[A-Za-z0-9_.-]+\.csv$ ]] || continue
     [[ -f "$SHARED/config/$file" && -d "$target/config" ]] || continue
-    cp -p "$SHARED/config/$file" "$target/config/$file"
+    local merger="$target/scripts/merge-persisted-config.mjs"
+    if [[ -f "$merger" ]]; then
+      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file"
+    else
+      # 仅兼容没有该工具的旧 release/测试夹具；新发布包始终走按主键合并。
+      echo "    警告：$merger 不存在，暂时整文件覆盖 $file" >&2
+      cp -p "$SHARED/config/$file" "$target/config/$file"
+    fi
   done < "$manifest"
 }
 
@@ -199,7 +206,6 @@ if [[ -d "$TARGET" ]]; then
 else
   mkdir "$STAGING"
   tar xzf "$ARCHIVE" -C "$STAGING"
-  apply_persisted_config "$STAGING"
   ln -s ../../shared/data "$STAGING/data"
   ln -s ../../shared/logs "$STAGING/logs"
   printf '%s\n' "$MAIN_SHA" > "$STAGING/.release-commit"
@@ -212,7 +218,8 @@ else
   CREATED_TARGET=1
 fi
 
-# 目标 release 已存在时也要重新套用最新 GM CSV（例如同一 SHA 重试发布）。
+# 构建完成后再套用最新 GM CSV；构建阶段使用 Git 默认配置，避免共享旧表
+# 把新增参数遮住。目标 release 已存在时也同样重新合并（例如同一 SHA 重试发布）。
 apply_persisted_config "$TARGET"
 migrate_legacy_config "$TARGET"
 # 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
