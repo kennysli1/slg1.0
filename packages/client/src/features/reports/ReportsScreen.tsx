@@ -32,7 +32,7 @@ const KIND_META: Record<ReportKind, { label: string; icon: string }> = {
 
 const FILTERS: Array<{ key: FilterKind; label: string; icon: string }> = [
   { key: 'all', label: '全部动态', icon: 'ui_seal_gold' },
-  ...(['battle', 'build', 'march', 'treasure', 'alarm', 'pop', 'research'] as ReportKind[])
+  ...(['battle'] as ReportKind[])
     .map((key) => ({ key, ...KIND_META[key] })),
 ];
 
