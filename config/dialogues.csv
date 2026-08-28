@@ -36,3 +36,8 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 37,m10_deliver,m10,deliver,1,,,
 38,m11_accept,m11,accept,1,,,
 39,m11_deliver,m11,deliver,1,,,
+40,m12_accept,m12,accept,1,,,
+41,m12_deliver,m12,deliver,1,,,
+42,m13_accept,m13,accept,1,,,
+43,m13_deliver,m13,deliver,1,,,
+44,my_effort_use,t1,use,1,,,

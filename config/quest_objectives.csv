@@ -18,3 +18,5 @@ o-villager,s3,deliver_to_npc,crop:500,1
 o-investigate,s4,clear_camp,rats:3,1
 o-m10,m10,main_base_level,2,1
 o-m11,m11,explore_tiles,200,1
+o-m12,m12,clear_camp,bandits:2,1
+o-m13,m13,investigate_task_village,secret_camp,1

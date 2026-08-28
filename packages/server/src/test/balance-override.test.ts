@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGameApp } from '../app.js';
 import { applyBalanceEdits, BALANCE_TABLES } from '../gateway/gm.js';
-import { mergeOverridesIntoRows } from '../infra/config.js';
+import { loadGameConfig, mergeOverridesIntoRows } from '../infra/config.js';
 import { ConfigAuthority, migrateLegacyBalanceOverrides } from '../infra/config-authority.js';
 import { parseCsvStructured } from '../infra/csv.js';
 
@@ -131,6 +131,7 @@ test('旧覆盖迁移：新版主基地删除的旧等级行只归档，不阻�
   const state = tempDir('kow-config-migration-main-level-');
   const overridePath = join(state, 'balance_overrides.json');
   try {
+    const baselineMainL4 = loadGameConfig(cfg.dir).buildings.main.levels[4].popCap;
     writeFileSync(overridePath, JSON.stringify({
       building_levels: {
         'main|5': { popCap: '99' },
@@ -144,7 +145,7 @@ test('旧覆盖迁移：新版主基地删除的旧等级行只归档，不阻�
     assert.equal(existsSync(overridePath), false);
     const app = createGameApp({ now: () => 1, manualScheduler: true, configDir: cfg.dir });
     assert.equal(app.config.buildings.main.levels[1].popCap, 11);
-    assert.equal(app.config.buildings.main.levels[4].popCap, 20);
+    assert.equal(app.config.buildings.main.levels[4].popCap, baselineMainL4);
   } finally {
     cfg.cleanup();
     rmSync(state, { recursive: true, force: true });

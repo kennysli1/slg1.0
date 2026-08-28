@@ -150,7 +150,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -181,6 +181,7 @@ export interface QuestObjective {
   researchCode?: string;
   /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
   taskVillageCode?: string;
+  /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -1423,6 +1424,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     }
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
+    if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
@@ -1503,7 +1505,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const conditionalRewards = conditionalRewardsOf(allEffects);
     const requires = questGraph.edges.filter((x) => x.toQuest === def.code && x.relation === 'requires').sort((a, b) => a.order - b.order).map((x) => x.fromQuest);
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
-    if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
+    // 一个任务可以由多个独立 offer 条件共同触发；运行时会按声明的 group
+    // 逐项评估。legacy trigger 仅保留第一条供旧客户端显示。
     const trigger = offer[0]
       ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' || offer[0].kind === 'tavern_refresh'
         ? offer[0].kind
@@ -1717,7 +1720,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1870,7 +1873,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1919,12 +1922,14 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] raid_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'defend_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
+    } else if (q.objective.kind === 'investigate_task_village') {
+      if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'side' && !(q.type === 'main' && q.trigger.startsWith('main_base_level:'))) errors.push(`quests.csv[${q.code}] 仅支线或主基地门槛主线可设触发条件 trigger`);
+      if (q.type !== 'side' && !(q.type === 'main' && (q.trigger.startsWith('main_base_level:') || q.trigger.startsWith('building_level:') || q.trigger.startsWith('treasure_used:')))) errors.push(`quests.csv[${q.code}] 仅支线或主基地/建筑/宝物使用门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
@@ -1993,7 +1998,8 @@ export function validateGameConfig(config: GameConfig): void {
     dialogueCodes.add(d.code);
     if (!Number.isInteger(d.id) || d.id < 1) errors.push(`dialogues.csv[${d.code}] id 必须为正整数`);
     if (!Number.isInteger(d.segment) || d.segment < 1) errors.push(`dialogues.csv[${d.code}] segment 必须为正整数`);
-    if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
+    // 宝物使用对话沿用 t1…tN 的排序 taskCode，但并不绑定任务。
+    if (!questCodes.has(d.taskCode) && !(d.trigger === 'use' && /^t\d+$/.test(d.taskCode) && /_use$/.test(d.code))) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
     if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
     dialogueTriggers.add(`${d.taskCode}:${d.trigger}`);
     const group = dialogueGroups.get(d.code) ?? [];

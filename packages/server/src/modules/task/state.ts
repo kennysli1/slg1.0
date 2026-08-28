@@ -50,6 +50,7 @@ export interface TaskInstance {
   natalieDecision?: 'store' | 'release';
   taskVillageId?: string;
   taskVillageXY?: { q: number; r: number };
+  taskVillageName?: string;
   taskVillageAttackAt?: number;
   taskVillageAttackDispatched?: boolean;
   outcome?: 'success' | 'failure';

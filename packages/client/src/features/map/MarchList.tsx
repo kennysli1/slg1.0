@@ -33,6 +33,7 @@ const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   explore:   (_) => '探索返程',
   auto_explore: (_) => '自动探索',
   ambush:    (_) => '伏击军',
+  investigate: (_) => '调查军',
   incoming_scout: (_) => '途中侦察',
 };
 
@@ -122,7 +123,7 @@ export function MarchList() {
                 await act(req('RecallGarrison', { movementId: m.id }), { okToast: '驻扎军开始返程' });
               }}>召回</Btn>
               <Btn size="sm" variant="primary" onClick={() => {
-                garrisonContinue.value = { movementId: m.id, movementType: type === 'ambush' ? 'ambush' : 'garrison' };
+                garrisonContinue.value = { movementId: m.id, movementType: type === 'ambush' ? 'ambush' : type === 'investigate' ? 'investigate' : 'garrison' };
                 selected.value = null;
                 showToast('请在地图上选择驻扎军的下一处目标');
               }}>行军</Btn>

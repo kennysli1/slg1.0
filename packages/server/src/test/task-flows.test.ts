@@ -167,6 +167,12 @@ test('③ GM 重新触发已放弃支线 -> 移出 abandonedSide 并重新可接
 test('主线人口门槛包含驻军人口', async () => {
   const app = freshApp();
   const va = await reg(app, 'population-task');
+  // 开局人口由主基地逐级配置决定（当前配置为10，而不是旧版固定20）。
+  // 将平民池设为20，保持本测试对“再增加10名士兵后总人口=30”的验证目标。
+  const population = app.store.get<any>('population', va);
+  assert.ok(population, '注册后应存在人口状态');
+  population.currentPop = 20;
+  app.store.set('population', va, population);
   app.store.set('task', va, baseState(va, {
     m3: { code: 'm3', type: 'main', acceptedAt: clock, submitted: {}, camps: [], campCleared: 0, progress: 0 },
   }));

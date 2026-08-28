@@ -54,7 +54,8 @@ test('Population RecoverCasualties: v5 战死按医院等级回收平民（无�
 
   const snap1 = (await app.commands.send({ name: 'population.GetSnapshot', from: 't', payload: { villageId: vid } })).payload as any;
   assert.ok(snap1.currentPop >= initPop + expectedRecovered - 1e-6, `战死回收应使平民+${expectedRecovered}（${initPop}→${snap1.currentPop}）`);
-  assert.ok(snap1.currentPop <= snap1.hardCap, `currentPop 不应超过 hardCap（${snap1.currentPop} vs ${snap1.hardCap}）`);
+  // 超出硬上限时由繁荣度模块施加额外惩罚，人口本身不再被强行截断。
+  assert.ok(Number.isFinite(snap1.currentPop) && snap1.currentPop >= 0, `回收后 currentPop 应为有效非负数（${snap1.currentPop}）`);
   assert.equal(snap1.wounded, undefined, 'v5 快照不应含 wounded 字段');
 
   const popState = app.store.get<any>('population', vid);

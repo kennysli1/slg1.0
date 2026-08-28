@@ -51,6 +51,8 @@ export interface TreasureEffects {
   soldierFoodReduce: number;
   /** 正直的心：科技点判定间隔倍率（乘数，默认 1；<1 表示更快）。 */
   techIntervalMult: number;
+  /** 黑色徽章：清理 PvE 营地时的额外掉落概率。 */
+  pveDropRateBonus: number;
 }
 
 interface TreasureState {
@@ -203,6 +205,7 @@ export class TreasureModule {
     this.commands.register('treasure.SetExpectedArrival', (c) => this.setExpectedArrival(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
+    this.commands.register('treasure.GetPveDropRateBonus', (c) => this.getPveDropRateBonus(c));
     this.commands.register('treasure.ExchangeQuestFlag', (c) => this.exchangeQuestFlag(c));
     // 炼金炉消耗宝物：由 alchemy owner 通过命令请求，避免跨模块直读 treasure 存档。
     this.commands.register('treasure.RemoveForAlchemy', (c) => this.removeForAlchemy(c));
@@ -509,6 +512,7 @@ export class TreasureModule {
     let cavalryTrainMult = 1;
     let soldierFoodReduce = 0;
     let techIntervalMult = 1;
+    let pveDropRateBonus = 0;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -550,6 +554,11 @@ export class TreasureModule {
           defMult = 1 + (defMult - 1) + total;
           break;
         }
+        case 'blackBadge':
+          atkMult = 1 + (atkMult - 1) + frac;
+          defMult = 1 + (defMult - 1) + frac;
+          pveDropRateBonus += 0.05;
+          break;
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -557,7 +566,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
@@ -977,6 +986,13 @@ export class TreasureModule {
     return { ok: true, payload: { effects: this.aggregate([]) } };
   }
 
+  private getPveDropRateBonus(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const s = this.ensureState(villageId);
+    return { ok: true, payload: { bonus: this.aggregate(this.activeCodes(s), s.victoryFlagBonus ?? 0).pveDropRateBonus } };
+  }
+
   /**
    * 使用宝物：仅对特殊宝物(instantGold)有效，发放 effectValue 金币并移除。
    * 被动宝物不可「使用」，返回 reason='not_usable'。
@@ -989,6 +1005,16 @@ export class TreasureModule {
     if (!t || t.applyType !== 'instant') return { ok: false, payload: {}, reason: 'not_usable' };
     if (!this.removeStored(s, code, location)) return { ok: false, payload: {}, reason: 'not_held' };
     this.store.set(COLLECTION, villageId, s);
+    // 使用宝物本身是任务触发事件（例如“我的努力”→m13）；事件在消耗
+    // 成功后立即发出，避免客户端对话关闭与任务解锁之间出现竞态。
+    await this.bus.emit({ name: 'treasure.Used', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code } } as DomainEvent);
+
+    if (t.effectType === 'dialogue') {
+      const dialogue = await this.commands.send({ name: 'dialogue.StartForTreasure', from: TreasureModule.NAME, payload: { villageId, treasureCode: code } });
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { dialogue: dialogue.ok ? (dialogue.payload as any)?.dialogue ?? null : null, codes: this.storedCodes(s) } };
+    }
 
     if (t.effectType === 'instantGold') {
       const gold = t.effectValue;
@@ -1237,7 +1263,12 @@ export class TreasureModule {
     } catch { /* 声望模块不可用时保持旧概率，兼容启动顺序/旧测试夹具 */ }
 
     // 门控：未命中总体概率 → 无掉落
-    const hit = forceCode ? true : this.rng() < Math.min(1, baseChance * chanceMult);
+    let pveBonus = 0;
+    if (!forceCode) {
+      const bonusRes = await this.commands.send({ name: 'treasure.GetPveDropRateBonus', from: TreasureModule.NAME, payload: { villageId } });
+      pveBonus = bonusRes.ok ? Math.max(0, Number((bonusRes.payload as any)?.bonus) || 0) : 0;
+    }
+    const hit = forceCode ? true : this.rng() < Math.min(1, baseChance * chanceMult + pveBonus);
     if (!hit) return { ok: true, payload: { dropped: null } };
 
     // 加权抽选宝物（按 dropRate 轮盘赌）

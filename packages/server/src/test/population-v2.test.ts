@@ -306,7 +306,9 @@ test('v3 C7：粮荒停止后发出 recovery 事件，inFamine 变 false', async
   const initSnap = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
   const initPop = initSnap.currentPop as number;
   // 新模型开局人口=城镇中心popCap（约20，远低于硬上限），需把口粮压力放大足以在 8h 内耗尽存量
-  const modestUpkeep = initPop * c7c.popCropPerLabor * 8;
+  // 配置中心允许调整开局库存与资源田产量，使用足够大的耗粮压力保证
+  // 本测试在任意合法调参下都能进入粮荒，而不是依赖旧版 750 粮食初始值。
+  const modestUpkeep = Math.max(1, initPop * c7c.popCropPerLabor * 1000);
   await send(app, 'economy.SetBaseRate', { villageId: vid, resource: 'crop', ratePerHour: 0.001 });
   await send(app, 'economy.SetUpkeep', { villageId: vid, source: 'test_heavy', cropPerHour: modestUpkeep });
 
