@@ -882,9 +882,9 @@ export class TasksModule {
     }
     if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
     // 仅建村自动激活的 m1 展示一次自动对话；手动接取的任务由 StartAccept 返回接取对话。
-    // 接取对话（包括 S3 的多段 accept session）不再另排 after_accept 待处理记录，
-    // 避免玩家在完成接取对话后再次看到同一段文本。
+    // S3 的接取后追问是独立的 after_accept 对话，必须在任务真正接取成功后排入待弹队列。
     if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
+    else if (q.type === 'side' && code === 's3') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }

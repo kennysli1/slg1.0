@@ -319,8 +319,9 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
       assert.ok(configured.has(`${code}:deliver`), `GM 对话表应预置 ${code} 交付模板`);
     }
     assert.ok(configured.has('s3:accept'), 'GM 对话表应包含 S3 接取模板');
-    assert.ok(byKey.get('s3_accept:2'), 'GM 对话表应包含 S3 接取对话第二段');
-    assert.equal(byKey.get('s3_after_accept:1'), undefined, 'GM 对话表不应保留 S3 旧 after_accept entry');
+    assert.equal(byKey.get('s3_accept:2'), undefined, 'GM 对话表不应把 S3 after_accept 当作接取第二段');
+    assert.ok(byKey.get('s3_after_accept:1'), 'GM 对话表应包含 S3 独立 after_accept 对话');
+    assert.ok(configured.has('s3:after_accept'), 'GM 对话表应包含 S3 接取后模板');
     const bad = await fastify.inject({
       method: 'POST', url: '/config/dialogues/save',
       headers: { 'content-type': 'application/json' },

@@ -94,7 +94,7 @@ test('dialogue：自动任务对话快照也携带完整段落组', async () => 
   assert.equal(pending.dialogue.segments[1].npcText, '愿我们一起重建家园。');
 });
 
-test('dialogue：S3 接取对话包含当前村民的第二段，接取后不再排队旧 after_accept', async () => {
+test('dialogue：S3 接取后排队独立的 after_accept 对话', async () => {
   const app = createGameApp({ now: () => 3_000_000, manualScheduler: true });
   app.setupWorld();
   const registered = await send(app, 'player.Register', { name: 's3-after', password: 'pass1', tribe: 'romans' });
@@ -108,19 +108,22 @@ test('dialogue：S3 接取对话包含当前村民的第二段，接取后不再
   const started = await send(app, 'task.StartAccept', { villageId, code: 's3' });
   assert.equal(started.ok, true, started.reason);
   const dialogue = (started.payload as any).dialogue;
-  assert.equal(dialogue.segmentCount, 2);
-  assert.deepEqual(dialogue.segments.map((item: any) => item.segment), [1, 2]);
-  assert.equal(dialogue.segments[1].code, 's3_accept');
-  assert.equal(dialogue.segments[1].npcName, 's3-after的村庄的村民');
-  assert.equal(dialogue.segments[1].npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
-  assert.deepEqual(dialogue.segments[1].replies, []);
+  assert.equal(dialogue.segmentCount, 1);
+  assert.equal(dialogue.code, 's3_accept');
+  assert.equal(dialogue.npcName, '幸福村的村民');
 
   const accepted = await send(app, 'task.Accept', { villageId, code: 's3' });
   assert.equal(accepted.ok, true, accepted.reason);
   const snapshot = await send(app, 'task.GetPlayerState', { playerId: player.id });
   assert.equal(snapshot.ok, true, snapshot.reason);
-  assert.equal(((snapshot.payload as any).pendingDialogues ?? [])
-    .some((item: any) => item.taskCode === 's3' && item.trigger === 'after_accept'), false);
+  const pending = ((snapshot.payload as any).pendingDialogues ?? [])
+    .find((item: any) => item.taskCode === 's3' && item.trigger === 'after_accept');
+  assert.ok(pending, '接受成功后应排队独立 after_accept 对话');
+  assert.equal(pending.dialogue.code, 's3_after_accept');
+  assert.equal(pending.dialogue.segmentCount, 1);
+  assert.equal(pending.dialogue.npcName, 's3-after的村庄的村民');
+  assert.equal(pending.dialogue.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
+  assert.deepEqual(pending.dialogue.replies, []);
   assert.ok((app.store.get<any>('task', villageId)!).active.s3);
 });
 
