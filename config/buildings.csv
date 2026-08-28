@@ -22,6 +22,6 @@ id,code,name,icon,zone,resource,maxLevel,mainBaseLevel,requires,prosperityPerLev
 20,tavern,酒馆,bld_tavern,inner,,5,1,1:1,2,0,接取任务的中枢 等级越高随机任务刷新越频繁可接取数量越多,每级加快随机任务刷新并增加可接取任务数,-1
 21,alchemy,炼金炉,bld_alchemy,inner,,1,1,1:1,3,0,将三个相同品质的宝物炼化为一个更高品质的随机宝物,每次炼化消耗三个宝物并按掉率抽取更高品质宝物,-1
 22,vault,保险库,bld_vault,inner,,10,1,1:1,4,0,保护城镇资源和金币免受攻城战掠夺,每级增加木材泥土铁粮与金币的安全储备,-1
-23,council,议会厅,bld_main,inner,,5,1,1:3,6,0,与所属封地领主议事并用声望购买王国服务,每级解锁更强的王国物资增援宝物与代打服务,1
+23,council,议会厅,bld_main,inner,,5,2,,6,0,与所属封地领主议事并用声望购买王国服务,每级解锁更强的王国物资增援宝物与代打服务,1
 24,explorers_guild,探险家协会,bld_explorers_guild,outer,,1,1,1:1,4,0,训练冒险者并派出执行探索与侦察任务,可训练冒险者,-1
 25,alliance_hall,联盟大厅,bld_main,inner,,1,2,,4,0,联盟成员管理大厅（功能将在联盟系统中开放）,需要联盟系统,1
