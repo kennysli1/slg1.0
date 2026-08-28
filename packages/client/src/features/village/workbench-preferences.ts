@@ -10,6 +10,27 @@ export interface VillageWorkbenchPreferences {
   militaryOpen: boolean;
 }
 
+export type VillageWorkbenchLayout =
+  | 'both-closed'
+  | 'development-open'
+  | 'military-open'
+  | 'both-open';
+
+/**
+ * Resolve the workbench geometry from state, rather than asking CSS to infer
+ * it from descendants. This keeps the one-open layouts full width and makes
+ * the four interaction states straightforward to test.
+ */
+export function villageWorkbenchLayoutClass(
+  preferences: Pick<VillageWorkbenchPreferences, 'developmentOpen' | 'militaryOpen'>,
+): `empire-workspace-grid--${VillageWorkbenchLayout}` {
+  const { developmentOpen, militaryOpen } = preferences;
+  const layout: VillageWorkbenchLayout = developmentOpen
+    ? militaryOpen ? 'both-open' : 'development-open'
+    : militaryOpen ? 'military-open' : 'both-closed';
+  return `empire-workspace-grid--${layout}`;
+}
+
 export interface VillageWorkbenchStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
