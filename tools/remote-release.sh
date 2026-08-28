@@ -161,6 +161,17 @@ migrate_legacy_config() {
     "$NODE_BIN" "$target/packages/server/dist/infra/config-authority.js" --migrate
 }
 
+archive_legacy_source() {
+  # 首次迁移前，旧生产目录 BASE/data 里可能还留有一份覆盖文件。若不把
+  # 这份已复制并成功迁移的源文件移走，下一次发布会再次复制/迁移它，
+  # 反复生成相同的配置 revision 和 GitHub PR。仅在迁移成功且 shared 中
+  # 已不存在活动覆盖时归档；失败会在此之前触发回滚，源文件保持可重试。
+  local source="$BASE/data/balance_overrides.json"
+  [[ -f "$source" && ! -e "$SHARED/data/balance_overrides.json" ]] || return 0
+  mkdir -p "$BASE/backups"
+  mv "$source" "$BASE/backups/balance_overrides.legacy-source.$(date -u +%Y%m%dT%H%M%SZ).json"
+}
+
 PREVIOUS_MODE=legacy
 PREVIOUS_PATH="$BASE"
 if [[ -L "$CURRENT" ]]; then
@@ -222,6 +233,7 @@ fi
 # 把新增参数遮住。目标 release 已存在时也同样重新合并（例如同一 SHA 重试发布）。
 apply_persisted_config "$TARGET"
 migrate_legacy_config "$TARGET"
+archive_legacy_source
 # 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
 apply_persisted_config "$TARGET"
 
