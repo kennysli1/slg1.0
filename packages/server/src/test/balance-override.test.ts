@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGameApp } from '../app.js';
@@ -154,6 +155,26 @@ test('mergeOverridesIntoRows：非法数值仍被拒绝', () => {
     assert.throws(() => mergeOverridesIntoRows(doc.rows, { file: 'buildings.csv', key: 'id', numeric: ['popGrowthPerLevel'] }, { '1': { popGrowthPerLevel: 'abc' } }), /不是合法数字/);
   } finally {
     cfg.cleanup();
+  }
+});
+
+test('发布配置合并：旧十级城镇中心不能覆盖新版主基地四级上限', () => {
+  const dir = tempDir('kow-config-merge-script-');
+  const canonical = join(dir, 'buildings.csv');
+  const persisted = join(dir, 'persisted-buildings.csv');
+  try {
+    writeFileSync(canonical, 'id,code,maxLevel,mainBaseLevel\n1,main,4,1\n2,warehouse,10,1\n');
+    // 这是升级前 shared/config 中仍可能存在的旧表头与旧主基地等级。
+    writeFileSync(persisted, 'id,code,maxLevel\n1,main,10\n2,warehouse,10\n');
+    const repoRoot = existsSync(join(process.cwd(), 'scripts', 'merge-persisted-config.mjs'))
+      ? process.cwd()
+      : join(process.cwd(), '..', '..');
+    execFileSync(process.execPath, [join(repoRoot, 'scripts', 'merge-persisted-config.mjs'), canonical, persisted, 'buildings.csv'], { stdio: 'pipe' });
+    const rows = parseCsvStructured(readFileSync(canonical, 'utf8')).rows;
+    assert.equal(rows.find((row) => row.code === 'main')?.maxLevel, '4');
+    assert.equal(rows.find((row) => row.code === 'warehouse')?.maxLevel, '10');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
