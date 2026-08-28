@@ -23,6 +23,13 @@ function output(command, args) {
   return result.stdout.trim();
 }
 
+function stagedPaths() {
+  return output('git', ['diff', '--cached', '--name-only'])
+    .split('\n')
+    .map((path) => path.trim().replace(/\\/g, '/'))
+    .filter(Boolean);
+}
+
 // 禁止 Git 用机器名猜测作者身份；否则 GitHub 无法归属贡献，服务器提交也无法追责到人。
 const authorIdent = output('git', ['var', 'GIT_AUTHOR_IDENT']);
 const authorEmail = authorIdent.match(/<([^>]+)>/)?.[1] ?? '';
@@ -43,7 +50,20 @@ if (unstaged || untracked) {
 }
 
 run('npm', ['run', 'guard'], 'G1 · 变更契约');
-run('npm', ['run', 'verify:quick'], 'G2 · 完整构建、静态检查与全部测试');
+const paths = stagedPaths();
+const touchesRuntime = paths.some((path) => path.startsWith('packages/') || path.startsWith('config/'));
+const baseSubject = output('git', ['log', '-1', '--format=%s', 'HEAD']);
+if (!touchesRuntime && /^config: sync /.test(baseSubject)) {
+  // 配置同步后仓库里的 CSV 是管理员确认过的运行时事实，不能再用出厂
+  // 默认值行为断言阻断仅工具/文档改动的提交；配置结构仍需完整校验。
+  run('npm', ['run', 'build:shared'], 'G2 · 构建共享协议');
+  run('npm', ['run', 'lint:all'], 'G2 · 静态检查');
+  run('npm', ['run', 'typecheck'], 'G2 · 类型检查');
+  run('npm', ['run', 'verify:config-sync'], 'G2 · 配置全图校验');
+  run('npm', ['run', 'test:ops'], 'G2 · release 布局测试');
+} else {
+  run('npm', ['run', 'verify:quick'], 'G2 · 完整构建、静态检查与全部测试');
+}
 run('npm', ['run', 'verify:deploy'], 'G3 · 构建并执行本地生产部署端到端冒烟');
 
 console.log('\n✔ 提交总闸门通过：当前暂存快照已完成本地验证；生产部署仅允许显式部署 origin/main。');
