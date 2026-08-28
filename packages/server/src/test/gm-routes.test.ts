@@ -296,8 +296,12 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     const byKey = new Map(parsed.rows.map((row) => [`${row.code}:${row.segment}`, row]));
     assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
     assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
-    assert.match(byKey.get('m8_deliver_success:1')?.npcText ?? '', /英明的战略决策/);
-    assert.match(byKey.get('m9_accept_m8_success:1')?.npcText ?? '', /乘胜追击/);
+    assert.match(byKey.get('m8_deliver:1')?.npcText ?? '', /英明的战略决策/);
+    assert.match(byKey.get('m9_accept:1')?.npcText ?? '', /乘胜追击/);
+    assert.match(byKey.get('m9_deliver:1')?.npcText ?? '', /洗劫干净/);
+    assert.equal(byKey.get('m8_deliver_success:1'), undefined);
+    assert.equal(byKey.get('m9_accept_m8_success:1'), undefined);
+    assert.equal(byKey.get('m9_deliver_m8_success:1'), undefined);
     assert.match(byKey.get('m9_deliver_m8_failure:1')?.npcText ?? '', /缴获了一个宝物/);
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
@@ -306,7 +310,9 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']) {
       assert.ok(configured.has(`${code}:deliver`), `GM 对话表应预置 ${code} 交付模板`);
     }
-    assert.ok(configured.has('s3:after_accept'), 'GM 对话表应包含 S3 接取后模板');
+    assert.ok(configured.has('s3:accept'), 'GM 对话表应包含 S3 接取模板');
+    assert.ok(byKey.get('s3_accept:2'), 'GM 对话表应包含 S3 接取对话第二段');
+    assert.equal(byKey.get('s3_after_accept:1'), undefined, 'GM 对话表不应保留 S3 旧 after_accept entry');
     const bad = await fastify.inject({
       method: 'POST', url: '/config/dialogues/save',
       headers: { 'content-type': 'application/json' },

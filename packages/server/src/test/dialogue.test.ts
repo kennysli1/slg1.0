@@ -94,7 +94,7 @@ test('dialogue：自动任务对话快照也携带完整段落组', async () => 
   assert.equal(pending.dialogue.segments[1].npcText, '愿我们一起重建家园。');
 });
 
-test('dialogue：S3 接取后弹出当前接取村庄村民的单段后续对话', async () => {
+test('dialogue：S3 接取对话包含当前村民的第二段，接取后不再排队旧 after_accept', async () => {
   const app = createGameApp({ now: () => 3_000_000, manualScheduler: true });
   app.setupWorld();
   const registered = await send(app, 'player.Register', { name: 's3-after', password: 'pass1', tribe: 'romans' });
@@ -105,21 +105,23 @@ test('dialogue：S3 接取后弹出当前接取村庄村民的单段后续对话
   state.offeredSide = ['s3'];
   app.store.set('task', villageId, state);
 
+  const started = await send(app, 'task.StartAccept', { villageId, code: 's3' });
+  assert.equal(started.ok, true, started.reason);
+  const dialogue = (started.payload as any).dialogue;
+  assert.equal(dialogue.segmentCount, 2);
+  assert.deepEqual(dialogue.segments.map((item: any) => item.segment), [1, 2]);
+  assert.equal(dialogue.segments[1].code, 's3_accept');
+  assert.equal(dialogue.segments[1].npcName, 's3-after的村庄的村民');
+  assert.equal(dialogue.segments[1].npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
+  assert.deepEqual(dialogue.segments[1].replies, []);
+
   const accepted = await send(app, 'task.Accept', { villageId, code: 's3' });
   assert.equal(accepted.ok, true, accepted.reason);
   const snapshot = await send(app, 'task.GetPlayerState', { playerId: player.id });
   assert.equal(snapshot.ok, true, snapshot.reason);
-  const pending = ((snapshot.payload as any).pendingDialogues ?? [])
-    .find((item: any) => item.taskCode === 's3' && item.trigger === 'after_accept');
-  assert.ok(pending?.dialogue);
-  assert.equal(pending.dialogue.npcName, 's3-after的村庄的村民');
-  assert.equal(pending.dialogue.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
-  assert.deepEqual(pending.dialogue.replies, []);
-
-  const consumed = await send(app, 'task.ConsumeDialogue', { playerId: player.id, dialogueId: pending.id });
-  assert.equal(consumed.ok, true, consumed.reason);
-  const after = await send(app, 'task.GetPlayerState', { playerId: player.id });
-  assert.equal((after.payload as any).pendingDialogues.some((item: any) => item.id === pending.id), false);
+  assert.equal(((snapshot.payload as any).pendingDialogues ?? [])
+    .some((item: any) => item.taskCode === 's3' && item.trigger === 'after_accept'), false);
+  assert.ok((app.store.get<any>('task', villageId)!).active.s3);
 });
 
 test('dialogue：新账号自动激活 M1 并保留一次性待弹对话记录', async () => {

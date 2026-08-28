@@ -881,10 +881,10 @@ export class TasksModule {
       this.store.set(COLLECTION, storageVillageId, s);
     }
     if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
-    // 仅建村自动激活的 m1 展示一次自动对话；手动接取的主线由 StartAccept 返回接取对话。
-    // 对话定义可为空，GM 填写后仍可通过未消费的 pending 记录热生效。
+    // 仅建村自动激活的 m1 展示一次自动对话；手动接取的任务由 StartAccept 返回接取对话。
+    // 接取对话（包括 S3 的多段 accept session）不再另排 after_accept 待处理记录，
+    // 避免玩家在完成接取对话后再次看到同一段文本。
     if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
-    else if (q.type === 'side') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }
@@ -998,14 +998,13 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
   }
 
-  /** M8/M9 的对话按 M8 结局选择 GM 中对应的触发文本；M9 的稳定 code
-   * 以 m8_ 前缀明确标注依据，trigger 保持 accept/deliver + outcome 兼容协议。 */
+  /** M8/M9 的成功文本已并入默认 accept/deliver；只有失败分支保留 *_failure 触发器。 */
   private dialogueTrigger(villageId: string, code: string, phase: 'accept' | 'deliver', inst?: TaskInstance): string {
     if (code !== 'm8' && code !== 'm9') return phase;
     const storage = this.storageVillageForQuest(villageId, code);
     const outcome = inst?.outcome ?? this.ensureState(storage).outcomes?.m8;
-    if (!outcome) return phase;
-    return `${phase}_${outcome}`;
+    if (!outcome || outcome === 'success') return phase;
+    return `${phase}_failure`;
   }
 
   /** 失败确认统一使用 deliver_failure；M8/M9 按结局复用同名触发器。 */
