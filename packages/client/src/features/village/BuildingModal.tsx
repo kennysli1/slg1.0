@@ -169,7 +169,7 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
     ? (data.slotBreakdown?.treasury ?? data.reserveSlots ?? 0)
     : 1;
 
-  const locLabel = kind === 'treasury' ? '宝库主栏' : '城镇中心主栏';
+  const locLabel = kind === 'treasury' ? '宝库主栏' : '主基地主栏';
 
   // Empty slots are rendered explicitly so the player can see the capacity of
   // both bars even when no treasure is currently stored there.

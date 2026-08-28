@@ -54,7 +54,7 @@ export function TechTreeScreen() {
 
       {academyCount === 0 && (
         <Empty icon="🏛️" title="尚未建造学院">
-          <p>把<b>城镇中心</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
+          <p>把<b>主基地</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
         </Empty>
       )}
 

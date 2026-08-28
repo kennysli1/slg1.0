@@ -13,7 +13,7 @@
  *  - 表头在首行、注释在表头之后（与 buildings.csv 约定一致：loadCsv/parseCsv 把首行当表头、仅跳过
  *    正文里的 # 注释行）。
  *  - popCap 为「该级相对上一级的增量贡献」（逐等级恒定=旧 popCapPerLevel），硬上限 = Σ 1..当前等级 popCap，
- *    1:1 等价于旧模型 popCapPerLevel × level（例如 main L10 = 20×10 = 200）。
+ *    1:1 等价于旧模型 popCapPerLevel × level（主基地现在固定 1..4 级，满级贡献 20×4=80）。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';

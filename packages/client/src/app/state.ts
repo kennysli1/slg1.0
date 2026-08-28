@@ -73,6 +73,8 @@ export interface PopSnapshot {
   popProsperityFullRatio?: number;
   /** 繁荣度满值时的额外速率加成（默认 +30%）。 */
   popProsperityMaxBonus?: number;
+  /** 人口达到硬上限几倍时繁荣额外加成降为 0（默认 2 倍）。 */
+  popOvercapPenaltyFullRatio?: number;
   /** 城镇中心等级（增长速率因子）。 */
   mainLevel: number;
   /** 是否处于饥荒（服务端权威）。 */

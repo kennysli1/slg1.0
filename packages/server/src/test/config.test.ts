@@ -183,10 +183,12 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
-  // 逐等级人口上限求和应等于「旧 popCapPerLevel × level」在 L10 时的值（1:1 迁移校验）
+  // 主基地固定四级；逐级人口上限增量总和应为 20×4=80。
   const main = cfg.buildings['main'];
-  const sumL10 = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
-  assert.equal(sumL10, 200, '主城 10 级每级 20，总和应为 200');
+  assert.equal(main.name, '主基地', '主基地显示名应统一');
+  assert.deepEqual(Object.keys(main.levels), ['1', '2', '3', '4'], '主基地只应有 1..4 级');
+  const sumMain = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
+  assert.equal(sumMain, 80, '主基地 4 级每级 20，总和应为 80');
   const res = cfg.buildings['residence'];
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
