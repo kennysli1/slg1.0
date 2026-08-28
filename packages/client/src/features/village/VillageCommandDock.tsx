@@ -10,8 +10,8 @@ import { VillageSwitcher } from './VillageSwitcher.js';
 export function VillageCommandDock() {
   return (
     <section class="village-command-dock" aria-label="王国当前操作村上下文">
+      <div class="village-command-dock__eyebrow">王国 · 当前操作</div>
       <div class="village-command-dock__village">
-        <div class="village-command-dock__eyebrow">王国 · 当前操作</div>
         <VillageSwitcher />
       </div>
       <div class="village-command-dock__resources">

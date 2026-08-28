@@ -3,11 +3,11 @@
  * 村庄场景保留为独立组件，但不再占用村庄页首屏空间。
  */
 import { useState } from 'preact/hooks';
-import { dataVersion, tab, tick } from '../../app/store.js';
+import { dataVersion, playerTaskState, tab, taskStates, tick } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { me } from '../../api.js';
 import { buildingInfo, unitInfo } from '../../app/config.js';
-import { Btn, Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { Panel, SectionHead, Tag, TimerBar, Icon } from '../../ui/index.js';
 import { fmt } from '../../shared/utils/format.js';
 import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
@@ -122,6 +122,99 @@ function VillageListView({ vil }: { vil: any }) {
   );
 }
 
+function taskKindTag(type: string) {
+  if (type === 'main') return <Tag kind="gold">主线</Tag>;
+  if (type === 'side') return <Tag kind="ember">支线</Tag>;
+  return <Tag kind="jade">日常</Tag>;
+}
+
+function taskStatus(task: any, source: 'active' | 'offer'): string {
+  if (task?.failureReady) return '确认失败';
+  if (task?.ready) return '待领取';
+  if (task?.status === 'failed') return '已失败';
+  if (source === 'offer' || task?.status === 'offered') return '可接取';
+  return '进行中';
+}
+
+function taskProgress(task: any): string | null {
+  const objective = task?.objective;
+  if (objective?.kind === 'clear_camp' && Number.isFinite(Number(task?.campTotal))) {
+    return `${Number(task.campCleared ?? 0)}/${Number(task.campTotal ?? 0)}`;
+  }
+  if (objective?.count != null && Number.isFinite(Number(task?.progress))) {
+    return `${Math.min(Number(task.progress ?? 0), Number(objective.count))}/${Number(objective.count)}`;
+  }
+  return null;
+}
+
+function currentVillageTasks(villageId: string): Array<{ task: any; source: 'active' | 'offer' }> {
+  const direct = taskStates.value[villageId];
+  const aggregate = playerTaskState.value?.villages?.find((v: any) => v.villageId === villageId);
+  const states = [direct, aggregate].filter(Boolean);
+  const entries: Array<{ task: any; source: 'active' | 'offer' }> = [];
+  const seen = new Set<string>();
+  for (const state of states) {
+    for (const task of state.active ?? []) {
+      if (!task || task.scope === 'global' || (task.villageId && task.villageId !== villageId)) continue;
+      const key = `${task.code ?? task.name}:${task.villageId ?? villageId}`;
+      if (!seen.has(key)) { seen.add(key); entries.push({ task, source: 'active' }); }
+    }
+    for (const list of [state.offeredMain, state.offeredSide, state.offered]) {
+      for (const task of list ?? []) {
+        if (!task || task.scope === 'global' || (task.villageId && task.villageId !== villageId)) continue;
+        const key = `${task.code ?? task.name}:${task.villageId ?? villageId}`;
+        if (!seen.has(key)) { seen.add(key); entries.push({ task, source: 'offer' }); }
+      }
+    }
+  }
+  return entries.sort((a, b) => {
+    const statusRank = (entry: { task: any; source: 'active' | 'offer' }) => entry.task.ready || entry.task.failureReady ? 0 : entry.source === 'active' ? 1 : 2;
+    return statusRank(a) - statusRank(b) || (a.task.type ?? '').localeCompare(b.task.type ?? '');
+  });
+}
+
+function VillageTaskShowcase({ villageId }: { villageId: string }) {
+  dataVersion.value;
+  playerTaskState.value;
+  taskStates.value;
+  const tasks = currentVillageTasks(villageId);
+
+  return (
+    <section class="empire-village-task-showcase" aria-label="当前村庄任务">
+      <div class="empire-village-task-head">
+        <div>
+          <span>当前村事务</span>
+          <strong>任务展示</strong>
+        </div>
+        <button type="button" onClick={() => { tab.value = 'tasks'; }}>任务簿 <span aria-hidden="true">↗</span></button>
+      </div>
+      {tasks.length > 0 ? (
+        <div class="empire-village-task-list">
+          {tasks.map(({ task, source }) => (
+            <button
+              type="button"
+              class="empire-village-task-row"
+              key={`${task.code ?? task.name}:${task.villageId ?? villageId}`}
+              onClick={() => { tab.value = 'tasks'; }}
+            >
+              <span class="empire-village-task-row__name">
+                {taskKindTag(task.type)}
+                <strong>{task.name ?? task.code ?? '未命名任务'}</strong>
+              </span>
+              <span class="empire-village-task-row__meta">
+                {taskProgress(task) && <small>{taskProgress(task)}</small>}
+                <small>{taskStatus(task, source)}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p class="empire-village-task-empty">当前村暂无任务，可在任务簿查看王国事务。</p>
+      )}
+    </section>
+  );
+}
+
 /** 首屏仅保留进行中摘要，完整建造与训练在下方工作区。 */
 function ActiveOperationsSummary({ vil }: { vil: any }) {
   dataVersion.value;
@@ -154,10 +247,7 @@ function ActiveOperationsSummary({ vil }: { vil: any }) {
               <small>{activeTraining ? `共 ${trainingQueues.length} 项训练进行中，取消与兵种详情在军务工作区` : '展开军务工作区开始训练或调整驻军'}</small>
             </div>
           </div>
-          <div class="empire-operation-guide">
-            <span>需要完整操作？</span>
-            <strong>下方两个工作区保留全部建造、训练、防御与管理入口。</strong>
-          </div>
+          <VillageTaskShowcase villageId={String(vil.id ?? me?.villageId ?? '')} />
         </div>
       </Panel>
     </section>
@@ -204,8 +294,12 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
   const hasTreasures = !!getCache().treasures;
   // 主基地是发展阶段核心，不占用城内/城外建造格；总数口径只统计
   // 玩家可以规划的两类建筑格，避免把固定的主基地重复算进“已启用地块”。
-  const placedCount = (vil.zones?.inner?.placed?.length ?? 0) + (vil.zones?.outer?.placed?.length ?? 0);
-  const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0);
+  const innerUsed = vil.zones?.inner?.placed?.length ?? 0;
+  const innerSlots = vil.zones?.inner?.slots ?? 0;
+  const outerUsed = vil.zones?.outer?.placed?.length ?? 0;
+  const outerSlots = vil.zones?.outer?.slots ?? 0;
+  const placedCount = innerUsed + outerUsed;
+  const slotCount = innerSlots + outerSlots;
   const setWorkspace = (field: keyof VillageWorkbenchPreferences, open: boolean) => {
     setPreferences((previous) => {
       const next = { ...previous, [field]: open };
@@ -223,7 +317,7 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
           id="village-building-management"
           eyebrow="发展工作区"
           title="建筑与城务"
-          summary={`${placedCount}/${slotCount} 个城内外建筑格已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
+          summary={`城内 ${innerUsed}/${innerSlots}、城外 ${outerUsed}/${outerSlots}（合计 ${placedCount}/${slotCount}）已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
           open={preferences.developmentOpen}
           onToggle={() => setWorkspace('developmentOpen', !preferences.developmentOpen)}
         >
@@ -240,7 +334,6 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
           summary="训练、驻军、援军、防御与解散均归属当前村庄；展开后可直接执行完整操作。"
           open={preferences.militaryOpen}
           onToggle={() => setWorkspace('militaryOpen', !preferences.militaryOpen)}
-          utility={<Btn size="sm" variant="ghost" onClick={() => { tab.value = 'army'; }}>前往完整军务</Btn>}
         >
           <VillageArmyManagement />
         </WorkspaceEntry>
