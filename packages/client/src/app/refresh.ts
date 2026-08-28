@@ -228,6 +228,7 @@ function applyPopPayload(p: any, merge = false): void {
     overflowRatio: Number(pick(p.overflowRatio, prev?.overflowRatio ?? 0)),
     popProsperityFullRatio: pick(p.popProsperityFullRatio, prev?.popProsperityFullRatio),
     popProsperityMaxBonus: pick(p.popProsperityMaxBonus, prev?.popProsperityMaxBonus),
+    popOvercapPenaltyFullRatio: pick(p.popOvercapPenaltyFullRatio, prev?.popOvercapPenaltyFullRatio),
     mainLevel: Number(pick(p.mainLevel, prev?.mainLevel ?? 1)),
     inFamine,
     goldPerHour: Number(pick(p.goldPerHour, prev?.goldPerHour ?? 0)),

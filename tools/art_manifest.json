@@ -73,7 +73,7 @@
   },
   {
     "base": "bld_main",
-    "zh": "城镇中心",
+    "zh": "主基地",
     "category": "bld",
     "mode": "icon",
     "size": 512,

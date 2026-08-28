@@ -149,6 +149,33 @@ test('v3 C2b：70%劳动人口占比获得完整额外加成，动员上限时�
   assert.equal(minimum.prosperityMult, 1, '达到动员上限时应仅取消额外加成，保留基础倍率');
 });
 
+test('v3 C2c：人口超过硬上限时线性降低繁荣额外加成，达到两倍归零', async () => {
+  const app = freshApp();
+  const vid = await reg(app, 'c2c', 'romans');
+  const stored = app.store.get<any>('population', vid);
+  assert.ok(stored, '人口状态应存在');
+  const hardCap = stored.hardCap;
+  const maxBonus = app.config.constants.popProsperityMaxBonus;
+
+  // 直接模拟 GM/旧存档造成的超上限状态；没有士兵时劳动人口占比仍为 100%。
+  app.store.set('population', vid, {
+    ...stored, currentPop: hardCap * 1.5, garrisonPopCost: 0,
+    enRoutePopCost: 0, trainingPopCost: 0, lastTick: clock,
+  });
+  const half = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.ok(Math.abs(half.totalPop / hardCap - 1.5) < 0.01, '1.5 倍硬上限应保留超额人口');
+  assert.ok(Math.abs(half.prosperityBonus - 0.5) < 0.01, `1.5 倍硬上限繁荣额外加成应为 50%，实际 ${half.prosperityBonus}`);
+  assert.ok(Math.abs(half.prosperityMult - (1 + maxBonus * 0.5)) < 0.01, '1.5 倍时只削减额外倍率，不影响基础倍率');
+
+  app.store.set('population', vid, {
+    ...stored, currentPop: hardCap * 2, garrisonPopCost: 0,
+    enRoutePopCost: 0, trainingPopCost: 0, lastTick: clock,
+  });
+  const zero = (await send(app, 'population.GetSnapshot', { villageId: vid })).payload as any;
+  assert.equal(zero.prosperityBonus, 0, '达到两倍硬上限时繁荣额外加成应归零');
+  assert.equal(zero.prosperityMult, 1, '达到两倍硬上限时仍保留基础倍率 1.0');
+});
+
 // ── C3：兵种口粮 ──────────────────────────────────────────────────────────
 
 test('v3 C3：GetArmy.trainable 每兵种 cropPerHourEach > 0（士兵以 upkeep 计入口粮）', async () => {
@@ -385,7 +412,8 @@ test('v3 C10：GetSnapshot 公共字段完整（v3 字段集）', async () => {
     'villageId', 'currentPop', 'soldierPop', 'hardCap', 'availableLabor',
     'laborRatio', 'prosperityBonus', 'prosperityMult', 'growthPerHour',
     'mobilizeCap', 'mainLevel', 'inFamine', 'civilianCropPerHour', 'softLimit',
-    'totalPop', 'trainingPop', 'popCeiling',
+    'totalPop', 'trainingPop', 'popCeiling', 'popProsperityFullRatio',
+    'popProsperityMaxBonus', 'popOvercapPenaltyFullRatio',
   ] as const;
   for (const field of required) {
     assert.ok(field in snap, `GetSnapshot 应包含字段: ${field}`);

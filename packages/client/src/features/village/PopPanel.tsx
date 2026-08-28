@@ -33,6 +33,8 @@ export function PopPanel() {
   const laborRatioPct = Math.round((ps.laborRatio ?? 0) * 100);
   const fullThreshPct = Math.round((ps.popProsperityFullRatio ?? 0.7) * 100);
   const maxBonusPct = Math.round((ps.popProsperityMaxBonus ?? 0.3) * 100);
+  const overcapZeroRatio = ps.popOvercapPenaltyFullRatio ?? 2;
+  const overcapZeroPct = Math.round(overcapZeroRatio * 100);
 
   const barKind = ps.inFamine ? 'crimson' as const
     : nearCap || atCap ? 'ember' as const
@@ -123,6 +125,13 @@ export function PopPanel() {
           </div>
         </div>
       )}
+      {rawRatio > 1 && (
+        <div class="pop-statuses">
+          <div class="pop-status pop-status--near">
+            ⚠️ 人口超过硬上限（{Math.round(rawRatio * 100)}%）：繁荣额外加成按超额比例降低，达到 {overcapZeroPct}% 上限时归零；基础产值不受影响
+          </div>
+        </div>
+      )}
 
       {/* Key stats */}
       <StatGrid>
@@ -164,6 +173,7 @@ export function PopPanel() {
         <Panel variant="sunken" pad style={{ marginTop: 'var(--s-2)' }}>
           <p style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)', lineHeight: 1.55, margin: 0 }}>
             繁荣度只提供额外速率：劳动人口占比达到动员上限对应的最低值时为 0%，达到阈值时为 +{maxBonusPct}%，不会把基础产值降到 100% 以下。
+            人口超过硬上限后，额外加成从 100% 按比例降低；达到硬上限的 {overcapZeroPct}% 时额外加成归零，基础产值仍保留。
             训练士兵 = 劳动人口转化为军队，总人数守恒（大数字不闪烁）。
             士兵占人口并受本族动员上限 <strong style={{ color: 'var(--c-gold)' }}>{Math.round((ps.mobilizeCap ?? 0) * 100)}%</strong> 约束，
             且按 popCost×(默认口粮 + 军晌) 计耗粮。
