@@ -30,7 +30,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 28,m9_accept_m8_failure,m9,accept_failure,1,,我实在咽不下这口恶气！我们一而再再而三被这只臭虫羞辱，此仇不报我死不瞑目。请领主大人重振军心，让我带领军队反攻，我必将亲手砍下他的首级！,accept:接受任务
 24,m9_deliver,m9,deliver,1,,敌方已被我们洗劫干净了，但是却没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，有一些有志之士愿意加入我们的村子，一起讨伐共同的仇人。,
 30,m9_deliver_m8_failure,m9,deliver_failure,1,,多么惨烈的战斗，好在最后我们还是棋高一着，将敌人全歼。美中不足的是没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，我们从敌方那里缴获了一个宝物。这宝物可以放在主基地让其生效，或者当军队规模足够大的时候随军出征。领主大人可以选择建造宝物用来存放更多的宝物，只不过该上哪里去寻找这些珍宝呢？,
-44,my_effort_use,t1,use,1,,,
+44,my_effort_use,t1,use,1,,my_effort_use,
 7,s1_accept,s1,accept,1,,,accept:接受任务|leave:离开
 32,s1_deliver,s1,deliver,1,,,
 8,s2_accept,s2,accept,1,,,accept:接受任务|leave:离开
