@@ -66,7 +66,7 @@ function AlchemyModal({ slotId, onClose }: { slotId: string; onClose: () => void
                 <div style={{ marginTop: 'var(--s-2)', maxHeight: '160px', overflowY: 'auto', textAlign: 'left', border: '1px solid var(--c-line)', borderRadius: 'var(--r-sm)', padding: 'var(--s-1)' }}>
                   {optionsFor(slot).length === 0 ? <span style={{ color: 'var(--c-ink-dim)' }}>没有可用的同品质宝物</span> : optionsFor(slot).map((x, i) => (
                     <button type="button" key={`${x.code}-${x.location}-${i}`} onClick={() => void choose(slot, x)} style={{ display: 'block', width: '100%', textAlign: 'left', padding: 'var(--s-1)', background: 'transparent', color: 'inherit', border: 0, cursor: 'pointer' }}>
-                      {x.name} <small>({treasureRarityName(x.rarity)} · {x.location === 'reserve' ? '备用栏' : x.location === 'town' ? '城镇中心' : '宝库'})</small>
+                      {x.name} <small>({treasureRarityName(x.rarity)} · {x.location === 'reserve' ? '备用栏' : x.location === 'town' ? '主基地' : '宝库'})</small>
                     </button>
                   ))}
                 </div>
@@ -91,7 +91,7 @@ function AlchemyModal({ slotId, onClose }: { slotId: string; onClose: () => void
             <Btn variant="primary" onClick={() => void claim()}>收获</Btn>
           </> : <span style={{ color: 'var(--c-ink-dim)' }}>炼化结果槽</span>}
         </div>
-        {data.result && <p style={{ color: 'var(--c-ink-dim)', fontSize: 'var(--f-xs)' }}>收获时会按宝物栏优先级存入；没有空位时提示宝库已满。</p>}
+        {data.result && <p style={{ color: 'var(--c-ink-dim)', fontSize: 'var(--f-xs)' }}>收获时按主基地→宝库主栏→备用栏存入；没有空位时提示宝库已满。</p>}
         <Divider />
         <BuildingManagement slotId={slotId} name="炼金炉" onClose={onClose} />
       </>}

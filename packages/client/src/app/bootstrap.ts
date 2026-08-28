@@ -102,10 +102,10 @@ async function refreshAll() {
     if (pop.ok) {
       // GetPopulation 返回 v3 完整快照（publicPayload）：currentPop/soldierPop/totalPop/trainingPop/
       // hardCap/availableLabor/softLimit(=hardCap)/popCeiling/laborRatio/prosperityBonus/
-      // prosperityMult/growthPerHour/potentialGrowthPerHour/mobilizeCap/popProsperityFullRatio/
+      // prosperityMult/growthPerHour/potentialGrowthPerHour/mobilizeCap/popProsperityFullRatio/popProsperityMaxBonus/popOvercapPenaltyFullRatio/
       // mainLevel/inFamine/civilianCropPerHour/goldPerHour。
       // 下列字段快照不携带，用安全默认值兜底（push 事件会持续校正）：
-      //   laborMults(五轴繁荣乘数) / garrisonPop(驻军展示) / lambdaRatio(充裕比) /
+      //   laborMults(四轴繁荣倍率) / garrisonPop(驻军展示) / lambdaRatio(充裕比) /
       //   wounded(伤兵池) / cropDeficitRate(粮食赤字速率)。
       const p = pop.payload as any;
       setPopState({
@@ -123,6 +123,8 @@ async function refreshAll() {
         potentialGrowthPerHour: p.potentialGrowthPerHour ?? 0,
         mobilizeCap: p.mobilizeCap ?? 0.7,
         popProsperityFullRatio: p.popProsperityFullRatio ?? 0.7,
+        popProsperityMaxBonus: p.popProsperityMaxBonus ?? 0.3,
+        popOvercapPenaltyFullRatio: p.popOvercapPenaltyFullRatio ?? 2,
         mainLevel: p.mainLevel ?? 1,
         inFamine: !!p.inFamine,
         civilianCropPerHour: p.civilianCropPerHour ?? 0,

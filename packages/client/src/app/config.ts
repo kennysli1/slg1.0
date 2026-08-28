@@ -37,6 +37,8 @@ interface ServerConfig {
   constants: {
     mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
+    /** 人口超过硬上限后的繁荣额外加成归零倍数。 */
+    popProsperityFullRatio?: number; popProsperityMaxBonus?: number; popOvercapPenaltyFullRatio?: number;
     /** 仓储容量：base×(1+Σ等级×growth)，仓库→木泥铁 / 粮仓→粮。 */
     storageBase: number; storageGrowthPerLevel: number;
     /** 城墙每级守城防御加成系数（ratio=1+等级×该值）。 */

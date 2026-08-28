@@ -13,7 +13,6 @@ import {
   Panel, SectionHead, Btn, Tag, Bar, Empty, Icon, IconPlate, TimerBar,
 } from '../../ui/index.js';
 import '../../styles/research.css';
-import { VillageList } from '../../shared/ui/VillageList.js';
 
 type Branch = 'military' | 'production' | 'social';
 
@@ -41,50 +40,73 @@ export function TechTreeScreen() {
   const techs: any[] = tree.techs ?? [];
   const academyCount: number = state?.academy?.academyCount ?? 0;
   const researching = state?.researching ?? null;
+  const candidates = techs.filter((tech) => tech.status === 'available').slice(0, 3);
+  const names = new Map(techs.map((tech) => [tech.code, tech.name]));
 
   return (
-    <>
-      <VillageList />
-      <SectionHead sub={academyCount > 0 ? `${academyCount} 座学院` : '尚未建造学院'}>
-        科研
-      </SectionHead>
-      <RpPanel rp={rp} state={state} researching={researching} />
+    <div class="tech-command-desk">
+      <section class="tech-current-research">
+        <SectionHead sub={academyCount > 0 ? `${academyCount} 座学院 · 研究跟随当前村庄` : '尚未建造学院'}>
+          当前研究
+        </SectionHead>
+        <RpPanel rp={rp} state={state} researching={researching} />
+      </section>
 
       {academyCount === 0 && (
         <Empty icon="🏛️" title="尚未建造学院">
-          <p>把<b>城镇中心</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
+          <p>把<b>主基地</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
         </Empty>
       )}
 
-      <>
-      <SectionHead actions={
-        <div class="tech-branch-tabs" role="tablist">
-          {BRANCHES.map((b) => (
-            <button
-              key={b.key}
-              role="tab"
-              aria-selected={branch === b.key}
-              class={`tech-branch-btn${branch === b.key ? ' active' : ''}`}
-              onClick={() => setBranch(b.key)}
-            >
-              <Icon icon={b.icon} label={b.name} size="xs" />
-              {b.name}
-            </button>
-          ))}
-        </div>
-      }>
-        科技树
-      </SectionHead>
+      {academyCount > 0 && !researching && (
+        <section class="tech-next-research">
+          <SectionHead sub="先展示此刻可投入的方向；其余节点仍在完整树中可查">下一步决策</SectionHead>
+          {candidates.length ? (
+            <div class="tech-next-grid">
+              {candidates.map((tech, index) => (
+                <TechNode
+                  key={tech.code}
+                  t={tech}
+                  rp={rp}
+                  researchingCode={researching?.code ?? null}
+                  names={names}
+                  academyAvailable
+                  primary={index === 0}
+                />
+              ))}
+            </div>
+          ) : <Empty icon="📚" title="暂无可立即研究的科技">完成当前研究或补足科研点后，下一步方向会显示在这里。</Empty>}
+        </section>
+      )}
 
-      <TechBranch
-        branch={branch}
-        techs={techs}
-        rp={rp}
-        researchingCode={researching?.code ?? null}
-        academyAvailable={academyCount > 0}
-      />
-      </>
-    </>
+      <section class="tech-full-tree">
+        <SectionHead actions={
+          <div class="tech-branch-tabs" role="tablist" aria-label="科技分支">
+            {BRANCHES.map((b) => (
+              <button
+                key={b.key}
+                role="tab"
+                aria-selected={branch === b.key}
+                class={`tech-branch-btn${branch === b.key ? ' active' : ''}`}
+                onClick={() => setBranch(b.key)}
+              >
+                <Icon icon={b.icon} label={b.name} size="xs" />
+                {b.name}
+              </button>
+            ))}
+          </div>
+        }>
+          完整科技树
+        </SectionHead>
+        <TechBranch
+          branch={branch}
+          techs={techs}
+          rp={rp}
+          researchingCode={researching?.code ?? null}
+          academyAvailable={academyCount > 0}
+        />
+      </section>
+    </div>
   );
 }
 
@@ -205,12 +227,13 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   );
 }
 
-function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
+function TechNode({ t, rp, researchingCode, names, academyAvailable, primary = false }: {
   t: any;
   rp: number;
   researchingCode: string | null;
   names: Map<string, string>;
   academyAvailable: boolean;
+  primary?: boolean;
 }) {
   const completed = t.status === 'completed';
   const researching = t.status === 'researching' || researchingCode === t.code;
@@ -270,7 +293,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
               : locked ? <Tag>前置未满足</Tag>
               : poor ? <Tag kind="crimson">科研点不足</Tag>
                 : (
-                  <Btn size="sm" variant="primary" disabled={!canStart} onClick={start}
+                  <Btn size="sm" variant={primary ? 'primary' : 'default'} disabled={!canStart} onClick={start}
                     title={researchingCode ? '已有科技在研发中' : `研发 ${t.name}`}>
                     {researchingCode ? '有研发进行中' : '研发'}
                   </Btn>

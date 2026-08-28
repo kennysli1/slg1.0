@@ -231,12 +231,19 @@ test('支线接取：同一支线被一个村接取后从玩家其他村的列�
   });
   assert.equal(attached.ok, true, attached.reason);
 
+  // mixed `offered` 槽位属于酒馆，接取前确保接取村有酒馆。
+  await send(app, 'economy.Grant', { villageId: branch, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999, gold: 9999 } });
+  const tavern = await send(app, 'building.Build', { villageId: branch, zone: 'inner', kind: 'tavern' });
+  assert.equal(tavern.ok, true, tavern.reason);
+  await app.scheduler.advanceTo(clock + 120_000, setClock);
+
   // 模拟同一一次性支线因两个村分别满足触发条件而同时出现在两边。
   for (const villageId of [capital, branch]) {
     const state = app.store.get<any>('task', villageId) ?? {
       villageId, completedMain: [], completedSide: [], abandonedSide: [],
       active: {}, offered: [], offeredSide: [], firedTriggers: [],
     };
+    state.offered = ['s1'];
     state.offeredSide = ['s1'];
     app.store.set('task', villageId, state);
   }
@@ -246,7 +253,9 @@ test('支线接取：同一支线被一个村接取后从玩家其他村的列�
   const capState = (await send(app, 'task.GetState', { villageId: capital })).payload as any;
   const branchState = (await send(app, 'task.GetState', { villageId: branch })).payload as any;
   assert.ok(!capState.offeredSide.some((item: any) => item.code === 's1'), '主城不应继续显示已被分城接取的支线');
+  assert.ok(!capState.offered.some((item: any) => item.code === 's1'), '主城混合酒馆槽位不应继续显示已被分城接取的支线');
   assert.ok(!branchState.offeredSide.some((item: any) => item.code === 's1'), '接取村也不应继续显示 offer');
+  assert.ok(!branchState.offered.some((item: any) => item.code === 's1'), '接取村混合酒馆槽位不应继续显示 offer');
   assert.ok(branchState.active.some((item: any) => item.code === 's1'), '支线实例应归接取村');
 
   const board = (await send(app, 'task.GetPlayerState', { playerId: player.id })).payload as any;

@@ -21,11 +21,95 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
-import { loadGameConfig, loadBalanceOverrides, saveBalanceOverrides, mergeBalanceOverrides, mergeOverridesIntoRows, type BalanceOverrides } from '../infra/config.js';
+import { loadGameConfig } from '../infra/config.js';
+
+/** 对话编辑器的确定性顺序：先按稳定 code，再按同一对象的段落号。 */
+function sortDialogueRows(rows: CsvRow[]): CsvRow[] {
+  return [...rows].sort((a, b) => {
+    const codeA = String(a.code ?? '');
+    const codeB = String(b.code ?? '');
+    if (codeA !== codeB) return codeA < codeB ? -1 : 1;
+
+    const segmentA = Number(a.segment);
+    const segmentB = Number(b.segment);
+    if (Number.isFinite(segmentA) && Number.isFinite(segmentB) && segmentA !== segmentB) {
+      return segmentA - segmentB;
+    }
+    if (Number.isFinite(segmentA) !== Number.isFinite(segmentB)) return Number.isFinite(segmentA) ? -1 : 1;
+
+    // code/segment 按规范应唯一；id 作为异常或旧数据的稳定兜底顺序。
+    const idA = Number(a.id);
+    const idB = Number(b.id);
+    if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) return idA - idB;
+    return 0;
+  });
+}
+
+/**
+ * 为每个支线任务补齐可编辑的接取/交付对话模板。
+ *
+ * 模板只在配置中心保存任务定义时自动写入；GET 接口仅在内存中补齐，避免
+ * 打开页面产生隐式配置变更。已有自定义 taskCode+trigger 行优先保留。
+ */
+function ensureDefaultSideDialogueRows(rows: CsvRow[], questRows: CsvRow[]): { rows: CsvRow[]; added: number } {
+  const result = rows.map((row) => ({ ...row }));
+  const existing = new Set(result.map((row) => `${row.taskCode ?? ''}:${row.trigger ?? ''}`));
+  let nextId = result.reduce((max, row) => {
+    const id = Number(row.id);
+    return Number.isFinite(id) ? Math.max(max, Math.floor(id)) : max;
+  }, 0) + 1;
+  let added = 0;
+  for (const quest of questRows) {
+    if (String(quest.type ?? '').trim() !== 'side') continue;
+    const taskCode = String(quest.code ?? '').trim();
+    if (!taskCode) continue;
+    for (const trigger of ['accept', 'deliver']) {
+      const key = `${taskCode}:${trigger}`;
+      if (existing.has(key)) continue;
+      result.push({
+        id: String(nextId++), code: `${taskCode}_${trigger}`, taskCode, trigger, segment: '1',
+        npcName: '', npcText: '', replies: '',
+      });
+      existing.add(key);
+      added++;
+    }
+  }
+  return { rows: result, added };
+}
+
+/** 按现有 CSV 文档的表头/注释布局重建数据行。 */
+function replaceCsvRows(text: string, rows: CsvRow[]): string {
+  const doc = parseCsvStructured(text);
+  const oldDataIndices = new Set(doc.rowIndices);
+  const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
+  doc.raw = raw;
+  doc.headerIndex = raw.findIndex((line) => line.split(',').map((x) => x.trim()).join(',') === doc.header.join(','));
+  doc.rows = rows.map((row) => Object.fromEntries(doc.header.map((header) => [header, row[header] ?? ''])));
+  doc.rowIndices = [];
+  for (let i = 0; i < doc.rows.length; i++) {
+    doc.raw.push('');
+    doc.rowIndices.push(doc.raw.length - 1);
+  }
+  return serializeCsv(doc);
+}
+
+/** 任务编辑器保存后，为新增支线任务持久化空白 accept/deliver 模板。 */
+function ensureSideDialogueTemplatesInDir(dir: string): { added: number } {
+  const dialoguePath = join(dir, 'dialogues.csv');
+  const questsPath = join(dir, 'quests.csv');
+  if (!existsSync(dialoguePath) || !existsSync(questsPath)) return { added: 0 };
+  const dialogueText = readFileSync(dialoguePath, 'utf-8');
+  const dialogueDoc = parseCsvStructured(dialogueText);
+  const questRows = loadCsv(questsPath);
+  const ensured = ensureDefaultSideDialogueRows(dialogueDoc.rows, questRows);
+  if (ensured.added === 0) return { added: 0 };
+  writeFileSync(dialoguePath, replaceCsvRows(dialogueText, sortDialogueRows(ensured.rows)), 'utf-8');
+  return { added: ensured.added };
+}
 
 const GM_PANEL_HTML = `<!DOCTYPE html>
 <html lang="zh">
@@ -77,12 +161,10 @@ button.sm{padding:3px 7px;font-size:11px}
   <div id="col-list"><div class="empty">加载中…</div></div>
   <div id="ops-panel">
     <h3>运维操作</h3>
+    <div style="color:#a0a8c0;font-size:10px;line-height:1.45;margin-bottom:7px">GM 只修改当前服务器实时 JSON 状态；任务定义、数值和对话请进入配置中心，合并配置 PR 并部署后生效。</div>
     <div class="ops-row">
-      <button class="warn sm" onclick="window.open('/gm/balance','_blank')">平衡调参</button>
-      <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务管理</button>
-      <button class="warn sm" onclick="window.open('/gm/quest-modules','_blank')">任务模块编辑</button>
-      <button class="warn sm" onclick="window.open('/gm/quest-graph','_blank')">任务关系图</button>
-      <button class="warn sm" onclick="window.open('/gm/dialogues','_blank')">对话编辑</button>
+      <button class="warn sm" onclick="window.open('/config','_blank')">配置中心（CSV）</button>
+      <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务状态管理</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -310,6 +392,21 @@ refreshAll();
 </body>
 </html>`;
 
+/** 独立配置中心入口：只编辑版本化 CSV，保存后由配置同步队列创建 GitHub PR。 */
+const CONFIG_CENTER_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>配置中心</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:900px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:block;padding:11px 13px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8}
+</style></head><body><main>
+<h1>配置中心（CSV）</h1>
+<div class="card"><div class="grid">
+<a href="/config/balance">平衡参数与常量</a><a href="/config/quest-modules">任务定义模块</a><a href="/config/quests">任务目录</a><a href="/config/quest-graph">任务关系图（只读审查）</a><a href="/config/dialogues">任务/NPC 对话</a>
+</div></div>
+<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR；合并 PR 后再按部署规范发布，才会成为后续版本和删档后的默认值。</div>
+<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><pre id="status">加载中…</pre></div>
+<script>let token=sessionStorage.getItem('gmToken')??'';function headers(){let h={};if(token)h['X-GM-Token']=token;return h}async function loadStatus(){let r=await fetch('/config/status',{headers:headers()});if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();if(token)sessionStorage.setItem('gmToken',token);return loadStatus();}}let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}async function syncNow(){let r=await fetch('/config/sync',{method:'POST',headers:headers()});let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}loadStatus();</script>
+</main></body></html>`;
+
 /**
  * 平衡调参表元数据：声明每个可编辑表对应哪个 CSV 文件、主键列、哪些列是数值可编辑。
  * 客户端据此渲染可编辑输入框；服务端据此校验并回写。新增可编辑列只需在此登记。
@@ -338,8 +435,8 @@ const QUEST_MODULE_TABLES = [
 /**
  * GM 编辑后的配置不能只停留在当前 release：release 目录会在下一次部署时
  * 被新的 git 包替换。把已编辑的 CSV 镜像到 shared/data 同级的 config 目录，
- * 由 remote-release.sh 在后续 release 构建前覆盖回去；manifest 只记录允许
- * 覆盖的配置文件名，避免把整套旧配置冻结住而遮蔽新的代码/配置变更。
+ * 由 remote-release.sh 在后续 release 构建完成后按稳定主键合并回去；manifest
+ * 只记录允许合并的配置文件名，避免旧整文件遮蔽新的代码/配置变更。
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
 function persistentConfigDir(gameApp: GameApp): string | null {
@@ -386,13 +483,13 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['maxLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
     file: 'building_levels.csv',
     keyComposite: ['code', 'level'],
-    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
+    numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'taskRefreshSec', 'taskMaxTasks', 'taskSideQuestChance', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'],
     labels: ['code', 'level', 'name'],
   },
   units: {
@@ -447,7 +544,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   // 科研系统
   research: {
     file: 'research.csv', key: 'id',
-    numeric: ['tier', 'effectValue', 'durationSec', 'rpCost'],
+    numeric: ['tier', 'mainBaseLevel', 'effectValue', 'durationSec', 'rpCost'],
     labels: ['id', 'code', 'name', 'branch', 'tier', 'requires', 'effectType', 'effectKey', 'scope'],
   },
   academy: {
@@ -552,7 +649,7 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <div id="status" class="ok">就绪</div>
 <div id="tables"></div>
 <script>
-const TOKEN = '';
+const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
 const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','constants','research','academy'];
 const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, constants:{}, research:{}, academy:{}};
@@ -689,7 +786,7 @@ function sectionKingdom(){
 }
 
 // ── 拓荒专用视图：把开城包的真实成本集中展示，避免在全局常量长表中漏看。 ──
-// 每个键仍然写入同一张 game_constants.csv；保存后 CSV 会被镜像到共享配置，JSON 仅作兼容兜底。
+// 每个键仍然写入同一张 game_constants.csv；保存后 CSV 会被镜像到共享配置并进入配置同步队列。
 var FOUND_ROWS = [
   ['found_resource_cost_base','第2座城每种资源成本','木材、泥土、钢、粮食各需多少；第2座城（N=2）使用此值'],
   ['found_resource_cost_growth','后续城成本增长倍率','第N座城每种资源 = base × growth^(N-2)，按最终结果四舍五入'],
@@ -699,7 +796,7 @@ var FOUND_ROWS = [
 function sectionFounding(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会校验并写回默认 CSV，同时保留兼容性覆盖；删档和后续部署都会沿用。</div>';
+  var h = '<div class="hint">拓荒开城包按每种资源分别计算：第 N 座城（N≥2）每种资源需要 round(base × growth^(N-2))。因此当前默认第2座城为木材/泥土/钢/粮食各 3000（合计 12000），第3座城各 6000（合计 24000）。修改后保存会校验并写回 CSV、镜像共享配置并排队创建配置 PR；删档和后续部署都会沿用。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<FOUND_ROWS.length;j++){
     var item = FOUND_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -765,6 +862,11 @@ function sectionBuildings(){
   function bonusCols(code){
     var c = [];
     if (code === 'treasury') c.push({k:'treasureSlots',l:'每级主/备用槽'});
+    if (code === 'tavern') {
+      c.push({k:'taskRefreshSec',l:'任务刷新秒'});
+      c.push({k:'taskMaxTasks',l:'任务槽数'});
+      c.push({k:'taskSideQuestChance',l:'支线概率'});
+    }
     if (code === 'vault') {
       c.push({k:'vaultProtectWood',l:'保木材/级'});
       c.push({k:'vaultProtectClay',l:'保泥土/级'});
@@ -781,9 +883,9 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。GM 保存会校验并写回默认 CSV，同时保留兼容性覆盖；删档和后续部署都会沿用。</div>';
+  var bFields = ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','主基地最低级','繁荣/级','人口增长/级·时'];
+  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -956,6 +1058,31 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     void reply.code(401).send({ ok: false, reason: '需要 X-GM-Token header' });
     return false;
   };
+  const requireConfigRoute = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    if (req.headers['x-config-route'] === '1') return true;
+    void reply.code(410).send({ ok: false, reason: 'CSV 配置编辑已迁移到 /config；GM 只允许修改实时 JSON 状态' });
+    return false;
+  };
+
+  // 配置中心与 GM 共用认证，但使用独立 URL 命名空间。兼容旧版书签的 /gm 配置
+  // 路由仍保留，GM 首页不再暴露它们；配置页面自身只请求 /config/*。
+  const configProxy = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const suffix = req.url.slice('/config'.length) || '/';
+    const headers: Record<string, string> = {};
+    headers['x-config-route'] = '1';
+    const gmToken = req.headers['x-gm-token'];
+    if (typeof gmToken === 'string') headers['x-gm-token'] = gmToken;
+    const result = await fastify.inject({
+      method: req.method as 'GET' | 'POST' | 'PUT' | 'DELETE',
+      url: `/gm${suffix}`,
+      headers,
+      payload: req.body as any,
+    } as any) as any;
+    reply.code(result.statusCode);
+    const contentType = result.headers['content-type'];
+    if (typeof contentType === 'string') reply.type(contentType);
+    void reply.send(result.body);
+  };
 
   /**
    * GM 面板允许直接编辑 player 文档。村庄坐标同时存在于 Player 快照和
@@ -989,6 +1116,26 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.get('/gm', (_req, reply) => {
     void reply.type('text/html; charset=utf-8').send(GM_PANEL_HTML);
   });
+
+  // 独立配置中心入口与页面。旧编辑器通过 configPage 重写为 /config API。
+  fastify.get('/config', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(CONFIG_CENTER_HTML);
+  });
+  fastify.get('/config/balance', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_BALANCE_HTML)));
+  fastify.get('/config/quests', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_QUESTS_HTML)));
+  fastify.get('/config/quest-modules', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_QUEST_MODULES_HTML)));
+  fastify.get('/config/quest-graph', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_QUEST_GRAPH_HTML)));
+  fastify.get('/config/dialogues', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_DIALOGUES_HTML)));
+  fastify.get('/config/status', (req, reply) => {
+    if (!auth(req, reply)) return;
+    void reply.send({ ok: true, ...gameApp.configAuthority.status() });
+  });
+  fastify.post('/config/sync', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const status = await gameApp.configAuthority.flush();
+    void reply.send({ ok: !status.lastError, ...status });
+  });
+  fastify.all('/config/*', configProxy);
 
   // GET /gm/collections
   fastify.get('/gm/collections', (req, reply) => {
@@ -1207,28 +1354,26 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
 
   // GET /gm/quests — 任务目录(quests.csv) Web 编辑器
-  fastify.get('/gm/quests', (_req, reply) => {
-    void reply.type('text/html; charset=utf-8').send(GM_QUESTS_HTML);
-  });
+  fastify.get('/gm/quests', (_req, reply) => { void reply.redirect('/config/quests'); });
 
   // GET /gm/quest-modules — 任务图模块化编辑器。六张表必须作为一个事务校验后才写回。
-  fastify.get('/gm/quest-modules', (_req, reply) => {
-    void reply.type('text/html; charset=utf-8').send(GM_QUEST_MODULES_HTML);
-  });
+  fastify.get('/gm/quest-modules', (_req, reply) => { void reply.redirect('/config/quest-modules'); });
 
   // GET/POST /gm/dialogues — NPC 对话目录编辑器。写回前复制整份 config 到临时目录校验。
-  fastify.get('/gm/dialogues', (_req, reply) => {
-    void reply.type('text/html; charset=utf-8').send(GM_DIALOGUES_HTML);
-  });
+  fastify.get('/gm/dialogues', (_req, reply) => { void reply.redirect('/config/dialogues'); });
 
   fastify.get('/gm/dialogues/data', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const doc = parseCsvStructured(readFileSync(join(gameApp.configDir, 'dialogues.csv'), 'utf-8'));
-    void reply.send({ ok: true, header: doc.header, rows: doc.rows });
+    const quests = loadCsv(join(gameApp.configDir, 'quests.csv'));
+    const ensured = ensureDefaultSideDialogueRows(doc.rows, quests);
+    void reply.send({ ok: true, header: doc.header, rows: sortDialogueRows(ensured.rows) });
   });
 
   fastify.post('/gm/dialogues/save', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const body = (req.body ?? {}) as { rows?: CsvRow[] };
     if (!Array.isArray(body.rows)) {
       void reply.code(400).send({ ok: false, reason: 'rows 必填' });
@@ -1243,7 +1388,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
       doc.raw = raw;
       doc.headerIndex = raw.findIndex((line) => line.split(',').map((x) => x.trim()).join(',') === doc.header.join(','));
-      doc.rows = body.rows.map((row) => Object.fromEntries(doc.header.map((h) => [h, row[h] ?? ''])));
+      doc.rows = sortDialogueRows(body.rows.map((row) => Object.fromEntries(doc.header.map((h) => [h, row[h] ?? '']))));
       doc.rowIndices = [];
       for (let i = 0; i < doc.rows.length; i++) {
         doc.raw.push('');
@@ -1255,6 +1400,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       loadGameConfig(tmp); // 校验失败不写线上配置
       writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
       persistConfigFiles(gameApp, ['dialogues.csv']);
+      gameApp.configAuthority.recordChange(['dialogues.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: doc.rows.length });
     } catch (e) {
@@ -1267,6 +1413,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
 
   fastify.get('/gm/quest-modules/data', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const dir = gameApp.configDir;
     const tables: Record<string, { header: string[]; rows: CsvRow[] }> = {};
     for (const file of QUEST_MODULE_TABLES) {
@@ -1278,6 +1425,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
 
   fastify.post('/gm/quest-modules/save', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const body = (req.body ?? {}) as { tables?: Record<string, { rows?: CsvRow[] }> };
     if (!body.tables) {
       void reply.code(400).send({ ok: false, reason: 'tables 必填' });
@@ -1285,6 +1433,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     const dir = gameApp.configDir;
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
+    let dialogueAdded = 0;
     try {
       const csvByFile: Record<string, string> = {};
       for (const file of QUEST_MODULE_TABLES) {
@@ -1306,9 +1455,13 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       }
       cpSync(dir, tmp, { recursive: true });
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(tmp, file), csvByFile[file], 'utf-8');
+      dialogueAdded = ensureSideDialogueTemplatesInDir(tmp).added;
       loadGameConfig(tmp); // 整图校验失败时绝不写入线上 configDir。
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
-      persistConfigFiles(gameApp, QUEST_MODULE_TABLES);
+      const changedFiles = [...QUEST_MODULE_TABLES, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
+      if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
+      persistConfigFiles(gameApp, changedFiles);
+      gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
     } catch (e) {
@@ -1321,18 +1474,20 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
 
   // GET /gm/quest-graph — 按任务线/节点/条件/目标/效果/边展示声明式任务图。
   fastify.get('/gm/quest-graph', (_req, reply) => {
-    void reply.type('text/html; charset=utf-8').send(GM_QUEST_GRAPH_HTML);
+    void reply.redirect('/config/quest-graph');
   });
 
   // GM 只读审查数据：配置仍以 config/quest_*.csv 为唯一事实源，避免线上覆盖漂移。
   fastify.get('/gm/quest-graph/data', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     void reply.send({ ok: true, graph: gameApp.config.questGraph });
   });
 
   // GET /gm/quests/data — 返回 quests.csv 解析后的行 + 表头（供编辑器渲染）
   fastify.get('/gm/quests/data', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const dir = gameApp.configDir;
     const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
     const doc = parseCsvStructured(text);
@@ -1342,6 +1497,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   // POST /gm/quests/save — 写回 quests.csv 并热重载（body: { rows: CsvRow[] }）
   fastify.post('/gm/quests/save', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const body = (req.body ?? {}) as { rows?: Record<string, string>[] };
     const rows = body.rows;
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -1350,6 +1506,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     const dir = gameApp.configDir;
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
+    let dialogueAdded = 0;
     try {
       const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
       const doc = parseCsvStructured(text);
@@ -1363,9 +1520,13 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       const csv = serializeCsv(doc);
       cpSync(dir, tmp, { recursive: true });
       writeFileSync(join(tmp, 'quests.csv'), csv, 'utf-8');
+      dialogueAdded = ensureSideDialogueTemplatesInDir(tmp).added;
       loadGameConfig(tmp); // 校验：失败在此抛出（不落盘）
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
-      persistConfigFiles(gameApp, ['quests.csv']);
+      const changedFiles = ['quests.csv' as const, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
+      if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
+      persistConfigFiles(gameApp, changedFiles);
+      gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
     } catch (e) {
@@ -1378,44 +1539,42 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
 
   // GET /gm/balance — 平衡调参 Web 面板
   fastify.get('/gm/balance', (_req, reply) => {
-    void reply.type('text/html; charset=utf-8').send(GM_BALANCE_HTML);
+    void reply.redirect('/config/balance');
   });
 
-  // GET /gm/balance/data — 返回可编辑配置行（建筑 / 建筑逐级 / 兵种 / 全局常量）
-  // 兼容旧 release：把 data/balance_overrides.json 的遗留覆盖叠在 CSV 之上后再返回，
-  // 直到下一次 GM 保存将其迁移到 CSV；否则编辑器会显示过期默认值。
+  // GET /gm/balance/data — 旧路径只保留兼容读取；配置编辑入口已迁移到 /config/balance。
+  // 运行时只读取 CSV，不再把 balance_overrides.json 叠加到返回结果。
   fastify.get('/gm/balance/data', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const dir = gameApp.configDir;
     const data: Record<string, unknown> = { meta: BALANCE_TABLES };
     const buildingNames: Record<string, string> = {};
     for (const r of loadCsv(join(dir, 'buildings.csv'))) buildingNames[r.code] = r.name;
-    const overrides = gameApp.balanceOverridePath ? loadBalanceOverrides(gameApp.balanceOverridePath) : {} as BalanceOverrides;
     for (const name of Object.keys(BALANCE_TABLES)) {
       let rows = loadCsv(join(dir, BALANCE_TABLES[name].file));
-      const tableChanges = overrides[name];
-      if (tableChanges && Object.keys(tableChanges).length) {
-        const t = BALANCE_TABLES[name];
-        rows = mergeOverridesIntoRows(rows, { file: t.file, key: t.key, keyComposite: t.keyComposite, numeric: t.numeric }, tableChanges);
-      }
       if (name === 'building_levels') {
-        for (const r of rows) r.name = buildingNames[r.code] ?? r.code;
+        for (const r of rows) {
+          r.name = buildingNames[r.code] ?? r.code;
+          // 旧版共享 CSV 可能在新增的酒馆专属列留下空值。空值在配置编辑器中
+          // 表示“未覆盖”，运行时会回退到 0.5；直接展示空白会误导管理员，
+          // 因此这里返回实际运行时默认值，保存时仍允许明确填 0 关闭支线刷新。
+          if (r.code === 'tavern' && (r.taskSideQuestChance === undefined || r.taskSideQuestChance.trim() === '')) {
+            r.taskSideQuestChance = '0.5';
+          }
+        }
       }
       data[name] = rows;
     }
     void reply.send({ ok: true, ...data });
   });
 
-  // POST /gm/balance/save — 校验 → 写回 CSV + 兼容性覆盖 → 热重载（失败绝不留半截配置）
+  // POST /gm/balance/save — 旧路径兼容入口；正式配置编辑请使用 /config/balance。
   fastify.post('/gm/balance/save', (req, reply) => {
     if (!auth(req, reply)) return;
+    if (!requireConfigRoute(req, reply)) return;
     const body = (req.body ?? {}) as Record<string, Record<string, Record<string, string>>>;
     const dir = gameApp.configDir;
-    const overridePath = gameApp.balanceOverridePath;
-    if (!overridePath) {
-      void reply.code(500).send({ ok: false, reason: 'balanceOverridePath 未配置（storePath 未设置？测试环境不支持平衡调参）' });
-      return;
-    }
     const edits: Array<[string, BalanceTable, Record<string, Record<string, string>>]> = [];
     for (const name of Object.keys(BALANCE_TABLES)) {
       const c = (body as Record<string, Record<string, Record<string, string>>>)[name];
@@ -1426,37 +1585,28 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     try {
-      // 1) 读当前覆盖，合并本次编辑（深合并：表→主键→字段，后写覆盖先写）
-      const current = loadBalanceOverrides(overridePath);
-      const incoming: BalanceOverrides = {};
-      for (const [name, , changes] of edits) incoming[name] = changes;
-      const merged = mergeBalanceOverrides(current, incoming);
-      // 2) 校验：把本次表的合并覆盖应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
-      //    使用 merged 而不是只使用 incoming，确保历史 JSON 覆盖也会被一次性迁移到 CSV。
+      // 校验：把本次编辑应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
         cpSync(dir, tmp, { recursive: true });
-        for (const [name, table] of edits) {
-          const tableChanges = merged[name] ?? {};
-          applyBalanceEdits(dir, tmp, table, tableChanges);
+        for (const [, table, changes] of edits) {
+          applyBalanceEdits(dir, tmp, table, changes);
         }
         loadGameConfig(tmp); // 失败在此抛出
 
-        // 校验通过后将同一份 CSV 写回当前配置目录，并镜像到共享配置目录。
-        // balance_overrides.json 仍保留一份，兼容旧版本/旧 release；CSV 是新的默认事实源。
+        // 校验通过后将同一份 CSV 写回当前配置目录并镜像到共享配置目录。
         for (const [, table] of edits) {
           copyFileSync(join(tmp, table.file), join(dir, table.file));
         }
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      persistConfigFiles(gameApp, edits.map(([, table]) => table.file));
-      // 3) 兼容性持久化覆盖（data/balance_overrides.json，wipe:all 不动）。
-      //    新写入的 CSV 与覆盖值相同；旧进程仍能读取覆盖，升级过程不丢调参。
-      saveBalanceOverrides(overridePath, merged);
-      // 4) 热重载（内存 + 存量村庄派生值即时生效）
+      const changedFiles = edits.map(([, table]) => table.file);
+      persistConfigFiles(gameApp, changedFiles);
+      gameApp.configAuthority.recordChange(changedFiles);
+      // 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();
-      void reply.send({ ok: true });
+      void reply.send({ ok: true, config: gameApp.configAuthority.status() });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       void reply.code(400).send({ ok: false, reason: msg });
@@ -1625,7 +1775,7 @@ const GM_DIALOGUES_HTML = `<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;vertical-align:top}th{position:sticky;top:0;background:#20354c;color:#8ed5ff;white-space:nowrap}input,textarea{width:190px;min-width:120px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}textarea{height:96px;resize:vertical}.small{width:70px;min-width:70px}.row-actions{min-width:54px;white-space:nowrap}a{color:#79cfff}
 </style></head><body>
 <h1>NPC 对话编辑</h1>
-<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是接取后的自动对话。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
+<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是任务接取成功后触发（S3 使用独立的 <b>s3_after_accept</b> 对象），<b>deliver</b> 是交付；M8/M9 的成功文本使用默认触发点，失败文本使用对应的 <b>accept_failure</b>/<b>deliver_failure</b>。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
 <div class="bar"><button onclick="addObject()">+ 新增对话对象</button><button class="save" onclick="save()">保存并热重载</button><span id="status">加载中…</span></div>
 <div class="table-wrap"><table id="grid"></table></div>
 <script>
@@ -1633,7 +1783,9 @@ let token=sessionStorage.getItem('gmToken')??'',header=[],rows=[];
 const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
 async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},token?{'X-GM-Token':token}: {},opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();sessionStorage.setItem('gmToken',token);return api(url,opt)}}let j=await r.json();if(!r.ok||!j.ok)throw Error(j.reason||'请求失败');return j}
 const editable=new Set(['npcName','npcText','replies']);
-function render(){let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已加载 '+rows.length+' 段'}
+function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??'');if(codeA!==codeB)return codeA<codeB?-1:1;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
+function sortRows(){rows.sort(rowCompare)}
+function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code 排序，加载 '+rows.length+' 段'}
 function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
 function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';rows.push(r);render()}
 function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);rows.splice(i+1,0,r);render()}
@@ -1642,6 +1794,19 @@ async function load(){try{let d=await api('/gm/dialogues/data');header=d.header;
 async function save(){try{document.getElementById('status').textContent='校验并保存中…';let d=await api('/gm/dialogues/save',{method:'POST',body:JSON.stringify({rows})});document.getElementById('status').textContent='已保存并热重载（'+d.count+' 行）'}catch(e){document.getElementById('status').textContent='保存失败：'+e.message}}
 load();
 </script></body></html>`;
+
+function configPage(html: string): string {
+  // 旧编辑器沿用成熟的渲染脚本，但页面与 API 均改到 /config 命名空间，
+  // 让配置编辑器不再出现在 GM 的实时状态入口下。
+  return html
+    .replaceAll("fetch('/gm' +", "fetch('/config' +")
+    .replaceAll("fetch('/gm'+", "fetch('/config'+")
+    .replaceAll("fetch('/gm/", "fetch('/config/")
+    .replaceAll("'/gm/", "'/config/")
+    .replaceAll('GM 面板', '配置中心')
+    .replaceAll('改 CSV 即时生效（无需刷档）', '配置中心 · CSV 版本化（合并并部署后生效）')
+    .replaceAll('保存并热重载', '提交配置并热重载');
+}
 
 const GM_QUESTS_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>任务目录编辑</title>

@@ -57,6 +57,8 @@
 .report-day-group { position: relative; }
 .report-day-group + .report-day-group { margin-top: var(--s-5); }
 
+.reports-command-desk { display: flex; flex-direction: column; gap: var(--s-5); }
+
 /* ── 战报卡片 / 时间线节点 ───────────────────────────────── */
 .report-list {
   position: relative;

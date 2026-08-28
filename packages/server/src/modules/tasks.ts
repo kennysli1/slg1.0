@@ -329,8 +329,11 @@ export class TasksModule {
   private clearPlayerSideOffers(villageId: string, code: string): void {
     for (const storageVillageId of this.playerTaskStorageIds(villageId, code)) {
       const state = this.ensureState(storageVillageId);
-      if (!state.offeredSide.includes(code)) continue;
-      state.offeredSide = state.offeredSide.filter((item) => item !== code);
+      const offered = state.offered.filter((item) => item !== code);
+      const offeredSide = state.offeredSide.filter((item) => item !== code);
+      if (offered.length === state.offered.length && offeredSide.length === state.offeredSide.length) continue;
+      state.offered = offered;
+      state.offeredSide = offeredSide;
       this.store.set(COLLECTION, storageVillageId, state);
     }
   }
@@ -430,7 +433,13 @@ export class TasksModule {
       const dailyActive = Object.values(s.active).filter((i) => i.type === 'daily').length;
       if (dailyActive >= info.maxTasks) return { ok: false, payload: {}, reason: 'too_many_active' };
     } else if (q.type === 'side') {
-      if (!s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
+      // 酒馆刷出的支线占用 mixed `offered` 槽；事件触发型支线仍在 offeredSide。
+      const tavernOffer = s.offered.includes(code);
+      if (!tavernOffer && !s.offeredSide.includes(code)) return { ok: false, payload: {}, reason: 'not_offered' };
+      if (tavernOffer) {
+        const info = await this.tavernInfo(villageId);
+        if (info.maxTasks <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
+      }
       if (this.sideClaimedByPlayer(villageId, code)) return { ok: false, payload: {}, reason: 'already_claimed' };
     } else {
       if (code === 'm1') return { ok: false, payload: {}, reason: 'main_auto_activated' };
@@ -482,6 +491,10 @@ export class TasksModule {
     } else if (q.type === 'side') {
       // 先从所有村庄移除 offer，再异步生成任务营地，避免同一玩家多村重复接取。
       this.clearPlayerSideOffers(villageId, code);
+      // clearPlayerSideOffers 通过 store 清理其他村状态；当前状态对象 `s`
+      // 可能是清理前取得的引用，必须同步移除后再写回，避免把当前村的旧槽位复原。
+      s.offered = s.offered.filter((c) => c !== code);
+      s.offeredSide = s.offeredSide.filter((c) => c !== code);
     } else {
       if (code === 'm1') return { ok: false, payload: {}, reason: 'main_auto_activated' };
       s.offeredMain = s.offeredMain.filter((c) => c !== code);
@@ -514,6 +527,9 @@ export class TasksModule {
     // 支线任务：放弃后永久不再出现（记入 abandonedSide，并从可接取移除）
     if (q.type === 'side') {
       if (!s.abandonedSide.includes(code)) s.abandonedSide.push(code);
+      // 酒馆刷出的支线占用混合 `offered` 槽；事件触发型支线占用
+      // `offeredSide`。两处都清理，避免放弃后旧槽位残留导致再次显示。
+      s.offered = s.offered.filter((c) => c !== code);
       s.offeredSide = s.offeredSide.filter((c) => c !== code);
     } else {
       // 日常任务：放弃冷却后仍可再次刷出
@@ -881,10 +897,10 @@ export class TasksModule {
       this.store.set(COLLECTION, storageVillageId, s);
     }
     if (await this.successConditionMet(villageId, code)) await this.markReady(villageId, code);
-    // 仅建村自动激活的 m1 展示一次自动对话；手动接取的主线由 StartAccept 返回接取对话。
-    // 对话定义可为空，GM 填写后仍可通过未消费的 pending 记录热生效。
+    // 仅建村自动激活的 m1 展示一次自动对话；手动接取的任务由 StartAccept 返回接取对话。
+    // S3 的接取后追问是独立的 after_accept 对话，必须在任务真正接取成功后排入待弹队列。
     if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
-    else if (q.type === 'side') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
+    else if (q.type === 'side' && code === 's3') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }
@@ -998,14 +1014,13 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
   }
 
-  /** M8/M9 的对话按 M8 结局选择 GM 中对应的触发文本；M9 的稳定 code
-   * 以 m8_ 前缀明确标注依据，trigger 保持 accept/deliver + outcome 兼容协议。 */
+  /** M8/M9 的成功文本已并入默认 accept/deliver；只有失败分支保留 *_failure 触发器。 */
   private dialogueTrigger(villageId: string, code: string, phase: 'accept' | 'deliver', inst?: TaskInstance): string {
     if (code !== 'm8' && code !== 'm9') return phase;
     const storage = this.storageVillageForQuest(villageId, code);
     const outcome = inst?.outcome ?? this.ensureState(storage).outcomes?.m8;
-    if (!outcome) return phase;
-    return `${phase}_${outcome}`;
+    if (!outcome || outcome === 'success') return phase;
+    return `${phase}_failure`;
   }
 
   /** 失败确认统一使用 deliver_failure；M8/M9 按结局复用同名触发器。 */
@@ -1338,6 +1353,7 @@ export class TasksModule {
     if (!s.completedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_completed_side' };
 
     s.completedSide = s.completedSide.filter((x) => x !== code);
+    s.offered = s.offered.filter((x) => x !== code);
     s.offeredSide = s.offeredSide.filter((x) => x !== code);
     // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
     if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
@@ -1613,6 +1629,8 @@ export class TasksModule {
       if (s.abandonedSide.includes(q.code)) continue; // 放弃过 → 永久不再出现
       if (s.active[q.code]) continue;
       if (this.sideClaimedByPlayer(villageId, q.code)) continue;
+      // 酒馆刷新型支线由 refreshOffered 按槽位概率管理，不走事件触发解锁。
+      if (q.trigger === 'tavern_refresh') continue;
       if (s.offeredSide.includes(q.code)) continue;
       if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(villageId, q.requires)) {
         s.offeredSide.push(q.code);
@@ -2120,22 +2138,42 @@ export class TasksModule {
     this.scheduleRefresh(villageId, info);
   }
 
-  /** 加权随机抽取日常任务填满酒馆（不超过 maxTasks）。日常任务可反复，不过滤完成历史，仅受冷却约束。 */
+  /** 按槽位填充酒馆：每个空槽独立按概率抽取支线，否则抽取日常。 */
   private async refreshOffered(villageId: string, info: TavernInfo): Promise<void> {
     const s = this.ensureState(villageId);
     const need = info.maxTasks - s.offered.length;
     if (need <= 0) return;
 
-    const pool = this.catalog.all().filter((q) =>
+    const selected = new Set(s.offered);
+    const dailyPool = this.catalog.all().filter((q) =>
       q.type === 'daily' &&
       (s.cooldownUntil?.[q.code] ?? 0) <= this.now() &&
       !s.active[q.code] &&
-      !s.offered.includes(q.code),
+      !selected.has(q.code),
     );
-    if (!pool.length) return;
-
-    const picked = this.weightedPick(pool, need);
-    for (const c of picked) s.offered.push(c);
+    const sidePool = this.catalog.all().filter((q) =>
+      q.type === 'side' &&
+      q.trigger === 'tavern_refresh' &&
+      !s.active[q.code] &&
+      !s.completedSide.includes(q.code) &&
+      !s.abandonedSide.includes(q.code) &&
+      !selected.has(q.code) &&
+      !this.sideClaimedByPlayer(villageId, q.code),
+    );
+    const chance = Math.min(1, Math.max(0, info.sideQuestChance));
+    let changed = false;
+    for (let i = 0; i < need; i++) {
+      const preferSide = this.rng() < chance;
+      const primary = preferSide ? sidePool : dailyPool;
+      const fallback = preferSide ? dailyPool : sidePool;
+      const code = this.weightedPick(primary.filter((q) => !selected.has(q.code)), 1)[0]
+        ?? this.weightedPick(fallback.filter((q) => !selected.has(q.code)), 1)[0];
+      if (!code) continue;
+      selected.add(code);
+      s.offered.push(code);
+      changed = true;
+    }
+    if (!changed) return;
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
   }
@@ -2162,12 +2200,13 @@ export class TasksModule {
   // ── 酒馆参数 ──
   private async tavernInfo(villageId: string): Promise<TavernInfo> {
     const level = await this.tavernLevel(villageId);
-    if (level <= 0) return { level: 0, refreshSec: 0, maxTasks: 0 };
+    if (level <= 0) return { level: 0, refreshSec: 0, maxTasks: 0, sideQuestChance: 0.5 };
     const def = this.config.buildings['tavern']?.levels[level];
     return {
       level,
       refreshSec: def?.taskRefreshSec ?? 3600,
       maxTasks: def?.taskMaxTasks ?? 1,
+      sideQuestChance: Math.min(1, Math.max(0, def?.taskSideQuestChance ?? 0.5)),
     };
   }
 

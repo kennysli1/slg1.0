@@ -793,6 +793,9 @@
   line-height: 1.35;
   margin-top: 3px;
 }
+.vil-card-inspect { display: flex; align-items: center; justify-content: flex-end; gap: var(--s-1); color: var(--c-gold-dim); font-size: var(--f-2xs); font-weight: 700; }
+.vil-card-inspect span,
+.vil-card-empty-label span { color: var(--c-gold); font-size: var(--f-lg); line-height: 0; }
 .vil-card-progress { margin-top: var(--s-1); }
 .vil-card-foot {
   display: flex;
@@ -1588,3 +1591,158 @@
 .kingdom-section-intro > span { color: var(--c-gold-hi); font-family: var(--ff-han); font-size: var(--f-lg); font-weight: 700; }
 .kingdom-section-intro small { color: var(--c-ink-dim); font-size: var(--f-xs); }
 @media (max-width: 720px) { .kingdom-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kingdom-resource-row:last-child { grid-column: 1 / -1; } .kingdom-section-intro { align-items: flex-start; flex-direction: column; } }
+
+/* ── 帝国指挥桌面：首屏只摘要，完整城务/军务按工作区展开 ── */
+.empire-command-desk { gap: var(--s-3); }
+.empire-task-banner { max-width: none; }
+.empire-command-desk .kingdom-resource-ledger { margin-bottom: 0; }
+.empire-operations-summary { display: grid; gap: var(--s-2); }
+.empire-operations-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, .75fr); align-items: stretch; gap: var(--s-3); }
+.empire-operation-item { display: flex; min-width: 0; align-items: flex-start; gap: var(--s-2); padding-right: var(--s-3); border-right: 1px solid var(--line); }
+.empire-operation-item > div { display: grid; min-width: 0; gap: var(--s-1); }
+.empire-operation-item span,
+.empire-operation-guide > span { color: var(--c-ink-dim); font-size: var(--f-2xs); }
+.empire-operation-item strong,
+.empire-operation-guide strong { overflow: hidden; color: var(--c-ink); font-size: var(--f-sm); text-overflow: ellipsis; white-space: nowrap; }
+.empire-operation-item small { color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.4; }
+.empire-operation-guide { display: grid; align-content: center; gap: var(--s-1); min-width: 0; }
+.empire-operation-guide strong { white-space: normal; line-height: 1.4; }
+.empire-workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s-4); }
+.empire-workspace-entry { min-width: 0; }
+.empire-workspace-panel { display: flex; min-height: 144px; height: 144px; flex-direction: column; }
+.empire-workspace-entry.is-open .empire-workspace-panel { min-height: 0; height: auto; }
+.empire-workspace-topline { display: flex; min-height: 100%; align-items: stretch; justify-content: space-between; gap: var(--s-3); }
+.empire-workspace-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--s-1); }
+.empire-workspace-copy h2 { margin: 0; color: var(--c-ink); font-family: var(--ff-han); font-size: var(--f-lg); line-height: 1.2; }
+.empire-workspace-copy p { margin: 0; color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.55; }
+.empire-workspace-actions { display: flex; min-width: 260px; flex-direction: row; align-items: center; justify-content: flex-end; gap: var(--s-2); }
+.empire-workspace-actions > .btn { min-height: 44px; justify-content: center; white-space: nowrap; }
+.empire-workspace-toggle { display: grid; min-width: 156px; min-height: 60px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s-1) var(--s-2); padding: var(--s-2) var(--s-3); border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--c-panel-3); color: var(--c-ink); cursor: pointer; font-family: var(--ff-body); text-align: left; transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast); }
+.empire-workspace-toggle > span { min-width: 0; font-size: var(--f-sm); font-weight: 700; }
+.empire-workspace-toggle small { grid-column: 1; color: var(--c-ink-dim); font-size: var(--f-2xs); line-height: 1.35; }
+.empire-workspace-toggle i { grid-column: 2; grid-row: 1 / span 2; color: var(--c-gold); font-size: var(--f-xl); font-style: normal; transition: transform var(--t-fast); }
+.empire-workspace-toggle:hover { border-color: var(--c-gold-dim); background: var(--c-raise); }
+.empire-workspace-toggle:active { transform: translateY(1px); }
+.empire-workspace-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.empire-workspace-entry.is-open .empire-workspace-toggle { border-color: var(--c-gold-dim); }
+.empire-workspace-entry.is-open .empire-workspace-toggle i { transform: rotate(180deg); }
+.empire-workspace-content { display: grid; gap: var(--s-4); margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.empire-workspace-content .kingdom-army-management { margin-top: 0; }
+.empire-active-panel { border-left: calc(var(--s-1) / 2) solid var(--status-warning); }
+
+@media (max-width: 1120px) {
+  .empire-operations-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .empire-operation-guide { grid-column: 1 / -1; padding-top: var(--s-2); border-top: 1px solid var(--line); }
+}
+@media (max-width: 720px) {
+  .empire-command-desk { gap: var(--s-3); }
+  .empire-operations-grid,
+  .empire-workspace-grid { grid-template-columns: minmax(0, 1fr); }
+  .empire-operation-item { padding: 0 0 var(--s-2); border-right: 0; border-bottom: 1px solid var(--line); }
+  .empire-workspace-panel { min-height: 0; height: auto; }
+  .empire-workspace-topline { align-items: flex-start; flex-direction: column; }
+  .empire-workspace-actions { width: 100%; min-width: 0; flex-direction: column; align-items: stretch; }
+  .empire-workspace-toggle { min-height: 56px; }
+}
+
+/* ── 王国页村庄指挥条：滚动时保留当前操作上下文 ── */
+.village-command-dock {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--tabbar-h));
+  z-index: calc(var(--z-tabbar) - 1);
+  display: grid;
+  grid-template-columns: minmax(220px, .38fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--s-3);
+  min-height: 104px;
+  margin-bottom: var(--s-1);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--c-bg);
+  box-shadow: var(--sh-2);
+}
+.village-command-dock__village,
+.village-command-dock__resources {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.village-command-dock__village { justify-content: center; }
+.village-command-dock__resources .kingdom-resource-ledger,
+.village-command-dock__resources .kingdom-resource-ledger > .panel {
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
+}
+.village-command-dock__resources .kingdom-resource-grid { height: 100%; align-items: stretch; }
+.kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
+.kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
+.village-command-dock__eyebrow {
+  color: var(--c-gold-dim);
+  font-family: var(--ff-display);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: .14em;
+  line-height: 1;
+}
+
+/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。 */
+.empire-workspace-grid--both-closed,
+.empire-workspace-grid--both-open {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.empire-workspace-grid--development-open,
+.empire-workspace-grid--military-open {
+  grid-template-columns: minmax(0, 1fr);
+}
+.empire-workspace-grid--development-open .empire-workspace-entry,
+.empire-workspace-grid--military-open .empire-workspace-entry {
+  grid-column: 1 / -1;
+}
+.empire-workspace-entry,
+.empire-workspace-entry .empire-workspace-panel { min-width: 0; }
+.empire-workspace-grid--both-closed .empire-workspace-entry,
+.empire-workspace-grid--both-closed .empire-workspace-panel { height: 100%; }
+.empire-workspace-entry {
+  scroll-margin-top: calc(var(--topbar-h) + var(--tabbar-h) + var(--s-7) + var(--s-6) + var(--s-5) + var(--s-4));
+}
+
+@media (max-width: 960px) and (min-width: 721px) {
+  .village-command-dock { grid-template-columns: minmax(190px, .46fr) minmax(0, 1fr); }
+  .village-command-dock__resources .kingdom-resource-grid { gap: var(--s-1); }
+  .kingdom-resource-ledger--embedded .kingdom-resource-row { padding: var(--s-1); }
+}
+
+@media (max-width: 720px) {
+  .village-command-dock {
+    /* Mobile shell stacks brand + resource rows; keep the dock below that header. */
+    position: sticky;
+    top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--safe-t));
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    margin-bottom: 0;
+    padding: var(--s-2) 0;
+    background: var(--c-bg);
+    box-shadow: var(--sh-1);
+  }
+  .village-command-dock__village { gap: var(--s-2); }
+  .village-command-dock__resources .kingdom-resource-ledger > .panel { padding: var(--s-2); }
+  .village-command-dock__resources .kingdom-resource-grid {
+    display: flex;
+    height: auto;
+    align-items: stretch;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .village-command-dock__resources .kingdom-resource-grid::-webkit-scrollbar { display: none; }
+  .kingdom-resource-ledger--embedded .kingdom-resource-row {
+    flex: 0 0 min(42vw, 164px);
+    min-height: 52px;
+  }
+  .empire-workspace-grid--both-closed,
+  .empire-workspace-grid--both-open,
+  .empire-workspace-grid--development-open,
+  .empire-workspace-grid--military-open { grid-template-columns: minmax(0, 1fr); }
+  .empire-workspace-entry { scroll-margin-top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--s-4) + var(--s-3) + var(--s-7)); }
+}

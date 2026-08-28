@@ -174,9 +174,9 @@ export function notificationText(event: string, payload: any, ts?: number): stri
     const kept = (payload.kept ?? []).map((c: string) => treasureInfo(c)?.name ?? c).join('、');
     const count = payload.pendingCount ?? (payload.pending?.length ?? 0);
     if (count > 0) {
-      return `${time}宝库被拆除：价值最高的宝物「${kept}」留于城镇中心，其余 ${count} 件转入报告页待你处理`;
+      return `${time}宝库被拆除：价值最高的宝物「${kept}」留于主基地，其余 ${count} 件转入报告页待你处理`;
     }
-    return `${time}宝库被拆除：宝物「${kept}」已留于城镇中心`;
+    return `${time}宝库被拆除：宝物「${kept}」已留于主基地`;
   } else if (event === 'TreasureReport') {
     const coords: Array<{ q: number; r: number }> = payload.coords ?? [];
     if (!coords.length) return `${time}秘密字条化作一片空白——附近没有可标记的空地`;

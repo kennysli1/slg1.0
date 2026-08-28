@@ -21,6 +21,8 @@ import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
+import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
+import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -31,6 +33,27 @@ describe('modalLayerZ', () => {
 });
 
 describe('地图定位', () => {
+  it('选择己方村庄只写地图定位与选中态，不会隐式切换当前村', () => {
+    const calls: string[] = [];
+    let target: any = null;
+    inspectOwnedVillage(
+      { id: 'v-branch', name: '许昌', q: 8, r: -3 },
+      (center) => { calls.push(`center:${center.q},${center.r}`); },
+      (next) => { calls.push('selected'); target = next; },
+    );
+    assert.deepEqual(calls, ['center:8,-3', 'selected']);
+    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'bld_main' });
+  });
+
+  it('只有目标卡明确确认后才请求切村；当前村不会重复请求', async () => {
+    const switched: string[] = [];
+    const switcher = async (id: string) => { switched.push(id); return { ok: true }; };
+    assert.deepEqual(await confirmOwnedVillage('v-branch', 'v-capital', switcher), { ok: true });
+    assert.deepEqual(switched, ['v-branch']);
+    assert.deepEqual(await confirmOwnedVillage('v-branch', 'v-branch', switcher), { ok: true });
+    assert.deepEqual(switched, ['v-branch']);
+  });
+
   it('MarchStep 同时更新己方行军和来袭预警，任务村 NPC 图标不会停在首次预警位置', () => {
     const previous = getCache();
     const warning = {
@@ -297,10 +320,11 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     popCeiling: 160,
     laborRatio: 0.5,
     prosperityBonus: 0.5,
-    prosperityMult: 0.875,
+    prosperityMult: 1.15,
     growthPerHour: 10,
     mobilizeCap: 0.75,
     popProsperityFullRatio: 0.7,
+    popProsperityMaxBonus: 0.3,
     mainLevel: 1,
     inFamine: false,
     civilianCropPerHour: 100,
@@ -309,7 +333,7 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     wounded: { total: 0, entries: [] },
     cropDeficitRate: 0,
     laborMults: {
-      production: 0.875, build: 0.875, train: 0.875, research: 0.875,
+      production: 1.15, build: 1.15, train: 1.15, research: 1.15,
     },
     softLimit: 160,
     lastTick: Date.now(),
@@ -327,7 +351,7 @@ describe('PopSnapshot v3 硬上限 - 新字段', () => {
     assert.equal(ps?.hardCap, 200);
     assert.equal(ps?.availableLabor, 160);
     assert.equal(ps?.laborRatio, 0.5);
-    assert.equal(ps?.prosperityMult, 0.875);
+    assert.equal(ps?.prosperityMult, 1.15);
     assert.equal(ps?.inFamine, false);
   });
 
@@ -645,5 +669,46 @@ describe('任务页菜单折叠偏好', () => {
     assert.deepEqual(readTaskMenuOpenState('player-2', storage), {});
     data.set(taskMenuStorageKey('player-1'), JSON.stringify({ global: 'yes', village: true, nested: 1 }));
     assert.deepEqual(readTaskMenuOpenState('player-1', storage), { village: true });
+  });
+});
+
+describe('王国工作区折叠偏好', () => {
+  it('用四态纯函数决定工作区布局，单开时可让页面使用全宽', () => {
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: false }), 'empire-workspace-grid--both-closed');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: false }), 'empire-workspace-grid--development-open');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: true }), 'empire-workspace-grid--military-open');
+    assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: true }), 'empire-workspace-grid--both-open');
+  });
+
+  it('初次读取默认收起，按玩家与村庄隔离保存', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+    writeVillageWorkbenchPreferences('p1', 'v1', { developmentOpen: true, militaryOpen: false }, storage);
+    assert.equal(villageWorkbenchStorageKey('p1', 'v1'), 'kow.village-workbench.p1.v1');
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: true, militaryOpen: false });
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v2', storage), { developmentOpen: false, militaryOpen: false });
+    assert.deepEqual(readVillageWorkbenchPreferences('p2', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+  });
+
+  it('坏数据、字段缺失与存储异常都退化为安全默认值', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+    data.set(villageWorkbenchStorageKey('p1', 'v1'), '{坏 JSON');
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+    data.set(villageWorkbenchStorageKey('p1', 'v1'), JSON.stringify({ developmentOpen: true, militaryOpen: 'yes' }));
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: true, militaryOpen: false });
+    const brokenStorage = {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+    };
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', brokenStorage), { developmentOpen: false, militaryOpen: false });
+    assert.doesNotThrow(() => writeVillageWorkbenchPreferences('p1', 'v1', { developmentOpen: true, militaryOpen: true }, brokenStorage));
   });
 });

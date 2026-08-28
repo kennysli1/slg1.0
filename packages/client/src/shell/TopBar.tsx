@@ -20,9 +20,6 @@ export function TopBar() {
           <div class="brand-title">世界之王</div>
           <div class="brand-sub">
             <span title={me?.name}>{me?.name}</span>
-            <span title={me?.villages?.find((v) => v.id === me?.villageId)?.name}>
-              {me?.villages?.find((v) => v.id === me?.villageId)?.name ?? `(${me?.q},${me?.r})`}
-            </span>
             <button class="logout-btn" type="button" onClick={onLogout} title="退出登录 / 切换账号">退出</button>
           </div>
         </div>

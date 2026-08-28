@@ -56,7 +56,7 @@ function renderCenter(tc: any): string {
   const btn = max ? '<small class="tag">已满级</small>'
     : busy ? '<small class="tag">建造中</small>'
     : `<button class="btn-sm" data-up-slot="${tc.slotId}" ${!afford ? 'disabled' : ''}>升级</button>`;
-  return `<h3>城镇中心</h3>
+  return `<h3>主基地</h3>
     <div class="card card-center" data-bld-slot="${tc.slotId}" title="点击查看 ${escapeAttr(tc.name)} 详情">${art(tc.icon, tc.name, 'xl')}
       <div class="cardbody"><div class="card-title">${escapeHtml(tc.name)} <b class="lv">Lv${tc.level}</b>
         <small class="bld-detail-hint">详情 ›</small></div>

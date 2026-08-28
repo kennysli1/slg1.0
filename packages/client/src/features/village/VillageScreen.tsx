@@ -2,19 +2,27 @@
  * 村庄页：以任务和建筑列表为主的村庄经营指挥台。
  * 村庄场景保留为独立组件，但不再占用村庄页首屏空间。
  */
-import { dataVersion, tick } from '../../app/store.js';
+import { useState } from 'preact/hooks';
+import { dataVersion, tab, tick } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { buildingInfo } from '../../app/config.js';
-import { Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { me } from '../../api.js';
+import { buildingInfo, unitInfo } from '../../app/config.js';
+import { Btn, Panel, SectionHead, TimerBar, Icon } from '../../ui/index.js';
+import { fmt } from '../../shared/utils/format.js';
 import { BuildingCard, EmptySlotCard } from './BuildingCard.js';
 import { PopPanel } from './PopPanel.js';
 import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
-import { VillageSwitcher } from './VillageSwitcher.js';
 import { VillageTaskSummary } from './VillageTaskSummary.js';
-import { VillageResourceLedger } from './VillageResourceLedger.js';
+import { VillageCommandDock } from './VillageCommandDock.js';
 import { VillageArmyManagement } from '../army/ArmyScreen.js';
+import {
+  readVillageWorkbenchPreferences,
+  writeVillageWorkbenchPreferences,
+  villageWorkbenchLayoutClass,
+  type VillageWorkbenchPreferences,
+} from './workbench-preferences.js';
 
 import '../../styles/village.css';
 
@@ -78,7 +86,7 @@ function VillageListView({ vil }: { vil: any }) {
       {/* Town centre */}
       {tc && (
         <div>
-          <SectionHead>城镇中心</SectionHead>
+        <SectionHead>{tc.name ?? '主基地'}</SectionHead>
           <div class="vil-zone-grid" style={{ gridTemplateColumns: '1fr' }}>
             <BuildingCard building={tc} isCenter />
           </div>
@@ -114,6 +122,133 @@ function VillageListView({ vil }: { vil: any }) {
   );
 }
 
+/** 首屏仅保留进行中摘要，完整建造与训练在下方工作区。 */
+function ActiveOperationsSummary({ vil }: { vil: any }) {
+  dataVersion.value;
+  const army = getCache().army;
+  const trainingQueues: any[] = army?.trainingQueues ?? [];
+  const buildItems: any[] = vil.queue?.items ?? [];
+  const activeBuild = buildItems[0];
+  const activeBuildInfo = activeBuild ? buildingInfo(activeBuild.kind) : null;
+  const activeTraining = trainingQueues[0];
+  const trainingName = activeTraining ? unitInfo(activeTraining.unit).name : '';
+
+  return (
+    <section class="empire-operations-summary" aria-label="当前村进行中事项">
+      <SectionHead sub="建造、训练和预警会随当前操作村庄切换">进行中</SectionHead>
+      <Panel variant="flat" pad>
+        <div class="empire-operations-grid">
+          <div class="empire-operation-item">
+            <Icon icon={activeBuildInfo?.icon ?? 'ui_icon_time'} label="" decorative size="sm" />
+            <div>
+              <span>建造</span>
+              <strong>{activeBuildInfo ? `${activeBuildInfo.name} · Lv${activeBuild.toLevel}` : '暂无建设工程'}</strong>
+              <small>{activeBuildInfo ? `队列 ${buildItems.length}/${vil.queue?.capacity ?? 0}，完整队列在建筑与城务中查看` : '展开建筑与城务安排下一项工程'}</small>
+            </div>
+          </div>
+          <div class="empire-operation-item">
+            <Icon icon="ui_icon_def" label="" decorative size="sm" />
+            <div>
+              <span>训练</span>
+              <strong>{activeTraining ? `${trainingName} · ${fmt(Number(activeTraining.count ?? 0))}` : '暂无训练队列'}</strong>
+              <small>{activeTraining ? `共 ${trainingQueues.length} 项训练进行中，取消与兵种详情在军务工作区` : '展开军务工作区开始训练或调整驻军'}</small>
+            </div>
+          </div>
+          <div class="empire-operation-guide">
+            <span>需要完整操作？</span>
+            <strong>下方两个工作区保留全部建造、训练、防御与管理入口。</strong>
+          </div>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function WorkspaceEntry({ id, eyebrow, title, summary, open, onToggle, children, utility }: {
+  id: string;
+  eyebrow: string;
+  title: string;
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+  children: any;
+  utility?: any;
+}) {
+  const contentId = `${id}-content`;
+  return (
+    <section id={id} class={`empire-workspace-entry${open ? ' is-open' : ''}`} aria-labelledby={`${id}-title`}>
+      <Panel pad class="empire-workspace-panel">
+        <div class="empire-workspace-topline">
+          <div class="empire-workspace-copy">
+            <span class="vil-eyebrow">{eyebrow}</span>
+            <h2 id={`${id}-title`}>{title}</h2>
+            <p>{summary}</p>
+          </div>
+          <div class="empire-workspace-actions">
+            {utility}
+            <button type="button" class="empire-workspace-toggle" aria-expanded={open} aria-controls={contentId} onClick={onToggle}>
+              <span>{open ? `收起${title}` : `展开${title}`}</span>
+              <small>{open ? '回到首屏摘要' : '查看完整操作与详情'}</small>
+              <i aria-hidden="true">⌄</i>
+            </button>
+          </div>
+        </div>
+        {open && <div id={contentId} class="empire-workspace-content">{children}</div>}
+      </Panel>
+    </section>
+  );
+}
+
+function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: string; villageId: string }) {
+  const [preferences, setPreferences] = useState<VillageWorkbenchPreferences>(() => readVillageWorkbenchPreferences(playerId, villageId));
+  const hasTreasures = !!getCache().treasures;
+  // 主基地是发展阶段核心，不占用城内/城外建造格；总数口径只统计
+  // 玩家可以规划的两类建筑格，避免把固定的主基地重复算进“已启用地块”。
+  const placedCount = (vil.zones?.inner?.placed?.length ?? 0) + (vil.zones?.outer?.placed?.length ?? 0);
+  const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0);
+  const setWorkspace = (field: keyof VillageWorkbenchPreferences, open: boolean) => {
+    setPreferences((previous) => {
+      const next = { ...previous, [field]: open };
+      writeVillageWorkbenchPreferences(playerId, villageId, next);
+      return next;
+    });
+  };
+  return (
+    <div class="vil-dashboard empire-command-desk">
+      <VillageCommandDock />
+      <div class="vil-dashboard-task-wrap empire-task-banner"><IncomingWarnings /><VillageTaskSummary /></div>
+      <ActiveOperationsSummary vil={vil} />
+      <div class={`empire-workspace-grid ${villageWorkbenchLayoutClass(preferences)}`}>
+        <WorkspaceEntry
+          id="village-building-management"
+          eyebrow="发展工作区"
+          title="建筑与城务"
+          summary={`${placedCount}/${slotCount} 个城内外建筑格已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
+          open={preferences.developmentOpen}
+          onToggle={() => setWorkspace('developmentOpen', !preferences.developmentOpen)}
+        >
+          <VillageCommandDeck vil={vil} />
+          {vil.queue?.items?.length > 0 && <Panel pad class="vil-queue-panel empire-active-panel"><QueueStrip queue={vil.queue} /></Panel>}
+          <VillageListView vil={vil} />
+          <section class="vil-detail-section"><SectionHead>人口 · 文明活力</SectionHead><Panel pad><PopPanel /></Panel></section>
+          {hasTreasures && <section class="vil-detail-section"><SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>宝物栏</SectionHead><Panel variant="flat" pad><TreasurePanel /></Panel></section>}
+        </WorkspaceEntry>
+        <WorkspaceEntry
+          id="village-military-workbench"
+          eyebrow="军务工作区"
+          title="军务工作区"
+          summary="训练、驻军、援军、防御与解散均归属当前村庄；展开后可直接执行完整操作。"
+          open={preferences.militaryOpen}
+          onToggle={() => setWorkspace('militaryOpen', !preferences.militaryOpen)}
+          utility={<Btn size="sm" variant="ghost" onClick={() => { tab.value = 'army'; }}>前往完整军务</Btn>}
+        >
+          <VillageArmyManagement />
+        </WorkspaceEntry>
+      </div>
+    </div>
+  );
+}
+
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export function VillageScreen() {
@@ -122,62 +257,7 @@ export function VillageScreen() {
   const vil = getCache().vil;
   if (!vil || !vil.zones) return <div class="loading">村庄数据加载中…</div>;
 
-  const hasTreasures = !!(getCache().treasures);
-  const placedCount = (vil.zones?.inner?.placed?.length ?? 0) + (vil.zones?.outer?.placed?.length ?? 0) + (vil.townCenter ? 1 : 0);
-  const slotCount = (vil.zones?.inner?.slots ?? 0) + (vil.zones?.outer?.slots ?? 0) + (vil.townCenter ? 1 : 0);
-
-  return (
-    <div class="vil-dashboard">
-      <div class="vil-dashboard-topline">
-        <div class="vil-dashboard-task-wrap">
-          <IncomingWarnings />
-          <VillageTaskSummary />
-        </div>
-        <VillageSwitcher />
-      </div>
-
-      <VillageResourceLedger />
-
-      <div class="vil-dashboard-grid">
-        <aside class="vil-overview-column" aria-label="村庄概览">
-          <VillageCommandDeck vil={vil} />
-
-          <section class="vil-detail-section">
-            <SectionHead>人口 · 文明活力</SectionHead>
-            <Panel pad>
-              <PopPanel />
-            </Panel>
-          </section>
-
-          {hasTreasures && (
-            <section class="vil-detail-section">
-              <SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>
-                宝物栏
-              </SectionHead>
-              <Panel variant="flat" pad>
-                <TreasurePanel />
-              </Panel>
-            </section>
-          )}
-        </aside>
-
-        <section id="village-building-management" class="vil-management-column" aria-label="建筑清单管理">
-          <header class="vil-management-head">
-            <span class="vil-eyebrow">建造清单</span>
-            <SectionHead sub={`${placedCount}/${slotCount}`}>建筑管理</SectionHead>
-          </header>
-
-          {vil.queue?.items?.length > 0 && (
-            <Panel pad class="vil-queue-panel">
-              <QueueStrip queue={vil.queue} />
-            </Panel>
-          )}
-
-          <VillageListView vil={vil} />
-        </section>
-      </div>
-
-      <VillageArmyManagement />
-    </div>
-  );
+  const playerId = String(me?.id ?? 'guest');
+  const villageId = String(me?.villageId ?? vil.id ?? 'unknown');
+  return <VillageWorkbench key={`${playerId}:${villageId}`} vil={vil} playerId={playerId} villageId={villageId} />;
 }

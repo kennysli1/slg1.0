@@ -263,12 +263,12 @@ test('人口：四轴繁荣度乘数（laborMults 字段正确，v3 统一为数
     assert.ok(typeof snap.laborMults[axis] === 'number', `应有 ${axis} 倍率（数值）`);
   }
 
-  // 四轴统一：所有倍率 = prosperityMult，且 ∈ [popLaborFloor, 1.0]（新模型：新村无士兵→满值1.0）
+  // 四轴统一：所有倍率 = prosperityMult，且从基础值 1.0 到完整繁荣度额外加成
   const c = app.config.constants;
   for (const axis of ['production', 'build', 'train', 'research'] as const) {
     const m = snap.laborMults[axis];
-    assert.ok(m >= c.popLaborFloor - 0.01 && m <= 1.01,
-      `${axis} 倍率应在[${c.popLaborFloor},1.0]，当前 ${m.toFixed(3)}`);
+    assert.ok(m >= 1 - 0.01 && m <= 1 + c.popProsperityMaxBonus + 0.01,
+      `${axis} 倍率应在[1.0,${1 + c.popProsperityMaxBonus}]，当前 ${m.toFixed(3)}`);
   }
   assert.ok(Math.abs(snap.laborMults.production - snap.prosperityMult) < 1e-6,
     'production 倍率应与 prosperityMult 一致');

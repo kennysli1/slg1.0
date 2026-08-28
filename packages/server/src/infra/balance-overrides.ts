@@ -8,6 +8,8 @@ export interface BalanceTableMeta {
   key?: string;
   keyComposite?: string[];
   numeric?: string[];
+  /** game_constants.csv 按行 type 列校验 number/bool，其余字段按文本保留。 */
+  numericByType?: boolean;
 }
 
 export function loadBalanceOverrides(overridePath: string): BalanceOverrides {
@@ -47,7 +49,19 @@ export function mergeOverridesIntoRows(
     const merged = { ...orig };
     for (const [field, value] of Object.entries(inc)) {
       if (value === '') continue;
-      if (table.numeric?.includes(field)) {
+      if (table.numericByType) {
+        const type = String(orig.type ?? 'number');
+        if (type === 'number') {
+          const number = Number(value);
+          if (!Number.isFinite(number)) throw new Error(`${table.file} 行 ${keyVal} 字段 ${field}="${value}" 不是合法数字`);
+          merged[field] = String(number);
+        } else if (type === 'bool') {
+          if (!['true', 'false', '0', '1'].includes(value)) throw new Error(`${table.file} 行 ${keyVal} 字段 ${field}="${value}" 不是合法 bool(true/false/0/1)`);
+          merged[field] = value;
+        } else {
+          merged[field] = value;
+        }
+      } else if (table.numeric?.includes(field)) {
         const number = Number(value);
         if (!Number.isFinite(number)) throw new Error(`${table.file} 行 ${keyVal} 字段 ${field}="${value}" 不是合法数字`);
         merged[field] = String(number);

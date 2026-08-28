@@ -14,6 +14,7 @@ import { req, me, isOwnVillageId } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Btn, Icon, IconPlate, Panel, Tag } from '../../ui/index.js';
 import { foreignArmyAt, foreignArmyName, ownArmyAt, ownStationedMoveAt } from './map-target-helpers.js';
+import { confirmOwnedVillage } from './owned-village-selection.js';
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
@@ -823,21 +824,8 @@ export function TargetPanel() {
 
 function OwnVillagePanel({ village, onClose }: { village: SelectedTarget; onClose: () => void }) {
   const isCurrent = village.refId === me?.villageId;
-  const enter = async () => {
-    // 地图上选中的己方村庄是进入管理页的明确对象。若它尚不是当前村庄，
-    // 先完成上下文切换，避免管理页仍显示之前村庄的数据。
-    if (!isCurrent) {
-      const result = await switchVillage(village.refId);
-      if (!result.ok) {
-        showToast('切换村庄失败，请稍后重试', 'bad');
-        return;
-      }
-    }
-    tab.value = 'village';
-  };
   const choose = async () => {
-    if (isCurrent) return;
-    const result = await switchVillage(village.refId);
+    const result = await confirmOwnedVillage(village.refId, me?.villageId, switchVillage);
     if (!result.ok) showToast('切换村庄失败，请稍后重试', 'bad');
   };
   return (
@@ -851,10 +839,10 @@ function OwnVillagePanel({ village, onClose }: { village: SelectedTarget; onClos
         <button type="button" class="target-close" onClick={onClose} aria-label="关闭村庄信息">×</button>
       </div>
       <div class="target-body">
-        <p class="expedition-modal-copy">{isCurrent ? '这是当前操作村庄。可进入王国页处理建设、驻军与训练。' : '选择它会切换资源、驻军、建造队列与训练上下文；地图视角不会离开。'}</p>
+        <p class="expedition-modal-copy">{isCurrent ? '这是当前操作村庄。可进入王国页处理建设、驻军与训练。' : '这座村庄已在地图中选中；资源、驻军、建造与训练仍属于当前操作村。确认后将留在地图。'}</p>
         <div class="target-actions">
-          {!isCurrent && <Btn variant="primary" onClick={() => void choose()}>设为当前村庄</Btn>}
-          <Btn variant={isCurrent ? 'primary' : 'default'} onClick={() => void enter()}>进入王国管理</Btn>
+          {!isCurrent && <Btn variant="primary" onClick={() => void choose()}>确认切换为当前村庄</Btn>}
+          {isCurrent && <Btn variant="primary" onClick={() => { tab.value = 'village'; }}>进入王国管理</Btn>}
         </div>
       </div>
     </Panel>

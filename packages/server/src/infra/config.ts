@@ -69,6 +69,8 @@ export interface BuildingLevelDef {
   taskRefreshSec?: number;
   /** 仅酒馆(tavern)：该等级酒馆同时可展示的随机任务数上限。 */
   taskMaxTasks?: number;
+  /** 仅酒馆(tavern)：每个随机任务槽刷新为酒馆支线任务的概率（0..1）。 */
+  taskSideQuestChance?: number;
   /** 仅保险库(vault)：该等级新增的各资源保护量；按等级累加，攻城拆除后重新计算。 */
   vaultProtectWood?: number;
   vaultProtectClay?: number;
@@ -88,6 +90,8 @@ export interface BuildingDef {
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
+  /** 建造该建筑所需的主基地最低等级；默认 1，配置中心可调。 */
+  mainBaseLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
   /** 每级贡献的繁荣度（按建筑主题分档，见 buildings.csv）。 */
   prosperityPerLevel: number;
@@ -451,16 +455,16 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
-  /** 人口：劳动人口占比达到此值（占硬上限比例）时，繁荣度加成达到满值（默认 0.70）。 */
+  /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
-  /** 人口：超上限惩罚拐点；currentPop/hardCap 达到此比例时繁荣度加成归零（默认 2.0=超出一倍）。 */
+  /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
+  popProsperityMaxBonus: number;
+  /** 人口：超上限惩罚拐点；totalPop/hardCap 达到此比例时繁荣度额外加成归零（默认 2.0=超出一倍）。 */
   popOvercapPenaltyFullRatio: number;
   /** 人口：各部族最大动员比例（士兵占总人口的上限）；条顿0.80/高卢0.70/罗马0.75；超过则禁止继续征兵。 */
   popRaceMobilizeMax: { romans: number; gauls: number; teutons: number };
   /** 人口：劳动人口每小时消耗粮食量（平民口粮；士兵口粮见兵种 upkeep）。 */
   popCropPerLabor: number;
-  /** 人口：零人口时所有速率类建筑的最低倍率（防死亡螺旋）。 */
-  popLaborFloor: number;
   /** 人口：净粮赤字→减员速率比例（值越大粮仓耗尽后减员越快；v2已拍板=0.5）。 */
   popDeathRateFactor: number;
   /** 人口：饥荒减员定时任务间隔（秒；默认 300=5 分钟）。 */
@@ -614,6 +618,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
+  mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
   requires: string[];
   desc: string;
@@ -648,7 +654,7 @@ export interface AcademyDef {
   probabilityGainPerFail: number;
   /** 概率上限 (= 保底线)。 */
   maxProbability: number;
-  /** 人口对概率的影响系数：实际概率 *= (1 + popFactor × currentPop/hardCap) */
+  /** 总人口对科研点判定的影响系数：概率/间隔因子 = 1 + popFactor × clamp(totalPop/hardCap,0,1)。 */
   popFactor: number;
 }
 
@@ -810,7 +816,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   assertUniqueRows(buildingRows, 'buildings.csv');
   // 应用遗留平衡覆盖（玩家在 /gm/balance 的旧版本手动修改；CSV 是当前默认事实源，JSON 仅作兼容）
   if (overrides?.buildings) {
-    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
+    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
   }
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
@@ -821,7 +827,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','taskSideQuestChance','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -843,6 +849,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
       taskRefreshSec: r.taskRefreshSec ? num(r.taskRefreshSec) : undefined,
       taskMaxTasks: r.taskMaxTasks ? num(r.taskMaxTasks) : undefined,
+      // 0 是合法的“关闭酒馆支线刷新”配置，不能用 truthy 判断吞掉。
+      taskSideQuestChance: r.taskSideQuestChance !== undefined && r.taskSideQuestChance !== '' ? num(r.taskSideQuestChance) : undefined,
       vaultProtectWood: r.vaultProtectWood ? num(r.vaultProtectWood) : undefined,
       vaultProtectClay: r.vaultProtectClay ? num(r.vaultProtectClay) : undefined,
       vaultProtectIron: r.vaultProtectIron ? num(r.vaultProtectIron) : undefined,
@@ -866,6 +874,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       },
       timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
+      mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
       popGrowthPerLevel: num(r.popGrowthPerLevel, 0),
@@ -1115,6 +1124,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
+    popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
     popRaceMobilizeMax: {
       romans: cn('pop_race_mobilize_max_romans', 0.75),
@@ -1122,13 +1132,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       teutons: cn('pop_race_mobilize_max_teutons', 0.80),
     },
     popCropPerLabor: cn('pop_crop_per_labor', 1.0),
-    popLaborFloor: cn('pop_labor_floor', 0.75),
     popDeathRateFactor: cn('pop_death_rate_factor', 0.5),
     popFamineTickSec: cn('pop_famine_tick_sec', 300),
     popHospitalRecoveryBase: cn('pop_hospital_recovery_base', 0.20),
     popHospitalRecoveryPerLevel: cn('pop_hospital_recovery_per_level', 0.10),
     popHospitalRecoveryMax: cn('pop_hospital_recovery_max', 0.80),
-    foundMinMainLevel: cn('found_min_main_level', 10),
+    foundMinMainLevel: cn('found_min_main_level', 4),
     foundSettlerCount: cn('found_settler_count', 1),
     foundResourceCostBase: cn('found_resource_cost_base', 3000),
     foundResourceCostGrowth: cn('found_resource_cost_growth', 2),
@@ -1230,7 +1239,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.research) {
     researchRows = mergeOverridesIntoRows(researchRows, {
       file: 'research.csv', key: 'id',
-      numeric: ['tier', 'durationSec', 'rpCost'],
+      numeric: ['tier', 'mainBaseLevel', 'durationSec', 'rpCost'],
     }, overrides.research);
   }
   assertUniqueRows(researchRows, 'research.csv');
@@ -1244,6 +1253,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
       effectType: 'resource_rate',
@@ -1478,7 +1488,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
     if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
     const trigger = offer[0]
-      ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
+      ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' || offer[0].kind === 'tavern_refresh'
+        ? offer[0].kind
+        : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
       id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
@@ -1526,7 +1538,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
 /**
  * 热重载入口：重新从目录加载整套配置（含 validateGameConfig 校验；失败抛出 Error）。
  * 配合 app.reloadConfig() 使用——先在此校验通过，再写回磁盘，避免半截配置。
- * overrides 来自旧版本的 data/balance_overrides.json；当前 GM 保存会先写回 CSV，再保留该文件兼容旧 release。
+ * `overrides` 参数仅为旧版本迁移/兼容测试保留；生产运行时只调用不带 overrides
+ * 的入口，CSV 是唯一配置事实源。部署迁移器会在启动新 release 前将旧
+ * data/balance_overrides.json 一次性折叠到 CSV，之后不再读取该文件。
  */
 export function reloadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   return loadGameConfig(configDir, overrides);
@@ -1573,6 +1587,7 @@ export function validateGameConfig(config: GameConfig): void {
       if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
     }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    if (!Number.isInteger(b.mainBaseLevel) || b.mainBaseLevel < 1) errors.push(`buildings.csv[${b.kind}] mainBaseLevel 必须是≥1的整数`);
     // 逐等级参数（building_levels.csv）：必须覆盖 1..maxLevel；popCap≥0；prod 仅资源田且≥0
     for (let lv = 1; lv <= b.maxLevel; lv++) {
       const ld = b.levels[lv];
@@ -1581,6 +1596,14 @@ export function validateGameConfig(config: GameConfig): void {
         continue;
       }
       if (ld.popCap < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} popCap 不能为负`);
+      if (ld.taskSideQuestChance !== undefined) {
+        if (b.kind !== 'tavern' && ld.taskSideQuestChance !== 0) {
+          errors.push(`building_levels.csv[${b.kind}] level=${lv} taskSideQuestChance 仅允许用于 tavern`);
+        }
+        if (ld.taskSideQuestChance < 0 || ld.taskSideQuestChance > 1) {
+          errors.push(`building_levels.csv[${b.kind}] level=${lv} taskSideQuestChance 必须在 0..1`);
+        }
+      }
       for (const [field, value] of [
         ['vaultProtectWood', ld.vaultProtectWood], ['vaultProtectClay', ld.vaultProtectClay],
         ['vaultProtectIron', ld.vaultProtectIron], ['vaultProtectCrop', ld.vaultProtectCrop],
@@ -1604,6 +1627,9 @@ export function validateGameConfig(config: GameConfig): void {
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
+  for (const b of Object.values(config.buildings)) {
+    if (centerMaxLevel > 0 && b.mainBaseLevel > centerMaxLevel) errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
 
   // town_center_slots：覆盖 1..城镇中心maxLevel；槽位单调不减；queue≥1
   if (centerMaxLevel > 0) {
@@ -1746,6 +1772,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
+  if (c.popProsperityMaxBonus < 0) errors.push(`game_constants.csv pop_prosperity_max_bonus 必须≥0`);
   if (c.popOvercapPenaltyFullRatio <= 1) errors.push(`game_constants.csv pop_overcap_penalty_full_ratio 必须>1（当前${c.popOvercapPenaltyFullRatio}）`);
   for (const [tribe, v] of Object.entries(c.popRaceMobilizeMax)) {
     if (v <= 0 || v > 1) {
@@ -1753,7 +1780,6 @@ export function validateGameConfig(config: GameConfig): void {
     }
   }
   if (c.popCropPerLabor <= 0) errors.push(`game_constants.csv pop_crop_per_labor 必须>0（平民每小时口粮）`);
-  if (c.popLaborFloor <= 0 || c.popLaborFloor > 1) errors.push(`game_constants.csv pop_labor_floor 必须在(0,1]`);
   if (c.popDeathRateFactor <= 0) errors.push(`game_constants.csv pop_death_rate_factor 必须>0`);
   if (c.popFamineTickSec <= 0) errors.push(`game_constants.csv pop_famine_tick_sec 必须>0`);
   if (c.popHospitalRecoveryBase < 0 || c.popHospitalRecoveryBase > 1) errors.push(`game_constants.csv pop_hospital_recovery_base 必须在[0,1]`);
@@ -1789,6 +1815,8 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (!RESEARCH_SCOPES.has(t.scope)) errors.push(`research.csv[${t.code}] scope=${t.scope} 必须是 village/player`);
     if (t.tier < 1) errors.push(`research.csv[${t.code}] tier=${t.tier} 必须≥1`);
+    if (!Number.isInteger(t.mainBaseLevel) || t.mainBaseLevel < 1) errors.push(`research.csv[${t.code}] mainBaseLevel 必须是≥1的整数`);
+    if (centerMaxLevel > 0 && t.mainBaseLevel > centerMaxLevel) errors.push(`research.csv[${t.code}] mainBaseLevel=${t.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
     if (t.durationSec < 1) errors.push(`research.csv[${t.code}] durationSec=${t.durationSec} 必须>0`);
     if (t.rpCost < 1) errors.push(`research.csv[${t.code}] rpCost=${t.rpCost} 必须>0`);
     for (const req of t.requires) {
@@ -1878,7 +1906,7 @@ export function validateGameConfig(config: GameConfig): void {
     if (q.trigger) {
       if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used / tavern_refresh）`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
@@ -1962,13 +1990,14 @@ export function validateGameConfig(config: GameConfig): void {
       if (d.segment !== i + 1) errors.push(`dialogues.csv[${code}] 段落必须从 1 连续编号`);
     }
   }
-  // 每个主线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
-  // 但缺行会让新主线无法在两处挂接对话，因此在配置阶段直接阻止发布。
+  // 每个主线和支线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
+  // 但缺行会让任务无法在两处挂接对话，因此在配置阶段直接阻止发布。
   for (const q of Object.values(config.quests)) {
-    if (q.type !== 'main') continue;
+    if (q.type !== 'main' && q.type !== 'side') continue;
+    const kind = q.type === 'main' ? '主线' : '支线';
     for (const trigger of ['accept', 'deliver']) {
       if (!dialogueTriggers.has(`${q.code}:${trigger}`)) {
-        errors.push(`主线任务 ${q.code} 缺少 dialogues.csv ${trigger} 对话模板`);
+        errors.push(`${kind}任务 ${q.code} 缺少 dialogues.csv ${trigger} 对话模板`);
       }
     }
   }

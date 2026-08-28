@@ -24,26 +24,26 @@ march_speed_multiplier,10,number,行军速度全局倍率(>1加速,<1减速,1=�
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%,均值不变;确定性LCG按清空次数取种,可复现)
-pop_prosperity_full_ratio,0.70,number,劳动人口占硬上限比例达到此值时繁荣度加成满值(默认0.70)
-pop_overcap_penalty_full_ratio,2.0,number,人口超过上限的惩罚拐点：currentPop/hardCap 达到此比例时繁荣度加成归零(默认2.0=超出一倍归零)
+pop_prosperity_full_ratio,0.70,number,劳动人口占总人口比例达到此值时繁荣度额外加成满值(默认0.70)
+pop_overcap_penalty_full_ratio,2.0,number,人口超过上限的惩罚拐点：totalPop/hardCap 达到此比例时繁荣度额外加成归零(默认2.0=超出一倍归零)
 pop_race_mobilize_max_romans,0.75,number,罗马最大动员比例(士兵占总人口上限);超过则禁止继续征兵
 pop_race_mobilize_max_gauls,0.70,number,高卢最大动员比例(士兵占总人口上限);超过则禁止继续征兵
 pop_race_mobilize_max_teutons,0.80,number,条顿最大动员比例(士兵占总人口上限);超过则禁止继续征兵
 pop_crop_per_labor,1.0,number,劳动人口(平民)每人每小时消耗粮食量(士兵口粮见兵种upkeep)
-pop_labor_floor,0.75,number,人口为0时速率类建筑的最低倍率(适用:资源田/学院/兵营/马厩/兵工厂/铁匠铺;防死亡螺旋)
+pop_prosperity_max_bonus,0.30,number,劳动人口占比达到阈值时资源产量/建造/训练/研究速度的繁荣度额外加成(0.30=+30%)
 pop_death_rate_factor,0.5,number,净粮赤字→减员速率比例(值越大粮仓耗尽后减员越快;v2已拍板=0.5)
 pop_famine_tick_sec,300,number,饥荒减员定时任务间隔(秒;5分钟=300)
 pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口的比例(其余永久扣除;无伤兵池)
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
-found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
+found_min_main_level,4,number,拓荒建村：出发村主基地最低等级（四本阶段）
 found_settler_count,1,number,拓荒建村：所需拓荒者数量（每名拓荒者占用5人口）
 found_resource_cost_base,3000,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
 found_resource_cost_growth,2,number,开城包递增底数
 found_min_tile_distance,3,number,新村与任意已有村庄的最小六边形距离
 found_max_inflight,1,number,每玩家同时在途的拓荒行军上限
 found_abandon_lock_sec,86400,number,新建分城后禁止放弃的秒数
-gold_tax_per_civilian_per_hour,1,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
+gold_tax_per_civilian_per_hour,1,number,每个劳动人口每小时交税金币数（绑定主基地 与人口增速同节奏 不受繁荣度影响）
 start_gold_amount,100,number,新村初始金币存量（让首座建筑可立即开建）
 trade_route_capacity,500,number,每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各算 1 单位 多条路线叠加）
 trade_caravan_speed,12,number,商人车队行进速度（格/小时 >0；独立于行军倍率）

@@ -106,15 +106,15 @@ export function renderMap(): string {
     let cls = 'hex', inner = '', clickable = '';
     if (isCurrent) {
       cls += ' hex-self';
-      inner = art('bld_main', '本城', 'sm');
+      inner = art(t?.icon ?? 'bld_main', '本城', 'sm');
     } else if (ownHere) {
       cls += ' hex-own';
-      inner = art('bld_main', ownHere.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(ownHere.id)}" data-name="${escapeAttr(ownHere.name)}"`;
+      inner = art(t?.icon ?? 'bld_main', ownHere.name, 'sm');
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="own_village" data-ref="${escapeAttr(ownHere.id)}" data-name="${escapeAttr(ownHere.name)}" data-icon="${escapeAttr(t?.icon ?? 'bld_main')}"`;
     } else if (t?.kind === 'village') {
       cls += ' hex-enemy';
-      inner = art('bld_main', t.name, 'sm');
-      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="village" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}"`;
+      inner = art(t.icon ?? 'bld_main', t.name, 'sm');
+      clickable = `data-tq="${h.q}" data-tr="${h.r}" data-kind="village" data-ref="${escapeAttr(t.refId)}" data-name="${escapeAttr(t.name)}" data-icon="${escapeAttr(t.icon ?? 'bld_main')}"`;
     } else if (t?.kind === 'pve') {
       cls += ' hex-pve';
       const picon = t.icon ?? pveIconByName(t.name);
@@ -259,7 +259,7 @@ function renderTargetPanel(): string {
     const isCurrentVillage = selected.refId === me.villageId;
     if (isCurrentVillage) {
       return `<div class="target-panel target">
-        <div class="target-head">${art('bld_main', selected.name, 'md')}
+        <div class="target-head">${art(selected.icon ?? 'bld_main', selected.name, 'md')}
           <div><div class="card-title">${escapeHtml(selected.name)}${isCapital ? '（主城）' : ''}</div>
             <small class="coord">当前操作村庄 · (${selected.q},${selected.r}) · 距离 ${dist} 格</small></div>
           <button class="target-close" id="closeTarget">✕</button>
@@ -275,7 +275,7 @@ function renderTargetPanel(): string {
     const cargoInputs = ['wood', 'clay', 'iron', 'crop'].map((t) =>
       `<label class="raid-input"><span class="raid-name">${t}</span><input type="number" min="0" max="${Math.floor(res[t] ?? 0)}" value="0" id="cargo-${t}" /><small>/${Math.floor(res[t] ?? 0)}</small></label>`).join('');
     return `<div class="target-panel target">
-      <div class="target-head">${art('bld_main', selected.name, 'md')}
+      <div class="target-head">${art(selected.icon ?? 'bld_main', selected.name, 'md')}
         <div><div class="card-title">${escapeHtml(selected.name)}${isCapital ? '（主城）' : ''}</div>
           <small class="coord">己方村庄 · (${selected.q},${selected.r}) · 距离 ${dist} 格</small></div>
         <button class="target-close" id="closeTarget">✕</button>

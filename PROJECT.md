@@ -51,7 +51,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
 
-组装与生命周期在 `packages/server/src/app.ts`；外部协议路由在 `packages/server/src/gateway/routes.ts`。基础设施包括 `event-bus.ts`、`command-bus.ts`、`scheduler.ts`、`store.ts`、`config.ts`、`csv.ts` 等。
+组装与生命周期在 `packages/server/src/app.ts`；外部协议路由在 `packages/server/src/gateway/routes.ts`。基础设施包括 `event-bus.ts`、`command-bus.ts`、`scheduler.ts`、`store.ts`、`config.ts`、`config-authority.ts`（配置中心版本/共享镜像/异步同步）、`csv.ts` 等。
 
 ## 四、客户端地图
 
@@ -87,6 +87,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `服务器/01_数据存储结构.md` | 修改存档结构或排查数据 |
 | `服务器/02_数据库操作手册.md` | 备份、刷档或恢复 |
 | `服务器/03_GM调试手册.md` | GM 联调和故障诊断 |
+| `配置中心与GM边界.md` | 配置中心、GM 实时状态、CSV 权威、旧覆盖迁移与 GitHub 同步 |
 | `任务模块.md` | 修改任务定义、任务图、任务营地或 GM 任务编辑 |
 | `视野模块.md` | 修改战争迷雾、视野参数或探索行军 |
 | `声望模块.md` | 修改玩家声望、声望效果、任务抉择或声望 GM 参数 |
@@ -98,7 +99,8 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 
 ## 六、常用路径
 
-- 改平衡：`config/*.csv`，字段见 `config/README.md`。
+- 改平衡/任务定义/对话：从 `/config` 配置中心提交 CSV 变更；字段见 `config/README.md`。
+- 改实时游戏状态/任务进度：从 `/gm` 操作，写入 `game.json/WAL`，不改变 CSV。
 - 改业务：先从本页 owner 表定位模块，再读对应参考文档和测试。
 - 加外部 action：`gateway/routes.ts` + owner 的内部契约；破坏性协议变更升级 `WIRE_VERSION`。
 - 改存档：升级 `SAVE_SCHEMA_VERSION`，在 CHANGELOG 标记 `[需刷档]`。

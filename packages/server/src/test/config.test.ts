@@ -114,6 +114,11 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.ok(cfg.questGraph.conditions.some((x) => x.id === 'c-m1-clean' && x.phase === 'success' && x.kind === 'no_damaged_resource_level'), 'M1 应有隐藏 success 兜底条件');
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
+  assert.equal(cfg.quests.s1.trigger, 'tavern_refresh', 'S1 应由酒馆任务槽刷新触发');
+  for (const code of ['s1', 's2', 's3', 's4']) {
+    assert.ok(cfg.dialogues[`${code}_accept:1`], `${code} 应有默认接取对话模板`);
+    assert.ok(cfg.dialogues[`${code}_deliver:1`], `${code} 应有默认交付对话模板`);
+  }
 });
 
 test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼容投影', () => {
@@ -143,10 +148,19 @@ test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者�
   assert.deepEqual(cfg.pveTemplates.tianwang_village.loot, { wood: 500, clay: 500, iron: 500, crop: 500 }, '天王老子村模板应标记四种资源各 500');
   assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.count, 15);
   assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.meleeAtk, cfg.units.clubswinger.meleeAtk, '天王老子村应使用条顿棍棒兵战斗属性');
-  assert.ok(cfg.dialogues['m9_accept_m8_success:1'], 'M9 成功分支对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m8_deliver:1'], 'M8 成功交付对话应并入默认 deliver');
+  assert.match(cfg.dialogues['m8_deliver:1']?.npcText ?? '', /英明的战略决策/);
   assert.ok(cfg.dialogues['m9_accept_m8_failure:1'], 'M9 失败分支对话代码应明确标注 M8 结局');
-  assert.ok(cfg.dialogues['m9_deliver_m8_success:1'], 'M9 成功交付对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m9_accept:1'], 'M9 成功接取对话应并入默认 accept');
+  assert.match(cfg.dialogues['m9_accept:1']?.npcText ?? '', /乘胜追击/);
   assert.ok(cfg.dialogues['m9_deliver_m8_failure:1'], 'M9 失败交付对话代码应明确标注 M8 结局');
+  assert.ok(cfg.dialogues['m9_deliver:1'], 'M9 成功交付对话应并入默认 deliver');
+  assert.match(cfg.dialogues['m9_deliver:1']?.npcText ?? '', /洗劫干净/);
+  assert.equal(cfg.dialogues['m8_deliver_success:1'], undefined, 'M8 成功分支旧 entry 应移除');
+  assert.equal(cfg.dialogues['m9_accept_m8_success:1'], undefined, 'M9 成功接取旧 entry 应移除');
+  assert.equal(cfg.dialogues['m9_deliver_m8_success:1'], undefined, 'M9 成功交付旧 entry 应移除');
+  assert.equal(cfg.dialogues['s3_accept:2'], undefined, 'S3 接取对话不应包含 after_accept 第二段');
+  assert.equal(cfg.dialogues['s3_after_accept:1']?.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {
@@ -169,14 +183,17 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
-  // 逐等级人口上限求和应等于「旧 popCapPerLevel × level」在 L10 时的值（1:1 迁移校验）
+  // 主基地固定四级；逐级人口上限增量总和应为 20×4=80。
   const main = cfg.buildings['main'];
-  const sumL10 = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
-  assert.equal(sumL10, 200, '主城 10 级每级 20，总和应为 200');
+  assert.equal(main.name, '主基地', '主基地显示名应统一');
+  assert.deepEqual(Object.keys(main.levels), ['1', '2', '3', '4'], '主基地只应有 1..4 级');
+  const sumMain = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
+  assert.equal(sumMain, 80, '主基地 4 级每级 20，总和应为 80');
   const res = cfg.buildings['residence'];
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
   assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
+  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.5, '酒馆支线刷新概率默认应为 0.5');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {
@@ -201,7 +218,7 @@ test('校验器：building_levels 缺级应抛错', () => {
       ...cfg.buildings,
       main: {
         ...cfg.buildings['main'],
-        levels: (() => { const cp = { ...cfg.buildings['main'].levels }; delete cp[5]; return cp; })(),
+        levels: (() => { const cp = { ...cfg.buildings['main'].levels }; delete cp[3]; return cp; })(),
       },
     },
   };
@@ -325,6 +342,7 @@ test('游戏设计约束表：军事科技、PvP曲线、佣兵合同与随机�
   assert.equal(cfg.units.merc_champion.contractSec, 259200);
   assert.equal(cfg.quests.d1.repeatable, true);
   assert.equal(cfg.quests.d1.cooldownSec, 21600);
+  assert.equal(cfg.constants.popProsperityMaxBonus, 0.30);
   assert.deepEqual(cfg.pvpPowerCurve.map((x) => x.lootMult), [1, 0.75, 0.5, 0.25, 0.1]);
   assert.equal(cfg.treasures.dragon_banner.effectCap, 50);
 });

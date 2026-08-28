@@ -50,11 +50,25 @@ interface BuildingState {
   techBuildSpeed?: number;
   /** storage_cap 科技容量加成；由 research 聚合后覆盖写入。 */
   techStorageCap?: number;
+  /** 新版主基地一次性迁移标记；旧存档缺失时按现有建筑数量选择最低可容纳等级。 */
+  mainBaseMigrationVersion?: 1;
 }
 
 const COLLECTION = 'building';
 const CENTER_KIND = 'main';
 const CENTER_SLOT = 'center';
+
+export const MAIN_BASE_STAGES: ReadonlyArray<{ level: number; name: string; icon: string }> = [
+  { level: 1, name: '村落集市', icon: 'bld_main' },
+  { level: 2, name: '领主庄园', icon: 'bld_residence' },
+  { level: 3, name: '城镇大厅', icon: 'bld_treasury' },
+  { level: 4, name: '中央主堡', icon: 'pve_fortress' },
+];
+
+export function mainBaseStageInfo(level: number): { level: number; name: string; icon: string } {
+  const normalized = Math.min(MAIN_BASE_STAGES.length, Math.max(1, Math.floor(Number(level) || 1)));
+  return MAIN_BASE_STAGES[normalized - 1]!;
+}
 
 export class BuildingModule {
   static readonly NAME = 'building';
@@ -96,6 +110,7 @@ export class BuildingModule {
   resume(): void {
     this.reconcileZones();
     for (const s of this.store.all<BuildingState>(COLLECTION)) {
+      this.migrateMainBase(s);
       if (!s.queue?.length) continue;
       for (const q of s.queue) {
         const delay = Math.max(0, q.finishAt - this.now());
@@ -110,6 +125,59 @@ export class BuildingModule {
       // 重启恢复：把贸易中心存在性镜像到宝物模块（决定待领取宝物能否「出售」）
       this.reportTradeCenter(s);
     }
+  }
+
+  /**
+   * 旧版城镇中心为 1..10 级，新版主基地只有 1..4 级。
+   * 仅对缺少迁移标记的存档执行一次：按现有城内/城外建筑数量选择能容纳它们的最低阶段，
+   * 不删除任何建筑；超过新版上限时固定为四本并让现有建筑继续占用旧槽位。
+   */
+  private migrateMainBase(s: BuildingState): void {
+    if (s.mainBaseMigrationVersion === 1) {
+      this.syncMainBaseStage(s);
+      return;
+    }
+    const center = this.center(s);
+    if (!center) {
+      s.mainBaseMigrationVersion = 1;
+      this.store.set(COLLECTION, s.villageId, s);
+      return;
+    }
+    const innerUsed = this.zoneUsed(s, 'inner');
+    const outerUsed = this.zoneUsed(s, 'outer');
+    let targetLevel = MAIN_BASE_STAGES.length;
+    for (let lv = 1; lv <= MAIN_BASE_STAGES.length; lv++) {
+      const tier = this.config.townCenterSlots[lv];
+      if (tier && innerUsed <= tier.inner && outerUsed <= tier.outer) {
+        targetLevel = lv;
+        break;
+      }
+    }
+    const previousLevel = center.level;
+    center.level = targetLevel;
+    // 旧版正在排队的五本以上升级无法在新版继续；不退费，避免恢复时重复执行旧操作。
+    s.queue = s.queue.filter((q) => {
+      if (q.slotId !== CENTER_SLOT) return true;
+      if (q.toLevel <= targetLevel) return true;
+      if (q.taskId) this.scheduler.cancel(q.taskId);
+      return false;
+    });
+    s.mainBaseMigrationVersion = 1;
+    this.store.set(COLLECTION, s.villageId, s);
+    if (previousLevel !== targetLevel) {
+      console.log(`[building] migrated village ${s.villageId} main ${previousLevel} → ${targetLevel} (slots ${innerUsed}/${outerUsed})`);
+    }
+    this.syncMainBaseStage(s);
+    this.reportCapacity(s);
+  }
+
+  /** 把主基地阶段镜像到 World，地图图标对所有玩家可见。 */
+  private syncMainBaseStage(s: BuildingState): void {
+    const stage = mainBaseStageInfo(this.tcLevel(s));
+    void this.commands.send({
+      name: 'world.UpdateVillageStage', from: BuildingModule.NAME,
+      payload: { villageId: s.villageId, level: stage.level, name: stage.name, icon: stage.icon },
+    });
   }
 
   /**
@@ -181,7 +249,7 @@ export class BuildingModule {
         ...(level === 0 && repairTargetLevel && repairTargetLevel > 0 ? { repairTargetLevel } : {}),
       });
     }
-    const s: BuildingState = { villageId, tribe, placed, queue: [] };
+    const s: BuildingState = { villageId, tribe, placed, queue: [], mainBaseMigrationVersion: 1 };
     this.store.set(COLLECTION, villageId, s);
 
     // 开局即上报派生（容量/各资源田产率），让 economy 初值正确。
@@ -190,6 +258,7 @@ export class BuildingModule {
     for (const r of ['wood', 'clay', 'iron', 'crop']) this.reportFieldRate(s, r);
     this.reportTreasureSlots(s);
     this.reportTradeCenter(s);
+    this.syncMainBaseStage(s);
   }
 
   private load(villageId: string): BuildingState | undefined {
@@ -241,7 +310,7 @@ export class BuildingModule {
 
   /** 城镇中心等级（缺失回退 1）。 */
   private tcLevel(s: BuildingState): number {
-    return this.center(s)?.level ?? 1;
+    return Math.min(MAIN_BASE_STAGES.length, Math.max(1, this.center(s)?.level ?? 1));
   }
 
   /** 城镇中心某等级的槽位配额（就近取：超表则用最高级）。 */
@@ -290,11 +359,20 @@ export class BuildingModule {
     });
   }
 
+  private meetsBuildRequirement(s: BuildingState, def: BuildingDef): boolean {
+    return this.tcLevel(s) >= def.mainBaseLevel && this.meetsRequires(s, def.requires);
+  }
+
   /** 前置未满足时的文案（如"需城镇中心 5 级"）。 */
   private lockReason(s: BuildingState, requires: { kind: string; level: number }[]): string | undefined {
     const missing = requires.filter((r) => !s.placed.some((x) => x.kind === r.kind && x.level >= r.level));
     if (!missing.length) return undefined;
     return '需' + missing.map((r) => `${this.config.buildings[r.kind]?.name ?? r.kind} ${r.level} 级`).join('、');
+  }
+
+  private buildLockReason(s: BuildingState, def: BuildingDef): string | undefined {
+    if (this.tcLevel(s) < def.mainBaseLevel) return `需主基地 ${def.mainBaseLevel} 级`;
+    return this.lockReason(s, def.requires);
   }
 
   /** 城镇中心降低建造时间；再乘人口劳动力建造加速（time_mult_pop）。 */
@@ -309,8 +387,8 @@ export class BuildingModule {
     }
     const speedup = 1 - Math.min(c.mainBuildSpeedupCap, totalSpeedup);
     let timeSec = Math.max(1, Math.round(baseSec * speedup));
-    // 人口建造加速：population.GetLaborMult('main') 返回 prosperityMult ∈ [popLaborFloor,1.0]，
-    // 越高越快 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
+    // 人口建造加速：population.GetLaborMult('main') 返回 1.0 起步的繁荣度倍率，
+    // 只提供额外加速 → 建造时间除以 mult（未就绪时 mult=1.0，兜底，铁律#4）
     try {
       const res = await this.commands.send({
         name: 'population.GetLaborMult',
@@ -385,7 +463,7 @@ export class BuildingModule {
     const centerP = this.center(s);
     const centerDef = this.config.buildings[CENTER_KIND];
     const tcLv = centerP?.level ?? 1;
-    const centerNext = tcLv < (centerDef?.maxLevel ?? 20);
+    const centerNext = tcLv < (centerDef?.maxLevel ?? MAIN_BASE_STAGES.length);
     const centerQueue = this.pendingOp(s, CENTER_SLOT);
     // buildTime is now async but getLayout is sync — use sync estimation (no pop mult) for layout display
     // The population mult is applied when the build command is actually submitted
@@ -407,11 +485,10 @@ export class BuildingModule {
       payload: {
         townCenter: {
           slotId: CENTER_SLOT,
+          ...mainBaseStageInfo(tcLv),
           kind: CENTER_KIND,
-          name: centerDef?.name ?? '城镇中心',
-          icon: centerDef?.icon ?? 'bld_main',
           level: tcLv,
-          maxLevel: centerDef?.maxLevel ?? 20,
+          maxLevel: Math.min(MAIN_BASE_STAGES.length, centerDef?.maxLevel ?? MAIN_BASE_STAGES.length),
           nextCost: centerNext ? centerDef!.cost(tcLv + 1) : null,
           nextTimeSec: centerNext ? buildTimeSyncEstimate(centerDef!.timeSec(tcLv + 1)) : null,
           building: !!centerQueue,
@@ -527,9 +604,10 @@ export class BuildingModule {
         icon: def.icon,
         cost: def.cost(1),
         timeSec: buildTimeSyncEstimate(def.timeSec(1)),
-        unlocked: this.meetsRequires(s, def.requires),
+        unlocked: this.meetsBuildRequirement(s, def),
         requires: def.requires,
-        lockReason: this.lockReason(s, def.requires),
+        mainBaseLevel: def.mainBaseLevel,
+        lockReason: this.buildLockReason(s, def),
         producing: def.resource ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, 1)) } : undefined,
       }));
     return { ok: true, payload: { zone, freeSlots: this.freeSlots(s, zone), options } };
@@ -545,7 +623,7 @@ export class BuildingModule {
     if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
     if (def.zone !== zone) return { ok: false, payload: {}, reason: 'zone_mismatch' };
     if (this.freeSlots(s, zone) <= 0) return { ok: false, payload: {}, reason: 'no_free_slot' };
-    if (!this.meetsRequires(s, def.requires)) return { ok: false, payload: {}, reason: 'requires_not_met' };
+    if (!this.meetsBuildRequirement(s, def)) return { ok: false, payload: {}, reason: 'requires_not_met' };
     if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
 
     const spend = await this.commands.send({
@@ -581,6 +659,7 @@ export class BuildingModule {
     if (!def) return { ok: false, payload: {}, reason: `unknown_building:${p.kind}` };
     const toLevel = p.level + 1;
     if (toLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'max_level' };
+    if (!this.meetsBuildRequirement(s, def)) return { ok: false, payload: {}, reason: 'requires_not_met' };
     if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
 
     const spend = await this.commands.send({
@@ -811,11 +890,12 @@ export class BuildingModule {
   }
 
   private async emit(name: string, villageId: string, slotId: string, kind: string, level: number): Promise<void> {
+    const stage = kind === CENTER_KIND ? mainBaseStageInfo(level) : undefined;
     const evt: DomainEvent = {
       name,
       source: BuildingModule.NAME,
       ts: this.now(),
-      payload: { villageId, slotId, kind, level },
+      payload: { villageId, slotId, kind, level, ...(stage ?? {}) },
     };
     await this.bus.emit(evt);
   }

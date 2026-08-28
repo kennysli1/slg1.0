@@ -57,9 +57,9 @@ export interface PopSnapshot {
   popCeiling: number;
   /** 平民占总人口比例 [0,1]（驱动繁荣度）。 */
   laborRatio: number;
-  /** 繁荣度加成 [0,1]（平民占比从种族最低到满值处的线性插值）。 */
+  /** 繁荣度加成 [0,1]（劳动人口占比从动员上限对应最低值到满值处的线性插值）。 */
   prosperityBonus: number;
-  /** 四轴统一繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
+  /** 四轴统一繁荣度倍率 ∈ [1.0, 1.0 + popProsperityMaxBonus]；低繁荣度不降低基础值。 */
   prosperityMult: number;
   /** 每小时增长（朝 popCeiling 收敛）。 */
   growthPerHour: number;
@@ -69,8 +69,12 @@ export interface PopSnapshot {
   overflowRatio?: number;
   /** 本部族最大动员比例（士兵占总人口上限；条顿0.80/高卢0.70/罗马0.75）。 */
   mobilizeCap: number;
-  /** 繁荣度满值阈值（平民占比 ≥此值时繁荣度=100%）。 */
+  /** 繁荣度满值阈值（劳动人口占总人口比例 ≥此值时额外加成达到上限）。 */
   popProsperityFullRatio?: number;
+  /** 繁荣度满值时的额外速率加成（默认 +30%）。 */
+  popProsperityMaxBonus?: number;
+  /** 人口达到硬上限几倍时繁荣额外加成降为 0（默认 2 倍）。 */
+  popOvercapPenaltyFullRatio?: number;
   /** 城镇中心等级（增长速率因子）。 */
   mainLevel: number;
   /** 是否处于饥荒（服务端权威）。 */
@@ -87,7 +91,7 @@ export interface PopSnapshot {
   wounded: { total: number; entries: any[] };
   /** 每小时粮食赤字速率（饥荒减员速率），由 famine_reduction push 校正。 */
   cropDeficitRate: number;
-  /** 四轴繁荣度乘数（全 = prosperityMult）。 */
+  /** 四轴繁荣度倍率（全 = prosperityMult，1.0 为基础值）。 */
   laborMults: {
     production: number;
     build: number;

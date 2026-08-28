@@ -89,6 +89,12 @@
   font-size: var(--f-2xs);
   color: var(--c-ink-dim);
 }
+.unit-card__inspect {
+  color: var(--c-gold-dim);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+}
+.unit-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* 雇佣兵：鎏金强调 */
 .unit-card--merc {

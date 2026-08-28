@@ -36,6 +36,7 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   assert.equal(p.constants.storageBase, app.config.constants.storageBase);
   assert.equal(p.constants.storageGrowthPerLevel, app.config.constants.storageGrowthPerLevel);
   assert.equal(p.constants.wallBonusPerLevel, app.config.constants.wallBonusPerLevel);
+  assert.equal(p.constants.popOvercapPenaltyFullRatio, app.config.constants.popOvercapPenaltyFullRatio);
   assert.equal(p.constants.popHospitalRecoveryBase, app.config.constants.popHospitalRecoveryBase);
   assert.equal(p.constants.popHospitalRecoveryPerLevel, app.config.constants.popHospitalRecoveryPerLevel);
   assert.equal(p.constants.popHospitalRecoveryMax, app.config.constants.popHospitalRecoveryMax);

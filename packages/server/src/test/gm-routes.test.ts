@@ -4,12 +4,12 @@
  *  2. 设置 GM_TOKEN 时，缺少 X-GM-Token header → 401
  *  3. 设置 GM_TOKEN 时，携带正确 X-GM-Token header → 200
  *  4. 危险路由（DELETE /gm/:collection）不带 ?confirm=yes → 400
- *  5. /gm/balance/data GET → 返回 ok:true + meta 字段
- *  6. /gm/balance/save POST round-trip（需 balanceOverridePath 配置；无 storePath 时跳过）
+ *  5. /config/balance/data GET → 返回 ok:true + meta 字段
+ *  6. /config/balance/save POST round-trip（配置中心写回 CSV）
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, rmSync, readFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
@@ -69,7 +69,7 @@ test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
     assert.equal(response.statusCode, 200, response.body);
     const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
     assert.equal(moved.ok, true);
-    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村' });
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'bld_main' });
     const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
     assert.equal(previous.ok, true);
     assert.equal((previous.payload as any).tile.kind, 'empty');
@@ -160,14 +160,14 @@ test('DELETE /gm/:collection 带 confirm=yes → 清空集合', async () => {
   }
 });
 
-// ─── 5. /gm/balance/data 返回正确结构 ───────────────────────────────
-test('/gm/balance/data 返回 ok:true + meta 字段', async () => {
+// ─── 5. /config/balance/data 返回正确结构 ───────────────────────────────
+test('/config/balance/data 返回 ok:true + meta 字段', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   try {
     const { fastify } = buildFastify();
     await fastify.ready();
-    const res = await fastify.inject({ method: 'GET', url: '/gm/balance/data' });
+    const res = await fastify.inject({ method: 'GET', url: '/config/balance/data' });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body) as { ok: boolean; meta?: unknown; buildings?: unknown };
     assert.equal(body.ok, true, 'balance/data 应成功');
@@ -180,13 +180,13 @@ test('/gm/balance/data 返回 ok:true + meta 字段', async () => {
   }
 });
 
-test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
+test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   try {
     const { fastify } = buildFastify();
     await fastify.ready();
-    const res = await fastify.inject({ method: 'GET', url: '/gm/balance' });
+    const res = await fastify.inject({ method: 'GET', url: '/config/balance' });
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /每级主\/备用槽/, 'GM 页面应明确显示宝库每级主/备用槽字段');
     assert.match(res.body, /保木材\/级/, 'GM 页面应显示保险库木材保护量字段');
@@ -213,19 +213,54 @@ test('/gm/balance 暴露宝库逐级主/备用槽编辑说明', async () => {
   }
 });
 
-test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任务图', async () => {
+test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   try {
     const { fastify } = buildFastify();
     await fastify.ready();
-    const modulesRes = await fastify.inject({ method: 'GET', url: '/gm/quest-modules/data' });
+    const gm = await fastify.inject({ method: 'GET', url: '/gm' });
+    assert.equal(gm.statusCode, 200);
+    assert.match(gm.body, /配置中心（CSV）/);
+    assert.match(gm.body, /任务状态管理/);
+    assert.doesNotMatch(gm.body, /任务模块编辑/);
+    const center = await fastify.inject({ method: 'GET', url: '/config' });
+    assert.equal(center.statusCode, 200);
+    assert.match(center.body, /配置中心（CSV）/);
+    const page = await fastify.inject({ method: 'GET', url: '/config/quest-modules' });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /\/config\/quest-modules\/data/);
+    const status = await fastify.inject({ method: 'GET', url: '/config/status' });
+    assert.equal(status.statusCode, 200);
+    assert.equal(JSON.parse(status.body).ok, true);
+    const sync = await fastify.inject({ method: 'POST', url: '/config/sync' });
+    assert.equal(sync.statusCode, 200);
+    assert.equal(JSON.parse(sync.body).ok, true);
+    const legacyPage = await fastify.inject({ method: 'GET', url: '/gm/balance' });
+    assert.equal(legacyPage.statusCode, 302, '旧配置页面应跳转到配置中心');
+    assert.equal(legacyPage.headers.location, '/config/balance');
+    const legacyApi = await fastify.inject({ method: 'GET', url: '/gm/balance/data' });
+    assert.equal(legacyApi.statusCode, 410, '旧配置 API 应拒绝写入/读取，避免误用 GM');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+  }
+});
+
+test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明式任务图', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  try {
+    const { fastify } = buildFastify();
+    await fastify.ready();
+    const modulesRes = await fastify.inject({ method: 'GET', url: '/config/quest-modules/data' });
     assert.equal(modulesRes.statusCode, 200);
     const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
     assert.equal(modules.ok, true);
     assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 5);
     assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
-    const graphRes = await fastify.inject({ method: 'GET', url: '/gm/quest-graph/data' });
+    const graphRes = await fastify.inject({ method: 'GET', url: '/config/quest-graph/data' });
     assert.equal(graphRes.statusCode, 200);
     const graph = JSON.parse(graphRes.body) as { ok: boolean; graph?: { quests: Record<string, unknown>; edges: unknown[] } };
     assert.equal(graph.ok, true);
@@ -238,36 +273,57 @@ test('/gm/quest-modules/data 与 /gm/quest-graph/data 返回完整声明式任�
   }
 });
 
-test('/gm/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
+test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   try {
     const { fastify } = buildFastify();
     await fastify.ready();
-    const page = await fastify.inject({ method: 'GET', url: '/gm/dialogues' });
+    const page = await fastify.inject({ method: 'GET', url: '/config/dialogues' });
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /NPC 对话编辑/);
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
-    const data = await fastify.inject({ method: 'GET', url: '/gm/dialogues/data' });
+    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code 排序');
+    const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
     const parsed = JSON.parse(data.body) as { header: string[]; rows: Array<Record<string, string>> };
     assert.ok(parsed.header.includes('segment'));
     assert.match(page.body, /\+ 段落/);
     assert.match(page.body, /只有 npcName、npcText、replies 可编辑/);
-    assert.equal(parsed.rows[0]?.taskCode, 's3');
-    assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const sortedKeys = parsed.rows.map((row) => `${row.code}:${row.segment}`);
+    assert.deepEqual(sortedKeys, [...sortedKeys].sort((a, b) => {
+      const [codeA, segmentA] = a.split(':');
+      const [codeB, segmentB] = b.split(':');
+      return codeA === codeB ? Number(segmentA) - Number(segmentB) : codeA < codeB ? -1 : 1;
+    }), '对话编辑器数据应按 code、段落号排序');
+    const firstS3 = parsed.rows.find((row) => row.code === 's3_accept' && row.segment === '1');
+    assert.equal(firstS3?.taskCode, 's3');
+    assert.match(firstS3?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const byKey = new Map(parsed.rows.map((row) => [`${row.code}:${row.segment}`, row]));
+    assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
+    assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
+    assert.match(byKey.get('m8_deliver:1')?.npcText ?? '', /英明的战略决策/);
+    assert.match(byKey.get('m9_accept:1')?.npcText ?? '', /乘胜追击/);
+    assert.match(byKey.get('m9_deliver:1')?.npcText ?? '', /洗劫干净/);
+    assert.equal(byKey.get('m8_deliver_success:1'), undefined);
+    assert.equal(byKey.get('m9_accept_m8_success:1'), undefined);
+    assert.equal(byKey.get('m9_deliver_m8_success:1'), undefined);
+    assert.match(byKey.get('m9_deliver_m8_failure:1')?.npcText ?? '', /缴获了一个宝物/);
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
     }
-    for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']) {
+    for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:deliver`), `GM 对话表应预置 ${code} 交付模板`);
     }
+    assert.ok(configured.has('s3:accept'), 'GM 对话表应包含 S3 接取模板');
+    assert.equal(byKey.get('s3_accept:2'), undefined, 'GM 对话表不应把 S3 after_accept 当作接取第二段');
+    assert.ok(byKey.get('s3_after_accept:1'), 'GM 对话表应包含 S3 独立 after_accept 对话');
     assert.ok(configured.has('s3:after_accept'), 'GM 对话表应包含 S3 接取后模板');
     const bad = await fastify.inject({
-      method: 'POST', url: '/gm/dialogues/save',
+      method: 'POST', url: '/config/dialogues/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows: [{ ...parsed.rows[0], taskCode: 'missing-task' }] }),
     });
@@ -280,13 +336,59 @@ test('/gm/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async
   }
 });
 
-test('/gm/quest-modules 页面脚本可解析并生成可切换标签', async () => {
+test('配置中心：新增支线任务时自动补齐空白接取/交付对话模板', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const root = mkdtempSync(join(tmpdir(), 'kow-side-dialogue-default-'));
+  const tempConfig = join(root, 'config');
+  try {
+    const seed = buildFastify();
+    cpSync(seed.app.configDir, tempConfig, { recursive: true });
+    await seed.fastify.close();
+    const { fastify } = buildFastify(undefined, tempConfig);
+    await fastify.ready();
+    const modulesRes = await fastify.inject({ method: 'GET', url: '/config/quest-modules/data' });
+    const modules = JSON.parse(modulesRes.body) as { tables: Record<string, { rows: Array<Record<string, string>> }> };
+    const side = modules.tables['quests.csv'].rows.find((row) => row.code === 's1');
+    const objective = modules.tables['quest_objectives.csv'].rows.find((row) => row.questCode === 's1');
+    assert.ok(side && objective, '测试需要复制现有支线的任务与目标节点');
+    modules.tables['quests.csv'].rows.push({ ...side, id: '99', code: 's_future_test', name: '测试支线' });
+    modules.tables['quest_objectives.csv'].rows.push({ ...objective, id: 'future-objective', questCode: 's_future_test' });
+    const save = await fastify.inject({
+      method: 'POST', url: '/config/quest-modules/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tables: modules.tables }),
+    });
+    assert.equal(save.statusCode, 200, save.body);
+    const dialogues = parseCsvStructured(readFileSync(join(tempConfig, 'dialogues.csv'), 'utf8'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_accept' && row.taskCode === 's_future_test' && row.trigger === 'accept'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver'));
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('/config 首页将配置入口置于页面顶部', async () => {
+  const { fastify } = buildFastify();
+  await fastify.ready();
+  const page = await fastify.inject({ method: 'GET', url: '/config' });
+  assert.equal(page.statusCode, 200);
+  const nav = page.body.indexOf('href="/config/balance"');
+  const notice = page.body.indexOf('这里修改的是版本化游戏配置');
+  assert.ok(nav >= 0, '配置中心首页必须保留配置入口');
+  assert.ok(notice >= 0 && nav < notice, '配置入口应出现在说明和状态卡片之前');
+  await fastify.close();
+});
+
+test('/config/quest-modules 页面脚本可解析并生成可切换标签', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   try {
     const { fastify } = buildFastify();
     await fastify.ready();
-    const page = await fastify.inject({ method: 'GET', url: '/gm/quest-modules' });
+    const page = await fastify.inject({ method: 'GET', url: '/config/quest-modules' });
     assert.equal(page.statusCode, 200);
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script, '编辑器页面应包含初始化脚本');
@@ -318,7 +420,7 @@ test('/gm/tasks 使用任务 code 而不是 active 数组下标', async () => {
   }
 });
 
-test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', async () => {
+test('/config/quest-modules/save 整图校验后热重载，非法边不写入', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   const tempRoot = mkdtempSync(join(tmpdir(), 'kow-quest-modules-'));
@@ -329,15 +431,15 @@ test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', asy
   try {
     const { fastify, app } = buildFastify(undefined, tempConfig);
     await fastify.ready();
-    const get = await fastify.inject({ method: 'GET', url: '/gm/quest-modules/data' });
+    const get = await fastify.inject({ method: 'GET', url: '/config/quest-modules/data' });
     const data = JSON.parse(get.body) as { tables: Record<string, { rows: Array<Record<string, string>> }> };
     data.tables['quests.csv'].rows[0].desc = 'GM 可编辑描述';
-    const ok = await fastify.inject({ method: 'POST', url: '/gm/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
+    const ok = await fastify.inject({ method: 'POST', url: '/config/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
     assert.equal(ok.statusCode, 200, ok.body);
     assert.equal(app.config.quests.m1.desc, 'GM 可编辑描述', '校验通过后必须热重载');
     const before = app.config.quests.m1.desc;
     data.tables['quest_edges.csv'].rows[0].toQuest = 'does_not_exist';
-    const bad = await fastify.inject({ method: 'POST', url: '/gm/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
+    const bad = await fastify.inject({ method: 'POST', url: '/config/quest-modules/save', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tables: data.tables }) });
     assert.equal(bad.statusCode, 400, '非法关系边必须被拒绝');
     assert.equal(app.config.quests.m1.desc, before, '失败不能留下半截配置或重载');
     await fastify.close();
@@ -348,8 +450,8 @@ test('/gm/quest-modules/save 整图校验后热重载，非法边不写入', asy
   }
 });
 
-// ─── 6. balance save/get round-trip ──────────────────────────────────
-test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', async () => {
+// ─── 6. config center save/get round-trip ──────────────────────────────────
+test('/config/balance/save → 写回 CSV → balance/data 反映修改', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   const dataDir = mkdtempSync(join(tmpdir(), 'kow-gm-'));
@@ -359,8 +461,20 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     // GM 保存现在会写回配置 CSV；测试必须使用隔离副本，不能污染仓库 config/。
     const seed = createGameApp({ now: () => 1_000_000, manualScheduler: true });
     cpSync(seed.configDir, tempConfig, { recursive: true });
+    // 模拟历史 shared/config：新增的酒馆支线概率列存在但整列是空值。
+    // 配置中心应显示运行时默认 0.5，而不是让管理员看到空白。
+    const staleLevelsPath = join(tempConfig, 'building_levels.csv');
+    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.5,', ',,'));
+    writeFileSync(staleLevelsPath, staleLevels, 'utf8');
     const { fastify, app } = buildFastify(storePath, tempConfig);
     await fastify.ready();
+
+    const initialLevelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const initialTavernRows = (initialLevelData.building_levels ?? []).filter((r) => r.code === 'tavern');
+    assert.equal(initialTavernRows.length, 5, '配置中心应返回全部酒馆等级');
+    assert.ok(initialTavernRows.every((r) => Number(r.taskSideQuestChance) === 0.5), '历史空值应展示酒馆支线默认概率 0.5');
 
     // 取 main 建筑 id 以作主键
     const mainId = String(app.config.buildings['main'].id);
@@ -369,7 +483,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     // 保存覆盖：把 main 的 popGrowthPerLevel 改成 999
     const saveRes = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ buildings: { [mainId]: { popGrowthPerLevel: '999' } } }),
     });
@@ -385,7 +499,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     );
 
     // balance/data 返回值也应反映覆盖
-    const dataRes = await fastify.inject({ method: 'GET', url: '/gm/balance/data' });
+    const dataRes = await fastify.inject({ method: 'GET', url: '/config/balance/data' });
     const dataBody = JSON.parse(dataRes.body) as { ok: boolean; buildings?: Array<Record<string, unknown>> };
     assert.equal(dataBody.ok, true);
     const mainRow = (dataBody.buildings ?? []).find((r) => String(r['id']) === mainId);
@@ -405,7 +519,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     // 且该增量同时作为主宝物栏与备用宝物栏的容量来源。
     const treasurySave = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ building_levels: { 'treasury|1': { treasureSlots: '7' } } }),
     });
@@ -416,7 +530,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     assert.equal(savedTreasuryLevel?.treasureSlots, '7',
       '逐级平衡参数必须写回默认 building_levels.csv');
 
-    const levelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+    const levelData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       building_levels?: Array<Record<string, unknown>>;
     };
     const treasuryLevel = (levelData.building_levels ?? []).find((r) => r.code === 'treasury' && String(r.level) === '1');
@@ -424,7 +538,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
 
     const vaultSave = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ building_levels: { 'vault|1': { vaultProtectWood: '777', vaultProtectGold: '8888' } } }),
     });
@@ -432,21 +546,35 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     assert.equal(app.config.buildings.vault.levels[1].vaultProtectWood, 777, '保险库木材保护量应热重载');
     assert.equal(app.config.buildings.vault.levels[1].vaultProtectGold, 8888, '保险库金币保护量应热重载');
 
-    const vaultData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+    const vaultData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       building_levels?: Array<Record<string, unknown>>;
     };
     const vaultLevel = (vaultData.building_levels ?? []).find((r) => r.code === 'vault' && String(r.level) === '1');
     assert.equal(Number(vaultLevel?.vaultProtectWood), 777, 'balance/data 应返回修改后的保险库木材保护量');
 
+    const tavernSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ building_levels: { 'tavern|1': { taskSideQuestChance: '0' } } }),
+    });
+    assert.equal(tavernSave.statusCode, 200, `酒馆支线概率覆盖应成功：${tavernSave.body}`);
+    assert.equal(app.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '酒馆支线概率可配置为 0');
+    const tavernData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      building_levels?: Array<Record<string, unknown>>;
+    };
+    const tavernLevel = (tavernData.building_levels ?? []).find((r) => r.code === 'tavern' && String(r.level) === '1');
+    assert.equal(Number(tavernLevel?.taskSideQuestChance), 0, 'balance/data 应返回酒馆支线概率');
+
     const alchemySave = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ constants: { alchemy_refine_sec: { value: '42' } } }),
     });
     assert.equal(alchemySave.statusCode, 200, `炼金时间覆盖应成功：${alchemySave.body}`);
     assert.equal(app.config.constants.alchemyRefineSec, 42, '炼金炉炼化时间应热重载为 42 秒');
-    const constantsData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+    const constantsData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       constants?: Array<Record<string, unknown>>;
     };
     const alchemyConstant = (constantsData.constants ?? []).find((r) => r.key === 'alchemy_refine_sec');
@@ -454,7 +582,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
 
     const foundingSave = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ constants: {
         found_resource_cost_base: { value: '4321' },
@@ -468,7 +596,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     const savedFoundBase = savedConstants.rows.find((row) => row.key === 'found_resource_cost_base');
     assert.equal(savedFoundBase?.value, '4321',
       '常量参数必须写回默认 game_constants.csv');
-    const foundingData = JSON.parse((await fastify.inject({ method: 'GET', url: '/gm/balance/data' })).body) as {
+    const foundingData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       constants?: Array<Record<string, unknown>>;
     };
     const foundingBase = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_base');
@@ -481,6 +609,7 @@ test('/gm/balance/save → save 写入覆盖 → balance/data 反映修改', asy
     const restarted = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath: join(dataDir, 'fresh-game.json'), configDir: tempConfig });
     assert.equal(restarted.config.buildings.main.popGrowthPerLevel, 999, '重启后应读取 GM 写回的 buildings.csv');
     assert.equal(restarted.config.buildings.treasury.levels[1].treasureSlots, 7, '重启后应读取 GM 写回的 building_levels.csv');
+    assert.equal(restarted.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '重启后应保留酒馆支线概率');
     assert.equal(restarted.config.constants.foundResourceCostBase, 4321, '重启后应读取 GM 写回的 game_constants.csv');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -511,7 +640,7 @@ test('生产式 data 符号链接：GM CSV 镜像写入 shared/config 而不是 
     const mainId = String(app.config.buildings.main.id);
     const res = await fastify.inject({
       method: 'POST',
-      url: '/gm/balance/save',
+      url: '/config/balance/save',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ buildings: { [mainId]: { popGrowthPerLevel: '321' } } }),
     });

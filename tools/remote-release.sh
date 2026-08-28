@@ -14,12 +14,22 @@ die() { echo "✖ $*" >&2; exit 1; }
 mkdir -p "$BASE_INPUT"
 BASE="$(cd "$BASE_INPUT" && pwd -P)"
 [[ "$BASE" != / && "$BASE" != /home && "$BASE" != /root ]] || die "拒绝使用过宽的生产目录：$BASE"
+# 生产机可在 shared/config.env 放置非 Git 管理的运行时密钥（例如
+# GITHUB_CONFIG_SYNC_TOKEN）。发布/PM2 重启时加载它，但绝不打包或输出文件内容。
+DEPLOY_ENV_FILE="${KOW_DEPLOY_ENV_FILE:-$BASE/shared/config.env}"
+if [[ -f "$DEPLOY_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$DEPLOY_ENV_FILE"
+  set +a
+fi
 STATE="$STATE_INPUT"
 RELEASES="$BASE/releases"
 SHARED="$BASE/shared"
 CURRENT="$BASE/current"
 LOCK="$BASE/.deploy-lock"
 NPM_BIN="${KOW_DEPLOY_NPM_BIN:-npm}"
+NODE_BIN="${KOW_DEPLOY_NODE_BIN:-node}"
 PM2_BIN="${KOW_DEPLOY_PM2_BIN:-pm2}"
 CURL_BIN="${KOW_DEPLOY_CURL_BIN:-curl}"
 
@@ -116,8 +126,8 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
 fi
 
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
-# 在构建/启动前覆盖回 release，既让 GM 修改跨部署保留，又不会冻结未被 GM
-# 编辑过的其它新配置。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
+# 都把共享 CSV 按主键合并到 Git 的默认 CSV：保留已有手调值，同时带入新增列/行，
+# 不会让旧整文件覆盖遮住新参数。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
 apply_persisted_config() {
   local target="$1"
   local manifest="$SHARED/data/balance_csv_files.list"
@@ -125,8 +135,30 @@ apply_persisted_config() {
   while IFS= read -r file || [[ -n "$file" ]]; do
     [[ "$file" =~ ^[A-Za-z0-9_.-]+\.csv$ ]] || continue
     [[ -f "$SHARED/config/$file" && -d "$target/config" ]] || continue
-    cp -p "$SHARED/config/$file" "$target/config/$file"
+    local merger="$target/scripts/merge-persisted-config.mjs"
+    if [[ -f "$merger" ]]; then
+      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file"
+    else
+      # 仅兼容没有该工具的旧 release/测试夹具；新发布包始终走按主键合并。
+      echo "    警告：$merger 不存在，暂时整文件覆盖 $file" >&2
+      cp -p "$SHARED/config/$file" "$target/config/$file"
+    fi
   done < "$manifest"
+}
+
+# 首次升级到 CSV 权威模式时，把旧 shared/data/balance_overrides.json 原子迁移到
+# CSV，并留存带时间戳的备份。迁移失败会触发发布回滚，绝不启动半套配置。
+migrate_legacy_config() {
+  local target="$1"
+  local legacy="$SHARED/data/balance_overrides.json"
+  [[ -f "$legacy" ]] || return 0
+  [[ -f "$target/packages/server/dist/infra/config-authority.js" ]] || die "缺少配置迁移程序：$target"
+  KOW_CONFIG_DIR="$target/config" \
+  KOW_SHARED_CONFIG="$SHARED/config" \
+  KOW_LEGACY_OVERRIDES="$legacy" \
+  KOW_STATE_DIR="$SHARED/data" \
+  KOW_MIGRATION_BACKUP_DIR="$SHARED/data" \
+    "$NODE_BIN" "$target/packages/server/dist/infra/config-authority.js" --migrate
 }
 
 PREVIOUS_MODE=legacy
@@ -174,7 +206,6 @@ if [[ -d "$TARGET" ]]; then
 else
   mkdir "$STAGING"
   tar xzf "$ARCHIVE" -C "$STAGING"
-  apply_persisted_config "$STAGING"
   ln -s ../../shared/data "$STAGING/data"
   ln -s ../../shared/logs "$STAGING/logs"
   printf '%s\n' "$MAIN_SHA" > "$STAGING/.release-commit"
@@ -187,7 +218,11 @@ else
   CREATED_TARGET=1
 fi
 
-# 目标 release 已存在时也要重新套用最新 GM CSV（例如同一 SHA 重试发布）。
+# 构建完成后再套用最新 GM CSV；构建阶段使用 Git 默认配置，避免共享旧表
+# 把新增参数遮住。目标 release 已存在时也同样重新合并（例如同一 SHA 重试发布）。
+apply_persisted_config "$TARGET"
+migrate_legacy_config "$TARGET"
+# 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
 apply_persisted_config "$TARGET"
 
 activate "$TARGET"

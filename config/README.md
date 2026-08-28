@@ -1,6 +1,6 @@
 # 配置表说明（config/）
 
-> 游戏所有数值都在这些 CSV 里。**双击用 Excel 打开编辑，保存即可，改完重启后端生效**，无需改代码。
+> 游戏静态数值都在这些 CSV 里。正式修改请使用 `/config` 配置中心：保存会校验并进入配置同步/PR流程；直接编辑 CSV 仅适合本地开发服。
 > 编辑注意：① 保持首行表头不动 ② 用英文逗号分隔（Excel 另存为 CSV 会自动处理）③ 文字不要含逗号 ④ 存为「CSV UTF-8」编码避免中文乱码。
 >
 > **编码已修复**：所有 CSV 已写入 UTF-8 BOM，Excel 双击打开不再中文乱码。另存时请保持「CSV UTF-8(逗号分隔)」格式。
@@ -35,8 +35,8 @@
 | # | 文件 | 配什么（一句话） | 想改这些就动它 |
 |---|------|----------------|---------------|
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
-| 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分城镇中心/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、改科技树前置、改归属区；探险家协会在此配置 |
-| 表3 | `town_center_slots.csv` | **城镇中心各级开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
+| 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、主基地最低等级、改科技树前置、改归属区；探险家协会在此配置 |
+| 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
 | 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
@@ -48,7 +48,7 @@
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率 |
-| 表15 | `research.csv` | **科技树目录**（分支/层级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
+| 表15 | `research.csv` | **科技树目录**（分支/层级/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
 | 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
 | 表17 | `quest_lines.csv` | **任务线目录**（入口与展示顺序） | 增加/调整独立任务线 |
@@ -89,14 +89,15 @@
 | id | 数字主键（跨表引用用：被 units.building、其它建筑的 requires 引用） |
 | code | 英文代码（程序/存档用，勿改） |
 | name / icon | 显示名 / 图标基名 |
-| zone | 归属区：`center`(城镇中心,唯一) / `inner`(城内·民生研发) / `outer`(城外·生产量产)。资源田填 `outer` |
+| zone | 归属区：`center`(主基地,唯一) / `inner`(城内·民生研发) / `outer`(城外·生产量产)。资源田填 `outer` |
 | resource | **仅资源田填**：产出哪种资源（对应 resources.csv 的 id）；非产出建筑留空 |
 | prodBase | **仅资源田填**：1级每小时产量基数 |
 | prodGrowth | **仅资源田填**：每级产量增长倍率（如1.3=每级+30%） |
 | costWood/.../costGrowth | 成本与增长（升n级成本 = costX × costGrowth^(n-1)） |
 | timeBase / timeGrowth | 耗时与增长 |
-| maxLevel | 最高等级 |
-| requires | 前置：`建筑数字ID:等级`，多个用 `\|` 分隔，如 `1:3`（城镇中心3级）。空=无前置 |
+| maxLevel | 最高等级；主基地固定为 4，其他建筑按各自目录配置 |
+| mainBaseLevel | 建造或升级该建筑所需的主基地最低等级；默认 1，配置中心可调 |
+| requires | 前置：`建筑数字ID:等级`，多个用 `\|` 分隔，如 `1:3`（主基地3级）。空=无前置 |
 
 > **加建筑只需加一行并填 `zone`**：城内外分池 + 侧边栏可建清单全部由 zone 自动归位，前端无需改代码。
 > 资源田是 `zone=outer` 且填了 `resource/prodBase/prodGrowth` 的建筑，与普通建筑走同一套"点空槽建造/升级"逻辑。
@@ -111,12 +112,25 @@
 | prod | 仅资源田填写：该级每小时产量 |
 | treasureSlots | 仅宝库填写：该级相对上一级新增的宝物栏槽位 |
 | storagePerLevel / defensePerLevel | 仅仓库/粮仓或城墙填写：该级仓储容量或城墙防御增量 |
+| taskRefreshSec / taskMaxTasks | 仅酒馆填写：任务刷新间隔（秒）/同时展示的任务槽数；等级越高可分别调得更快、更多 |
+| taskSideQuestChance | 仅酒馆填写：每个任务槽刷新为“酒馆触发型”支线任务的概率（0..1）；未抽中时刷新日常任务 |
 | vaultProtectWood/vaultProtectClay/vaultProtectIron/vaultProtectCrop/vaultProtectGold | 仅保险库填写：该级新增保护量，按等级累加；攻城拆除后按剩余等级生效 |
 
-## town_center_slots.csv — 城镇中心槽位曲线
+主基地（`code=main`）是村庄发展阶段指标：1 级“村落集市”（一本）、2 级“领主庄园”（二本）、3 级“城镇大厅”（三本）、4 级“中央主堡”（四本）。四个阶段分别开放 `town_center_slots.csv` 的槽位；每升一级增加四个总建造格，并沿用逐级人口增长与建造提速参数。主基地不可拆除，也不会被攻城建筑损伤。
+
+## research.csv — 科技树目录
 | 列 | 含义 |
 |----|------|
-| tcLevel | 城镇中心等级（需覆盖 1..城镇中心maxLevel，逐级写全） |
+| id / code | 数字主键 / 稳定英文代码 |
+| branch / tier | 科技分支 / 层级 |
+| mainBaseLevel | 研发该科技所需的主基地最低等级；默认 1，配置中心可调 |
+| requires | 前置科技 code（`|` 为 AND，`OR` 表示备选路径） |
+| durationSec / rpCost | 研发耗时（秒）/科研点消耗 |
+
+## town_center_slots.csv — 主基地槽位曲线（1–4级）
+| 列 | 含义 |
+|----|------|
+| tcLevel | 主基地等级（需覆盖 1..主基地maxLevel，逐级写全） |
 | innerSlots | 该等级开放的城内槽位数（须单调不减） |
 | outerSlots | 该等级开放的城外槽位数（须单调不减） |
 | queueSlots | 该等级的建造队列条数（≥1；可随等级增长） |
@@ -229,7 +243,9 @@
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。GM 平衡面板会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。配置中心 `/config/balance` 会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+
+人口繁荣度参数：`pop_prosperity_full_ratio` 是劳动人口占总人口比例达到繁荣满值的阈值（默认 70%），`pop_prosperity_max_bonus` 是满值时资源产量、建造、训练和研究的额外速率加成（默认 +30%）。劳动人口占比在本族动员上限对应的最低值时额外加成为 0；低繁荣度只取消这层额外加成，不降低基础产值或把耗时变长。
 
 王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
@@ -241,9 +257,9 @@
 
 ### 拓荒成本参数
 
-拓荒开城包按每种资源（木材、泥土、钢、粮食）分别收取：第 `N` 座城（`N≥2`）每种资源的需求量为 `round(found_resource_cost_base × found_resource_cost_growth^(N-2))`。当前默认第 2 座城每种资源 3000（四种资源合计 12000），第 3 座城每种资源 6000（合计 24000）。GM 平衡面板的“拓荒参数”板块可直接修改并持久化这两个值，删档不会清除覆盖。
+拓荒开城包按每种资源（木材、泥土、钢、粮食）分别收取：第 `N` 座城（`N≥2`）每种资源的需求量为 `round(found_resource_cost_base × found_resource_cost_growth^(N-2))`。当前默认第 2 座城每种资源 3000（四种资源合计 12000），第 3 座城每种资源 6000（合计 24000）。配置中心 `/config/balance` 的“拓荒参数”板块可直接修改并持久化，删档不会清除 CSV 默认值。
 
-当前常量（改完重启即生效，默认值与重构前行为一致）：
+当前常量（配置中心保存后热重载，默认值与重构前行为一致）：
 
 | key | 默认 | 作用 |
 |-----|------|------|
@@ -258,10 +274,12 @@
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 | march_point_base | 0 | 每座城镇的基础行军点数 |
 | march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
+| pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
+| pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；GM 平衡面板提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
+M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
 ## trade_center.csv — 贸易中心逐级参数
 | 列 | 含义 |
@@ -295,6 +313,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name / desc / icon | 显示名 / 说明 / 图标基名 |
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
 | tier | 层级，1 为最底层；界面按层分组显示 |
+| mainBaseLevel | 研发所需主基地最低等级；默认 1，配置中心可调 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
 | durationSec / rpCost | 研发耗时（秒）/ 消耗科研点 |
@@ -316,7 +335,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | baseProbability | 基础成功概率（0~1） |
 | probabilityGainPerFail | 每次失败累积的概率增量（保底机制，避免长期不出点） |
 | maxProbability | 概率上限 |
-| popFactor | 人口对概率的影响系数（0=不受影响，1=满人口时概率翻倍） |
+| popFactor | 总人口对科研点判定的影响系数（0=不受影响；按 `totalPop / hardCap` 同时提高成功概率并缩短判定间隔，1=满硬上限时因子翻倍） |
 
 ## village_templates.csv — 各部族开局布局
 | 列 | 含义 |
@@ -342,7 +361,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 
 ## 任务图配置（`quest_*.csv`）
 
-任务系统以 **任务线 → 任务节点 → 条件 / 目标 / 效果 → 关系边** 为唯一配置事实源。`tasks.ts` 只持有玩家任务实例、事件推进和任务营地；不得再把任务定义散落进运行时代码。GM 的“任务模块编辑”和“任务关系图”分别用于修改与审查这六张表。
+任务系统以 **任务线 → 任务节点 → 条件 / 目标 / 效果 → 关系边** 为唯一配置事实源。`tasks.ts` 只持有玩家任务实例、事件推进和任务营地；不得再把任务定义散落进运行时代码。配置中心的“任务模块编辑”和“任务关系图”分别用于修改与审查这六张表；GM 只管理任务实例状态，不编辑这些定义。
 
 ### quest_lines.csv — 任务线
 | 列 | 含义 |
@@ -351,7 +370,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name | 任务显示名 |
 | kind | `main` / `daily` / `side`，用于展示与刷新策略 |
 | entryQuest | 此任务线入口任务的 `code` |
-| order | GM 图和客户端目录的显示顺序 |
+| order | 配置中心关系图和客户端目录的显示顺序 |
 
 ### quests.csv — 任务节点
 | 列 | 含义 |
@@ -362,7 +381,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name / desc | 玩家可见名称与描述 |
 | type | `main` / `daily` / `side`，与任务线用途一致 |
 | scope | `global` 或 `village`；主线必须为 `global`，日常必须为 `village`，支线按任务设计配置 |
-| weight | 每日任务抽取权重；主线/支线填 0 |
+| weight | 日常任务在酒馆槽中的加权抽取权重；主线/支线填 0（酒馆支线由每槽概率先决定是否进入支线池） |
 | repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
 
 ### quest_conditions.csv — 条件
@@ -372,7 +391,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | questCode | 所属任务代码 |
 | phase | `offer`（出现条件）；`accept` / `success` / `failure` 可用于运行时条件审查。`success` 条件不会自动显示在玩家任务目标卡；例如 `no_damaged_resource_level` 可作为隐藏测试兜底 |
 | group | 同组条件的组合语义；当前填 `all` |
-| kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20` |
+| kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20`；`tavern_refresh` / `1` 表示由酒馆槽概率刷新 |
 
 ### quest_objectives.csv — 目标
 | 列 | 含义 |
@@ -406,20 +425,20 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | maxRatio | 攻击方与防守方出征初始战力比的区间上限；最后一档留空表示无上限 |
 | lootMult | 该区间最终可掠夺量倍率 |
 
-> 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在 GM 关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
+> 主线靠 `quest_edges.csv` 的 `requires` 串成链；每日任务由 `weight` 抽取。编辑任一表时应在配置中心关系图复核入边、出边和效果，保存会拒绝不存在的引用、无效目标和循环前置。
 
 ### dialogues.csv — NPC 对话
 | 列 | 含义 |
 |----|------|
 | id / code / segment | 对话对象数字主键 / 稳定对话代码 / 对象内段落序号（从 1 连续编号；同一对象可有多行） |
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
-| trigger | 触发点，例如 `accept`（点击接取任务）或 `accept_success` / `accept_failure`、`deliver_success` / `deliver_failure`（按 M8 结局选择文本） |
+| trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
-同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。GM 对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
+同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
 
-M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8_success`、`m9_accept_m8_failure`、`m9_deliver_m8_success`、`m9_deliver_m8_failure`。其 `trigger` 仍分别使用 `accept_success`、`accept_failure`、`deliver_success`、`deliver_failure`，由任务模块按 M8 结局调用。
+S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真正接取成功后弹出；`s3_accept` 只包含接取时的文本。M8 成功交付文本并入 `m8_deliver`，M9 成功接取/交付文本分别并入 `m9_accept` / `m9_deliver`，因此成功时使用默认 `accept` / `deliver`。M8/M9 的失败文本仍保留 `m8_deliver_failure`、`m9_accept_m8_failure`、`m9_deliver_m8_failure`，由任务模块按 M8 结局调用。
 
 ## kingdom_services.csv — 议会厅服务
 
@@ -437,7 +456,8 @@ M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8
 ---
 
 ## 改了之后怎么生效
-- 后端启动时一次性读取。直接编辑仓库 CSV 后重启后端（`npm run dev:server` 会自动重启，或 Ctrl+C 后重跑）。
-- GM 面板保存会先做完整配置校验，再写回当前 release 的 CSV，并镜像到生产共享配置；因此 GM 调整在重启、删档和后续发布后仍是默认值。`data/balance_overrides.json` 只作旧版本兼容，不再是唯一事实源。
+- 配置中心（`/config`）保存先做完整校验并热重载当前进程，同时写入 `shared/config`；异步同步队列只上传 CSV 差异，不阻塞 GM 或玩家请求。发布时共享 CSV 会按主键合并到 Git 默认 CSV：保留已有手调值，并自动带入新行/新列；共享文件中只存在的旧行不会复活。
+- GitHub 配置 PR 合并、`npm run deploy:prod` 发布后，新 release 读取同一份 CSV；删档/重启只处理 `game.json` 进度，不回退配置。
+- 本地直接编辑仓库 CSV 仍可在开发服重启后生效，但正式环境应使用配置中心的 PR 流程。
 - 改 CSV **不需要改任何代码、不需要重新编译**。
 - ⚠️ **改了 id/code 或新增/删除目录行，相当于改了数据契约**：开发期建议清空旧存档 `data/game.json` 再重启，避免老村庄里残留的 code 找不到定义。
