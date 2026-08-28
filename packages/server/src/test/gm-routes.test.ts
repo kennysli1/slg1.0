@@ -285,14 +285,22 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
+    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code 排序');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
     const parsed = JSON.parse(data.body) as { header: string[]; rows: Array<Record<string, string>> };
     assert.ok(parsed.header.includes('segment'));
     assert.match(page.body, /\+ 段落/);
     assert.match(page.body, /只有 npcName、npcText、replies 可编辑/);
-    assert.equal(parsed.rows[0]?.taskCode, 's3');
-    assert.match(parsed.rows[0]?.npcText ?? '', /感谢你清除了附近的威胁/);
+    const sortedKeys = parsed.rows.map((row) => `${row.code}:${row.segment}`);
+    assert.deepEqual(sortedKeys, [...sortedKeys].sort((a, b) => {
+      const [codeA, segmentA] = a.split(':');
+      const [codeB, segmentB] = b.split(':');
+      return codeA === codeB ? Number(segmentA) - Number(segmentB) : codeA < codeB ? -1 : 1;
+    }), '对话编辑器数据应按 code、段落号排序');
+    const firstS3 = parsed.rows.find((row) => row.code === 's3_accept' && row.segment === '1');
+    assert.equal(firstS3?.taskCode, 's3');
+    assert.match(firstS3?.npcText ?? '', /感谢你清除了附近的威胁/);
     const byKey = new Map(parsed.rows.map((row) => [`${row.code}:${row.segment}`, row]));
     assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
     assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
