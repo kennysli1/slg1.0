@@ -120,6 +120,7 @@ export function BuildingCard({ building: b, isCenter }: BuildingCardProps) {
           )}
         </div>
       </div>
+      <div class="vil-card-inspect" aria-hidden="true">查看建筑详情 <span>›</span></div>
 
       {/* Progress bar if in-progress */}
       {isBusy && b.buildingStartAt && b.buildingFinishAt && (
@@ -189,7 +190,7 @@ export function EmptySlotCard({ zone }: { zone: 'inner' | 'outer' }) {
       onKeyDown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') openBuildModal(zone, 1); }}
     >
       <div class="vil-card-empty-icon">＋</div>
-      <div class="vil-card-empty-label">空槽 · 点击建造</div>
+      <div class="vil-card-empty-label">选择建筑并开工 <span>›</span></div>
     </Panel>
   );
 }
