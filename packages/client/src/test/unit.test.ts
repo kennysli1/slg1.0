@@ -21,6 +21,7 @@ import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
+import { readVillageWorkbenchPreferences, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 
 describe('modalLayerZ', () => {
@@ -668,5 +669,39 @@ describe('任务页菜单折叠偏好', () => {
     assert.deepEqual(readTaskMenuOpenState('player-2', storage), {});
     data.set(taskMenuStorageKey('player-1'), JSON.stringify({ global: 'yes', village: true, nested: 1 }));
     assert.deepEqual(readTaskMenuOpenState('player-1', storage), { village: true });
+  });
+});
+
+describe('王国工作区折叠偏好', () => {
+  it('初次读取默认收起，按玩家与村庄隔离保存', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+    writeVillageWorkbenchPreferences('p1', 'v1', { developmentOpen: true, militaryOpen: false }, storage);
+    assert.equal(villageWorkbenchStorageKey('p1', 'v1'), 'kow.village-workbench.p1.v1');
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: true, militaryOpen: false });
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v2', storage), { developmentOpen: false, militaryOpen: false });
+    assert.deepEqual(readVillageWorkbenchPreferences('p2', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+  });
+
+  it('坏数据、字段缺失与存储异常都退化为安全默认值', () => {
+    const data = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    };
+    data.set(villageWorkbenchStorageKey('p1', 'v1'), '{坏 JSON');
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: false, militaryOpen: false });
+    data.set(villageWorkbenchStorageKey('p1', 'v1'), JSON.stringify({ developmentOpen: true, militaryOpen: 'yes' }));
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', storage), { developmentOpen: true, militaryOpen: false });
+    const brokenStorage = {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+    };
+    assert.deepEqual(readVillageWorkbenchPreferences('p1', 'v1', brokenStorage), { developmentOpen: false, militaryOpen: false });
+    assert.doesNotThrow(() => writeVillageWorkbenchPreferences('p1', 'v1', { developmentOpen: true, militaryOpen: true }, brokenStorage));
   });
 });
