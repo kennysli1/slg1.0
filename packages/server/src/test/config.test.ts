@@ -340,6 +340,7 @@ test('游戏设计约束表：军事科技、PvP曲线、佣兵合同与随机�
   assert.equal(cfg.units.merc_champion.contractSec, 259200);
   assert.equal(cfg.quests.d1.repeatable, true);
   assert.equal(cfg.quests.d1.cooldownSec, 21600);
+  assert.equal(cfg.constants.popProsperityMaxBonus, 0.30);
   assert.deepEqual(cfg.pvpPowerCurve.map((x) => x.lootMult), [1, 0.75, 0.5, 0.25, 0.1]);
   assert.equal(cfg.treasures.dragon_banner.effectCap, 50);
 });

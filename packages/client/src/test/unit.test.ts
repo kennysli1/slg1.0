@@ -319,10 +319,11 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     popCeiling: 160,
     laborRatio: 0.5,
     prosperityBonus: 0.5,
-    prosperityMult: 0.875,
+    prosperityMult: 1.15,
     growthPerHour: 10,
     mobilizeCap: 0.75,
     popProsperityFullRatio: 0.7,
+    popProsperityMaxBonus: 0.3,
     mainLevel: 1,
     inFamine: false,
     civilianCropPerHour: 100,
@@ -331,7 +332,7 @@ function makePopSnap(overrides: Partial<Parameters<typeof setPopState>[0]> = {})
     wounded: { total: 0, entries: [] },
     cropDeficitRate: 0,
     laborMults: {
-      production: 0.875, build: 0.875, train: 0.875, research: 0.875,
+      production: 1.15, build: 1.15, train: 1.15, research: 1.15,
     },
     softLimit: 160,
     lastTick: Date.now(),
@@ -349,7 +350,7 @@ describe('PopSnapshot v3 硬上限 - 新字段', () => {
     assert.equal(ps?.hardCap, 200);
     assert.equal(ps?.availableLabor, 160);
     assert.equal(ps?.laborRatio, 0.5);
-    assert.equal(ps?.prosperityMult, 0.875);
+    assert.equal(ps?.prosperityMult, 1.15);
     assert.equal(ps?.inFamine, false);
   });
 

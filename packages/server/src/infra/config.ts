@@ -453,16 +453,16 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
-  /** 人口：劳动人口占比达到此值（占硬上限比例）时，繁荣度加成达到满值（默认 0.70）。 */
+  /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
-  /** 人口：超上限惩罚拐点；currentPop/hardCap 达到此比例时繁荣度加成归零（默认 2.0=超出一倍）。 */
+  /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
+  popProsperityMaxBonus: number;
+  /** 人口：超上限惩罚拐点；totalPop/hardCap 达到此比例时繁荣度额外加成归零（默认 2.0=超出一倍）。 */
   popOvercapPenaltyFullRatio: number;
   /** 人口：各部族最大动员比例（士兵占总人口的上限）；条顿0.80/高卢0.70/罗马0.75；超过则禁止继续征兵。 */
   popRaceMobilizeMax: { romans: number; gauls: number; teutons: number };
   /** 人口：劳动人口每小时消耗粮食量（平民口粮；士兵口粮见兵种 upkeep）。 */
   popCropPerLabor: number;
-  /** 人口：零人口时所有速率类建筑的最低倍率（防死亡螺旋）。 */
-  popLaborFloor: number;
   /** 人口：净粮赤字→减员速率比例（值越大粮仓耗尽后减员越快；v2已拍板=0.5）。 */
   popDeathRateFactor: number;
   /** 人口：饥荒减员定时任务间隔（秒；默认 300=5 分钟）。 */
@@ -650,7 +650,7 @@ export interface AcademyDef {
   probabilityGainPerFail: number;
   /** 概率上限 (= 保底线)。 */
   maxProbability: number;
-  /** 人口对概率的影响系数：实际概率 *= (1 + popFactor × currentPop/hardCap) */
+  /** 总人口对科研点判定的影响系数：概率/间隔因子 = 1 + popFactor × clamp(totalPop/hardCap,0,1)。 */
   popFactor: number;
 }
 
@@ -1119,6 +1119,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
+    popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
     popRaceMobilizeMax: {
       romans: cn('pop_race_mobilize_max_romans', 0.75),
@@ -1126,7 +1127,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       teutons: cn('pop_race_mobilize_max_teutons', 0.80),
     },
     popCropPerLabor: cn('pop_crop_per_labor', 1.0),
-    popLaborFloor: cn('pop_labor_floor', 0.75),
     popDeathRateFactor: cn('pop_death_rate_factor', 0.5),
     popFamineTickSec: cn('pop_famine_tick_sec', 300),
     popHospitalRecoveryBase: cn('pop_hospital_recovery_base', 0.20),
@@ -1762,6 +1762,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
+  if (c.popProsperityMaxBonus < 0) errors.push(`game_constants.csv pop_prosperity_max_bonus 必须≥0`);
   if (c.popOvercapPenaltyFullRatio <= 1) errors.push(`game_constants.csv pop_overcap_penalty_full_ratio 必须>1（当前${c.popOvercapPenaltyFullRatio}）`);
   for (const [tribe, v] of Object.entries(c.popRaceMobilizeMax)) {
     if (v <= 0 || v > 1) {
@@ -1769,7 +1770,6 @@ export function validateGameConfig(config: GameConfig): void {
     }
   }
   if (c.popCropPerLabor <= 0) errors.push(`game_constants.csv pop_crop_per_labor 必须>0（平民每小时口粮）`);
-  if (c.popLaborFloor <= 0 || c.popLaborFloor > 1) errors.push(`game_constants.csv pop_labor_floor 必须在(0,1]`);
   if (c.popDeathRateFactor <= 0) errors.push(`game_constants.csv pop_death_rate_factor 必须>0`);
   if (c.popFamineTickSec <= 0) errors.push(`game_constants.csv pop_famine_tick_sec 必须>0`);
   if (c.popHospitalRecoveryBase < 0 || c.popHospitalRecoveryBase > 1) errors.push(`game_constants.csv pop_hospital_recovery_base 必须在[0,1]`);

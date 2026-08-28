@@ -45,9 +45,11 @@ test('宝物：woodRate 被动提升木产率 (+5%)', async () => {
   assert.equal(g.ok, true, `授予 chainsaw 应成功: ${g.reason ?? ''}`);
 
   const after = (await send(app, 'economy.GetResources', { villageId: 'v1' })).payload as any;
-  // grossRate = base × (1 + Σ mult.wood)；chainsaw woodRate=5 → mult.wood=0.05
-  assert.ok(Math.abs(after.netRate.wood - woodBefore * 1.05) < 1e-6,
-    `木产率应 ×1.05: before=${woodBefore} after=${after.netRate.wood}`);
+  // grossRate = base × (1 + Σ mult.wood)；繁荣度是基础值之上的额外加成，
+  // 因此宝物 +5% 应增加 5% 的基础产率，而不是把已含繁荣加成的总倍率再乘 1.05。
+  const baseWoodRate = before.rawRate.wood / ((await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any).prosperityMult;
+  assert.ok(Math.abs(after.rawRate.wood - (before.rawRate.wood + baseWoodRate * 0.05)) < 1e-6,
+    `木产率应增加基础产率的5%: before=${before.rawRate.wood} after=${after.rawRate.wood}`);
 });
 
 test('宝物：旧版 locked 桶中的勇士之证迁入城镇中心，可正常交互', async () => {

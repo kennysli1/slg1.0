@@ -140,7 +140,7 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
  * 排除并把原始 JSON 完整归档，避免服务器因历史遗留值无法发布。
  */
 const REMOVED_LEGACY_ROWS: Record<string, ReadonlySet<string>> = {
-  constants: new Set(['treasure_trade_drop_chance']),
+  constants: new Set(['treasure_trade_drop_chance', 'pop_labor_floor']),
 };
 
 /** 旧版表中曾存在、但当前 CSV 已删除的字段；原始 JSON 仍会完整归档。 */

@@ -16,9 +16,10 @@ import type { GameConfig } from '../infra/config.js';
  *     availableLabor = currentPop（平民即劳动人口）；popCeiling = hardCap − 足迹（平民增长上限）。
  *  C. 繁荣度由「平民占总人口比例」驱动（与硬上限解耦，建造/升级不再造成负收益）：
  *       civilFrac = currentPop / (currentPop + soldierPop)   // 平民(劳动)占总人口比例，∈[0,1]
- *       prosperityBonus = clamp(civilFrac / popProsperityFullRatio, 0, 1)   // ≥即满值；再乘拥挤惩罚
- *       prosperityMult  = popLaborFloor + (1 − popLaborFloor) × prosperityBonus   // ∈ [popLaborFloor, 1.0]
- *     五条速率轴（资源产出 / 研究 / 练兵 / 锻造 / 建造）统一消费 prosperityMult。
+ *       prosperityBonus = clamp((civilFrac − minLaborRatio) / (fullRatio − minLaborRatio), 0, 1)
+ *         // minLaborRatio = 1 − 本族动员上限；达到动员上限时为 0，劳动人口占比达到 fullRatio 时为 1
+ *       prosperityMult  = 1 + popProsperityMaxBonus × prosperityBonus   // ∈ [1.0, 1.0 + maxBonus]
+ *     四条速率轴（资源产出 / 研究 / 练兵 / 建造）统一消费 prosperityMult；繁荣度只增加额外加成，不降低基础值。
  *  D. 增长 growthPerHour = main.popGrowthPerLevel × mainLevel，朝 popCeiling（硬上限−士兵足迹）收敛（currentPop 已达则不再增长）。
  *     速率绑在城镇中心上（GM 面板可调）；旧版全局常数 popGrowthPerHour 已废弃。
  *  E. 开局人口：currentPop = 城镇中心当前等级贡献的 popCap 之和（mainPopCap），其他默认建筑只贡献 hardCap 不贡献人口。
@@ -292,9 +293,10 @@ export class PopulationModule {
   }
 
   /**
-   * 繁荣度加成 ∈ [0,1]，由「平民占住房比例」驱动（v4 解耦：士兵不占人口，故繁荣度与军队规模无关）：
-   *  - civilFrac = currentPop / hardCap（laborRatio），∈ [0,1]；住房越满越繁荣。
-   *  - 达到 popProsperityFullRatio（默认 0.70）为满值，低于则线性降到 0。
+   * 繁荣度加成 ∈ [0,1]，由「劳动人口占总人口比例」驱动：
+   *  - civilFrac = currentPop / totalPop（laborRatio），∈ [0,1]。
+   *  - minLaborRatio = 1 − 本族动员上限；达到动员上限或更高时加成为 0。
+   *  - 达到 popProsperityFullRatio（默认 0.70）为满值，区间内线性插值。
    *  - 拥挤惩罚（保底）：平民实际超过硬上限（人口超 housing，多在拆房/减员回补瞬态）时，
    *    按 popOvercapPenaltyFullRatio 在 1→2 倍间线性降到 0。正常稳态 currentPop ≤ hardCap，不触发。
    */
@@ -302,7 +304,13 @@ export class PopulationModule {
     const c = this.config.constants;
     const total = this.totalPop(s);
     const civilFrac = total > 0 ? s.currentPop / total : 0;
-    const fillBonus = clamp(civilFrac / c.popProsperityFullRatio, 0, 1);
+    const minLaborRatio = clamp(1 - this.mobilizeCap(s), 0, 1);
+    const threshold = c.popProsperityFullRatio;
+    const fillBonus = civilFrac <= minLaborRatio
+      ? 0
+      : threshold <= minLaborRatio
+        ? 1
+        : clamp((civilFrac - minLaborRatio) / (threshold - minLaborRatio), 0, 1);
     let overcrowd = 1;
     if (s.hardCap > 0 && total > s.hardCap) {
       const overRatio = total / s.hardCap;
@@ -312,10 +320,10 @@ export class PopulationModule {
     return fillBonus * overcrowd;
   }
 
-  /** 四轴统一的繁荣度乘数 ∈ [popLaborFloor, 1.0]。 */
+  /** 四轴统一的繁荣度倍率 ∈ [1.0, 1.0 + popProsperityMaxBonus]；低繁荣度不低于基础产值。 */
   private prosperityMult(s: PopulationState): number {
     const c = this.config.constants;
-    return c.popLaborFloor + (1 - c.popLaborFloor) * this.prosperityBonus(s);
+    return 1 + Math.max(0, c.popProsperityMaxBonus) * this.prosperityBonus(s);
   }
 
   /** 原始增长速率（每小时，未夹紧到缺口）。速率绑在城镇中心上：main.popGrowthPerLevel × mainLevel（GM 面板可调）。再乘宝物人口增长倍率。 */
@@ -334,7 +342,7 @@ export class PopulationModule {
 
   /**
    * 向 economy 上报：① 平民口粮 currentPop × popCropPerLabor（source='civilian_pop'）；
-   * ② 四轴繁荣度乘数（source='pop_labor'，mult[res] = prosperityMult − 1）。
+   * ② 四轴繁荣度额外加成（source='pop_labor'，mult[res] = prosperityMult − 1）。
    * 士兵口粮（source='troops'）由 military 自行上报，此处不重复。
    */
   private async reportToEconomy(s: PopulationState): Promise<void> {
@@ -439,8 +447,10 @@ export class PopulationModule {
         : null,
       /** 本部族最大动员比例（士兵占总人口上限）；用于前端展示/校验。 */
       mobilizeCap: this.mobilizeCap(s),
-      /** 繁荣度满值阈值（平民占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
+      /** 繁荣度满值阈值（劳动人口占总人口比例 ≥此值时 prosperityBonus=1）；面板文案使用。 */
       popProsperityFullRatio: c.popProsperityFullRatio,
+      /** 繁荣度满值时的额外速率加成（默认 +30%）。 */
+      popProsperityMaxBonus: c.popProsperityMaxBonus,
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,

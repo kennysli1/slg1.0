@@ -14,15 +14,16 @@ import { secStr } from '../../shared/utils/format.js';
 import { escapeHtml } from '../../shared/ui/widgets.js';
 import { getPopState, interpolatePop } from '../../app/state.js';
 
-/** 速率类 mult → "XX%" */
+/** 速率类 mult → 额外加成 "±XX%" */
 function multPct(mult: number): string {
-  return `${Math.round(mult * 100)}%`;
+  const extra = Math.round((mult - 1) * 100);
+  return `${extra >= 0 ? '+' : ''}${extra}%`;
 }
 
 /** time_mult（建造） → 节省百分比文字。0.80 → "节省 20%" */
 function buildSaveStr(timeMult: number): string {
-  const save = Math.round((1 - timeMult) * 100);
-  return save > 0 ? `节省 ${save}%` : '无加速';
+  const save = Math.round((1 - (1 / Math.max(1, timeMult))) * 100);
+  return save > 0 ? `节省 ${save}%` : '无额外加速';
 }
 
 /**
@@ -157,7 +158,7 @@ export function renderPopPanel(): string {
     ${woundedHtml}
     ${statusLabels}
     <div class="pop-labor">
-      <div class="pop-labor-title">劳动力加成</div>
+      <div class="pop-labor-title">繁荣度额外加成</div>
       <div class="pop-labor-grid">
         <span class="pop-labor-item"><i>资源产率</i><b>${multPct(prodAvg)}</b></span>
         <span class="pop-labor-item pop-labor-build"><i>建造</i><b>${buildSaveStr(lm.build)}</b></span>
