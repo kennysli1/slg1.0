@@ -114,6 +114,11 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.ok(cfg.questGraph.conditions.some((x) => x.id === 'c-m1-clean' && x.phase === 'success' && x.kind === 'no_damaged_resource_level'), 'M1 应有隐藏 success 兜底条件');
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
+  assert.equal(cfg.quests.s1.trigger, 'tavern_refresh', 'S1 应由酒馆任务槽刷新触发');
+  for (const code of ['s1', 's2', 's3', 's4']) {
+    assert.ok(cfg.dialogues[`${code}_accept:1`], `${code} 应有默认接取对话模板`);
+    assert.ok(cfg.dialogues[`${code}_deliver:1`], `${code} 应有默认交付对话模板`);
+  }
 });
 
 test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼容投影', () => {
@@ -186,6 +191,7 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
   assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
+  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.5, '酒馆支线刷新概率默认应为 0.5');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {

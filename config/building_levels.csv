@@ -1,5 +1,5 @@
-code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod,treasureSlots,storagePerLevel,defensePerLevel,buildSpeedupPerLevel,trainTimeReducePerLevel,trainCostReducePerLevel,taskRefreshSec,taskMaxTasks,vaultProtectWood,vaultProtectClay,vaultProtectIron,vaultProtectCrop,vaultProtectGold
-#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时,storagePerLevel(仓库/粮仓容量增量,余空),defensePerLevel(城墙防御增量),buildSpeedupPerLevel(主城建造加速),trainTimeReducePerLevel(军事建筑训练加速),trainCostReducePerLevel(军事建筑训练降费),treasureSlots=该级相对上一级的宝物栏槽位增量贡献(仅宝库treasury有值;非宝库留空;总槽位=城镇中心基础1+Σ1..当前等级treasureSlots),taskRefreshSec=酒馆专属·随机任务刷新间隔(秒;非酒馆留空),taskMaxTasks=酒馆专属·可同时接取的随机任务上限(非酒馆留空),vaultProtect*=保险库该等级新增保护量(每级累加;仅vault填写)
+code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod,treasureSlots,storagePerLevel,defensePerLevel,buildSpeedupPerLevel,trainTimeReducePerLevel,trainCostReducePerLevel,taskRefreshSec,taskMaxTasks,taskSideQuestChance,vaultProtectWood,vaultProtectClay,vaultProtectIron,vaultProtectCrop,vaultProtectGold
+#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时,storagePerLevel(仓库/粮仓容量增量,余空),defensePerLevel(城墙防御增量),buildSpeedupPerLevel(主城建造加速),trainTimeReducePerLevel(军事建筑训练加速),trainCostReducePerLevel(军事建筑训练降费),treasureSlots=该级相对上一级的宝物栏槽位增量贡献(仅宝库treasury有值;非宝库留空;总槽位=城镇中心基础1+Σ1..当前等级treasureSlots),taskRefreshSec=酒馆专属·随机任务刷新间隔(秒;非酒馆留空),taskMaxTasks=酒馆专属·可同时接取的随机任务上限(非酒馆留空),taskSideQuestChance=酒馆每个任务槽刷新支线任务的概率(0..1;非酒馆留空),vaultProtect*=保险库该等级新增保护量(每级累加;仅vault填写)
 main,1,4,4,3,2,1,2,20,,,,0,,
 main,2,5,4,4,3,1,2,20,,,,0.05,,
 main,3,7,6,5,3,1,4,20,,,,0.05,,
@@ -192,22 +192,22 @@ academy,7,25,18,17,9,1,25,8,,,,,,,,
 academy,8,28,20,19,10,1,40,8,,,,,,,,
 academy,9,31,22,21,11,1,64,8,,,,,,,,
 academy,10,34,24,23,12,1,103,8,,,,,,,,
-tavern,1,100,100,80,60,10,60,0,,,,,,,,600,2
-tavern,2,160,160,130,100,15,180,0,,,,,,,,480,3
-tavern,3,250,250,200,160,20,420,0,,,,,,,,360,4
-tavern,4,380,380,300,240,30,900,0,,,,,,,,240,5
-tavern,5,560,560,450,360,50,1800,0,,,,,,,,120,6
+tavern,1,100,100,80,60,10,60,0,,,,,,,,600,2,0.5
+tavern,2,160,160,130,100,15,180,0,,,,,,,,480,3,0.5
+tavern,3,250,250,200,160,20,420,0,,,,,,,,360,4,0.5
+tavern,4,380,380,300,240,30,900,0,,,,,,,,240,5,0.5
+tavern,5,560,560,450,360,50,1800,0,,,,,,,,120,6,0.5
 alchemy,1,20,20,20,20,5,60,0,,,,,,,,,
-vault,1,100,100,100,100,10,120,0,,,,,,,,,,100,100,100,100,1000,
-vault,2,150,150,150,150,15,240,0,,,,,,,,,,150,150,150,150,1500,
-vault,3,225,225,225,225,20,420,0,,,,,,,,,,200,200,200,200,2000,
-vault,4,340,340,340,340,30,720,0,,,,,,,,,,250,250,250,250,2500,
-vault,5,510,510,510,510,45,1200,0,,,,,,,,,,300,300,300,300,3000,
-vault,6,765,765,765,765,65,1800,0,,,,,,,,,,350,350,350,350,3500,
-vault,7,1150,1150,1150,1150,95,2700,0,,,,,,,,,,400,400,400,400,4000,
-vault,8,1725,1725,1725,1725,140,4050,0,,,,,,,,,,450,450,450,450,4500,
-vault,9,2590,2590,2590,2590,210,6075,0,,,,,,,,,,500,500,500,500,5000,
-vault,10,3885,3885,3885,3885,315,9110,0,,,,,,,,,,550,550,550,550,5500,
+vault,1,100,100,100,100,10,120,0,,,,,,,,,,,100,100,100,100,1000,
+vault,2,150,150,150,150,15,240,0,,,,,,,,,,,150,150,150,150,1500,
+vault,3,225,225,225,225,20,420,0,,,,,,,,,,,200,200,200,200,2000,
+vault,4,340,340,340,340,30,720,0,,,,,,,,,,,250,250,250,250,2500,
+vault,5,510,510,510,510,45,1200,0,,,,,,,,,,,300,300,300,300,3000,
+vault,6,765,765,765,765,65,1800,0,,,,,,,,,,,350,350,350,350,3500,
+vault,7,1150,1150,1150,1150,95,2700,0,,,,,,,,,,,400,400,400,400,4000,
+vault,8,1725,1725,1725,1725,140,4050,0,,,,,,,,,,,450,450,450,450,4500,
+vault,9,2590,2590,2590,2590,210,6075,0,,,,,,,,,,,500,500,500,500,5000,
+vault,10,3885,3885,3885,3885,315,9110,0,,,,,,,,,,,550,550,550,550,5500,
 council,1,200,180,160,120,20,300,5,,,,,,,,,,,,,,
 council,2,350,320,280,220,35,600,5,,,,,,,,,,,,,,
 council,3,600,550,500,400,60,1200,5,,,,,,,,,,,,,,

@@ -69,6 +69,8 @@ export interface BuildingLevelDef {
   taskRefreshSec?: number;
   /** 仅酒馆(tavern)：该等级酒馆同时可展示的随机任务数上限。 */
   taskMaxTasks?: number;
+  /** 仅酒馆(tavern)：每个随机任务槽刷新为酒馆支线任务的概率（0..1）。 */
+  taskSideQuestChance?: number;
   /** 仅保险库(vault)：该等级新增的各资源保护量；按等级累加，攻城拆除后重新计算。 */
   vaultProtectWood?: number;
   vaultProtectClay?: number;
@@ -821,7 +823,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.building_levels) {
     levelRows = mergeOverridesIntoRows(levelRows, {
       file: 'building_levels.csv', keyComposite: ['code','level'],
-      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
+      numeric: ['costWood','costClay','costIron','costCrop','costGold','timeSec','popCap','treasureSlots','prod','storagePerLevel','defensePerLevel','buildSpeedupPerLevel','trainTimeReducePerLevel','trainCostReducePerLevel','taskRefreshSec','taskMaxTasks','taskSideQuestChance','vaultProtectWood','vaultProtectClay','vaultProtectIron','vaultProtectCrop','vaultProtectGold'],
     }, overrides.building_levels);
   }
   for (const r of levelRows) {
@@ -843,6 +845,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainCostReducePerLevel: r.trainCostReducePerLevel ? num(r.trainCostReducePerLevel) : undefined,
       taskRefreshSec: r.taskRefreshSec ? num(r.taskRefreshSec) : undefined,
       taskMaxTasks: r.taskMaxTasks ? num(r.taskMaxTasks) : undefined,
+      // 0 是合法的“关闭酒馆支线刷新”配置，不能用 truthy 判断吞掉。
+      taskSideQuestChance: r.taskSideQuestChance !== undefined && r.taskSideQuestChance !== '' ? num(r.taskSideQuestChance) : undefined,
       vaultProtectWood: r.vaultProtectWood ? num(r.vaultProtectWood) : undefined,
       vaultProtectClay: r.vaultProtectClay ? num(r.vaultProtectClay) : undefined,
       vaultProtectIron: r.vaultProtectIron ? num(r.vaultProtectIron) : undefined,
@@ -1478,7 +1482,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
     if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
     const trigger = offer[0]
-      ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' ? offer[0].kind : `${offer[0].kind}:${offer[0].value}`)
+      ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' || offer[0].kind === 'tavern_refresh'
+        ? offer[0].kind
+        : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
       id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
@@ -1583,6 +1589,14 @@ export function validateGameConfig(config: GameConfig): void {
         continue;
       }
       if (ld.popCap < 0) errors.push(`building_levels.csv[${b.kind}] level=${lv} popCap 不能为负`);
+      if (ld.taskSideQuestChance !== undefined) {
+        if (b.kind !== 'tavern' && ld.taskSideQuestChance !== 0) {
+          errors.push(`building_levels.csv[${b.kind}] level=${lv} taskSideQuestChance 仅允许用于 tavern`);
+        }
+        if (ld.taskSideQuestChance < 0 || ld.taskSideQuestChance > 1) {
+          errors.push(`building_levels.csv[${b.kind}] level=${lv} taskSideQuestChance 必须在 0..1`);
+        }
+      }
       for (const [field, value] of [
         ['vaultProtectWood', ld.vaultProtectWood], ['vaultProtectClay', ld.vaultProtectClay],
         ['vaultProtectIron', ld.vaultProtectIron], ['vaultProtectCrop', ld.vaultProtectCrop],
@@ -1880,7 +1894,7 @@ export function validateGameConfig(config: GameConfig): void {
     if (q.trigger) {
       if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used / tavern_refresh）`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
@@ -1964,13 +1978,14 @@ export function validateGameConfig(config: GameConfig): void {
       if (d.segment !== i + 1) errors.push(`dialogues.csv[${code}] 段落必须从 1 连续编号`);
     }
   }
-  // 每个主线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
-  // 但缺行会让新主线无法在两处挂接对话，因此在配置阶段直接阻止发布。
+  // 每个主线和支线都必须预置可由 GM 填写的接取/交付模板；空白文本是合法的，
+  // 但缺行会让任务无法在两处挂接对话，因此在配置阶段直接阻止发布。
   for (const q of Object.values(config.quests)) {
-    if (q.type !== 'main') continue;
+    if (q.type !== 'main' && q.type !== 'side') continue;
+    const kind = q.type === 'main' ? '主线' : '支线';
     for (const trigger of ['accept', 'deliver']) {
       if (!dialogueTriggers.has(`${q.code}:${trigger}`)) {
-        errors.push(`主线任务 ${q.code} 缺少 dialogues.csv ${trigger} 对话模板`);
+        errors.push(`${kind}任务 ${q.code} 缺少 dialogues.csv ${trigger} 对话模板`);
       }
     }
   }

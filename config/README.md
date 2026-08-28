@@ -111,6 +111,8 @@
 | prod | 仅资源田填写：该级每小时产量 |
 | treasureSlots | 仅宝库填写：该级相对上一级新增的宝物栏槽位 |
 | storagePerLevel / defensePerLevel | 仅仓库/粮仓或城墙填写：该级仓储容量或城墙防御增量 |
+| taskRefreshSec / taskMaxTasks | 仅酒馆填写：任务刷新间隔（秒）/同时展示的任务槽数；等级越高可分别调得更快、更多 |
+| taskSideQuestChance | 仅酒馆填写：每个任务槽刷新为“酒馆触发型”支线任务的概率（0..1）；未抽中时刷新日常任务 |
 | vaultProtectWood/vaultProtectClay/vaultProtectIron/vaultProtectCrop/vaultProtectGold | 仅保险库填写：该级新增保护量，按等级累加；攻城拆除后按剩余等级生效 |
 
 ## town_center_slots.csv — 城镇中心槽位曲线
@@ -362,7 +364,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name / desc | 玩家可见名称与描述 |
 | type | `main` / `daily` / `side`，与任务线用途一致 |
 | scope | `global` 或 `village`；主线必须为 `global`，日常必须为 `village`，支线按任务设计配置 |
-| weight | 每日任务抽取权重；主线/支线填 0 |
+| weight | 日常任务在酒馆槽中的加权抽取权重；主线/支线填 0（酒馆支线由每槽概率先决定是否进入支线池） |
 | repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
 
 ### quest_conditions.csv — 条件
@@ -372,7 +374,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | questCode | 所属任务代码 |
 | phase | `offer`（出现条件）；`accept` / `success` / `failure` 可用于运行时条件审查。`success` 条件不会自动显示在玩家任务目标卡；例如 `no_damaged_resource_level` 可作为隐藏测试兜底 |
 | group | 同组条件的组合语义；当前填 `all` |
-| kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20` |
+| kind / value | 事件或门槛，例如 `building_built` / `treasury`、`troops_reached` / `20`；`tavern_refresh` / `1` 表示由酒馆槽概率刷新 |
 
 ### quest_objectives.csv — 目标
 | 列 | 含义 |

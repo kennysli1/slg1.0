@@ -569,9 +569,10 @@ function categoryItems(state: any, type: TaskCategory): { active: any[]; offers:
   const offers = [
     ...(type === 'main' ? (state?.offeredMain ?? []) : []),
     ...(type === 'daily' ? (state?.offered ?? []) : []),
-    ...(type === 'side' ? (state?.offeredSide ?? []) : []),
+    // 酒馆任务槽是 mixed offered：其中可能是日常，也可能是 tavern_refresh 支线。
+    ...(type === 'side' ? [...(state?.offered ?? []), ...(state?.offeredSide ?? [])] : []),
   ].filter((task: any) => task.type === type);
-  return { active, offers };
+  return { active, offers: offers.filter((task: any, index: number) => offers.findIndex((item: any) => item.code === task.code) === index) };
 }
 
 function TaskEntry({ task, offer, openState = true, onToggle = () => {}, showOfferAlert = true }: { task?: any; offer?: any; openState?: boolean; onToggle?: (event: Event) => void; showOfferAlert?: boolean }) {
@@ -771,11 +772,14 @@ function TaskScopeMenu({ scope, state, currentVillageId, openState, onMenuToggle
 /** 兼容旧入口：按单个村庄快照渲染任务分类。 */
 export function TaskOffers({ offered, offeredSide }: { offered: any[]; offeredSide?: any[] }) {
   const side = offeredSide ?? [];
-  if (!offered?.length && !side.length) return null;
+  const mixedSide = (offered ?? []).filter((q) => q.type === 'side');
+  const mixedDaily = (offered ?? []).filter((q) => q.type !== 'side');
+  const sideOffers = [...side, ...mixedSide].filter((q, index, all) => all.findIndex((item) => item.code === q.code) === index);
+  if (!mixedDaily.length && !mixedSide.length && !side.length) return null;
   return (
     <div class="task-offers">
-      {side.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert />)}
-      {(offered ?? []).map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert={false} />)}
+      {sideOffers.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert />)}
+      {mixedDaily.map((q) => <TaskEntry key={`${q.villageId ?? ''}:${q.code}`} offer={q} showOfferAlert={false} />)}
     </div>
   );
 }
