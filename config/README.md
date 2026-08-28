@@ -413,13 +413,13 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / code / segment | 对话对象数字主键 / 稳定对话代码 / 对象内段落序号（从 1 连续编号；同一对象可有多行） |
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
-| trigger | 触发点，例如 `accept`（点击接取任务）或 `accept_success` / `accept_failure`、`deliver_success` / `deliver_failure`（按 M8 结局选择文本） |
+| trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
 同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
 
-M9 的四个分支对话代码明确标记其依据的 M8 结局：`m9_accept_m8_success`、`m9_accept_m8_failure`、`m9_deliver_m8_success`、`m9_deliver_m8_failure`。其 `trigger` 仍分别使用 `accept_success`、`accept_failure`、`deliver_success`、`deliver_failure`，由任务模块按 M8 结局调用。
+S3 的接取后追问已并入 `s3_accept` 对话对象的第 2 段；不再单独维护 `s3_after_accept` entry。M8 成功交付文本并入 `m8_deliver`，M9 成功接取/交付文本分别并入 `m9_accept` / `m9_deliver`，因此成功时使用默认 `accept` / `deliver`。M8/M9 的失败文本仍保留 `m8_deliver_failure`、`m9_accept_m8_failure`、`m9_deliver_m8_failure`，由任务模块按 M8 结局调用。
 
 ## kingdom_services.csv — 议会厅服务
 
