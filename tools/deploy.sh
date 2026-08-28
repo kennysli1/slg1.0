@@ -27,6 +27,17 @@ MAIN_SHA="${REMOTE_LINE%%[[:space:]]*}"
 git -C "$ROOT" fetch --quiet origin main
 git -C "$ROOT" cat-file -e "$MAIN_SHA^{commit}"
 echo "    production source: origin/main@$MAIN_SHA"
+MAIN_SUBJECT="$(git -C "$ROOT" log -1 --format=%s "$MAIN_SHA")"
+# 配置中心生成的 squash commit 使用固定的 `config: sync ...` 前缀。配置值
+# 是可由管理员调节的运行时事实，不能用针对出厂默认值的完整行为测试阻止
+# 发布；该提交改用配置专用校验，其余代码提交仍走完整 verify:quick。
+CONFIG_SYNC_RELEASE=0
+if [[ "$MAIN_SUBJECT" == "config: sync "* ]]; then
+  CONFIG_SYNC_RELEASE=1
+  echo "    release kind: configuration sync (config-specific validation)"
+else
+  echo "    release kind: code (full validation)"
+fi
 
 DEPLOY_TMP="$(mktemp -d)"
 WORKTREE="$DEPLOY_TMP/main"
@@ -72,7 +83,15 @@ git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
   cd "$WORKTREE"
   npm ci
   npm run guard
-  npm run verify:quick
+  if [[ "$CONFIG_SYNC_RELEASE" == 1 ]]; then
+    npm run build:shared
+    npm run lint:all
+    npm run typecheck
+    npm run verify:config-sync
+    npm run test:ops
+  else
+    npm run verify:quick
+  fi
   KOW_RELEASE_BRANCH=main KOW_RELEASE_COMMIT="$MAIN_SHA" npm run verify:deploy
 )
 
