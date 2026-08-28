@@ -52,6 +52,17 @@ const KEY_COLUMNS = {
   'village_templates.csv': ['tribe'],
 };
 
+// Some schema migrations intentionally narrow a structural limit.  The old
+// town-center table used ten levels, while the main-base model is fixed at
+// four stages.  A shared CSV produced before that migration may still carry
+// `main.maxLevel=10`; treating it as a player override would make the new
+// four-row town_center_slots table fail validation on every release.  Keep the
+// new canonical structural limit, while continuing to preserve all actual
+// tuning fields from the shared CSV.
+const CANONICAL_STRUCTURAL_FIELDS = {
+  'buildings.csv': { main: new Set(['maxLevel']) },
+};
+
 function parse(text) {
   const bom = text.charCodeAt(0) === 0xfeff;
   const clean = bom ? text.slice(1) : text;
@@ -109,6 +120,8 @@ for (let i = 0; i < canonical.rows.length; i += 1) {
   // newly removed fields out while preserving every manually edited value.
   for (const column of canonical.header) {
     if (!persistedColumns.has(column)) continue;
+    const structural = CANONICAL_STRUCTURAL_FIELDS[fileName]?.[target.code];
+    if (structural?.has(column)) continue;
     // A blank in an old shared row means “no override” for a newly introduced
     // numeric/config column. Do not let it erase a non-empty canonical default
     // (notably tavern.taskSideQuestChance=0.5). Explicit zero remains a real
