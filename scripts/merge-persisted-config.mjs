@@ -60,7 +60,10 @@ const KEY_COLUMNS = {
 // new canonical structural limit, while continuing to preserve all actual
 // tuning fields from the shared CSV.
 const CANONICAL_STRUCTURAL_FIELDS = {
-  'buildings.csv': { main: new Set(['maxLevel']) },
+  // The main-base stage model owns both the four-stage limit and its
+  // canonical display name. Older shared CSVs may still say 城镇中心 and
+  // must not overwrite the release definition 主基地.
+  'buildings.csv': { main: new Set(['maxLevel', 'name']) },
 };
 
 function parse(text) {

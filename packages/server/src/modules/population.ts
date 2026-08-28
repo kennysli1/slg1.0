@@ -451,6 +451,8 @@ export class PopulationModule {
       popProsperityFullRatio: c.popProsperityFullRatio,
       /** 繁荣度满值时的额外速率加成（默认 +30%）。 */
       popProsperityMaxBonus: c.popProsperityMaxBonus,
+      /** 人口达到硬上限几倍时，繁荣额外加成降为 0（默认 2 倍）。 */
+      popOvercapPenaltyFullRatio: c.popOvercapPenaltyFullRatio,
       mainLevel: s.mainLevel,
       inFamine: !!s.inFamine,
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,

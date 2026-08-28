@@ -13,7 +13,7 @@ import { applyBalanceEdits, BALANCE_TABLES } from '../gateway/gm.js';
  *   → loadGameConfig(tmp) 校验（对应真实保存前的合法性校验）→ 断言写回结果与注释/表头保留。
  *
  * 注：逐等级 popCap 是「该级相对上一级的增量贡献」，硬上限 = Σ 1..当前等级 popCap。
- *   故 main L1..L10 每级增量均为 20，10 级总和=200；居民楼每级增量 18，10 级总和=180。
+ *   故 main L1..L4 每级增量均为 20，4 级总和=80；居民楼每级增量 18，10 级总和=180。
  */
 
 const configDir = join(dirname(fileURLToPath(import.meta.url)), '../../../../config');
@@ -52,7 +52,7 @@ test('GM 面板：building_levels 复合主键编辑 round-trip（改 main|1 pop
     // 居民楼逐等级增量恒为 18，10 级总和=180
     assert.equal(cfg.buildings['residence'].levels[10].popCap, 18, '居民楼 L10 增量仍为 18');
     assert.equal(popCapSum(cfg.buildings['residence']), 180, '居民楼 10 级 popCap 增量总和应=180');
-    assert.equal(popCapSum(cfg.buildings['main']), 200 + 79, 'main 改 L1=99 后总和应为 20×9+99=279');
+    assert.equal(popCapSum(cfg.buildings['main']), 80 + 79, 'main 改 L1=99 后总和应为 20×3+99=159');
 
     // 3) 注释与表头原样保留
     const raw = readFileSync(join(tmp, 'building_levels.csv'), 'utf8');

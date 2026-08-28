@@ -163,15 +163,16 @@ test('发布配置合并：旧十级城镇中心不能覆盖新版主基地四�
   const canonical = join(dir, 'buildings.csv');
   const persisted = join(dir, 'persisted-buildings.csv');
   try {
-    writeFileSync(canonical, 'id,code,maxLevel,mainBaseLevel\n1,main,4,1\n2,warehouse,10,1\n');
+    writeFileSync(canonical, 'id,code,name,maxLevel,mainBaseLevel\n1,main,主基地,4,1\n2,warehouse,仓库,10,1\n');
     // 这是升级前 shared/config 中仍可能存在的旧表头与旧主基地等级。
-    writeFileSync(persisted, 'id,code,maxLevel\n1,main,10\n2,warehouse,10\n');
+    writeFileSync(persisted, 'id,code,name,maxLevel\n1,main,城镇中心,10\n2,warehouse,仓库,10\n');
     const repoRoot = existsSync(join(process.cwd(), 'scripts', 'merge-persisted-config.mjs'))
       ? process.cwd()
       : join(process.cwd(), '..', '..');
     execFileSync(process.execPath, [join(repoRoot, 'scripts', 'merge-persisted-config.mjs'), canonical, persisted, 'buildings.csv'], { stdio: 'pipe' });
     const rows = parseCsvStructured(readFileSync(canonical, 'utf8')).rows;
     assert.equal(rows.find((row) => row.code === 'main')?.maxLevel, '4');
+    assert.equal(rows.find((row) => row.code === 'main')?.name, '主基地');
     assert.equal(rows.find((row) => row.code === 'warehouse')?.maxLevel, '10');
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -102,6 +102,7 @@ export class MetaModule {
           popGrowthPerLevel: c.buildings.main?.popGrowthPerLevel ?? 0,
           popProsperityFullRatio: c.constants.popProsperityFullRatio,
           popProsperityMaxBonus: c.constants.popProsperityMaxBonus,
+          popOvercapPenaltyFullRatio: c.constants.popOvercapPenaltyFullRatio,
           popRaceMobilizeMax: c.constants.popRaceMobilizeMax,
           popCropPerLabor: c.constants.popCropPerLabor,
           popHospitalRecoveryBase: c.constants.popHospitalRecoveryBase,

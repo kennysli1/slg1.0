@@ -1,15 +1,9 @@
 code,level,costWood,costClay,costIron,costCrop,costGold,timeSec,popCap,prod,treasureSlots,storagePerLevel,defensePerLevel,buildSpeedupPerLevel,trainTimeReducePerLevel,trainCostReducePerLevel,taskRefreshSec,taskMaxTasks,taskSideQuestChance,vaultProtectWood,vaultProtectClay,vaultProtectIron,vaultProtectCrop,vaultProtectGold
-#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时,storagePerLevel(仓库/粮仓容量增量,余空),defensePerLevel(城墙防御增量),buildSpeedupPerLevel(主城建造加速),trainTimeReducePerLevel(军事建筑训练加速),trainCostReducePerLevel(军事建筑训练降费),treasureSlots=该级相对上一级的宝物栏槽位增量贡献(仅宝库treasury有值;非宝库留空;总槽位=城镇中心基础1+Σ1..当前等级treasureSlots),taskRefreshSec=酒馆专属·随机任务刷新间隔(秒;非酒馆留空),taskMaxTasks=酒馆专属·可同时接取的随机任务上限(非酒馆留空),taskSideQuestChance=酒馆每个任务槽刷新支线任务的概率(0..1;非酒馆留空),vaultProtect*=保险库该等级新增保护量(每级累加;仅vault填写)
+#建筑逐级参数（v4 逐等级独立数值；由 scripts/gen-building-levels.mjs 从旧公式基数快照生成）。code=建筑代码,level=等级(1..maxLevel),cost*=升/建到该级的花费,timeSec=耗时(秒),popCap=该级相对上一级的人口上限增量贡献(硬上限=Σ1..当前等级popCap),prod=仅资源田填该级产量/小时,storagePerLevel(仓库/粮仓容量增量,余空),defensePerLevel(城墙防御增量),buildSpeedupPerLevel(主基地建造加速),trainTimeReducePerLevel(军事建筑训练加速),trainCostReducePerLevel(军事建筑训练降费),treasureSlots=该级相对上一级的宝物栏槽位增量贡献(仅宝库treasury有值;非宝库留空;总槽位=主基地基础1+Σ1..当前等级treasureSlots),taskRefreshSec=酒馆专属·随机任务刷新间隔(秒;非酒馆留空),taskMaxTasks=酒馆专属·可同时接取的随机任务上限(非酒馆留空),taskSideQuestChance=酒馆每个任务槽刷新支线任务的概率(0..1;非酒馆留空),vaultProtect*=保险库该等级新增保护量(每级累加;仅vault填写)
 main,1,4,4,3,2,1,2,20,,,,,0,,,,,,,,,,
 main,2,5,4,4,3,1,2,20,,,,,0.05,,,,,,,,,,
 main,3,7,6,5,3,1,4,20,,,,,0.05,,,,,,,,,,
 main,4,8,7,6,4,1,6,20,,,,,0.05,,,,,,,,,,
-main,5,11,9,8,5,1,10,20,,,,,0.05,,,,,,,,,,
-main,6,14,12,10,7,1,16,20,,,,,0.05,,,,,,,,,,
-main,7,18,15,13,9,1,25,20,,,,,0.05,,,,,,,,,,
-main,8,23,20,17,11,1,40,20,,,,,0.05,,,,,,,,,,
-main,9,29,25,22,14,1,64,20,,,,,0.05,,,,,,,,,,
-main,10,37,32,28,18,1,103,20,,,,,0.05,,,,,,,,,,
 warehouse,1,4,4,3,2,1,2,6,,,400,,,,,,,,,,,,
 warehouse,2,5,4,4,3,1,2,6,,,400,,,,,,,,,,,,
 warehouse,3,7,6,5,3,1,4,6,,,400,,,,,,,,,,,,

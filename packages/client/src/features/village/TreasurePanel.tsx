@@ -60,7 +60,7 @@ export function TreasurePanel() {
       <div class="trs-panel">
         <p class="trs-empty-hint">
           暂无生效宝物。清理野营、击败敌军或在贸易中心向 NPC 购买；
-          城镇中心提供基础主栏，建造宝库可扩展。（{totalCodes}/{slots}）{reserveCount > 0 ? ` 另有 ${reserveCount} 件宝物在备用栏` : ''}
+          主基地提供基础主栏，建造宝库可扩展。（{totalCodes}/{slots}）{reserveCount > 0 ? ` 另有 ${reserveCount} 件宝物在备用栏` : ''}
         </p>
         <div>
           <span style={{ fontSize: 'var(--f-xs)', color: 'var(--c-ink-dim)', marginRight: 'var(--s-2)' }}>本村加成</span>
