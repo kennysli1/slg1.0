@@ -41,6 +41,10 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   assert.equal(cfg.buildings['warehouse'].zone, 'inner', '仓库归 inner');
   assert.equal(cfg.buildings['barracks'].zone, 'inner', '兵营归 inner（军事建筑迁入城内）');
   assert.equal(cfg.buildings['mercenarycamp'].zone, 'outer', '雇佣兵营地归 outer');
+  assert.equal(cfg.buildings['council'].maxCount, 1, '议会厅每村最多 1 座');
+  assert.equal(cfg.buildings['council'].mainBaseLevel, 2, '议会厅需要二级主基地');
+  assert.equal(cfg.buildings['alliance_hall'].maxCount, 1, '联盟大厅每村最多 1 座');
+  assert.equal(cfg.buildings['alliance_hall'].mainBaseLevel, 2, '联盟大厅需要二级主基地');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
   assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');
@@ -101,6 +105,14 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m6.objective.kind, 'resource_owned');
   assert.equal(cfg.quests.m6.objective.resourceKey, 'gold');
   assert.equal(cfg.quests.m6.objective.count, 100);
+  assert.equal(cfg.quests.m10.objective.kind, 'main_base_level');
+  assert.equal(cfg.quests.m10.objective.count, 2, 'M10 目标为二级主基地');
+  assert.deepEqual(cfg.quests.m10.rewards.resourceGrowth, { percent: 25, durationSec: 43200 }, 'M10 奖励四资源产量 +25%/12小时');
+  assert.equal(cfg.quests.m11.trigger, 'main_base_level:2', 'M11 由二级主基地触发');
+  assert.equal(cfg.quests.m11.objective.kind, 'explore_tiles');
+  assert.equal(cfg.quests.m11.objective.count, 200);
+  assert.deepEqual(cfg.quests.m11.rewards.buildingUnlocks, ['alliance_hall', 'council']);
+  assert.ok(cfg.questGraph.lines.world_exploration, 'M11 应位于开眼看世界任务线');
   assert.equal(cfg.quests.m7.objective.kind, 'research_completed');
   assert.equal(cfg.quests.m7.objective.count, 1);
   assert.equal(cfg.quests.m8.objective.kind, 'defend_task_village');

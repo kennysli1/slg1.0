@@ -76,9 +76,11 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
   const reputation = Number(rewards.reputation) || 0;
   const population = Number(rewards.population) || 0;
   const populationGrowth = rewards.populationGrowth ?? null;
+  const resourceGrowth = rewards.resourceGrowth ?? null;
+  const buildingUnlocks: string[] = rewards.buildingUnlocks ?? [];
   const researchPoints = Number(rewards.researchPoints) || 0;
   const resEntries = Object.entries(res);
-  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && researchPoints === 0 && !populationGrowth) return null;
+  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && researchPoints === 0 && !populationGrowth && !resourceGrowth && buildingUnlocks.length === 0) return null;
   return (
     <div class="task-card-reward">
       <span class="task-reward-label">{label}</span>
@@ -117,6 +119,12 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
             人口增长 +{fmt(populationGrowth.percent)}%（{Math.round(Number(populationGrowth.durationSec) / 3600)}小时）
           </span>
         )}
+        {resourceGrowth && Number(resourceGrowth.percent) > 0 && (
+          <span class="task-reward-chip task-reward-chip--population-growth">
+            四种资源产量 +{fmt(resourceGrowth.percent)}%（{Math.round(Number(resourceGrowth.durationSec) / 3600)}小时）
+          </span>
+        )}
+        {buildingUnlocks.map((kind) => <span class="task-reward-chip" key={kind}>解锁建筑 {kind}</span>)}
       </div>
     </div>
   );
@@ -203,13 +211,15 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasReputation = Number(rewards?.reputation) !== 0;
   const hasPopulation = Number(rewards?.population) !== 0;
   const hasPopulationGrowth = !!rewards?.populationGrowth;
+  const hasResourceGrowth = !!rewards?.resourceGrowth;
+  const hasBuildingUnlocks = (rewards?.buildingUnlocks ?? []).length > 0;
   const hasResearchPoints = Number(rewards?.researchPoints) !== 0;
   return (
     <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth || hasResearchPoints
+      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, population: rewards?.population, populationGrowth: rewards?.populationGrowth, researchPoints: rewards?.researchPoints }} label="本次获得" />
+      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints }} label="本次获得" />
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
       )}
@@ -440,7 +450,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
         </div>
       )}
-      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles') && (
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level') && (
         <div class="task-card-obj">
           <div class="task-card-prog">
             <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
@@ -450,6 +460,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'population_reached' && <span class="task-prog-hint">主城总人口（含军队人口）</span>}
             {o.kind === 'resource_owned' && <span class="task-prog-hint">不消耗资源，只检查主城当前拥有量</span>}
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
+            {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
           </div>
         </div>
       )}
@@ -657,7 +668,9 @@ function KingdomTaskMenu({ openState, onToggle, taskOpenState, onTaskToggle }: {
 }) {
   tick.value;
   const state = kingdomState.value;
-  if (!state) return null;
+  // 王国任务由议会厅解锁；服务器在未解锁时返回 kingdomEnabled=false，
+  // 此时连同二级菜单一起隐藏，避免把“等待指令”误显示成可用王国任务。
+  if (!state || state.kingdomEnabled === false) return null;
   const task = state.task;
   const goMap = () => {
     if (!task || !Number.isFinite(task.targetQ) || !Number.isFinite(task.targetR)) return;

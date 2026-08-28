@@ -483,7 +483,7 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -883,8 +883,8 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','主基地最低级','繁荣/级','人口增长/级·时'];
+  var bFields = ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','繁荣/级','人口增长/级·时'];
   var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();

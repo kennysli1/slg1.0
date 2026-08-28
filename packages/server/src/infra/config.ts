@@ -90,6 +90,8 @@ export interface BuildingDef {
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
+  /** 每座村庄最多可建造数量；-1 表示不限制。 */
+  maxCount: number;
   /** 建造该建筑所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
@@ -148,7 +150,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -190,6 +192,10 @@ export interface QuestRewards {
   population?: number;
   /** grant_population_growth：人口增长速率临时倍率；percent=10 表示 +10%。 */
   populationGrowth?: { percent: number; durationSec: number };
+  /** grant_resource_growth：四种资源产量临时倍率；percent=25 表示 +25%。 */
+  resourceGrowth?: { percent: number; durationSec: number };
+  /** unlock_buildings：交付时解锁指定建筑代码。 */
+  buildingUnlocks?: string[];
   /** grant_research_points：交付时加入学院科研点。 */
   researchPoints?: number;
 }
@@ -748,6 +754,8 @@ function parsePopulationGrowthReward(s: string): { percent: number; durationSec:
   return { percent, durationSec };
 }
 
+const parseResourceGrowthReward = parsePopulationGrowthReward;
+
 /** 解析 dialogues.csv 的 replies：accept:接受任务|leave:离开。 */
 function parseDialogueReplies(raw: string): DialogueReplyDef[] {
   return (raw ?? '').split('|').map((part) => {
@@ -816,7 +824,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   assertUniqueRows(buildingRows, 'buildings.csv');
   // 应用遗留平衡覆盖（玩家在 /gm/balance 的旧版本手动修改；CSV 是当前默认事实源，JSON 仅作兼容）
   if (overrides?.buildings) {
-    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
+    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
   }
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
@@ -874,6 +882,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       },
       timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
+      maxCount: num(r.maxCount, -1),
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
@@ -1397,7 +1406,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       const [buildingZone, count] = row.params.split(':');
       return { kind: row.kind, buildingZone: (buildingZone?.trim() || 'inner') as 'inner' | 'outer', count: Math.max(1, num(count, 1)) };
     }
-    if (row.kind === 'population_reached' || row.kind === 'explore_tiles') {
+    if (row.kind === 'population_reached' || row.kind === 'explore_tiles' || row.kind === 'main_base_level') {
       return { kind: row.kind, count: Math.max(1, num(row.params, 1)) };
     }
     if (row.kind === 'resource_owned') {
@@ -1425,6 +1434,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const populationGrowth = rows
       .map((x) => x.kind === 'grant_population_growth' ? parsePopulationGrowthReward(x.params) : null)
       .find((value): value is { percent: number; durationSec: number } => !!value);
+    const resourceGrowth = rows
+      .map((x) => x.kind === 'grant_resource_growth' ? parseResourceGrowthReward(x.params) : null)
+      .find((value): value is { percent: number; durationSec: number } => !!value);
+    const buildingUnlocks = rows
+      .filter((x) => x.kind === 'unlock_buildings')
+      .flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
@@ -1432,6 +1447,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (population > 0) out.population = population;
     if (researchPoints > 0) out.researchPoints = researchPoints;
     if (populationGrowth) out.populationGrowth = populationGrowth;
+    if (resourceGrowth) out.resourceGrowth = resourceGrowth;
+    if (buildingUnlocks.length) out.buildingUnlocks = [...new Set(buildingUnlocks)];
     return out;
   };
   const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
@@ -1587,6 +1604,7 @@ export function validateGameConfig(config: GameConfig): void {
       if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
     }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    if (b.maxCount !== -1 && (!Number.isInteger(b.maxCount) || b.maxCount < 1)) errors.push(`buildings.csv[${b.kind}] maxCount 必须为 -1 或正整数（当前${b.maxCount}）`);
     if (!Number.isInteger(b.mainBaseLevel) || b.mainBaseLevel < 1) errors.push(`buildings.csv[${b.kind}] mainBaseLevel 必须是≥1的整数`);
     // 逐等级参数（building_levels.csv）：必须覆盖 1..maxLevel；popCap≥0；prod 仅资源田且≥0
     for (let lv = 1; lv <= b.maxLevel; lv++) {
@@ -1852,7 +1870,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1874,7 +1892,7 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'build_buildings') {
       if (q.objective.buildingZone !== 'inner' && q.objective.buildingZone !== 'outer') errors.push(`quests.csv[${q.code}] build_buildings 区域必须是 inner/outer`);
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] build_buildings 数量必须≥1`);
-    } else if (q.objective.kind === 'population_reached' || q.objective.kind === 'explore_tiles') {
+    } else if (q.objective.kind === 'population_reached' || q.objective.kind === 'explore_tiles' || q.objective.kind === 'main_base_level') {
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 数量必须≥1`);
     } else if (q.objective.kind === 'resource_owned') {
       if (!q.objective.resourceKey || !resourceKeys.has(q.objective.resourceKey)) errors.push(`quests.csv[${q.code}] resource_owned 资源 ${q.objective.resourceKey} 不在 resources.csv`);
@@ -1902,11 +1920,11 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'defend_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
     }
-    // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
+    // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
+      if (q.type !== 'side' && !(q.type === 'main' && q.trigger.startsWith('main_base_level:'))) errors.push(`quests.csv[${q.code}] 仅支线或主基地门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used / tavern_refresh）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
@@ -1950,6 +1968,14 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (row.kind === 'grant_population_growth' && !parsePopulationGrowthReward(row.params)) {
       errors.push(`quest_effects.csv[${row.id}] grant_population_growth 参数必须是 percent:durationSec（如 10:86400）`);
+    }
+    if (row.kind === 'grant_resource_growth' && !parseResourceGrowthReward(row.params)) {
+      errors.push(`quest_effects.csv[${row.id}] grant_resource_growth 参数必须是 percent:durationSec（如 25:43200）`);
+    }
+    if (row.kind === 'unlock_buildings') {
+      for (const kind of row.params.split('|').map((value) => value.trim()).filter(Boolean)) {
+        if (!config.buildings[kind]) errors.push(`quest_effects.csv[${row.id}] 解锁建筑 ${kind} 不在 buildings.csv`);
+      }
     }
   }
   for (const row of config.questGraph.edges) {

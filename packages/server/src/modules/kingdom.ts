@@ -96,6 +96,11 @@ export class KingdomModule {
     this.commands.register('kingdom.BuyService', (c) => this.buyService(c));
     this.bus.on('player.Registered', (evt) => void this.onPlayerRegistered(evt));
     this.bus.on('combat.BattleEnded', (evt) => void this.onBattleEnded(evt));
+    // 议会厅是王国任务系统的入口。建成后立即挂载该玩家的首个任务计时器，
+    // 避免玩家必须重新打开页面或等待旧的（无议会厅时已取消的）计时器。
+    this.bus.on('building.Built', (evt) => void this.onCouncilChanged(evt));
+    this.bus.on('building.Upgraded', (evt) => void this.onCouncilChanged(evt));
+    this.bus.on('building.Demolished', (evt) => void this.onCouncilChanged(evt));
   }
 
   resume(): void {
@@ -248,9 +253,44 @@ export class KingdomModule {
     for (const player of ((list.payload as any)?.players ?? [])) {
       const state = await this.ensure(String(player.id));
       if (!state) continue;
-      this.armTask(state);
+      if (await this.hasCouncil(String(player.id))) this.armTask(state);
+      else this.scheduler.cancelByOwner(`kingdom-task:${state.playerId}`);
       for (const order of state.orders.filter((o) => o.status === 'pending')) this.armOrder(order);
     }
+  }
+
+  /** 王国任务是玩家级全局任务，但只有拥有至少一座议会厅时才启用。 */
+  private async hasCouncil(playerId: string): Promise<boolean> {
+    const result = await this.commands.send({ name: 'player.Get', from: KingdomModule.NAME, payload: { playerId } });
+    if (!result.ok) return false;
+    const villages = ((result.payload as any)?.player?.villages ?? []) as Array<{ id?: string }>;
+    for (const village of villages) {
+      if (!village.id) continue;
+      const level = await this.commands.send({
+        name: 'building.GetBuildingLevel', from: KingdomModule.NAME,
+        payload: { villageId: village.id, kind: 'council' },
+      });
+      if (level.ok && Number((level.payload as any)?.level ?? 0) > 0) return true;
+    }
+    return false;
+  }
+
+  private async onCouncilChanged(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; kind?: string };
+    if (p.kind !== 'council' || !p.villageId) return;
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: KingdomModule.NAME, payload: { villageId: p.villageId } });
+    const playerId = String((owner.payload as any)?.player?.id ?? (owner.payload as any)?.playerId ?? '');
+    if (!owner.ok || !playerId) return;
+    const state = await this.ensure(playerId);
+    if (!state || !(await this.hasCouncil(playerId))) return;
+    // 议会厅拆除时不创建新任务；重建后若没有进行中的/待领取任务则立即发令。
+    if (state.task?.status === 'active' || state.task?.status === 'ready') {
+      this.armTask(state);
+      return;
+    }
+    state.nextIssueAt = this.now();
+    this.store.set(COLLECTION, playerId, state);
+    await this.issueTask(playerId);
   }
 
   private armTask(state: KingdomState): void {
@@ -308,6 +348,14 @@ export class KingdomModule {
   private async issueTask(playerId: string): Promise<void> {
     const state = await this.ensure(playerId);
     if (!state) return;
+    if (!(await this.hasCouncil(playerId))) {
+      // 没有议会厅时不应继续递归调度；议会厅建成事件会重新唤醒任务循环。
+      state.nextIssueAt = 0;
+      this.store.set(COLLECTION, playerId, state);
+      this.scheduler.cancelByOwner(`kingdom-task:${playerId}`);
+      await this.emitUpdated(state, 'disabled');
+      return;
+    }
     // ready 表示目标已经完成，必须等玩家领取后才开始下一轮，不能因为旧期限已过而重发任务。
     if (state.task?.status === 'ready') {
       this.armTask(state);
@@ -378,6 +426,7 @@ export class KingdomModule {
 
   private async submitTribute(cmd: Command): Promise<CommandResult> {
     const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
+    if (!(await this.hasCouncil(playerId))) return { ok: false, payload: {}, reason: 'council_required' };
     const state = await this.ensure(playerId);
     const task = state?.task;
     if (!state || !task || task.status !== 'active' || task.kind !== 'tribute' || !task.resource || !task.amount) return { ok: false, payload: {}, reason: 'kingdom_task_not_submittable' };
@@ -390,6 +439,7 @@ export class KingdomModule {
 
   private async claimTask(cmd: Command): Promise<CommandResult> {
     const { playerId } = cmd.payload as { playerId: string };
+    if (!(await this.hasCouncil(playerId))) return { ok: false, payload: {}, reason: 'council_required' };
     const state = await this.ensure(playerId);
     const task = state?.task;
     if (!state || !task || task.status !== 'ready') return { ok: false, payload: {}, reason: 'kingdom_task_not_ready' };
@@ -406,8 +456,13 @@ export class KingdomModule {
     const { playerId, villageId } = cmd.payload as { playerId: string; villageId?: string };
     const state = await this.ensure(playerId);
     if (!state) return { ok: false, payload: {}, reason: 'player_not_found' };
-    if (state.nextIssueAt <= this.now() && (!state.task || ['failed', 'claimed'].includes(state.task.status))) await this.issueTask(playerId);
-    else this.armTask(state);
+    const kingdomEnabled = await this.hasCouncil(playerId);
+    if (kingdomEnabled) {
+      if (state.nextIssueAt <= this.now() && (!state.task || ['failed', 'claimed'].includes(state.task.status))) await this.issueTask(playerId);
+      else this.armTask(state);
+    } else {
+      this.scheduler.cancelByOwner(`kingdom-task:${playerId}`);
+    }
     const fresh = this.store.get<KingdomState>(COLLECTION, playerId) ?? state;
     const levelResult = villageId
       ? await this.commands.send({ name: 'building.GetBuildingLevel', from: KingdomModule.NAME, payload: { villageId, kind: 'council' } })
@@ -418,7 +473,8 @@ export class KingdomModule {
       ok: true,
       payload: {
         playerId, villageId, fief: fresh.fief, fiefName: FIEF_NAMES[fresh.fief],
-        nextIssueAt: fresh.nextIssueAt, task: fresh.task ?? null, orders: fresh.orders.slice(-10).reverse(),
+        kingdomEnabled,
+        nextIssueAt: fresh.nextIssueAt, task: kingdomEnabled ? (fresh.task ?? null) : null, orders: fresh.orders.slice(-10).reverse(),
         councilLevel: Number((levelResult.payload as any)?.level ?? 0),
         services: Object.values(this.config.kingdomServices).sort((a, b) => a.minCouncilLevel - b.minCouncilLevel || a.id - b.id),
         landmarks,

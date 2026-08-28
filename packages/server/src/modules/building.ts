@@ -52,6 +52,8 @@ interface BuildingState {
   techStorageCap?: number;
   /** 新版主基地一次性迁移标记；旧存档缺失时按现有建筑数量选择最低可容纳等级。 */
   mainBaseMigrationVersion?: 1;
+  /** 任务或其他系统授予的建筑解锁；旧存档默认为空。 */
+  unlockedBuildings?: string[];
 }
 
 const COLLECTION = 'building';
@@ -101,6 +103,7 @@ export class BuildingModule {
     this.commands.register('building.GetVaultProtection', (c) => this.getVaultProtection(c));
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
+    this.commands.register('building.UnlockBuildings', (c) => this.unlockBuildings(c));
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
     this.commands.register('building.SetBuildSpeedMult', (c) => this.setBuildSpeedMult(c));
     this.commands.register('building.SetStorageTechMult', (c) => this.setStorageTechMult(c));
@@ -249,7 +252,7 @@ export class BuildingModule {
         ...(level === 0 && repairTargetLevel && repairTargetLevel > 0 ? { repairTargetLevel } : {}),
       });
     }
-    const s: BuildingState = { villageId, tribe, placed, queue: [], mainBaseMigrationVersion: 1 };
+    const s: BuildingState = { villageId, tribe, placed, queue: [], mainBaseMigrationVersion: 1, unlockedBuildings: [] };
     this.store.set(COLLECTION, villageId, s);
 
     // 开局即上报派生（容量/各资源田产率），让 economy 初值正确。
@@ -360,7 +363,12 @@ export class BuildingModule {
   }
 
   private meetsBuildRequirement(s: BuildingState, def: BuildingDef): boolean {
-    return this.tcLevel(s) >= def.mainBaseLevel && this.meetsRequires(s, def.requires);
+    if (this.tcLevel(s) < def.mainBaseLevel || !this.meetsRequires(s, def.requires)) return false;
+    // 联盟大厅/议会厅由 M11 奖励解锁。已存在的旧存档建筑视为兼容性解锁，避免升级被锁死。
+    if ((def.kind === 'alliance_hall' || def.kind === 'council')
+      && !s.unlockedBuildings?.includes(def.kind)
+      && !s.placed.some((p) => p.kind === def.kind)) return false;
+    return true;
   }
 
   /** 前置未满足时的文案（如"需城镇中心 5 级"）。 */
@@ -372,7 +380,26 @@ export class BuildingModule {
 
   private buildLockReason(s: BuildingState, def: BuildingDef): string | undefined {
     if (this.tcLevel(s) < def.mainBaseLevel) return `需主基地 ${def.mainBaseLevel} 级`;
+    if ((def.kind === 'alliance_hall' || def.kind === 'council')
+      && !s.unlockedBuildings?.includes(def.kind)
+      && !s.placed.some((p) => p.kind === def.kind)) return '需完成任务解锁';
     return this.lockReason(s, def.requires);
+  }
+
+  private unlockBuildings(cmd: Command): CommandResult {
+    const { villageId, kinds } = cmd.payload as { villageId: string; kinds?: string[] };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const requested = Array.isArray(kinds) ? kinds : [];
+    s.unlockedBuildings ??= [];
+    const added: string[] = [];
+    for (const kind of requested) {
+      if (!this.config.buildings[kind] || s.unlockedBuildings.includes(kind)) continue;
+      s.unlockedBuildings.push(kind);
+      added.push(kind);
+    }
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { unlocked: [...s.unlockedBuildings], added } };
   }
 
   /** 城镇中心降低建造时间；再乘人口劳动力建造加速（time_mult_pop）。 */
@@ -598,6 +625,8 @@ export class BuildingModule {
     };
     const options = Object.values(this.config.buildings)
       .filter((def) => def.zone === zone)
+      // 达到单村建造上限后直接从列表移除；-1 表示不限数量。
+      .filter((def) => def.maxCount < 0 || s.placed.filter((p) => p.kind === def.kind).length < def.maxCount)
       .map((def) => ({
         kind: def.kind,
         name: def.name,
@@ -607,6 +636,8 @@ export class BuildingModule {
         unlocked: this.meetsBuildRequirement(s, def),
         requires: def.requires,
         mainBaseLevel: def.mainBaseLevel,
+        maxCount: def.maxCount,
+        builtCount: s.placed.filter((p) => p.kind === def.kind).length,
         lockReason: this.buildLockReason(s, def),
         producing: def.resource ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, 1)) } : undefined,
       }));
@@ -622,6 +653,7 @@ export class BuildingModule {
     if (!def) return { ok: false, payload: {}, reason: `unknown_building:${kind}` };
     if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
     if (def.zone !== zone) return { ok: false, payload: {}, reason: 'zone_mismatch' };
+    if (def.maxCount >= 0 && s.placed.filter((p) => p.kind === def.kind).length >= def.maxCount) return { ok: false, payload: {}, reason: 'max_count' };
     if (this.freeSlots(s, zone) <= 0) return { ok: false, payload: {}, reason: 'no_free_slot' };
     if (!this.meetsBuildRequirement(s, def)) return { ok: false, payload: {}, reason: 'requires_not_met' };
     if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };

@@ -127,6 +127,11 @@ export class TasksModule {
     this.bus.on('building.Repaired', (evt: DomainEvent) => void this.onBuildingRepaired(evt));
     // 建筑建成、人口变化、行军视野更新 → 推进门槛类主线目标。
     this.bus.on('building.Built', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
+    this.bus.on('building.Upgraded', (evt: DomainEvent) => {
+      const villageId = (evt.payload as { villageId?: string }).villageId ?? '';
+      void this.syncThresholdObjectives(villageId);
+      void this.unlockMainQuests(villageId);
+    });
     this.bus.on('population.Changed', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
     this.bus.on('movement.VisionUpdated', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
     this.bus.on('research.TechCompleted', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
@@ -157,6 +162,7 @@ export class TasksModule {
       // 任务营地持久化在 pve 集合。为旧存档回填 owner，并把历史遗留的全局 pve 地块收回私有 taskcamp。
       // 仅重排酒馆刷新节奏（若存在酒馆）。
       void this.resumeVillage(s.villageId).catch(() => {});
+      await this.unlockMainQuests(s.villageId);
       for (const inst of Object.values(s.active)) {
         if (this.quest(inst.code)?.objective.kind === 'clear_camp') {
           for (const camp of inst.camps) {
@@ -672,7 +678,7 @@ export class TasksModule {
 
     const rewardVillageId = q.scope === 'global' ? (inst.executionVillageId ?? villageId) : (inst.spawnVillageId ?? villageId);
     const rewardsDef = q.failureRewards;
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; researchPoints?: number; rewardVillageId?: string } = {
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; rewardVillageId?: string } = {
       resources: null, treasures: [], rewardVillageId,
     };
 
@@ -919,8 +925,10 @@ export class TasksModule {
         const q = this.quest(code);
         if (!q || inst.readyToDeliver) continue;
         const kind = q.objective.kind;
-        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed') continue;
-        const sourceVillageId = q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId;
+        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level') continue;
+        const sourceVillageId = kind === 'main_base_level'
+          ? villageId
+          : (q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId);
         let current = 0;
         if (kind === 'build_buildings') {
           const layout = await this.commands.send({ name: 'building.GetLayout', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
@@ -958,6 +966,9 @@ export class TasksModule {
         } else if (kind === 'resource_owned') {
           const resources = await this.commands.send({ name: 'economy.GetResources', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
           current = Math.max(0, Number((resources.payload as any)?.resources?.[q.objective.resourceKey ?? '']) || 0);
+        } else if (kind === 'main_base_level') {
+          const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId: sourceVillageId, kind: 'main' } });
+          current = Math.max(0, Math.floor(Number((level.payload as any)?.level) || 0));
         } else if (kind === 'research_completed') {
           // 全局科技目标可由任意己方村庄完成；不要只读取任务锚点村的科技树。
           // 同时按任务文案要求校验至少有一座学院，避免仅凭旧档科技快照误判。
@@ -990,7 +1001,11 @@ export class TasksModule {
           changed = true;
         }
         if (nextProgress >= target) {
-          const executionVillageId = kind === 'research_completed' && q.scope === 'global' ? villageId : sourceVillageId;
+          // 全局研究/探索可由任意己方村执行，完成时奖励应落到本次产生进度的村庄；
+          // 仍以主城锚点读取资源、人口等“主城”口径目标。
+          const executionVillageId = q.scope === 'global' && (kind === 'research_completed' || kind === 'explore_tiles')
+            ? villageId
+            : sourceVillageId;
           inst.executionVillageId = executionVillageId;
           this.store.set(COLLECTION, storageVillageId, state);
           await this.markReady(executionVillageId, code);
@@ -1215,7 +1230,7 @@ export class TasksModule {
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; researchPoints?: number; rewardVillageId?: string } | null> {
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; rewardVillageId?: string } | null> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -1241,7 +1256,7 @@ export class TasksModule {
       this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
     }
 
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; researchPoints?: number; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
     // 资源奖励
     if (rewardsDef.resources && Object.keys(rewardsDef.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: rewardsDef.resources } });
@@ -1265,6 +1280,31 @@ export class TasksModule {
           expiresAt: Number((growth.payload as any)?.expiresAt) || undefined,
         };
       }
+    }
+    if (rewardsDef.resourceGrowth) {
+      const percent = rewardsDef.resourceGrowth.percent / 100;
+      const growth = await this.commands.send({
+        name: 'economy.ApplyTimedBuff', from: TasksModule.NAME,
+        payload: {
+          villageId: rewardVillageId,
+          source: `task:${code}:resource_growth`,
+          mult: { wood: percent, clay: percent, iron: percent, crop: percent },
+          durationSec: rewardsDef.resourceGrowth.durationSec,
+        },
+      });
+      if (growth.ok) {
+        granted.resourceGrowth = {
+          ...rewardsDef.resourceGrowth,
+          expiresAt: Number((growth.payload as any)?.until) || undefined,
+        };
+      }
+    }
+    if (rewardsDef.buildingUnlocks?.length) {
+      const unlocked = await this.commands.send({
+        name: 'building.UnlockBuildings', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, kinds: rewardsDef.buildingUnlocks },
+      });
+      if (unlocked.ok) granted.buildingUnlocks = rewardsDef.buildingUnlocks;
     }
     if (rewardsDef.reputation) {
       await this.commands.send({
@@ -1599,6 +1639,15 @@ export class TasksModule {
   }
 
   // ── 主线解锁（m1 自动激活，其余进入手动接取列表）──
+  private async mainTriggerSatisfied(villageId: string, trigger: string | undefined): Promise<boolean> {
+    if (!trigger) return true;
+    const [kind, rawValue] = trigger.split(':');
+    if (kind !== 'main_base_level') return true;
+    const required = Math.max(1, Number(rawValue) || 1);
+    const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind: 'main' } });
+    return level.ok && Number((level.payload as any)?.level) >= required;
+  }
+
   private async unlockMainQuests(villageId: string): Promise<void> {
     for (const q of this.catalog.all()) {
       if (q.type !== 'main') continue;
@@ -1606,7 +1655,7 @@ export class TasksModule {
       const s = this.ensureState(storageVillageId);
       if (s.completedMain.includes(q.code)) continue;
       if (s.active[q.code] || s.offeredMain.includes(q.code)) continue;
-      if (this.prereqsMet(villageId, q.requires)) {
+      if (this.prereqsMet(villageId, q.requires) && await this.mainTriggerSatisfied(villageId, q.trigger)) {
         try {
           if (q.code === 'm1') await this.activateQuest(villageId, q.code);
           else {
@@ -2572,6 +2621,8 @@ export class TasksModule {
       reputation: rewards?.reputation ?? 0,
       population: rewards?.population ?? 0,
       populationGrowth: rewards?.populationGrowth ?? null,
+      resourceGrowth: rewards?.resourceGrowth ?? null,
+      buildingUnlocks: rewards?.buildingUnlocks ?? [],
       researchPoints: rewards?.researchPoints ?? 0,
     };
   }

@@ -442,7 +442,7 @@ test('宝库：备用栏已满或主栏已满时移动返回明确错误', async
   assert.equal(l.ok, true, '主栏有空位时应可装载');
 });
 
-test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根因回归）', async () => {
+test('宝库：SetSlots 扩容不搬运城镇中心宝物，新增宝物仍优先主基地', async () => {
   const app = await freshApp();
   // 起初只有城镇中心 1 格
   const l0 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
@@ -453,12 +453,16 @@ test('宝库：SetSlots 扩容时城镇中心宝物自动迁入宝库（Bug1 根
   const l1 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
   assert.deepEqual(l1.town, ['chainsaw'], '宝物应在城镇中心');
   assert.deepEqual(l1.treasury, [], '宝库仍为空');
-  // 建造宝库（等价 SetSlots extra=1）：城镇中心的宝物应自动迁入宝库
+  // 建造宝库（等价 SetSlots extra=1）：扩容只增加槽位，已有宝物位置不变
   const set = await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
   assert.equal(set.ok, true);
   const l2 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  assert.deepEqual(l2.town, [], '城镇中心应清空');
-  assert.deepEqual(l2.treasury, ['chainsaw'], '原城镇中心宝物应迁入宝库');
+  assert.deepEqual(l2.town, ['chainsaw'], '城镇中心宝物应保持原位置');
+  assert.deepEqual(l2.treasury, [], '宝库不应自动接管原宝物');
+  await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
+  const l3 = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(l3.town, ['chainsaw'], '已有宝物仍留在主基地');
+  assert.deepEqual(l3.treasury, ['war_flag'], '主基地满后新增宝物进入宝库主栏');
 });
 
 test('宝库：旧存档（town 有宝+extraSlots 已存在）加载时保持主栏位置', async () => {
