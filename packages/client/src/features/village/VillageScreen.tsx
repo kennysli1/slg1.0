@@ -15,11 +15,12 @@ import { TreasurePanel } from './TreasurePanel.js';
 import { VillageCommandDeck } from './VillageCommandDeck.js';
 import { IncomingWarnings } from '../../shared/ui/IncomingWarnings.js';
 import { VillageTaskSummary } from './VillageTaskSummary.js';
-import { VillageResourceLedger } from './VillageResourceLedger.js';
+import { VillageCommandDock } from './VillageCommandDock.js';
 import { VillageArmyManagement } from '../army/ArmyScreen.js';
 import {
   readVillageWorkbenchPreferences,
   writeVillageWorkbenchPreferences,
+  villageWorkbenchLayoutClass,
   type VillageWorkbenchPreferences,
 } from './workbench-preferences.js';
 
@@ -212,10 +213,10 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
   };
   return (
     <div class="vil-dashboard empire-command-desk">
+      <VillageCommandDock />
       <div class="vil-dashboard-task-wrap empire-task-banner"><IncomingWarnings /><VillageTaskSummary /></div>
-      <VillageResourceLedger />
       <ActiveOperationsSummary vil={vil} />
-      <div class="empire-workspace-grid">
+      <div class={`empire-workspace-grid ${villageWorkbenchLayoutClass(preferences)}`}>
         <WorkspaceEntry
           id="village-building-management"
           eyebrow="发展工作区"
