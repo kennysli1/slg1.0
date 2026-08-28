@@ -3,38 +3,17 @@ import { me } from '../api.js';
 import { tick, dataVersion, sessionVersion, villageSwitching, showToast } from '../app/store.js';
 import { switchVillage } from '../app/refresh.js';
 import { errText } from '../shared/ui/text.js';
-import { getCache, getPopState, liveResource, interpolatePop, interpolateTotalPop, type PopSnapshot } from '../app/state.js';
-import { resInfo, resourceKeys } from '../app/config.js';
-import { fmt } from '../shared/utils/format.js';
-import { Icon, Bar } from '../ui/index.js';
-
-type ResourceSnapshot = ReturnType<typeof getCache>['res'];
+import { getCache, type PopSnapshot } from '../app/state.js';
+import { Icon } from '../ui/index.js';
 
 export function ResourceBar() {
   tick.value;
   dataVersion.value;
   const villagePicker = <VillagePicker />;
-  const overview = getCache().kingdomOverview as any;
-  if (!overview) {
-    return (
-      <div class="resbar" aria-label="王国资源概览">
-        {villagePicker}
-        <ReputationCell />
-        <span class="resbar-scope" title="王国总览暂时不可用，正在等待下一次刷新">王国资源载入中</span>
-      </div>
-    );
-  }
-  const resource = overview;
   return (
-    <div class="resbar" aria-label="王国资源概览">
+    <div class="resbar" aria-label="当前战略上下文">
       {villagePicker}
       <ReputationCell />
-      <span class="resbar-scope" title="这是全部村庄的资源合计，不随当前操作村庄切换">王国合计</span>
-      {resourceKeys().map((type) => (
-        type === 'gold'
-          ? <GoldCell key={type} resource={resource} global />
-          : <ResCell key={type} type={type} res={resource} global />
-      ))}
     </div>
   );
 }
@@ -105,66 +84,7 @@ function ReputationCell() {
   );
 }
 
-function ResCell({ type, res, global = false }: { type: string; res: NonNullable<ResourceSnapshot>; global?: boolean }) {
-  const info = resInfo(type);
-  const have = global ? Number((res as any).resources?.[type] ?? 0) : liveResource(type);
-  const capacity = res.capacity?.[type] ?? 0;
-  const rate = (res.netRate?.[type] ?? 0) * 3600;
-  const rawRate = res.rawRate?.[type] ?? rate; // 原始产率（停产时用于显示本可产出多少）
-  const paused = Boolean(res.productionPaused?.[type] || (res.overCapacity?.[type] ?? 0) > 0);
-  const low = type === 'crop' && rate < 0;
-  const percent = capacity > 0 ? have / capacity * 100 : 0;
-  const nearFull = percent >= 92;
-  const state = [low ? 'res--low' : '', paused ? 'res--over' : ''].filter(Boolean).join(' ');
-  const title = `${info.name}：${fmt(have)} / ${fmt(capacity)}；`
-    + (paused ? `仓储已满，生产暂停（原产量 ${rawRate >= 0 ? '+' : ''}${rawRate.toFixed(0)}/时）` : `每小时 ${rate >= 0 ? '+' : ''}${rate.toFixed(0)}`)
-    + (low ? '；净消耗为负，粮食正在减少' : '');
-  return (
-    <div class={`res ${state}`} title={title}>
-      <Icon icon={info.icon} label="" decorative size="sm" />
-      <div class="res-value">
-        <span class="res-label">{info.name}{global ? '·全' : ''}</span>
-        <span class="res-num">{fmt(have)}<small>/{fmt(capacity)}</small></span>
-      </div>
-      <div class="res-meta">
-        <span class="res-rate">{paused ? <span style="opacity:0.55">停产（{rawRate >= 0 ? '+' : ''}{rawRate.toFixed(0)}/时）</span> : `${rate >= 0 ? '+' : ''}${rate.toFixed(0)}/时`}</span>
-        <span class="res-cap">
-          <Bar pct={percent} thin kind={paused || nearFull ? 'ember' : low ? 'crimson' : 'steel'} />
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function GoldCell({ resource, global = false }: { resource?: any; global?: boolean }) {
-  const info = resInfo('gold');
-  const gold = global ? Number(resource?.resources?.gold ?? 0) : liveResource('gold');
-  const rate = global ? Number(resource?.netRate?.gold ?? 0) * 3600 : getPopState()?.goldPerHour ?? 0;
-  return (
-    <div class="res res--gold" title={`金币：${fmt(gold)}；每小时 ${rate >= 0 ? '+' : ''}${rate.toFixed(0)}`}>
-      <Icon icon={info.icon} label="" decorative size="sm" />
-      <div class="res-value">
-        <span class="res-label">金币{global ? '·全' : ''}</span>
-        <span class="res-num">{fmt(gold)}</span>
-      </div>
-      <div class="res-meta"><span class="res-rate">{rate >= 0 ? '+' : ''}{rate.toFixed(0)}/时</span></div>
-    </div>
-  );
-}
-
-function _UpkeepCell({ crop }: { crop: number }) {
-  return (
-    <div class="res" title="全军与平民每小时口粮消耗">
-      <Icon icon="ui_icon_upkeep" label="" decorative size="sm" />
-      <div class="res-value">
-        <span class="res-label">耗粮</span>
-        <span class="res-num">{fmt(crop)}</span>
-      </div>
-      <div class="res-meta"><span>口粮/时</span></div>
-    </div>
-  );
-}
-
+/** 人口告警文案由人口面板与单测复用；不再属于顶栏资源显示。 */
 export function populationTooltip(
   state: Pick<PopSnapshot, 'hardCap' | 'inFamine' | 'overflowRatio' | 'soldierPop'>,
   population: number,
@@ -178,35 +98,6 @@ export function populationTooltip(
   const alarm = reasons.length ? `；红框原因：${reasons.join('；')}` : '';
   const change = `变化 ${growth >= 0 ? '+' : ''}${growth}/时`;
   return state.inFamine
-    ? `人口：${fmt(population)}/${fmt(state.hardCap)}${alarm}；${change}`
-    : `人口：${fmt(population)}/${fmt(state.hardCap)}；平民 ${fmt(civilian)}；军队 ${fmt(state.soldierPop)}${alarm}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
-}
-
-function _PopCell() {
-  const state = getPopState();
-  if (!state) return null;
-  const population = interpolateTotalPop();
-  const atCap = !state.inFamine && state.hardCap > 0 && population / state.hardCap >= 1;
-  const growth = Math.round(atCap ? (state.potentialGrowthPerHour ?? 0) : state.growthPerHour);
-  const hasGrowthDebuff = (state.overflowRatio ?? 0) > 0;
-  const title = populationTooltip(state, population, Math.round(interpolatePop()), growth);
-  return (
-    <div class={`res res--pop${state.inFamine || hasGrowthDebuff ? ' res--alarm' : ''}`} title={title}>
-      <Icon icon="ui_icon_pop" label="" decorative size="sm" />
-      <div class="res-value">
-        <span class="res-label">人口</span>
-        <span class="res-num">{fmt(population)}<small>/{fmt(state.hardCap)}</small></span>
-      </div>
-      <div class="res-meta">
-        <span class="res-rate">{growth >= 0 ? '+' : ''}{growth}/时{atCap ? ' · 已满' : ''}</span>
-        <span class="res-cap">
-          <Bar
-            pct={state.hardCap > 0 ? population / state.hardCap * 100 : 0}
-            thin
-            kind={state.inFamine || hasGrowthDebuff ? 'crimson' : 'jade'}
-          />
-        </span>
-      </div>
-    </div>
-  );
+    ? `人口：${population}/${state.hardCap}${alarm}；${change}`
+    : `人口：${population}/${state.hardCap}；平民 ${civilian}；军队 ${state.soldierPop}${alarm}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
 }

@@ -21,6 +21,7 @@ import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
 import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
+import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
@@ -31,6 +32,27 @@ describe('modalLayerZ', () => {
 });
 
 describe('地图定位', () => {
+  it('选择己方村庄只写地图定位与选中态，不会隐式切换当前村', () => {
+    const calls: string[] = [];
+    let target: any = null;
+    inspectOwnedVillage(
+      { id: 'v-branch', name: '许昌', q: 8, r: -3 },
+      (center) => { calls.push(`center:${center.q},${center.r}`); },
+      (next) => { calls.push('selected'); target = next; },
+    );
+    assert.deepEqual(calls, ['center:8,-3', 'selected']);
+    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'bld_main' });
+  });
+
+  it('只有目标卡明确确认后才请求切村；当前村不会重复请求', async () => {
+    const switched: string[] = [];
+    const switcher = async (id: string) => { switched.push(id); return { ok: true }; };
+    assert.deepEqual(await confirmOwnedVillage('v-branch', 'v-capital', switcher), { ok: true });
+    assert.deepEqual(switched, ['v-branch']);
+    assert.deepEqual(await confirmOwnedVillage('v-branch', 'v-branch', switcher), { ok: true });
+    assert.deepEqual(switched, ['v-branch']);
+  });
+
   it('MarchStep 同时更新己方行军和来袭预警，任务村 NPC 图标不会停在首次预警位置', () => {
     const previous = getCache();
     const warning = {

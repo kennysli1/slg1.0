@@ -1588,3 +1588,43 @@
 .kingdom-section-intro > span { color: var(--c-gold-hi); font-family: var(--ff-han); font-size: var(--f-lg); font-weight: 700; }
 .kingdom-section-intro small { color: var(--c-ink-dim); font-size: var(--f-xs); }
 @media (max-width: 720px) { .kingdom-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kingdom-resource-row:last-child { grid-column: 1 / -1; } .kingdom-section-intro { align-items: flex-start; flex-direction: column; } }
+
+/* ── 帝国指挥桌面：任务 → 当前村资源 → 进行中 → 发展 → 军务 ── */
+.empire-command-desk { gap: var(--s-5); }
+.empire-task-banner { max-width: none; }
+.empire-workbench {
+  grid-template-columns: minmax(240px, .78fr) minmax(0, 1.35fr) minmax(220px, .62fr);
+  align-items: start;
+}
+.empire-operations-column,
+.empire-development-column,
+.empire-military-column { min-width: 0; }
+.empire-active-panel { border-left: calc(var(--s-1) / 2) solid var(--status-warning); }
+.empire-development-column { padding-left: var(--s-4); border-left: 1px solid var(--line); }
+.empire-military-column { padding-left: var(--s-4); border-left: 1px solid var(--line); }
+.empire-military-brief { display: flex; flex-direction: column; gap: var(--s-2); }
+.empire-military-count { display: flex; align-items: center; gap: var(--s-2); }
+.empire-military-count > div { display: grid; gap: var(--s-1); }
+.empire-military-count span,
+.empire-military-brief p,
+.empire-military-queue { color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.5; }
+.empire-military-count strong { color: var(--c-ink); font-family: var(--ff-num); font-size: var(--f-xl); }
+.empire-military-brief p { margin: var(--s-3) 0 0; }
+.empire-military-queue { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.empire-army-archive { display: grid; gap: var(--s-4); border-top: 1px solid var(--line-strong); padding-top: var(--s-4); }
+.empire-army-archive > summary { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); min-height: var(--s-7); color: var(--c-ink); cursor: pointer; font-family: var(--ff-han); font-size: var(--f-lg); font-weight: 700; }
+.empire-army-archive > summary small { color: var(--c-ink-dim); font-family: var(--ff-body); font-size: var(--f-xs); font-weight: 400; }
+.empire-army-archive > summary:focus-visible { outline: calc(var(--s-1) / 2) solid var(--focus-ring); outline-offset: var(--s-1); }
+.empire-army-archive[open] > summary { color: var(--c-gold-hi); }
+
+@media (max-width: 1120px) {
+  .empire-workbench { grid-template-columns: minmax(240px, .7fr) minmax(0, 1.3fr); }
+  .empire-military-column { grid-column: 1 / -1; padding-left: 0; border-left: 0; border-top: 1px solid var(--line); padding-top: var(--s-4); }
+}
+@media (max-width: 720px) {
+  .empire-command-desk { gap: var(--s-4); }
+  .empire-workbench { grid-template-columns: minmax(0, 1fr); }
+  .empire-development-column,
+  .empire-military-column { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); padding-top: var(--s-4); }
+  .empire-army-archive > summary { align-items: flex-start; flex-direction: column; justify-content: center; }
+}

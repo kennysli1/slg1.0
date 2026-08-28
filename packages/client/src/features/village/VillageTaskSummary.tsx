@@ -45,7 +45,7 @@ export function VillageTaskSummary() {
       <Panel variant="gold" corners pad class="vil-current-task-panel">
         <div class="vil-current-task-head">
           <div>
-            <span class="vil-eyebrow">王国事务 · 当前任务</span>
+            <span class="vil-eyebrow">整体事务 · 当前焦点</span>
             {task ? (
               <div class="vil-current-task-title">
                 <h1>{task.name}</h1>

@@ -9,9 +9,9 @@ import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/h
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
 import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab } from '../../app/store.js';
-import { getMapCenter, setMapCenter, refreshForeignMoves, switchVillage } from '../../app/refresh.js';
+import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
-import { me, ownVillageAt, isOwnVillageId } from '../../api.js';
+import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
 import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
@@ -912,8 +912,7 @@ export function HexMap() {
       ...(visibility ? { visibility } : {}),
       ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
     };
-    // 己方村庄就是操作上下文：选择后切换数据，但仍停留在地图观察周边。
-    if (kind === 'own_village' || isOwnVillageId(refId)) void switchVillage(refId);
+    // 己方村庄先进入观察态；只有目标卡的明确确认按钮才会切换操作上下文。
   }
 
   // ─── event handlers ────────────────────────────────────────────────────────
