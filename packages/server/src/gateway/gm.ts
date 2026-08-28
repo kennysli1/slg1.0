@@ -315,11 +315,11 @@ const CONFIG_CENTER_HTML = `<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:900px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:block;padding:11px 13px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8}
 </style></head><body><main>
 <h1>配置中心（CSV）</h1>
-<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR；合并 PR 后再按部署规范发布，才会成为后续版本和删档后的默认值。</div>
-<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><pre id="status">加载中…</pre></div>
 <div class="card"><div class="grid">
 <a href="/config/balance">平衡参数与常量</a><a href="/config/quest-modules">任务定义模块</a><a href="/config/quests">任务目录</a><a href="/config/quest-graph">任务关系图（只读审查）</a><a href="/config/dialogues">任务/NPC 对话</a>
 </div></div>
+<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR；合并 PR 后再按部署规范发布，才会成为后续版本和删档后的默认值。</div>
+<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><pre id="status">加载中…</pre></div>
 <script>let token=sessionStorage.getItem('gmToken')??'';function headers(){let h={};if(token)h['X-GM-Token']=token;return h}async function loadStatus(){let r=await fetch('/config/status',{headers:headers()});if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();if(token)sessionStorage.setItem('gmToken',token);return loadStatus();}}let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}async function syncNow(){let r=await fetch('/config/sync',{method:'POST',headers:headers()});let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}loadStatus();</script>
 </main></body></html>`;
 
