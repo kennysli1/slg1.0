@@ -162,7 +162,7 @@ export function BattleReportCard({ report }: { report: StoredReport }) {
             </span>
             <span class="rcard-text">{report.text}</span>
           </span>
-          <span class="report-card-chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+          <span class="report-card-chevron" aria-hidden="true" />
         </button>
         {expanded && <BattleReplay details={details} />}
       </div>
