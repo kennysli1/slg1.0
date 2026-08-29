@@ -79,6 +79,12 @@ function ringKind(kind: string, isSelf: boolean): string {
   return '';
 }
 
+function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
+  if (refId === 'kingdom-capital') return 'capital';
+  if (refId === 'kingdom-fief-ne' || refId === 'kingdom-fief-se' || refId === 'kingdom-fief-sw' || refId === 'kingdom-fief-nw') return 'fief';
+  return null;
+}
+
 // ─── hex math ────────────────────────────────────────────────────────────────
 function hexDistance(a: Hex, b: Hex): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -401,6 +407,8 @@ export function HexMap() {
     visibility: Visibility;
     isSelected: boolean;
     isSelf: boolean;
+    landmark: 'capital' | 'fief' | null;
+    landmarkCenter: boolean;
   }
 
   function buildVisibleHexes(): HexCell[] {
@@ -442,6 +450,8 @@ export function HexMap() {
             const ownV = ownVillageAt(q, r);
             const t = tileAt(q, r);
             const visibility = (t?.visibility ?? 'visible') as Visibility;
+            const landmark = landmarkKindFromRefId(t?.refId);
+            const landmarkCenter = landmark ? t?.landmarkCenter !== false : true;
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined
@@ -476,7 +486,7 @@ export function HexMap() {
 
             cells.push({
               q, r, camX, camY, kind, refId, name, icon, terrain, visibility,
-              isSelf,
+              isSelf, landmark, landmarkCenter,
               isSelected: !!(sel && sel.q === q && sel.r === r),
             });
           }
@@ -1210,13 +1220,14 @@ export function HexMap() {
               return (
                 <g
                   key={`poi-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                  class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
+                  class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}${c.landmark ? ` hex-poi--landmark-${c.landmark}${c.landmarkCenter ? ' hex-poi--landmark-center' : ' hex-poi--landmark-footprint'}` : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
                 >
+                  {c.landmark && <polygon class={`landmark-tile landmark-tile--${c.landmark}`} points={HEX_CORNER_STR} />}
                   {/* Entity ring */}
-                  {rk && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
+                  {rk && c.landmarkCenter && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
-                  {c.icon && (
+                  {c.icon && (!c.landmark || c.landmarkCenter) && (
                     <image
                       class="hex-entity-img"
                       href={artPath(c.icon)}
@@ -1228,7 +1239,7 @@ export function HexMap() {
                     />
                   )}
                   {/* 名称必须留在所属六边形内；放到格外会被后绘制的相邻地形遮住。 */}
-                  {c.kind !== 'empty' && (
+                  {c.kind !== 'empty' && (!c.landmark || c.landmarkCenter) && (
                     <text class="hex-label" textAnchor="middle" dominantBaseline="middle" y={HEX_SIZE * 0.62}>
                       {c.name.slice(0, 5)}
                     </text>

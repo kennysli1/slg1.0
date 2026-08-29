@@ -107,6 +107,29 @@
   stroke: var(--c-crimson-hi);
   stroke-width: 2;
 }
+
+/* 王都/封地是由多个真实地块组成的三角形地标：外围格只画统一底纹，
+   中心格保留实体图标与名称，避免重复标签把三角形切碎。 */
+.landmark-tile {
+  pointer-events: none;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.landmark-tile--capital {
+  fill: rgb(164 119 49 / 30%);
+  stroke: var(--c-gold-hi);
+}
+.landmark-tile--fief {
+  fill: rgb(91 118 158 / 28%);
+  stroke: var(--c-steel);
+}
+.hex-poi--landmark-footprint .landmark-tile {
+  opacity: .9;
+}
+.hex-poi--landmark-center .landmark-tile {
+  opacity: 1;
+  filter: drop-shadow(0 0 5px rgb(234 214 164 / 30%));
+}
 /* 任务营地：鎏金描边 + 脉冲，和 PvE 的红色区分开 */
 .hex-ring--task {
   stroke: var(--c-gold);

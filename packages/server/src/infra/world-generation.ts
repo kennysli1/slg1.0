@@ -7,6 +7,8 @@ export interface WorldAnchor {
   type: string;
   q: number;
   r: number;
+  /** 多格王国地标的实际占地（含中心格）；普通 PvE 不填写。 */
+  footprint?: Array<{ q: number; r: number }>;
 }
 
 export interface GeneratedWorldPlan {
@@ -26,6 +28,42 @@ const PVE_TYPES = ['rats', 'wolves', 'bandits', 'mercenaries', 'barbarians', 'fo
 const PVE_WEIGHTS = [28, 20, 14, 9, 6, 4, 2, 1] as const;
 const PLAN_CACHE = new Map<string, GeneratedWorldPlan>();
 
+export type KingdomLandmarkKind = 'capital' | 'fief';
+
+/** 根据目标类型或地图 refId 识别王国地标。 */
+export function kingdomLandmarkKind(value: string | undefined): KingdomLandmarkKind | undefined {
+  if (value === 'royal_capital' || value === 'kingdom-capital') return 'capital';
+  if (value === 'kingdom-fief-ne' || value === 'kingdom-fief-se' || value === 'kingdom-fief-sw' || value === 'kingdom-fief-nw') return 'fief';
+  if (value === 'royal_fief_ne' || value === 'royal_fief_se' || value === 'royal_fief_sw' || value === 'royal_fief_nw') return 'fief';
+  return undefined;
+}
+
+/** 王国地标的三角形占地偏移，均包含中心格。 */
+export function kingdomLandmarkFootprintOffsets(value: string | undefined): Array<{ q: number; r: number }> {
+  const kind = kingdomLandmarkKind(value);
+  if (kind === 'capital') {
+    // 三角形三行：1 + 2 + 3 = 6 格。
+    return [
+      { q: 0, r: 0 },
+      { q: 1, r: 0 },
+      { q: 2, r: 0 },
+      { q: 0, r: 1 },
+      { q: 1, r: 1 },
+      { q: 0, r: 2 },
+    ];
+  }
+  if (kind === 'fief') {
+    // 三角形两行：1 + 2 = 3 格。
+    return [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 0, r: 1 }];
+  }
+  return [];
+}
+
+/** 王国地标中心坐标对应的、已取模的实际占地。 */
+export function kingdomLandmarkFootprint(value: string | undefined, center: { q: number; r: number }, w: number, h: number): Array<{ q: number; r: number }> {
+  return kingdomLandmarkFootprintOffsets(value).map((offset) => wrapHex({ q: center.q + offset.q, r: center.r + offset.r }, w, h));
+}
+
 /** 王都与四封地的确定性锚点。中心/象限位置随世界尺寸变化，比例由 GM 常量控制。 */
 export function kingdomLandmarkAnchors(w: number, h: number, offsetRatio = 0.25): WorldAnchor[] {
   const cq = Math.floor(w / 2), cr = Math.floor(h / 2);
@@ -37,7 +75,14 @@ export function kingdomLandmarkAnchors(w: number, h: number, offsetRatio = 0.25)
     { id: 'kingdom-fief-se', type: 'royal_fief_se', q: cq + oq, r: cr + or },
     { id: 'kingdom-fief-sw', type: 'royal_fief_sw', q: cq - oq, r: cr + or },
     { id: 'kingdom-fief-nw', type: 'royal_fief_nw', q: cq - oq, r: cr - or },
-  ].map((anchor) => ({ ...anchor, ...wrapHex(anchor, w, h) }));
+  ].map((anchor) => {
+    const wrapped = wrapHex(anchor, w, h);
+    return {
+      ...anchor,
+      ...wrapped,
+      footprint: kingdomLandmarkFootprint(anchor.id, wrapped, w, h),
+    };
+  });
 }
 
 function hash32(text: string): number {
@@ -88,7 +133,7 @@ function ringPositions(size: number, spacing: number, offset: number): number[] 
   return Array.from({ length: count }, (_, i) => Math.floor(i * size / count + offset) % size);
 }
 
-function generateSpawnSlots(seed: string, w: number, h: number, blocked: Set<string>): Array<{ q: number; r: number }> {
+function generateSpawnSlots(seed: string, w: number, h: number, blocked: Set<string>, avoid = blocked): Array<{ q: number; r: number }> {
   const maxLattice = Math.floor(w / SPAWN_MIN_DISTANCE) * Math.floor(h / SPAWN_MIN_DISTANCE);
   const wanted = Math.min(LARGE_WORLD_SPAWN_TARGET, maxLattice);
   let best: Array<{ q: number; r: number }> = [];
@@ -104,7 +149,9 @@ function generateSpawnSlots(seed: string, w: number, h: number, blocked: Set<str
   // 按局部相邻顺序开放槽位，让同期新玩家落在同一出生区；种子只决定起始区。
   const start = best.length > 0 ? hash32(`${seed}:spawn-start`) % best.length : 0;
   const ordered = [...best.slice(start), ...best.slice(0, start)];
-  return ordered.slice(0, wanted);
+  // blocked 参与晶格选择，avoid 只在最终出槽时过滤；这样新增多格地标
+  // 不会改变原有出生区的晶格偏移，同时确保地标占地不会被分配给玩家。
+  return ordered.filter((candidate) => !avoid.has(`${candidate.q},${candidate.r}`)).slice(0, wanted);
 }
 
 function pveTypeAt(index: number, total: number): string {
@@ -176,7 +223,7 @@ function greedyCoverage(
 export function generateWorldPlan(w: number, h: number, seed: string, anchors: WorldAnchor[], kingdomCityStateCount = 0): GeneratedWorldPlan {
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 8 || h < 8) throw new Error('world dimensions must be integers >= 8');
   const cityCount = Math.max(0, Math.floor(kingdomCityStateCount));
-  const cacheKey = `${w}x${h}:${seed}:${cityCount}:${anchors.map((a) => `${a.id}/${a.type}/${a.q}/${a.r}`).join('|')}`;
+  const cacheKey = `${w}x${h}:${seed}:${cityCount}:${anchors.map((a) => `${a.id}/${a.type}/${a.q}/${a.r}/${a.footprint?.map((p) => `${p.q},${p.r}`).join(';') ?? ''}`).join('|')}`;
   const cached = PLAN_CACHE.get(cacheKey);
   if (cached) return cached;
   const normalizedAnchors: WorldAnchor[] = [];
@@ -185,16 +232,32 @@ export function generateWorldPlan(w: number, h: number, seed: string, anchors: W
     const p = wrapHex(anchor, w, h);
     const key = `${p.q},${p.r}`;
     if (occupied.has(key)) continue;
+    const footprint = (anchor.footprint?.length
+      ? anchor.footprint
+      : kingdomLandmarkFootprint(anchor.id || anchor.type, p, w, h)).map((cell) => wrapHex(cell, w, h));
     occupied.add(key);
-    normalizedAnchors.push({ ...anchor, ...p });
+    for (const cell of footprint) occupied.add(`${cell.q},${cell.r}`);
+    normalizedAnchors.push({ ...anchor, ...p, ...(footprint.length > 1 ? { footprint } : {}) });
   }
   const terrain = generateTerrain(seed, w, h);
-  const spawnSlots = generateSpawnSlots(seed, w, h, occupied);
+  // 保持既有世界的出生槽确定性：多格地标不会改变槽位晶格的起始偏移；
+  // 真实放置时 World.AllocateSpawn 仍会跳过已被地标占用的格子。
+  const spawnBlocked = new Set(normalizedAnchors.map((anchor) => `${anchor.q},${anchor.r}`));
+  const spawnAvoid = new Set(normalizedAnchors.flatMap((anchor) =>
+    anchor.footprint?.map((cell) => `${cell.q},${cell.r}`) ?? [`${anchor.q},${anchor.r}`]));
+  const spawnSlots = generateSpawnSlots(seed, w, h, spawnBlocked, spawnAvoid);
   const reserved = new Set(spawnSlots.map((p) => `${p.q},${p.r}`));
   const targetCount = Math.round(w * h * 0.05);
   // 城邦占用 PvE 配额，避免在旧世界中无界增加总目标数量；总密度仍保持约 5%。
   const supplement = Math.max(0, targetCount - normalizedAnchors.length - cityCount);
-  const generatedBlocked = new Set([...occupied, ...reserved]);
+  // 出生槽位需要避开多格地标的全部占地；普通 PvE 的计划点则只避开
+  // 地标中心，运行时由 World.PlacePve 在发生重叠时按后备点迁移，
+  // 这样扩展地标不会扰动既有世界的普通 PvE 确定性分布。
+  const pveBlocked = new Set<string>([
+    ...normalizedAnchors.map((anchor) => `${anchor.q},${anchor.r}`),
+    ...reserved,
+  ]);
+  const generatedBlocked = new Set(pveBlocked);
   const guaranteed = spawnSlots.length >= LARGE_WORLD_SPAWN_TARGET ? [
     ...greedyCoverage('rats', 4, 2, spawnSlots, normalizedAnchors, generatedBlocked, seed, w, h, terrain, 'plain'),
     ...greedyCoverage('wolves', 6, 1, spawnSlots, normalizedAnchors, generatedBlocked, seed, w, h, terrain, 'forest'),
@@ -246,7 +309,7 @@ export function generateWorldPlan(w: number, h: number, seed: string, anchors: W
   const plannedKeys = new Set(generatedPoints.map((p) => `${p.q},${p.r}`));
   const fallback = candidates.filter((p) => !plannedKeys.has(`${p.q},${p.r}`)).map(({ q, r }) => ({ q, r }));
   const cityBlocked = new Set<string>([
-    ...occupied,
+    ...pveBlocked,
     ...reserved,
     ...generatedPoints.map((p) => `${p.q},${p.r}`),
   ]);
