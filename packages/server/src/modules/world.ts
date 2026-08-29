@@ -140,25 +140,48 @@ export class WorldModule {
   /** 为旧存档中仍只有单格的王都/封地补齐三角形占地，不覆盖玩家或其它目标。 */
   private normalizeLandmarkFootprints(): void {
     const W = this.worldW, H = this.worldH;
-    const landmarks = this.store.all<Tile>(COLLECTION_TILE)
-      .filter((tile) => tile.kind === 'pve' && tile.landmarkCenter !== false && kingdomLandmarkKind(tile.refId));
-    for (const center of landmarks) {
-      const kind = kingdomLandmarkKind(center.refId);
-      if (!kind) continue;
-      const cells = kingdomLandmarkFootprint(center.refId, center, W, H);
+    const byRef = new Map<string, Tile[]>();
+    for (const tile of this.store.all<Tile>(COLLECTION_TILE)) {
+      if (tile.kind !== 'pve' || !kingdomLandmarkKind(tile.refId)) continue;
+      const tiles = byRef.get(tile.refId!) ?? [];
+      tiles.push(tile);
+      byRef.set(tile.refId!, tiles);
+    }
+
+    for (const [refId, tiles] of byRef) {
+      const kind = kingdomLandmarkKind(refId);
+      if (!kind || tiles.length === 0) continue;
+
+      // 旧版本也写过 landmarkCenter=false/true；若字段缺失，则优先使用
+      // 当前世界计划中的固定锚点，再退回到任意已有格，保证迁移不会把整座地标
+      // 当成多个中心处理。
+      const planned = this.plan?.pveSpawns.find((spawn) => spawn.id === refId);
+      const center = tiles.find((tile) => tile.landmarkCenter === true)
+        ?? (planned && tiles.find((tile) => tile.q === planned.q && tile.r === planned.r))
+        ?? tiles[0]!;
+      const cells = kingdomLandmarkFootprint(refId, center, W, H);
+      const desired = new Set(cells.map((cell) => hexKey(cell.q, cell.r)));
+
+      // 写入当前版本唯一的倒三角占地，并清除旧版本遗留的同 refId 格子。
+      // 这一步是必要的：仅补齐新格会把两套三角形叠加成截图中的大块轮廓。
       for (const cell of cells) {
         const key = hexKey(cell.q, cell.r);
         const existing = this.store.get<Tile>(COLLECTION_TILE, key);
-        if (existing && (existing.kind !== 'pve' || existing.refId !== center.refId)) continue;
+        if (existing && (existing.kind !== 'pve' || existing.refId !== refId)) continue;
         this.store.set<Tile>(COLLECTION_TILE, key, {
           ...(existing ?? center),
           q: cell.q,
           r: cell.r,
           kind: 'pve',
-          refId: center.refId,
+          refId,
           landmark: kind,
           landmarkCenter: cell.q === center.q && cell.r === center.r,
         });
+      }
+      for (const tile of tiles) {
+        if (!desired.has(hexKey(tile.q, tile.r))) {
+          this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { q: tile.q, r: tile.r, kind: 'empty' });
+        }
       }
     }
   }

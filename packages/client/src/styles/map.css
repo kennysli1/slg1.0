@@ -211,6 +211,10 @@
 .hex-cell--landmark .hex-hit {
   pointer-events: none;
 }
+.hex-cell--landmark:hover .hex-hit {
+  fill: transparent;
+  stroke: transparent;
+}
 
 /* ---------- 六边形名字标签 ---------- */
 .hex-label {

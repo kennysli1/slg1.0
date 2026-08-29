@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGameApp } from '../app.js';
 import { kingdomLandmarkAnchors, kingdomLandmarkFootprintOffsets } from '../infra/world-generation.js';
 
@@ -66,6 +69,42 @@ test('王国地标：即使未探索也会在地图返回公开地标标记', as
     const tile = tiles.find((t) => t.refId === id);
     assert.ok(tile, `${id} 应存在地图标记`);
     assert.notEqual(tile.visibility, 'unexplored', `${id} 不应被战争迷雾隐藏`);
+  }
+});
+
+test('王国地标迁移：切换倒三角后清除旧版本遗留占地', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-migration-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchor = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    ).find((item) => item.id === 'kingdom-capital')!;
+    // 旧版正三角形的这些格不属于当前上窄下宽占地，模拟升级前的持久化残留。
+    // 选一块当前计划没有其它目标占用的格，避免覆盖无关 PvE。
+    const stale = [
+      { q: anchor.q + 1, r: anchor.r }, { q: anchor.q + 2, r: anchor.r },
+      { q: anchor.q + 1, r: anchor.r + 1 }, { q: anchor.q, r: anchor.r + 2 },
+    ].find((cell) => !initial.store.get('world_tile', `${cell.q},${cell.r}`)
+      || initial.store.get<any>('world_tile', `${cell.q},${cell.r}`)?.kind === 'empty');
+    assert.ok(stale, '测试需要一块可写入旧版本遗留格的空地');
+    initial.store.set('world_tile', `${stale.q},${stale.r}`, {
+      q: stale.q, r: stale.r, kind: 'pve', refId: anchor.id,
+      name: '王都', icon: 'pve_fortress', faction: 'kingdom', landmark: 'capital', landmarkCenter: false,
+    });
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    const tiles = restarted.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(tiles.length, 6, '重启迁移后王都只能保留 6 个倒三角格');
+    assert.ok(!tiles.some((tile) => tile.q === stale.q && tile.r === stale.r), '旧版遗留格应被清除');
+    assert.equal(restarted.store.get<any>('world_tile', `${stale.q},${stale.r}`)?.kind, 'empty');
+    assert.equal(tiles.filter((tile) => tile.landmarkCenter === true).length, 1, '迁移后仍只能有一个中心格');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

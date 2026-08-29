@@ -1373,7 +1373,8 @@ export function HexMap() {
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
                 >
                   {/* Entity ring */}
-                  {rk && c.landmarkCenter && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
+                  {/* 王都/封地使用合并轮廓；不再绘制中心格的单格 PvE 红环。 */}
+                  {rk && !c.landmark && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
                   {c.icon && !c.landmark && (
                     <image
