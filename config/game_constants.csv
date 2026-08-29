@@ -21,6 +21,9 @@ combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越
 ambush_attack_bonus,0.2,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)
 notifications_per_village,60,number,每个村庄最多保留的通知/战报条数
 march_speed_multiplier,10,number,行军速度全局倍率(>1加速
+forest_vision_penalty,2,number,森林方向军队视野减少格数
+hills_vision_bonus,1,number,军队位于丘陵时视野增加格数
+hills_march_speed_multiplier,0.6666666667,number,军队位于丘陵时行军速度倍率(默认2/3，即速度减少1/3)
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%
