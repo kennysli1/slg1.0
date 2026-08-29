@@ -285,6 +285,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
+    assert.match(page.body, /function compareNatural\(a,b\)/, '对话编辑器应使用数字感知排序');
     assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 taskCode、code 排序');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
@@ -296,9 +297,12 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.deepEqual(sortedKeys, [...sortedKeys].sort((a, b) => {
       const [taskCodeA, codeA, segmentA] = a.split(':');
       const [taskCodeB, codeB, segmentB] = b.split(':');
-      if (taskCodeA !== taskCodeB) return taskCodeA < taskCodeB ? -1 : 1;
-      return codeA === codeB ? Number(segmentA) - Number(segmentB) : codeA < codeB ? -1 : 1;
-    }), '对话编辑器数据应按 taskCode、code、段落号排序');
+      const natural = (left: string, right: string) => left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
+      const taskCodeOrder = natural(taskCodeA, taskCodeB);
+      if (taskCodeOrder !== 0) return taskCodeOrder;
+      const codeOrder = natural(codeA, codeB);
+      return codeOrder !== 0 ? codeOrder : Number(segmentA) - Number(segmentB);
+    }), '对话编辑器数据应按数字感知的 taskCode、code、段落号排序');
     const firstS3 = parsed.rows.find((row) => row.code === 's3_accept' && row.segment === '1');
     assert.equal(firstS3?.taskCode, 's3');
     assert.match(firstS3?.npcText ?? '', /感谢你清除了附近的威胁/);
