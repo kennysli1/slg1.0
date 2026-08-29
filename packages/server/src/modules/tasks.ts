@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most（声望值达到阈值或更低）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
@@ -134,6 +134,7 @@ export class TasksModule {
       void this.unlockMainQuests(villageId);
     });
     this.bus.on('population.Changed', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
+    this.bus.on('reputation.Changed', (evt: DomainEvent) => void this.onReputationChanged(evt));
     this.bus.on('movement.VisionUpdated', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
     // M13 秘密营地只有进入玩家视野后才在地图上标记；视野推进时及时
     // 更新任务标记，让玩家探索到营地附近即可发现它。
@@ -961,7 +962,7 @@ export class TasksModule {
         const q = this.quest(code);
         if (!q || inst.readyToDeliver) continue;
         const kind = q.objective.kind;
-        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level') continue;
+        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level' && kind !== 'reputation_at_most') continue;
         const sourceVillageId = kind === 'main_base_level'
           ? villageId
           : (q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId);
@@ -1021,6 +1022,10 @@ export class TasksModule {
           current = hasAcademy
             ? (q.objective.researchCode ? (completed.has(q.objective.researchCode) ? 1 : 0) : completed.size)
             : 0;
+        } else if (kind === 'reputation_at_most') {
+          const reputation = await this.commands.send({ name: 'reputation.GetByVillage', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
+          current = Number((reputation.payload as any)?.value);
+          if (!Number.isFinite(current)) current = 0;
         } else {
           const playerId = this.playerDirectory.villageOwner(sourceVillageId);
           if (playerId) {
@@ -1036,7 +1041,10 @@ export class TasksModule {
           inst.progress = nextProgress;
           changed = true;
         }
-        if (nextProgress >= target) {
+        const thresholdMet = kind === 'reputation_at_most'
+          ? current <= (q.objective.threshold ?? 0)
+          : nextProgress >= target;
+        if (thresholdMet) {
           // 全局研究/探索可由任意己方村执行，完成时奖励应落到本次产生进度的村庄；
           // 仍以主城锚点读取资源、人口等“主城”口径目标。
           const executionVillageId = q.scope === 'global' && (kind === 'research_completed' || kind === 'explore_tiles')
@@ -1358,7 +1366,7 @@ export class TasksModule {
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; rewardVillageId?: string } | null> {
+  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; reputationResetFrom?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; mercenaries?: Record<string, number>; rewardVillageId?: string } | null> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
@@ -1384,7 +1392,7 @@ export class TasksModule {
       this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
     }
 
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
+    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; reputationResetFrom?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; mercenaries?: Record<string, number>; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
     // 资源奖励
     if (rewardsDef.resources && Object.keys(rewardsDef.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: rewardsDef.resources } });
@@ -1411,12 +1419,16 @@ export class TasksModule {
     }
     if (rewardsDef.resourceGrowth) {
       const percent = rewardsDef.resourceGrowth.percent / 100;
+      const resource = rewardsDef.resourceGrowth.resource;
+      const mult = resource
+        ? { [resource]: percent }
+        : { wood: percent, clay: percent, iron: percent, crop: percent };
       const growth = await this.commands.send({
         name: 'economy.ApplyTimedBuff', from: TasksModule.NAME,
         payload: {
           villageId: rewardVillageId,
           source: `task:${code}:resource_growth`,
-          mult: { wood: percent, clay: percent, iron: percent, crop: percent },
+          mult,
           durationSec: rewardsDef.resourceGrowth.durationSec,
         },
       });
@@ -1440,6 +1452,32 @@ export class TasksModule {
         payload: { villageId: rewardVillageId, delta: rewardsDef.reputation, reason: `task_${code}_success` },
       });
       granted.reputation = rewardsDef.reputation;
+    }
+    // M14：交付时读取当前总声望；若为正数则归零，每减少 1 点发放配置数量的
+    // 无期限佣兵。任务奖励直接写入 military.troops，不创建 mercenary contract，
+    // 因而既不占人口/粮耗，也不会被雇佣兵营地的合同到期逻辑移除。
+    if (rewardsDef.reputationMercenaryExchange) {
+      const exchange = rewardsDef.reputationMercenaryExchange;
+      const reputation = await this.commands.send({ name: 'reputation.GetByVillage', from: TasksModule.NAME, payload: { villageId: rewardVillageId } });
+      const before = Math.max(0, Math.trunc(Number((reputation.payload as any)?.value) || 0));
+      if (reputation.ok && before > 0) {
+        const count = Math.max(0, Math.floor(before * exchange.perPoint));
+        const added = await this.commands.send({
+          name: 'military.AddMercenaries', from: TasksModule.NAME,
+          payload: { villageId: rewardVillageId, units: { [exchange.unitCode]: count } },
+        });
+        if (added.ok) {
+          const reset = await this.commands.send({
+            name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
+            payload: { villageId: rewardVillageId, delta: -before, reason: `task_${code}_reputation_exchange` },
+          });
+          if (reset.ok) {
+            granted.reputation = (granted.reputation ?? 0) - before;
+            granted.reputationResetFrom = before;
+            granted.mercenaries = { [exchange.unitCode]: count };
+          }
+        }
+      }
     }
     if (rewardsDef.researchPoints && rewardsDef.researchPoints > 0) {
       const rp = await this.commands.send({ name: 'research.GrantPoints', from: TasksModule.NAME, payload: { villageId: rewardVillageId, amount: rewardsDef.researchPoints } });
@@ -2042,6 +2080,18 @@ export class TasksModule {
           await this.pushMap(villageId);
         }
         return;
+      }
+    }
+  }
+
+  /** 声望变化后及时推进“达到负声望阈值”类任务，而不是等玩家重新打开任务页。 */
+  private async onReputationChanged(evt: DomainEvent): Promise<void> {
+    const payload = evt.payload as { playerIds?: string[]; playerId?: string };
+    const playerIds = [...new Set([...(payload.playerIds ?? []), payload.playerId].filter((id): id is string => Boolean(id)))];
+    for (const playerId of playerIds) {
+      await this.playerDirectory.refreshPlayer(playerId);
+      for (const villageId of this.playerDirectory.villages(playerId)) {
+        await this.syncThresholdObjectives(villageId);
       }
     }
   }
@@ -2817,6 +2867,7 @@ export class TasksModule {
       deliverAmount: q.objective.deliverAmount ?? 0,
       researchCode: q.objective.researchCode ?? null,
       taskVillageCode: q.objective.taskVillageCode ?? null,
+      threshold: q.objective.threshold ?? null,
     };
   }
 
@@ -2885,6 +2936,8 @@ export class TasksModule {
       resourceGrowth: rewards?.resourceGrowth ?? null,
       buildingUnlocks: rewards?.buildingUnlocks ?? [],
       researchPoints: rewards?.researchPoints ?? 0,
+      reputationMercenaryExchange: rewards?.reputationMercenaryExchange ?? null,
+      mercenaries: rewards?.mercenaries ?? null,
     };
   }
 

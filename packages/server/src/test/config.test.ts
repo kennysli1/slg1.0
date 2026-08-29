@@ -113,6 +113,13 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m11.objective.count, 200);
   assert.deepEqual(cfg.quests.m11.rewards.buildingUnlocks, ['alliance_hall', 'council']);
   assert.ok(cfg.questGraph.lines.world_exploration, 'M11 应位于开眼看世界任务线');
+  assert.equal(cfg.quests.m12.lineCode, 'world_exploration', 'M12 前置 M11，应归入开眼看世界任务线');
+  assert.equal(cfg.quests.m14.lineCode, 'world_exploration', 'M14 前置 M13，应归入开眼看世界任务线');
+  assert.equal(cfg.quests.m15.lineCode, 'world_exploration', 'M15 前置 M14，应归入开眼看世界任务线');
+  assert.deepEqual(cfg.quests.m14.objective.resources, { crop: 500 });
+  assert.deepEqual(cfg.quests.m14.rewards.reputationMercenaryExchange, { unitCode: 'merc_sword', perPoint: 2 });
+  assert.equal(cfg.quests.m15.objective.threshold, -5);
+  assert.deepEqual(cfg.quests.m15.rewards.resourceGrowth, { resource: 'crop', percent: 25, durationSec: 86400 }, 'M15 只应提高粮食产量');
   assert.equal(cfg.quests.m7.objective.kind, 'research_completed');
   assert.equal(cfg.quests.m7.objective.count, 1);
   assert.equal(cfg.quests.m8.objective.kind, 'defend_task_village');

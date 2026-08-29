@@ -150,7 +150,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -182,6 +182,8 @@ export interface QuestObjective {
   /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
   taskVillageCode?: string;
   /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
+  /** reputation_at_most：玩家声望值达到 threshold 或更低。 */
+  threshold?: number;
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -193,12 +195,16 @@ export interface QuestRewards {
   population?: number;
   /** grant_population_growth：人口增长速率临时倍率；percent=10 表示 +10%。 */
   populationGrowth?: { percent: number; durationSec: number };
-  /** grant_resource_growth：四种资源产量临时倍率；percent=25 表示 +25%。 */
-  resourceGrowth?: { percent: number; durationSec: number };
+  /** grant_resource_growth：资源产量临时倍率；默认作用于四种资源，可用 resource 指定单一资源。 */
+  resourceGrowth?: { percent: number; durationSec: number; resource?: string };
   /** unlock_buildings：交付时解锁指定建筑代码。 */
   buildingUnlocks?: string[];
   /** grant_research_points：交付时加入学院科研点。 */
   researchPoints?: number;
+  /** 按交付时的正声望兑换无期限佣兵；兑换后声望归零。 */
+  reputationMercenaryExchange?: { unitCode: string; perPoint: number };
+  /** 实际结算返回的任务佣兵（不属于静态配置）。 */
+  mercenaries?: Record<string, number>;
 }
 
 /** 按前置任务 m8 结局选择的奖励。key 使用 m8_success / m8_failure。 */
@@ -224,6 +230,8 @@ export type QuestScope = 'global' | 'village';
 export interface QuestDef {
   id: number;
   code: string;
+  /** 所属任务线 code（与 quests.csv / questGraph 保持一致）。 */
+  lineCode: string;
   name: string;
   desc: string;
   type: QuestType;
@@ -374,7 +382,7 @@ export interface UnitDef {
   traits: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
-  /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买、永久拥有；不进训练队列。 */
+  /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买；营地购买的服役期限由 contractSec 管理，任务奖励可直接授予无期限兵力。 */
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
   goldCost?: number;
@@ -755,7 +763,30 @@ function parsePopulationGrowthReward(s: string): { percent: number; durationSec:
   return { percent, durationSec };
 }
 
-const parseResourceGrowthReward = parsePopulationGrowthReward;
+/**
+ * 解析资源产量奖励：`percent:durationSec` 作用于四种资源，
+ * `resource:percent:durationSec` 只作用于指定资源（例如 `crop:25:86400`）。
+ */
+function parseResourceGrowthReward(s: string): { percent: number; durationSec: number; resource?: string } | null {
+  if (!s?.trim()) return null;
+  const parts = s.split('|').map((v) => v.trim()).filter(Boolean);
+  const resourceKeys = new Set(['wood', 'clay', 'iron', 'crop']);
+  let resource: string | undefined;
+  let percent = 0;
+  let durationSec = 0;
+  const colonParts = parts[0]?.split(':').map((value) => value.trim()) ?? [];
+  if (colonParts.length >= 3 && resourceKeys.has(colonParts[0])) {
+    resource = colonParts[0];
+    percent = num(colonParts[1], 0);
+    durationSec = num(colonParts[2], 0);
+  } else {
+    const [rawPercent, rawDuration] = colonParts;
+    percent = num(rawPercent, 0);
+    durationSec = num(rawDuration, 0);
+  }
+  if (!Number.isFinite(percent) || !Number.isFinite(durationSec) || percent <= 0 || durationSec <= 0) return null;
+  return resource ? { resource, percent, durationSec } : { percent, durationSec };
+}
 
 /** 解析 dialogues.csv 的 replies：accept:接受任务|leave:离开。 */
 function parseDialogueReplies(raw: string): DialogueReplyDef[] {
@@ -1425,7 +1456,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
+    if (row.kind === 'reputation_at_most') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
+  };
+  const parseReputationMercenaryExchange = (s: string): { unitCode: string; perPoint: number } | null => {
+    const [unitCode, rawPerPoint] = (s ?? '').split(':').map((value) => value.trim());
+    const perPoint = num(rawPerPoint, 0);
+    if (!unitCode || !Number.isFinite(perPoint) || perPoint <= 0) return null;
+    return { unitCode, perPoint };
   };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
     const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
@@ -1442,6 +1480,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const buildingUnlocks = rows
       .filter((x) => x.kind === 'unlock_buildings')
       .flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
+    const reputationMercenaryExchange = rows
+      .map((x) => x.kind === 'grant_mercenaries_by_positive_reputation' ? parseReputationMercenaryExchange(x.params) : null)
+      .find((value): value is { unitCode: string; perPoint: number } => !!value);
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
@@ -1451,6 +1492,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (populationGrowth) out.populationGrowth = populationGrowth;
     if (resourceGrowth) out.resourceGrowth = resourceGrowth;
     if (buildingUnlocks.length) out.buildingUnlocks = [...new Set(buildingUnlocks)];
+    if (reputationMercenaryExchange) out.reputationMercenaryExchange = reputationMercenaryExchange;
     return out;
   };
   const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
@@ -1513,7 +1555,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
-      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
+      id: def.id, code: def.code, lineCode: def.lineCode, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       conditionalRewards,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
@@ -1873,7 +1915,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1924,6 +1966,8 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'investigate_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
+    } else if (q.objective.kind === 'reputation_at_most') {
+      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] reputation_at_most 必须指定数值阈值`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
@@ -1976,6 +2020,13 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (row.kind === 'grant_resource_growth' && !parseResourceGrowthReward(row.params)) {
       errors.push(`quest_effects.csv[${row.id}] grant_resource_growth 参数必须是 percent:durationSec（如 25:43200）`);
+    }
+    if (row.kind === 'grant_mercenaries_by_positive_reputation') {
+      const [unitCode, rawPerPoint] = row.params.split(':').map((value) => value.trim());
+      const perPoint = num(rawPerPoint, 0);
+      const unit = config.units[unitCode];
+      if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 兑换兵种 ${unitCode} 必须是 merc 雇佣兵`);
+      if (!Number.isFinite(perPoint) || perPoint <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries_by_positive_reputation 的每点数量必须>0`);
     }
     if (row.kind === 'unlock_buildings') {
       for (const kind of row.params.split('|').map((value) => value.trim()).filter(Boolean)) {

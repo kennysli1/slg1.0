@@ -402,7 +402,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
 | params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
@@ -413,7 +413,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
 | phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
-| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；`grant_resource_growth` 使用 `percent:durationSec` 作用于四种资源，或 `resource:percent:durationSec` 指定单一资源（如 `crop:25:86400`）；`grant_mercenaries_by_positive_reputation` 使用 `merc_sword:2`，交付时将正声望归零并按每点发放无期限佣兵；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
 | order | 同阶段的执行顺序 |
 
 ### quest_edges.csv — 关系边

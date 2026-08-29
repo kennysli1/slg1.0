@@ -58,6 +58,7 @@ function objText(task: any): string {
   if (o.kind === 'research_completed') return `拥有学院并研发科技 ×${o.count}`;
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
+  if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
   return o.kind;
 }
 
@@ -79,8 +80,11 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
   const resourceGrowth = rewards.resourceGrowth ?? null;
   const buildingUnlocks: string[] = rewards.buildingUnlocks ?? [];
   const researchPoints = Number(rewards.researchPoints) || 0;
+  const mercenaries: Record<string, number> = rewards.mercenaries ?? {};
+  const mercenaryExchange = rewards.reputationMercenaryExchange ?? null;
+  const reputationResetFrom = Number(rewards.reputationResetFrom) || 0;
   const resEntries = Object.entries(res);
-  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && population === 0 && researchPoints === 0 && !populationGrowth && !resourceGrowth && buildingUnlocks.length === 0) return null;
+  if (resEntries.length === 0 && tres.length === 0 && reputation === 0 && reputationResetFrom === 0 && population === 0 && researchPoints === 0 && Object.keys(mercenaries).length === 0 && !mercenaryExchange && !populationGrowth && !resourceGrowth && buildingUnlocks.length === 0) return null;
   return (
     <div class="task-card-reward">
       <span class="task-reward-label">{label}</span>
@@ -108,7 +112,18 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
             声望 {reputation > 0 ? '+' : ''}{reputation}
           </span>
         )}
+        {reputationResetFrom > 0 && (
+          <span class="task-reward-chip task-reward-chip--reputation">
+            声望归零（-{reputationResetFrom}）
+          </span>
+        )}
         {researchPoints > 0 && <span class="task-reward-chip">科研点 {fmt(researchPoints)}</span>}
+        {Object.entries(mercenaries).map(([code, count]: any) => (
+          <span class="task-reward-chip" key={`merc-${code}`}>佣兵 {code} ×{fmt(count)}</span>
+        ))}
+        {mercenaryExchange && (
+          <span class="task-reward-chip">正声望归零：每减少1点获得 {mercenaryExchange.perPoint} 名佣兵</span>
+        )}
         {population !== 0 && (
           <span class="task-reward-chip task-reward-chip--population">
             人口 {population > 0 ? '+' : ''}{fmt(population)}
@@ -121,7 +136,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
         )}
         {resourceGrowth && Number(resourceGrowth.percent) > 0 && (
           <span class="task-reward-chip task-reward-chip--population-growth">
-            四种资源产量 +{fmt(resourceGrowth.percent)}%（{Math.round(Number(resourceGrowth.durationSec) / 3600)}小时）
+            {resourceGrowth.resource ? `${resInfo(resourceGrowth.resource).name}产量` : '四种资源产量'} +{fmt(resourceGrowth.percent)}%（{Math.round(Number(resourceGrowth.durationSec) / 3600)}小时）
           </span>
         )}
         {buildingUnlocks.map((kind) => <span class="task-reward-chip" key={kind}>解锁建筑 {kind}</span>)}
@@ -214,12 +229,15 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasResourceGrowth = !!rewards?.resourceGrowth;
   const hasBuildingUnlocks = (rewards?.buildingUnlocks ?? []).length > 0;
   const hasResearchPoints = Number(rewards?.researchPoints) !== 0;
+  const hasMercenaries = Object.keys(rewards?.mercenaries ?? {}).length > 0;
+  const hasMercenaryExchange = !!rewards?.reputationMercenaryExchange;
+  const hasReputationReset = Number(rewards?.reputationResetFrom) > 0;
   return (
     <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints
+      {hasRes || hasTres || hasReputation || hasReputationReset || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints || hasMercenaries || hasMercenaryExchange
         ? <p class="task-reward-hint">你获得了以下奖励：</p>
         : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints }} label="本次获得" />
+      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, reputationResetFrom: rewards?.reputationResetFrom, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints, mercenaries: rewards?.mercenaries, reputationMercenaryExchange: rewards?.reputationMercenaryExchange }} label="本次获得" />
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
       )}
@@ -249,7 +267,8 @@ function FailureModal({ task, rewards, dialogue, close }: { task: any; rewards: 
       || Number(rewards?.reputation)
       || Number(rewards?.population)
       || rewards?.populationGrowth
-      || Number(rewards?.researchPoints),
+      || Number(rewards?.researchPoints)
+      || Object.keys(rewards?.mercenaries ?? {}).length,
   );
   const next = () => {
     if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
@@ -461,6 +480,16 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'resource_owned' && <span class="task-prog-hint">不消耗资源，只检查主城当前拥有量</span>}
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
             {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
+          </div>
+        </div>
+      )}
+      {o.kind === 'reputation_at_most' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${Number(task.progress) <= Number(o.threshold) ? ' done' : ''}`}>
+              当前声望 {fmt(Number(task.progress) || 0)} / 目标 ≤{fmt(Number(o.threshold) || 0)}
+            </span>
+            <span class="task-prog-hint">声望达到目标后即可领取</span>
           </div>
         </div>
       )}

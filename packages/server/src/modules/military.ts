@@ -1049,8 +1049,9 @@ export class MilitaryModule {
   }
 
   /**
-   * 雇佣兵入库：把雇佣兵永久加入 troops（popCost=0/upkeep=0 → reportUpkeep/reportGarrisonPop 自动零副作用，
-   * 战斗快照自动含其战力）。与行军/训练是同一份 troops 数据，故雇佣兵自动参战、无需新字段/迁移。
+   * 雇佣兵入库：把兵力加入 troops（popCost=0/upkeep=0 → reportUpkeep/reportGarrisonPop 自动零副作用，
+   * 战斗快照自动含其战力）。是否有期限由调用方决定：营地购买由 MercenaryModule 登记合同，
+   * 任务奖励直接调用本命令且不登记合同，因此永久保留；两者共用同一 troops 数据。
    */
   private addMercenaries(cmd: Command): CommandResult {
     const { villageId, units } = cmd.payload as { villageId: string; units: Record<string, number> };
