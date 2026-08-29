@@ -1310,16 +1310,74 @@ export class MovementModule {
     return { ok: true, payload: { id } };
   }
 
-  /** 让已驻扎军继续走向新坐标，可选择保持伏击、驻扎、探索、掠夺或攻城；不再扣兵也不增加行军点。 */
+  /**
+   * 让已驻扎军继续走向新坐标。
+   *
+   * 续行必须复用 GetMarchOptions 的目标/外交判定，不能只根据目标类型
+   * 猜一个默认动作。这样 PvE 目标会同时提供侦察、掠夺（以及符合条件
+   * 的调查），玩家村庄则会按己方/盟军/中立/敌对关系提供完整动作清单。
+   * 编队、宝物和已占用的行军点都保持不变。
+   */
   private async continueGarrison(cmd: Command): Promise<CommandResult> {
     const { villageId, movementId, q, r, mode, targetId, targetVillage } = cmd.payload as {
-      villageId: string; movementId: string; q: number; r: number; mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush' | 'investigate'; targetId?: string; targetVillage?: string;
+      villageId: string; movementId: string; q: number; r: number;
+      mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'scout' | 'reinforce' | 'transfer' | 'ambush' | 'investigate';
+      targetId?: string; targetVillage?: string;
     };
     const mv = this.load(movementId);
     if (!mv || mv.fromVillage !== villageId || (mv.type !== 'garrison' && mv.type !== 'ambush' && mv.type !== 'investigate') || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
-    const toXY = wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+
+    const worldW = this.config.constants.worldW ?? 41;
+    const worldH = this.config.constants.worldH ?? 41;
+    let toXY = wrapHex({ q, r }, worldW, worldH);
+    let targetKind: 'empty' | 'unexplored' | 'pve' | 'taskcamp' | 'village' = 'empty';
+    let resolvedTargetId = targetId;
+    let resolvedTargetVillage = targetVillage;
+
+    // 目标村/PvE 的坐标和类型全部以服务端快照为准，避免客户端地图缓存
+    // 或 GM 移动目标后续行军仍使用旧坐标。
+    if (targetVillage) {
+      const tile = await this.villageTile(targetVillage);
+      if (!tile) return { ok: false, payload: {}, reason: 'target_not_found' };
+      targetKind = 'village';
+      toXY = { q: tile.q, r: tile.r };
+    } else if (targetId) {
+      const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
+      if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+      const pve = target.payload as any;
+      targetKind = pve.task === true ? 'taskcamp' : 'pve';
+      toXY = { q: Number(pve.q), r: Number(pve.r) };
+    } else {
+      // 空地/未探索地块没有 refId，用玩家当前视野的权威状态决定是
+      // “驻扎/伏击”还是“探索”，不能接受客户端伪造的 kind。
+      const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
+      const playerId = (owner.payload as any)?.player?.id;
+      if (owner.ok && playerId) {
+        const visibility = await this.commands.send({ name: 'vision.GetVisibility', from: MovementModule.NAME, payload: { playerId, q: toXY.q, r: toXY.r } });
+        if (visibility.ok && (visibility.payload as any)?.visibility === 'unexplored') targetKind = 'unexplored';
+      }
+    }
+
     if (toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
-    if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack' || mode === 'investigate') {
+
+    // 与首次派遣完全相同的权威模式清单；不在清单中的续行命令一律拒绝。
+    const options = await this.getMarchOptions({
+      name: 'movement.GetMarchOptions', from: MovementModule.NAME, payload: {
+        villageId,
+        q: toXY.q,
+        r: toXY.r,
+        kind: targetKind,
+        ...(resolvedTargetId ? { refId: resolvedTargetId } : {}),
+        ...(resolvedTargetVillage ? { refId: resolvedTargetVillage } : {}),
+      },
+    } as Command);
+    const availableModes = options.ok ? ((options.payload as any)?.modes ?? []) as Array<{ mode?: string }> : [];
+    const continuationModes = mv.type === 'ambush' && targetKind === 'empty'
+      ? availableModes.filter((entry) => entry.mode === 'ambush')
+      : availableModes;
+    if (!continuationModes.some((entry) => entry.mode === mode)) return { ok: false, payload: {}, reason: 'invalid_continuation_mode' };
+
+    if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack' || mode === 'scout' || mode === 'reinforce' || mode === 'transfer' || mode === 'investigate') {
       const known = await this.ensureKnown(villageId, toXY);
       if (known) return known;
     }
@@ -1327,16 +1385,30 @@ export class MovementModule {
       const exploration = await this.ensureExplorable(villageId, toXY);
       if (exploration) return exploration;
     }
-    if (mode === 'raid' && !targetId) return { ok: false, payload: {}, reason: 'target_not_found' };
-    if (mode === 'investigate' && !targetId) return { ok: false, payload: {}, reason: 'target_not_found' };
-    if (mode === 'attack' && !targetVillage) return { ok: false, payload: {}, reason: 'target_not_found' };
-    const path = linePathWrapped(mv.pos, toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if ((mode === 'raid' || mode === 'investigate') && targetKind !== 'pve' && targetKind !== 'taskcamp' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
+    if ((mode === 'attack' || mode === 'reinforce' || mode === 'transfer') && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (mode === 'scout' && targetKind !== 'pve' && targetKind !== 'taskcamp' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (mode === 'scout' && Object.entries(mv.troops).some(([code, count]) => Number(count) > 0 && !this.isScoutUnit(code) && !this.isAdventurerUnit(code))) {
+      return { ok: false, payload: {}, reason: 'scout_units_only' };
+    }
+    const path = linePathWrapped(mv.pos, toXY, worldW, worldH);
     const steps = Math.max(1, path.length - 1);
     const perStepMs = Math.max(1, Math.round(await this.travelSec(mv.fromVillage, mv.pos, toXY, mv.troops) * 1000 / steps));
-    mv.type = mode;
-    mv.targetId = mode === 'raid' || mode === 'investigate' ? targetId : undefined;
-    mv.targetVillage = mode === 'attack' ? targetVillage : undefined;
+
+    const isPveTarget = targetKind === 'pve' || targetKind === 'taskcamp';
+    const isVillageTarget = targetKind === 'village';
+    // transfer/reinforce 在 MovementRecord 中都以 transport 存储，具体语义由
+    // transportMode 区分；其余模式直接写入对应的移动类型。
+    mv.type = mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode;
+    mv.targetId = isPveTarget && (mode === 'raid' || mode === 'scout' || mode === 'investigate') ? resolvedTargetId : undefined;
+    mv.targetVillage = isVillageTarget && ['attack', 'raid', 'scout', 'reinforce', 'transfer'].includes(mode) ? resolvedTargetVillage : undefined;
+    mv.transportMode = mode === 'reinforce' || mode === 'transfer' ? mode : undefined;
+    mv.cargo = mode === 'reinforce' || mode === 'transfer' ? {} : undefined;
+    mv.battleType = mode === 'attack' ? 'siege' : mode === 'raid' && isVillageTarget ? 'raid' : undefined;
+    mv.scoutType = mode === 'scout' ? 'scout_resources' : undefined;
     mv.requestedXY = mode === 'garrison' || mode === 'ambush' || mode === 'explore' || mode === 'investigate' ? toXY : undefined;
+    mv.loot = undefined;
+    mv.autoExplore = undefined;
     mv.toXY = toXY;
     mv.path = path;
     mv.stepIndex = 0;

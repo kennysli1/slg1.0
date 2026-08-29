@@ -112,6 +112,7 @@ const ERR_MSG: Record<string, string> = {
   use_garrison_commands: '驻扎军请使用驻扎指令',
   use_recall_garrison: '驻扎军请使用召回指令',
   garrison_not_found: '这支驻扎军已不存在或不归你指挥',
+  invalid_continuation_mode: '该目标不支持此行军模式，请重新选择',
   same_tile: '目标不能是部队当前所在格',
   target_unexplored: '目标仍未探索；只能派军执行探索行军',
   target_already_explored: '该格已被探索，请改用驻扎、掠夺或攻城命令',
