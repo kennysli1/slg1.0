@@ -38,7 +38,7 @@
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
 | 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
-| 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
+| 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸、M8任务村参数等） | 调平衡参数；原先写死在代码里的常量都在这 |
@@ -214,6 +214,8 @@
 | name / icon | 显示名 / 图标基名 |
 | respawnSec | 被清空后重生秒数 |
 | lootWood/Clay/Iron/Crop | 战利品总量 |
+| faction | 阵营（`neutral`/`kingdom`）；王国城邦填 `kingdom` |
+| cityState | 是否启用运行时随机城邦生成（`true`） |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
@@ -244,7 +246,9 @@
 
 这些行是必须保留的人工锚点。World 会按实际世界面积自动补足公共 PvE 到 `round(W×H×5%)`；自动点位由 `world_seed` 确定，不写回 CSV，也不进入存档。新世界使用 `world_width/world_height`，已有世界始终优先采用存档中的 `world_meta` 尺寸。
 
-地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。地貌当前只用于地图表现和 PvE 分布，不改变行军速度或战斗数值。
+地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。森林会按方向降低军队视野，丘陵提高视野但使经过该格的行军速度降为 2/3；拓荒仅允许平原。
+
+地图计划会按 `kingdom_city_state_count` 随机生成王国城邦（`kingdom_city_state`），数量与生成位置均由 `world_seed` 确定。城邦是王国阵营 PvE 目标，运行时随机生成资源、守军、掠夺防守比例和城内/城外建筑；城外四类资源田至少各有一座 3 级田。城邦可侦察、掠夺或攻城，侦察被发现及后两种攻击均扣除配置的声望值；损失后的兵力/资源按恢复时长线性恢复，恢复中再次受击会重置倒计时。
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
@@ -284,6 +288,19 @@
 | hills_march_speed_multiplier | 0.6666666667 | 军队位于丘陵时的行军速度倍率（默认 2/3） |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
+| kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
+| kingdom_city_state_resource_min/max | 1000/5000 | 城邦四类资源随机范围 |
+| kingdom_city_state_gold_min/max | 0/1000 | 城邦金币随机范围 |
+| kingdom_city_state_troops_per_resource | 0.04 | 资源总量折算守军数量 |
+| kingdom_city_state_raid_defense_min/max_ratio | 0.2/0.8 | 掠夺时随机分配的防守兵力比例 |
+| kingdom_city_state_recovery_min/max_sec | 43200/172800 | 兵力恢复随机时长（12–48 小时） |
+| kingdom_city_state_recovery_resource_extra_sec | 21600 | 资源恢复比兵力额外延长时长（6 小时） |
+| kingdom_city_state_reputation_penalty | 2 | 城邦攻击或被发现侦察的声望扣除 |
+| kingdom_city_state_resource_field_level | 3 | 四类城外资源田保底等级 |
+| kingdom_city_state_inner/outer_building_count_min/max | 3–8 / 4–8 | 城内/城外随机建筑数量范围 |
+| kingdom_city_state_building_level_min/max | 1/5 | 随机建筑等级范围 |
+| kingdom_city_state_unit_pool | `legionnaire|...` | 城邦随机守军兵种池 |
+| kingdom_city_state_inner/outer_building_pool | `...|...` | 城邦随机建筑池 |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 

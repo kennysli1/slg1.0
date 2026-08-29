@@ -1400,7 +1400,11 @@ export class MovementModule {
       if (exploration) return exploration;
     }
     if ((mode === 'raid' || mode === 'investigate') && targetKind !== 'pve' && targetKind !== 'taskcamp' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
-    if ((mode === 'attack' || mode === 'reinforce' || mode === 'transfer') && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
+    if ((mode === 'attack' || mode === 'reinforce' || mode === 'transfer') && targetKind !== 'village' && !(mode === 'attack' && targetKind === 'pve')) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (mode === 'attack' && targetKind === 'pve') {
+      const city = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: resolvedTargetId } });
+      if (!city.ok || !(city.payload as any)?.cityState) return { ok: false, payload: {}, reason: 'not_city_state' };
+    }
     if (mode === 'scout' && targetKind !== 'pve' && targetKind !== 'taskcamp' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
     if (mode === 'scout' && Object.entries(mv.troops).some(([code, count]) => Number(count) > 0 && !this.isScoutUnit(code) && !this.isAdventurerUnit(code))) {
       return { ok: false, payload: {}, reason: 'scout_units_only' };
@@ -1414,11 +1418,11 @@ export class MovementModule {
     // transfer/reinforce 在 MovementRecord 中都以 transport 存储，具体语义由
     // transportMode 区分；其余模式直接写入对应的移动类型。
     mv.type = mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode;
-    mv.targetId = isPveTarget && (mode === 'raid' || mode === 'scout' || mode === 'investigate') ? resolvedTargetId : undefined;
+    mv.targetId = isPveTarget && (mode === 'raid' || mode === 'scout' || mode === 'investigate' || mode === 'attack') ? resolvedTargetId : undefined;
     mv.targetVillage = isVillageTarget && ['attack', 'raid', 'scout', 'reinforce', 'transfer'].includes(mode) ? resolvedTargetVillage : undefined;
     mv.transportMode = mode === 'reinforce' || mode === 'transfer' ? mode : undefined;
     mv.cargo = mode === 'reinforce' || mode === 'transfer' ? {} : undefined;
-    mv.battleType = mode === 'attack' ? 'siege' : mode === 'raid' && isVillageTarget ? 'raid' : undefined;
+    mv.battleType = mode === 'attack' ? 'siege' : mode === 'raid' ? 'raid' : undefined;
     mv.scoutType = mode === 'scout' ? 'scout_resources' : undefined;
     mv.requestedXY = mode === 'garrison' || mode === 'ambush' || mode === 'explore' || mode === 'investigate' ? toXY : undefined;
     mv.loot = undefined;
@@ -1588,7 +1592,7 @@ export class MovementModule {
     }
 
     const mv = await this.launch({
-      id, type: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
+      id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
 
@@ -1602,28 +1606,37 @@ export class MovementModule {
    * 与 sendRaid 同结构，目标是玩家村（targetVillage）而非 PvE 目标。
    */
   private async sendAttack(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, troops, treasures, declareWar } = cmd.payload as {
+    const { villageId, targetVillage, targetId, troops, treasures, declareWar } = cmd.payload as {
       villageId: string;
-      targetVillage: string;
+      targetVillage?: string; targetId?: string;
       troops: Record<string, number>;
       treasures?: string[]; declareWar?: boolean;
     };
+    if (!targetVillage && !targetId) return { ok: false, payload: {}, reason: 'target_not_found' };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
     const fromXY = await this.villageXY(villageId);
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
-    const toXY = await this.villageXY(targetVillage);
+    const target = targetId
+      ? await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } })
+      : null;
+    if (targetId && (!target?.ok || !(target.payload as any)?.cityState)) return { ok: false, payload: {}, reason: 'not_city_state' };
+    const toXY = targetId ? { q: Number((target!.payload as any).q), r: Number((target!.payload as any).r) } : await this.villageXY(targetVillage!);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
     const point = await this.ensureMarchPoint(villageId);
     if (point) return point;
 
     // 目标村必须存在（有军队状态即视为存在）
-    const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
-    if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (targetVillage) {
+      const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
+      if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+    }
     // 旧客户端未携带 declareWar 字段时沿用旧行为（视为确认宣战）；新客户端显式 false 才拒绝。
-    const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
-    if (!relation.ok) return relation;
+    if (targetVillage) {
+      const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
+      if (!relation.ok) return relation;
+    }
     // 从源村扣出兵力
     const delta: Record<string, number> = {};
     for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
@@ -1639,12 +1652,12 @@ export class MovementModule {
     }
 
     const mv = await this.launch({
-      id, type: 'attack', battleType: 'siege', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops,
+      id, type: 'attack', battleType: 'siege', fromVillage: villageId, fromXY, toXY, ...(targetVillage ? { targetVillage } : { targetId }), troops: valid.troops,
       treasures: carry.codes, departAt: this.now(),
     });
 
-    log('出征(attack)', { id: mv.id, from: villageId, targetVillage, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
-    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
+    log('出征(attack)', { id: mv.id, from: villageId, targetVillage, targetId, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', villageId, targetVillage, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
@@ -1684,6 +1697,7 @@ export class MovementModule {
     const modes: Array<{ mode: string; label: string; requiresDeclaration?: boolean }> = [];
     let relation: string | undefined;
     let targetPlayerId: string | undefined;
+    let cityState = false;
     const originTile = await this.villageTile(villageId);
     const targetTile = refId && (kind === 'village' || kind === 'own_village')
       ? await this.villageTile(refId)
@@ -1701,10 +1715,12 @@ export class MovementModule {
       modes.push({ mode: 'scout', label: '侦察' });
       const target = refId ? await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: refId } }) : null;
       const targetData = target?.ok ? target.payload as any : undefined;
+      cityState = targetData?.cityState === true;
       if (targetData?.task === true && targetData.type === 'secret_camp' && targetData.ownerVillageId && await this.samePlayerVillage(villageId, targetData.ownerVillageId)) {
         modes.push({ mode: 'investigate', label: '调查' });
       }
       modes.push({ mode: 'raid', label: '掠夺' });
+      if (targetData?.cityState === true) modes.push({ mode: 'attack', label: '攻城' });
     }
     else if (kind === 'village' || kind === 'own_village') {
       const owner = refId ? await this.ownerOf(refId) : '';
@@ -1758,18 +1774,20 @@ export class MovementModule {
         modes,
         rallyPointLevel: await this.getRallyLevel(villageId),
         marchPoints: await this.marchPointState(villageId),
+        cityState: cityState || undefined,
       },
     };
   }
 
   /** 最终确认页的权威预览：行军时长、可派兵快照、行军点与集结点等级。 */
   private async previewMarch(cmd: Command): Promise<CommandResult> {
-    const { villageId, q, r, mode, troops, targetVillage } = cmd.payload as { villageId: string; q: number; r: number; mode: string; troops: Record<string, number>; targetVillage?: string };
+    const { villageId, q, r, mode, troops, targetVillage, targetId } = cmd.payload as { villageId: string; q: number; r: number; mode: string; troops: Record<string, number>; targetVillage?: string; targetId?: string };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
     const from = await this.villageXY(villageId);
     if (!from) return { ok: false, payload: {}, reason: 'origin_not_found' };
-    const target = targetVillage ? await this.villageXY(targetVillage) : wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    const pveTarget = targetId ? await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } }) : null;
+    const target = targetVillage ? await this.villageXY(targetVillage) : pveTarget?.ok ? { q: Number((pveTarget.payload as any).q), r: Number((pveTarget.payload as any).r) } : wrapHex({ q, r }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     if (!target) return { ok: false, payload: {}, reason: 'target_not_found' };
     if (targetVillage && target.q === from.q && target.r === from.r) {
       return { ok: false, payload: {}, reason: 'same_village' };
@@ -1831,10 +1849,12 @@ export class MovementModule {
     const fromXY = await this.villageXY(villageId);
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
     let toXY: Hex | null | undefined;
+    let pveCityState = false;
     if (isPve) {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
       if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
       const pve = target.payload as any;
+      pveCityState = pve.cityState === true;
       if (pve.ownerVillageId && pve.ownerVillageId !== villageId && !(pve.task === true && await this.samePlayerVillage(villageId, pve.ownerVillageId))) {
         return { ok: false, payload: {}, reason: 'not_task_owner' };
       }
@@ -1864,8 +1884,8 @@ export class MovementModule {
     const mv = await this.launch({
       id, type: 'scout', fromVillage: villageId, fromXY, toXY,
       ...(isPve ? { targetId } : { targetVillage }),
-      // PvE 营地没有可侦察建筑，服务端强制降级为资源/守军报告。
-      scoutType: !isPve && scoutType === 'scout_buildings' ? 'scout_buildings' : 'scout_resources',
+      // 只有王国城邦允许侦察建筑；普通 PvE 仍只提供资源/守军报告。
+      scoutType: (!isPve || pveCityState) && scoutType === 'scout_buildings' ? 'scout_buildings' : 'scout_resources',
       troops: valid.troops, treasures: carry.codes, departAt: this.now(),
     });
     this.save(mv);
@@ -2923,6 +2943,7 @@ export class MovementModule {
     if (mv.type === 'scout' && (mv.targetVillage || mv.targetId)) { await this.arriveScout(mv); return; }
     if (mv.type === 'raid' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
     if (mv.type === 'raid' && mv.targetVillage) { await this.arriveEngage(mv, 'village', mv.targetVillage); return; }
+    if (mv.type === 'attack' && mv.targetId) { await this.arriveEngage(mv, 'pve', mv.targetId); return; }
     if (mv.type === 'attack' && mv.targetVillage) {
       await this.arriveEngage(mv, 'village', mv.targetVillage);
       return;
@@ -2937,6 +2958,12 @@ export class MovementModule {
    */
   private async arriveEngage(mv: MovementRecord, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
     this.clearIncomingWarning(mv);
+    if (targetKind === 'pve' && (mv.battleType === 'raid' || mv.battleType === 'siege')) {
+      const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
+      if ((target.payload as any)?.cityState) {
+        await this.commands.send({ name: 'reputation.AdjustByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage, delta: -this.config.constants.kingdomCityStateReputationPenalty, reason: `kingdom_city_state_${mv.battleType}` } });
+      }
+    }
     // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
     // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
     const carried = mv.treasures && mv.treasures.length > 0 ? mv.treasures : [];
@@ -2965,7 +2992,7 @@ export class MovementModule {
     const reportTarget = targetVillage ?? targetId;
     if (!reportTarget) return;
     const armyRes = isPve
-      ? await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: targetId } })
+      ? await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: targetId, purpose: 'scout' } })
       // 侦察应读取村庄实际驻军，而不是“防御掠夺”分配池。后者可以被
       // 玩家关闭或设为空，不能让侦察报告把真实守军误报为无。
       : await this.commands.send({ name: 'military.GetCombatSnapshot', from: MovementModule.NAME, payload: { villageId: targetVillage } });
@@ -2978,6 +3005,9 @@ export class MovementModule {
     const defenderScouts = Object.entries(defenderSnapshot)
       .filter(([code]) => this.isScoutUnit(code))
       .reduce((sum, [, unit]) => sum + Math.max(0, Number(unit.count) || 0), 0);
+    if (isPve && defenderScouts > 0 && (armyRes.payload as any)?.cityState) {
+      await this.commands.send({ name: 'reputation.AdjustByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage, delta: -this.config.constants.kingdomCityStateReputationPenalty, reason: 'kingdom_city_state_scout_detected' } });
+    }
     // 侦察兵互相反侦察：守方每名侦察兵消灭一名来袭侦察兵；无守方侦察兵则无人伤亡。
     const { survivors, losses, lossMap } = this.applyScoutDefense(mv.troops, defenderScouts);
     const scoutType = mv.scoutType ?? 'scout_resources';
@@ -2989,19 +3019,26 @@ export class MovementModule {
       targetKind: isPve ? 'pve' : 'village',
       defenderTroops: Object.fromEntries(Object.entries(defenderSnapshot).map(([code, unit]) => [code, unit.count])),
     };
-    if (!isPve && scoutType === 'scout_buildings') {
+    if (scoutType === 'scout_buildings' && !isPve) {
       const layout = await this.commands.send({ name: 'building.GetLayout', from: MovementModule.NAME, payload: { villageId: targetVillage } });
       const data = (layout.payload as any) ?? {};
       const normalize = (zone: string) => ((data.zones?.[zone]?.placed ?? []) as any[]).map((b) => ({
         kind: b.kind, name: b.name ?? b.kind, level: Number(b.level) || 0,
       }));
       report.buildings = { center: data.townCenter ? [{ kind: data.townCenter.kind, name: data.townCenter.name, level: data.townCenter.level }] : [], inner: normalize('inner'), outer: normalize('outer') };
-    } else {
-      if (isPve) report.resources = (armyRes.payload as any)?.loot ?? {};
-      else {
-        const resources = await this.commands.send({ name: 'economy.GetResources', from: MovementModule.NAME, payload: { villageId: targetVillage } });
-        report.resources = (resources.payload as any)?.resources ?? {};
+    } else if (isPve) {
+      report.resources = (armyRes.payload as any)?.loot ?? {};
+      if ((armyRes.payload as any)?.cityState && scoutType === 'scout_buildings') {
+        const buildings = ((armyRes.payload as any)?.buildings ?? []) as Array<{ zone?: string; kind?: string; level?: number }>;
+        report.buildings = {
+          center: [],
+          inner: buildings.filter((b) => b.zone === 'inner').map((b) => ({ kind: b.kind, name: b.kind, level: Number(b.level) || 0 })),
+          outer: buildings.filter((b) => b.zone === 'outer').map((b) => ({ kind: b.kind, name: b.kind, level: Number(b.level) || 0 })),
+        };
       }
+    } else {
+      const resources = await this.commands.send({ name: 'economy.GetResources', from: MovementModule.NAME, payload: { villageId: targetVillage } });
+      report.resources = (resources.payload as any)?.resources ?? {};
     }
     this.remove(mv.id);
     this.updateEnRoutePop(mv.fromVillage);

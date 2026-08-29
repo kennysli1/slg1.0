@@ -422,8 +422,8 @@ export class CombatModule {
   /** 拉取防守方快照 + 城墙等级。PvP 找 military+building；PvE 找 pve。 */
   private async fetchDefender(kind: 'village' | 'pve', targetId: string, battleType?: 'raid' | 'siege' | 'ambush'): Promise<{ defender: Snapshot; wallLevel: number; defenderContributions?: Record<string, DefenderContribution> }> {
     if (kind === 'pve') {
-      const res = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: CombatModule.NAME, payload: { id: targetId } });
-      return { defender: ((res.payload as any)?.snapshot ?? {}) as Snapshot, wallLevel: 0 };
+      const res = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: CombatModule.NAME, payload: { id: targetId, purpose: battleType } });
+      return { defender: ((res.payload as any)?.snapshot ?? {}) as Snapshot, wallLevel: Number((res.payload as any)?.wallLevel ?? 0) };
     }
     const defRes = await this.commands.send({
       name: 'military.GetCombatSnapshot', from: CombatModule.NAME,
@@ -601,9 +601,15 @@ export class CombatModule {
     if (b.targetKind === 'pve') {
       const apply = await this.commands.send({
         name: 'pve.ApplyResult', from: CombatModule.NAME,
-        payload: { id: b.targetId, defenderLosses, attackerWins, looterCarry: totalCarry },
+        payload: {
+          id: b.targetId, defenderLosses, attackerWins, looterCarry: totalCarry, battleType: b.battleType,
+          buildingPower: totalPower(filterNonSiegeWeapons(b.attacker)) + totalPower(filterSiegeWeapons(b.attacker)),
+        },
       });
       looted = (apply.payload as any)?.looted ?? {};
+      buildingLoot = (apply.payload as any)?.buildingLoot ?? {};
+      storedLoot = (apply.payload as any)?.storedLoot ?? {};
+      buildingDamage = (apply.payload as any)?.buildingDamage ?? [];
       campCleared = !!((apply.payload as any)?.cleared);
       // M8/M9 的天王老子村是任务专属目标，不应触发普通 PvE 宝物掉落。
       // 旧存档可能没有 task=true 标记，因此同时按模板类型兜底识别。
