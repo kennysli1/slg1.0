@@ -171,11 +171,12 @@ function greedyCoverage(
 
 /**
  * 纯函数式、确定性的环面世界计划。计划不落盘：同 seed + 尺寸 + 人工锚点必得同一结果。
- * 人工 PvE 锚点优先保留；自动点补足到 round(W*H*5%)，且不占用首村保留槽位。
+ * 人工 PvE 锚点优先保留；自动点补足到 round(W*H*5%)（城邦占用其中的配置配额），且不占用首村保留槽位。
  */
-export function generateWorldPlan(w: number, h: number, seed: string, anchors: WorldAnchor[]): GeneratedWorldPlan {
+export function generateWorldPlan(w: number, h: number, seed: string, anchors: WorldAnchor[], kingdomCityStateCount = 0): GeneratedWorldPlan {
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 8 || h < 8) throw new Error('world dimensions must be integers >= 8');
-  const cacheKey = `${w}x${h}:${seed}:${anchors.map((a) => `${a.id}/${a.type}/${a.q}/${a.r}`).join('|')}`;
+  const cityCount = Math.max(0, Math.floor(kingdomCityStateCount));
+  const cacheKey = `${w}x${h}:${seed}:${cityCount}:${anchors.map((a) => `${a.id}/${a.type}/${a.q}/${a.r}`).join('|')}`;
   const cached = PLAN_CACHE.get(cacheKey);
   if (cached) return cached;
   const normalizedAnchors: WorldAnchor[] = [];
@@ -191,7 +192,8 @@ export function generateWorldPlan(w: number, h: number, seed: string, anchors: W
   const spawnSlots = generateSpawnSlots(seed, w, h, occupied);
   const reserved = new Set(spawnSlots.map((p) => `${p.q},${p.r}`));
   const targetCount = Math.round(w * h * 0.05);
-  const supplement = Math.max(0, targetCount - normalizedAnchors.length);
+  // 城邦占用 PvE 配额，避免在旧世界中无界增加总目标数量；总密度仍保持约 5%。
+  const supplement = Math.max(0, targetCount - normalizedAnchors.length - cityCount);
   const generatedBlocked = new Set([...occupied, ...reserved]);
   const guaranteed = spawnSlots.length >= LARGE_WORLD_SPAWN_TARGET ? [
     ...greedyCoverage('rats', 4, 2, spawnSlots, normalizedAnchors, generatedBlocked, seed, w, h, terrain, 'plain'),
@@ -243,10 +245,28 @@ export function generateWorldPlan(w: number, h: number, seed: string, anchors: W
   // 替代候选先列计划点，再列所有非保留格；旧世界碰撞时仍能补足总量。
   const plannedKeys = new Set(generatedPoints.map((p) => `${p.q},${p.r}`));
   const fallback = candidates.filter((p) => !plannedKeys.has(`${p.q},${p.r}`)).map(({ q, r }) => ({ q, r }));
+  const cityBlocked = new Set<string>([
+    ...occupied,
+    ...reserved,
+    ...generatedPoints.map((p) => `${p.q},${p.r}`),
+  ]);
+  const cityCandidates: Array<{ q: number; r: number; score: number }> = [];
+  for (let r = 0; r < h; r++) for (let q = 0; q < w; q++) {
+    const key = `${q},${r}`;
+    if (cityBlocked.has(key)) continue;
+    cityCandidates.push({ q, r, score: unitHash(seed, q, r, 'kingdom-city-state') });
+  }
+  cityCandidates.sort((a, b) => a.score - b.score);
+  const cityPoints = cityCandidates.slice(0, Math.min(cityCount, cityCandidates.length)).map((p, i) => ({
+    id: `kingdom-city-state-${i}`,
+    type: 'kingdom_city_state',
+    q: p.q,
+    r: p.r,
+  }));
   const plan = {
     w, h, seed, terrain, spawnSlots,
-    pveSpawns: [...normalizedAnchors, ...generated],
-    pveCandidates: [...generatedPoints.map(({ q, r }) => ({ q, r })), ...fallback],
+    pveSpawns: [...normalizedAnchors, ...generated, ...cityPoints],
+    pveCandidates: [...generatedPoints.map(({ q, r }) => ({ q, r })), ...cityPoints.map(({ q, r }) => ({ q, r })), ...fallback],
   };
   PLAN_CACHE.set(cacheKey, plan);
   return plan;

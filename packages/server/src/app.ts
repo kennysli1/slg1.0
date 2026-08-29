@@ -414,6 +414,8 @@ export function createGameApp(opts?: {
           console.warn('[reloadConfig] 村庄 ' + b.villageId + ' 重报派生值失败:', err);
         }
       }
+      // 城邦数量是配置化地图派生项；热重载时补齐新增城邦（不覆盖已有战损状态）。
+      ensureWorldPlan();
       return newConfig;
     },
     async resetWorld({ keepAccounts, reassignSpots = false }) {

@@ -396,6 +396,10 @@ export interface PveTemplate {
   type: string; // code
   name: string;
   icon: string; // 基名
+  /** 阵营；普通 PvE 为 neutral，王国城邦为 kingdom。 */
+  faction?: 'neutral' | 'kingdom';
+  /** 王国城邦使用运行时随机资源、兵力与建筑生成。 */
+  cityState?: boolean;
   defender: Record<string, {
     count: number;
     form: UnitForm;
@@ -476,6 +480,42 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
+  /** 王国城邦：地图额外生成数量。 */
+  kingdomCityStateCount: number;
+  /** 王国城邦：四类基础资源随机上下限。 */
+  kingdomCityStateResourceMin: number;
+  kingdomCityStateResourceMax: number;
+  /** 王国城邦：金币随机上下限。 */
+  kingdomCityStateGoldMin: number;
+  kingdomCityStateGoldMax: number;
+  /** 王国城邦：每点资源折算的守军数量，随后受最小/最大兵力限制。 */
+  kingdomCityStateTroopsPerResource: number;
+  kingdomCityStateTroopMin: number;
+  kingdomCityStateTroopMax: number;
+  /** 王国城邦：守军中用于侦察战的侦察兵比例。 */
+  kingdomCityStateScoutRatio: number;
+  /** 王国城邦：参与掠夺防守的守军比例随机上下限。 */
+  kingdomCityStateRaidDefenseMinRatio: number;
+  kingdomCityStateRaidDefenseMaxRatio: number;
+  /** 王国城邦：兵力恢复随机时长与资源额外恢复时长。 */
+  kingdomCityStateRecoveryMinSec: number;
+  kingdomCityStateRecoveryMaxSec: number;
+  kingdomCityStateRecoveryResourceExtraSec: number;
+  /** 王国城邦：侦察战/掠夺/攻城触发的声望扣除绝对值。 */
+  kingdomCityStateReputationPenalty: number;
+  /** 王国城邦：资源田保底等级。 */
+  kingdomCityStateResourceFieldLevel: number;
+  /** 王国城邦：城内/城外随机建筑数量和等级范围。 */
+  kingdomCityStateInnerBuildingCountMin: number;
+  kingdomCityStateInnerBuildingCountMax: number;
+  kingdomCityStateOuterBuildingCountMin: number;
+  kingdomCityStateOuterBuildingCountMax: number;
+  kingdomCityStateBuildingLevelMin: number;
+  kingdomCityStateBuildingLevelMax: number;
+  /** 王国城邦：以 | 分隔的随机池；空/无效项由运行时过滤。 */
+  kingdomCityStateUnitPool: string[];
+  kingdomCityStateInnerBuildingPool: string[];
+  kingdomCityStateOuterBuildingPool: string[];
   /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
   /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
@@ -717,6 +757,11 @@ function parseConstantValue(raw: string, type: string): number | boolean | strin
   if (type === 'bool') return raw === 'true' || raw === '1';
   if (type === 'string') return raw;
   return num(raw);
+}
+
+function parseConstantList(raw: unknown, fallback: string): string[] {
+  const value = typeof raw === 'string' && raw.trim() ? raw : fallback;
+  return value.split('|').map((item) => item.trim()).filter(Boolean);
 }
 
 /** 解析 "main:1|rallypoint:1" → { main:1, rallypoint:1 }。 */
@@ -1073,7 +1118,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of pveRows) {
     pveIdToCode.set(num(r.id), r.code);
     pveTemplates[r.code] = {
-      id: num(r.id), type: r.code, name: r.name, icon: r.icon, respawnSec: num(r.respawnSec, 120),
+      id: num(r.id), type: r.code, name: r.name, icon: r.icon,
+      faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
+      cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
+      respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
     };
@@ -1144,6 +1192,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     raw[r.key] = parseConstantValue(r.value, r.type);
   }
   const cn = (k: string, def: number) => (typeof raw[k] === 'number' ? (raw[k] as number) : def);
+  const cs = (k: string, def: string) => (typeof raw[k] === 'string' ? String(raw[k]) : def);
   const constants: GameConstants = {
     wallBonusPerLevel: cn('wall_bonus_per_level', 0.03),
     mainBuildSpeedupPerLevel: cn('main_build_speedup_per_level', 0.05),
@@ -1173,6 +1222,31 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
+    kingdomCityStateCount: Math.max(0, Math.floor(cn('kingdom_city_state_count', 8))),
+    kingdomCityStateResourceMin: Math.max(0, cn('kingdom_city_state_resource_min', 1000)),
+    kingdomCityStateResourceMax: Math.max(0, cn('kingdom_city_state_resource_max', 5000)),
+    kingdomCityStateGoldMin: Math.max(0, cn('kingdom_city_state_gold_min', 0)),
+    kingdomCityStateGoldMax: Math.max(0, cn('kingdom_city_state_gold_max', 1000)),
+    kingdomCityStateTroopsPerResource: Math.max(0, cn('kingdom_city_state_troops_per_resource', 0.04)),
+    kingdomCityStateTroopMin: Math.max(0, Math.floor(cn('kingdom_city_state_troop_min', 100))),
+    kingdomCityStateTroopMax: Math.max(0, Math.floor(cn('kingdom_city_state_troop_max', 10000))),
+    kingdomCityStateScoutRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_scout_ratio', 0.05))),
+    kingdomCityStateRaidDefenseMinRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_raid_defense_min_ratio', 0.2))),
+    kingdomCityStateRaidDefenseMaxRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_raid_defense_max_ratio', 0.8))),
+    kingdomCityStateRecoveryMinSec: Math.max(1, cn('kingdom_city_state_recovery_min_sec', 43200)),
+    kingdomCityStateRecoveryMaxSec: Math.max(1, cn('kingdom_city_state_recovery_max_sec', 172800)),
+    kingdomCityStateRecoveryResourceExtraSec: Math.max(0, cn('kingdom_city_state_recovery_resource_extra_sec', 21600)),
+    kingdomCityStateReputationPenalty: Math.max(0, Math.floor(cn('kingdom_city_state_reputation_penalty', 2))),
+    kingdomCityStateResourceFieldLevel: Math.max(1, Math.floor(cn('kingdom_city_state_resource_field_level', 3))),
+    kingdomCityStateInnerBuildingCountMin: Math.max(0, Math.floor(cn('kingdom_city_state_inner_building_count_min', 3))),
+    kingdomCityStateInnerBuildingCountMax: Math.max(0, Math.floor(cn('kingdom_city_state_inner_building_count_max', 8))),
+    kingdomCityStateOuterBuildingCountMin: Math.max(4, Math.floor(cn('kingdom_city_state_outer_building_count_min', 4))),
+    kingdomCityStateOuterBuildingCountMax: Math.max(4, Math.floor(cn('kingdom_city_state_outer_building_count_max', 8))),
+    kingdomCityStateBuildingLevelMin: Math.max(1, Math.floor(cn('kingdom_city_state_building_level_min', 1))),
+    kingdomCityStateBuildingLevelMax: Math.max(1, Math.floor(cn('kingdom_city_state_building_level_max', 5))),
+    kingdomCityStateUnitPool: parseConstantList(cs('kingdom_city_state_unit_pool', 'legionnaire|praetorian|imperian|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire'),
+    kingdomCityStateInnerBuildingPool: parseConstantList(cs('kingdom_city_state_inner_building_pool', 'warehouse|granary|barracks|stable|workshop|academy|smithy|hospital|residence|treasury|tavern|vault|council'), 'warehouse|granary'),
+    kingdomCityStateOuterBuildingPool: parseConstantList(cs('kingdom_city_state_outer_building_pool', 'woodcutter|claypit|ironmine|cropland|wall|mercenarycamp|tradecenter|explorers_guild'), 'woodcutter|claypit|ironmine|cropland|wall'),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
@@ -1757,8 +1831,9 @@ export function validateGameConfig(config: GameConfig): void {
   // pve：每个模板必须有守军；spawn 目标必须存在且坐标在地图内
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
-    // happy_village（幸福村）是 0 守军的 NPC 村庄（玩家可接受订单送达，或掠夺触发失败），特例放行
-    if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village') errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
+    if (p.faction !== 'neutral' && p.faction !== 'kingdom') errors.push(`pve_targets.csv[${p.type}] faction 必须是 neutral 或 kingdom`);
+    // happy_village（幸福村）和 kingdom_city_state（运行时随机生成）允许不在静态守军表中配置。
+    if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
   }
   for (const s of config.pveSpawns) {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
@@ -1846,6 +1921,19 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.hillsMarchSpeedMultiplier <= 0 || c.hillsMarchSpeedMultiplier > 1) {
     errors.push(`game_constants.csv hills_march_speed_multiplier 必须在(0,1]`);
   }
+  if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
+  if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);
+  if (c.kingdomCityStateGoldMin < 0 || c.kingdomCityStateGoldMax < c.kingdomCityStateGoldMin) errors.push(`game_constants.csv kingdom_city_state_gold_min/max 范围非法`);
+  if (c.kingdomCityStateTroopsPerResource < 0) errors.push(`game_constants.csv kingdom_city_state_troops_per_resource 必须≥0`);
+  if (c.kingdomCityStateTroopMin < 0 || c.kingdomCityStateTroopMax < c.kingdomCityStateTroopMin) errors.push(`game_constants.csv kingdom_city_state_troop_min/max 范围非法`);
+  if (c.kingdomCityStateScoutRatio < 0 || c.kingdomCityStateScoutRatio > 1) errors.push(`game_constants.csv kingdom_city_state_scout_ratio 必须在[0,1]`);
+  if (c.kingdomCityStateRaidDefenseMinRatio < 0 || c.kingdomCityStateRaidDefenseMaxRatio > 1 || c.kingdomCityStateRaidDefenseMaxRatio < c.kingdomCityStateRaidDefenseMinRatio) errors.push(`game_constants.csv kingdom_city_state_raid_defense_min/max_ratio 范围非法`);
+  if (c.kingdomCityStateRecoveryMinSec <= 0 || c.kingdomCityStateRecoveryMaxSec < c.kingdomCityStateRecoveryMinSec) errors.push(`game_constants.csv kingdom_city_state_recovery_min/max_sec 范围非法`);
+  if (c.kingdomCityStateRecoveryResourceExtraSec < 0) errors.push(`game_constants.csv kingdom_city_state_recovery_resource_extra_sec 必须≥0`);
+  if (c.kingdomCityStateReputationPenalty < 0) errors.push(`game_constants.csv kingdom_city_state_reputation_penalty 必须≥0`);
+  if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
+  if (c.kingdomCityStateInnerBuildingCountMin < 0 || c.kingdomCityStateInnerBuildingCountMax < c.kingdomCityStateInnerBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_inner_building_count_min/max 范围非法`);
+  if (c.kingdomCityStateBuildingLevelMin <= 0 || c.kingdomCityStateBuildingLevelMax < c.kingdomCityStateBuildingLevelMin) errors.push(`game_constants.csv kingdom_city_state_building_level_min/max 范围非法`);
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);

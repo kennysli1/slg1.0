@@ -32,6 +32,8 @@ export interface Tile {
   icon?: string;
   /** 主导地貌；由 Movement/Vision 读取以影响行军、军队视野与拓荒校验。 */
   terrain?: Terrain;
+  faction?: 'neutral' | 'kingdom';
+  cityState?: boolean;
 }
 
 interface WorldState {
@@ -146,7 +148,8 @@ export class WorldModule {
     const ratio = Number(this.config.constants.raw.kingdom_fief_offset_ratio ?? 0.25);
     const landmarks = kingdomLandmarkAnchors(this.worldW, this.worldH, Number.isFinite(ratio) ? ratio : 0.25);
     // 王国锚点优先占位；人工 PvE 与自动 PvE 遇到它们时走确定性替代格。
-    this.plan = generateWorldPlan(this.worldW, this.worldH, seed, [...landmarks, ...this.config.pveSpawns]);
+    const cityStates = Math.max(0, Math.floor(this.config.constants.kingdomCityStateCount ?? 0));
+    this.plan = generateWorldPlan(this.worldW, this.worldH, seed, [...landmarks, ...this.config.pveSpawns], cityStates);
   }
 
   private getMeta(_cmd: Command): CommandResult {
@@ -348,19 +351,19 @@ export class WorldModule {
   }
 
   private placePve(cmd: Command): CommandResult {
-    const { q, r, refId, name, icon, task } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean };
+    const { q, r, refId, name, icon, task, faction, cityState } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean; faction?: 'neutral' | 'kingdom'; cityState?: boolean };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const exist = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
     // 旧版本可能把任务营地写成全局 pve；恢复时允许同 refId 原子升级为私有 taskcamp。
     if (exist && exist.kind !== 'empty') {
       if (task && exist.refId === refId && (exist.kind === 'pve' || exist.kind === 'taskcamp')) {
-        this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { ...exist, kind: 'taskcamp', name, icon });
+        this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { ...exist, kind: 'taskcamp', name, icon, faction, cityState });
         return { ok: true, payload: { q: w.q, r: w.r } };
       }
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
     // 任务营地写入独立 kind='taskcamp'：与全局视野隔离（getArea 过滤），但仍占用该格避免与其它营地/建筑冲突
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: task ? 'taskcamp' : 'pve', refId, name, icon });
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: task ? 'taskcamp' : 'pve', refId, name, icon, faction: faction ?? 'neutral', cityState: cityState === true });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
