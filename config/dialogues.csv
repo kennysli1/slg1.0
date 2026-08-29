@@ -41,3 +41,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 42,m13_accept,m13,accept,1,,,
 43,m13_deliver,m13,deliver,1,,,
 44,my_effort_use,t1,use,1,,,
+45,m14_accept,m14,accept,1,,,
+46,m14_deliver,m14,deliver,1,,,
+47,m15_accept,m15,accept,1,,,
+48,m15_deliver,m15,deliver,1,,,

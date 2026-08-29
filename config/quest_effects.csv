@@ -25,3 +25,6 @@ e-m11-unlock-buildings,m11,deliver,unlock_buildings,alliance_hall|council,1
 e-m12-gold,m12,deliver,grant_resources,gold:50,1
 e-m12-reputation,m12,deliver,adjust_reputation,5,2
 e-m13-reward,m13,deliver,grant_treasure,black_badge,1
+e-m14-reputation-mercenaries,m14,deliver,grant_mercenaries_by_positive_reputation,merc_sword:2,1
+e-m15-research,m15,deliver,grant_research_points,10,1
+e-m15-crop-growth,m15,deliver,grant_resource_growth,crop:25:86400,2
