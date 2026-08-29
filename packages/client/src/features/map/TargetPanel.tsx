@@ -601,6 +601,7 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
       r: target.r,
       kind: targetKind,
       refId: target.refId || undefined,
+      movementId,
     }).then((res) => {
       if (!live || !res.ok) return;
       const payload = res.payload as any;
@@ -611,14 +612,12 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
         name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
       }));
       const available = (payload.modes ?? []) as ModeOption[];
-      // 伏击军在空地续行仍保持伏击语义；只有切换到有明确目标的
-      // 行为（例如侦察/掠夺）时才按目标类型展示对应模式。
-      setOptions(movementType === 'ambush' && targetKind === 'empty'
-        ? available.filter((option) => option.mode === 'ambush')
-        : available);
+      // 伏击只能从城镇直接派出；抵达后不再提供任何续行模式。
+      // 其余筛选（例如混合编队不得侦察）由服务端按 movementId 完成。
+      setOptions(movementType === 'ambush' ? [] : available);
     }).catch(() => { if (live) setOptions([]); });
     return () => { live = false; };
-  }, [target.q, target.r, target.refId, target.kind, target.visibility, targetKind, movementType]);
+  }, [movementId, target.q, target.r, target.refId, target.kind, target.visibility, targetKind, movementType]);
 
   const continueLabel = movementType === 'ambush' ? '伏击军' : movementType === 'investigate' ? '调查军' : '驻扎军';
   const chosenMode = choice?.mode;
@@ -719,12 +718,12 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
           <Btn onClick={async () => {
             if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: `${investigating ? '调查军' : ambush ? '伏击军' : '驻扎军'}开始返程` })) onClose();
           }}>召回</Btn>
-          <Btn variant="primary" onClick={() => {
-            garrisonContinue.value = { movementId: move.id, movementType: investigating ? 'investigate' : ambush ? 'ambush' : 'garrison' };
+          {!ambush && <Btn variant="primary" onClick={() => {
+            garrisonContinue.value = { movementId: move.id, movementType: investigating ? 'investigate' : 'garrison' };
             selected.value = null;
-            showToast(`请在地图上选择${ambush ? '伏击军' : '驻扎军'}的下一处行军目标`);
+            showToast(`请在地图上选择${investigating ? '调查军' : '驻扎军'}的下一处行军目标`);
             onClose();
-          }}>选择行军模式</Btn>
+          }}>选择行军模式</Btn>}
         </div>
       </div>
     </Panel>

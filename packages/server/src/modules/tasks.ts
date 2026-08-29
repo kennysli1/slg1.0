@@ -135,6 +135,9 @@ export class TasksModule {
     });
     this.bus.on('population.Changed', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
     this.bus.on('movement.VisionUpdated', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
+    // M13 秘密营地只有进入玩家视野后才在地图上标记；视野推进时及时
+    // 更新任务标记，让玩家探索到营地附近即可发现它。
+    this.bus.on('movement.VisionUpdated', (evt: DomainEvent) => void this.pushMap((evt.payload as { villageId?: string }).villageId ?? ''));
     this.bus.on('research.TechCompleted', (evt: DomainEvent) => void this.syncThresholdObjectives((evt.payload as { villageId?: string }).villageId ?? ''));
 
     // 出售/丢弃宝物 → 推进 sell_discard_treasure 任务
@@ -155,7 +158,15 @@ export class TasksModule {
     this.bus.on('treasure.PendingClaimed', (evt: DomainEvent) => void this.onNatalieDecision(evt));
     // player owner 的公开变更仅刷新 task 的只读目录镜像，绝不读取 player 集合。
     this.bus.on('player.Registered', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
-    this.bus.on('player.VillageAttached', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
+    this.bus.on('player.VillageAttached', (evt: DomainEvent) => {
+      const payload = evt.payload as { playerId?: string; villageId?: string };
+      // 新村庄建成时会立即获得初始视野；让同一事件顺手检查 M13，
+      // 避免玩家必须重新探索一次或刷新页面才能发现已在视野内的秘密营地。
+      void (async () => {
+        await this.playerDirectory.refreshPlayer(String(payload.playerId ?? ''));
+        if (payload.villageId) await this.pushMap(payload.villageId);
+      })().catch(() => {});
+    });
     this.bus.on('player.VillageRenamed', (evt: DomainEvent) => void this.playerDirectory.refreshPlayer(String((evt.payload as { playerId?: string }).playerId ?? '')));
   }
 
@@ -196,6 +207,8 @@ export class TasksModule {
       // 支线门槛可能在本次部署/重启前已经达到；恢复时补查，不能只依赖新训练事件。
       await this.syncTaskVillageCoordinates(s.villageId);
       await this.checkTroopTriggers(s.villageId);
+      // 只在恢复/视野事件时查询 M13 的真实视野，避免每次任务页读取都扫描地图。
+      await this.pushMap(s.villageId);
     }
   }
 
@@ -360,7 +373,7 @@ export class TasksModule {
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     await this.syncTaskVillageCoordinates(villageId);
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /** 玩家任务板：聚合该玩家全部村庄的任务；执行动作仍携带来源村庄并走原有村庄状态。 */
@@ -375,8 +388,11 @@ export class TasksModule {
       await this.syncTaskVillageCoordinates(villageId);
     }
     const anchor = villageIds[0];
-    const global = anchor ? this.snapshot(anchor, this.ensureState(anchor), 'global') : this.emptySnapshot(anchor ?? null);
-    const villages = villageIds.map((villageId) => this.snapshot(villageId, this.ensureState(villageId), 'village'));
+    const global = anchor
+      ? this.redactHiddenTaskVillages(this.snapshot(anchor, this.ensureState(anchor), 'global'))
+      : this.emptySnapshot(anchor ?? null);
+    const villages = await Promise.all(villageIds.map((villageId) =>
+      this.redactHiddenTaskVillages(this.snapshot(villageId, this.ensureState(villageId), 'village'))));
     const activeByCode = new Map<string, Record<string, unknown>>();
     const offeredByCode = new Map<string, Record<string, unknown>>();
     const offeredSideByCode = new Map<string, Record<string, unknown>>();
@@ -1491,7 +1507,7 @@ export class TasksModule {
     const s = this.stateForQuest(villageId, code);
     if (!s.active[code]) return { ok: false, payload: {}, reason: 'not_active' };
     await this.completeQuest(villageId, code);
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /** 把已完成的一次性支线恢复为未完成，并要求再次满足触发条件才可接取。 */
@@ -1514,7 +1530,7 @@ export class TasksModule {
     await this.pushMap(villageId);
     // 没有触发条件的支线可立刻重新出现；有触发条件的由下一次领域事件解锁。
     if (!q.trigger) await this.unlockSideQuests(villageId);
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /** ③ 把已放弃的支线任务恢复为可接取：移出 abandonedSide 并清空触发/冷却，重新进入可接取列表。 */
@@ -1534,7 +1550,7 @@ export class TasksModule {
     if (s.cooldownUntil) delete s.cooldownUntil[code];
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
     await this.unlockSideQuests(villageId);
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /** ② captured_natalies 报告被玩家抉择（入库/释放）→ 标记调查坐标任务就绪。 */
@@ -2220,7 +2236,7 @@ export class TasksModule {
       await this.pushList(villageId);
       await this.pushMap(villageId);
     }
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /** 进行中的主线回退为未触发：清理实例/任务营地，不自动重新放入可接取列表。 */
@@ -2253,7 +2269,7 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
     await this.pushMap(villageId);
-    return { ok: true, payload: this.snapshotForVillage(villageId) };
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
   /**
@@ -2644,11 +2660,50 @@ export class TasksModule {
     return { villageId, active: [], offeredMain: [], offered: [], offeredSide: [], completedMain: [], completedSide: [], abandonedSide: [], pendingDialogues: [] };
   }
 
+  /** 查询村庄所属玩家；任务模块只通过公开 player 命令取归属，不读取 player 存档。 */
+  private async playerIdForVillage(villageId: string): Promise<string | undefined> {
+    const cached = this.playerDirectory.villageOwner(villageId);
+    if (cached) return cached;
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: TasksModule.NAME, payload: { villageId } });
+    const playerId = (owner.payload as any)?.player?.id;
+    return owner.ok && typeof playerId === 'string' && playerId ? playerId : undefined;
+  }
+
+  /** M13 秘密营地的地图发现判定：只有玩家当前视野覆盖目标格才算找到。 */
+  private async isTaskVillageVisible(villageId: string, point?: { q?: number; r?: number }): Promise<boolean> {
+    if (!point || !Number.isFinite(Number(point.q)) || !Number.isFinite(Number(point.r))) return false;
+    const playerId = await this.playerIdForVillage(villageId);
+    if (!playerId) return false;
+    const result = await this.commands.send({
+      name: 'vision.GetVisibility', from: TasksModule.NAME,
+      payload: { playerId, q: Number(point.q), r: Number(point.r) },
+    });
+    return result.ok && (result.payload as any)?.visibility === 'visible';
+  }
+
+  /** 从任务快照中隐藏尚未发现的 M13 营地坐标，防止任务页/刷新接口泄露位置。 */
+  private redactHiddenTaskVillages(snapshot: Record<string, unknown>): Record<string, unknown> {
+    const active = Array.isArray(snapshot.active) ? snapshot.active as Record<string, any>[] : [];
+    if (!active.some((item) => item.code === 'm13' && item.taskVillageXY)) return snapshot;
+    const next = active.map((item) => {
+      if (item.code !== 'm13' || !item.taskVillageXY) return item;
+      if (item.taskVillageDiscovered === true) return { ...item, taskVillageVisible: true };
+      return {
+        ...item,
+        taskVillageId: null,
+        taskVillageXY: null,
+        taskVillageName: null,
+        taskVillageVisible: false,
+      };
+    });
+    return { ...snapshot, active: next };
+  }
+
   /** 当前村任务页快照：本村 village 任务 + 玩家锚点上的 global 任务。 */
-  private snapshotForVillage(villageId: string): Record<string, unknown> {
-    const local = this.snapshot(villageId, this.ensureState(villageId), 'village');
+  private async snapshotForVillage(villageId: string): Promise<Record<string, unknown>> {
+    const local = this.redactHiddenTaskVillages(this.snapshot(villageId, this.ensureState(villageId), 'village'));
     const anchor = this.anchorVillage(villageId);
-    const global = this.snapshot(anchor, this.ensureState(anchor), 'global');
+    const global = this.redactHiddenTaskVillages(this.snapshot(anchor, this.ensureState(anchor), 'global'));
     return {
       villageId,
       active: [...(global.active as unknown[]), ...(local.active as unknown[])],
@@ -2804,6 +2859,7 @@ export class TasksModule {
       taskVillageId: inst.taskVillageId ?? null,
       taskVillageXY: inst.taskVillageXY ?? null,
       taskVillageName: inst.taskVillageName ?? null,
+      taskVillageDiscovered: inst.taskVillageDiscovered === true,
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
       taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
@@ -2845,13 +2901,13 @@ export class TasksModule {
     await this.syncTaskVillageCoordinates(villageId);
     await this.bus.emit({
       name: 'task.ListChanged', source: TasksModule.NAME, ts: this.now(),
-      payload: this.snapshotForVillage(villageId),
+      payload: await this.snapshotForVillage(villageId),
     });
   }
 
   private async pushMap(villageId: string): Promise<void> {
     await this.syncTaskVillageCoordinates(villageId);
-    const camps: Array<{ id: string; q: number; r: number; cleared: boolean; name?: string; taskVillage?: boolean }> = [];
+    const camps: Array<{ id: string; q: number; r: number; cleared: boolean; name?: string; taskVillage?: boolean; taskInfo?: Record<string, unknown> }> = [];
     for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
       for (const inst of Object.values(state.active)) {
         if (this.storageVillageForQuest(villageId, inst.code) !== storageVillageId) continue;
@@ -2863,6 +2919,17 @@ export class TasksModule {
         // m8/m9 的天王老子村同样是任务专属地块。World 会刻意过滤 taskcamp，
         // 所以必须随任务标记推送；否则任务卡虽有坐标，地图上却无法点击目标。
         if (inst.taskVillageId && inst.taskVillageXY) {
+          // M13 秘密营地只有在生成时/探索后进入玩家视野才会被发现。
+          // 一旦发现就持久化标记，后续离开视野仍可从任务地图标记找回。
+          if (inst.code === 'm13' && !inst.taskVillageDiscovered) {
+            if (await this.isTaskVillageVisible(villageId, inst.taskVillageXY)) {
+              inst.taskVillageDiscovered = true;
+              this.store.set(COLLECTION, storageVillageId, state);
+            } else {
+              continue;
+            }
+          }
+          const task = this.quest(inst.code);
           camps.push({
             id: inst.taskVillageId,
             q: inst.taskVillageXY.q,
@@ -2870,6 +2937,19 @@ export class TasksModule {
             cleared: false,
             name: inst.taskVillageName ?? (inst.code === 'm13' ? '秘密营地' : '天王老子村'),
             taskVillage: true,
+            ...(task ? {
+              taskInfo: {
+                code: task.code,
+                name: task.name,
+                desc: task.desc,
+                type: task.type,
+                scope: task.scope,
+                campCleared: inst.campCleared,
+                campTotal: inst.camps.length,
+                villageId: this.storageVillageForQuest(villageId, inst.code),
+                objective: this.serializeObjective(task),
+              },
+            } : {}),
           });
         }
       }

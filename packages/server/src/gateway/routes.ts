@@ -193,7 +193,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       GetMarchOptions: {
         command: 'movement.GetMarchOptions', ownVillage: true, needAuth: true,
-        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, kind: { type: 'string', minLen: 1, maxLen: 16 }, refId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
+        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, kind: { type: 'string', minLen: 1, maxLen: 16 }, refId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, movementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
       },
       PreviewMarch: {
         command: 'movement.PreviewMarch', ownVillage: true, needAuth: true,
