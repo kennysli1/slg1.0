@@ -307,10 +307,10 @@ export class PveModule {
       .map((unit) => unit.key);
     const pool = [...new Set([...configuredPool, ...derivedPool])]
       .filter((code) => this.config.units[code]?.tribe === tribe && !this.config.units[code]?.isMercenary);
-    const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout']);
-    const scout = pool.find((code) => scoutCodes.has(code));
-    const shuffled = shuffleDeterministic(pool.filter((code) => code !== scout), `${seed}:${version}:${id}:units`);
-    const selected = [...(scout ? [scout] : []), ...shuffled].slice(0, Math.max(1, profile.unitCount));
+    // 所有兵种都从对应种族池随机抽取，不再强制包含侦察兵；是否出现侦察兵
+    // 由城邦等级的随机兵种数量和种族兵种池共同决定。
+    const shuffled = shuffleDeterministic(pool, `${seed}:${version}:${id}:units`);
+    const selected = shuffled.slice(0, Math.max(1, profile.unitCount));
     const defender: Snapshot = {};
     for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;

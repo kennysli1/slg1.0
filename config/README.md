@@ -289,7 +289,7 @@
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 | kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
-| kingdom_city_state_generation_version | 2 | 城邦生成规则版本；提升后按新规则重生成既有城邦 |
+| kingdom_city_state_generation_version | 3 | 城邦生成规则版本；提升后按新规则重生成既有城邦 |
 | kingdom_city_state_tier_weights | 1:1\|2:1\|3:1 | 一级/二级/三级随机权重 |
 | kingdom_city_state_tribe_pool | romans\|gauls\|teutons | 城邦随机种族池 |
 | kingdom_city_state_unit_pool_romans/gauls/teutons | 各族兵种 code | 对应种族的城邦守军随机池 |

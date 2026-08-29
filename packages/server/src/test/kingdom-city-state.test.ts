@@ -54,6 +54,23 @@ test('王国城邦：三级兵种数量/兵力范围与种族兵种池生效', (
   }
 });
 
+test('王国城邦：兵种随机抽取，不强制包含侦察兵', () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.config.constants.kingdomCityStateTierWeights = { 1: 1, 2: 0, 3: 0 };
+  const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout']);
+  let withScout = 0;
+  let withoutScout = 0;
+  for (let i = 0; i < 64; i++) {
+    const id = `city-random-units-${i}`;
+    app.pve.create(id, 'kingdom_city_state', 20 + i, 20 + i);
+    const city = app.store.get<any>('pve', id)!;
+    if (Object.keys(city.defender).some((code) => scoutCodes.has(code))) withScout++;
+    else withoutScout++;
+  }
+  assert.ok(withScout > 0, '随机池中应有机会抽到侦察兵');
+  assert.ok(withoutScout > 0, '随机抽取不应保证每座城邦都有侦察兵');
+});
+
 test('王国城邦：侦察快照提供资源与建筑两种模式', async () => {
   const app = createGameApp({ manualScheduler: true });
   app.setupWorld();
