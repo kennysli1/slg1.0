@@ -176,7 +176,7 @@ function Assessment({
 }
 
 function targetAssessmentTitle(meta: TargetMeta): string {
-  if (meta.targetKind === 'empty') return '可拓荒空地';
+  if (meta.targetKind === 'empty') return '野外空地';
   if (meta.targetKind === 'unexplored') return '未探索区域';
   if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return 'PvE 营地';
   if (meta.targetKind === 'own_village' || meta.isOwn) return '己方村庄';
@@ -184,7 +184,7 @@ function targetAssessmentTitle(meta: TargetMeta): string {
 }
 
 function targetAssessmentCopy(meta: TargetMeta): string {
-  if (meta.targetKind === 'empty') return '这是可行动的空地。可驻扎；拥有拓荒者时还可拓荒建村。';
+  if (meta.targetKind === 'empty') return '这是可行动的空地。驻扎军可继续驻扎或伏击。';
   if (meta.targetKind === 'unexplored') return '该格尚未探索。只能执行探索，军队抵达后会立即返城。';
   if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return '这是地图上的 PvE 营地。可侦察资源与守军，或派兵掠夺。';
   if (meta.targetKind === 'own_village' || meta.isOwn) return '这是己方村庄。可将部队和随队宝物转移过去。';
@@ -576,30 +576,120 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   );
 }
 
-/** 驻扎军“行军”后的目标确认：兵力与宝物保持在原军中，不会重新扣兵或多占行军点。 */
+/**
+ * 驻扎军“行军”后的目标模式选择与确认。
+ *
+ * 这里不能根据目标类型在客户端硬编码一个模式：驻扎军续行与首次派遣
+ * 使用的是同一套外交/目标规则，服务端 GetMarchOptions 才是唯一权威来源。
+ * 续行仍保持原军的兵力和宝物，不重新扣兵或增加行军点。
+ */
 function GarrisonContinuation({ movementId, movementType, target, onClose }: {
   movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string }; onClose: () => void;
 }) {
-  const mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush' = target.kind === 'pve'
-    ? 'raid'
-    : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : movementType === 'ambush' ? 'ambush' : 'garrison';
-  const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : mode === 'ambush' ? '伏击' : '驻扎';
-  const depth = mode === 'explore' ? unexploredDepth(target.q, target.r) : 0;
-  const maxExploreDepth = rallypointLevel();
-  const allowExplore = mode !== 'explore' || (depth >= 1 && depth <= maxExploreDepth);
+  const targetKind = target.visibility === 'unexplored' ? 'unexplored' : target.kind;
+  const [options, setOptions] = useState<ModeOption[] | null>(null);
+  const [choice, setChoice] = useState<ModeOption | null>(null);
+  const [resolvedTarget, setResolvedTarget] = useState(target);
+
+  useEffect(() => {
+    let live = true;
+    setOptions(null);
+    setChoice(null);
+    setResolvedTarget(target);
+    void req('GetMarchOptions', {
+      q: target.q,
+      r: target.r,
+      kind: targetKind,
+      refId: target.refId || undefined,
+    }).then((res) => {
+      if (!live || !res.ok) return;
+      const payload = res.payload as any;
+      setResolvedTarget((prev) => ({
+        ...prev,
+        q: Number.isFinite(Number(payload.q)) ? Number(payload.q) : prev.q,
+        r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
+        name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
+      }));
+      const available = (payload.modes ?? []) as ModeOption[];
+      // 伏击军在空地续行仍保持伏击语义；只有切换到有明确目标的
+      // 行为（例如侦察/掠夺）时才按目标类型展示对应模式。
+      setOptions(movementType === 'ambush' && targetKind === 'empty'
+        ? available.filter((option) => option.mode === 'ambush')
+        : available);
+    }).catch(() => { if (live) setOptions([]); });
+    return () => { live = false; };
+  }, [target.q, target.r, target.refId, target.kind, target.visibility, targetKind, movementType]);
+
+  const continueLabel = movementType === 'ambush' ? '伏击军' : movementType === 'investigate' ? '调查军' : '驻扎军';
+  const chosenMode = choice?.mode;
+  const chosenLabel = choice?.label ?? '';
+  const isVillage = targetKind === 'village' || targetKind === 'own_village';
+  const isPve = targetKind === 'pve' || targetKind === 'taskcamp';
+
   async function continueMarch() {
-    const payload: Record<string, unknown> = { movementId, q: target.q, r: target.r, mode };
-    if (mode === 'raid') payload.targetId = target.refId;
-    if (mode === 'attack') payload.targetVillage = target.refId;
-    if (await act(req('ContinueGarrison', payload), { okToast: `${movementType === 'ambush' ? '伏击军' : '驻扎军'}开始${label}` })) {
+    if (!choice) return;
+    const mode = choice.mode;
+    const payload: Record<string, unknown> = {
+      movementId,
+      q: resolvedTarget.q,
+      r: resolvedTarget.r,
+      mode,
+    };
+    if (isPve && ['scout', 'raid', 'investigate'].includes(mode)) payload.targetId = resolvedTarget.refId;
+    if (isVillage && ['scout', 'raid', 'attack', 'reinforce', 'transfer'].includes(mode)) payload.targetVillage = resolvedTarget.refId;
+    if (await act(req('ContinueGarrison', payload), { okToast: `${continueLabel}开始${chosenLabel}` })) {
       garrisonContinue.value = null;
       onClose();
     }
   }
+
+  if (!choice) {
+    const headerMeta: TargetMeta = {
+      refId: resolvedTarget.refId,
+      q: resolvedTarget.q,
+      r: resolvedTarget.r,
+      name: resolvedTarget.name,
+      dist: 0,
+      icon: isPve ? 'pve_bandits' : 'bld_main',
+      mode: 'garrison',
+      targetKind,
+    };
+    return (
+      <Panel variant="gold" corners class="map-target-panel">
+        <WorkflowHeader meta={headerMeta} step={1} onClose={onClose} />
+        <TargetAssessment meta={headerMeta} options={options} onChoose={setChoice} />
+        <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消选择</Btn></div>
+      </Panel>
+    );
+  }
+
   return (
-    <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
-      <div class="target-head"><IconPlate icon={mode === 'garrison' || mode === 'ambush' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">选择行军模式</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消行军模式">×</button></div>
-      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>{label}至「{target.name}」</h3><p>{allowExplore ? `该军队会从当前${movementType === 'ambush' ? '伏击' : '驻扎'}地出发，保持所携部队和宝物，并继续占用原有的一个行军点。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
+    <Panel variant={chosenMode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
+      <WorkflowHeader meta={{
+        refId: resolvedTarget.refId,
+        q: resolvedTarget.q,
+        r: resolvedTarget.r,
+        name: resolvedTarget.name,
+        dist: 0,
+        icon: isPve ? 'pve_bandits' : 'bld_main',
+        mode: chosenMode ?? 'garrison',
+        targetKind,
+        declareWar: choice?.requiresDeclaration,
+      }} step={3} onClose={onClose} />
+      <div class="target-body expedition-body">
+        <section class="expedition-confirm-card">
+          <div class="expedition-kicker">保持编队</div>
+          <h3>{chosenLabel}至「{resolvedTarget.name}」</h3>
+          <p>该{continueLabel}会从当前驻扎地出发，保持所携部队和宝物，并继续占用原有的一个行军点。</p>
+        </section>
+        {(choice?.requiresDeclaration || chosenMode === 'raid' || chosenMode === 'attack') && (
+          <p class="expedition-warning">{choice?.requiresDeclaration ? '该目标当前为中立玩家，确认后将同时宣战。' : `确认后${chosenLabel}抵达目标将立即执行。`}</p>
+        )}
+        <div class="target-foot expedition-foot expedition-foot--split">
+          <Btn onClick={() => setChoice(null)}>返回模式选择</Btn>
+          <Btn variant={chosenMode === 'attack' || choice?.requiresDeclaration ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{chosenLabel}</Btn>
+        </div>
+      </div>
     </Panel>
   );
 }

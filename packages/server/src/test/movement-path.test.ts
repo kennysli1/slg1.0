@@ -255,6 +255,45 @@ test('野外驻扎：抵达空地后持续占用一个行军点，可续行并�
   assert.equal(movements(app).filter((m) => m.type === 'return').length, 1, '应生成返程军');
 });
 
+test('驻扎军续行：PvE 目标列出侦察与掠夺，并可沿用原编队执行侦察', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '驻扎侦察', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { equlegati: 5 });
+
+  // 先把侦察兵派到空地驻扎，再从驻扎点选择 PvE 目标。
+  const target = { q: p.q + 3, r: p.r + 2 };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...target, radius: 0 });
+  const first = await send(app, 'movement.SendGarrison', { villageId: p.villageId, ...target, troops: { equlegati: 1 } });
+  assert.equal(first.ok, true, `驻扎派遣应成功: ${first.reason ?? ''}`);
+  const id = (first.payload as any).id as string;
+  for (let i = 0; i < 30; i++) {
+    await app.scheduler.advanceTo(clock + 60_000, setClock);
+    if (app.store.get<any>('movement', id)?.status === 'stationed') break;
+  }
+  assert.equal(app.store.get<any>('movement', id)?.status, 'stationed', '侦察兵应先抵达驻扎点');
+
+  const pve = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  assert.equal(pve.ok, true);
+  const pveXY = { q: (pve.payload as any).q, r: (pve.payload as any).r };
+  await send(app, 'vision.Reveal', { playerId: p.id, ...pveXY, radius: 0 });
+  const options = await send(app, 'movement.GetMarchOptions', {
+    villageId: p.villageId, kind: 'pve', refId: 'pve-0', ...pveXY,
+  });
+  assert.equal(options.ok, true);
+  const modes = ((options.payload as any).modes ?? []).map((entry: { mode: string }) => entry.mode);
+  assert.deepEqual(modes, ['scout', 'raid'], 'PvE 驻扎军续行应列出全部适用模式');
+
+  const continued = await send(app, 'movement.ContinueGarrison', {
+    villageId: p.villageId, movementId: id, mode: 'scout', targetId: 'pve-0', ...pveXY,
+  });
+  assert.equal(continued.ok, true, `驻扎军续行侦察应成功: ${continued.reason ?? ''}`);
+  const moving = app.store.get<any>('movement', id);
+  assert.equal(moving?.type, 'scout', '续行侦察应切换为 scout 行军');
+  assert.equal(moving?.targetId, 'pve-0');
+  assert.deepEqual(moving?.troops, { equlegati: 1 }, '续行不应重新选择或扣除编队');
+});
+
 test('野外驻扎：目标在抵达前变为被占据格时停在路径前一格', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', { name: '驻扎乙', password: 'pass123', tribe: 'romans' });
