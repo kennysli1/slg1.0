@@ -1698,6 +1698,7 @@ export class MovementModule {
     let relation: string | undefined;
     let targetPlayerId: string | undefined;
     let cityState = false;
+    let targetData: any;
     const originTile = await this.villageTile(villageId);
     const targetTile = refId && (kind === 'village' || kind === 'own_village')
       ? await this.villageTile(refId)
@@ -1714,7 +1715,7 @@ export class MovementModule {
       // PvE 营地也可侦察，但 NPC 营地没有城内/城外建筑报告，只提供资源与守军情报。
       modes.push({ mode: 'scout', label: '侦察' });
       const target = refId ? await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: refId } }) : null;
-      const targetData = target?.ok ? target.payload as any : undefined;
+      targetData = target?.ok ? target.payload as any : undefined;
       cityState = targetData?.cityState === true;
       if (targetData?.task === true && targetData.type === 'secret_camp' && targetData.ownerVillageId && await this.samePlayerVillage(villageId, targetData.ownerVillageId)) {
         modes.push({ mode: 'investigate', label: '调查' });
@@ -1775,6 +1776,8 @@ export class MovementModule {
         rallyPointLevel: await this.getRallyLevel(villageId),
         marchPoints: await this.marchPointState(villageId),
         cityState: cityState || undefined,
+        cityStateTier: cityState ? (targetData?.cityStateTier ?? undefined) : undefined,
+        cityStateTribe: cityState ? (targetData?.cityStateTribe ?? undefined) : undefined,
       },
     };
   }

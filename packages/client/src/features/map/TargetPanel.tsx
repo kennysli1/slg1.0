@@ -33,11 +33,15 @@ interface TargetMeta {
   declareWar?: boolean;
   targetKind?: string;
   kingdomCityState?: boolean;
+  cityStateTier?: 1 | 2 | 3;
+  cityStateTribe?: 'romans' | 'gauls' | 'teutons';
   taskInfo?: TaskCampInfo;
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
 const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', auto_explore: '自动探索', scout: '侦察', ambush: '伏击', investigate: '调查' }[mode]);
+const cityTierLabel = (tier?: number): string => tier === 1 ? '一级' : tier === 2 ? '二级' : tier === 3 ? '三级' : '';
+const cityTribeLabel = (tribe?: string): string => tribe === 'romans' ? '罗马' : tribe === 'gauls' ? '高卢' : tribe === 'teutons' ? '条顿' : '';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -163,6 +167,8 @@ function Assessment({
         <div class="expedition-facts">
           <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
           <span>行军距离 <b>{meta.dist} 格</b></span>
+          {meta.kingdomCityState && <span>城邦等级 <b>{cityTierLabel(meta.cityStateTier)}</b></span>}
+          {meta.kingdomCityState && <span>所属种族 <b>{cityTribeLabel(meta.cityStateTribe)}</b></span>}
           <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'auto_explore' || meta.mode === 'ambush' || meta.mode === 'investigate' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
         </div>
       </section>
@@ -506,6 +512,8 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
           r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
           name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
           kingdomCityState: payload.cityState === true,
+          cityStateTier: payload.cityStateTier,
+          cityStateTribe: payload.cityStateTribe,
         }));
         setOptions((payload.modes ?? []) as ModeOption[]);
       })
@@ -588,7 +596,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
  * 续行仍保持原军的兵力和宝物，不重新扣兵或增加行军点。
  */
 function GarrisonContinuation({ movementId, movementType, target, onClose }: {
-  movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string; cityState?: boolean }; onClose: () => void;
+  movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string; cityState?: boolean; cityStateTier?: 1 | 2 | 3; cityStateTribe?: 'romans' | 'gauls' | 'teutons' }; onClose: () => void;
 }) {
   const targetKind = target.visibility === 'unexplored' ? 'unexplored' : target.kind;
   const [options, setOptions] = useState<ModeOption[] | null>(null);
@@ -615,6 +623,8 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
         r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
         name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
         cityState: payload.cityState === true,
+        cityStateTier: payload.cityStateTier,
+        cityStateTribe: payload.cityStateTribe,
       }));
       const available = (payload.modes ?? []) as ModeOption[];
       // 伏击只能从城镇直接派出；抵达后不再提供任何续行模式。
@@ -658,6 +668,8 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
       mode: 'garrison',
       targetKind,
       kingdomCityState: !!(resolvedTarget as any).cityState,
+      cityStateTier: resolvedTarget.cityStateTier,
+      cityStateTribe: resolvedTarget.cityStateTribe,
     };
     return (
       <Panel variant="gold" corners class="map-target-panel">
@@ -680,6 +692,8 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
         mode: chosenMode ?? 'garrison',
         targetKind,
         kingdomCityState: !!(resolvedTarget as any).cityState,
+        cityStateTier: resolvedTarget.cityStateTier,
+        cityStateTribe: resolvedTarget.cityStateTribe,
         declareWar: choice?.requiresDeclaration,
       }} step={3} onClose={onClose} />
       <div class="target-body expedition-body">
