@@ -286,6 +286,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
     assert.match(page.body, /function compareNatural\(a,b\)/, '对话编辑器应使用数字感知排序');
+    assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
     assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
@@ -298,7 +299,15 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
       const [codeA, taskCodeA, segmentA] = a.split(':');
       const [codeB, taskCodeB, segmentB] = b.split(':');
       const natural = (left: string, right: string) => left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
-      const codeOrder = natural(codeA, codeB);
+      const codePartsA = codeA.split('_');
+      const codePartsB = codeB.split('_');
+      const codeParts = Math.min(codePartsA.length, codePartsB.length);
+      let codeOrder = 0;
+      for (let i = 0; i < codeParts; i++) {
+        codeOrder = natural(codePartsA[i], codePartsB[i]);
+        if (codeOrder !== 0) break;
+      }
+      if (codeOrder === 0) codeOrder = codePartsA.length - codePartsB.length;
       if (codeOrder !== 0) return codeOrder;
       const taskCodeOrder = natural(taskCodeA, taskCodeB);
       return taskCodeOrder !== 0 ? taskCodeOrder : Number(segmentA) - Number(segmentB);
