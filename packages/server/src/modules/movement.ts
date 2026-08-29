@@ -7,6 +7,7 @@ import type { Scheduler } from '../infra/scheduler.js';
 import type { KeyedSerialQueue } from '../infra/keyed-serial-queue.js';
 import type { Snapshot } from '../infra/combat-types.js';
 import type { GameConfig } from '../infra/config.js';
+import type { Terrain } from '../infra/world-generation.js';
 import { type Hex, hexDistance, linePath, hexDistanceWrapped, linePathWrapped, wrapHex, headingWrapped, hexKey } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
 
@@ -131,6 +132,13 @@ interface MovementRecord {
 
 const COLLECTION = 'movement';
 
+interface PathTiming {
+  /** 完整路径耗时；至少保留现有的 3 秒最短行军时间。 */
+  totalMs: number;
+  /** 每个相邻路径段的耗时，供逐格 Scheduler 和返程进度计算。 */
+  segmentMs: number[];
+}
+
 export class MovementModule {
   static readonly NAME = 'movement';
 
@@ -138,6 +146,8 @@ export class MovementModule {
   private posIndex = new Map<string, Set<string>>();
   /** 村庄索引：villageId → movement id 集合。 */
   private villageIndex = new Map<string, Set<string>>();
+  /** 当前进程内的逐段计时缓存；旧存档没有缓存时由 World 重新计算。 */
+  private timingCache = new Map<string, PathTiming>();
 
   constructor(
     private store: Store,
@@ -271,6 +281,7 @@ export class MovementModule {
       });
     }
     this.store.delete(COLLECTION, id);
+    this.timingCache.delete(id);
     if (prev) void this.syncIncomingWarningsForOwnerVillage(prev.fromVillage);
   }
 
@@ -742,7 +753,7 @@ export class MovementModule {
   /** 为视野模块提供指定玩家在途军队的位置和视野；不暴露给客户端。 */
   private async listVisionSources(cmd: Command): Promise<CommandResult> {
     const { playerId } = cmd.payload as { playerId: string };
-    const sources: Array<{ q: number; r: number; radius: number }> = [];
+    const sources: Array<{ q: number; r: number; radius: number; terrainAware: true }> = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
       if (!owner.ok || (owner.payload as any).player?.id !== playerId) continue;
@@ -752,7 +763,7 @@ export class MovementModule {
         const sight = this.config.units[code]?.vision ?? 1;
         if (count > most || (count === most && sight > radius)) { most = count; radius = sight; }
       }
-      if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius: mv.type === 'ambush' ? 1 : radius });
+      if (most > 0) sources.push({ q: mv.pos.q, r: mv.pos.r, radius: mv.type === 'ambush' ? 1 : radius, terrainAware: true });
     }
     return { ok: true, payload: { sources } };
   }
@@ -899,11 +910,13 @@ export class MovementModule {
   /** 行军起步与每一步都将当时视野写入探索历史；无需依赖客户端刷新地图。 */
   private async revealVision(mv: MovementRecord, revealId?: string): Promise<Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>> {
     const radius = mv.type === 'ambush' ? 1 : this.visionRadius(mv.troops);
-    if (radius <= 0) return [];
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
     if (!playerId) return [];
-    const revealed = await this.commands.send({ name: 'vision.Reveal', from: MovementModule.NAME, payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius, revealId } });
+    const revealed = await this.commands.send({
+      name: 'vision.Reveal', from: MovementModule.NAME,
+      payload: { playerId, q: mv.pos.q, r: mv.pos.r, radius, terrainAware: true, revealId },
+    });
     if (revealed.ok) {
       void this.bus.emit({
         name: 'movement.VisionUpdated', source: MovementModule.NAME, ts: this.now(),
@@ -1393,8 +1406,8 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'scout_units_only' };
     }
     const path = linePathWrapped(mv.pos, toXY, worldW, worldH);
-    const steps = Math.max(1, path.length - 1);
-    const perStepMs = Math.max(1, Math.round(await this.travelSec(mv.fromVillage, mv.pos, toXY, mv.troops) * 1000 / steps));
+    const timing = await this.pathTiming(mv.fromVillage, path, mv.troops, mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode);
+    const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
 
     const isPveTarget = targetKind === 'pve' || targetKind === 'taskcamp';
     const isVillageTarget = targetKind === 'village';
@@ -1416,7 +1429,7 @@ export class MovementModule {
     mv.pos = path[0];
     mv.perStepMs = perStepMs;
     mv.nextStepAt = this.now() + perStepMs;
-    mv.arriveAt = this.now() + perStepMs * steps;
+    mv.arriveAt = this.now() + timing.totalMs;
     mv.launchedAt = this.now();
     mv.status = 'marching';
     mv.stepToken += 1;
@@ -1426,13 +1439,71 @@ export class MovementModule {
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - this.now()) / 1000) } };
   }
 
-  /** 全程行军秒数：六边形距离 / 最慢兵种速度（格/小时）。 */
+  /** 全程行军秒数：最短路径上的每段按所在地形分别计时。 */
   private async travelSec(villageId: string, from: Hex, to: Hex, troops: Record<string, number>): Promise<number> {
-    const dist = hexDistanceWrapped(from, to, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    const mult = this.config.constants.marchSpeedMultiplier ?? 1;
-    const speed = await this.commands.send({ name: 'military.GetMarchSpeedSnapshot', from: MovementModule.NAME, payload: { villageId, troops } });
-    const slowest = (speed.ok ? Number((speed.payload as any).slowestSpeed) : Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6))) * mult;
-    return Math.max(3, Math.round((dist / slowest) * 3600)); // 速度=格/小时
+    const path = linePathWrapped(from, to, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    const timing = await this.pathTiming(villageId, path, troops, 'raid');
+    return Math.max(3, Math.round(timing.totalMs / 1000));
+  }
+
+  /** 读取 World 权威地貌；缺失/旧存档地貌按 plain 兼容。 */
+  private async terrainAt(point: Hex): Promise<Terrain> {
+    const tile = await this.commands.send({ name: 'world.GetTile', from: MovementModule.NAME, payload: point });
+    const terrain = (tile.payload as any)?.tile?.terrain;
+    return terrain === 'forest' || terrain === 'hills' ? terrain : 'plain';
+  }
+
+  /** 计算行军的基础每格耗时。贸易商队不属于军队，不吃丘陵移速惩罚。 */
+  private async baseStepMs(villageId: string, troops: Record<string, number>, type: MovementRecord['type']): Promise<number> {
+    if (type === 'caravan') {
+      const speed = Math.max(0.0001, Number(this.config.constants.tradeCaravanSpeed) || 12);
+      return 3_600_000 / speed;
+    }
+    const speed = await this.commands.send({
+      name: 'military.GetMarchSpeedSnapshot', from: MovementModule.NAME, payload: { villageId, troops },
+    });
+    const fallback = Math.min(...Object.keys(troops).map((u) => this.config.units[u]?.speed ?? 6), 6);
+    const rawSpeed = speed.ok ? Number((speed.payload as any).slowestSpeed) : fallback;
+    const effectiveSpeed = Number.isFinite(rawSpeed) && rawSpeed > 0 ? rawSpeed : fallback;
+    const slowest = Math.max(0.0001, effectiveSpeed * (this.config.constants.marchSpeedMultiplier ?? 1));
+    return 3_600_000 / slowest;
+  }
+
+  /** 单个路径段耗时：部队从当前格离开时若当前格是丘陵，则该段速度降为 2/3。 */
+  private async segmentDurationMs(
+    villageId: string,
+    troops: Record<string, number>,
+    type: MovementRecord['type'],
+    from: Hex,
+  ): Promise<number> {
+    const base = await this.baseStepMs(villageId, troops, type);
+    if (type !== 'caravan' && (await this.terrainAt(from)) === 'hills') {
+      const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
+      return Math.max(1, Math.round(base / hillsMultiplier));
+    }
+    return Math.max(1, Math.round(base));
+  }
+
+  /** 计算整条最短路径的逐段耗时；路径算法本身仍始终使用 linePathWrapped。 */
+  private async pathTiming(
+    villageId: string,
+    path: Hex[],
+    troops: Record<string, number>,
+    type: MovementRecord['type'],
+  ): Promise<PathTiming> {
+    const steps = Math.max(0, path.length - 1);
+    if (steps === 0) return { totalMs: 3_000, segmentMs: [] };
+    const base = await this.baseStepMs(villageId, troops, type);
+    const terrains = await Promise.all(path.slice(0, -1).map((point) => this.terrainAt(point)));
+    const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
+    let segmentMs = terrains.map((terrain) => Math.max(1, Math.round(
+      type !== 'caravan' && terrain === 'hills' ? base / hillsMultiplier : base,
+    )));
+    const minimumMs = type === 'caravan' ? 3_000_000 : 3_000;
+    const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
+    // 商队原有口径是全程统一分摊（且有 3000 秒最低时长），保持逐格调度与 arriveAt 一致。
+    if (type === 'caravan') segmentMs = Array.from({ length: steps }, () => Math.max(1, Math.round(totalMs / steps)));
+    return { totalMs, segmentMs };
   }
 
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
@@ -1444,9 +1515,9 @@ export class MovementModule {
     const path = pathOverride?.length
       ? pathOverride.map((point) => wrapHex(point, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41))
       : linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    const steps = Math.max(1, path.length - 1);
-    const totalMs = await this.travelSec(base.fromVillage, base.fromXY, base.toXY, base.troops) * 1000;
-    const perStepMs = Math.max(1, Math.round(totalMs / steps));
+    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type);
+    this.timingCache.set(base.id, timing);
+    const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
     const full: MovementRecord = {
       ...base,
       launchedAt: base.departAt,
@@ -1456,7 +1527,7 @@ export class MovementModule {
       pos: path[0],
       perStepMs,
       nextStepAt: this.now() + perStepMs,
-      arriveAt: this.now() + perStepMs * steps,
+      arriveAt: this.now() + timing.totalMs,
       status: 'marching',
       stepToken: 1,
     };
@@ -2525,6 +2596,9 @@ export class MovementModule {
       payload: { q: toXY.q, r: toXY.r },
     });
     const tile = (tileRes.payload as any)?.tile;
+    if (tile?.terrain && tile.terrain !== 'plain') {
+      return { ok: false, reason: 'found_only_on_plain' };
+    }
     if (tile && tile.kind && tile.kind !== 'empty') {
       return { ok: false, reason: 'tile_occupied' };
     }
@@ -2596,7 +2670,17 @@ export class MovementModule {
     mv.previousPos = { ...mv.pos };
     mv.stepIndex += 1;
     if (mv.stepIndex < mv.path.length) mv.pos = mv.path[mv.stepIndex];
-    mv.nextStepAt = this.now() + mv.perStepMs;
+    if (mv.stepIndex < mv.path.length - 1) {
+      // 到达新格后，下一段从当前格出发；因此丘陵只影响军队位于丘陵
+      // 格时离开的这一段，逐格推进和整条路径预览使用同一口径。
+      if (mv.type !== 'caravan') {
+        const cached = this.timingCache.get(mv.id)?.segmentMs[mv.stepIndex];
+        mv.perStepMs = cached ?? await this.segmentDurationMs(mv.fromVillage, mv.troops, mv.type, mv.pos);
+      }
+      mv.nextStepAt = this.now() + mv.perStepMs;
+    } else {
+      mv.nextStepAt = this.now();
+    }
     if (mv.type === 'auto_explore') {
       const radius = this.visionRadius(mv.troops);
       mv.autoExplore = {
@@ -3340,15 +3424,20 @@ export class MovementModule {
     // 行军列表中的当前位置可能仍处于当前两格之间：服务端 pos 是已抵达的格子，
     // nextStepAt/perStepMs 则保留了这一格的真实进度。撤回应从这个进度点返程，
     // 不能把整条原路线当成尚未出发。若路径被外部测试/旧档改写，则回退到坐标距离。
-    const routeProgressMs = this.outboundReturnMs(mv);
+    const outboundTiming = this.timingCache.get(mv.id) ?? await this.pathTiming(mv.fromVillage, mv.path, mv.troops, mv.type);
+    const routeProgressMs = this.outboundReturnMs(mv, outboundTiming);
+    const returnTiming = this.reversePathTiming(mv, path, outboundTiming)
+      ?? await this.pathTiming(mv.fromVillage, path, mv.troops, mv.type === 'caravan' ? 'caravan' : 'return');
     if (mv.type === 'caravan') {
       const dist = hexDistanceWrapped(cur, home, W, H);
       const mult = this.config.constants.tradeCaravanSpeed ?? 12;
-      totalMs = routeProgressMs ?? (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000);
+      totalMs = routeProgressMs && routeProgressMs > 0
+        ? routeProgressMs
+        : (returnTiming.totalMs || (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000));
     } else {
-      totalMs = routeProgressMs ?? (await this.travelSec(mv.fromVillage, cur, home, mv.troops) * 1000);
+      totalMs = routeProgressMs && routeProgressMs > 0 ? routeProgressMs : returnTiming.totalMs;
     }
-    const perStepMs = Math.max(1, Math.round(totalMs / steps));
+    const perStepMs = returnTiming.segmentMs[0] ?? Math.max(1, Math.round(totalMs / steps));
 
     const wasCaravan = mv.type === 'caravan';
     if (wasScout) mv.scoutReturn = true;
@@ -3362,8 +3451,9 @@ export class MovementModule {
     mv.stepToken += 1; // 作废旧的逐格推进定时（step 回调校验 token 后自动忽略）
     mv.departAt = this.now();
     mv.nextStepAt = this.now() + perStepMs;
-    mv.arriveAt = this.now() + perStepMs * steps;
+    mv.arriveAt = this.now() + totalMs;
     mv.perStepMs = perStepMs;
+    this.timingCache.set(mv.id, returnTiming);
     mv.targetId = undefined;
     mv.targetMovementId = undefined;
     if (!wasCaravan) mv.targetVillage = undefined; // 商队保留 targetVillage 仅作展示，不影响回家逻辑
@@ -3384,17 +3474,28 @@ export class MovementModule {
    * 仅适用于仍沿原始路径行进/停止的记录；路径不匹配时返回 undefined，
    * 由调用方按当前坐标重新计算，兼容旧存档和手工构造记录。
    */
-  private outboundReturnMs(mv: MovementRecord): number | undefined {
+  private outboundReturnMs(mv: MovementRecord, timing: PathTiming): number | undefined {
     const home = mv.originalFromXY ?? mv.path[0] ?? mv.fromXY;
     const first = mv.path[0];
     if (!first || first.q !== home.q || first.r !== home.r) return undefined;
     if (!Number.isFinite(mv.perStepMs) || mv.perStepMs <= 0) return undefined;
     const index = Math.max(0, Math.min(mv.stepIndex, mv.path.length - 1));
+    if (timing.segmentMs.length < Math.max(1, mv.path.length - 1)) return undefined;
     // stopped/非 marching 状态下位置已经固定在当前格，不应带入过期的段内进度。
-    if (mv.status !== 'marching') return Math.max(0, Math.round(index * mv.perStepMs));
+    if (mv.status !== 'marching') return Math.max(0, timing.segmentMs.slice(0, index).reduce((sum, ms) => sum + ms, 0));
     const segmentStart = mv.nextStepAt - mv.perStepMs;
     const elapsed = Math.max(0, Math.min(mv.perStepMs, this.now() - segmentStart));
-    return Math.max(0, Math.round(index * mv.perStepMs + elapsed));
+    return Math.max(0, timing.segmentMs.slice(0, index).reduce((sum, ms) => sum + ms, 0) + elapsed);
+  }
+
+  /** 若从原路线中途掉头，返程路径就是已走过路段的反向，可直接复用缓存。 */
+  private reversePathTiming(mv: MovementRecord, path: Hex[], timing: PathTiming): PathTiming | undefined {
+    const index = Math.max(0, Math.min(mv.stepIndex, mv.path.length - 1));
+    const expected = mv.path.slice(0, index + 1).reverse();
+    if (expected.length !== path.length || expected.some((point, i) => point.q !== path[i].q || point.r !== path[i].r)) return undefined;
+    const segmentMs = timing.segmentMs.slice(0, index).reverse();
+    const minimumMs = mv.type === 'caravan' ? 3_000_000 : 3_000;
+    return { totalMs: Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0)), segmentMs };
   }
 
   /** 返程到达：兵力归队 + 战利品入库。 */

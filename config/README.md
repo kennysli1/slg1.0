@@ -279,6 +279,9 @@
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 | march_point_base | 0 | 每座城镇的基础行军点数 |
 | march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
+| forest_vision_penalty | 2 | 军队视野朝森林方向减少的格数 |
+| hills_vision_bonus | 1 | 军队位于丘陵时视野增加的格数 |
+| hills_march_speed_multiplier | 0.6666666667 | 军队位于丘陵时的行军速度倍率（默认 2/3） |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 

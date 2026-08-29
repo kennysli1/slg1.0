@@ -463,6 +463,12 @@ export interface GameConstants {
   ambushAttackBonus: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
+  /** 森林方向视野衰减格数（仅军队视野）。 */
+  forestVisionPenalty: number;
+  /** 丘陵军队视野额外增加格数。 */
+  hillsVisionBonus: number;
+  /** 丘陵军队行军速度倍率（默认 2/3，即速度减少 1/3）。 */
+  hillsMarchSpeedMultiplier: number;
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
   marchPointBase: number;
   marchPointPerRallypointLevel: number;
@@ -1161,6 +1167,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
+    forestVisionPenalty: cn('forest_vision_penalty', 2),
+    hillsVisionBonus: cn('hills_vision_bonus', 1),
+    hillsMarchSpeedMultiplier: cn('hills_march_speed_multiplier', 2 / 3),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
@@ -1832,6 +1841,11 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
   if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
+  if (c.forestVisionPenalty < 0) errors.push(`game_constants.csv forest_vision_penalty 必须≥0`);
+  if (c.hillsVisionBonus < 0) errors.push(`game_constants.csv hills_vision_bonus 必须≥0`);
+  if (c.hillsMarchSpeedMultiplier <= 0 || c.hillsMarchSpeedMultiplier > 1) {
+    errors.push(`game_constants.csv hills_march_speed_multiplier 必须在(0,1]`);
+  }
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);

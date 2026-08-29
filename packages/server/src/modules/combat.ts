@@ -791,7 +791,7 @@ export class CombatModule {
         }
       }
 
-      void this.bus.emit({
+      await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
@@ -822,7 +822,7 @@ export class CombatModule {
           payload: { villageId: b.targetId, losses: residentDefenderLosses },
         });
       }
-      void this.bus.emit({
+      await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: { villageId: b.targetId, side: 'defender', battleId: b.id, looted, ...reportBase },
       } as DomainEvent);
@@ -856,7 +856,7 @@ export class CombatModule {
       if (Object.keys(losses).length > 0) {
         void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: contrib.fromVillage, losses } });
       }
-      void this.bus.emit({
+      await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
@@ -883,7 +883,7 @@ export class CombatModule {
       if (Object.keys(defLosses).length > 0) {
         void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: dc.fromVillage, losses: defLosses } });
       }
-      void this.bus.emit({
+      await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
           villageId: dc.fromVillage, side: 'defender', battleId: b.id,

@@ -30,7 +30,7 @@ export interface Tile {
   name?: string;
   /** 图标基名（pve/村庄阶段图标，渲染时拼 /art/+基名+.png）。 */
   icon?: string;
-  /** 主导地貌；只影响展示与内容分布，当前不参与行军/战斗。 */
+  /** 主导地貌；由 Movement/Vision 读取以影响行军、军队视野与拓荒校验。 */
   terrain?: Terrain;
 }
 

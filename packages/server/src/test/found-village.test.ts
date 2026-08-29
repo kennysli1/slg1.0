@@ -55,6 +55,27 @@ async function prepFoundReady(app: GameApp, villageId: string): Promise<void> {
   });
 }
 
+async function findFoundTarget(
+  app: GameApp,
+  pq: number,
+  pr: number,
+  predicate: (terrain: string | undefined) => boolean = (terrain) => terrain === 'plain',
+  excluded = new Set<string>(),
+): Promise<{ q: number; r: number } | undefined> {
+  const minD = app.config.constants.foundMinTileDistance;
+  const plan = app.world.setup(app.config.constants.worldW, app.config.constants.worldH);
+  const reserved = new Set(plan.spawnSlots.map((slot) => `${slot.q},${slot.r}`));
+  for (let r = 0; r < plan.h; r++) for (let q = 0; q < plan.w; q++) {
+    const key = `${q},${r}`;
+    if (reserved.has(key) || excluded.has(key)) continue;
+    if (hexDistanceWrapped({ q: pq, r: pr }, { q, r }, plan.w, plan.h) < minD) continue;
+    const tile = await send(app, 'world.GetTile', { q, r });
+    const data = (tile.payload as any)?.tile;
+    if (data?.kind === 'empty' && predicate(data.terrain)) return { q, r };
+  }
+  return undefined;
+}
+
 test('拓荒：门控不足时拒绝', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', {
@@ -78,17 +99,8 @@ test('拓荒：成功建第二村', async () => {
   const pr = player.r as number;
   await prepFoundReady(app, vid);
 
-  // 选一个距主城足够远、且不是首村保留槽的空地
-  const minD = app.config.constants.foundMinTileDistance;
-  const plan = app.world.setup(app.config.constants.worldW, app.config.constants.worldH);
-  const reserved = new Set(plan.spawnSlots.map((slot) => `${slot.q},${slot.r}`));
-  let target: { q: number; r: number } | undefined;
-  for (let r = 0; r < plan.h && !target; r++) for (let q = 0; q < plan.w; q++) {
-    if (reserved.has(`${q},${r}`)) continue;
-    if (hexDistanceWrapped({ q: pq, r: pr }, { q, r }, plan.w, plan.h) < minD) continue;
-    const tile = await send(app, 'world.GetTile', { q, r });
-    if ((tile.payload as any).tile.kind === 'empty') { target = { q, r }; break; }
-  }
+  // 选一个距主城足够远、不是首村保留槽且地貌为平原的空地
+  const target = await findFoundTarget(app, pq, pr);
   assert.ok(target, '应找到可拓荒的非保留空地');
   const { q: tq, r: tr } = target;
 
@@ -135,6 +147,18 @@ test('拓荒：距离过近拒绝', async () => {
   );
 });
 
+test('拓荒：森林或丘陵格拒绝建村', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: 'found-terrain', password: 'pass5', tribe: 'romans' });
+  const player = (reg.payload as any).player;
+  await prepFoundReady(app, player.villageId);
+  const target = await findFoundTarget(app, player.q, player.r, (terrain) => terrain === 'forest' || terrain === 'hills');
+  assert.ok(target, '应找到足够远的非平原空地');
+  const found = await send(app, 'movement.FoundVillage', { villageId: player.villageId, ...target });
+  assert.equal(found.ok, false);
+  assert.equal(found.reason, 'found_only_on_plain');
+});
+
 test('拓荒：同时只能 1 支在途', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', {
@@ -144,17 +168,18 @@ test('拓荒：同时只能 1 支在途', async () => {
   const vid = player.villageId as string;
   await prepFoundReady(app, vid);
 
-  const minD = app.config.constants.foundMinTileDistance;
+  const firstTarget = await findFoundTarget(app, player.q, player.r);
+  assert.ok(firstTarget, '应找到第一块平原拓荒地');
   const a = await send(app, 'movement.FoundVillage', {
-    villageId: vid, q: player.q + minD + 2, r: player.r,
+    villageId: vid, ...firstTarget,
   });
   assert.equal(a.ok, true, a.reason);
 
   // 再补拓荒者与资源发第二支
   await prepFoundReady(app, vid);
-  const b = await send(app, 'movement.FoundVillage', {
-    villageId: vid, q: player.q + minD + 4, r: player.r,
-  });
+  const secondTarget = await findFoundTarget(app, player.q, player.r, undefined, new Set([`${firstTarget!.q},${firstTarget!.r}`]));
+  assert.ok(secondTarget, '应找到第二块平原拓荒地');
+  const b = await send(app, 'movement.FoundVillage', { villageId: vid, ...secondTarget });
   assert.equal(b.ok, false);
   assert.equal(b.reason, 'found_inflight_limit');
 });
