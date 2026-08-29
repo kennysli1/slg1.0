@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp } from '../app.js';
-import { kingdomLandmarkAnchors } from '../infra/world-generation.js';
+import { kingdomLandmarkAnchors, kingdomLandmarkFootprintOffsets } from '../infra/world-generation.js';
 
 const send = (app: ReturnType<typeof createGameApp>, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 
@@ -19,6 +19,22 @@ function addCouncil(app: ReturnType<typeof createGameApp>, villageId: string): v
 test('王国地标：王都位于世界中心，四封地位于四象限中心且成为真实 PvE', () => {
   const app = createGameApp({ manualScheduler: true });
   app.setupWorld();
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-capital').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2, '1': 3 },
+    '王都应为上窄下宽的 1+2+3 倒三角',
+  );
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-fief-ne').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2 },
+    '封地应为上窄下宽的 1+2 倒三角',
+  );
   const expected = kingdomLandmarkAnchors(app.config.constants.worldW, app.config.constants.worldH, Number(app.config.constants.raw.kingdom_fief_offset_ratio));
   for (const anchor of expected) {
     const pve = app.store.get<any>('pve', anchor.id);

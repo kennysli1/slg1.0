@@ -42,19 +42,19 @@ export function kingdomLandmarkKind(value: string | undefined): KingdomLandmarkK
 export function kingdomLandmarkFootprintOffsets(value: string | undefined): Array<{ q: number; r: number }> {
   const kind = kingdomLandmarkKind(value);
   if (kind === 'capital') {
-    // 三角形三行：1 + 2 + 3 = 6 格。
+    // 倒三角三行：上窄下宽，1 + 2 + 3 = 6 格；中心位于中行右侧。
     return [
+      { q: 0, r: -1 },
+      { q: -1, r: 0 },
       { q: 0, r: 0 },
-      { q: 1, r: 0 },
-      { q: 2, r: 0 },
+      { q: -2, r: 1 },
+      { q: -1, r: 1 },
       { q: 0, r: 1 },
-      { q: 1, r: 1 },
-      { q: 0, r: 2 },
     ];
   }
   if (kind === 'fief') {
-    // 三角形两行：1 + 2 = 3 格。
-    return [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 0, r: 1 }];
+    // 倒三角两行：上窄下宽，1 + 2 = 3 格；中心位于下行右侧。
+    return [{ q: 0, r: -1 }, { q: -1, r: 0 }, { q: 0, r: 0 }];
   }
   return [];
 }

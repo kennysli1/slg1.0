@@ -245,6 +245,7 @@ export function HexMap() {
   type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
+  const [hoveredLandmarkRef, setHoveredLandmarkRef] = useState('');
 
   /** 相机坐标系下的格心 → 屏幕 client 坐标（与 wheel 缩放同一套 pan/zoom）。 */
   function cameraToScreen(camX: number, camY: number): { x: number; y: number } {
@@ -409,6 +410,112 @@ export function HexMap() {
     isSelf: boolean;
     landmark: 'capital' | 'fief' | null;
     landmarkCenter: boolean;
+  }
+
+  type LandmarkOutline = {
+    path: string;
+    centerX: number;
+    centerY: number;
+  };
+
+  type LandmarkGroup = {
+    key: string;
+    refId: string;
+    landmark: 'capital' | 'fief';
+    center: HexCell;
+    cells: HexCell[];
+    outline: LandmarkOutline;
+    clipId: string;
+  };
+
+  function pointKey(point: { x: number; y: number }): string {
+    return `${Math.round(point.x * 10)},${Math.round(point.y * 10)}`;
+  }
+
+  function formatPath(points: Array<{ x: number; y: number }>): string {
+    return points.length > 0
+      ? `M${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join('L')}Z`
+      : '';
+  }
+
+  /** 将同一地标的六边形边界合并成单一外轮廓，内部共享边不会产生线条。 */
+  function buildLandmarkOutline(cells: HexCell[]): LandmarkOutline | null {
+    type Edge = { from: { x: number; y: number }; to: { x: number; y: number } };
+    const edges = new Map<string, Edge>();
+    for (const cell of cells) {
+      const corners = hexCorners().map((corner) => ({ x: cell.camX + corner.x, y: cell.camY + corner.y }));
+      for (let i = 0; i < corners.length; i++) {
+        const from = corners[i]!;
+        const to = corners[(i + 1) % corners.length]!;
+        const fromKey = pointKey(from);
+        const toKey = pointKey(to);
+        const edgeKey = fromKey < toKey ? `${fromKey}|${toKey}` : `${toKey}|${fromKey}`;
+        if (edges.has(edgeKey)) edges.delete(edgeKey);
+        else edges.set(edgeKey, { from, to });
+      }
+    }
+    if (edges.size === 0) return null;
+
+    const remaining = [...edges.values()];
+    const used = new Set<number>();
+    const first = remaining[0]!;
+    const points = [first.from];
+    used.add(0);
+    let current = first.to;
+    const startKey = pointKey(first.from);
+    for (let guard = 0; guard < remaining.length + 2; guard++) {
+      points.push(current);
+      if (pointKey(current) === startKey) break;
+      let nextIndex = -1;
+      let nextPoint: { x: number; y: number } | null = null;
+      const currentKey = pointKey(current);
+      for (let i = 0; i < remaining.length; i++) {
+        if (used.has(i)) continue;
+        const edge = remaining[i]!;
+        if (pointKey(edge.from) === currentKey) {
+          nextIndex = i; nextPoint = edge.to; break;
+        }
+        if (pointKey(edge.to) === currentKey) {
+          nextIndex = i; nextPoint = edge.from; break;
+        }
+      }
+      if (nextIndex < 0 || !nextPoint) break;
+      used.add(nextIndex);
+      current = nextPoint;
+    }
+    if (points.length < 4) return null;
+    const centerX = cells.reduce((sum, cell) => sum + cell.camX, 0) / cells.length;
+    const centerY = cells.reduce((sum, cell) => sum + cell.camY, 0) / cells.length;
+    return { path: formatPath(points), centerX, centerY };
+  }
+
+  function buildLandmarkGroups(cells: HexCell[]): LandmarkGroup[] {
+    const centers = cells.filter((cell) => cell.landmark && cell.landmarkCenter && cell.visibility !== 'unexplored');
+    const groups: LandmarkGroup[] = [];
+    const usedCenterKeys = new Set<string>();
+    for (const center of centers) {
+      const centerKey = `${center.refId}|${center.camX.toFixed(1)}|${center.camY.toFixed(1)}`;
+      if (usedCenterKeys.has(centerKey)) continue;
+      usedCenterKeys.add(centerKey);
+      const members = cells.filter((cell) =>
+        cell.refId === center.refId
+        && cell.landmark === center.landmark
+        && cell.visibility !== 'unexplored'
+        && Math.hypot(cell.camX - center.camX, cell.camY - center.camY) <= HEX_SIZE * 5.2);
+      const outline = buildLandmarkOutline(members);
+      if (!outline) continue;
+      const safeKey = centerKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+      groups.push({
+        key: safeKey,
+        refId: center.refId,
+        landmark: center.landmark!,
+        center,
+        cells: members,
+        outline,
+        clipId: `landmark-clip-${safeKey}`,
+      });
+    }
+    return groups;
   }
 
   function buildVisibleHexes(): HexCell[] {
@@ -777,7 +884,15 @@ export function HexMap() {
   function updateHoverTip(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
     const cell = hit?.closest?.('.hex-cell') as Element | null;
-    if (!cell) { setTooltip(null); hovKey.current = ''; return; }
+    if (!cell) {
+      setTooltip(null);
+      hovKey.current = '';
+      if (hoveredLandmarkRef) setHoveredLandmarkRef('');
+      return;
+    }
+
+    const landmarkRef = cell.getAttribute('data-landmark-ref') ?? '';
+    if (landmarkRef !== hoveredLandmarkRef) setHoveredLandmarkRef(landmarkRef);
 
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
@@ -934,6 +1049,7 @@ export function HexMap() {
     dragPX.current = panX.current; dragPY.current = panY.current;
     svgEl.current?.classList.add('grabbing');
     setTooltip(null);
+    if (hoveredLandmarkRef) setHoveredLandmarkRef('');
   }
 
   function onMouseMove(e: MouseEvent) {
@@ -1158,6 +1274,7 @@ export function HexMap() {
 
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
+  const landmarkGroups = buildLandmarkGroups(visibleCells);
   const terrainLayers = buildTerrainLayers(visibleCells);
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
@@ -1178,6 +1295,7 @@ export function HexMap() {
           if (dragging.current) onMouseUp(e);
           setTooltip(null);
           hovKey.current = '';
+          if (hoveredLandmarkRef) setHoveredLandmarkRef('');
         }}
         onDblClick={onDblClick}
         onClick={onSvgClick}
@@ -1190,6 +1308,11 @@ export function HexMap() {
             <path class="terrain-plain-contour" d="M-24 36 C18 10 52 12 94 34 S166 62 206 28" />
             <path class="terrain-plain-contour terrain-plain-contour--soft" d="M-18 104 C30 78 74 84 112 106 S174 128 204 98" />
           </pattern>
+          {landmarkGroups.map((group) => (
+            <clipPath key={group.clipId} id={group.clipId}>
+              <path d={group.outline.path} />
+            </clipPath>
+          ))}
         </defs>
 
         <rect class="map-bg" x="0" y="0" width="100%" height="100%" />
@@ -1214,20 +1337,45 @@ export function HexMap() {
 
           {/* ── POI 与地貌解耦，不再改写底层 terrain ── */}
           <g class="layer-pois">
+            {landmarkGroups.map((group) => {
+              const iconSize = group.landmark === 'capital' ? HEX_SIZE * 2.35 : HEX_SIZE * 1.65;
+              const isHovered = hoveredLandmarkRef === group.refId;
+              return (
+                <g
+                  key={`landmark-${group.key}`}
+                  class={`landmark-merged landmark-merged--${group.landmark}${isHovered ? ' landmark-merged--hovered' : ''}`}
+                  data-landmark-ref={group.refId}
+                >
+                  <path class="landmark-merged-shape" d={group.outline.path} />
+                  {group.center.icon && (
+                    <image
+                      class={`landmark-icon landmark-icon--${group.landmark}`}
+                      href={artPath(group.center.icon)}
+                      x={group.outline.centerX - iconSize / 2}
+                      y={group.outline.centerY - iconSize / 2}
+                      width={iconSize}
+                      height={iconSize}
+                      preserveAspectRatio="xMidYMid meet"
+                      clipPath={`url(#${group.clipId})`}
+                    />
+                  )}
+                </g>
+              );
+            })}
             {visibleCells.map((c) => {
               const rk = ringKind(c.kind, c.isSelf);
               if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
+              if (c.landmark && !c.landmarkCenter) return null;
               return (
                 <g
                   key={`poi-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
                   class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}${c.landmark ? ` hex-poi--landmark-${c.landmark}${c.landmarkCenter ? ' hex-poi--landmark-center' : ' hex-poi--landmark-footprint'}` : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
                 >
-                  {c.landmark && <polygon class={`landmark-tile landmark-tile--${c.landmark}`} points={HEX_CORNER_STR} />}
                   {/* Entity ring */}
                   {rk && c.landmarkCenter && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
-                  {c.icon && (!c.landmark || c.landmarkCenter) && (
+                  {c.icon && !c.landmark && (
                     <image
                       class="hex-entity-img"
                       href={artPath(c.icon)}
@@ -1257,15 +1405,35 @@ export function HexMap() {
 
           {/* 独立透明命中层：默认不画格线，只在 hover / 选中时显出六边边界。 */}
           <g class="layer-hexes">
+            {landmarkGroups.map((group) => (
+              <g
+                key={`landmark-hit-${group.key}`}
+                class={`hex-cell landmark-merged-hit landmark-merged-hit--${group.landmark}`}
+                data-landmark-ref={group.refId}
+                {...({
+                  'data-tq': String(group.center.q),
+                  'data-tr': String(group.center.r),
+                  'data-cam-x': String(group.outline.centerX),
+                  'data-cam-y': String(group.outline.centerY),
+                  'data-kind': group.center.kind,
+                  'data-ref': group.refId,
+                  'data-name': group.center.name,
+                  'data-visibility': group.center.visibility,
+                  ...(group.center.icon ? { 'data-icon': group.center.icon } : {}),
+                } as any)}
+              >
+                <path class="landmark-merged-hit-path" d={group.outline.path} />
+              </g>
+            ))}
             {visibleCells.map((c) => (
               <g
                 key={`hit-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}`}
+                class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}${c.landmark ? ' hex-cell--landmark' : ''}`}
                 transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
               >
                 <polygon class="hex-hit" points={HEX_CORNER_STR} />
-                {c.isSelected && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
+                {c.isSelected && (!c.landmark || c.landmarkCenter) && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
               </g>
             ))}
           </g>
