@@ -718,11 +718,15 @@ function sectionGeneric(table){
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
     var kingdomKeys = {}; for (var ki=0;ki<KINGDOM_ROWS.length;ki++) kingdomKeys[KINGDOM_ROWS[ki][0]] = true;
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
+    var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
+    var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -810,6 +814,99 @@ function sectionM8(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>M8 任务村参数</h2>'+h+'</div>';
+}
+
+// ── 地图地形专用视图：不再让森林/丘陵规则埋在全局常量长表中。 ──
+var TERRAIN_ROWS = [
+  ['forest_vision_penalty','森林方向视野衰减','军队位于森林或朝森林方向观察时减少的视野格数'],
+  ['hills_vision_bonus','丘陵视野加成','军队位于丘陵格时额外增加的视野格数'],
+  ['hills_march_speed_multiplier','丘陵行军速度倍率','经过丘陵格的路径段速度倍率；0.6666666667 表示速度降低三分之一'],
+];
+function sectionTerrain(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">地图地貌由世界种子生成：森林会按方向降低视野，丘陵会增加驻军视野但降低经过该格的行军速度；拓荒只允许平原。修改后保存会写回 game_constants.csv 并热重载。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TERRAIN_ROWS.length;j++){
+    var item = TERRAIN_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>地图格子特性 / 地形参数</h2>'+h+'</div>';
+}
+
+// ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
+var CITY_STATE_ROWS = [
+  ['kingdom_city_state_count','地图城邦数量','每张地图随机生成的城邦数量'],
+  ['kingdom_city_state_generation_version','城邦生成规则版本','提升版本后启动时按新规则重生成既有城邦'],
+  ['kingdom_city_state_tier_weights','城邦等级权重','格式为 1:权重|2:权重|3:权重'],
+  ['kingdom_city_state_tribe_pool','随机种族池','格式为 romans|gauls|teutons'],
+  ['kingdom_city_state_resource_min','旧版资源下限','兼容旧存档/旧配置；新生成城邦使用下方三级资源范围'],
+  ['kingdom_city_state_resource_max','旧版资源上限','兼容旧存档/旧配置；新生成城邦使用下方三级资源范围'],
+  ['kingdom_city_state_gold_min','旧版金币下限','兼容旧存档/旧配置；新生成城邦使用下方三级金币范围'],
+  ['kingdom_city_state_gold_max','旧版金币上限','兼容旧存档/旧配置；新生成城邦使用下方三级金币范围'],
+  ['kingdom_city_state_troops_per_resource','旧版资源折算兵力','兼容旧存档/旧配置；新生成城邦按等级每种兵数量生成'],
+  ['kingdom_city_state_troop_min','旧版总兵力下限','兼容旧存档/旧配置；新生成城邦使用下方三级每种兵范围'],
+  ['kingdom_city_state_troop_max','旧版总兵力上限','兼容旧存档/旧配置；新生成城邦使用下方三级每种兵范围'],
+  ['kingdom_city_state_scout_ratio','旧版侦察兵比例','兼容旧存档/旧配置；新生成城邦按种族兵种池随机抽取侦察兵'],
+  ['kingdom_city_state_unit_pool','旧版通用兵种池','兼容旧存档/旧配置；新生成城邦使用下方三种族兵种池'],
+  ['kingdom_city_state_unit_pool_romans','罗马兵种池','只从罗马兵种池中抽取'],
+  ['kingdom_city_state_unit_pool_gauls','高卢兵种池','只从高卢兵种池中抽取'],
+  ['kingdom_city_state_unit_pool_teutons','条顿兵种池','只从条顿兵种池中抽取'],
+  ['kingdom_city_state_tier1_unit_count','一级随机兵种数','默认 3 种'],
+  ['kingdom_city_state_tier1_unit_min','一级每种兵最少','默认 0'],
+  ['kingdom_city_state_tier1_unit_max','一级每种兵最多','默认 20'],
+  ['kingdom_city_state_tier1_resource_min','一级资源最少','四类资源各自随机下限；少量资源'],
+  ['kingdom_city_state_tier1_resource_max','一级资源最多','四类资源各自随机上限；少量资源'],
+  ['kingdom_city_state_tier1_gold_min','一级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier1_gold_max','一级金币最多','金币随机上限'],
+  ['kingdom_city_state_tier2_unit_count','二级随机兵种数','默认 4 种'],
+  ['kingdom_city_state_tier2_unit_min','二级每种兵最少','默认 5'],
+  ['kingdom_city_state_tier2_unit_max','二级每种兵最多','默认 35'],
+  ['kingdom_city_state_tier2_resource_min','二级资源最少','四类资源各自随机下限；中量资源'],
+  ['kingdom_city_state_tier2_resource_max','二级资源最多','四类资源各自随机上限；中量资源'],
+  ['kingdom_city_state_tier2_gold_min','二级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier2_gold_max','二级金币最多','金币随机上限'],
+  ['kingdom_city_state_tier3_unit_count','三级随机兵种数','默认 5 种'],
+  ['kingdom_city_state_tier3_unit_min','三级每种兵最少','默认 10'],
+  ['kingdom_city_state_tier3_unit_max','三级每种兵最多','默认 50'],
+  ['kingdom_city_state_tier3_resource_min','三级资源最少','四类资源各自随机下限；大量资源'],
+  ['kingdom_city_state_tier3_resource_max','三级资源最多','四类资源各自随机上限；大量资源'],
+  ['kingdom_city_state_tier3_gold_min','三级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier3_gold_max','三级金币最多','金币随机上限'],
+  ['kingdom_city_state_raid_defense_min_ratio','掠夺防守比例下限','城邦随机分配用于防守掠夺的兵力比例'],
+  ['kingdom_city_state_raid_defense_max_ratio','掠夺防守比例上限','城邦随机分配用于防守掠夺的兵力比例'],
+  ['kingdom_city_state_recovery_min_sec','兵力恢复最短秒数','默认 43200 秒（12 小时）'],
+  ['kingdom_city_state_recovery_max_sec','兵力恢复最长秒数','默认 172800 秒（48 小时）'],
+  ['kingdom_city_state_recovery_resource_extra_sec','资源恢复额外秒数','资源比兵力恢复再多 21600 秒（6 小时）'],
+  ['kingdom_city_state_reputation_penalty','城邦声望扣除','侦察被发现、掠夺或攻城时扣除的声望绝对值'],
+  ['kingdom_city_state_resource_field_level','资源田保底等级','四种城外资源田至少达到此等级'],
+  ['kingdom_city_state_inner_building_count_min','城内建筑最少数','随机城内建筑数量下限'],
+  ['kingdom_city_state_inner_building_count_max','城内建筑最多数','随机城内建筑数量上限'],
+  ['kingdom_city_state_outer_building_count_min','城外建筑最少数','随机城外建筑数量下限（至少四座资源田）'],
+  ['kingdom_city_state_outer_building_count_max','城外建筑最多数','随机城外建筑数量上限'],
+  ['kingdom_city_state_building_level_min','随机建筑最低等级','非资源田保底建筑的随机等级下限'],
+  ['kingdom_city_state_building_level_max','随机建筑最高等级','非资源田保底建筑的随机等级上限'],
+  ['kingdom_city_state_inner_building_pool','城内建筑池','格式为 warehouse|granary|barracks…'],
+  ['kingdom_city_state_outer_building_pool','城外建筑池','格式为 woodcutter|claypit|ironmine…'],
+];
+var CITY_STATE_STRING_KEYS = { kingdom_city_state_tier_weights: true, kingdom_city_state_tribe_pool: true, kingdom_city_state_unit_pool: true, kingdom_city_state_unit_pool_romans: true, kingdom_city_state_unit_pool_gauls: true, kingdom_city_state_unit_pool_teutons: true, kingdom_city_state_inner_building_pool: true, kingdom_city_state_outer_building_pool: true };
+function sectionCityState(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">城邦按等级随机生成：一级 3 种兵、每种 0–20；二级 4 种兵、每种 5–35；三级 5 种兵、每种 10–50。每座城邦随机选择罗马/高卢/条顿之一，并只抽取该种族兵种池。侦察可选择“资源与守军”或“城内外建筑”两种模式。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<CITY_STATE_ROWS.length;j++){
+    var item = CITY_STATE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var textInput = !!CITY_STATE_STRING_KEYS[item[0]];
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>王国城邦参数（三级/三种族）</h2>'+h+'</div>';
 }
 
 function sectionKingdom(){
@@ -1056,6 +1153,8 @@ function render(){
   html += sectionBuildings();
   html += sectionFounding();
   html += sectionReputation();
+  html += sectionTerrain();
+  html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();
   html += sectionAmbush();

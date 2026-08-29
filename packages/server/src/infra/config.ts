@@ -516,6 +516,35 @@ export interface GameConstants {
   kingdomCityStateUnitPool: string[];
   kingdomCityStateInnerBuildingPool: string[];
   kingdomCityStateOuterBuildingPool: string[];
+  /** 王国城邦：生成规则版本；提升后启动时重生成既有城邦。 */
+  kingdomCityStateGenerationVersion: number;
+  /** 王国城邦：等级 1/2/3 的随机权重。 */
+  kingdomCityStateTierWeights: Record<1 | 2 | 3, number>;
+  /** 王国城邦：随机种族与各族兵种池。 */
+  kingdomCityStateTribePool: string[];
+  kingdomCityStateUnitPools: Record<'romans' | 'gauls' | 'teutons', string[]>;
+  /** 王国城邦：三级城邦每种兵的数量、四类资源和金币范围。 */
+  kingdomCityStateTier1UnitCount: number;
+  kingdomCityStateTier1UnitMin: number;
+  kingdomCityStateTier1UnitMax: number;
+  kingdomCityStateTier1ResourceMin: number;
+  kingdomCityStateTier1ResourceMax: number;
+  kingdomCityStateTier1GoldMin: number;
+  kingdomCityStateTier1GoldMax: number;
+  kingdomCityStateTier2UnitCount: number;
+  kingdomCityStateTier2UnitMin: number;
+  kingdomCityStateTier2UnitMax: number;
+  kingdomCityStateTier2ResourceMin: number;
+  kingdomCityStateTier2ResourceMax: number;
+  kingdomCityStateTier2GoldMin: number;
+  kingdomCityStateTier2GoldMax: number;
+  kingdomCityStateTier3UnitCount: number;
+  kingdomCityStateTier3UnitMin: number;
+  kingdomCityStateTier3UnitMax: number;
+  kingdomCityStateTier3ResourceMin: number;
+  kingdomCityStateTier3ResourceMax: number;
+  kingdomCityStateTier3GoldMin: number;
+  kingdomCityStateTier3GoldMax: number;
   /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
   /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
@@ -762,6 +791,18 @@ function parseConstantValue(raw: string, type: string): number | boolean | strin
 function parseConstantList(raw: unknown, fallback: string): string[] {
   const value = typeof raw === 'string' && raw.trim() ? raw : fallback;
   return value.split('|').map((item) => item.trim()).filter(Boolean);
+}
+
+/** 解析王国城邦等级权重："1:1|2:1|3:1"。非法/非正权重由调用方按默认值补齐。 */
+function parseCityStateTierWeights(raw: unknown): Record<1 | 2 | 3, number> {
+  const out: Record<1 | 2 | 3, number> = { 1: 1, 2: 1, 3: 1 };
+  if (typeof raw !== 'string') return out;
+  for (const part of raw.split('|')) {
+    const [tierText, weightText] = part.split(':');
+    const tier = Number(tierText), weight = Number(weightText);
+    if ((tier === 1 || tier === 2 || tier === 3) && Number.isFinite(weight) && weight >= 0) out[tier] = weight;
+  }
+  return out;
 }
 
 /** 解析 "main:1|rallypoint:1" → { main:1, rallypoint:1 }。 */
@@ -1247,6 +1288,35 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     kingdomCityStateUnitPool: parseConstantList(cs('kingdom_city_state_unit_pool', 'legionnaire|praetorian|imperian|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire'),
     kingdomCityStateInnerBuildingPool: parseConstantList(cs('kingdom_city_state_inner_building_pool', 'warehouse|granary|barracks|stable|workshop|academy|smithy|hospital|residence|treasury|tavern|vault|council'), 'warehouse|granary'),
     kingdomCityStateOuterBuildingPool: parseConstantList(cs('kingdom_city_state_outer_building_pool', 'woodcutter|claypit|ironmine|cropland|wall|mercenarycamp|tradecenter|explorers_guild'), 'woodcutter|claypit|ironmine|cropland|wall'),
+    kingdomCityStateGenerationVersion: Math.max(1, Math.floor(cn('kingdom_city_state_generation_version', 2))),
+    kingdomCityStateTierWeights: parseCityStateTierWeights(cs('kingdom_city_state_tier_weights', '1:1|2:1|3:1')),
+    kingdomCityStateTribePool: parseConstantList(cs('kingdom_city_state_tribe_pool', 'romans|gauls|teutons'), 'romans|gauls|teutons').filter((tribe): tribe is 'romans' | 'gauls' | 'teutons' => tribe === 'romans' || tribe === 'gauls' || tribe === 'teutons'),
+    kingdomCityStateUnitPools: {
+      romans: parseConstantList(cs('kingdom_city_state_unit_pool_romans', 'legionnaire|praetorian|imperian|equlegati|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire|praetorian|imperian|equlegati|equimperatoris|equcaesaris|ram|catapult'),
+      gauls: parseConstantList(cs('kingdom_city_state_unit_pool_gauls', 'phalanx|swordsman|pathfinder|theutates|druidrider|haeduan|gaulram|gcaultrebuchet'), 'phalanx|swordsman|pathfinder|theutates|druidrider|haeduan|gaulram|gcaultrebuchet'),
+      teutons: parseConstantList(cs('kingdom_city_state_unit_pool_teutons', 'clubswinger|spearman|axeman|teuscout|paladin|teutonknight|teuram|teucatapult'), 'clubswinger|spearman|axeman|teuscout|paladin|teutonknight|teuram|teucatapult'),
+    },
+    kingdomCityStateTier1UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier1_unit_count', 3))),
+    kingdomCityStateTier1UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier1_unit_min', 0))),
+    kingdomCityStateTier1UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier1_unit_max', 20))),
+    kingdomCityStateTier1ResourceMin: Math.max(0, cn('kingdom_city_state_tier1_resource_min', 500)),
+    kingdomCityStateTier1ResourceMax: Math.max(0, cn('kingdom_city_state_tier1_resource_max', 1500)),
+    kingdomCityStateTier1GoldMin: Math.max(0, cn('kingdom_city_state_tier1_gold_min', 0)),
+    kingdomCityStateTier1GoldMax: Math.max(0, cn('kingdom_city_state_tier1_gold_max', 300)),
+    kingdomCityStateTier2UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier2_unit_count', 4))),
+    kingdomCityStateTier2UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier2_unit_min', 5))),
+    kingdomCityStateTier2UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier2_unit_max', 35))),
+    kingdomCityStateTier2ResourceMin: Math.max(0, cn('kingdom_city_state_tier2_resource_min', 1500)),
+    kingdomCityStateTier2ResourceMax: Math.max(0, cn('kingdom_city_state_tier2_resource_max', 5000)),
+    kingdomCityStateTier2GoldMin: Math.max(0, cn('kingdom_city_state_tier2_gold_min', 300)),
+    kingdomCityStateTier2GoldMax: Math.max(0, cn('kingdom_city_state_tier2_gold_max', 1200)),
+    kingdomCityStateTier3UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier3_unit_count', 5))),
+    kingdomCityStateTier3UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier3_unit_min', 10))),
+    kingdomCityStateTier3UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier3_unit_max', 50))),
+    kingdomCityStateTier3ResourceMin: Math.max(0, cn('kingdom_city_state_tier3_resource_min', 5000)),
+    kingdomCityStateTier3ResourceMax: Math.max(0, cn('kingdom_city_state_tier3_resource_max', 15000)),
+    kingdomCityStateTier3GoldMin: Math.max(0, cn('kingdom_city_state_tier3_gold_min', 1200)),
+    kingdomCityStateTier3GoldMax: Math.max(0, cn('kingdom_city_state_tier3_gold_max', 5000)),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
@@ -1934,6 +2004,20 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
   if (c.kingdomCityStateInnerBuildingCountMin < 0 || c.kingdomCityStateInnerBuildingCountMax < c.kingdomCityStateInnerBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_inner_building_count_min/max 范围非法`);
   if (c.kingdomCityStateBuildingLevelMin <= 0 || c.kingdomCityStateBuildingLevelMax < c.kingdomCityStateBuildingLevelMin) errors.push(`game_constants.csv kingdom_city_state_building_level_min/max 范围非法`);
+  if (c.kingdomCityStateGenerationVersion < 1 || !Number.isInteger(c.kingdomCityStateGenerationVersion)) errors.push(`game_constants.csv kingdom_city_state_generation_version 必须为正整数`);
+  if (c.kingdomCityStateTribePool.length === 0) errors.push(`game_constants.csv kingdom_city_state_tribe_pool 不能为空`);
+  if (Object.values(c.kingdomCityStateTierWeights).every((weight) => weight <= 0)) errors.push(`game_constants.csv kingdom_city_state_tier_weights 至少需要一个正权重`);
+  const cityTiers = [
+    [1, c.kingdomCityStateTier1UnitCount, c.kingdomCityStateTier1UnitMin, c.kingdomCityStateTier1UnitMax, c.kingdomCityStateTier1ResourceMin, c.kingdomCityStateTier1ResourceMax, c.kingdomCityStateTier1GoldMin, c.kingdomCityStateTier1GoldMax],
+    [2, c.kingdomCityStateTier2UnitCount, c.kingdomCityStateTier2UnitMin, c.kingdomCityStateTier2UnitMax, c.kingdomCityStateTier2ResourceMin, c.kingdomCityStateTier2ResourceMax, c.kingdomCityStateTier2GoldMin, c.kingdomCityStateTier2GoldMax],
+    [3, c.kingdomCityStateTier3UnitCount, c.kingdomCityStateTier3UnitMin, c.kingdomCityStateTier3UnitMax, c.kingdomCityStateTier3ResourceMin, c.kingdomCityStateTier3ResourceMax, c.kingdomCityStateTier3GoldMin, c.kingdomCityStateTier3GoldMax],
+  ] as const;
+  for (const [tier, unitCount, unitMin, unitMax, resourceMin, resourceMax, goldMin, goldMax] of cityTiers) {
+    if (!Number.isInteger(unitCount) || unitCount < 1) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_unit_count 必须为正整数`);
+    if (!Number.isInteger(unitMin) || unitMin < 0 || !Number.isInteger(unitMax) || unitMax < unitMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_unit_min/max 范围非法`);
+    if (resourceMin < 0 || resourceMax < resourceMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_resource_min/max 范围非法`);
+    if (goldMin < 0 || goldMax < goldMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_gold_min/max 范围非法`);
+  }
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);

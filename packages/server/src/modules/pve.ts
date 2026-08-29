@@ -39,6 +39,9 @@ interface PveState {
   taskVillageLootInitialized?: boolean;
   faction?: 'neutral' | 'kingdom';
   cityState?: boolean;
+  cityStateTier?: 1 | 2 | 3;
+  cityStateTribe?: 'romans' | 'gauls' | 'teutons';
+  cityStateGenerationVersion?: number;
   defenderPeak?: Snapshot;
   lootPeak?: Record<string, number>;
   raidDefense?: Snapshot;
@@ -65,6 +68,22 @@ function random01(seed: string): number { return hash32(seed) / 0x1_0000_0000; }
 function randomInt(seed: string, min: number, max: number): number {
   const lo = Math.ceil(min), hi = Math.floor(max);
   return hi <= lo ? lo : lo + Math.floor(random01(seed) * (hi - lo + 1));
+}
+
+function chooseWeightedTier(seed: string, weights: Record<1 | 2 | 3, number>): 1 | 2 | 3 {
+  const entries = ([1, 2, 3] as const).map((tier) => ({ tier, weight: Math.max(0, Number(weights[tier]) || 0) }));
+  const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  if (total <= 0) return 2;
+  let cursor = random01(seed) * total;
+  for (const entry of entries) {
+    cursor -= entry.weight;
+    if (cursor < 0) return entry.tier;
+  }
+  return 3;
+}
+
+function shuffleDeterministic<T>(values: readonly T[], seed: string): T[] {
+  return [...values].sort((a, b) => random01(`${seed}:${String(a)}`) - random01(`${seed}:${String(b)}`));
 }
 
 function totalUnits(s: Snapshot): number { return Object.values(s).reduce((n, u) => n + Math.max(0, Math.floor(u.count)), 0); }
@@ -196,6 +215,11 @@ export class PveModule {
       const current = this.load(s.id) ?? s;
       this.migrateTaskVillageLoot(current);
       if (current.cityState) {
+        // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
+        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.cityStateTier || !current.cityStateTribe) {
+          this.regenerateCityState(current);
+          continue;
+        }
         this.settleRecovery(current);
         if (current.recovery) this.scheduleRecovery(current);
         continue;
@@ -243,44 +267,59 @@ export class PveModule {
   }
 
   private createCityState(id: string, type: string, q: number, r: number): void {
+    const state = this.buildCityState(id, type, q, r);
+    this.store.set(COLLECTION, id, state);
     const tpl = this.config.pveTemplates[type];
+    void this.commands.send({ name: 'world.PlacePve', from: PveModule.NAME, payload: { q, r, refId: id, name: tpl?.name ?? '王国城邦', icon: tpl?.icon, faction: 'kingdom', cityState: true } });
+  }
+
+  /** 用当前版本规则重建一个既有城邦，保留地图坐标和稳定 id。 */
+  private regenerateCityState(previous: PveState): void {
+    const state = this.buildCityState(previous.id, previous.type, previous.q, previous.r);
+    this.store.set(COLLECTION, previous.id, state);
+    const tpl = this.config.pveTemplates[previous.type];
+    void this.commands.send({ name: 'world.PlacePve', from: PveModule.NAME, payload: { q: state.q, r: state.r, refId: state.id, name: tpl?.name ?? '王国城邦', icon: tpl?.icon, faction: 'kingdom', cityState: true } });
+  }
+
+  private buildCityState(id: string, type: string, q: number, r: number): PveState {
     const c = this.config.constants;
     const seed = String(c.raw.world_seed ?? 'kow-world-v1');
+    const version = c.kingdomCityStateGenerationVersion;
+    const tier = chooseWeightedTier(`${seed}:${version}:${id}:tier`, c.kingdomCityStateTierWeights);
+    const tribes: Array<'romans' | 'gauls' | 'teutons'> = c.kingdomCityStateTribePool.filter((value): value is 'romans' | 'gauls' | 'teutons' => value === 'romans' || value === 'gauls' || value === 'teutons');
+    if (tribes.length === 0) tribes.push('romans');
+    const tribe: 'romans' | 'gauls' | 'teutons' = tribes[Math.floor(random01(`${seed}:${version}:${id}:tribe`) * tribes.length)] ?? 'romans';
+    const profile = tier === 1
+      ? { unitCount: c.kingdomCityStateTier1UnitCount, unitMin: c.kingdomCityStateTier1UnitMin, unitMax: c.kingdomCityStateTier1UnitMax, resourceMin: c.kingdomCityStateTier1ResourceMin, resourceMax: c.kingdomCityStateTier1ResourceMax, goldMin: c.kingdomCityStateTier1GoldMin, goldMax: c.kingdomCityStateTier1GoldMax }
+      : tier === 2
+        ? { unitCount: c.kingdomCityStateTier2UnitCount, unitMin: c.kingdomCityStateTier2UnitMin, unitMax: c.kingdomCityStateTier2UnitMax, resourceMin: c.kingdomCityStateTier2ResourceMin, resourceMax: c.kingdomCityStateTier2ResourceMax, goldMin: c.kingdomCityStateTier2GoldMin, goldMax: c.kingdomCityStateTier2GoldMax }
+        : { unitCount: c.kingdomCityStateTier3UnitCount, unitMin: c.kingdomCityStateTier3UnitMin, unitMax: c.kingdomCityStateTier3UnitMax, resourceMin: c.kingdomCityStateTier3ResourceMin, resourceMax: c.kingdomCityStateTier3ResourceMax, goldMin: c.kingdomCityStateTier3GoldMin, goldMax: c.kingdomCityStateTier3GoldMax };
     const baseLoot: Record<string, number> = {
-      wood: randomInt(`${seed}:${id}:wood`, c.kingdomCityStateResourceMin, c.kingdomCityStateResourceMax),
-      clay: randomInt(`${seed}:${id}:clay`, c.kingdomCityStateResourceMin, c.kingdomCityStateResourceMax),
-      iron: randomInt(`${seed}:${id}:iron`, c.kingdomCityStateResourceMin, c.kingdomCityStateResourceMax),
-      crop: randomInt(`${seed}:${id}:crop`, c.kingdomCityStateResourceMin, c.kingdomCityStateResourceMax),
-      gold: randomInt(`${seed}:${id}:gold`, c.kingdomCityStateGoldMin, c.kingdomCityStateGoldMax),
+      wood: randomInt(`${seed}:${version}:${id}:wood`, profile.resourceMin, profile.resourceMax),
+      clay: randomInt(`${seed}:${version}:${id}:clay`, profile.resourceMin, profile.resourceMax),
+      iron: randomInt(`${seed}:${version}:${id}:iron`, profile.resourceMin, profile.resourceMax),
+      crop: randomInt(`${seed}:${version}:${id}:crop`, profile.resourceMin, profile.resourceMax),
+      gold: randomInt(`${seed}:${version}:${id}:gold`, profile.goldMin, profile.goldMax),
     };
-    const troopTotal = Math.max(c.kingdomCityStateTroopMin, Math.min(c.kingdomCityStateTroopMax,
-      Math.round((baseLoot.wood + baseLoot.clay + baseLoot.iron + baseLoot.crop) * c.kingdomCityStateTroopsPerResource)));
-    const pool = c.kingdomCityStateUnitPool.filter((code) => this.config.units[code]);
-    const selected = pool.length ? pool : ['legionnaire'];
+    const configuredPool = c.kingdomCityStateUnitPools[tribe] ?? [];
+    const derivedPool = Object.values(this.config.units)
+      .filter((unit) => unit.tribe === tribe && !unit.isMercenary && !unit.key.includes('settler') && !unit.key.includes('chief'))
+      .map((unit) => unit.key);
+    const pool = [...new Set([...configuredPool, ...derivedPool])]
+      .filter((code) => this.config.units[code]?.tribe === tribe && !this.config.units[code]?.isMercenary);
+    const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout']);
+    const scout = pool.find((code) => scoutCodes.has(code));
+    const shuffled = shuffleDeterministic(pool.filter((code) => code !== scout), `${seed}:${version}:${id}:units`);
+    const selected = [...(scout ? [scout] : []), ...shuffled].slice(0, Math.max(1, profile.unitCount));
     const defender: Snapshot = {};
-    let remaining = troopTotal;
-    selected.forEach((code, i) => {
-      const count = i === selected.length - 1 ? remaining : Math.floor(troopTotal / selected.length);
-      remaining -= count;
+    for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;
-      defender[code] = { count, form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, traits: [] };
-    });
-    const scoutCode = this.config.units.equlegati ? 'equlegati' : (this.config.units.equites_legati ? 'equites_legati' : undefined);
-    if (scoutCode && c.kingdomCityStateScoutRatio > 0) {
-      const scout = Math.min(troopTotal, Math.max(1, Math.floor(troopTotal * c.kingdomCityStateScoutRatio)));
-      const u = this.config.units[scoutCode]!;
-      defender[scoutCode] = { count: (defender[scoutCode]?.count ?? 0) + scout, form: u.form, meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk, meleeDef: u.meleeDef, rangedDef: u.rangedDef, carry: u.carry, traits: [] };
-      let toRemove = scout;
-      for (const code of selected) {
-        if (toRemove <= 0) break;
-        const take = Math.min(toRemove, defender[code]?.count ?? 0);
-        if (take > 0) { defender[code]!.count -= take; toRemove -= take; }
-      }
+      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, traits: [] };
     }
-    const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
+    const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
     const raidDefense: Snapshot = {};
-    for (const [code, u] of Object.entries(defender)) raidDefense[code] = { ...u, count: Math.min(u.count, Math.floor(u.count * ratio)) };
-    const desiredDefense = Math.round(troopTotal * ratio);
+    for (const [code, unit] of Object.entries(defender)) raidDefense[code] = { ...unit, count: Math.floor(unit.count * ratio) };
+    const desiredDefense = Math.round(totalUnits(defender) * ratio);
     let defenseDelta = desiredDefense - totalUnits(raidDefense);
     for (const code of Object.keys(defender)) {
       if (defenseDelta === 0) break;
@@ -289,14 +328,12 @@ export class PveModule {
       raidDefense[code]!.count += defenseDelta > 0 ? change : -change;
       defenseDelta += defenseDelta > 0 ? -change : change;
     }
-    const buildings = this.generateCityBuildings(id, seed);
-    const state: PveState = {
+    const buildings = this.generateCityBuildings(id, `${seed}:${version}`);
+    return {
       id, type, q, r, defender: structuredClone(defender), defenderPeak: structuredClone(defender), raidDefense,
       raidDefenseRatio: ratio, loot: { ...baseLoot }, lootPeak: { ...baseLoot }, cleared: false, clearCount: 0,
-      faction: 'kingdom', cityState: true, buildings,
+      faction: 'kingdom', cityState: true, cityStateTier: tier, cityStateTribe: tribe, cityStateGenerationVersion: version, buildings,
     };
-    this.store.set(COLLECTION, id, state);
-    void this.commands.send({ name: 'world.PlacePve', from: PveModule.NAME, payload: { q, r, refId: id, name: tpl?.name ?? '王国城邦', icon: tpl?.icon, faction: 'kingdom', cityState: true } });
   }
 
   private generateCityBuildings(id: string, seed: string): Array<{ slotId: string; zone: 'inner' | 'outer'; kind: string; level: number }> {
@@ -380,7 +417,11 @@ export class PveModule {
     this.migrateTaskVillageDefender(s);
     const afterDefender = this.load(s.id) ?? s;
     this.migrateTaskVillageLoot(afterDefender);
-    const current = this.load(s.id) ?? afterDefender;
+    let current = this.load(s.id) ?? afterDefender;
+    if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.cityStateTier || !current.cityStateTribe)) {
+      this.regenerateCityState(current);
+      current = this.load(current.id) ?? current;
+    }
     if (current.cityState) this.settleRecovery(current);
     // World owns the displayed tile coordinate. Older task-village records can
     // retain stale q/r after a map edit or a failed asynchronous PlacePve;
@@ -409,7 +450,8 @@ export class PveModule {
         targets: this.store.all<PveState>(COLLECTION).map((s) => ({
           id: s.id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
           task: !!s.task, noRespawn: !!s.noRespawn,
-          faction: s.faction, cityState: !!s.cityState, buildings: s.cityState ? structuredClone(s.buildings ?? []) : undefined,
+          faction: s.faction, cityState: !!s.cityState, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe,
+          buildings: s.cityState ? structuredClone(s.buildings ?? []) : undefined,
         })),
       },
     };
@@ -427,7 +469,7 @@ export class PveModule {
     const purpose = (cmd.payload as any).purpose as 'raid' | 'siege' | 'scout' | undefined;
     const snapshot = s.cleared ? {} : structuredClone(purpose === 'raid' ? (s.raidDefense ?? s.defender) : s.defender);
     const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
-    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
+    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
   }
 
   /**
@@ -511,7 +553,7 @@ export class PveModule {
     const hasLoot = Object.values({ ...buildingLoot, ...storedLoot }).some((n) => n > 0);
     if (hasLoss || hasLoot) this.resetRecovery(s);
     this.store.set(COLLECTION, s.id, s);
-    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', task: false, noRespawn: false } };
+    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, task: false, noRespawn: false } };
   }
 
   private mergeResources(a: Record<string, number>, b: Record<string, number>): Record<string, number> {

@@ -206,6 +206,13 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /M8 任务村参数/, 'GM 页面应提供 M8 任务村专用参数板块');
     assert.match(res.body, /M8 攻城倒计时（秒）/, 'GM 页面应提供 M8 攻城倒计时编辑项');
     assert.match(res.body, /m8_attack_delay_sec/, 'GM 页面应提供 M8 攻城倒计时参数键');
+    assert.match(res.body, /地图格子特性 \/ 地形参数/, 'GM 页面应提供地图格子特性专用参数板块');
+    assert.match(res.body, /forest_vision_penalty/, 'GM 页面应提供森林视野参数');
+    assert.match(res.body, /hills_vision_bonus/, 'GM 页面应提供丘陵视野参数');
+    assert.match(res.body, /hills_march_speed_multiplier/, 'GM 页面应提供丘陵行军速度参数');
+    assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
+    assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
+    assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
