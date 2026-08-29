@@ -1,14 +1,6 @@
 id,code,taskCode,trigger,segment,npcName,npcText,replies
 #数字ID,稳定对话代码,绑定任务代码,触发点,段落序号,对话对象,对话文本,回复选项(key:显示文本|...)
 
-36,m10_accept,m10,accept,1,,m10_accept,accept:接受任务
-37,m10_deliver,m10,deliver,1,,m10_deliver,
-38,m11_accept,m11,accept,1,,m11_accept,accept:接受任务
-39,m11_deliver,m11,deliver,1,,m11_deliver,
-40,m12_accept,m12,accept,1,,m12_accept,accept:接受任务
-41,m12_deliver,m12,deliver,1,,m12_deliver,
-42,m13_accept,m13,accept,1,,m13_accept,accept:接受任务
-43,m13_deliver,m13,deliver,1,,m13_deliver,
 2,m1_accept,m1,accept,1,{villageName}的长老,欢迎领主大人接手我们的村庄。上任领主带着从村民那里贪污的税收潜逃了，我发誓假如此生能有幸再次看到他我一定狠狠的踢他的屁股，然后再砍下他的头颅。由于年久失修我们城外的资源田都已经荒废了。村民们收集了仅剩的一点物资都在这里了。请领导我们重拾繁荣！,accept:接受任务
 18,m1_deliver,m1,deliver,1,{villageName}的长老,瞧瞧这，多亏了你，我们的资源又恢复产出了。是应该继续扩建这些设施还是开辟新设施呢？算了，我想不明白，还是交给领主大人你做决定吧。,
 3,m2_accept,m2,accept,1,{villageName}的长老,既然资源产出恢复了，让我们填充一下村内的空地吧。请领主大人决定村内该兴建哪些建筑。请留意，我们的地块是有限的，需要谨慎选择怎么利用这些空间。,accept:接受任务
@@ -30,7 +22,18 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 28,m9_accept_m8_failure,m9,accept_failure,1,,我实在咽不下这口恶气！我们一而再再而三被这只臭虫羞辱，此仇不报我死不瞑目。请领主大人重振军心，让我带领军队反攻，我必将亲手砍下他的首级！,accept:接受任务
 24,m9_deliver,m9,deliver,1,,敌方已被我们洗劫干净了，但是却没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，有一些有志之士愿意加入我们的村子，一起讨伐共同的仇人。,
 30,m9_deliver_m8_failure,m9,deliver_failure,1,,多么惨烈的战斗，好在最后我们还是棋高一着，将敌人全歼。美中不足的是没有看到那该死的身影和他欠我们的金币，看起来他又使出了看家本领卷款而逃了。我相信这仇又朝一日一定能痛快得报。不过这次反攻我们也不是一无所获，我们从敌方那里缴获了一个宝物。这宝物可以放在主基地让其生效，或者当军队规模足够大的时候随军出征。领主大人可以选择建造宝物用来存放更多的宝物，只不过该上哪里去寻找这些珍宝呢？,
-44,my_effort_use,t1,use,1,,my_effort_use,
+36,m10_accept,m10,accept,1,,m10_accept,accept:接受任务
+37,m10_deliver,m10,deliver,1,,m10_deliver,
+38,m11_accept,m11,accept,1,,m11_accept,accept:接受任务
+39,m11_deliver,m11,deliver,1,,m11_deliver,
+40,m12_accept,m12,accept,1,,m12_accept,accept:接受任务
+41,m12_deliver,m12,deliver,1,,m12_deliver,
+42,m13_accept,m13,accept,1,,m13_accept,accept:接受任务
+43,m13_deliver,m13,deliver,1,,m13_deliver,
+45,m14_accept,m14,accept,1,,m14_accept,accept:接受任务
+46,m14_deliver,m14,deliver,1,,m14_deliver,
+47,m15_accept,m15,accept,1,,m15_accept,accept:接受任务
+48,m15_deliver,m15,deliver,1,,m15_deliver,
 7,s1_accept,s1,accept,1,,,accept:接受任务|leave:离开
 32,s1_deliver,s1,deliver,1,,,
 8,s2_accept,s2,accept,1,,,accept:接受任务|leave:离开
@@ -42,3 +45,4 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 9,s4_accept,s4,accept,1,,,accept:接受任务|leave:离开
 35,s4_deliver,s4,deliver,1,,,
 11,s4_natalies_returned,s4,natalies_returned,1,被囚禁的娜塔莉们,多谢你拯救了我们，我们都是被那个恶魔村，也就是自称幸福村的那帮恶霸绑架到他们村子并囚禁起来的。那帮畜生强迫我们为他们的人口计划而劳动，甚至导致吃饭的嘴太多了把粮食都吃完了。他们是罪有应得。请释放我们让我们回家，我们的家人会给你丰盛的报酬的。,
+44,my_effort_use,t1,use,1,,my_effort_use,
