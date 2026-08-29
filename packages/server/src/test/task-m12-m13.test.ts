@@ -80,6 +80,10 @@ test('M13 流程：使用我的努力解锁并生成二近丘陵秘密营地，�
 
   const offered = (await send(app, 'task.GetState', { villageId })).payload as any;
   assert.ok(offered.offeredMain.some((task: any) => task.code === 'm13'), '使用我的努力后应出现 M13');
+  let latestMapUpdate: any;
+  const stopWatchingTaskMap = app.bus.on('task.MapUpdated', (event) => {
+    if ((event.payload as any).villageId === villageId) latestMapUpdate = event.payload;
+  });
   const accepted = await send(app, 'task.Accept', { villageId, code: 'm13' });
   assert.equal(accepted.ok, true, accepted.reason);
   const instance = app.store.get<any>('task', villageId)?.active.m13;
@@ -91,6 +95,21 @@ test('M13 流程：使用我的努力解锁并生成二近丘陵秘密营地，�
   assert.deepEqual(target.loot, { wood: 1000, clay: 1000, iron: 1000, crop: 1000, gold: 500 });
   assert.equal(target.defender.mercGuard.count, 8);
   assert.equal(target.defender.mercArcher.count, 3);
+
+  // 秘密营地的坐标只在玩家当前视野内时随地图标记下发；视野外必须先探索，
+  // 任务快照也不能泄露坐标。该断言按服务端权威视野结果判断，不依赖随机生成位置。
+  const visibility = await send(app, 'vision.GetVisibility', { playerId: (await send(app, 'player.GetByVillage', { villageId })).payload.player.id, q: target.q, r: target.r });
+  const isVisible = (visibility.payload as any).visibility === 'visible';
+  const marker = (latestMapUpdate?.camps ?? []).find((camp: any) => camp.id === instance.taskVillageId);
+  assert.equal(Boolean(marker), isVisible, '秘密营地只有在生成时处于玩家视野才显示地图标记');
+  const stateAfterAccept = (await send(app, 'task.GetState', { villageId })).payload as any;
+  const serialized = stateAfterAccept.active.find((task: any) => task.code === 'm13');
+  assert.equal(Boolean(serialized?.taskVillageVisible), isVisible);
+  if (!isVisible) {
+    assert.equal(serialized?.taskVillageId, null, '视野外秘密营地不能从任务快照泄露坐标');
+    assert.equal(serialized?.taskVillageXY, null, '视野外秘密营地不能从任务快照泄露坐标');
+  }
+  stopWatchingTaskMap();
 
   const troops = await send(app, 'military.AdjustTroops', { villageId, delta: { legionnaire: 1 } });
   assert.equal(troops.ok, true, troops.reason);

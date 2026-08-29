@@ -1366,15 +1366,16 @@ export class MovementModule {
         villageId,
         q: toXY.q,
         r: toXY.r,
+        movementId,
         kind: targetKind,
         ...(resolvedTargetId ? { refId: resolvedTargetId } : {}),
         ...(resolvedTargetVillage ? { refId: resolvedTargetVillage } : {}),
       },
     } as Command);
     const availableModes = options.ok ? ((options.payload as any)?.modes ?? []) as Array<{ mode?: string }> : [];
-    const continuationModes = mv.type === 'ambush' && targetKind === 'empty'
-      ? availableModes.filter((entry) => entry.mode === 'ambush')
-      : availableModes;
+    // 伏击只能在城镇出发时建立。已抵达的伏击军只能召回，不能再次
+    // 转成伏击或从野外继续派遣；普通驻扎军也不能临时切换成伏击。
+    const continuationModes = mv.type === 'ambush' ? [] : availableModes.filter((entry) => entry.mode !== 'ambush');
     if (!continuationModes.some((entry) => entry.mode === mode)) return { ok: false, payload: {}, reason: 'invalid_continuation_mode' };
 
     if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack' || mode === 'scout' || mode === 'reinforce' || mode === 'transfer' || mode === 'investigate') {
@@ -1608,7 +1609,7 @@ export class MovementModule {
 
   /** 地图目标的唯一模式清单；客户端不再自行猜测盟军/中立/敌对。 */
   private async getMarchOptions(cmd: Command): Promise<CommandResult> {
-    const { villageId, kind, refId, q, r } = cmd.payload as { villageId: string; kind: string; refId?: string; q: number; r: number };
+    const { villageId, kind, refId, q, r, movementId } = cmd.payload as { villageId: string; kind: string; refId?: string; q: number; r: number; movementId?: string };
     const modes: Array<{ mode: string; label: string; requiresDeclaration?: boolean }> = [];
     let relation: string | undefined;
     let targetPlayerId: string | undefined;
@@ -1659,6 +1660,21 @@ export class MovementModule {
         }
       }
     } else if (kind === 'unexplored') modes.push({ mode: 'explore', label: '探索' });
+
+    // 续行时把部队编成也纳入可用模式判定：混有普通兵种的编队不是
+    // “纯侦察部队”，不应在菜单里出现侦察。冒险者虽没有侦察战斗力，
+    // 仍属于可执行侦察的侦察编队成员。伏击仅允许从城镇直接派出。
+    if (movementId) {
+      const movement = this.load(movementId);
+      if (movement?.fromVillage === villageId && movement.status === 'stationed') {
+        const scoutOnly = this.isScoutOnlyTroops(movement.troops);
+        if (!scoutOnly) {
+          for (let i = modes.length - 1; i >= 0; i -= 1) if (modes[i].mode === 'scout') modes.splice(i, 1);
+        }
+        if (movement.type === 'ambush') modes.length = 0;
+        else for (let i = modes.length - 1; i >= 0; i -= 1) if (modes[i].mode === 'ambush') modes.splice(i, 1);
+      }
+    }
     return {
       ok: true,
       payload: {
@@ -1852,6 +1868,12 @@ export class MovementModule {
 
   private isAdventurerUnit(code: string): boolean {
     return code === 'adventurer' || this.config.units[code]?.name === '冒险者';
+  }
+
+  /** 只有侦察兵/冒险者组成的编队才算纯侦察部队。 */
+  private isScoutOnlyTroops(troops: Record<string, number>): boolean {
+    const entries = Object.entries(troops).filter(([, raw]) => Number(raw) > 0);
+    return entries.length > 0 && entries.every(([code]) => this.isScoutUnit(code) || this.isAdventurerUnit(code));
   }
 
   private async validatePvPRelation(villageId: string, targetVillage: string, declareWar: boolean): Promise<CommandResult> {

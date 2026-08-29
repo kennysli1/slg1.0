@@ -52,6 +52,8 @@ interface ServerConfig {
     tradeRouteCapacity: number; tradeCaravanSpeed: number;
     tradeNpcGoldPerResource: number; tradeNpcSellMargin: number;
     tradeOrderMaxPerVillage: number; tradeOrderTtlSec: number;
+    /** 清理普通 PvE 营地时命中宝物掉落的基础概率（0–1）。 */
+    treasureCampDropChance?: number;
     /** 军队携带宝物：每多少总兵力 +1 携带格。 */
     treasureCarryTroopsPerSlot: number;
     /** 军队携带宝物：携带格数硬上限（实际上限 = min(此值, floor(总兵力/每格兵力数))）。 */
@@ -175,6 +177,7 @@ export function treasureEffectText(info: TreasureInfo): string {
     cavalryTrainSpeed: `骑兵训练时间 -${v}%（使用后翻倍骑兵）`,
     soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
     victoryFlag: `全军攻击、防御 +${v}%；每次携旗清营或成功掠夺并归城，额外 +2%`,
+    blackBadge: `全军攻击 +${v}%、全军防御 +${v}%、清理 PvE 营地宝物爆率 +5%（无需携带）`,
   };
   return (map[info.effectType] ?? info.effectType) + reputationText;
 }

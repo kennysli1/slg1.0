@@ -51,6 +51,8 @@ export interface TaskInstance {
   taskVillageId?: string;
   taskVillageXY?: { q: number; r: number };
   taskVillageName?: string;
+  /** M13 秘密营地被玩家视野发现后保留地图标记；未发现时不向客户端泄露坐标。 */
+  taskVillageDiscovered?: boolean;
   taskVillageAttackAt?: number;
   taskVillageAttackDispatched?: boolean;
   outcome?: 'success' | 'failure';

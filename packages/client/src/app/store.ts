@@ -183,6 +183,7 @@ function decorateTaskCamps(active: any[]): any[] {
         ...(taskInfo ? { taskInfo } : {}),
       }));
       const taskVillage = task?.taskVillageId && task?.taskVillageXY
+        && !(task.code === 'm13' && task.taskVillageVisible === false)
         ? [{
           id: String(task.taskVillageId),
           q: Number(task.taskVillageXY.q),
