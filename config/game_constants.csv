@@ -152,7 +152,7 @@ kingdom_city_state_building_level_max,5,number,王国城邦随机建筑等级最
 kingdom_city_state_unit_pool,legionnaire|praetorian|imperian|equimperatoris|equcaesaris|ram|catapult,string,王国城邦随机守军兵种池
 kingdom_city_state_inner_building_pool,warehouse|granary|barracks|stable|workshop|academy|smithy|hospital|residence|treasury|tavern|vault|council,string,王国城邦城内随机建筑池
 kingdom_city_state_outer_building_pool,woodcutter|claypit|ironmine|cropland|wall|mercenarycamp|tradecenter|explorers_guild,string,王国城邦城外随机建筑池
-kingdom_city_state_generation_version,2,number,王国城邦生成规则版本；提升后启动时按新规则重生成既有城邦
+kingdom_city_state_generation_version,3,number,王国城邦生成规则版本；提升后启动时按新规则重生成既有城邦
 kingdom_city_state_tier_weights,1:1|2:1|3:1,string,王国城邦等级权重（等级:权重，竖线分隔）
 kingdom_city_state_tribe_pool,romans|gauls|teutons,string,王国城邦随机种族池
 kingdom_city_state_unit_pool_romans,legionnaire|praetorian|imperian|equlegati|equimperatoris|equcaesaris|ram|catapult,string,罗马城邦兵种池

@@ -1288,7 +1288,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     kingdomCityStateUnitPool: parseConstantList(cs('kingdom_city_state_unit_pool', 'legionnaire|praetorian|imperian|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire'),
     kingdomCityStateInnerBuildingPool: parseConstantList(cs('kingdom_city_state_inner_building_pool', 'warehouse|granary|barracks|stable|workshop|academy|smithy|hospital|residence|treasury|tavern|vault|council'), 'warehouse|granary'),
     kingdomCityStateOuterBuildingPool: parseConstantList(cs('kingdom_city_state_outer_building_pool', 'woodcutter|claypit|ironmine|cropland|wall|mercenarycamp|tradecenter|explorers_guild'), 'woodcutter|claypit|ironmine|cropland|wall'),
-    kingdomCityStateGenerationVersion: Math.max(1, Math.floor(cn('kingdom_city_state_generation_version', 2))),
+    kingdomCityStateGenerationVersion: Math.max(1, Math.floor(cn('kingdom_city_state_generation_version', 3))),
     kingdomCityStateTierWeights: parseCityStateTierWeights(cs('kingdom_city_state_tier_weights', '1:1|2:1|3:1')),
     kingdomCityStateTribePool: parseConstantList(cs('kingdom_city_state_tribe_pool', 'romans|gauls|teutons'), 'romans|gauls|teutons').filter((tribe): tribe is 'romans' | 'gauls' | 'teutons' => tribe === 'romans' || tribe === 'gauls' || tribe === 'teutons'),
     kingdomCityStateUnitPools: {
