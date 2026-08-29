@@ -29,6 +29,8 @@ import { ReputationModule } from './modules/reputation.js';
 import { AlchemyModule } from './modules/alchemy.js';
 import { KingdomModule } from './modules/kingdom.js';
 import { DialoguesModule } from './modules/dialogues.js';
+import { kingdomLandmarkFootprint } from './infra/world-generation.js';
+import { wrapHex } from './infra/hex.js';
 
 /**
  * 应用组装层：加载配置(CSV) → 拼装基础设施 + 领域模块 → 可运行游戏内核。
@@ -328,21 +330,27 @@ export function createGameApp(opts?: {
   const ensurePve = (plan: ReturnType<typeof setupWorldPlan>): void => {
     const occupied = world.getOccupiedTileKeys();
     let fallbackIndex = 0;
+    const footprintAt = (spawn: { id: string; type: string }, point: { q: number; r: number }): Array<{ q: number; r: number }> => {
+      const landmark = kingdomLandmarkFootprint(spawn.id || spawn.type, point, plan.w, plan.h);
+      return landmark.length > 0 ? landmark : [wrapHex(point, plan.w, plan.h)];
+    };
+    const fits = (spawn: { id: string; type: string }, point: { q: number; r: number }): boolean =>
+      footprintAt(spawn, point).every((cell) => !occupied.has(`${cell.q},${cell.r}`));
     for (const s of plan.pveSpawns) {
       if (store.get('pve', s.id)) continue;
       let point = { q: s.q, r: s.r };
-      if (occupied.has(`${point.q},${point.r}`)) {
+      if (!fits(s, point)) {
         while (fallbackIndex < plan.pveCandidates.length) {
           const candidate = plan.pveCandidates[fallbackIndex++]!;
-          if (!occupied.has(`${candidate.q},${candidate.r}`)) {
+          if (fits(s, candidate)) {
             point = candidate;
             break;
           }
         }
       }
-      if (occupied.has(`${point.q},${point.r}`)) continue;
+      if (!fits(s, point)) continue;
       pve.create(s.id, s.type, point.q, point.r);
-      occupied.add(`${point.q},${point.r}`);
+      for (const cell of footprintAt(s, point)) occupied.add(`${cell.q},${cell.r}`);
     }
   };
   const ensureWorldPlan = (useConfiguredSize = false): void => {

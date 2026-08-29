@@ -5,7 +5,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
 import { hexKey, wrapHex, hexDistanceWrapped } from '../infra/hex.js';
 import { makeLogger } from '../infra/logger.js';
-import { generateWorldPlan, kingdomLandmarkAnchors, terrainAt, type GeneratedWorldPlan, type Terrain } from '../infra/world-generation.js';
+import { generateWorldPlan, kingdomLandmarkAnchors, kingdomLandmarkFootprint, kingdomLandmarkKind, terrainAt, type GeneratedWorldPlan, type Terrain } from '../infra/world-generation.js';
 
 /**
  * 领域模块 · World（地图 / 坐标 / 地块）
@@ -34,6 +34,9 @@ export interface Tile {
   terrain?: Terrain;
   faction?: 'neutral' | 'kingdom';
   cityState?: boolean;
+  /** 王都/封地多格地标的视觉与占地标记；中心格仍是唯一可交互目标坐标。 */
+  landmark?: 'capital' | 'fief';
+  landmarkCenter?: boolean;
 }
 
 interface WorldState {
@@ -82,6 +85,7 @@ export class WorldModule {
     }
     this.rebuildPlan();
     this.normalizeTiles();
+    this.normalizeLandmarkFootprints();
     this._bus.on('player.VillageRenamed', (evt: DomainEvent) => this.onVillageRenamed(evt));
     this._bus.on('building.Built', (evt: DomainEvent) => this.onMainBaseChanged(evt));
     this._bus.on('building.Upgraded', (evt: DomainEvent) => this.onMainBaseChanged(evt));
@@ -131,6 +135,32 @@ export class WorldModule {
       }
     }
     if (migrated > 0) log(`normalized ${migrated} world_tile coords into torus ${W}x${H}`);
+  }
+
+  /** 为旧存档中仍只有单格的王都/封地补齐三角形占地，不覆盖玩家或其它目标。 */
+  private normalizeLandmarkFootprints(): void {
+    const W = this.worldW, H = this.worldH;
+    const landmarks = this.store.all<Tile>(COLLECTION_TILE)
+      .filter((tile) => tile.kind === 'pve' && tile.landmarkCenter !== false && kingdomLandmarkKind(tile.refId));
+    for (const center of landmarks) {
+      const kind = kingdomLandmarkKind(center.refId);
+      if (!kind) continue;
+      const cells = kingdomLandmarkFootprint(center.refId, center, W, H);
+      for (const cell of cells) {
+        const key = hexKey(cell.q, cell.r);
+        const existing = this.store.get<Tile>(COLLECTION_TILE, key);
+        if (existing && (existing.kind !== 'pve' || existing.refId !== center.refId)) continue;
+        this.store.set<Tile>(COLLECTION_TILE, key, {
+          ...(existing ?? center),
+          q: cell.q,
+          r: cell.r,
+          kind: 'pve',
+          refId: center.refId,
+          landmark: kind,
+          landmarkCenter: cell.q === center.q && cell.r === center.r,
+        });
+      }
+    }
   }
 
   /** 初始化地图（环绕平行四边形 W×H，坐标对 (W,H) 取模无缝）。 */
@@ -196,8 +226,9 @@ export class WorldModule {
   /** 按 owner id 反查地块，供行军等模块派生服务器权威坐标。 */
   private getTileByRef(cmd: Command): CommandResult {
     const { refId, kind } = cmd.payload as { refId: string; kind?: TileKind };
-    const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) =>
+    const matches = this.store.all<Tile>(COLLECTION_TILE).filter((t) =>
       t.refId === refId && (kind ? t.kind === kind : true));
+    const tile = matches.find((t) => t.landmarkCenter) ?? matches[0];
     if (!tile) return { ok: false, payload: {}, reason: 'tile_not_found' };
     return { ok: true, payload: { tile } };
   }
@@ -351,19 +382,37 @@ export class WorldModule {
   }
 
   private placePve(cmd: Command): CommandResult {
-    const { q, r, refId, name, icon, task, faction, cityState } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean; faction?: 'neutral' | 'kingdom'; cityState?: boolean };
+    const { q, r, refId, name, icon, task, faction, cityState, footprint } = cmd.payload as { q: number; r: number; refId: string; name: string; icon?: string; task?: boolean; faction?: 'neutral' | 'kingdom'; cityState?: boolean; footprint?: Array<{ q: number; r: number }> };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
-    const exist = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
+    const landmark = kingdomLandmarkKind(refId);
+    const cells = (footprint?.length
+      ? footprint.map((cell) => wrapHex(cell, this.worldW, this.worldH))
+      : landmark ? kingdomLandmarkFootprint(refId, w, this.worldW, this.worldH) : [w]);
+    const uniqueCells = [...new Map(cells.map((cell) => [hexKey(cell.q, cell.r), cell])).values()];
     // 旧版本可能把任务营地写成全局 pve；恢复时允许同 refId 原子升级为私有 taskcamp。
-    if (exist && exist.kind !== 'empty') {
-      if (task && exist.refId === refId && (exist.kind === 'pve' || exist.kind === 'taskcamp')) {
-        this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { ...exist, kind: 'taskcamp', name, icon, faction, cityState });
-        return { ok: true, payload: { q: w.q, r: w.r } };
-      }
+    for (const cell of uniqueCells) {
+      const current = this.store.get<Tile>(COLLECTION_TILE, hexKey(cell.q, cell.r));
+      if (!current || current.kind === 'empty') continue;
+      if (current.refId === refId && (current.kind === 'pve' || current.kind === 'taskcamp')) continue;
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
     // 任务营地写入独立 kind='taskcamp'：与全局视野隔离（getArea 过滤），但仍占用该格避免与其它营地/建筑冲突
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: task ? 'taskcamp' : 'pve', refId, name, icon, faction: faction ?? 'neutral', cityState: cityState === true });
+    const tileKind = task ? 'taskcamp' : 'pve';
+    for (const cell of uniqueCells) {
+      const current = this.store.get<Tile>(COLLECTION_TILE, hexKey(cell.q, cell.r));
+      this.store.set<Tile>(COLLECTION_TILE, hexKey(cell.q, cell.r), {
+        ...(current ?? {}),
+        q: cell.q,
+        r: cell.r,
+        kind: tileKind,
+        refId,
+        name,
+        icon,
+        faction: faction ?? 'neutral',
+        cityState: cityState === true,
+        ...(landmark ? { landmark, landmarkCenter: cell.q === w.q && cell.r === w.r } : {}),
+      });
+    }
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -371,11 +420,10 @@ export class WorldModule {
   private removeTile(cmd: Command): CommandResult {
     const { q, r, refId } = cmd.payload as { q: number; r: number; refId: string };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
-    const key = hexKey(w.q, w.r);
-    const t = this.store.get<Tile>(COLLECTION_TILE, key);
-    if (!t) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
-    if ((t.kind !== 'pve' && t.kind !== 'taskcamp') || t.refId !== refId) return { ok: false, payload: {}, reason: 'tile_mismatch' };
-    this.store.set<Tile>(COLLECTION_TILE, key, { q: w.q, r: w.r, kind: 'empty' });
+    const matches = this.store.all<Tile>(COLLECTION_TILE).filter((tile) =>
+      (tile.kind === 'pve' || tile.kind === 'taskcamp') && tile.refId === refId);
+    if (matches.length === 0) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
+    for (const tile of matches) this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { q: tile.q, r: tile.r, kind: 'empty' });
     // PvE/任务营地地块消失：通知行军模块——所有前往该目标的出征/商队应立即原路返回
     // （见 movement.onTargetRemoved）。pve.Remove 已发过同一事件，这里再兜底一次，
     // 保证无论地块由哪条路径移除（pve.Remove / 直接 world.RemoveTile），商队都不会继续冲向已消失的目标。

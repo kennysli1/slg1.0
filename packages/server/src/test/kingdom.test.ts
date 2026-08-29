@@ -26,6 +26,14 @@ test('王国地标：王都位于世界中心，四封地位于四象限中心�
     assert.equal(pve.type, anchor.type);
     assert.deepEqual({ q: pve.q, r: pve.r }, { q: anchor.q, r: anchor.r });
     assert.ok(Object.values(pve.defender as Record<string, { count: number }>).reduce((sum, unit) => sum + unit.count, 0) > 0);
+    const footprint = app.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(footprint.length, anchor.id === 'kingdom-capital' ? 6 : 3, `${anchor.id} 应占用三角形格子数`);
+    assert.equal(footprint.filter((tile) => tile.landmarkCenter === true).length, 1, `${anchor.id} 应保留唯一中心格`);
+    assert.deepEqual(
+      new Set(footprint.map((tile) => `${tile.q},${tile.r}`)),
+      new Set((anchor.footprint ?? [{ q: anchor.q, r: anchor.r }]).map((cell) => `${cell.q},${cell.r}`)),
+      `${anchor.id} 应按规划的三角形占地写入地图`,
+    );
   }
 });
 
