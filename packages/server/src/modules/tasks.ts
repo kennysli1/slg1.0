@@ -390,10 +390,10 @@ export class TasksModule {
     }
     const anchor = villageIds[0];
     const global = anchor
-      ? this.redactHiddenTaskVillages(this.snapshot(anchor, this.ensureState(anchor), 'global'))
+      ? this.redactHiddenTaskVillages(await this.snapshot(anchor, this.ensureState(anchor), 'global'))
       : this.emptySnapshot(anchor ?? null);
     const villages = await Promise.all(villageIds.map((villageId) =>
-      this.redactHiddenTaskVillages(this.snapshot(villageId, this.ensureState(villageId), 'village'))));
+      this.snapshot(villageId, this.ensureState(villageId), 'village').then((snapshot) => this.redactHiddenTaskVillages(snapshot))));
     const activeByCode = new Map<string, Record<string, unknown>>();
     const offeredByCode = new Map<string, Record<string, unknown>>();
     const offeredSideByCode = new Map<string, Record<string, unknown>>();
@@ -485,9 +485,10 @@ export class TasksModule {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     const check = await this.validateAccept(villageId, code);
     if (!check.ok) return check;
+    const context = await this.playerDirectory.dialogueContext(villageId);
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.dialogueTrigger(villageId, code, 'accept'), villageName: this.playerDirectory.villageName(villageId) },
+      payload: { taskCode: code, trigger: this.dialogueTrigger(villageId, code, 'accept'), ...context },
     });
     if (!dialogue.ok) return dialogue;
     return { ok: true, payload: { code, dialogue: (dialogue.payload as any).dialogue ?? null } };
@@ -671,9 +672,10 @@ export class TasksModule {
     // 交付对话与奖励同一响应返回。模板默认为空，因此不会改变现有领取流程；
     // GM 填写后客户端会在奖励明细中展示 NPC 对话，且不会再次执行任务逻辑。
     const rewardVillageId = (rewards as any)?.rewardVillageId ?? villageId;
+    const context = await this.playerDirectory.dialogueContext(rewardVillageId);
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.dialogueTrigger(rewardVillageId, code, 'deliver', inst), villageName: this.playerDirectory.villageName(rewardVillageId) },
+      payload: { taskCode: code, trigger: this.dialogueTrigger(rewardVillageId, code, 'deliver', inst), ...context },
     });
     return {
       ok: true,
@@ -778,9 +780,10 @@ export class TasksModule {
     if (q.type === 'main') await this.unlockMainQuests(villageId);
     else if (q.type === 'side') await this.unlockSideQuests(villageId);
 
+    const context = await this.playerDirectory.dialogueContext(rewardVillageId);
     const dialogue = await this.commands.send({
       name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.failureDialogueTrigger(code, inst), villageName: this.playerDirectory.villageName(rewardVillageId) },
+      payload: { taskCode: code, trigger: this.failureDialogueTrigger(code, inst), ...context },
     });
     return {
       ok: true,
@@ -1769,7 +1772,7 @@ export class TasksModule {
     const info = await this.tavernInfo(villageId);
     if (info.level <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
     await this.refreshOffered(villageId, info);
-    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+    return { ok: true, payload: await this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
   /** 重置本村全部任务进度（删状态+营地、重激活 m1）。 */
@@ -1782,7 +1785,7 @@ export class TasksModule {
     await this.wipeSingleVillageAsync(villageId);
     this.store.set(COLLECTION, villageId, emptyTaskState(villageId));
     await this.unlockMainQuests(villageId);
-    return { ok: true, payload: this.snapshot(villageId, this.ensureState(villageId)) };
+    return { ok: true, payload: await this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
   /** 重置所有玩家/村庄的任务进度；只清 task 状态和任务营地，不触碰其他游戏存档。 */
@@ -2751,9 +2754,9 @@ export class TasksModule {
 
   /** 当前村任务页快照：本村 village 任务 + 玩家锚点上的 global 任务。 */
   private async snapshotForVillage(villageId: string): Promise<Record<string, unknown>> {
-    const local = this.redactHiddenTaskVillages(this.snapshot(villageId, this.ensureState(villageId), 'village'));
+    const local = this.redactHiddenTaskVillages(await this.snapshot(villageId, this.ensureState(villageId), 'village'));
     const anchor = this.anchorVillage(villageId);
-    const global = this.redactHiddenTaskVillages(this.snapshot(anchor, this.ensureState(anchor), 'global'));
+    const global = this.redactHiddenTaskVillages(await this.snapshot(anchor, this.ensureState(anchor), 'global'));
     return {
       villageId,
       active: [...(global.active as unknown[]), ...(local.active as unknown[])],
@@ -2772,7 +2775,7 @@ export class TasksModule {
     };
   }
 
-  private snapshot(villageId: string, s: TaskState, scopeFilter?: QuestScope): Record<string, unknown> {
+  private async snapshot(villageId: string, s: TaskState, scopeFilter?: QuestScope): Promise<Record<string, unknown>> {
     const include = (code: string) => !scopeFilter || this.questScope(code) === scopeFilter;
     const active = Object.values(s.active).filter((inst) => include(inst.code)).map((inst) => this.serializeInstance(inst, villageId));
     const offered = s.offered
@@ -2785,9 +2788,9 @@ export class TasksModule {
       .map((code) => this.quest(code))
       .filter((q): q is QuestDef => !!q)
       .map((q) => this.serializeOffer(q, villageId));
-    const pendingDialogues = (s.pendingDialogues ?? [])
+    const pendingDialogues = await Promise.all((s.pendingDialogues ?? [])
       .filter((item) => include(item.taskCode))
-      .map((item) => this.serializePendingDialogue(item));
+      .map((item) => this.serializePendingDialogue(item)));
     return {
       villageId,
       active,
@@ -2805,13 +2808,16 @@ export class TasksModule {
     };
   }
 
-  private serializePendingDialogue(item: PendingTaskDialogue): Record<string, unknown> {
+  private async serializePendingDialogue(item: PendingTaskDialogue): Promise<Record<string, unknown>> {
     const defs = Object.values(this.config.dialogues ?? {})
       .filter((dialogue) => dialogue.taskCode === item.taskCode && dialogue.trigger === item.trigger)
       .sort((a, b) => a.segment - b.segment)
       .filter((dialogue) => dialogue.npcName || dialogue.npcText);
     if (!defs.length) return { ...item, dialogue: null };
-    const render = (value: string) => value.replaceAll('{villageName}', this.playerDirectory.villageName(item.villageId));
+    const context = await this.playerDirectory.dialogueContext(item.villageId);
+    const render = (value: string) => value
+      .replaceAll('{villageName}', context.villageName)
+      .replaceAll('{fiefName}', context.fiefName);
     const segments = defs.map((def): SerializedDialogueSegment => ({
       code: def.code,
       taskCode: def.taskCode,

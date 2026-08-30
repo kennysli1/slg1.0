@@ -38,6 +38,13 @@ test('M12 配置与流程：前置/两处强盗营地/最后一处固定掉落�
   state.completedMain = ['m11'];
   state.offeredMain = ['m12'];
   app.store.set('task', villageId, state);
+  const preview = await send(app, 'task.StartAccept', { villageId, code: 'm12' });
+  assert.equal(preview.ok, true, preview.reason);
+  const previewDialogue = (preview.payload as any).dialogue;
+  assert.equal(previewDialogue.npcName, '王国使者');
+  assert.match(previewDialogue.npcText, /m12-flow的村庄的首领/);
+  assert.match(previewDialogue.npcText, /东北封地的领主大人/);
+  assert.doesNotMatch(previewDialogue.npcText, /\{(?:villageName|fiefName)\}/);
   const accepted = await send(app, 'task.Accept', { villageId, code: 'm12' });
   assert.equal(accepted.ok, true, accepted.reason);
   const active = app.store.get<any>('task', villageId)?.active.m12;

@@ -91,6 +91,7 @@ export class KingdomModule {
 
   init(): void {
     this.commands.register('kingdom.GetState', (c) => this.getState(c));
+    this.commands.register('kingdom.GetFief', (c) => this.getFief(c));
     this.commands.register('kingdom.GetOverview', (c) => this.getOverview(c));
     this.commands.register('kingdom.SubmitTribute', (c) => this.submitTribute(c));
     this.commands.register('kingdom.ClaimTask', (c) => this.claimTask(c));
@@ -483,6 +484,15 @@ export class KingdomModule {
         landmarks,
       },
     };
+  }
+
+  /** 任务/对话等内部只读调用：获取玩家所属封地，不触发王国任务签发或其它页面副作用。 */
+  private async getFief(cmd: Command): Promise<CommandResult> {
+    const playerId = String((cmd.payload as { playerId?: unknown }).playerId ?? '').trim();
+    if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
+    const state = await this.ensure(playerId);
+    if (!state) return { ok: false, payload: {}, reason: 'player_not_found' };
+    return { ok: true, payload: { playerId, fief: state.fief, fiefName: FIEF_NAMES[state.fief] } };
   }
 
   private async buyService(cmd: Command): Promise<CommandResult> {

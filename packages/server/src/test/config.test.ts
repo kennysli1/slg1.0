@@ -185,6 +185,9 @@ test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者�
   assert.equal(cfg.dialogues['m9_deliver_m8_success:1'], undefined, 'M9 成功交付旧 entry 应移除');
   assert.equal(cfg.dialogues['s3_accept:2'], undefined, 'S3 接取对话不应包含 after_accept 第二段');
   assert.equal(cfg.dialogues['s3_after_accept:1']?.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
+  assert.match(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{villageName\}/, 'M12 接取文本应使用村庄变量');
+  assert.match(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, 'M12 接取文本应使用封地变量');
+  assert.doesNotMatch(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{封地\}/, 'M12 配置不应保存中文封地占位符');
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {
