@@ -19,10 +19,19 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { landmarkCenterFromTile, normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
+
+describe('王国地标中心标记', () => {
+  it('只接受服务端显式中心，缺字段不会把每个占地格当成中心', () => {
+    assert.equal(landmarkCenterFromTile('kingdom-fief-sw', true), true);
+    assert.equal(landmarkCenterFromTile('kingdom-fief-sw', false), false);
+    assert.equal(landmarkCenterFromTile('kingdom-fief-sw', undefined), false);
+    assert.equal(landmarkCenterFromTile('some-village', undefined), true);
+  });
+});
 
 describe('modalLayerZ', () => {
   it('弹层容器整体高于应用导航，叠加弹窗逐层抬高', () => {
