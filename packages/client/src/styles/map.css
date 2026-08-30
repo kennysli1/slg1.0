@@ -108,11 +108,13 @@
   stroke-width: 2;
 }
 
-/* 王都/封地由多个真实地块组成一个倒三角。占地仍合并为一个可点击目标，
-   但不再以蓝/黄底色或边框强调，地图上只保留居中的图标与名称。 */
+/* 王都/封地由多个真实地块组成一个倒三角。只保留合并后的 PvE 外轮廓：
+   与普通营地使用同一红色描边，不填色、不悬停高光，内部没有格线。 */
 .landmark-merged-shape {
-  fill: transparent;
-  stroke: transparent;
+  fill: none;
+  stroke: var(--c-crimson-hi);
+  stroke-width: 2;
+  stroke-linejoin: round;
   pointer-events: none;
 }
 .landmark-icon {
