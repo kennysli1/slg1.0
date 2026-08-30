@@ -108,35 +108,16 @@
   stroke-width: 2;
 }
 
-/* 王都/封地由多个真实地块组成一个倒三角：只描绘合并后的外围，
-   内部不再出现六边形格线；图标单独按整体轮廓居中并由 clipPath 限制边界。 */
+/* 王都/封地由多个真实地块组成一个倒三角。占地仍合并为一个可点击目标，
+   但不再以蓝/黄底色或边框强调，地图上只保留居中的图标与名称。 */
 .landmark-merged-shape {
+  fill: transparent;
+  stroke: transparent;
   pointer-events: none;
-  stroke-width: 2.4;
-  stroke-linejoin: round;
-}
-.landmark-merged--capital .landmark-merged-shape {
-  fill: rgb(164 119 49 / 30%);
-  stroke: var(--c-gold-hi);
-}
-.landmark-merged--fief .landmark-merged-shape {
-  fill: rgb(91 118 158 / 28%);
-  stroke: var(--c-steel);
-}
-.landmark-merged--hovered .landmark-merged-shape {
-  stroke-width: 3.4;
-  filter: drop-shadow(0 0 8px rgb(246 224 170 / 80%));
-}
-.landmark-merged--fief.landmark-merged--hovered .landmark-merged-shape {
-  filter: drop-shadow(0 0 8px rgb(172 202 234 / 76%));
 }
 .landmark-icon {
   pointer-events: none;
   filter: saturate(.84) contrast(1.08) drop-shadow(0 4px 6px rgb(0 0 0 / 86%));
-  transition: filter var(--t-fast);
-}
-.landmark-merged--hovered .landmark-icon {
-  filter: saturate(1) brightness(1.14) drop-shadow(0 5px 9px rgb(0 0 0 / 90%));
 }
 .landmark-merged-hit {
   cursor: pointer;
@@ -146,11 +127,6 @@
   fill: transparent;
   stroke: transparent;
   stroke-width: 1.5;
-  transition: fill var(--t-fast), stroke var(--t-fast);
-}
-.landmark-merged-hit:hover .landmark-merged-hit-path {
-  fill: var(--border-subtle);
-  stroke: var(--terrain-hover-edge);
 }
 /* 任务营地：鎏金描边 + 脉冲，和 PvE 的红色区分开 */
 .hex-ring--task {

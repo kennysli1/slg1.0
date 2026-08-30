@@ -1434,7 +1434,8 @@ export function HexMap() {
                 {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
               >
                 <polygon class="hex-hit" points={HEX_CORNER_STR} />
-                {c.isSelected && (!c.landmark || c.landmarkCenter) && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
+                {/* 王都/封地是合并后的整体目标；点击后不再回退显示某一个内部格的选中环。 */}
+                {c.isSelected && !c.landmark && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
               </g>
             ))}
           </g>
