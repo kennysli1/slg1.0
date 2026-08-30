@@ -4,6 +4,7 @@ import { tick, dataVersion, sessionVersion, villageSwitching, showToast } from '
 import { switchVillage } from '../app/refresh.js';
 import { errText } from '../shared/ui/text.js';
 import { getCache, type PopSnapshot } from '../app/state.js';
+import { gameConstants } from '../app/config.js';
 import { Icon } from '../ui/index.js';
 
 export function ResourceBar() {
@@ -61,16 +62,22 @@ function VillagePicker() {
 
 function ReputationCell() {
   const rep = getCache().reputation as any;
+  const treasures = getCache().treasures as any;
   const value = Math.trunc(Number(rep?.value) || 0);
   const alignment = value > 0 ? '正声望' : value < 0 ? '负声望' : '中立';
   const popBonus = Math.round((Number(rep?.populationGrowthBonus) || 0) * 100);
-  const pveBonus = Math.round((Number(rep?.pveTreasureDropBonus) || 0) * 100);
   const popPenalty = Math.round((Number(rep?.populationGrowthPenalty) || 0) * 100);
   const armyAttackBonus = Math.round((Number(rep?.armyAttackBonus) || 0) * 100);
   const armyDefenseBonus = Math.round((Number(rep?.armyDefenseBonus) || 0) * 100);
   const taxReduction = Math.round((Number(rep?.goldTaxReduction) || 0) * 100);
+  const constants = gameConstants();
+  const baseDrop = Math.max(0, Math.min(1, Number(constants?.treasureCampDropChance) || 0));
+  const reputationDropMult = Math.max(1, Number(rep?.pveTreasureDropMult) || 1);
+  const treasureDropBonus = Math.max(0, Number(treasures?.effect?.pveDropRateBonus) || 0);
+  const effectiveDrop = Math.min(1, baseDrop * reputationDropMult + treasureDropBonus);
+  const dropPercent = Math.round(effectiveDrop * 1000) / 10;
   const title = rep
-    ? `声望值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${value < 0 ? '-' + popPenalty : '+' + popBonus}%；军队攻防 ${value < 0 ? '+' + armyAttackBonus + '% / +' + armyDefenseBonus + '%' : '无修正'}；金币税收 ${value > 0 ? '-' + taxReduction : '无修正'}；PvE宝物掉落 ${pveBonus >= 0 ? '+' : ''}${pveBonus}%`
+    ? `声望值：${value >= 0 ? '+' : ''}${value}（${alignment}）；人口增长 ${value < 0 ? '-' + popPenalty : '+' + popBonus}%；军队攻防 ${value < 0 ? '+' + armyAttackBonus + '% / +' + armyDefenseBonus + '%' : '无修正'}；金币税收 ${value > 0 ? '-' + taxReduction : '无修正'}；本村 PvE 宝物掉落率 ${dropPercent}%（基础 ${(baseDrop * 100).toFixed(1)}%，声望倍率 ${reputationDropMult.toFixed(2)}，宝物加成 +${Math.round(treasureDropBonus * 100)}%）`
     : '声望值：正在加载';
   return (
     <div class={`res res--reputation res--${value > 0 ? 'good' : value < 0 ? 'evil' : 'neutral'}`} title={title}>

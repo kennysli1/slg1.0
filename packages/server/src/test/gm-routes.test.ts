@@ -195,7 +195,8 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /alchemy_refine_sec/, 'GM 页面应提供炼金时间参数');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
-    assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
+    assert.match(res.body, /任务中的声望目标\/效果/, 'GM 页面应集中显示任务声望目标与效果');
+    assert.match(res.body, /宝物被动声望和议会厅声望价格/, 'GM 页面应集中显示宝物和议会厅的声望参数');
     assert.match(res.body, /拓荒参数/, 'GM 页面应包含拓荒专用调参板块');
     assert.match(res.body, /found_resource_cost_base/, 'GM 页面应提供第2座城每种资源成本参数');
     assert.match(res.body, /found_resource_cost_growth/, 'GM 页面应提供后续城成本增长倍率参数');
@@ -206,6 +207,47 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /M8 任务村参数/, 'GM 页面应提供 M8 任务村专用参数板块');
     assert.match(res.body, /M8 攻城倒计时（秒）/, 'GM 页面应提供 M8 攻城倒计时编辑项');
     assert.match(res.body, /m8_attack_delay_sec/, 'GM 页面应提供 M8 攻城倒计时参数键');
+    assert.match(res.body, /地图格子特性 \/ 地形参数/, 'GM 页面应提供地图格子特性专用参数板块');
+    assert.match(res.body, /forest_vision_penalty/, 'GM 页面应提供森林视野参数');
+    assert.match(res.body, /hills_vision_bonus/, 'GM 页面应提供丘陵视野参数');
+    assert.match(res.body, /hills_march_speed_multiplier/, 'GM 页面应提供丘陵行军速度参数');
+    assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
+    assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
+    assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
+    assert.match(res.body, /kingdom_fief_unit_count/, 'GM 页面应提供封地兵种数量参数');
+    assert.match(res.body, /kingdom_capital_unit_count/, 'GM 页面应提供王都兵种数量参数');
+    assert.match(res.body, /kingdom_pve_killed_population_per_reputation/, 'GM 页面应提供王国 PvE 声望人口阈值');
+    assert.match(res.body, /kingdom_pve_retaliation_raid_threshold/, 'GM 页面应提供封地掠夺阈值');
+    assert.match(res.body, /kingdom_pve_retaliation_siege_threshold/, 'GM 页面应提供封地攻城阈值');
+    assert.match(res.body, /kingdom_fief_mercenary_min_ratio/, 'GM 页面应提供封地雇佣军比例参数');
+    const renderStart = res.body.indexOf('function render()');
+    const reputationCall = res.body.indexOf('html += sectionReputation();', renderStart);
+    const terrainCall = res.body.indexOf('html += sectionTerrain();', renderStart);
+    assert.ok(renderStart >= 0 && reputationCall >= 0 && terrainCall > reputationCall, '声望参数板块应位于地形参数之前');
+    const reputationFnStart = res.body.indexOf('var REP_ROWS = [');
+    const reputationFnEnd = res.body.indexOf('function sectionAmbush()', reputationFnStart);
+    const reputationSection = res.body.slice(reputationFnStart, reputationFnEnd);
+    for (const key of [
+      'kingdom_task_tribute_weight',
+      'kingdom_task_clear_pve_weight',
+      'kingdom_task_attack_evil_weight',
+      'kingdom_task_eliminate_troops_weight',
+      'kingdom_task_evil_target_threshold',
+      'kingdom_task_tribute_reward_reputation',
+      'kingdom_task_clear_pve_reward_reputation',
+      'kingdom_task_attack_evil_reward_reputation',
+      'kingdom_task_eliminate_troops_reward_reputation',
+      'kingdom_pve_killed_population_per_reputation',
+      'kingdom_pve_retaliation_chunk',
+      'kingdom_pve_retaliation_raid_threshold',
+      'kingdom_pve_retaliation_siege_threshold',
+      'kingdom_fief_mercenary_min_ratio',
+      'kingdom_fief_mercenary_max_ratio',
+      'kingdom_city_state_reputation_penalty',
+    ]) assert.match(reputationSection, new RegExp(key), `声望参数板块应包含 ${key}`);
+    const cityStateFnStart = res.body.indexOf('function sectionCityState()');
+    const cityStateFnEnd = res.body.indexOf('function sectionKingdom()', cityStateFnStart);
+    assert.doesNotMatch(res.body.slice(cityStateFnStart, cityStateFnEnd), /kingdom_pve_killed_population_per_reputation/, '王国 PvE 声望累计参数不应继续散落在城邦板块');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -276,8 +318,13 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
 test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
+  const root = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
+  const tempConfig = join(root, 'config');
   try {
-    const { fastify } = buildFastify();
+    const seed = buildFastify();
+    cpSync(seed.app.configDir, tempConfig, { recursive: true });
+    await seed.fastify.close();
+    const { fastify, app } = buildFastify(undefined, tempConfig);
     await fastify.ready();
     const page = await fastify.inject({ method: 'GET', url: '/config/dialogues' });
     assert.equal(page.statusCode, 200);
@@ -285,19 +332,39 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '对话编辑器脚本必须是合法 JavaScript');
-    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code 排序');
+    assert.match(page.body, /function compareNatural\(a,b\)/, '对话编辑器应使用数字感知排序');
+    assert.match(page.body, /match\(\/\\d\+\|\\D\+\/g\)/, '对话编辑器自然排序必须保留数字匹配正则');
+    assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
+    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
+    assert.match(page.body, /\{villageName\}/, '对话编辑器应说明村庄变量');
+    assert.match(page.body, /\{fiefName\}/, '对话编辑器应说明封地变量');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
     const parsed = JSON.parse(data.body) as { header: string[]; rows: Array<Record<string, string>> };
     assert.ok(parsed.header.includes('segment'));
     assert.match(page.body, /\+ 段落/);
     assert.match(page.body, /只有 npcName、npcText、replies 可编辑/);
-    const sortedKeys = parsed.rows.map((row) => `${row.code}:${row.segment}`);
+    const sortedKeys = parsed.rows.map((row) => `${row.code}:${row.taskCode}:${row.segment}`);
     assert.deepEqual(sortedKeys, [...sortedKeys].sort((a, b) => {
-      const [codeA, segmentA] = a.split(':');
-      const [codeB, segmentB] = b.split(':');
-      return codeA === codeB ? Number(segmentA) - Number(segmentB) : codeA < codeB ? -1 : 1;
-    }), '对话编辑器数据应按 code、段落号排序');
+      const [codeA, taskCodeA, segmentA] = a.split(':');
+      const [codeB, taskCodeB, segmentB] = b.split(':');
+      const natural = (left: string, right: string) => left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
+      const codePartsA = codeA.split('_');
+      const codePartsB = codeB.split('_');
+      const codeParts = Math.min(codePartsA.length, codePartsB.length);
+      let codeOrder = 0;
+      for (let i = 0; i < codeParts; i++) {
+        codeOrder = natural(codePartsA[i], codePartsB[i]);
+        if (codeOrder !== 0) break;
+      }
+      if (codeOrder === 0) codeOrder = codePartsA.length - codePartsB.length;
+      if (codeOrder !== 0) return codeOrder;
+      const taskCodeOrder = natural(taskCodeA, taskCodeB);
+      return taskCodeOrder !== 0 ? taskCodeOrder : Number(segmentA) - Number(segmentB);
+    }), '对话编辑器数据应按数字感知的 code、taskCode、段落号排序');
+    const m9Index = parsed.rows.findIndex((row) => row.code === 'm9_accept');
+    const m10Index = parsed.rows.findIndex((row) => row.code === 'm10_accept');
+    assert.ok(m9Index >= 0 && m10Index > m9Index, 'm10 对话必须排在 m9 对话之后');
     const firstS3 = parsed.rows.find((row) => row.code === 's3_accept' && row.segment === '1');
     assert.equal(firstS3?.taskCode, 's3');
     assert.match(firstS3?.npcText ?? '', /感谢你清除了附近的威胁/);
@@ -311,6 +378,15 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.equal(byKey.get('m9_accept_m8_success:1'), undefined);
     assert.equal(byKey.get('m9_deliver_m8_success:1'), undefined);
     assert.match(byKey.get('m9_deliver_m8_failure:1')?.npcText ?? '', /缴获了一个宝物/);
+    assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{villageName\}/, '配置中心应保存 M12 村庄变量');
+    assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{fiefName\}/, '配置中心应保存 M12 封地变量');
+    assert.doesNotMatch(byKey.get('m12_accept:1')?.npcText ?? '', /\{封地\}/, '配置中心不应保存中文封地占位符');
+    const saved = await fastify.inject({
+      method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rows: parsed.rows }),
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.match(app.config.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, '保存后服务端热重载仍应保留变量');
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
@@ -331,6 +407,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(bad.body, /dialogues\.csv/);
     await fastify.close();
   } finally {
+    rmSync(root, { recursive: true, force: true });
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
   }
@@ -603,6 +680,31 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     const foundingGrowth = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_growth');
     assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
     assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
+
+    const reputationData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      kingdom_services?: Array<Record<string, unknown>>;
+      treasures?: Array<Record<string, unknown>>;
+      quest_objectives?: Array<Record<string, unknown>>;
+      quest_effects?: Array<Record<string, unknown>>;
+    };
+    assert.ok(reputationData.kingdom_services && reputationData.treasures, '声望专用视图应读取议会厅与宝物表');
+    assert.ok(reputationData.quest_objectives && reputationData.quest_effects, '声望专用视图应读取任务目标与效果表');
+    const reputationSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kingdom_services: { '1': { reputationCost: '3' } },
+        treasures: { '25': { reputationValue: '2' } },
+        quest_objectives: { 'o-m15': { params: '-6' } },
+        quest_effects: { 'e-m12-reputation': { params: '6' } },
+      }),
+    });
+    assert.equal(reputationSave.statusCode, 200, `声望相关行级参数覆盖应成功：${reputationSave.body}`);
+    assert.equal(app.config.kingdomServices.supplies_small.reputationCost, 3, '议会厅服务声望价格应热重载');
+    assert.equal(app.config.treasures.honest_heart.reputationValue, 2, '宝物被动声望值应热重载');
+    assert.equal(app.config.quests.m12.rewards.reputation, 6, '任务声望调整应热重载');
+    assert.equal(app.config.quests.m15.objective.threshold, -6, '任务声望目标阈值应热重载');
 
     await fastify.close();
     // 模拟删档/重启：game.json 会换新，但同一 configDir 和共享 CSV 必须继续作为默认值。

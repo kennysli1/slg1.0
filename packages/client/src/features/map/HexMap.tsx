@@ -79,6 +79,57 @@ function ringKind(kind: string, isSelf: boolean): string {
   return '';
 }
 
+function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
+  if (refId === 'kingdom-capital') return 'capital';
+  if (refId === 'kingdom-fief-ne' || refId === 'kingdom-fief-se' || refId === 'kingdom-fief-sw' || refId === 'kingdom-fief-nw') return 'fief';
+  return null;
+}
+
+/** 地标中心必须由服务端显式标记；缺字段不能把整个占地误判成多个中心。 */
+export function landmarkCenterFromTile(refId?: string, landmarkCenter?: boolean): boolean {
+  return landmarkKindFromRefId(refId) ? landmarkCenter === true : true;
+}
+
+export type LandmarkOutline = {
+  path: string;
+  centerX: number;
+  centerY: number;
+  points: readonly [
+    { x: number; y: number },
+    { x: number; y: number },
+    { x: number; y: number },
+  ];
+};
+
+function formatClosedPath(points: ReadonlyArray<{ x: number; y: number }>): string {
+  return points.length > 0
+    ? `M${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join('L')}Z`
+    : '';
+}
+
+/**
+ * 把一个地标的占地格归并为真正的单一三角形。轮廓只由三个顶点组成，
+ * 不再沿每个六边形的外边逐段拼接，因此不会出现两个/多个六边形连在一起的折线。
+ */
+export function buildLandmarkTriangleOutline(cells: ReadonlyArray<{ camX: number; camY: number }>): LandmarkOutline | null {
+  if (cells.length === 0) return null;
+  const minX = Math.min(...cells.map((cell) => cell.camX));
+  const maxX = Math.max(...cells.map((cell) => cell.camX));
+  const minY = Math.min(...cells.map((cell) => cell.camY));
+  const maxY = Math.max(...cells.map((cell) => cell.camY));
+  const shoulder = HEX_SIZE * Math.sqrt(3) / 2;
+  const left = { x: minX - shoulder, y: maxY + HEX_SIZE };
+  const right = { x: maxX + shoulder, y: maxY + HEX_SIZE };
+  const apex = { x: (left.x + right.x) / 2, y: minY - HEX_SIZE };
+  const points = [apex, right, left] as const;
+  return {
+    path: formatClosedPath(points),
+    centerX: (apex.x + right.x + left.x) / 3,
+    centerY: (apex.y + right.y + left.y) / 3,
+    points,
+  };
+}
+
 // ─── hex math ────────────────────────────────────────────────────────────────
 function hexDistance(a: Hex, b: Hex): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -239,6 +290,7 @@ export function HexMap() {
   type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
+  const [hoveredLandmarkRef, setHoveredLandmarkRef] = useState('');
 
   /** 相机坐标系下的格心 → 屏幕 client 坐标（与 wheel 缩放同一套 pan/zoom）。 */
   function cameraToScreen(camX: number, camY: number): { x: number; y: number } {
@@ -401,6 +453,62 @@ export function HexMap() {
     visibility: Visibility;
     isSelected: boolean;
     isSelf: boolean;
+    landmark: 'capital' | 'fief' | null;
+    landmarkCenter: boolean;
+  }
+
+  type LandmarkGroup = {
+    key: string;
+    refId: string;
+    landmark: 'capital' | 'fief';
+    center: HexCell;
+    cells: HexCell[];
+    outline: LandmarkOutline;
+    clipId: string;
+  };
+
+  function buildLandmarkGroups(cells: HexCell[]): LandmarkGroup[] {
+    const centers = cells.filter((cell) => cell.landmark && cell.visibility !== 'unexplored');
+    const groups: LandmarkGroup[] = [];
+    // 一个地图副本内，同一地标的多个占地格可能因旧存档缺少 landmarkCenter
+    // 而都被判成中心。按完整可见成员集合去重，保证每个视觉副本只生成一个组；
+    // 不按西南/东北等方向做任何特判。
+    const usedGroupKeys = new Set<string>();
+    const landmarkCells = cells.filter((cell) => cell.landmark && cell.visibility !== 'unexplored');
+    for (const center of centers) {
+      const members = landmarkCells.filter((cell) =>
+        cell.refId === center.refId
+        && cell.landmark === center.landmark
+        && Math.hypot(cell.camX - center.camX, cell.camY - center.camY) <= HEX_SIZE * 5.2);
+      const memberKey = members
+        .map((cell) => `${cell.q},${cell.r},${cell.camX.toFixed(1)},${cell.camY.toFixed(1)}`)
+        .sort()
+        .join('|');
+      if (usedGroupKeys.has(memberKey)) continue;
+      usedGroupKeys.add(memberKey);
+      // 正常数据一定有显式中心。旧数据缺字段时，仍只选择一个稳定中心，
+      // 避免重复绘制；行数中位数 + 该行最右格对应统一的倒三角中心。
+      const explicitCenter = members.find((cell) => cell.landmarkCenter);
+      const rows = [...new Set(members.map((cell) => cell.r))].sort((a, b) => a - b);
+      const fallbackRow = rows[Math.floor(rows.length / 2)];
+      const fallbackCenter = members
+        .filter((cell) => cell.r === fallbackRow)
+        .sort((a, b) => b.q - a.q || a.camY - b.camY)[0];
+      const groupCenter = explicitCenter ?? fallbackCenter ?? center;
+      const outline = buildLandmarkTriangleOutline(members);
+      if (!outline) continue;
+      const safeKey = `${center.refId}|${center.camX.toFixed(1)}|${center.camY.toFixed(1)}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      groups.push({
+        key: safeKey,
+        refId: center.refId,
+        landmark: center.landmark!,
+        center: groupCenter,
+        cells: members,
+        outline,
+        clipId: `landmark-clip-${safeKey}`,
+      });
+    }
+    return groups;
   }
 
   function buildVisibleHexes(): HexCell[] {
@@ -442,6 +550,8 @@ export function HexMap() {
             const ownV = ownVillageAt(q, r);
             const t = tileAt(q, r);
             const visibility = (t?.visibility ?? 'visible') as Visibility;
+            const landmark = landmarkKindFromRefId(t?.refId);
+            const landmarkCenter = landmarkCenterFromTile(t?.refId, t?.landmarkCenter);
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined
@@ -476,7 +586,7 @@ export function HexMap() {
 
             cells.push({
               q, r, camX, camY, kind, refId, name, icon, terrain, visibility,
-              isSelf,
+              isSelf, landmark, landmarkCenter,
               isSelected: !!(sel && sel.q === q && sel.r === r),
             });
           }
@@ -767,7 +877,15 @@ export function HexMap() {
   function updateHoverTip(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
     const cell = hit?.closest?.('.hex-cell') as Element | null;
-    if (!cell) { setTooltip(null); hovKey.current = ''; return; }
+    if (!cell) {
+      setTooltip(null);
+      hovKey.current = '';
+      if (hoveredLandmarkRef) setHoveredLandmarkRef('');
+      return;
+    }
+
+    const landmarkRef = cell.getAttribute('data-landmark-ref') ?? '';
+    if (landmarkRef !== hoveredLandmarkRef) setHoveredLandmarkRef(landmarkRef);
 
     const q = Number(cell.getAttribute('data-tq'));
     const r = Number(cell.getAttribute('data-tr'));
@@ -924,6 +1042,7 @@ export function HexMap() {
     dragPX.current = panX.current; dragPY.current = panY.current;
     svgEl.current?.classList.add('grabbing');
     setTooltip(null);
+    if (hoveredLandmarkRef) setHoveredLandmarkRef('');
   }
 
   function onMouseMove(e: MouseEvent) {
@@ -1148,6 +1267,7 @@ export function HexMap() {
 
   // ─── render ────────────────────────────────────────────────────────────────
   const visibleCells = buildVisibleHexes();
+  const landmarkGroups = buildLandmarkGroups(visibleCells);
   const terrainLayers = buildTerrainLayers(visibleCells);
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
@@ -1168,6 +1288,7 @@ export function HexMap() {
           if (dragging.current) onMouseUp(e);
           setTooltip(null);
           hovKey.current = '';
+          if (hoveredLandmarkRef) setHoveredLandmarkRef('');
         }}
         onDblClick={onDblClick}
         onClick={onSvgClick}
@@ -1180,6 +1301,11 @@ export function HexMap() {
             <path class="terrain-plain-contour" d="M-24 36 C18 10 52 12 94 34 S166 62 206 28" />
             <path class="terrain-plain-contour terrain-plain-contour--soft" d="M-18 104 C30 78 74 84 112 106 S174 128 204 98" />
           </pattern>
+          {landmarkGroups.map((group) => (
+            <clipPath key={group.clipId} id={group.clipId}>
+              <path d={group.outline.path} />
+            </clipPath>
+          ))}
         </defs>
 
         <rect class="map-bg" x="0" y="0" width="100%" height="100%" />
@@ -1204,19 +1330,59 @@ export function HexMap() {
 
           {/* ── POI 与地貌解耦，不再改写底层 terrain ── */}
           <g class="layer-pois">
+            {landmarkGroups.map((group) => {
+              const iconSize = group.landmark === 'capital' ? HEX_SIZE * 2.35 : HEX_SIZE * 1.65;
+              const isHovered = hoveredLandmarkRef === group.refId;
+              return (
+                <g
+                  key={`landmark-${group.key}`}
+                  class={`landmark-merged landmark-merged--${group.landmark}${isHovered ? ' landmark-merged--hovered' : ''}`}
+                  data-landmark-ref={group.refId}
+                >
+                  <path
+                    class={`landmark-merged-ground terrain-surface terrain-surface--${group.center.terrain ?? 'plain'} terrain-surface--${group.center.visibility}`}
+                    d={group.outline.path}
+                  />
+                  <path class="landmark-merged-shape" d={group.outline.path} />
+                  {group.center.icon && (
+                    <image
+                      class={`landmark-icon landmark-icon--${group.landmark}`}
+                      href={artPath(group.center.icon)}
+                      x={group.outline.centerX - iconSize / 2}
+                      y={group.outline.centerY - iconSize / 2}
+                      width={iconSize}
+                      height={iconSize}
+                      preserveAspectRatio="xMidYMid meet"
+                      clipPath={`url(#${group.clipId})`}
+                    />
+                  )}
+                  <text
+                    class="hex-label landmark-label"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    x={group.outline.centerX}
+                    y={group.outline.centerY + iconSize * 0.42}
+                  >
+                    {group.center.name.slice(0, 5)}
+                  </text>
+                </g>
+              );
+            })}
             {visibleCells.map((c) => {
               const rk = ringKind(c.kind, c.isSelf);
               if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
+              if (c.landmark) return null;
               return (
                 <g
                   key={`poi-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                  class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}`}
+                  class={`hex-poi hex-cell--${c.visibility}${c.isSelf ? ' hex-cell--self' : ''}${c.kind !== 'empty' ? ' hex-cell--occupied' : ''}${c.landmark ? ` hex-poi--landmark-${c.landmark}${c.landmarkCenter ? ' hex-poi--landmark-center' : ' hex-poi--landmark-footprint'}` : ''}`}
                   transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
                 >
                   {/* Entity ring */}
-                  {rk && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
+                  {/* 王都/封地使用合并轮廓；不再绘制中心格的单格 PvE 红环。 */}
+                  {rk && !c.landmark && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
-                  {c.icon && (
+                  {c.icon && !c.landmark && (
                     <image
                       class="hex-entity-img"
                       href={artPath(c.icon)}
@@ -1246,15 +1412,36 @@ export function HexMap() {
 
           {/* 独立透明命中层：默认不画格线，只在 hover / 选中时显出六边边界。 */}
           <g class="layer-hexes">
+            {landmarkGroups.map((group) => (
+              <g
+                key={`landmark-hit-${group.key}`}
+                class={`hex-cell landmark-merged-hit landmark-merged-hit--${group.landmark}`}
+                data-landmark-ref={group.refId}
+                {...({
+                  'data-tq': String(group.center.q),
+                  'data-tr': String(group.center.r),
+                  'data-cam-x': String(group.outline.centerX),
+                  'data-cam-y': String(group.outline.centerY),
+                  'data-kind': group.center.kind,
+                  'data-ref': group.refId,
+                  'data-name': group.center.name,
+                  'data-visibility': group.center.visibility,
+                  ...(group.center.icon ? { 'data-icon': group.center.icon } : {}),
+                } as any)}
+              >
+                <path class="landmark-merged-hit-path" d={group.outline.path} />
+              </g>
+            ))}
             {visibleCells.map((c) => (
               <g
                 key={`hit-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
-                class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}`}
+                class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}${c.landmark ? ' hex-cell--landmark' : ''}`}
                 transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
               >
                 <polygon class="hex-hit" points={HEX_CORNER_STR} />
-                {c.isSelected && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
+                {/* 王都/封地是合并后的整体目标；点击后不再回退显示某一个内部格的选中环。 */}
+                {c.isSelected && !c.landmark && <polygon class="hex-sel-ring" points={HEX_CORNER_STR} />}
               </g>
             ))}
           </g>

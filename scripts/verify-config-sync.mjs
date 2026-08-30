@@ -24,6 +24,7 @@ const requiredTables = [
   'academy.csv',
   'building_levels.csv',
   'buildings.csv',
+  'dialogues.csv',
   'game_constants.csv',
   'mercenaries.csv',
   'research.csv',

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { hexDistanceWrapped } from '../infra/hex.js';
 
 let clock = 1_000_000;
 function freshApp(): GameApp {
@@ -21,6 +22,27 @@ const spawnResidentCamp = (app: GameApp, id = 'camp-other') =>
   send(app, 'pve.Spawn', { id, type: 'rats', q: 30, r: 30, task: false, noRespawn: false });
 
 const m1Fields = ['woodcutter', 'claypit', 'ironmine', 'cropland'];
+
+test('任务营地选点：同一搜索范围内按稳定种子随机分散，不固定命中相邻格', async () => {
+  const app = freshApp();
+  const registered = await reg(app, '任务营地随机选点');
+  assert.equal(registered.ok, true, `注册应成功: ${registered.reason ?? ''}`);
+  const player = (registered.payload as any).player;
+  const center = { q: player.q, r: player.r };
+  const radius = 4;
+  const picks = new Map<string, number>();
+  for (let i = 0; i < 20; i++) {
+    const result = await send(app, 'world.FindFreeTile', {
+      centerQ: center.q, centerR: center.r, radius, salt: `taskcamp-test-${i}`,
+    });
+    assert.equal(result.ok, true, `范围内应能找到空地: ${result.reason ?? ''}`);
+    const point = result.payload as { q: number; r: number };
+    picks.set(`${point.q},${point.r}`, hexDistanceWrapped(center, point, app.config.constants.worldW, app.config.constants.worldH));
+  }
+  assert.ok(picks.size > 1, '不同任务营地种子不应总命中同一格');
+  assert.ok([...picks.values()].some((distance) => distance > 1), '应有任务营地落在非紧邻村庄的范围内');
+});
+
 async function repairM1Fields(app: GameApp, villageId: string): Promise<void> {
   await grant(app, villageId, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
   for (const kind of m1Fields) {

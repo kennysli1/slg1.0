@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-08-28
+updated: 2026-08-30
 owner: ops
 summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 ---
@@ -32,6 +32,8 @@ summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 生产机可把 `GITHUB_CONFIG_SYNC_TOKEN`（以及可选的 repo/API 地址）写入 `shared/config.env`，发布脚本会在 PM2 重启前加载该文件；它不进入 release 压缩包、Git 或日志。没有 token 时仍可运行游戏，管理员可补齐密钥后在配置中心点击重试。
 
 配置中心的“热重载”只表示当前进程重新读取 CSV，不等同于 GitHub 合并或生产发布。发布失败不应手动覆盖 `current`，按部署手册回滚。
+
+对话变量也遵循同一条链路：`/config/dialogues` 与 `dialogues.csv` 保存 `{villageName}`、`{fiefName}` 变量名；任务服务端按当前玩家村庄和王国归属封地渲染后，通过任务快照/奖励响应下发，客户端不自行替换。`dialogues/save` 会同时更新当前配置、共享配置镜像、revision/outbox，并在热重载后立即可读；发布脚本再按 `dialogues.csv` 主键合并共享配置，避免运行时、持久化和客户端出现不同版本。
 
 ## GM 实时状态流程
 

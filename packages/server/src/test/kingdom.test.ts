@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGameApp } from '../app.js';
-import { kingdomLandmarkAnchors } from '../infra/world-generation.js';
+import { kingdomLandmarkAnchors, kingdomLandmarkFootprintOffsets } from '../infra/world-generation.js';
 
 const send = (app: ReturnType<typeof createGameApp>, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
 
@@ -19,6 +22,22 @@ function addCouncil(app: ReturnType<typeof createGameApp>, villageId: string): v
 test('王国地标：王都位于世界中心，四封地位于四象限中心且成为真实 PvE', () => {
   const app = createGameApp({ manualScheduler: true });
   app.setupWorld();
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-capital').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2, '1': 3 },
+    '王都应为上窄下宽的 1+2+3 倒三角',
+  );
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-fief-ne').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2 },
+    '封地应为上窄下宽的 1+2 倒三角',
+  );
   const expected = kingdomLandmarkAnchors(app.config.constants.worldW, app.config.constants.worldH, Number(app.config.constants.raw.kingdom_fief_offset_ratio));
   for (const anchor of expected) {
     const pve = app.store.get<any>('pve', anchor.id);
@@ -26,6 +45,14 @@ test('王国地标：王都位于世界中心，四封地位于四象限中心�
     assert.equal(pve.type, anchor.type);
     assert.deepEqual({ q: pve.q, r: pve.r }, { q: anchor.q, r: anchor.r });
     assert.ok(Object.values(pve.defender as Record<string, { count: number }>).reduce((sum, unit) => sum + unit.count, 0) > 0);
+    const footprint = app.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(footprint.length, anchor.id === 'kingdom-capital' ? 6 : 3, `${anchor.id} 应占用三角形格子数`);
+    assert.equal(footprint.filter((tile) => tile.landmarkCenter === true).length, 1, `${anchor.id} 应保留唯一中心格`);
+    assert.deepEqual(
+      new Set(footprint.map((tile) => `${tile.q},${tile.r}`)),
+      new Set((anchor.footprint ?? [{ q: anchor.q, r: anchor.r }]).map((cell) => `${cell.q},${cell.r}`)),
+      `${anchor.id} 应按规划的三角形占地写入地图`,
+    );
   }
 });
 
@@ -42,6 +69,74 @@ test('王国地标：即使未探索也会在地图返回公开地标标记', as
     const tile = tiles.find((t) => t.refId === id);
     assert.ok(tile, `${id} 应存在地图标记`);
     assert.notEqual(tile.visibility, 'unexplored', `${id} 不应被战争迷雾隐藏`);
+  }
+});
+
+test('王国地标迁移：切换倒三角后清除旧版本遗留占地', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-migration-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchor = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    ).find((item) => item.id === 'kingdom-capital')!;
+    // 旧版正三角形的这些格不属于当前上窄下宽占地，模拟升级前的持久化残留。
+    // 选一块当前计划没有其它目标占用的格，避免覆盖无关 PvE。
+    const stale = [
+      { q: anchor.q + 1, r: anchor.r }, { q: anchor.q + 2, r: anchor.r },
+      { q: anchor.q + 1, r: anchor.r + 1 }, { q: anchor.q, r: anchor.r + 2 },
+    ].find((cell) => !initial.store.get('world_tile', `${cell.q},${cell.r}`)
+      || initial.store.get<any>('world_tile', `${cell.q},${cell.r}`)?.kind === 'empty');
+    assert.ok(stale, '测试需要一块可写入旧版本遗留格的空地');
+    initial.store.set('world_tile', `${stale.q},${stale.r}`, {
+      q: stale.q, r: stale.r, kind: 'pve', refId: anchor.id,
+      name: '王都', icon: 'pve_fortress', faction: 'kingdom', landmark: 'capital', landmarkCenter: false,
+    });
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    const tiles = restarted.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(tiles.length, 6, '重启迁移后王都只能保留 6 个倒三角格');
+    assert.ok(!tiles.some((tile) => tile.q === stale.q && tile.r === stale.r), '旧版遗留格应被清除');
+    assert.equal(restarted.store.get<any>('world_tile', `${stale.q},${stale.r}`)?.kind, 'empty');
+    assert.equal(tiles.filter((tile) => tile.landmarkCenter === true).length, 1, '迁移后仍只能有一个中心格');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('王国地标迁移：重启时会补回持久化为显式空地的缺失格', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-empty-repair-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchors = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    );
+
+    // 复现生产存档：目标曾被清除后留下 { kind:'empty' }，并非“没有这条记录”。
+    for (const anchor of anchors) {
+      const missing = (anchor.footprint ?? []).find((cell) => cell.q !== anchor.q || cell.r !== anchor.r)!;
+      initial.store.set('world_tile', `${missing.q},${missing.r}`, { q: missing.q, r: missing.r, kind: 'empty' });
+    }
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    for (const anchor of anchors) {
+      const expected = new Set((anchor.footprint ?? []).map((cell) => `${cell.q},${cell.r}`));
+      const actual = restarted.store.all<any>('world_tile')
+        .filter((tile) => tile.refId === anchor.id)
+        .map((tile) => `${tile.q},${tile.r}`);
+      assert.deepEqual(new Set(actual), expected, `${anchor.id} 的显式空地应按同一迁移规则补回`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

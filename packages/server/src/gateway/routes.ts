@@ -142,7 +142,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       SendAttack: {
         command: 'movement.SendAttack', ownVillage: true, needAuth: true,
         schema: {
-          targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
+          targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+          targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           declareWar: { type: 'boolean', optional: true },
@@ -193,11 +194,11 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       GetMarchOptions: {
         command: 'movement.GetMarchOptions', ownVillage: true, needAuth: true,
-        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, kind: { type: 'string', minLen: 1, maxLen: 16 }, refId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
+        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, kind: { type: 'string', minLen: 1, maxLen: 16 }, refId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, movementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
       },
       PreviewMarch: {
         command: 'movement.PreviewMarch', ownVillage: true, needAuth: true,
-        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout', 'ambush', 'investigate'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
+        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout', 'ambush', 'investigate'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
       },
       FoundVillage: {
         command: 'movement.FoundVillage', ownVillage: true, needAuth: true,

@@ -37,6 +37,19 @@ interface PveState {
   noRespawn?: boolean;
   /** 天王老子村库存已按 M8 配置初始化；旧存档缺失时由 resume 惰性迁移。 */
   taskVillageLootInitialized?: boolean;
+  faction?: 'neutral' | 'kingdom';
+  cityState?: boolean;
+  cityStateTier?: 1 | 2 | 3;
+  cityStateTribe?: 'romans' | 'gauls' | 'teutons';
+  kingdomProfile?: 'city_state' | 'fief' | 'capital';
+  cityStateGenerationVersion?: number;
+  defenderPeak?: Snapshot;
+  lootPeak?: Record<string, number>;
+  raidDefense?: Snapshot;
+  raidDefenseRatio?: number;
+  buildings?: Array<{ slotId: string; zone: 'inner' | 'outer'; kind: string; level: number }>;
+  recovery?: { startedAt: number; troopDurationSec: number; resourceDurationSec: number; troopStart?: Snapshot; resourceStart?: Record<string, number> };
+  recoveryResetCount?: number;
 }
 
 const COLLECTION = 'pve';
@@ -45,6 +58,36 @@ const PVE_BASIC_LOOT_RESOURCES = ['wood', 'clay', 'iron', 'crop'] as const;
 function positiveInt(value: unknown): number {
   return Math.max(0, Math.floor(Number(value) || 0));
 }
+
+function hash32(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+function random01(seed: string): number { return hash32(seed) / 0x1_0000_0000; }
+function randomInt(seed: string, min: number, max: number): number {
+  const lo = Math.ceil(min), hi = Math.floor(max);
+  return hi <= lo ? lo : lo + Math.floor(random01(seed) * (hi - lo + 1));
+}
+
+function chooseWeightedTier(seed: string, weights: Record<1 | 2 | 3, number>): 1 | 2 | 3 {
+  const entries = ([1, 2, 3] as const).map((tier) => ({ tier, weight: Math.max(0, Number(weights[tier]) || 0) }));
+  const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  if (total <= 0) return 2;
+  let cursor = random01(seed) * total;
+  for (const entry of entries) {
+    cursor -= entry.weight;
+    if (cursor < 0) return entry.tier;
+  }
+  return 3;
+}
+
+function shuffleDeterministic<T>(values: readonly T[], seed: string): T[] {
+  return [...values].sort((a, b) => random01(`${seed}:${String(a)}`) - random01(`${seed}:${String(b)}`));
+}
+
+function totalUnits(s: Snapshot): number { return Object.values(s).reduce((n, u) => n + Math.max(0, Math.floor(u.count)), 0); }
 
 /** 在四种基础资源之间尽量平均分配有限运力，库存短缺时自动让位。 */
 function allocateAveragePve(available: Record<string, number>, capacity: number): Record<string, number> {
@@ -102,6 +145,7 @@ export class PveModule {
     this.commands.register('pve.ListTargets', () => this.listTargets());
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
+    this.commands.register('pve.DepositLoot', (c) => this.depositLoot(c));
     this.commands.register('pve.ApplyTaskVillageOutcome', (c) => this.applyTaskVillageOutcome(c));
     // 任务模块运行时生成/移除任务营地（内部命令）
     this.commands.register('pve.Spawn', (c) => this.spawn(c));
@@ -141,6 +185,7 @@ export class PveModule {
     const s = this.load(id);
     if (!s) return { ok: true, payload: {} }; // 已不存在，幂等成功
     this.scheduler.cancelByOwner(`pve:${id}`);
+    this.scheduler.cancelByOwner(`pve:recovery:${id}`);
     this.store.delete(COLLECTION, id);
     await this.commands.send({
       name: 'world.RemoveTile', from: PveModule.NAME,
@@ -171,6 +216,16 @@ export class PveModule {
       this.migrateTaskVillageDefender(s);
       const current = this.load(s.id) ?? s;
       this.migrateTaskVillageLoot(current);
+      if (current.cityState) {
+        // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
+        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe) {
+          this.regenerateCityState(current);
+          continue;
+        }
+        this.settleRecovery(current);
+        if (current.recovery) this.scheduleRecovery(current);
+        continue;
+      }
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
       if (s.cleared && !s.task && !s.noRespawn) this.respawn(s.id);
     }
@@ -179,6 +234,7 @@ export class PveModule {
   /** 创建一个 PvE 目标，并登记到地图。坐标为六边形轴坐标 (q,r)。task=true 时登记为任务营地，ownerVillageId 标记所属村庄。 */
   create(id: string, type: string, q: number, r: number, task = false, ownerVillageId?: string, loot?: Record<string, number>, noRespawn = false): void {
     const tpl = this.config.pveTemplates[type];
+    if (tpl?.cityState) { this.createCityState(id, type, q, r); return; }
     const s: PveState = {
       id,
       type,
@@ -210,6 +266,105 @@ export class PveModule {
       from: PveModule.NAME,
       payload: { q, r, refId: id, name: tpl.name, icon: tpl.icon, task: !!task },
     });
+  }
+
+  private createCityState(id: string, type: string, q: number, r: number): void {
+    const state = this.buildCityState(id, type, q, r);
+    this.store.set(COLLECTION, id, state);
+    const tpl = this.config.pveTemplates[type];
+    void this.commands.send({ name: 'world.PlacePve', from: PveModule.NAME, payload: { q, r, refId: id, name: tpl?.name ?? '王国城邦', icon: tpl?.icon, faction: 'kingdom', cityState: true } });
+  }
+
+  /** 用当前版本规则重建一个既有城邦，保留地图坐标和稳定 id。 */
+  private regenerateCityState(previous: PveState): void {
+    const state = this.buildCityState(previous.id, previous.type, previous.q, previous.r);
+    this.store.set(COLLECTION, previous.id, state);
+    const tpl = this.config.pveTemplates[previous.type];
+    void this.commands.send({ name: 'world.PlacePve', from: PveModule.NAME, payload: { q: state.q, r: state.r, refId: state.id, name: tpl?.name ?? '王国城邦', icon: tpl?.icon, faction: 'kingdom', cityState: true } });
+  }
+
+  private buildCityState(id: string, type: string, q: number, r: number): PveState {
+    const c = this.config.constants;
+    const template = this.config.pveTemplates[type];
+    const seed = String(c.raw.world_seed ?? 'kow-world-v1');
+    const version = c.kingdomCityStateGenerationVersion;
+    const kingdomProfile = template?.kingdomProfile ?? 'city_state';
+    const tier = kingdomProfile === 'city_state' ? chooseWeightedTier(`${seed}:${version}:${id}:tier`, c.kingdomCityStateTierWeights) : undefined;
+    const tribes: Array<'romans' | 'gauls' | 'teutons'> = c.kingdomCityStateTribePool.filter((value): value is 'romans' | 'gauls' | 'teutons' => value === 'romans' || value === 'gauls' || value === 'teutons');
+    if (tribes.length === 0) tribes.push('romans');
+    const tribe: 'romans' | 'gauls' | 'teutons' = tribes[Math.floor(random01(`${seed}:${version}:${id}:tribe`) * tribes.length)] ?? 'romans';
+    const profile = kingdomProfile === 'fief'
+      ? { unitCount: c.kingdomFiefUnitCount, unitMin: c.kingdomFiefUnitMin, unitMax: c.kingdomFiefUnitMax, resourceMin: c.kingdomFiefResourceMin, resourceMax: c.kingdomFiefResourceMax, goldMin: c.kingdomFiefGoldMin, goldMax: c.kingdomFiefGoldMax }
+      : kingdomProfile === 'capital'
+        ? { unitCount: c.kingdomCapitalUnitCount, unitMin: c.kingdomCapitalUnitMin, unitMax: c.kingdomCapitalUnitMax, resourceMin: c.kingdomCapitalResourceMin, resourceMax: c.kingdomCapitalResourceMax, goldMin: c.kingdomCapitalGoldMin, goldMax: c.kingdomCapitalGoldMax }
+        : tier === 1
+      ? { unitCount: c.kingdomCityStateTier1UnitCount, unitMin: c.kingdomCityStateTier1UnitMin, unitMax: c.kingdomCityStateTier1UnitMax, resourceMin: c.kingdomCityStateTier1ResourceMin, resourceMax: c.kingdomCityStateTier1ResourceMax, goldMin: c.kingdomCityStateTier1GoldMin, goldMax: c.kingdomCityStateTier1GoldMax }
+      : tier === 2
+        ? { unitCount: c.kingdomCityStateTier2UnitCount, unitMin: c.kingdomCityStateTier2UnitMin, unitMax: c.kingdomCityStateTier2UnitMax, resourceMin: c.kingdomCityStateTier2ResourceMin, resourceMax: c.kingdomCityStateTier2ResourceMax, goldMin: c.kingdomCityStateTier2GoldMin, goldMax: c.kingdomCityStateTier2GoldMax }
+        : { unitCount: c.kingdomCityStateTier3UnitCount, unitMin: c.kingdomCityStateTier3UnitMin, unitMax: c.kingdomCityStateTier3UnitMax, resourceMin: c.kingdomCityStateTier3ResourceMin, resourceMax: c.kingdomCityStateTier3ResourceMax, goldMin: c.kingdomCityStateTier3GoldMin, goldMax: c.kingdomCityStateTier3GoldMax };
+    const baseLoot: Record<string, number> = {
+      wood: randomInt(`${seed}:${version}:${id}:wood`, profile.resourceMin, profile.resourceMax),
+      clay: randomInt(`${seed}:${version}:${id}:clay`, profile.resourceMin, profile.resourceMax),
+      iron: randomInt(`${seed}:${version}:${id}:iron`, profile.resourceMin, profile.resourceMax),
+      crop: randomInt(`${seed}:${version}:${id}:crop`, profile.resourceMin, profile.resourceMax),
+      gold: randomInt(`${seed}:${version}:${id}:gold`, profile.goldMin, profile.goldMax),
+    };
+    const configuredPool = c.kingdomCityStateUnitPools[tribe] ?? [];
+    const derivedPool = Object.values(this.config.units)
+      .filter((unit) => unit.tribe === tribe && !unit.isMercenary && !unit.key.includes('settler') && !unit.key.includes('chief'))
+      .map((unit) => unit.key);
+    const pool = [...new Set([...configuredPool, ...derivedPool])]
+      .filter((code) => this.config.units[code]?.tribe === tribe && !this.config.units[code]?.isMercenary);
+    // 所有兵种都从对应种族池随机抽取，不再强制包含侦察兵；是否出现侦察兵
+    // 由城邦等级的随机兵种数量和种族兵种池共同决定。
+    const shuffled = shuffleDeterministic(pool, `${seed}:${version}:${id}:units`);
+    const selected = shuffled.slice(0, Math.max(1, profile.unitCount));
+    const defender: Snapshot = {};
+    for (const [index, code] of selected.entries()) {
+      const def = this.config.units[code]!;
+      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, traits: [] };
+    }
+    const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
+    const raidDefense: Snapshot = {};
+    for (const [code, unit] of Object.entries(defender)) raidDefense[code] = { ...unit, count: Math.floor(unit.count * ratio) };
+    const desiredDefense = Math.round(totalUnits(defender) * ratio);
+    let defenseDelta = desiredDefense - totalUnits(raidDefense);
+    for (const code of Object.keys(defender)) {
+      if (defenseDelta === 0) break;
+      const room = defenseDelta > 0 ? defender[code]!.count - raidDefense[code]!.count : raidDefense[code]!.count;
+      const change = Math.min(Math.abs(defenseDelta), room);
+      raidDefense[code]!.count += defenseDelta > 0 ? change : -change;
+      defenseDelta += defenseDelta > 0 ? -change : change;
+    }
+    const buildings = this.generateCityBuildings(id, `${seed}:${version}`);
+    return {
+      id, type, q, r, defender: structuredClone(defender), defenderPeak: structuredClone(defender), raidDefense,
+      raidDefenseRatio: ratio, loot: { ...baseLoot }, lootPeak: { ...baseLoot }, cleared: false, clearCount: 0,
+      faction: 'kingdom', cityState: true, cityStateTier: tier, cityStateTribe: tribe, kingdomProfile, cityStateGenerationVersion: version, buildings,
+    };
+  }
+
+  private generateCityBuildings(id: string, seed: string): Array<{ slotId: string; zone: 'inner' | 'outer'; kind: string; level: number }> {
+    const c = this.config.constants;
+    const result: Array<{ slotId: string; zone: 'inner' | 'outer'; kind: string; level: number }> = [];
+    const addZone = (zone: 'inner' | 'outer', requested: number, pool: string[], mandatory: string[] = []) => {
+      const defs = Object.values(this.config.buildings).filter((b) => b.zone === zone);
+      const valid = [...new Set([...mandatory, ...pool, ...defs.map((b) => b.kind)])].filter((code) => this.config.buildings[code]?.zone === zone);
+      const want = Math.min(valid.length, Math.max(mandatory.length, requested));
+      const ordered = [...valid].sort((a, b) => random01(`${seed}:${id}:building:${zone}:${a}`) - random01(`${seed}:${id}:building:${zone}:${b}`));
+      for (const kind of [...mandatory, ...ordered]) {
+        if (result.some((x) => x.kind === kind) || result.filter((x) => x.zone === zone).length >= want) continue;
+        const def = this.config.buildings[kind]; if (!def) continue;
+        const mandatoryField = mandatory.includes(kind);
+        const level = mandatoryField
+          ? Math.min(def.maxLevel, Math.max(1, Math.floor(c.kingdomCityStateResourceFieldLevel)))
+          : Math.min(def.maxLevel, randomInt(`${seed}:${id}:level:${kind}`, c.kingdomCityStateBuildingLevelMin, c.kingdomCityStateBuildingLevelMax));
+        result.push({ slotId: `${zone}-${result.filter((x) => x.zone === zone).length + 1}`, zone, kind, level });
+      }
+    };
+    addZone('outer', randomInt(`${seed}:${id}:outer-count`, c.kingdomCityStateOuterBuildingCountMin, c.kingdomCityStateOuterBuildingCountMax), c.kingdomCityStateOuterBuildingPool, ['woodcutter', 'claypit', 'ironmine', 'cropland']);
+    addZone('inner', randomInt(`${seed}:${id}:inner-count`, c.kingdomCityStateInnerBuildingCountMin, c.kingdomCityStateInnerBuildingCountMax), c.kingdomCityStateInnerBuildingPool);
+    return result;
   }
 
   private load(id: string): PveState | undefined {
@@ -270,7 +425,12 @@ export class PveModule {
     this.migrateTaskVillageDefender(s);
     const afterDefender = this.load(s.id) ?? s;
     this.migrateTaskVillageLoot(afterDefender);
-    const current = this.load(s.id) ?? afterDefender;
+    let current = this.load(s.id) ?? afterDefender;
+    if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe)) {
+      this.regenerateCityState(current);
+      current = this.load(current.id) ?? current;
+    }
+    if (current.cityState) this.settleRecovery(current);
     // World owns the displayed tile coordinate. Older task-village records can
     // retain stale q/r after a map edit or a failed asynchronous PlacePve;
     // resolve the refId through World so scouting, raiding and map details agree.
@@ -298,6 +458,8 @@ export class PveModule {
         targets: this.store.all<PveState>(COLLECTION).map((s) => ({
           id: s.id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
           task: !!s.task, noRespawn: !!s.noRespawn,
+          faction: s.faction, cityState: !!s.cityState, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile,
+          buildings: s.cityState ? structuredClone(s.buildings ?? []) : undefined,
         })),
       },
     };
@@ -307,12 +469,15 @@ export class PveModule {
   private getDefenderSnapshot(cmd: Command): CommandResult {
     const s = this.load((cmd.payload as any).id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (s.cityState) this.settleRecovery(s);
     // 快照是跨模块的只读边界，不能把 PvE 存档里的守军对象直接交给 Combat。
     // Combat 会在逐 tick 结算时原地修改快照；若这里返回原引用，Pve 状态会先被
     // 战斗过程扣减，随后 ApplyResult 再按 defenderLosses 扣一次，导致失败战斗
     // 也把幸存守军清成 0（例如 13 -> 3 后又 3 -> 0）。
-    const snapshot = s.cleared ? {} : structuredClone(s.defender);
-    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn } };
+    const purpose = (cmd.payload as any).purpose as 'raid' | 'siege' | 'scout' | undefined;
+    const snapshot = s.cleared ? {} : structuredClone(purpose === 'raid' ? (s.raidDefense ?? s.defender) : s.defender);
+    const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
+    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
   }
 
   /**
@@ -320,14 +485,17 @@ export class PveModule {
    * looterCarry = 进攻方幸存载货量；战利品按 carry 上限搬运。
    */
   private applyResult(cmd: Command): CommandResult {
-    const { id, defenderLosses, attackerWins, looterCarry } = cmd.payload as {
+    const { id, defenderLosses, attackerWins, looterCarry, battleType, buildingPower } = cmd.payload as {
       id: string;
       defenderLosses: Record<string, number>;
       attackerWins: boolean;
       looterCarry: number;
+      battleType?: 'raid' | 'siege' | 'ambush';
+      buildingPower?: number;
     };
     const s = this.load(id);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
+    if (s.cityState) return this.applyCityStateResult(s, defenderLosses, attackerWins, looterCarry, battleType, buildingPower);
 
     // 扣守军
     for (const [unit, dead] of Object.entries(defenderLosses)) {
@@ -360,6 +528,109 @@ export class PveModule {
         noRespawn: !!s.noRespawn,
       },
     };
+  }
+
+  private applyCityStateResult(s: PveState, defenderLosses: Record<string, number>, attackerWins: boolean, looterCarry: number, battleType?: string, buildingPower = 0): CommandResult {
+    this.settleRecovery(s);
+    for (const [unit, dead] of Object.entries(defenderLosses)) {
+      if (s.defender[unit]) s.defender[unit].count = Math.max(0, s.defender[unit].count - Math.max(0, Math.floor(dead)));
+      if (s.raidDefense?.[unit] && battleType === 'raid') s.raidDefense[unit].count = Math.max(0, s.raidDefense[unit].count - Math.max(0, Math.floor(dead)));
+    }
+    let buildingLoot: Record<string, number> = {}, storedLoot: Record<string, number> = {}, buildingDamage: unknown[] = [];
+    if (attackerWins && battleType === 'raid' && buildingPower > 0) {
+      let power = buildingPower;
+      const threshold = this.config.constants.pvpRaidPowerPerBuildingLevel;
+      for (const b of s.buildings ?? []) {
+        if (b.zone !== 'outer' || power < threshold || b.level <= 0) continue;
+        const levels = Math.min(b.level, Math.floor(power / Math.max(1, threshold)));
+        if (levels <= 0) continue;
+        const def = this.config.buildings[b.kind];
+        let repairCost: Record<string, number> = {}, repairTimeSec = 0;
+        for (let i = 0; i < levels; i++) {
+          const level = b.level - i;
+          buildingLoot = this.mergeResources(buildingLoot, def?.cost(level) ?? {});
+          repairCost = this.mergeResources(repairCost, def?.cost(level) ?? {});
+          repairTimeSec += def?.timeSec(level) ?? 0;
+        }
+        buildingDamage.push({ kind: b.kind, slotId: b.slotId, fromLevel: b.level, toLevel: b.level - levels, destroyed: levels, repairCost, repairTimeSec });
+        power -= levels * threshold;
+      }
+    }
+    if (attackerWins && battleType === 'siege') storedLoot = this.takeLoot(s, looterCarry);
+    const hasLoss = Object.values(defenderLosses).some((n) => n > 0);
+    const hasLoot = Object.values({ ...buildingLoot, ...storedLoot }).some((n) => n > 0);
+    if (hasLoss || hasLoot) this.resetRecovery(s);
+    this.store.set(COLLECTION, s.id, s);
+    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, task: false, noRespawn: false } };
+  }
+
+  /** 王国封地雇佣军返程时把掠夺所得存回来源封地，不加入玩家经济。 */
+  private depositLoot(cmd: Command): CommandResult {
+    const { id, gain } = cmd.payload as { id?: string; gain?: Record<string, number> };
+    if (!id) return { ok: false, payload: {}, reason: 'target_id_required' };
+    const s = this.load(id);
+    if (!s || !s.cityState || s.faction !== 'kingdom') return { ok: false, payload: {}, reason: 'kingdom_target_not_found' };
+    const deposited: Record<string, number> = {};
+    for (const [key, raw] of Object.entries(gain ?? {})) {
+      const amount = Math.max(0, Math.floor(Number(raw) || 0));
+      if (amount <= 0) continue;
+      const peak = Number(s.lootPeak?.[key] ?? Number.POSITIVE_INFINITY);
+      const before = Number(s.loot[key] ?? 0);
+      const after = Math.min(peak, before + amount);
+      s.loot[key] = after;
+      deposited[key] = Math.max(0, after - before);
+    }
+    this.store.set(COLLECTION, id, s);
+    return { ok: true, payload: { id, deposited, loot: { ...s.loot } } };
+  }
+
+  private mergeResources(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+    const out = { ...a }; for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + (Number(v) || 0); return out;
+  }
+
+  private recoveryProgress(s: PveState, kind: 'troop' | 'resource'): number {
+    if (!s.recovery) return 1;
+    const duration = kind === 'troop' ? s.recovery.troopDurationSec : s.recovery.resourceDurationSec;
+    return Math.max(0, Math.min(1, (this.now() - s.recovery.startedAt) / 1000 / Math.max(1, duration)));
+  }
+
+  private settleRecovery(s: PveState): void {
+    if (!s.cityState || !s.recovery || !s.defenderPeak || !s.lootPeak) return;
+    const tp = this.recoveryProgress(s, 'troop'), rp = this.recoveryProgress(s, 'resource');
+    for (const [code, peak] of Object.entries(s.defenderPeak)) {
+      const cur = s.recovery.troopStart?.[code] ?? { ...peak, count: 0 };
+      s.defender[code] = { ...peak, count: Math.min(peak.count, Math.floor(cur.count + (peak.count - cur.count) * tp)) };
+    }
+    if (s.raidDefense) {
+      const ratio = s.raidDefenseRatio ?? this.config.constants.kingdomCityStateRaidDefenseMinRatio;
+      for (const [code, unit] of Object.entries(s.defender)) s.raidDefense[code] = { ...unit, count: Math.floor(unit.count * ratio) };
+    }
+    for (const [key, peak] of Object.entries(s.lootPeak)) {
+      const start = Number(s.recovery.resourceStart?.[key] ?? s.loot[key] ?? 0);
+      s.loot[key] = Math.min(peak, start + (peak - start) * rp);
+    }
+    if (tp >= 1 && rp >= 1) { s.defender = structuredClone(s.defenderPeak); s.loot = { ...s.lootPeak }; s.raidDefense = this.makeRaidDefense(s); s.recovery = undefined; }
+    this.store.set(COLLECTION, s.id, s);
+  }
+
+  private makeRaidDefense(s: PveState): Snapshot {
+    const ratio = s.raidDefenseRatio ?? this.config.constants.kingdomCityStateRaidDefenseMinRatio;
+    const out: Snapshot = {}; for (const [code, u] of Object.entries(s.defender)) out[code] = { ...u, count: Math.floor(u.count * ratio) }; return out;
+  }
+
+  private resetRecovery(s: PveState): void {
+    s.recoveryResetCount = (s.recoveryResetCount ?? 0) + 1;
+    const c = this.config.constants, seed = String(c.raw.world_seed ?? 'kow-world-v1');
+    const duration = randomInt(`${seed}:${s.id}:recovery:${s.recoveryResetCount}:${this.now()}`, c.kingdomCityStateRecoveryMinSec, c.kingdomCityStateRecoveryMaxSec);
+    s.recovery = { startedAt: this.now(), troopDurationSec: duration, resourceDurationSec: duration + c.kingdomCityStateRecoveryResourceExtraSec, troopStart: structuredClone(s.defender), resourceStart: { ...s.loot } };
+    this.scheduleRecovery(s);
+  }
+
+  private scheduleRecovery(s: PveState): void {
+    this.scheduler.cancelByOwner(`pve:recovery:${s.id}`);
+    if (!s.recovery) return;
+    const delay = Math.max(0, s.recovery.resourceDurationSec * 1000 - (this.now() - s.recovery.startedAt));
+    this.scheduler.schedule(delay, () => { const cur = this.load(s.id); if (cur) this.settleRecovery(cur); }, `pve:recovery:${s.id}`, `pve:${s.id}`);
   }
 
   /** m8 战斗结束后的任务村持久化：保留实体，守军变为战后幸存者，资源减半且金币归零。 */

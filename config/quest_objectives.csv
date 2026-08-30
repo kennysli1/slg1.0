@@ -20,3 +20,5 @@ o-m10,m10,main_base_level,2,1
 o-m11,m11,explore_tiles,200,1
 o-m12,m12,clear_camp,bandits:2,1
 o-m13,m13,investigate_task_village,secret_camp,1
+o-m14,m14,submit_resources,crop:500,1
+o-m15,m15,reputation_at_most,-5,1

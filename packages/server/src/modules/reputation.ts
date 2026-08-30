@@ -16,6 +16,11 @@ interface ReputationState {
   updatedAt: number;
   goodPvpKillRemainder?: number;
   evilPvpKillRemainder?: number;
+  /** 王国 PvE 击杀人口累计；不足一声望点的部分跨战斗保留。 */
+  kingdomPveKillRemainder?: number;
+  /** 已由王国 PvE 击杀累计触发的 -5 声望批次，用于每批只触发一次报复检查。 */
+  kingdomPvePenaltyChunks?: number;
+  kingdomPvePenaltyRemainder?: number;
 }
 
 const COLLECTION = 'reputation';
@@ -42,7 +47,9 @@ export class ReputationModule {
     this.commands.register('reputation.AdjustByVillage', (c) => this.adjustByVillage(c));
     this.commands.register('reputation.SetTreasureDelta', (c) => this.setTreasureDelta(c));
     this.commands.register('reputation.ProcessPvpBattle', (c) => this.processPvpBattle(c));
-    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
+    // BattleEnded 的声望结算属于战斗完成的同步后置步骤；等待处理器，
+    // 让战斗命令返回时跨战斗累计与报复阈值检查已经落库。
+    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => this.onBattleEnded(evt));
   }
 
   resume(): void {
@@ -65,13 +72,16 @@ export class ReputationModule {
       updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : this.now(),
       goodPvpKillRemainder: Math.max(0, Math.trunc(raw.goodPvpKillRemainder ?? 0)) % 10,
       evilPvpKillRemainder: Math.max(0, Math.trunc(raw.evilPvpKillRemainder ?? 0)) % 10,
+      kingdomPveKillRemainder: Math.max(0, Math.trunc(raw.kingdomPveKillRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveKilledPopulationPerReputation),
+      kingdomPvePenaltyChunks: Math.max(0, Math.trunc(raw.kingdomPvePenaltyChunks ?? 0)),
+      kingdomPvePenaltyRemainder: Math.max(0, Math.trunc(raw.kingdomPvePenaltyRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveRetaliationChunk),
     };
   }
 
   private ensure(playerId: string): ReputationState {
     const existing = this.store.get<ReputationState>(COLLECTION, playerId);
     if (existing) return this.normalize(existing);
-    const state: ReputationState = { playerId, baseValue: 0, treasureDelta: 0, value: 0, updatedAt: this.now(), goodPvpKillRemainder: 0, evilPvpKillRemainder: 0 };
+    const state: ReputationState = { playerId, baseValue: 0, treasureDelta: 0, value: 0, updatedAt: this.now(), goodPvpKillRemainder: 0, evilPvpKillRemainder: 0, kingdomPveKillRemainder: 0, kingdomPvePenaltyChunks: 0, kingdomPvePenaltyRemainder: 0 };
     this.store.set(COLLECTION, playerId, state);
     return state;
   }
@@ -148,7 +158,8 @@ export class ReputationModule {
     state.updatedAt = this.now();
     this.store.set(COLLECTION, playerId, state);
     await this.syncVillages(playerId, state.value);
-    const payload = { ...this.payload(state), delta: state.value - before, reason: reason ?? 'gameplay', playerIds: [playerId] };
+    const kingdomPvePenaltyChunks = Math.max(0, Math.floor(Number((cmd.payload as any)?.kingdomPvePenaltyChunks ?? 0)));
+    const payload = { ...this.payload(state), delta: state.value - before, reason: reason ?? 'gameplay', playerIds: [playerId], ...(kingdomPvePenaltyChunks > 0 ? { kingdomPvePenaltyChunks } : {}) };
     await this.bus.emit({ name: 'reputation.Changed', source: ReputationModule.NAME, ts: this.now(), payload } as DomainEvent);
     return { ok: true, payload };
   }
@@ -221,11 +232,51 @@ export class ReputationModule {
 
   private async onBattleEnded(evt: DomainEvent): Promise<void> {
     const p = evt.payload as { side?: string; targetKind?: string; targetId?: string; fromVillage?: string; defenderLossesAttributed?: Record<string, number>; defenderLosses?: Record<string, number> };
-    if (p.side !== 'attacker' || p.targetKind !== 'village' || !p.fromVillage || !p.targetId) return;
-    await this.processPvpBattle({
-      name: 'reputation.ProcessPvpBattle', from: ReputationModule.NAME,
-      payload: { attackerVillageId: p.fromVillage, targetVillageId: p.targetId, defenderLosses: p.defenderLossesAttributed ?? p.defenderLosses },
-    });
+    if (p.side !== 'attacker' || !p.fromVillage || !p.targetId) return;
+    const losses = p.defenderLossesAttributed ?? p.defenderLosses;
+    if (p.targetKind === 'village') {
+      await this.processPvpBattle({
+        name: 'reputation.ProcessPvpBattle', from: ReputationModule.NAME,
+        payload: { attackerVillageId: p.fromVillage, targetVillageId: p.targetId, defenderLosses: losses },
+      });
+      return;
+    }
+    if (p.targetKind !== 'pve') return;
+    const target = await this.commands.send({ name: 'pve.GetTarget', from: ReputationModule.NAME, payload: { id: p.targetId } });
+    if (!target.ok || (target.payload as any)?.faction !== 'kingdom' || (target.payload as any)?.cityState !== true) return;
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: ReputationModule.NAME, payload: { villageId: p.fromVillage } });
+    const playerId = String((owner.payload as any)?.player?.id ?? '');
+    if (!owner.ok || !playerId) return;
+    await this.processKingdomPveBattle(playerId, losses ?? {});
+  }
+
+  /** 王国 PvE 战斗击杀人口累计：每满配置人口扣 1 点声望，跨战斗保留余数。 */
+  private async processKingdomPveBattle(playerId: string, defenderLosses: Record<string, number>): Promise<void> {
+    const state = this.ensure(playerId);
+    let killedPopulation = 0;
+    for (const [code, raw] of Object.entries(defenderLosses)) {
+      const count = Math.max(0, Math.floor(Number(raw) || 0));
+      if (count <= 0) continue;
+      killedPopulation += count * Math.max(1, this.config.units[code]?.popCost ?? 1);
+    }
+    if (killedPopulation <= 0) return;
+    const perPoint = Math.max(1, this.config.constants.kingdomPveKilledPopulationPerReputation);
+    const total = (state.kingdomPveKillRemainder ?? 0) + killedPopulation;
+    const reputationPoints = Math.floor(total / perPoint);
+    state.kingdomPveKillRemainder = total % perPoint;
+    if (reputationPoints <= 0) {
+      this.store.set(COLLECTION, playerId, state);
+      return;
+    }
+    const chunkSize = Math.max(1, this.config.constants.kingdomPveRetaliationChunk);
+    const beforeChunks = state.kingdomPvePenaltyChunks ?? 0;
+    const accumulatedPoints = (state.kingdomPvePenaltyRemainder ?? 0) + reputationPoints;
+    const triggeredChunks = Math.floor(accumulatedPoints / chunkSize);
+    const afterChunks = beforeChunks + triggeredChunks;
+    state.kingdomPvePenaltyRemainder = accumulatedPoints % chunkSize;
+    state.kingdomPvePenaltyChunks = afterChunks;
+    this.store.set(COLLECTION, playerId, state);
+    await this.adjust({ name: 'reputation.Adjust', from: ReputationModule.NAME, payload: { playerId, delta: -reputationPoints, reason: 'kingdom_pve_population_kills', kingdomPvePenaltyChunks: triggeredChunks } });
   }
 
   private async syncVillages(playerId: string, value: number): Promise<void> {

@@ -32,9 +32,16 @@ export interface DialogueSegment {
   replies: { key: string; label: string }[];
 }
 
-/** 对话中的 {villageName} 等展示占位符只在服务端解析，避免客户端自行猜测村庄。 */
-function renderVillageTemplate(value: string, villageName?: string): string {
-  return value.replaceAll('{villageName}', villageName ?? '当前村庄');
+export interface DialogueContext {
+  villageName?: string;
+  fiefName?: string;
+}
+
+/** 对话展示变量只在服务端解析，避免客户端自行猜测玩家归属。 */
+function renderTemplate(value: string, context: DialogueContext = {}): string {
+  return value
+    .replaceAll('{villageName}', context.villageName ?? '当前村庄')
+    .replaceAll('{fiefName}', context.fiefName ?? '当前封地');
 }
 
 export class DialoguesModule {
@@ -54,7 +61,7 @@ export class DialoguesModule {
   }
 
   private startForTask(cmd: Command): CommandResult {
-    const payload = cmd.payload as { taskCode?: string; trigger?: string; villageName?: string };
+    const payload = cmd.payload as { taskCode?: string; trigger?: string } & DialogueContext;
     const taskCode = String(payload.taskCode ?? '').trim();
     const trigger = String(payload.trigger ?? 'accept').trim() || 'accept';
     if (!taskCode) return { ok: false, payload: {}, reason: 'taskCode_required' };
@@ -62,20 +69,20 @@ export class DialoguesModule {
       .filter((item) => item.taskCode === taskCode && item.trigger === trigger)
       .sort((a, b) => a.segment - b.segment);
     // GM 可以先建立空白模板，等策划填文本/对象；空白模板不阻塞任务接取。
-    return this.buildSession(defs, payload.villageName);
+    return this.buildSession(defs, payload);
   }
 
   private startForTreasure(cmd: Command): CommandResult {
-    const payload = cmd.payload as { treasureCode?: string; villageName?: string };
+    const payload = cmd.payload as { treasureCode?: string } & DialogueContext;
     const treasureCode = String(payload.treasureCode ?? '').trim();
     if (!treasureCode) return { ok: false, payload: {}, reason: 'treasureCode_required' };
     const defs = Object.values(this.config.dialogues ?? {})
       .filter((item) => item.code === `${treasureCode}_use` && item.trigger === 'use')
       .sort((a, b) => a.segment - b.segment);
-    return this.buildSession(defs, payload.villageName);
+    return this.buildSession(defs, payload);
   }
 
-  private buildSession(defs: GameConfig['dialogues'][string][], villageName?: string): CommandResult {
+  private buildSession(defs: GameConfig['dialogues'][string][], context: DialogueContext = {}): CommandResult {
     const visibleDefs = defs.filter((item) => item.npcName || item.npcText || item.replies.length);
     if (!visibleDefs.length) return { ok: true, payload: { dialogue: null } };
     const first = visibleDefs[0];
@@ -84,8 +91,8 @@ export class DialoguesModule {
       taskCode: def.taskCode,
       trigger: def.trigger,
       segment: def.segment,
-      npcName: renderVillageTemplate(def.npcName, villageName),
-      npcText: renderVillageTemplate(def.npcText, villageName),
+      npcName: renderTemplate(def.npcName, context),
+      npcText: renderTemplate(def.npcText, context),
       replies: def.replies.map((reply) => ({ ...reply })),
     }));
     const session: DialogueSession = {

@@ -38,7 +38,7 @@
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
 | 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
-| 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地） | 改目标战利品、重生时间、显示名/图标、加新目标类型 |
+| 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸、M8任务村参数等） | 调平衡参数；原先写死在代码里的常量都在这 |
@@ -214,6 +214,8 @@
 | name / icon | 显示名 / 图标基名 |
 | respawnSec | 被清空后重生秒数 |
 | lootWood/Clay/Iron/Crop | 战利品总量 |
+| faction | 阵营（`neutral`/`kingdom`）；王国城邦填 `kingdom` |
+| cityState | 是否启用运行时随机城邦生成（`true`） |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
@@ -244,15 +246,17 @@
 
 这些行是必须保留的人工锚点。World 会按实际世界面积自动补足公共 PvE 到 `round(W×H×5%)`；自动点位由 `world_seed` 确定，不写回 CSV，也不进入存档。新世界使用 `world_width/world_height`，已有世界始终优先采用存档中的 `world_meta` 尺寸。
 
-地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。地貌当前只用于地图表现和 PvE 分布，不改变行军速度或战斗数值。
+地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。森林会按方向降低军队视野，丘陵提高视野但使经过该格的行军速度降为 2/3；拓荒仅允许平原。
+
+地图计划会按 `kingdom_city_state_count` 随机生成王国城邦（`kingdom_city_state`），数量与生成位置均由 `world_seed` 确定。城邦是王国阵营 PvE 目标，运行时随机抽取一级/二级/三级之一，并随机选择罗马、高卢或条顿种族，只从对应种族兵种池抽取守军：一级 3 种、每种 0–20；二级 4 种、每种 5–35；三级 5 种、每种 10–50。三级资源范围分别在 `kingdom_city_state_tier*_resource_min/max` 配置，默认少量/中量/大量递增。城外四类资源田至少各有一座 3 级田。王都和四个封地也使用同一王国 PvE 生成器，分别读取 `capital` / `fief` 档位。城邦、封地和王都侦察都可选择“资源与守军”或“城内外建筑”两种模式；王国 PvE 战斗按消灭人口累计扣声望，不再按侦察/掠夺/攻城固定扣分。`kingdom_city_state_generation_version` 提升后，启动时会按新规则重生成既有王国 PvE。
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。配置中心 `/config/balance` 会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。王国任务声望权重/奖励/目标门槛、王国 PvE 击杀累计与封地报复阈值/雇佣军比例也属于声望全局参数。配置中心 `/config/balance` 的“声望参数”板块会集中显示并编辑这些全局行，同时直接列出任务声望目标/调整、正声望兑换佣兵参数、宝物被动/直接声望值和议会厅服务声望价格；保存后分别写回对应 CSV，热重载即可生效，无需刷档。
 
 人口繁荣度参数：`pop_prosperity_full_ratio` 是劳动人口占总人口比例达到繁荣满值的阈值（默认 70%），`pop_prosperity_max_bonus` 是满值时资源产量、建造、训练和研究的额外速率加成（默认 +30%）。劳动人口占比在本族动员上限对应的最低值时额外加成为 0；低繁荣度只取消这层额外加成，不降低基础产值或把耗时变长。
 
-王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
+王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、上贡与击杀目标范围等非声望调度参数；四类任务权重、负声望目标门槛及声望奖励已归入配置中心“声望参数”。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
 |----|------|
 | key | 常量键（代码按它读取，**勿改**） |
@@ -279,10 +283,48 @@
 | map_view_radius | 6 | 前端地图视野半径（前端白名单常量） |
 | march_point_base | 0 | 每座城镇的基础行军点数 |
 | march_point_per_rallypoint_level | 1 | 集结点每级增加的行军点数；同时在地图上的军队数不能超过基础值加该值×集结点等级 |
+| forest_vision_penalty | 2 | 军队视野朝森林方向减少的格数 |
+| hills_vision_bonus | 1 | 军队位于丘陵时视野增加的格数 |
+| hills_march_speed_multiplier | 0.6666666667 | 军队位于丘陵时的行军速度倍率（默认 2/3） |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
+| kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
+| kingdom_city_state_generation_version | 4 | 王国 PvE 生成规则版本；提升后按新规则重生成既有城邦、封地和王都 |
+| kingdom_city_state_tier_weights | 1:1\|2:1\|3:1 | 一级/二级/三级随机权重 |
+| kingdom_city_state_tribe_pool | romans\|gauls\|teutons | 城邦随机种族池 |
+| kingdom_city_state_unit_pool_romans/gauls/teutons | 各族兵种 code | 对应种族的城邦守军随机池 |
+| kingdom_city_state_tier1_unit_count/min/max | 3 / 0 / 20 | 一级兵种数、每种兵数量范围 |
+| kingdom_city_state_tier1_resource_min/max | 500/1500 | 一级四类资源范围（少量） |
+| kingdom_city_state_tier1_gold_min/max | 0/300 | 一级金币范围 |
+| kingdom_city_state_tier2_unit_count/min/max | 4 / 5 / 35 | 二级兵种数、每种兵数量范围 |
+| kingdom_city_state_tier2_resource_min/max | 1500/5000 | 二级四类资源范围（中量） |
+| kingdom_city_state_tier2_gold_min/max | 300/1200 | 二级金币范围 |
+| kingdom_city_state_tier3_unit_count/min/max | 5 / 10 / 50 | 三级兵种数、每种兵数量范围 |
+| kingdom_city_state_tier3_resource_min/max | 5000/15000 | 三级四类资源范围（大量） |
+| kingdom_city_state_tier3_gold_min/max | 1200/5000 | 三级金币范围 |
+| kingdom_city_state_raid_defense_min/max_ratio | 0.2/0.8 | 掠夺时随机分配的防守兵力比例 |
+| kingdom_city_state_recovery_min/max_sec | 43200/172800 | 兵力恢复随机时长（12–48 小时） |
+| kingdom_city_state_recovery_resource_extra_sec | 21600 | 资源恢复比兵力额外延长时长（6 小时） |
+| kingdom_city_state_reputation_penalty | 2 | 旧版固定扣分参数（弃用，仅兼容旧配置；当前按王国 PvE 消灭人口累计扣分） |
+| kingdom_city_state_resource_field_level | 3 | 四类城外资源田保底等级 |
+| kingdom_city_state_inner/outer_building_count_min/max | 3–8 / 4–8 | 城内/城外随机建筑数量范围 |
+| kingdom_city_state_building_level_min/max | 1/5 | 随机建筑等级范围 |
+| kingdom_city_state_inner/outer_building_pool | `...|...` | 城邦随机建筑池 |
+| kingdom_fief_unit_count/min/max | 7 / 30 / 100 | 四个领主封地统一标准：随机兵种数及每种兵数量范围 |
+| kingdom_fief_resource_min/max | 15000/30000 | 封地四类资源随机范围 |
+| kingdom_fief_gold_min/max | 5000/10000 | 封地金币随机范围 |
+| kingdom_capital_unit_count/min/max | 10 / 50 / 150 | 王都随机兵种数及每种兵数量范围（高于封地） |
+| kingdom_capital_resource_min/max | 30000/60000 | 王都四类资源随机范围 |
+| kingdom_capital_gold_min/max | 10000/20000 | 王都金币随机范围 |
+| kingdom_pve_killed_population_per_reputation | 25 | 每累计消灭 25 人王国 PvE 军队人口扣 1 点声望，跨战斗累加 |
+| kingdom_pve_retaliation_chunk | 5 | 每累计产生 5 点该类声望扣分时检查一次封地报复 |
+| kingdom_pve_retaliation_raid_threshold | -10 | 声望小于等于此值时掠夺主城 |
+| kingdom_pve_retaliation_siege_threshold | -20 | 声望小于等于此值时攻城主城 |
+| kingdom_fief_mercenary_min/max_ratio | 0.4/0.7 | 封地报复雇佣军占封地守军总人口的随机比例 |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
+
+配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；它们仍写入同一张 `game_constants.csv`。
 
 M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
@@ -402,7 +444,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
 | params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
@@ -413,7 +455,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
 | phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
-| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；`grant_resource_growth` 使用 `percent:durationSec` 作用于四种资源，或 `resource:percent:durationSec` 指定单一资源（如 `crop:25:86400`）；`grant_mercenaries_by_positive_reputation` 使用 `merc_sword:2`，交付时将正声望归零并按每点发放无期限佣兵；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
 | order | 同阶段的执行顺序 |
 
 ### quest_edges.csv — 关系边
@@ -438,7 +480,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | id / code / segment | 对话对象数字主键 / 稳定对话代码 / 对象内段落序号（从 1 连续编号；同一对象可有多行） |
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
 | trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；宝物使用对话固定为 `use`，代码为 `<treasureCode>_use`、taskCode 从 `t1` 起独立排序；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
-| npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号） |
+| npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号）；支持服务端展示变量 `{villageName}`（当前玩家村庄名）和 `{fiefName}`（当前玩家所属封地名），配置中心保存变量名，运行时由服务端替换后再下发客户端 |
 | replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
 
 同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
