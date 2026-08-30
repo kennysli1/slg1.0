@@ -818,8 +818,17 @@ export class MovementModule {
         const nearby = await this.hasNearbyArmySource(playerId, mv.pos);
         if (!nearby) continue;
       } else if (!visible.has(key)) continue;
-      const owner = await resolveOwner(mv.fromVillage);
-      if (!owner || owner.playerId === playerId) continue;
+      // 王国 NPC 行军使用 `kingdom-fief:*` / `task:*` 等内部来源 ID，
+      // 没有对应的玩家村庄，不能走 player.GetByVillage；否则移动中的
+      // 王国军队（尤其是复仇军返程）会在地图外军列表里被静默丢弃。
+      const owner = mv.npcService
+        ? {
+          playerId: undefined,
+          name: '王国',
+          villageName: mv.taskCode === 'kingdom_retaliation' ? '封地复仇军' : '王国军队',
+        }
+        : await resolveOwner(mv.fromVillage);
+      if (!owner || (!mv.npcService && owner.playerId === playerId)) continue;
       out.push(this.toForeignArmy(mv, owner));
     }
     return { ok: true, payload: { movements: out } };
@@ -2800,16 +2809,27 @@ export class MovementModule {
     // ListForeign 已过滤侦察，这里也必须在增量通道早退，避免地图轮询间隔内
     // 通过 ForeignStepped 短暂暴露侦察部队。
     if (this.isScoutMovement(mv)) return;
-    const ownerRes = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
-    if (!ownerRes.ok) return;
-    const p = ownerRes.ok ? (ownerRes.payload as any)?.player : undefined;
-    if (!p?.id) return;
-    const v = (p?.villages ?? []).find((x: any) => x.id === mv.fromVillage);
-    const owner = { playerId: p?.id as string | undefined, name: p?.name as string | undefined, villageName: (v?.name ?? mv.fromVillage) as string };
+    // NPC 行军使用内部来源 ID，不存在 player/village 记录；为其提供
+    // 稳定的脱敏归属，避免 ForeignArmyStep 因查不到玩家而直接丢弃。
+    const owner = mv.npcService
+      ? {
+        playerId: undefined,
+        name: '王国',
+        villageName: mv.taskCode === 'kingdom_retaliation' ? '封地复仇军' : '王国军队',
+      }
+      : await (async () => {
+        const ownerRes = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
+        if (!ownerRes.ok) return null;
+        const p = (ownerRes.payload as any)?.player;
+        if (!p?.id) return null;
+        const v = (p.villages ?? []).find((x: any) => x.id === mv.fromVillage);
+        return { playerId: p.id as string | undefined, name: p.name as string | undefined, villageName: (v?.name ?? mv.fromVillage) as string };
+      })();
+    if (!owner) return;
     const ownerPlayerId = owner.playerId;
     const obsRes = await this.commands.send({ name: 'vision.GetObservers', from: MovementModule.NAME, payload: { q: mv.pos.q, r: mv.pos.r } });
     const playerIds: string[] = (obsRes.payload as any)?.playerIds ?? [];
-    const observers = playerIds.filter((pid) => pid !== ownerPlayerId);
+    const observers = playerIds.filter((pid) => !ownerPlayerId || pid !== ownerPlayerId);
     if (observers.length === 0) return;
     void this.bus.emit({
       name: 'movement.ForeignStepped', source: MovementModule.NAME, ts: this.now(),
@@ -3185,6 +3205,9 @@ export class MovementModule {
     for (const oid of ids) {
       const other = this.load(oid);
       if (!other || other.id === mv.id) continue;
+      // NPC 行军不是玩家军队，不能被普通野战遭遇卷入；双方都必须是
+      // 玩家出征军，王国任务/复仇/增援等 NPC 行军一律跳过。
+      if (other.npcService) continue;
       if (other.type === 'return' || other.type === 'caravan' || other.type === 'transport' || other.type === 'scout' || other.type === 'incoming_scout' || other.status !== 'marching') continue;
       const otherOwner = await this.ownerOf(other.fromVillage);
       if (otherOwner && myOwner && otherOwner === myOwner) continue;
@@ -3199,6 +3222,9 @@ export class MovementModule {
     const myOwner = await this.ownerOf(mv.fromVillage);
     for (const other of this.store.all<MovementRecord>(COLLECTION)) {
       if (other.id === mv.id || other.type !== 'ambush' || other.status !== 'stationed') continue;
+      // NPC 行军不属于可被玩家伏击系统处理的普通出征军，不能触发
+      // 或被卷入野外伏击战；双方均需是玩家军队。
+      if (other.npcService) continue;
       if (await this.ownerOf(other.fromVillage) === myOwner) continue;
       if (hexDistanceWrapped(other.pos, mv.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) <= 1) return other;
     }

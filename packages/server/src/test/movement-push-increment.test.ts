@@ -146,6 +146,31 @@ test('movement.ForeignStepped：侦察军步进不向其他玩家推送', async 
   assert.equal(foreignSteps.length, 0, '主动侦察、途中拦截侦察及其返程均不得推送 ForeignStepped');
 });
 
+test('movement.ForeignStepped：王国 NPC 行军在玩家视野内可增量推送', async () => {
+  const app = freshApp();
+  const observer = await register(app, '王国 NPC 观察者');
+  const foreignSteps: any[] = [];
+  app.bus.on('movement.ForeignStepped', (e) => { foreignSteps.push(e.payload); });
+
+  const pos = { q: observer.q, r: observer.r };
+  await (app.movement as any).emitForeignStep({
+    id: 'kingdom-retaliation-step', type: 'return', npcService: true,
+    taskCode: 'kingdom_retaliation', fromVillage: 'kingdom-fief:kingdom-fief-sw',
+    fromXY: pos, toXY: { q: pos.q + 1, r: pos.r }, pos,
+    path: [pos, { q: pos.q + 1, r: pos.r }], stepIndex: 0,
+    troops: { merc_knight: 4 }, loot: {}, status: 'marching', perStepMs: 1000,
+    nextStepAt: clock + 1000,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(foreignSteps.length, 1, '王国 NPC 应向视野内玩家推送 ForeignStepped');
+  assert.deepEqual(foreignSteps[0].playerIds, [observer.id]);
+  assert.equal(foreignSteps[0].army.ownerPlayerName, '王国');
+  assert.equal(foreignSteps[0].army.ownerVillageName, '封地复仇军');
+  assert.equal(foreignSteps[0].army.type, 'return');
+});
+
 test('王国增援：目标村收到实时步进、抵达和到期移除推送', async () => {
   const app = freshApp();
   const pushes: any[] = [];
