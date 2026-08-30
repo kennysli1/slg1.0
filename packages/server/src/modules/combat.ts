@@ -40,6 +40,8 @@ interface Contribution {
   treasures: string[];
   /** 王国议会厅购买的 NPC 军队：不占玩家人口，也不触发玩家伤亡回收或营地宝物掉落。 */
   npcService?: boolean;
+  kingdomMercenary?: boolean;
+  returnPveId?: string;
 }
 
 /** 防守方独立兵力池：本村驻军与每支临时援军在战斗快照中保持来源边界。 */
@@ -260,6 +262,8 @@ export class CombatModule {
         troops: Record<string, number>; attackerSnapshot: Snapshot; treasures?: string[];
       };
       npcService?: boolean;
+      kingdomMercenary?: boolean;
+      returnPveId?: string;
       taskCode?: string;
     };
 
@@ -269,7 +273,7 @@ export class CombatModule {
     if (existing) {
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         existing.attacker[`${contribId}#${code}`] = existing.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -289,7 +293,7 @@ export class CombatModule {
       const raceCheck = this.findActive(p.targetId);
       if (raceCheck) {
         raceCheck.contributions[contribId] = {
-          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
+          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
           raceCheck.attacker[`${contribId}#${code}`] = raceCheck.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -323,7 +327,7 @@ export class CombatModule {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
         battleType: p.battleType, taskCode: p.taskCode,
-        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
+        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
         defenderContribution: defContrib,
         attackerPending: 0, defenderPending: 0,
         initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
@@ -355,7 +359,7 @@ export class CombatModule {
     if (raceExisting) {
       // 安全并入
       raceExisting.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService,
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         raceExisting.attacker[`${contribId}#${code}`] = raceExisting.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
@@ -388,7 +392,7 @@ export class CombatModule {
       defender,
       defenderOriginal,
       defenderContributions,
-      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService } },
+      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
       attackerPending: 0,
       defenderPending: 0,
       initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
@@ -803,7 +807,7 @@ export class CombatModule {
           villageId: contrib.fromVillage, side: 'attacker', battleId: b.id,
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
-          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, npcService: !!contrib.npcService, ...reportBase,
+          survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, npcService: !!contrib.npcService, kingdomMercenary: !!contrib.kingdomMercenary, returnPveId: contrib.returnPveId, ...reportBase,
         },
       } as DomainEvent);
     }

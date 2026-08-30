@@ -81,3 +81,21 @@ test('王国城邦：侦察快照提供资源与建筑两种模式', async () =>
   assert.equal((result.payload as any).cityStateTier, city.cityStateTier);
   assert.equal((result.payload as any).cityStateTribe, city.cityStateTribe);
 });
+
+test('王国 PvE 高等级档位：四封地统一标准且高于三级城邦，王都更高', () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.pve.create('test-fief', 'royal_fief_ne', 3, 3);
+  app.pve.create('test-capital', 'royal_capital', 8, 8);
+  const fief = app.store.get<any>('pve', 'test-fief')!;
+  const capital = app.store.get<any>('pve', 'test-capital')!;
+  assert.equal(fief.cityState, true);
+  assert.equal(fief.kingdomProfile, 'fief');
+  assert.equal(capital.kingdomProfile, 'capital');
+  assert.equal(fief.cityStateTier, undefined, '封地不应带城邦等级');
+  assert.equal(capital.cityStateTier, undefined, '王都不应带城邦等级');
+  assert.ok(Object.keys(fief.defender).length >= app.config.constants.kingdomFiefUnitCount);
+  assert.ok(Object.keys(capital.defender).length >= Math.min(app.config.constants.kingdomCapitalUnitCount, 8));
+  assert.ok(Object.values(fief.loot).reduce((sum: number, value: any) => sum + Number(value), 0) > app.config.constants.kingdomCityStateTier3ResourceMin * 4);
+  assert.ok(Object.values(capital.loot).reduce((sum: number, value: any) => sum + Number(value), 0) >= Object.values(fief.loot).reduce((sum: number, value: any) => sum + Number(value), 0));
+  assert.equal(new Set(fief.buildings.filter((b: any) => b.zone === 'outer' && ['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(b.kind)).map((b: any) => b.kind)).size, 4);
+});

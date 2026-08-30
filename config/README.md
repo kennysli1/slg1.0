@@ -248,7 +248,7 @@
 
 地貌同样由 `world_seed` 确定生成，规则分类为平原 55%、森林 30%、丘陵 15%。森林会按方向降低军队视野，丘陵提高视野但使经过该格的行军速度降为 2/3；拓荒仅允许平原。
 
-地图计划会按 `kingdom_city_state_count` 随机生成王国城邦（`kingdom_city_state`），数量与生成位置均由 `world_seed` 确定。城邦是王国阵营 PvE 目标，运行时随机抽取一级/二级/三级之一，并随机选择罗马、高卢或条顿种族，只从对应种族兵种池抽取守军：一级 3 种、每种 0–20；二级 4 种、每种 5–35；三级 5 种、每种 10–50。三级资源范围分别在 `kingdom_city_state_tier*_resource_min/max` 配置，默认少量/中量/大量递增。城外四类资源田至少各有一座 3 级田。城邦侦察可选择“资源与守军”或“城内外建筑”两种模式；侦察被发现及掠夺/攻城均扣除配置的声望值。`kingdom_city_state_generation_version` 提升后，启动时会按新规则重生成既有城邦。
+地图计划会按 `kingdom_city_state_count` 随机生成王国城邦（`kingdom_city_state`），数量与生成位置均由 `world_seed` 确定。城邦是王国阵营 PvE 目标，运行时随机抽取一级/二级/三级之一，并随机选择罗马、高卢或条顿种族，只从对应种族兵种池抽取守军：一级 3 种、每种 0–20；二级 4 种、每种 5–35；三级 5 种、每种 10–50。三级资源范围分别在 `kingdom_city_state_tier*_resource_min/max` 配置，默认少量/中量/大量递增。城外四类资源田至少各有一座 3 级田。王都和四个封地也使用同一王国 PvE 生成器，分别读取 `capital` / `fief` 档位。城邦、封地和王都侦察都可选择“资源与守军”或“城内外建筑”两种模式；王国 PvE 战斗按消灭人口累计扣声望，不再按侦察/掠夺/攻城固定扣分。`kingdom_city_state_generation_version` 提升后，启动时会按新规则重生成既有王国 PvE。
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
@@ -289,7 +289,7 @@
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 | kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
-| kingdom_city_state_generation_version | 3 | 城邦生成规则版本；提升后按新规则重生成既有城邦 |
+| kingdom_city_state_generation_version | 4 | 王国 PvE 生成规则版本；提升后按新规则重生成既有城邦、封地和王都 |
 | kingdom_city_state_tier_weights | 1:1\|2:1\|3:1 | 一级/二级/三级随机权重 |
 | kingdom_city_state_tribe_pool | romans\|gauls\|teutons | 城邦随机种族池 |
 | kingdom_city_state_unit_pool_romans/gauls/teutons | 各族兵种 code | 对应种族的城邦守军随机池 |
@@ -305,11 +305,22 @@
 | kingdom_city_state_raid_defense_min/max_ratio | 0.2/0.8 | 掠夺时随机分配的防守兵力比例 |
 | kingdom_city_state_recovery_min/max_sec | 43200/172800 | 兵力恢复随机时长（12–48 小时） |
 | kingdom_city_state_recovery_resource_extra_sec | 21600 | 资源恢复比兵力额外延长时长（6 小时） |
-| kingdom_city_state_reputation_penalty | 2 | 城邦攻击或被发现侦察的声望扣除 |
+| kingdom_city_state_reputation_penalty | 2 | 旧版固定扣分参数（弃用，仅兼容旧配置；当前按王国 PvE 消灭人口累计扣分） |
 | kingdom_city_state_resource_field_level | 3 | 四类城外资源田保底等级 |
 | kingdom_city_state_inner/outer_building_count_min/max | 3–8 / 4–8 | 城内/城外随机建筑数量范围 |
 | kingdom_city_state_building_level_min/max | 1/5 | 随机建筑等级范围 |
 | kingdom_city_state_inner/outer_building_pool | `...|...` | 城邦随机建筑池 |
+| kingdom_fief_unit_count/min/max | 7 / 30 / 100 | 四个领主封地统一标准：随机兵种数及每种兵数量范围 |
+| kingdom_fief_resource_min/max | 15000/30000 | 封地四类资源随机范围 |
+| kingdom_fief_gold_min/max | 5000/10000 | 封地金币随机范围 |
+| kingdom_capital_unit_count/min/max | 10 / 50 / 150 | 王都随机兵种数及每种兵数量范围（高于封地） |
+| kingdom_capital_resource_min/max | 30000/60000 | 王都四类资源随机范围 |
+| kingdom_capital_gold_min/max | 10000/20000 | 王都金币随机范围 |
+| kingdom_pve_killed_population_per_reputation | 25 | 每累计消灭 25 人王国 PvE 军队人口扣 1 点声望，跨战斗累加 |
+| kingdom_pve_retaliation_chunk | 5 | 每累计产生 5 点该类声望扣分时检查一次封地报复 |
+| kingdom_pve_retaliation_raid_threshold | -10 | 声望小于等于此值时掠夺主城 |
+| kingdom_pve_retaliation_siege_threshold | -20 | 声望小于等于此值时攻城主城 |
+| kingdom_fief_mercenary_min/max_ratio | 0.4/0.7 | 封地报复雇佣军占封地守军总人口的随机比例 |
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 

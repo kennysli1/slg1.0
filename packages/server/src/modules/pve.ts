@@ -41,6 +41,7 @@ interface PveState {
   cityState?: boolean;
   cityStateTier?: 1 | 2 | 3;
   cityStateTribe?: 'romans' | 'gauls' | 'teutons';
+  kingdomProfile?: 'city_state' | 'fief' | 'capital';
   cityStateGenerationVersion?: number;
   defenderPeak?: Snapshot;
   lootPeak?: Record<string, number>;
@@ -144,6 +145,7 @@ export class PveModule {
     this.commands.register('pve.ListTargets', () => this.listTargets());
     this.commands.register('pve.GetDefenderSnapshot', (c) => this.getDefenderSnapshot(c));
     this.commands.register('pve.ApplyResult', (c) => this.applyResult(c));
+    this.commands.register('pve.DepositLoot', (c) => this.depositLoot(c));
     this.commands.register('pve.ApplyTaskVillageOutcome', (c) => this.applyTaskVillageOutcome(c));
     // 任务模块运行时生成/移除任务营地（内部命令）
     this.commands.register('pve.Spawn', (c) => this.spawn(c));
@@ -216,7 +218,7 @@ export class PveModule {
       this.migrateTaskVillageLoot(current);
       if (current.cityState) {
         // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
-        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.cityStateTier || !current.cityStateTribe) {
+        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe) {
           this.regenerateCityState(current);
           continue;
         }
@@ -283,13 +285,19 @@ export class PveModule {
 
   private buildCityState(id: string, type: string, q: number, r: number): PveState {
     const c = this.config.constants;
+    const template = this.config.pveTemplates[type];
     const seed = String(c.raw.world_seed ?? 'kow-world-v1');
     const version = c.kingdomCityStateGenerationVersion;
-    const tier = chooseWeightedTier(`${seed}:${version}:${id}:tier`, c.kingdomCityStateTierWeights);
+    const kingdomProfile = template?.kingdomProfile ?? 'city_state';
+    const tier = kingdomProfile === 'city_state' ? chooseWeightedTier(`${seed}:${version}:${id}:tier`, c.kingdomCityStateTierWeights) : undefined;
     const tribes: Array<'romans' | 'gauls' | 'teutons'> = c.kingdomCityStateTribePool.filter((value): value is 'romans' | 'gauls' | 'teutons' => value === 'romans' || value === 'gauls' || value === 'teutons');
     if (tribes.length === 0) tribes.push('romans');
     const tribe: 'romans' | 'gauls' | 'teutons' = tribes[Math.floor(random01(`${seed}:${version}:${id}:tribe`) * tribes.length)] ?? 'romans';
-    const profile = tier === 1
+    const profile = kingdomProfile === 'fief'
+      ? { unitCount: c.kingdomFiefUnitCount, unitMin: c.kingdomFiefUnitMin, unitMax: c.kingdomFiefUnitMax, resourceMin: c.kingdomFiefResourceMin, resourceMax: c.kingdomFiefResourceMax, goldMin: c.kingdomFiefGoldMin, goldMax: c.kingdomFiefGoldMax }
+      : kingdomProfile === 'capital'
+        ? { unitCount: c.kingdomCapitalUnitCount, unitMin: c.kingdomCapitalUnitMin, unitMax: c.kingdomCapitalUnitMax, resourceMin: c.kingdomCapitalResourceMin, resourceMax: c.kingdomCapitalResourceMax, goldMin: c.kingdomCapitalGoldMin, goldMax: c.kingdomCapitalGoldMax }
+        : tier === 1
       ? { unitCount: c.kingdomCityStateTier1UnitCount, unitMin: c.kingdomCityStateTier1UnitMin, unitMax: c.kingdomCityStateTier1UnitMax, resourceMin: c.kingdomCityStateTier1ResourceMin, resourceMax: c.kingdomCityStateTier1ResourceMax, goldMin: c.kingdomCityStateTier1GoldMin, goldMax: c.kingdomCityStateTier1GoldMax }
       : tier === 2
         ? { unitCount: c.kingdomCityStateTier2UnitCount, unitMin: c.kingdomCityStateTier2UnitMin, unitMax: c.kingdomCityStateTier2UnitMax, resourceMin: c.kingdomCityStateTier2ResourceMin, resourceMax: c.kingdomCityStateTier2ResourceMax, goldMin: c.kingdomCityStateTier2GoldMin, goldMax: c.kingdomCityStateTier2GoldMax }
@@ -332,7 +340,7 @@ export class PveModule {
     return {
       id, type, q, r, defender: structuredClone(defender), defenderPeak: structuredClone(defender), raidDefense,
       raidDefenseRatio: ratio, loot: { ...baseLoot }, lootPeak: { ...baseLoot }, cleared: false, clearCount: 0,
-      faction: 'kingdom', cityState: true, cityStateTier: tier, cityStateTribe: tribe, cityStateGenerationVersion: version, buildings,
+      faction: 'kingdom', cityState: true, cityStateTier: tier, cityStateTribe: tribe, kingdomProfile, cityStateGenerationVersion: version, buildings,
     };
   }
 
@@ -418,7 +426,7 @@ export class PveModule {
     const afterDefender = this.load(s.id) ?? s;
     this.migrateTaskVillageLoot(afterDefender);
     let current = this.load(s.id) ?? afterDefender;
-    if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.cityStateTier || !current.cityStateTribe)) {
+    if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe)) {
       this.regenerateCityState(current);
       current = this.load(current.id) ?? current;
     }
@@ -450,7 +458,7 @@ export class PveModule {
         targets: this.store.all<PveState>(COLLECTION).map((s) => ({
           id: s.id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
           task: !!s.task, noRespawn: !!s.noRespawn,
-          faction: s.faction, cityState: !!s.cityState, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe,
+          faction: s.faction, cityState: !!s.cityState, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile,
           buildings: s.cityState ? structuredClone(s.buildings ?? []) : undefined,
         })),
       },
@@ -469,7 +477,7 @@ export class PveModule {
     const purpose = (cmd.payload as any).purpose as 'raid' | 'siege' | 'scout' | undefined;
     const snapshot = s.cleared ? {} : structuredClone(purpose === 'raid' ? (s.raidDefense ?? s.defender) : s.defender);
     const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
-    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
+    return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
   }
 
   /**
@@ -553,7 +561,27 @@ export class PveModule {
     const hasLoot = Object.values({ ...buildingLoot, ...storedLoot }).some((n) => n > 0);
     if (hasLoss || hasLoot) this.resetRecovery(s);
     this.store.set(COLLECTION, s.id, s);
-    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, task: false, noRespawn: false } };
+    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, task: false, noRespawn: false } };
+  }
+
+  /** 王国封地雇佣军返程时把掠夺所得存回来源封地，不加入玩家经济。 */
+  private depositLoot(cmd: Command): CommandResult {
+    const { id, gain } = cmd.payload as { id?: string; gain?: Record<string, number> };
+    if (!id) return { ok: false, payload: {}, reason: 'target_id_required' };
+    const s = this.load(id);
+    if (!s || !s.cityState || s.faction !== 'kingdom') return { ok: false, payload: {}, reason: 'kingdom_target_not_found' };
+    const deposited: Record<string, number> = {};
+    for (const [key, raw] of Object.entries(gain ?? {})) {
+      const amount = Math.max(0, Math.floor(Number(raw) || 0));
+      if (amount <= 0) continue;
+      const peak = Number(s.lootPeak?.[key] ?? Number.POSITIVE_INFINITY);
+      const before = Number(s.loot[key] ?? 0);
+      const after = Math.min(peak, before + amount);
+      s.loot[key] = after;
+      deposited[key] = Math.max(0, after - before);
+    }
+    this.store.set(COLLECTION, id, s);
+    return { ok: true, payload: { id, deposited, loot: { ...s.loot } } };
   }
 
   private mergeResources(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
