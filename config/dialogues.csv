@@ -36,8 +36,8 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 37,m10_deliver,m10,deliver,1,,,
 38,m11_accept,m11,accept,1,,,
 39,m11_deliver,m11,deliver,1,,,
-40,m12_accept,m12,accept,1,,,
-41,m12_deliver,m12,deliver,1,,,
+40,m12_accept,m12,accept,1,王国使者,尊敬的{villageName}的首领，贵镇发展迅速，令人咋舌。我们高高在上的{fiefName}的领主大人对你的领导才能甚是青睐，这是你至高无上的荣幸。为了检测你是否是位值得培养的全才，请替王国清理几处土匪窝藏点，也是替你自己保护你的民众了。,accept:接受任务
+41,m12_deliver,m12,deliver,1,王国使者,令人满意的行动。王国最近匪患频发，如果你能积极响应王国下达的任务的话，你将会获得等价的报酬和声望。当然，你并不是唯一的苗子，这片土地上值得栽培的苗子太多了，你只有积极地证明自己，才能爬上权力的阶梯，我点到为止。,
 42,m13_accept,m13,accept,1,,,
 43,m13_deliver,m13,deliver,1,,,
 44,my_effort_use,t1,use,1,,,

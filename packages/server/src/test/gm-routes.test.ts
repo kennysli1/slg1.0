@@ -318,8 +318,13 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
 test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
+  const root = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
+  const tempConfig = join(root, 'config');
   try {
-    const { fastify } = buildFastify();
+    const seed = buildFastify();
+    cpSync(seed.app.configDir, tempConfig, { recursive: true });
+    await seed.fastify.close();
+    const { fastify, app } = buildFastify(undefined, tempConfig);
     await fastify.ready();
     const page = await fastify.inject({ method: 'GET', url: '/config/dialogues' });
     assert.equal(page.statusCode, 200);
@@ -331,6 +336,8 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(page.body, /match\(\/\\d\+\|\\D\+\/g\)/, '对话编辑器自然排序必须保留数字匹配正则');
     assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
     assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
+    assert.match(page.body, /\{villageName\}/, '对话编辑器应说明村庄变量');
+    assert.match(page.body, /\{fiefName\}/, '对话编辑器应说明封地变量');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
     assert.equal(data.statusCode, 200);
     const parsed = JSON.parse(data.body) as { header: string[]; rows: Array<Record<string, string>> };
@@ -371,6 +378,15 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.equal(byKey.get('m9_accept_m8_success:1'), undefined);
     assert.equal(byKey.get('m9_deliver_m8_success:1'), undefined);
     assert.match(byKey.get('m9_deliver_m8_failure:1')?.npcText ?? '', /缴获了一个宝物/);
+    assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{villageName\}/, '配置中心应保存 M12 村庄变量');
+    assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{fiefName\}/, '配置中心应保存 M12 封地变量');
+    assert.doesNotMatch(byKey.get('m12_accept:1')?.npcText ?? '', /\{封地\}/, '配置中心不应保存中文封地占位符');
+    const saved = await fastify.inject({
+      method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rows: parsed.rows }),
+    });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.match(app.config.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, '保存后服务端热重载仍应保留变量');
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
@@ -391,6 +407,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(bad.body, /dialogues\.csv/);
     await fastify.close();
   } finally {
+    rmSync(root, { recursive: true, force: true });
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
   }
