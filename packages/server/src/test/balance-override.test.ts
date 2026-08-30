@@ -205,6 +205,36 @@ test('发布配置合并：旧十级城镇中心不能覆盖新版主基地四�
   }
 });
 
+test('发布配置合并：多段对话可共享 id 并按 code+segment 覆盖', () => {
+  const dir = tempDir('kow-dialogue-merge-script-');
+  const canonical = join(dir, 'dialogues.csv');
+  const persisted = join(dir, 'persisted-dialogues.csv');
+  try {
+    writeFileSync(canonical, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段,,',
+      '39,m11_deliver,m11,deliver,2,长老,第二段,,',
+      '',
+    ].join('\n'));
+    writeFileSync(persisted, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段（已调参）,,',
+      '39,m11_deliver,m11,deliver,2,长老,第二段（已调参）,,',
+      '',
+    ].join('\n'));
+    const repoRoot = existsSync(join(process.cwd(), 'scripts', 'merge-persisted-config.mjs'))
+      ? process.cwd()
+      : join(process.cwd(), '..', '..');
+    execFileSync(process.execPath, [join(repoRoot, 'scripts', 'merge-persisted-config.mjs'), canonical, persisted, 'dialogues.csv'], { stdio: 'pipe' });
+    const rows = parseCsvStructured(readFileSync(canonical, 'utf8')).rows;
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((row) => row.segment === '1')?.npcText, '第一段（已调参）');
+    assert.equal(rows.find((row) => row.segment === '2')?.npcText, '第二段（已调参）');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('配置同步 outbox：只合并未发送的差异，不重复上传上次成功文件', () => {
   const cfg = seedConfig();
   const state = tempDir('kow-config-outbox-');

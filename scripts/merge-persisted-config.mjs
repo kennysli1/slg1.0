@@ -26,7 +26,9 @@ const KEY_COLUMNS = {
   'academy.csv': ['level'],
   'building_levels.csv': ['code', 'level'],
   'buildings.csv': ['id'],
-  'dialogues.csv': ['id'],
+  // Dialogue ids identify the dialogue object, so multiple ordered segments
+  // intentionally share one id.  The code + segment pair is the row identity.
+  'dialogues.csv': ['code', 'segment'],
   'game_constants.csv': ['key'],
   'kingdom_services.csv': ['id'],
   'merc_camp.csv': ['level'],
