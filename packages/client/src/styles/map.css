@@ -115,7 +115,14 @@
   stroke: var(--c-crimson-hi);
   stroke-width: 2;
   stroke-linejoin: round;
+  transition: stroke var(--t-fast), stroke-width var(--t-fast), filter var(--t-fast);
   pointer-events: none;
+}
+.landmark-merged--hovered .landmark-merged-shape {
+  /* 悬停只强调外轮廓；不填充三角形内部，移开鼠标即恢复普通 PvE 描边。 */
+  stroke: var(--terrain-hover-edge);
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 5px rgb(246 224 170 / 58%));
 }
 .landmark-icon {
   pointer-events: none;
