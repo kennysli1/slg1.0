@@ -221,7 +221,7 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
 function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
   const [segmentIndex, setSegmentIndex] = useState(0);
   const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
-    .filter((item: any) => item && (item.npcName || item.npcText));
+    .filter((item: any) => item && (item.npcName || item.npcText || (item.replies ?? []).length));
   const current = segments[segmentIndex] ?? dialogue;
   const next = () => {
     if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
@@ -249,15 +249,21 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
       )}
-      {current && (current.npcName || current.npcText) && (
+      {current && (current.npcName || current.npcText || (current.replies ?? []).length > 0) && (
         <div class="dialogue-session task-delivery-dialogue">
           {current.npcName && <div class="dialogue-npc-name">{current.npcName}</div>}
           {current.npcText && <div class="dialogue-npc-text">{current.npcText}</div>}
+          {(current.replies ?? []).length > 0 && (
+            <div class="dialogue-replies" aria-label="玩家回复">
+              {(current.replies ?? []).map((reply: any) => (
+                <Btn key={reply.key} variant={reply.key === 'leave' ? 'ghost' : 'primary'} onClick={next}>
+                  {reply.label}
+                </Btn>
+              ))}
+            </div>
+          )}
         </div>
       )}
-      <div class="modal-foot">
-        <Btn variant="primary" onClick={next}>{segmentIndex < segments.length - 1 ? '继续' : '收下'}</Btn>
-      </div>
     </Modal>
   );
 }
