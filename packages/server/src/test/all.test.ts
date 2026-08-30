@@ -66,6 +66,7 @@ import './vision-multivillage.test.js';
 import './incoming-warning.test.js';
 import './world-generation.test.js';
 import './terrain-effects.test.js';
+import './movement-return-timing.test.js';
 import './kingdom-city-state.test.js';
 import './kingdom.test.js';
 import './kingdom-overview.test.js';
