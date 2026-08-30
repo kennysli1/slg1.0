@@ -1377,15 +1377,35 @@ export class MovementModule {
       targetKind = pve.task === true ? 'taskcamp' : 'pve';
       toXY = { q: Number(pve.q), r: Number(pve.r) };
     } else {
-      // 空地/未探索地块没有 refId，用玩家当前视野的权威状态决定是
-      // “驻扎/伏击”还是“探索”，不能接受客户端伪造的 kind。
-      const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
-      const playerId = (owner.payload as any)?.player?.id;
-      if (owner.ok && playerId) {
-        const visibility = await this.commands.send({ name: 'vision.GetVisibility', from: MovementModule.NAME, payload: { playerId, q: toXY.q, r: toXY.r } });
-        if (visibility.ok && (visibility.payload as any)?.visibility === 'unexplored') targetKind = 'unexplored';
+      // 没有 refId 时也必须先读取 World 权威地块，不能把玩家村庄坐标伪装成空地，
+      // 再借续行切换成攻城/掠夺。PvE 目标同样从地块反查 refId，保留 NPC 格子的续行能力。
+      const tileRes = await this.commands.send({ name: 'world.GetTile', from: MovementModule.NAME, payload: toXY });
+      const tile = (tileRes.payload as any)?.tile;
+      if (tile?.kind === 'village' && typeof tile.refId === 'string' && tile.refId) {
+        targetKind = 'village';
+        resolvedTargetVillage = tile.refId;
+      } else if ((tile?.kind === 'pve' || tile?.kind === 'taskcamp') && typeof tile.refId === 'string' && tile.refId) {
+        const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: tile.refId } });
+        if (!target.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
+        const pve = target.payload as any;
+        targetKind = pve.task === true || tile.kind === 'taskcamp' ? 'taskcamp' : 'pve';
+        resolvedTargetId = tile.refId;
+        toXY = { q: Number(pve.q), r: Number(pve.r) };
+      } else {
+        // 空地/未探索地块没有 refId，用玩家当前视野的权威状态决定是
+        // “驻扎/伏击”还是“探索”，不能接受客户端伪造的 kind。
+        const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
+        const playerId = (owner.payload as any)?.player?.id;
+        if (owner.ok && playerId) {
+          const visibility = await this.commands.send({ name: 'vision.GetVisibility', from: MovementModule.NAME, payload: { playerId, q: toXY.q, r: toXY.r } });
+          if (visibility.ok && (visibility.payload as any)?.visibility === 'unexplored') targetKind = 'unexplored';
+        }
       }
     }
+
+    // 驻扎军不能先靠近玩家控制的格子再从驻扎切换为攻城、掠夺等行为。
+    // NPC 格子（王国地标、普通营地、任务营地）不走这里，继续沿用原有模式规则。
+    if (String(targetKind) === 'village') return { ok: false, payload: {}, reason: 'garrison_player_target_forbidden' };
 
     if (toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
 
@@ -1773,6 +1793,12 @@ export class MovementModule {
     if (movementId) {
       const movement = this.load(movementId);
       if (movement?.fromVillage === villageId && movement.status === 'stationed') {
+        // 玩家村庄是玩家控制地块。即使客户端伪造 kind/refId，也以 World 的
+        // 坐标快照为准隐藏续行模式，服务端 ContinueGarrison 仍会再次拒绝。
+        const tileRes = await this.commands.send({ name: 'world.GetTile', from: MovementModule.NAME, payload: { q: targetQ, r: targetR } });
+        const tile = (tileRes.payload as any)?.tile;
+        if (kind === 'village' || kind === 'own_village' || tile?.kind === 'village') modes.length = 0;
+
         const scoutOnly = this.isScoutOnlyTroops(movement.troops);
         if (!scoutOnly) {
           for (let i = modes.length - 1; i >= 0; i -= 1) if (modes[i].mode === 'scout') modes.splice(i, 1);

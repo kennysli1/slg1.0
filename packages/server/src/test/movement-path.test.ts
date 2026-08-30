@@ -294,6 +294,49 @@ test('驻扎军续行：PvE 目标列出侦察与掠夺，并可沿用原编队�
   assert.deepEqual(moving?.troops, { equlegati: 1 }, '续行不应重新选择或扣除编队');
 });
 
+test('驻扎军续行：玩家控制格不提供模式且服务端拒绝坐标伪装', async () => {
+  const app = freshApp();
+  const attacker = await send(app, 'player.Register', { name: '驻扎玩家目标甲', password: 'pass123', tribe: 'romans' });
+  const defender = await send(app, 'player.Register', { name: '驻扎玩家目标乙', password: 'pass123', tribe: 'romans' });
+  const A = (attacker.payload as any).player;
+  const B = (defender.payload as any).player;
+  await giveTroops(app, A.villageId, { legionnaire: 20 });
+
+  const staging = { q: A.q + 2, r: A.r + 1 };
+  await send(app, 'vision.Reveal', { playerId: A.id, ...staging, radius: 0 });
+  const first = await send(app, 'movement.SendGarrison', { villageId: A.villageId, ...staging, troops: { legionnaire: 5 } });
+  assert.equal(first.ok, true, `驻扎军派遣应成功: ${first.reason ?? ''}`);
+  const id = (first.payload as any).id as string;
+  for (let i = 0; i < 100 && app.store.get<any>('movement', id)?.status !== 'stationed'; i++) {
+    const mv = app.store.get<any>('movement', id);
+    await app.scheduler.advanceTo(clock + (mv?.perStepMs ?? 60_000) + 1, setClock);
+  }
+  const stationed = app.store.get<any>('movement', id);
+  assert.equal(stationed?.status, 'stationed');
+  const originalPos = { ...stationed.pos };
+
+  const options = await send(app, 'movement.GetMarchOptions', {
+    villageId: A.villageId, movementId: id, kind: 'village', refId: B.villageId, q: B.q, r: B.r,
+  });
+  assert.equal(options.ok, true);
+  assert.deepEqual((options.payload as any).modes, [], '驻扎军对玩家村庄不应显示任何续行模式');
+
+  const byRef = await send(app, 'movement.ContinueGarrison', {
+    villageId: A.villageId, movementId: id, targetVillage: B.villageId, q: B.q, r: B.r, mode: 'attack',
+  });
+  assert.equal(byRef.ok, false);
+  assert.equal(byRef.reason, 'garrison_player_target_forbidden');
+
+  // 不传 targetVillage 仍不能靠坐标伪装成空地；服务端会从 World 反查玩家村。
+  const byCoordinate = await send(app, 'movement.ContinueGarrison', {
+    villageId: A.villageId, movementId: id, q: B.q, r: B.r, mode: 'attack',
+  });
+  assert.equal(byCoordinate.ok, false);
+  assert.equal(byCoordinate.reason, 'garrison_player_target_forbidden');
+  assert.equal(app.store.get<any>('movement', id)?.status, 'stationed');
+  assert.deepEqual(app.store.get<any>('movement', id)?.pos, originalPos);
+});
+
 test('混合驻扎军不显示侦察：只有纯侦察兵/冒险者编队才可续行侦察', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', { name: '混合驻扎', password: 'pass123', tribe: 'romans' });
