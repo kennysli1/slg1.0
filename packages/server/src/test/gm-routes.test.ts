@@ -195,7 +195,8 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /alchemy_refine_sec/, 'GM 页面应提供炼金时间参数');
     assert.match(res.body, /声望参数/, 'GM 页面应包含声望专用调参板块');
     assert.match(res.body, /reputation_s4_release_delta/, 'GM 页面应列出 S4 声望值参数');
-    assert.match(res.body, /娜塔莉任务的声望结算/, 'GM 页面应说明娜塔莉任务的声望结算位置');
+    assert.match(res.body, /任务中的声望目标\/效果/, 'GM 页面应集中显示任务声望目标与效果');
+    assert.match(res.body, /宝物被动声望和议会厅声望价格/, 'GM 页面应集中显示宝物和议会厅的声望参数');
     assert.match(res.body, /拓荒参数/, 'GM 页面应包含拓荒专用调参板块');
     assert.match(res.body, /found_resource_cost_base/, 'GM 页面应提供第2座城每种资源成本参数');
     assert.match(res.body, /found_resource_cost_growth/, 'GM 页面应提供后续城成本增长倍率参数');
@@ -219,6 +220,34 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /kingdom_pve_retaliation_raid_threshold/, 'GM 页面应提供封地掠夺阈值');
     assert.match(res.body, /kingdom_pve_retaliation_siege_threshold/, 'GM 页面应提供封地攻城阈值');
     assert.match(res.body, /kingdom_fief_mercenary_min_ratio/, 'GM 页面应提供封地雇佣军比例参数');
+    const renderStart = res.body.indexOf('function render()');
+    const reputationCall = res.body.indexOf('html += sectionReputation();', renderStart);
+    const terrainCall = res.body.indexOf('html += sectionTerrain();', renderStart);
+    assert.ok(renderStart >= 0 && reputationCall >= 0 && terrainCall > reputationCall, '声望参数板块应位于地形参数之前');
+    const reputationFnStart = res.body.indexOf('var REP_ROWS = [');
+    const reputationFnEnd = res.body.indexOf('function sectionAmbush()', reputationFnStart);
+    const reputationSection = res.body.slice(reputationFnStart, reputationFnEnd);
+    for (const key of [
+      'kingdom_task_tribute_weight',
+      'kingdom_task_clear_pve_weight',
+      'kingdom_task_attack_evil_weight',
+      'kingdom_task_eliminate_troops_weight',
+      'kingdom_task_evil_target_threshold',
+      'kingdom_task_tribute_reward_reputation',
+      'kingdom_task_clear_pve_reward_reputation',
+      'kingdom_task_attack_evil_reward_reputation',
+      'kingdom_task_eliminate_troops_reward_reputation',
+      'kingdom_pve_killed_population_per_reputation',
+      'kingdom_pve_retaliation_chunk',
+      'kingdom_pve_retaliation_raid_threshold',
+      'kingdom_pve_retaliation_siege_threshold',
+      'kingdom_fief_mercenary_min_ratio',
+      'kingdom_fief_mercenary_max_ratio',
+      'kingdom_city_state_reputation_penalty',
+    ]) assert.match(reputationSection, new RegExp(key), `声望参数板块应包含 ${key}`);
+    const cityStateFnStart = res.body.indexOf('function sectionCityState()');
+    const cityStateFnEnd = res.body.indexOf('function sectionKingdom()', cityStateFnStart);
+    assert.doesNotMatch(res.body.slice(cityStateFnStart, cityStateFnEnd), /kingdom_pve_killed_population_per_reputation/, '王国 PvE 声望累计参数不应继续散落在城邦板块');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -634,6 +663,31 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     const foundingGrowth = (foundingData.constants ?? []).find((r) => r.key === 'found_resource_cost_growth');
     assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
     assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
+
+    const reputationData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      kingdom_services?: Array<Record<string, unknown>>;
+      treasures?: Array<Record<string, unknown>>;
+      quest_objectives?: Array<Record<string, unknown>>;
+      quest_effects?: Array<Record<string, unknown>>;
+    };
+    assert.ok(reputationData.kingdom_services && reputationData.treasures, '声望专用视图应读取议会厅与宝物表');
+    assert.ok(reputationData.quest_objectives && reputationData.quest_effects, '声望专用视图应读取任务目标与效果表');
+    const reputationSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kingdom_services: { '1': { reputationCost: '3' } },
+        treasures: { '25': { reputationValue: '2' } },
+        quest_objectives: { 'o-m15': { params: '-6' } },
+        quest_effects: { 'e-m12-reputation': { params: '6' } },
+      }),
+    });
+    assert.equal(reputationSave.statusCode, 200, `声望相关行级参数覆盖应成功：${reputationSave.body}`);
+    assert.equal(app.config.kingdomServices.supplies_small.reputationCost, 3, '议会厅服务声望价格应热重载');
+    assert.equal(app.config.treasures.honest_heart.reputationValue, 2, '宝物被动声望值应热重载');
+    assert.equal(app.config.quests.m12.rewards.reputation, 6, '任务声望调整应热重载');
+    assert.equal(app.config.quests.m15.objective.threshold, -6, '任务声望目标阈值应热重载');
 
     await fastify.close();
     // 模拟删档/重启：game.json 会换新，但同一 configDir 和共享 CSV 必须继续作为默认值。

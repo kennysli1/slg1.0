@@ -252,11 +252,11 @@
 
 ## game_constants.csv — 全局常量（原硬编码迁出）
 
-声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。配置中心 `/config/balance` 会把这些行集中显示在“声望参数”板块；保存后热重载即可生效，无需刷档。宝物目录的 `reputationValue` 列控制主宝物栏被动声望修正。
+声望模块参数也在此表维护：`reputation_s4_release_delta` 控制 S4 释放抉择，`reputation_*_pvp_*` 控制正/负声望玩家按每十点敌方士兵人口击杀获得的声望值与目标门槛，`reputation_good_pop_growth_*` 控制正声望对人口增长的倍率及上限，`reputation_evil_pop_growth_penalty_*` 控制负声望的人口增长下降，`reputation_evil_army_attack_*` / `reputation_evil_army_defense_*` 控制负声望军队攻防倍率及上限，`reputation_good_gold_tax_penalty_*` 控制正声望的金币税收下降，`reputation_evil_pve_drop_rate_*` 控制负声望对 PvE 宝物掉落概率的倍率及上限。王国任务声望权重/奖励/目标门槛、王国 PvE 击杀累计与封地报复阈值/雇佣军比例也属于声望全局参数。配置中心 `/config/balance` 的“声望参数”板块会集中显示并编辑这些全局行，同时直接列出任务声望目标/调整、正声望兑换佣兵参数、宝物被动/直接声望值和议会厅服务声望价格；保存后分别写回对应 CSV，热重载即可生效，无需刷档。
 
 人口繁荣度参数：`pop_prosperity_full_ratio` 是劳动人口占总人口比例达到繁荣满值的阈值（默认 70%），`pop_prosperity_max_bonus` 是满值时资源产量、建造、训练和研究的额外速率加成（默认 +30%）。劳动人口占比在本族动员上限对应的最低值时额外加成为 0；低繁荣度只取消这层额外加成，不降低基础产值或把耗时变长。
 
-王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、四类任务权重、上贡与击杀目标范围、负声望目标门槛及声望奖励。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
+王国系统的 `kingdom_*` 行控制封地位置比例、首次/循环任务等待、期限、上贡与击杀目标范围等非声望调度参数；四类任务权重、负声望目标门槛及声望奖励已归入配置中心“声望参数”。王都/四封地守军与掉落仍在 `pve_targets.csv` / `pve_defenders.csv` 调整。
 | 列 | 含义 |
 |----|------|
 | key | 常量键（代码按它读取，**勿改**） |
