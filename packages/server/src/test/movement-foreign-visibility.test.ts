@@ -69,6 +69,17 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
     path: [far, far], stepIndex: 0, pos: far,
     perStepMs: 1000, nextStepAt: clock + 1000, status: 'marching', stepToken: 1,
   });
+  // 王国封地复仇军返程使用内部来源 ID，没有玩家村庄归属；即使在玩家视野内，
+  // 也必须作为脱敏的“王国军队”出现在外军列表中。
+  setMovement(app, {
+    id: 'mv-kingdom-retaliation-return', type: 'return', npcService: true,
+    kingdomMercenary: true, taskCode: 'kingdom_retaliation', returnPveId: 'kingdom-fief-sw',
+    fromVillage: 'kingdom-fief:kingdom-fief-sw', fromXY: vis, toXY: { q: 0, r: 0 },
+    troops: { merc_knight: 12 }, loot: { wood: 30 }, cargo: {}, treasures: [],
+    departAt: clock, arriveAt: clock + 300000,
+    path: [vis, { q: vis.q + 1, r: vis.r }], stepIndex: 0, pos: vis,
+    perStepMs: 1000, nextStepAt: clock + 1000, status: 'marching', stepToken: 1,
+  });
   // B 的主动侦察军：即使停在 A 的可见格，也不能通过地图外军列表发现
   setMovement(app, {
     id: 'mv-B-scout', type: 'scout', fromVillage: B.villageId, targetVillage: A.villageId,
@@ -106,6 +117,8 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
   assert.ok(ids.includes('mv-B-vis'), '视野内他国驻扎军应出现');
   // 2) 含商队
   assert.ok(ids.includes('mv-B-caravan'), '视野内他国商队应出现');
+  // 2b) 王国 NPC（含封地复仇军返程）也应出现在视野内
+  assert.ok(ids.includes('mv-kingdom-retaliation-return'), '视野内王国复仇军返程应出现');
   // 3) 不可见格的他国军队不出现
   assert.ok(!ids.includes('mv-B-far'), '视野外他国军队不应出现');
   assert.ok(!ids.includes('mv-B-scout'), '他国侦察军不应出现在地图外军列表');
@@ -135,4 +148,11 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
   assert.equal(caravan.cargo, undefined, '商队不得泄露 cargo');
   assert.equal(caravan.type, 'caravan', '商队 type 应为 caravan');
   assert.equal(caravan.ownerPlayerId, B.id, '商队应归属敌国 B');
+
+  const kingdom = list.find((m) => m.id === 'mv-kingdom-retaliation-return')!;
+  assert.equal(kingdom.ownerPlayerId, undefined, '王国 NPC 不应伪造玩家 id');
+  assert.equal(kingdom.ownerPlayerName, '王国', '王国 NPC 应显示王国归属');
+  assert.equal(kingdom.ownerVillageName, '封地复仇军', '复仇军应显示来源类型');
+  assert.equal(kingdom.type, 'return', '复仇军战后应保持返程类型');
+  assert.equal(kingdom.troops, undefined, '王国 NPC 返程不得泄露兵力');
 });
