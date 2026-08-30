@@ -177,7 +177,9 @@ export class WorldModule {
       for (const cell of cells) {
         const key = hexKey(cell.q, cell.r);
         const existing = this.store.get<Tile>(COLLECTION_TILE, key);
-        if (existing && (existing.kind !== 'pve' || existing.refId !== refId)) continue;
+        // Store 会把被移除的目标保留成显式 kind='empty'。空地仍然可写；
+        // 若把“有记录”误当成“被占用”，旧存档里缺失的地标格会永远无法自愈。
+        if (existing && existing.kind !== 'empty' && (existing.kind !== 'pve' || existing.refId !== refId)) continue;
         this.store.set<Tile>(COLLECTION_TILE, key, {
           ...(existing ?? center),
           q: cell.q,

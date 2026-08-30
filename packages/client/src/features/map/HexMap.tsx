@@ -90,6 +90,46 @@ export function landmarkCenterFromTile(refId?: string, landmarkCenter?: boolean)
   return landmarkKindFromRefId(refId) ? landmarkCenter === true : true;
 }
 
+export type LandmarkOutline = {
+  path: string;
+  centerX: number;
+  centerY: number;
+  points: readonly [
+    { x: number; y: number },
+    { x: number; y: number },
+    { x: number; y: number },
+  ];
+};
+
+function formatClosedPath(points: ReadonlyArray<{ x: number; y: number }>): string {
+  return points.length > 0
+    ? `M${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join('L')}Z`
+    : '';
+}
+
+/**
+ * 把一个地标的占地格归并为真正的单一三角形。轮廓只由三个顶点组成，
+ * 不再沿每个六边形的外边逐段拼接，因此不会出现两个/多个六边形连在一起的折线。
+ */
+export function buildLandmarkTriangleOutline(cells: ReadonlyArray<{ camX: number; camY: number }>): LandmarkOutline | null {
+  if (cells.length === 0) return null;
+  const minX = Math.min(...cells.map((cell) => cell.camX));
+  const maxX = Math.max(...cells.map((cell) => cell.camX));
+  const minY = Math.min(...cells.map((cell) => cell.camY));
+  const maxY = Math.max(...cells.map((cell) => cell.camY));
+  const shoulder = HEX_SIZE * Math.sqrt(3) / 2;
+  const left = { x: minX - shoulder, y: maxY + HEX_SIZE };
+  const right = { x: maxX + shoulder, y: maxY + HEX_SIZE };
+  const apex = { x: (left.x + right.x) / 2, y: minY - HEX_SIZE };
+  const points = [apex, right, left] as const;
+  return {
+    path: formatClosedPath(points),
+    centerX: (apex.x + right.x + left.x) / 3,
+    centerY: (apex.y + right.y + left.y) / 3,
+    points,
+  };
+}
+
 // ─── hex math ────────────────────────────────────────────────────────────────
 function hexDistance(a: Hex, b: Hex): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -417,12 +457,6 @@ export function HexMap() {
     landmarkCenter: boolean;
   }
 
-  type LandmarkOutline = {
-    path: string;
-    centerX: number;
-    centerY: number;
-  };
-
   type LandmarkGroup = {
     key: string;
     refId: string;
@@ -432,67 +466,6 @@ export function HexMap() {
     outline: LandmarkOutline;
     clipId: string;
   };
-
-  function pointKey(point: { x: number; y: number }): string {
-    return `${Math.round(point.x * 10)},${Math.round(point.y * 10)}`;
-  }
-
-  function formatPath(points: Array<{ x: number; y: number }>): string {
-    return points.length > 0
-      ? `M${points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join('L')}Z`
-      : '';
-  }
-
-  /** 将同一地标的六边形边界合并成单一外轮廓，内部共享边不会产生线条。 */
-  function buildLandmarkOutline(cells: HexCell[]): LandmarkOutline | null {
-    type Edge = { from: { x: number; y: number }; to: { x: number; y: number } };
-    const edges = new Map<string, Edge>();
-    for (const cell of cells) {
-      const corners = hexCorners().map((corner) => ({ x: cell.camX + corner.x, y: cell.camY + corner.y }));
-      for (let i = 0; i < corners.length; i++) {
-        const from = corners[i]!;
-        const to = corners[(i + 1) % corners.length]!;
-        const fromKey = pointKey(from);
-        const toKey = pointKey(to);
-        const edgeKey = fromKey < toKey ? `${fromKey}|${toKey}` : `${toKey}|${fromKey}`;
-        if (edges.has(edgeKey)) edges.delete(edgeKey);
-        else edges.set(edgeKey, { from, to });
-      }
-    }
-    if (edges.size === 0) return null;
-
-    const remaining = [...edges.values()];
-    const used = new Set<number>();
-    const first = remaining[0]!;
-    const points = [first.from];
-    used.add(0);
-    let current = first.to;
-    const startKey = pointKey(first.from);
-    for (let guard = 0; guard < remaining.length + 2; guard++) {
-      points.push(current);
-      if (pointKey(current) === startKey) break;
-      let nextIndex = -1;
-      let nextPoint: { x: number; y: number } | null = null;
-      const currentKey = pointKey(current);
-      for (let i = 0; i < remaining.length; i++) {
-        if (used.has(i)) continue;
-        const edge = remaining[i]!;
-        if (pointKey(edge.from) === currentKey) {
-          nextIndex = i; nextPoint = edge.to; break;
-        }
-        if (pointKey(edge.to) === currentKey) {
-          nextIndex = i; nextPoint = edge.from; break;
-        }
-      }
-      if (nextIndex < 0 || !nextPoint) break;
-      used.add(nextIndex);
-      current = nextPoint;
-    }
-    if (points.length < 4) return null;
-    const centerX = cells.reduce((sum, cell) => sum + cell.camX, 0) / cells.length;
-    const centerY = cells.reduce((sum, cell) => sum + cell.camY, 0) / cells.length;
-    return { path: formatPath(points), centerX, centerY };
-  }
 
   function buildLandmarkGroups(cells: HexCell[]): LandmarkGroup[] {
     const centers = cells.filter((cell) => cell.landmark && cell.visibility !== 'unexplored');
@@ -522,7 +495,7 @@ export function HexMap() {
         .filter((cell) => cell.r === fallbackRow)
         .sort((a, b) => b.q - a.q || a.camY - b.camY)[0];
       const groupCenter = explicitCenter ?? fallbackCenter ?? center;
-      const outline = buildLandmarkOutline(members);
+      const outline = buildLandmarkTriangleOutline(members);
       if (!outline) continue;
       const safeKey = `${center.refId}|${center.camX.toFixed(1)}|${center.camY.toFixed(1)}`.replace(/[^a-zA-Z0-9_-]/g, '_');
       groups.push({
@@ -1366,6 +1339,10 @@ export function HexMap() {
                   class={`landmark-merged landmark-merged--${group.landmark}${isHovered ? ' landmark-merged--hovered' : ''}`}
                   data-landmark-ref={group.refId}
                 >
+                  <path
+                    class={`landmark-merged-ground terrain-surface terrain-surface--${group.center.terrain ?? 'plain'} terrain-surface--${group.center.visibility}`}
+                    d={group.outline.path}
+                  />
                   <path class="landmark-merged-shape" d={group.outline.path} />
                   {group.center.icon && (
                     <image
@@ -1379,13 +1356,22 @@ export function HexMap() {
                       clipPath={`url(#${group.clipId})`}
                     />
                   )}
+                  <text
+                    class="hex-label landmark-label"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    x={group.outline.centerX}
+                    y={group.outline.centerY + iconSize * 0.42}
+                  >
+                    {group.center.name.slice(0, 5)}
+                  </text>
                 </g>
               );
             })}
             {visibleCells.map((c) => {
               const rk = ringKind(c.kind, c.isSelf);
               if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
-              if (c.landmark && !c.landmarkCenter) return null;
+              if (c.landmark) return null;
               return (
                 <g
                   key={`poi-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
@@ -1408,7 +1394,7 @@ export function HexMap() {
                     />
                   )}
                   {/* 名称必须留在所属六边形内；放到格外会被后绘制的相邻地形遮住。 */}
-                  {c.kind !== 'empty' && (!c.landmark || c.landmarkCenter) && (
+                  {c.kind !== 'empty' && (
                     <text class="hex-label" textAnchor="middle" dominantBaseline="middle" y={HEX_SIZE * 0.62}>
                       {c.name.slice(0, 5)}
                     </text>

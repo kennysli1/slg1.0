@@ -108,6 +108,38 @@ test('王国地标迁移：切换倒三角后清除旧版本遗留占地', () =>
   }
 });
 
+test('王国地标迁移：重启时会补回持久化为显式空地的缺失格', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-empty-repair-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchors = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    );
+
+    // 复现生产存档：目标曾被清除后留下 { kind:'empty' }，并非“没有这条记录”。
+    for (const anchor of anchors) {
+      const missing = (anchor.footprint ?? []).find((cell) => cell.q !== anchor.q || cell.r !== anchor.r)!;
+      initial.store.set('world_tile', `${missing.q},${missing.r}`, { q: missing.q, r: missing.r, kind: 'empty' });
+    }
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    for (const anchor of anchors) {
+      const expected = new Set((anchor.footprint ?? []).map((cell) => `${cell.q},${cell.r}`));
+      const actual = restarted.store.all<any>('world_tile')
+        .filter((tile) => tile.refId === anchor.id)
+        .map((tile) => `${tile.q},${tile.r}`);
+      assert.deepEqual(new Set(actual), expected, `${anchor.id} 的显式空地应按同一迁移规则补回`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('议会厅/玩家增援：抵达后不并入目标村军队，来源村仍承担军队足迹', async () => {
   let clock = 1_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock });
