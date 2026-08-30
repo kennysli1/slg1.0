@@ -19,7 +19,7 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { landmarkCenterFromTile, normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, landmarkCenterFromTile, normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
@@ -30,6 +30,20 @@ describe('王国地标中心标记', () => {
     assert.equal(landmarkCenterFromTile('kingdom-fief-sw', false), false);
     assert.equal(landmarkCenterFromTile('kingdom-fief-sw', undefined), false);
     assert.equal(landmarkCenterFromTile('some-village', undefined), true);
+  });
+
+  it('三个占地格只生成一个无内边框的三边形轮廓', () => {
+    const outline = buildLandmarkTriangleOutline([
+      { camX: -25.98, camY: -45 },
+      { camX: -51.96, camY: 0 },
+      { camX: 0, camY: 0 },
+    ]);
+    assert.ok(outline);
+    assert.equal(outline.points.length, 3);
+    assert.equal((outline.path.match(/L/g) ?? []).length, 2, '闭合路径只能包含三条边，不能沿六边形逐段拼接');
+    assert.ok(outline.points[0].y < outline.points[1].y, '三角形应上窄下宽');
+    assert.equal(outline.points[1].y, outline.points[2].y, '底边应保持水平');
+    assert.ok(Math.abs(outline.centerX + 25.98) < 0.1, '图标中心应落在大三角水平中心');
   });
 });
 
