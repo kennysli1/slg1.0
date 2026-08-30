@@ -85,6 +85,11 @@ function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
   return null;
 }
 
+/** 地标中心必须由服务端显式标记；缺字段不能把整个占地误判成多个中心。 */
+export function landmarkCenterFromTile(refId?: string, landmarkCenter?: boolean): boolean {
+  return landmarkKindFromRefId(refId) ? landmarkCenter === true : true;
+}
+
 // ─── hex math ────────────────────────────────────────────────────────────────
 function hexDistance(a: Hex, b: Hex): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -490,26 +495,41 @@ export function HexMap() {
   }
 
   function buildLandmarkGroups(cells: HexCell[]): LandmarkGroup[] {
-    const centers = cells.filter((cell) => cell.landmark && cell.landmarkCenter && cell.visibility !== 'unexplored');
+    const centers = cells.filter((cell) => cell.landmark && cell.visibility !== 'unexplored');
     const groups: LandmarkGroup[] = [];
-    const usedCenterKeys = new Set<string>();
+    // 一个地图副本内，同一地标的多个占地格可能因旧存档缺少 landmarkCenter
+    // 而都被判成中心。按完整可见成员集合去重，保证每个视觉副本只生成一个组；
+    // 不按西南/东北等方向做任何特判。
+    const usedGroupKeys = new Set<string>();
+    const landmarkCells = cells.filter((cell) => cell.landmark && cell.visibility !== 'unexplored');
     for (const center of centers) {
-      const centerKey = `${center.refId}|${center.camX.toFixed(1)}|${center.camY.toFixed(1)}`;
-      if (usedCenterKeys.has(centerKey)) continue;
-      usedCenterKeys.add(centerKey);
-      const members = cells.filter((cell) =>
+      const members = landmarkCells.filter((cell) =>
         cell.refId === center.refId
         && cell.landmark === center.landmark
-        && cell.visibility !== 'unexplored'
         && Math.hypot(cell.camX - center.camX, cell.camY - center.camY) <= HEX_SIZE * 5.2);
+      const memberKey = members
+        .map((cell) => `${cell.q},${cell.r},${cell.camX.toFixed(1)},${cell.camY.toFixed(1)}`)
+        .sort()
+        .join('|');
+      if (usedGroupKeys.has(memberKey)) continue;
+      usedGroupKeys.add(memberKey);
+      // 正常数据一定有显式中心。旧数据缺字段时，仍只选择一个稳定中心，
+      // 避免重复绘制；行数中位数 + 该行最右格对应统一的倒三角中心。
+      const explicitCenter = members.find((cell) => cell.landmarkCenter);
+      const rows = [...new Set(members.map((cell) => cell.r))].sort((a, b) => a - b);
+      const fallbackRow = rows[Math.floor(rows.length / 2)];
+      const fallbackCenter = members
+        .filter((cell) => cell.r === fallbackRow)
+        .sort((a, b) => b.q - a.q || a.camY - b.camY)[0];
+      const groupCenter = explicitCenter ?? fallbackCenter ?? center;
       const outline = buildLandmarkOutline(members);
       if (!outline) continue;
-      const safeKey = centerKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeKey = `${center.refId}|${center.camX.toFixed(1)}|${center.camY.toFixed(1)}`.replace(/[^a-zA-Z0-9_-]/g, '_');
       groups.push({
         key: safeKey,
         refId: center.refId,
         landmark: center.landmark!,
-        center,
+        center: groupCenter,
         cells: members,
         outline,
         clipId: `landmark-clip-${safeKey}`,
@@ -558,7 +578,7 @@ export function HexMap() {
             const t = tileAt(q, r);
             const visibility = (t?.visibility ?? 'visible') as Visibility;
             const landmark = landmarkKindFromRefId(t?.refId);
-            const landmarkCenter = landmark ? t?.landmarkCenter !== false : true;
+            const landmarkCenter = landmarkCenterFromTile(t?.refId, t?.landmarkCenter);
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined

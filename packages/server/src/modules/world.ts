@@ -47,6 +47,16 @@ interface WorldState {
 const COLLECTION_META = 'world_meta';
 const COLLECTION_TILE = 'world_tile';
 
+/** 与世界种子绑定的稳定哈希：运行时随机点在重启后仍可复现，但不会总选最近格。 */
+function hash32(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 export class WorldModule {
   private worldW = 41; // 环绕平行四边形宽（axial q 周期）
   private worldH = 41; // 环绕平行四边形高（axial r 周期）
@@ -457,22 +467,31 @@ export class WorldModule {
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
-  /** 在以 (centerQ,centerR) 为中心、radius 半径内找一块空地块，返回其坐标（用于运行时生成任务营地）。环式由内向外扫描，命中即返回。 */
+  /** 在以 (centerQ,centerR) 为中心的范围内随机选一块空地（环面坐标）。 */
   private findFreeTile(cmd: Command): CommandResult {
-    const { centerQ, centerR, radius } = cmd.payload as { centerQ: number; centerR: number; radius?: number };
+    const { centerQ, centerR, radius, salt } = cmd.payload as { centerQ: number; centerR: number; radius?: number; salt?: string };
     const R = Math.max(1, Math.min(Math.floor(radius ?? 6), 30));
     const cq = Number(centerQ) || 0, cr = Number(centerR) || 0;
-    for (let d = 1; d <= R; d++) {
-      for (let dq = -R; dq <= R; dq++) {
-        for (let dr = -R; dr <= R; dr++) {
-          const rawQ = cq + dq, rawR = cr + dr;
-          if (hexDistanceWrapped({ q: cq, r: cr }, { q: rawQ, r: rawR }, this.worldW, this.worldH) !== d) continue;
-          const w = wrapHex({ q: rawQ, r: rawR }, this.worldW, this.worldH);
-          const t = this.store.get<Tile>(COLLECTION_TILE, hexKey(w.q, w.r));
-          if (!t || t.kind === 'empty') return { ok: true, payload: { q: w.q, r: w.r } };
+    const center = wrapHex({ q: cq, r: cr }, this.worldW, this.worldH);
+    const candidates = new Map<string, { q: number; r: number; score: number }>();
+    const seed = String(this.config.constants.raw.world_seed ?? 'kow-world-v1');
+    const selectionSalt = typeof salt === 'string' && salt.length > 0 ? salt : `${center.q},${center.r}:${R}`;
+    for (let dq = -R; dq <= R; dq++) {
+      for (let dr = -R; dr <= R; dr++) {
+        const rawQ = center.q + dq, rawR = center.r + dr;
+        const distance = hexDistanceWrapped(center, { q: rawQ, r: rawR }, this.worldW, this.worldH);
+        if (distance < 1 || distance > R) continue;
+        const w = wrapHex({ q: rawQ, r: rawR }, this.worldW, this.worldH);
+        const key = hexKey(w.q, w.r);
+        if (candidates.has(key)) continue;
+        const t = this.store.get<Tile>(COLLECTION_TILE, key);
+        if (!t || t.kind === 'empty') {
+          candidates.set(key, { q: w.q, r: w.r, score: hash32(`${seed}:free-tile:${selectionSalt}:${w.q}:${w.r}`) });
         }
       }
     }
+    const chosen = [...candidates.values()].sort((a, b) => a.score - b.score || a.q - b.q || a.r - b.r)[0];
+    if (chosen) return { ok: true, payload: { q: chosen.q, r: chosen.r } };
     return { ok: false, payload: {}, reason: 'no_free_tile' };
   }
 }

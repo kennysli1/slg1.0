@@ -24,7 +24,7 @@
  *
  * 跨模块协作（仅经 Commands，不读他模块 store）：
  *   world.GetTileByRef  取本村坐标
- *   world.FindFreeTile  在村内找空地放任务营地
+ *   world.FindFreeTile  在村庄周围配置范围内随机找空地放任务营地
  *   pve.Spawn / pve.Remove 生成 / 移除任务营地（task=true，不掉落/不自动重生）
  *   economy.TrySpend / economy.Grant 扣 / 发资源奖励
  *   treasure.Grant 发任务奖励；满栏时转待处理报告，由玩家决定领取、出售或丢弃
@@ -1320,7 +1320,7 @@ export class TasksModule {
     }, owner, `village:${storageVillageId}`);
   }
 
-  /** 在村内找空地生成任务营地（task=true，不掉落/不自动重生）。 */
+  /** 在村庄周围范围内随机选点生成任务营地（task=true，不掉落/不自动重生）。 */
   private async spawnCamps(villageId: string, inst: TaskInstance, storageVillageId = villageId): Promise<void> {
     const q = this.quest(inst.code);
     if (!q || q.objective.kind !== 'clear_camp') return;
@@ -1337,10 +1337,10 @@ export class TasksModule {
       const radius = attempts >= 3
         ? this.config.constants.mapSize
         : Math.min(q.campMaxRadius, q.campSearchRadius + attempts * q.campSearchRadius);
-      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius } });
+      const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
+      const free = await this.commands.send({ name: 'world.FindFreeTile', from: TasksModule.NAME, payload: { centerQ: xy.q, centerR: xy.r, radius, salt: campId } });
       if (!free.ok) break;
       const { q: cq, r: cr } = free.payload as { q: number; r: number };
-      const campId = `taskcamp-${villageId}-${inst.code}-${i}`;
       const spawn = await this.commands.send({ name: 'pve.Spawn', from: TasksModule.NAME, payload: { id: campId, type: template, q: cq, r: cr, task: true, ownerVillageId: villageId } });
       if (spawn.ok) {
         inst.camps.push({ id: campId, q: cq, r: cr, cleared: false });
