@@ -1,5 +1,5 @@
-﻿id,code,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop,faction,cityState
-#数字ID(跨表引用用),代码标识(英文,勿改),显示名,图标基名(渲染时拼 /art/+基名+.png),重生秒数,掠夺木材,掠夺泥土,掠夺铁矿,掠夺粮食,阵营(neutral/kingdom),是否运行时随机城邦
+id,code,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop,faction,cityState,kingdomProfile
+#数字ID(跨表引用用),代码标识(英文,勿改),显示名,图标基名(渲染时拼 /art/+基名+.png),重生秒数,掠夺木材,掠夺泥土,掠夺铁矿,掠夺粮食,阵营(neutral/kingdom),是否运行时随机城邦,王国PvE生成档位(city_state/fief/capital)
 1,rats,老鼠窝,pve_rats,900,200,200,100,100
 2,wolves,野狼群,pve_wolves,1800,500,500,400,300
 3,bandits,强盗营地,pve_bandits,3600,1200,1200,1000,600
@@ -10,11 +10,11 @@
 8,bone_king,骷髅王营地,pve_bone_king,86400,28000,28000,20000,14000
 99,task_camp,任务营地,quest_camp,999999,0,0,0,0
 100,happy_village,幸福村,pve_happy,999999,200,200,200,100
-101,royal_capital,王都,pve_fortress,86400,30000,30000,30000,30000
-102,royal_fief_ne,东北封地,pve_fortress,43200,12000,12000,12000,12000
-103,royal_fief_se,东南封地,pve_fortress,43200,12000,12000,12000,12000
-104,royal_fief_sw,西南封地,pve_fortress,43200,12000,12000,12000,12000
-105,royal_fief_nw,西北封地,pve_fortress,43200,12000,12000,12000,12000
+101,royal_capital,王都,pve_fortress,86400,30000,30000,30000,30000,kingdom,true,capital
+102,royal_fief_ne,东北封地,pve_fortress,43200,12000,12000,12000,12000,kingdom,true,fief
+103,royal_fief_se,东南封地,pve_fortress,43200,12000,12000,12000,12000,kingdom,true,fief
+104,royal_fief_sw,西南封地,pve_fortress,43200,12000,12000,12000,12000,kingdom,true,fief
+105,royal_fief_nw,西北封地,pve_fortress,43200,12000,12000,12000,12000,kingdom,true,fief
 106,tianwang_village,天王老子村,pve_bandits,999999,500,500,500,500
 107,secret_camp,秘密营地,pve_bandits,999999,1000,1000,1000,1000
-108,kingdom_city_state,王国城邦,pve_fortress,999999,0,0,0,0,kingdom,true
+108,kingdom_city_state,王国城邦,pve_fortress,999999,0,0,0,0,kingdom,true,city_state

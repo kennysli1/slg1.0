@@ -85,6 +85,10 @@ interface MovementRecord {
   taskCode?: string;
   /** NPC 行军的真实出发任务村，用于读取任务村守军快照。 */
   taskVillageId?: string;
+  /** 王国封地报复军：使用独立雇佣军快照，返程时存回来源 PvE 目标并解散。 */
+  kingdomMercenary?: boolean;
+  returnPveId?: string;
+  attackerSnapshotOverride?: Snapshot;
   reinforcementUntil?: number;
   reinforcementSnapshot?: Snapshot;
   /** 该支增援独立的掠夺防守配置；旧记录缺省为全军参与。 */
@@ -177,6 +181,7 @@ export class MovementModule {
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendKingdomReinforcement', (c) => this.sendKingdomReinforcement(c));
+    this.commands.register('movement.SendKingdomRetaliation', (c) => this.sendKingdomRetaliation(c));
     this.commands.register('movement.GetReinforcementSnapshot', (c) => this.getReinforcementSnapshot(c));
     this.commands.register('movement.ApplyReinforcementLosses', (c) => this.applyReinforcementLosses(c));
     this.commands.register('movement.SetReinforcementRaidDefense', (c) => this.setReinforcementRaidDefense(c));
@@ -1513,7 +1518,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
@@ -2218,6 +2223,31 @@ export class MovementModule {
       },
     } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), reinforcementUntil: mv.reinforcementUntil } };
+  }
+
+  /** 王国封地报复军：只创建 NPC 雇佣军行军，不扣封地原守军或玩家人口。 */
+  private async sendKingdomRetaliation(cmd: Command): Promise<CommandResult> {
+    const { sourcePveId, fromXY, targetVillage, troops, attackerSnapshot, battleType, retaliationId } = cmd.payload as {
+      sourcePveId: string; fromXY: Hex; targetVillage: string; troops: Record<string, number>; attackerSnapshot: Snapshot;
+      battleType?: 'raid' | 'siege'; retaliationId?: string;
+    };
+    if (!sourcePveId || !targetVillage) return { ok: false, payload: {}, reason: 'retaliation_target_required' };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const origin: Hex = { q: Number(fromXY?.q), r: Number(fromXY?.r) };
+    if (!Number.isFinite(origin.q) || !Number.isFinite(origin.r)) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const id = this.nextId();
+    const mv = await this.launch({
+      id, type: 'attack', battleType: battleType === 'siege' ? 'siege' : 'raid',
+      fromVillage: `kingdom-fief:${sourcePveId}`, fromXY: origin, toXY, targetVillage,
+      troops: valid.troops, npcService: true, taskCode: 'kingdom_retaliation',
+      kingdomMercenary: true, returnPveId: sourcePveId, attackerSnapshotOverride: structuredClone(attackerSnapshot),
+      departAt: this.now(),
+    });
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'attack', npcService: true, taskCode: mv.taskCode, targetVillage, retaliationId, arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
   /** 商队到达：去程→把货物交给目标村（目标村不存在则跳过交付）后启动返程；返程→到家回收贸易路线。 */
@@ -2961,12 +2991,6 @@ export class MovementModule {
    */
   private async arriveEngage(mv: MovementRecord, targetKind: 'village' | 'pve', targetId: string): Promise<void> {
     this.clearIncomingWarning(mv);
-    if (targetKind === 'pve' && (mv.battleType === 'raid' || mv.battleType === 'siege')) {
-      const target = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: targetId } });
-      if ((target.payload as any)?.cityState) {
-        await this.commands.send({ name: 'reputation.AdjustByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage, delta: -this.config.constants.kingdomCityStateReputationPenalty, reason: `kingdom_city_state_${mv.battleType}` } });
-      }
-    }
     // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
     // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
     const carried = mv.treasures && mv.treasures.length > 0 ? mv.treasures : [];
@@ -3008,9 +3032,6 @@ export class MovementModule {
     const defenderScouts = Object.entries(defenderSnapshot)
       .filter(([code]) => this.isScoutUnit(code))
       .reduce((sum, [, unit]) => sum + Math.max(0, Number(unit.count) || 0), 0);
-    if (isPve && defenderScouts > 0 && (armyRes.payload as any)?.cityState) {
-      await this.commands.send({ name: 'reputation.AdjustByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage, delta: -this.config.constants.kingdomCityStateReputationPenalty, reason: 'kingdom_city_state_scout_detected' } });
-    }
     // 侦察兵互相反侦察：守方每名侦察兵消灭一名来袭侦察兵；无守方侦察兵则无人伤亡。
     const { survivors, losses, lossMap } = this.applyScoutDefense(mv.troops, defenderScouts);
     const scoutType = mv.scoutType ?? 'scout_resources';
@@ -3122,6 +3143,7 @@ export class MovementModule {
    * 修复：此前直接用 buildSnapshot 导致铁匠加成只作用于防守、进攻无效。
    */
   private async attackerSnapshot(mv: MovementRecord): Promise<Snapshot> {
+    if (mv.attackerSnapshotOverride) return structuredClone(mv.attackerSnapshotOverride);
     if (mv.npcService && mv.taskVillageId) {
       const npc = await this.commands.send({ name: 'pve.GetDefenderSnapshot', from: MovementModule.NAME, payload: { id: mv.taskVillageId } });
       const snapshot = (npc.ok ? (npc.payload as any)?.snapshot : undefined) as Snapshot | undefined;
@@ -3273,7 +3295,7 @@ export class MovementModule {
       side: string; fromVillage: string; fromXY: Hex; toXY: Hex;
       survivors?: Record<string, number>; loot?: Record<string, number>;
       treasures?: string[]; targetKind?: string; targetId?: string; battleType?: string; movementId: string;
-      originalFromXY?: Hex; npcService?: boolean; taskCode?: string;
+      originalFromXY?: Hex; npcService?: boolean; taskCode?: string; kingdomMercenary?: boolean; returnPveId?: string;
     };
 
     // 野战（field）分支：普通相遇战幸存者继续原路线；伏击战双方幸存者都原路返城。
@@ -3314,13 +3336,26 @@ export class MovementModule {
     }
 
     if (p.side !== 'attacker') return;
+    const survivors = p.survivors ?? {};
+    // 王国封地报复军属于一次性雇佣军：幸存者带战利品返回封地，抵达后直接解散。
+    if (p.npcService && p.taskCode === 'kingdom_retaliation') {
+      if (Object.keys(survivors).length === 0) {
+        this.remove(p.movementId, 'returned');
+        return;
+      }
+      this.remove(p.movementId);
+      await this.scheduleReturn(
+        p.fromVillage, p.toXY, p.originalFromXY ?? p.fromXY, survivors, p.loot ?? {}, [], p.movementId, p.originalFromXY ?? p.fromXY,
+        undefined, false, true, p.returnPveId,
+      );
+      return;
+    }
     // 任务 NPC 攻城军不属于玩家人口，也不需要返程；任务模块会依据同一场战斗记录结局。
     if (p.npcService && p.taskCode) {
       this.remove(p.movementId, 'returned');
       return;
     }
     const treasures = p.treasures ?? [];
-    const survivors = p.survivors ?? {};
     if (Object.keys(survivors).length === 0) {
       // 全歼：携带宝物按 pve(回收到系统池) / pvp(转交防守方村庄) 处理
       if (treasures.length > 0) {
@@ -3403,13 +3438,15 @@ export class MovementModule {
     originalFromXY?: Hex,
     autoExplore?: MovementRecord['autoExplore'],
     scoutReturn = false,
+    kingdomMercenary = false,
+    returnPveId?: string,
   ): Promise<string | undefined> {
     const id = this.nextId();
     await this.launch({
       id, type: 'return', fromVillage, fromXY, toXY,
       originalFromXY: originalFromXY ?? toXY,
       troops, loot, treasures, departAt: this.now(), outwardId, autoExplore,
-      scoutReturn: scoutReturn || undefined,
+      scoutReturn: scoutReturn || undefined, kingdomMercenary: kingdomMercenary || undefined, returnPveId,
     });
     return id;
   }
@@ -3546,6 +3583,14 @@ export class MovementModule {
     // 出征军队 id：携带宝物与掉落 pending 均按「出征 id」索引；返程 movement 自身是新 id，
     // 故优先用 outwardId（由 onBattleEnded 透传的出征 id）回链，缺失时退化为返程 id兼容旧档。
     const outwardId = mv.outwardId ?? mv.id;
+    if (mv.kingdomMercenary && mv.returnPveId) {
+      if (mv.loot && Object.keys(mv.loot).length > 0) {
+        await this.commands.send({ name: 'pve.DepositLoot', from: MovementModule.NAME, payload: { id: mv.returnPveId, gain: mv.loot } });
+      }
+      this.remove(id, 'returned');
+      void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, returnPveId: mv.returnPveId, troops: {}, loot: mv.loot, kingdomMercenary: true } } as DomainEvent);
+      return;
+    }
     // 兵归队
     await this.commands.send({
       name: 'military.AdjustTroops',

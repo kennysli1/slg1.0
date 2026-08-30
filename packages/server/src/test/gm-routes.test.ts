@@ -213,6 +213,12 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
     assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
     assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
+    assert.match(res.body, /kingdom_fief_unit_count/, 'GM 页面应提供封地兵种数量参数');
+    assert.match(res.body, /kingdom_capital_unit_count/, 'GM 页面应提供王都兵种数量参数');
+    assert.match(res.body, /kingdom_pve_killed_population_per_reputation/, 'GM 页面应提供王国 PvE 声望人口阈值');
+    assert.match(res.body, /kingdom_pve_retaliation_raid_threshold/, 'GM 页面应提供封地掠夺阈值');
+    assert.match(res.body, /kingdom_pve_retaliation_siege_threshold/, 'GM 页面应提供封地攻城阈值');
+    assert.match(res.body, /kingdom_fief_mercenary_min_ratio/, 'GM 页面应提供封地雇佣军比例参数');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;

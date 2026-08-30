@@ -400,6 +400,8 @@ export interface PveTemplate {
   faction?: 'neutral' | 'kingdom';
   /** 王国城邦使用运行时随机资源、兵力与建筑生成。 */
   cityState?: boolean;
+  /** 王国 PvE 生成档位：普通城邦、统一标准封地或更高标准王都。 */
+  kingdomProfile?: 'city_state' | 'fief' | 'capital';
   defender: Record<string, {
     count: number;
     form: UnitForm;
@@ -545,6 +547,29 @@ export interface GameConstants {
   kingdomCityStateTier3ResourceMax: number;
   kingdomCityStateTier3GoldMin: number;
   kingdomCityStateTier3GoldMax: number;
+  /** 王国封地/王都高等级 PvE 档位：每种兵数量、资源与金币范围。 */
+  kingdomFiefUnitCount: number;
+  kingdomFiefUnitMin: number;
+  kingdomFiefUnitMax: number;
+  kingdomFiefResourceMin: number;
+  kingdomFiefResourceMax: number;
+  kingdomFiefGoldMin: number;
+  kingdomFiefGoldMax: number;
+  kingdomCapitalUnitCount: number;
+  kingdomCapitalUnitMin: number;
+  kingdomCapitalUnitMax: number;
+  kingdomCapitalResourceMin: number;
+  kingdomCapitalResourceMax: number;
+  kingdomCapitalGoldMin: number;
+  kingdomCapitalGoldMax: number;
+  /** 王国 PvE 声望惩罚：每累计消灭的人口数扣 1 点；每累计扣除多少点触发一次报复检查。 */
+  kingdomPveKilledPopulationPerReputation: number;
+  kingdomPveRetaliationChunk: number;
+  kingdomPveRetaliationRaidThreshold: number;
+  kingdomPveRetaliationSiegeThreshold: number;
+  /** 封地派出的雇佣军占封地守军总兵力的随机比例。 */
+  kingdomFiefMercenaryMinRatio: number;
+  kingdomFiefMercenaryMaxRatio: number;
   /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
   /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
@@ -1162,6 +1187,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       id: num(r.id), type: r.code, name: r.name, icon: r.icon,
       faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
       cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
+      kingdomProfile: r.kingdomProfile === 'fief' || r.kingdomProfile === 'capital' ? r.kingdomProfile : (r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state' ? 'city_state' : undefined),
       respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
@@ -1317,6 +1343,26 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     kingdomCityStateTier3ResourceMax: Math.max(0, cn('kingdom_city_state_tier3_resource_max', 15000)),
     kingdomCityStateTier3GoldMin: Math.max(0, cn('kingdom_city_state_tier3_gold_min', 1200)),
     kingdomCityStateTier3GoldMax: Math.max(0, cn('kingdom_city_state_tier3_gold_max', 5000)),
+    kingdomFiefUnitCount: Math.max(1, Math.floor(cn('kingdom_fief_unit_count', 7))),
+    kingdomFiefUnitMin: Math.max(0, Math.floor(cn('kingdom_fief_unit_min', 30))),
+    kingdomFiefUnitMax: Math.max(0, Math.floor(cn('kingdom_fief_unit_max', 100))),
+    kingdomFiefResourceMin: Math.max(0, cn('kingdom_fief_resource_min', 15000)),
+    kingdomFiefResourceMax: Math.max(0, cn('kingdom_fief_resource_max', 30000)),
+    kingdomFiefGoldMin: Math.max(0, cn('kingdom_fief_gold_min', 5000)),
+    kingdomFiefGoldMax: Math.max(0, cn('kingdom_fief_gold_max', 10000)),
+    kingdomCapitalUnitCount: Math.max(1, Math.floor(cn('kingdom_capital_unit_count', 10))),
+    kingdomCapitalUnitMin: Math.max(0, Math.floor(cn('kingdom_capital_unit_min', 50))),
+    kingdomCapitalUnitMax: Math.max(0, Math.floor(cn('kingdom_capital_unit_max', 150))),
+    kingdomCapitalResourceMin: Math.max(0, cn('kingdom_capital_resource_min', 30000)),
+    kingdomCapitalResourceMax: Math.max(0, cn('kingdom_capital_resource_max', 60000)),
+    kingdomCapitalGoldMin: Math.max(0, cn('kingdom_capital_gold_min', 10000)),
+    kingdomCapitalGoldMax: Math.max(0, cn('kingdom_capital_gold_max', 20000)),
+    kingdomPveKilledPopulationPerReputation: Math.max(1, Math.floor(cn('kingdom_pve_killed_population_per_reputation', 25))),
+    kingdomPveRetaliationChunk: Math.max(1, Math.floor(cn('kingdom_pve_retaliation_chunk', 5))),
+    kingdomPveRetaliationRaidThreshold: Math.min(0, Math.floor(cn('kingdom_pve_retaliation_raid_threshold', -10))),
+    kingdomPveRetaliationSiegeThreshold: Math.min(0, Math.floor(cn('kingdom_pve_retaliation_siege_threshold', -20))),
+    kingdomFiefMercenaryMinRatio: Math.max(0, Math.min(1, cn('kingdom_fief_mercenary_min_ratio', 0.4))),
+    kingdomFiefMercenaryMaxRatio: Math.max(0, Math.min(1, cn('kingdom_fief_mercenary_max_ratio', 0.7))),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
@@ -2001,6 +2047,12 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.kingdomCityStateRecoveryMinSec <= 0 || c.kingdomCityStateRecoveryMaxSec < c.kingdomCityStateRecoveryMinSec) errors.push(`game_constants.csv kingdom_city_state_recovery_min/max_sec 范围非法`);
   if (c.kingdomCityStateRecoveryResourceExtraSec < 0) errors.push(`game_constants.csv kingdom_city_state_recovery_resource_extra_sec 必须≥0`);
   if (c.kingdomCityStateReputationPenalty < 0) errors.push(`game_constants.csv kingdom_city_state_reputation_penalty 必须≥0`);
+  if (c.kingdomFiefUnitMin < 0 || c.kingdomFiefUnitMax < c.kingdomFiefUnitMin || c.kingdomCapitalUnitMin < 0 || c.kingdomCapitalUnitMax < c.kingdomCapitalUnitMin) errors.push(`game_constants.csv 王国封地/王都兵力范围非法`);
+  if (c.kingdomFiefResourceMin < 0 || c.kingdomFiefResourceMax < c.kingdomFiefResourceMin || c.kingdomCapitalResourceMin < 0 || c.kingdomCapitalResourceMax < c.kingdomCapitalResourceMin) errors.push(`game_constants.csv 王国封地/王都资源范围非法`);
+  if (c.kingdomFiefGoldMin < 0 || c.kingdomFiefGoldMax < c.kingdomFiefGoldMin || c.kingdomCapitalGoldMin < 0 || c.kingdomCapitalGoldMax < c.kingdomCapitalGoldMin) errors.push(`game_constants.csv 王国封地/王都金币范围非法`);
+  if (c.kingdomPveKilledPopulationPerReputation <= 0 || c.kingdomPveRetaliationChunk <= 0) errors.push(`game_constants.csv 王国 PvE 声望累计参数必须>0`);
+  if (c.kingdomPveRetaliationSiegeThreshold > c.kingdomPveRetaliationRaidThreshold) errors.push(`game_constants.csv 王国 PvE 报复阈值顺序非法`);
+  if (c.kingdomFiefMercenaryMinRatio < 0 || c.kingdomFiefMercenaryMaxRatio > 1 || c.kingdomFiefMercenaryMaxRatio < c.kingdomFiefMercenaryMinRatio) errors.push(`game_constants.csv 王国封地雇佣军比例范围非法`);
   if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
   if (c.kingdomCityStateInnerBuildingCountMin < 0 || c.kingdomCityStateInnerBuildingCountMax < c.kingdomCityStateInnerBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_inner_building_count_min/max 范围非法`);
   if (c.kingdomCityStateBuildingLevelMin <= 0 || c.kingdomCityStateBuildingLevelMax < c.kingdomCityStateBuildingLevelMin) errors.push(`game_constants.csv kingdom_city_state_building_level_min/max 范围非法`);

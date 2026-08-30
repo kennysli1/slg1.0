@@ -881,7 +881,27 @@ var CITY_STATE_ROWS = [
   ['kingdom_city_state_recovery_min_sec','兵力恢复最短秒数','默认 43200 秒（12 小时）'],
   ['kingdom_city_state_recovery_max_sec','兵力恢复最长秒数','默认 172800 秒（48 小时）'],
   ['kingdom_city_state_recovery_resource_extra_sec','资源恢复额外秒数','资源比兵力恢复再多 21600 秒（6 小时）'],
-  ['kingdom_city_state_reputation_penalty','城邦声望扣除','侦察被发现、掠夺或攻城时扣除的声望绝对值'],
+  ['kingdom_city_state_reputation_penalty','旧版城邦固定扣分（弃用）','已改为按王国 PvE 消灭人口累计扣分；仅为旧配置兼容保留，不再参与结算'],
+  ['kingdom_fief_unit_count','封地随机兵种数','四个领主封地统一标准；从对应种族兵种池随机抽取'],
+  ['kingdom_fief_unit_min','封地每种兵最少','封地每种随机兵种的数量下限'],
+  ['kingdom_fief_unit_max','封地每种兵最多','封地每种随机兵种的数量上限'],
+  ['kingdom_fief_resource_min','封地资源下限','封地四类资源各自随机下限'],
+  ['kingdom_fief_resource_max','封地资源上限','封地四类资源各自随机上限'],
+  ['kingdom_fief_gold_min','封地金币下限','封地金币随机下限'],
+  ['kingdom_fief_gold_max','封地金币上限','封地金币随机上限'],
+  ['kingdom_capital_unit_count','王都随机兵种数','王都从对应种族兵种池随机抽取的兵种数量'],
+  ['kingdom_capital_unit_min','王都每种兵最少','王都每种随机兵种的数量下限'],
+  ['kingdom_capital_unit_max','王都每种兵最多','王都每种随机兵种的数量上限'],
+  ['kingdom_capital_resource_min','王都资源下限','王都四类资源各自随机下限'],
+  ['kingdom_capital_resource_max','王都资源上限','王都四类资源各自随机上限'],
+  ['kingdom_capital_gold_min','王都金币下限','王都金币随机下限'],
+  ['kingdom_capital_gold_max','王都金币上限','王都金币随机上限'],
+  ['kingdom_pve_killed_population_per_reputation','王国 PvE 声望人口阈值','每累计消灭多少王国 PvE 军队人口扣 1 点声望；跨战斗累加'],
+  ['kingdom_pve_retaliation_chunk','王国 PvE 报复批次','通过人口累计扣分每达到此数量时检查一次主城报复'],
+  ['kingdom_pve_retaliation_raid_threshold','封地掠夺阈值','玩家声望小于等于此值时，主城对应封地派雇佣军掠夺'],
+  ['kingdom_pve_retaliation_siege_threshold','封地攻城阈值','玩家声望小于等于此值时，将封地报复升级为攻城'],
+  ['kingdom_fief_mercenary_min_ratio','封地雇佣军比例下限','报复部队随机取封地守军总人口的比例下限'],
+  ['kingdom_fief_mercenary_max_ratio','封地雇佣军比例上限','报复部队随机取封地守军总人口的比例上限'],
   ['kingdom_city_state_resource_field_level','资源田保底等级','四种城外资源田至少达到此等级'],
   ['kingdom_city_state_inner_building_count_min','城内建筑最少数','随机城内建筑数量下限'],
   ['kingdom_city_state_inner_building_count_max','城内建筑最多数','随机城内建筑数量上限'],
@@ -893,6 +913,7 @@ var CITY_STATE_ROWS = [
   ['kingdom_city_state_outer_building_pool','城外建筑池','格式为 woodcutter|claypit|ironmine…'],
 ];
 var CITY_STATE_STRING_KEYS = { kingdom_city_state_tier_weights: true, kingdom_city_state_tribe_pool: true, kingdom_city_state_unit_pool: true, kingdom_city_state_unit_pool_romans: true, kingdom_city_state_unit_pool_gauls: true, kingdom_city_state_unit_pool_teutons: true, kingdom_city_state_inner_building_pool: true, kingdom_city_state_outer_building_pool: true };
+var CITY_STATE_SIGNED_KEYS = { kingdom_pve_retaliation_raid_threshold: true, kingdom_pve_retaliation_siege_threshold: true };
 function sectionCityState(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
@@ -902,11 +923,12 @@ function sectionCityState(){
     var item = CITY_STATE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
     var textInput = !!CITY_STATE_STRING_KEYS[item[0]];
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
-    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    var signedInput = !!CITY_STATE_SIGNED_KEYS[item[0]];
+    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput || signedInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
-  return '<div class="sec"><h2>王国城邦参数（三级/三种族）</h2>'+h+'</div>';
+  return '<div class="sec"><h2>王国城邦参数（三级/三种族） · 王国 PvE（城邦/封地/王都）</h2>'+h+'</div>';
 }
 
 function sectionKingdom(){
