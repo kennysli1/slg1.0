@@ -1,5 +1,5 @@
 import type { Command, CommandResult, DomainEvent } from '@slg/shared';
-import type { Movement as MovementWire, ForeignArmy, IncomingWarning } from '@slg/shared';
+import type { Movement as MovementWire, ForeignArmy, IncomingWarning, MovementTurnTransition } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
@@ -154,6 +154,12 @@ export class MovementModule {
   private timingCache = new Map<string, PathTiming>();
   /** 已记录过缺失 popCost 的兵种，避免同一配置在每个路径段重复刷警告。 */
   private warnedMissingPopCost = new Set<string>();
+  /**
+   * 目标消失/撤回瞬间的段内连续位置，仅在当前进程内保留。
+   * 离散 `MovementRecord.pos` 仍是服务端判定坐标；该表只服务地图无缝渲染，
+   * 不增加存档字段，也不改变遭遇、视野或路径计算。
+   */
+  private turnTransitions = new Map<string, MovementTurnTransition>();
 
   constructor(
     private store: Store,
@@ -289,6 +295,7 @@ export class MovementModule {
     }
     this.store.delete(COLLECTION, id);
     this.timingCache.delete(id);
+    this.turnTransitions.delete(id);
     if (prev) void this.syncIncomingWarningsForOwnerVillage(prev.fromVillage);
   }
 
@@ -340,6 +347,7 @@ export class MovementModule {
       status: m.status,
       perStepMs: m.perStepMs,
       nextStepAt: m.nextStepAt,
+      turningPoint: this.turnTransitions.get(m.id),
       troops: m.troops,
       cargo: m.cargo,
       loot: m.loot,
@@ -370,6 +378,7 @@ export class MovementModule {
       heading,
       perStepMs: mv.perStepMs,
       nextStepAt: mv.nextStepAt,
+      turningPoint: this.turnTransitions.get(mv.id),
     };
   }
 
@@ -659,6 +668,7 @@ export class MovementModule {
         stepIndex: mv.stepIndex,
         perStepMs: mv.perStepMs,
         nextStepAt: mv.nextStepAt,
+        turningPoint: this.turnTransitions.get(mv.id),
         arriveAt: mv.arriveAt,
         intelligence: mv.incomingIntel,
       });
@@ -2812,6 +2822,9 @@ export class MovementModule {
     // 前进一格
     mv.previousPos = { ...mv.pos };
     mv.stepIndex += 1;
+    // 掉头过渡只覆盖返程的第一个离散步骤；一旦真正抵达首个返程格，
+    // 客户端回到普通的逐段插值，避免旧的连续位置再次参与渲染。
+    if (mv.stepIndex > 0) this.turnTransitions.delete(mv.id);
     if (mv.stepIndex < mv.path.length) mv.pos = mv.path[mv.stepIndex];
     if (mv.stepIndex < mv.path.length - 1) {
       // 到达新格后，下一段从当前格出发；因此丘陵只影响军队位于丘陵
@@ -2853,6 +2866,7 @@ export class MovementModule {
         villageIds: this.movementPushVillages(mv),
         id: mv.id, pos: mv.pos, stepIndex: mv.stepIndex,
         nextStepAt: mv.nextStepAt, perStepMs: mv.perStepMs,
+        turningPoint: this.turnTransitions.get(mv.id),
         status: mv.status, arriveAt: mv.arriveAt,
       },
     } as DomainEvent);
@@ -3605,6 +3619,24 @@ export class MovementModule {
    * 原地改写同一条 movement（保留 id，确保携带宝物 pending 与 outwardId 链路不丢），仅翻转类型并重算路径。
    * 商队保留 caravan 类型并置 returning=true，以便到家时释放贸易路线；其余转为 return 类型。
    */
+  private captureTurnTransition(mv: MovementRecord): MovementTurnTransition | undefined {
+    if (mv.status !== 'marching' || !Number.isFinite(mv.perStepMs) || mv.perStepMs <= 0) return undefined;
+    const from = mv.path[mv.stepIndex] ?? mv.pos;
+    const to = mv.path[mv.stepIndex + 1];
+    if (!from || !to) return undefined;
+    const now = this.now();
+    const segmentStart = mv.nextStepAt - mv.perStepMs;
+    const elapsed = Math.max(0, Math.min(mv.perStepMs, now - segmentStart));
+    if (elapsed <= 0) return undefined;
+    return {
+      from: { ...from },
+      to: { ...to },
+      progress: Math.max(0, Math.min(1, elapsed / mv.perStepMs)),
+      startedAt: now,
+      durationMs: elapsed,
+    };
+  }
+
   private async startReturn(mv: MovementRecord): Promise<void> {
     this.clearIncomingWarning(mv);
     // 立即作废已经登记的去程回调。返程计算会等待路径/地形耗时查询；若在
@@ -3639,6 +3671,9 @@ export class MovementModule {
     // nextStepAt/perStepMs 则保留了这一格的真实进度。撤回应从这个进度点返程，
     // 不能把整条原路线当成尚未出发。若路径被外部测试/旧档改写，则回退到坐标距离。
     const outboundTiming = this.timingCache.get(mv.id) ?? await this.pathTiming(mv.fromVillage, mv.path, mv.troops, mv.type);
+    // 在所有异步路径/计时查询完成后捕获，保证 turningPoint 与客户端刚刚看到的
+    // 当前段内位置以及随后设置的返程首段时间使用同一个时钟瞬间。
+    const turnTransition = this.captureTurnTransition(mv);
     const routeProgressMs = this.outboundReturnMs(mv, outboundTiming);
     let returnTiming = this.reversePathTiming(mv, path, outboundTiming)
       ?? await this.pathTiming(mv.fromVillage, path, mv.troops, mv.type === 'caravan' ? 'caravan' : 'return');
@@ -3672,6 +3707,8 @@ export class MovementModule {
     mv.arriveAt = this.now() + totalMs;
     mv.perStepMs = perStepMs;
     this.timingCache.set(mv.id, returnTiming);
+    if (turnTransition) this.turnTransitions.set(mv.id, turnTransition);
+    else this.turnTransitions.delete(mv.id);
     mv.targetId = undefined;
     mv.targetMovementId = undefined;
     if (!wasCaravan) mv.targetVillage = undefined; // 商队保留 targetVillage 仅作展示，不影响回家逻辑

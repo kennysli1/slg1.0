@@ -694,7 +694,20 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!shouldRenderMarchPath(m)) return;
-      const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
+      let pathPixels = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H);
+      const turn = m.turningPoint;
+      if (turn && m.status === 'marching' && m.stepIndex === 0
+        && Number(turn.durationMs) > 0 && Number.isFinite(Number(turn.progress))) {
+        const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, ref.x, ref.y, W, H);
+        if (pair[0] && pair[1]) {
+          const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+          pathPixels = [{
+            x: pair[0].x + (pair[1].x - pair[0].x) * progress,
+            y: pair[0].y + (pair[1].y - pair[0].y) * progress,
+          }, ...pathPixels];
+        }
+      }
+      const pts = pathPixels
         .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
         .join(' ');
       const t = m.type === 'return' ? 'return'
@@ -729,7 +742,8 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       markers.push(
         <g
@@ -759,7 +773,8 @@ export function HexMap() {
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
           key={`incoming-mk-${m.id}`}
@@ -792,7 +807,8 @@ export function HexMap() {
     const ref = viewRef();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
 
       // 朝向箭头：heading 指向下一格，计算像素方向后绘制小三角
@@ -927,6 +943,44 @@ export function HexMap() {
     const unwrapped = unwrapPathPixels(m.path, ox.current, oy.current, refX, refY, W, H);
     let px = unwrapped[m.stepIndex];
     if (!px) return null;
+    // 目标消失/撤回可能发生在当前段中间。服务端仍用离散格做判定，
+    // 但 turningPoint 让地图先从实际段内位置退回当前格，再接上返程路径，
+    // 避免状态切换时从半格瞬移回上一个格心。
+    const turn = m.turningPoint;
+    if (turn && m.status === 'marching' && m.stepIndex === 0
+      && Number.isFinite(Number(turn.startedAt)) && Number(turn.durationMs) > 0
+      && Number.isFinite(Number(turn.progress))) {
+      const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, refX, refY, W, H);
+      const turnStart = Number(turn.startedAt);
+      const turnDuration = Math.max(1, Number(turn.durationMs));
+      const turnEnd = turnStart + turnDuration;
+      const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+      const turnStartPx = pair[0];
+      const turnNextPx = pair[1];
+      const returnStartPx = unwrapped[0];
+      if (turnStartPx && turnNextPx && returnStartPx) {
+        if (now < turnEnd) {
+          const t = Math.max(0, Math.min(1, (now - turnStart) / turnDuration));
+          return {
+            x: turnStartPx.x + (turnNextPx.x - turnStartPx.x) * progress * (1 - t)
+              + (returnStartPx.x - turnStartPx.x) * t,
+            y: turnStartPx.y + (turnNextPx.y - turnStartPx.y) * progress * (1 - t)
+              + (returnStartPx.y - turnStartPx.y) * t,
+          };
+        }
+        // 第一段返程在服务端包含“当前段已走时间 + 上一格完整段时间”。
+        // 连续过渡结束后，把剩余时间用于正常的当前格→上一格插值。
+        const next = unwrapped[1];
+        if (next) {
+          const remaining = Math.max(1, Number(m.nextStepAt) - turnEnd);
+          const t = Math.max(0, Math.min(1, (now - turnEnd) / remaining));
+          return {
+            x: returnStartPx.x + (next.x - returnStartPx.x) * t,
+            y: returnStartPx.y + (next.y - returnStartPx.y) * t,
+          };
+        }
+      }
+    }
     if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
       const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
       const nxt = unwrapped[m.stepIndex + 1];
@@ -941,6 +995,30 @@ export function HexMap() {
   function foreignMarkerPixel(m: ForeignArmy, now: number, refX: number, refY: number): { x: number; y: number } | null {
     if (!m.pos) return null;
     const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, refX, refY, W, H);
+    const turn = m.turningPoint;
+    if (turn && m.status === 'marching' && Number.isFinite(Number(turn.startedAt))
+      && Number(turn.durationMs) > 0 && Number.isFinite(Number(turn.progress))) {
+      const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, refX, refY, W, H);
+      const turnStart = Number(turn.startedAt);
+      const turnDuration = Math.max(1, Number(turn.durationMs));
+      const turnEnd = turnStart + turnDuration;
+      const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+      if (pair[0] && pair[1]) {
+        if (now < turnEnd) {
+          const t = Math.max(0, Math.min(1, (now - turnStart) / turnDuration));
+          const x = pair[0].x + (pair[1].x - pair[0].x) * progress;
+          const y = pair[0].y + (pair[1].y - pair[0].y) * progress;
+          return { x: x + (p.x - pair[0].x) * t, y: y + (p.y - pair[0].y) * t };
+        }
+        if (m.heading && m.nextStepAt) {
+          const nextHex = { q: m.pos.q + m.heading.q, r: m.pos.r + m.heading.r };
+          const np = cameraPixelForHex(nextHex.q, nextHex.r, ox.current, oy.current, refX, refY, W, H);
+          const remaining = Math.max(1, Number(m.nextStepAt) - turnEnd);
+          const t = Math.max(0, Math.min(1, (now - turnEnd) / remaining));
+          return { x: p.x + (np.x - p.x) * t, y: p.y + (np.y - p.y) * t };
+        }
+      }
+    }
     if (m.status === 'marching' && m.heading && m.nextStepAt && m.perStepMs) {
       const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
       const nextHex = { q: m.pos.q + m.heading.q, r: m.pos.r + m.heading.r };
