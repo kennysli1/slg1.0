@@ -82,7 +82,7 @@ test('M13 流程：使用我的努力解锁并生成二近丘陵秘密营地，�
   assert.equal(granted.ok, true, granted.reason);
   const used = await send(app, 'treasure.Use', { villageId, code: 'my_effort' });
   assert.equal(used.ok, true, used.reason);
-  assert.equal((used.payload as any).dialogue, null, '空白 GM 对话模板不应弹出空对话框');
+  assert.equal((used.payload as any).dialogue?.code, 'my_effort_use');
   await tick();
 
   const offered = (await send(app, 'task.GetState', { villageId })).payload as any;

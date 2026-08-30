@@ -207,8 +207,8 @@ export class MovementModule {
     // 战斗结束 → 安排幸存者带战利品返程（跨模块只走 Event）
     this.bus.on('combat.BattleEnded', (e: DomainEvent) => this.onBattleEnded(e));
     // 目标消失（PvE 营地/幸福村被移除、玩家村庄被放弃）→ 在途的进攻/运输/商队立即原路返回
-    this.bus.on('pve.TargetRemoved', (e: DomainEvent) => void this.onTargetRemoved(e));
-    this.bus.on('world.VillageRemoved', (e: DomainEvent) => void this.onVillageRemoved(e));
+    this.bus.on('pve.TargetRemoved', (e: DomainEvent) => this.onTargetRemoved(e));
+    this.bus.on('world.VillageRemoved', (e: DomainEvent) => this.onVillageRemoved(e));
     this.rebuildIndexes();
   }
 
@@ -649,7 +649,7 @@ export class MovementModule {
     mv.warningVisibleToTarget = visible;
     this.save(mv);
     if (!mv.targetVillage) return;
-    void this.bus.emit({
+    await this.bus.emit({
       name: 'movement.IncomingWarningChanged', source: MovementModule.NAME, ts: this.now(),
       payload: { villageId: mv.targetVillage, movementId: mv.id, visible },
     } as DomainEvent);

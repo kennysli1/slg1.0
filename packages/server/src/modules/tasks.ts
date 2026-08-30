@@ -145,7 +145,8 @@ export class TasksModule {
     this.bus.on('treasure.SoldDiscarded', (evt: DomainEvent) => void this.onTreasureSoldDiscarded(evt));
 
     // 战斗结束 → 推进 clear_camp 任务
-    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
+    // Combat 会等待该事件：任务营地清除必须先广播目标失效，慢军队才能在同一结算内返程。
+    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => this.onBattleEnded(evt));
     this.bus.on('military.TroopTrained', (evt: DomainEvent) => void this.onTroopTrained(evt));
     this.bus.on('treasure.CarriedStored', (evt: DomainEvent) => void this.onCarriedStored(evt));
     this.bus.on('treasure.StoredRemoved', (evt: DomainEvent) => void this.onStoredRemoved(evt));
@@ -240,6 +241,11 @@ export class TasksModule {
     const s = this.store.get<TaskState>(COLLECTION, villageId);
     if (s) await this.removeTaskEntities(s);
     this.store.delete(COLLECTION, villageId);
+  }
+
+  /** 等待清理完成的入口，供放弃村庄时同步完成目标失效事件。 */
+  async wipeSingleVillageAndWait(villageId: string): Promise<void> {
+    await this.wipeSingleVillageAsync(villageId);
   }
 
   /** 兼容删号生命周期的同步入口；GM 重置使用上面的 await 版本。 */
@@ -1639,6 +1645,7 @@ export class TasksModule {
     inst.executionVillageId = updateVillageId;
     inst.campCleared = (inst.campCleared ?? 0) + 1;
     this.store.set(COLLECTION, storageVillageId, state);
+    await this.notifyTaskCampRemoved(camp);
 
     if (inst.campCleared >= inst.camps.length) {
       // 临时任务营地不走普通 droprate，也不能随机掉落其它任务专属宝物。
@@ -1674,6 +1681,14 @@ export class TasksModule {
       await this.pushList(updateVillageId);
       await this.pushMap(updateVillageId);
     }
+  }
+
+  /** 任务营地清除后立即使目标失效；实体状态仍保留到任务收尾，避免破坏任务快照。 */
+  private async notifyTaskCampRemoved(camp: TaskCamp): Promise<void> {
+    await this.bus.emit({
+      name: 'pve.TargetRemoved', source: TasksModule.NAME, ts: this.now(),
+      payload: { id: camp.id, q: camp.q, r: camp.r, task: true },
+    } as DomainEvent);
   }
 
   /**
@@ -2058,6 +2073,7 @@ export class TasksModule {
         inst.executionVillageId = villageId;
         inst.campCleared = (inst.campCleared ?? 0) + 1;
         this.store.set(COLLECTION, storageVillageId, state);
+        await this.notifyTaskCampRemoved(camp);
         if (inst.campCleared >= inst.camps.length) {
           // 任务营地不按宝物 droprate 抽取；S4 仅在最后一处营地发放其明确定义的阶段道具。
           if (code === 's4') {

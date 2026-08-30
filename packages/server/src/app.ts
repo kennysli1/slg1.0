@@ -262,7 +262,7 @@ export function createGameApp(opts?: {
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
-  const wipeSingleVillage = (villageId: string): void => {
+  const wipeSingleVillage = async (villageId: string): Promise<void> => {
     for (const prefix of [
       `building:${villageId}`,
       `military:${villageId}`,
@@ -278,11 +278,11 @@ export function createGameApp(opts?: {
     trade.wipeSingleVillage(villageId);
     treasure.wipeSingleVillage(villageId);
     alchemy.wipeSingleVillage(villageId);
-    task.wipeSingleVillage(villageId);
+    await task.wipeSingleVillageAndWait(villageId);
     // 通知行军模块：来向该村的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
     // 必须在删除行军记录之前发出，并保留「来向本村」的行军，留给 onVillageRemoved→startReturn
     // 就地改写为返程；否则村庄数据被清后行军记录已删，客户端只看到陈旧倒计时且不刷新。
-    void bus.emit({
+    await bus.emit({
       name: 'world.VillageRemoved', source: 'app', ts: now(),
       payload: { villageId },
     } as any);

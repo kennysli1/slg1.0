@@ -219,6 +219,14 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
 
 // ── 交付奖励弹窗 ───────────────────────────────────────────────────────────────
 function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
+    .filter((item: any) => item && (item.npcName || item.npcText));
+  const current = segments[segmentIndex] ?? dialogue;
+  const next = () => {
+    if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
+    else close();
+  };
   const res = rewards?.resources ?? null;
   const tres: string[] = rewards?.treasures ?? [];
   const hasRes = res && Object.keys(res).length > 0;
@@ -241,14 +249,14 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
       {(rewards?.rewardVillageId || task?.rewardVillageId) && (
         <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
       )}
-      {dialogue && (dialogue.npcName || dialogue.npcText) && (
+      {current && (current.npcName || current.npcText) && (
         <div class="dialogue-session task-delivery-dialogue">
-          {dialogue.npcName && <div class="dialogue-npc-name">{dialogue.npcName}</div>}
-          {dialogue.npcText && <div class="dialogue-npc-text">{dialogue.npcText}</div>}
+          {current.npcName && <div class="dialogue-npc-name">{current.npcName}</div>}
+          {current.npcText && <div class="dialogue-npc-text">{current.npcText}</div>}
         </div>
       )}
       <div class="modal-foot">
-        <Btn variant="primary" onClick={close}>收下</Btn>
+        <Btn variant="primary" onClick={next}>{segmentIndex < segments.length - 1 ? '继续' : '收下'}</Btn>
       </div>
     </Modal>
   );

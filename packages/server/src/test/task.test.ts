@@ -503,6 +503,55 @@ test('任务营地战败不推进任务，营地仍在地图上等待再次出�
   assert.equal(m4.camps[0].cleared, false, '战败不应标记营地已清理');
 });
 
+test('任务营地被先到军队清除后，仍在途的后续军队立即返程', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务营地清除返程');
+  const va = (regRes.payload as any).player.villageId as string;
+  const campId = 'taskcamp-return-after-clear';
+  app.store.set('task', va, {
+    villageId: va, completedMain: [], completedSide: [], abandonedSide: [], offered: [], offeredSide: [], firedTriggers: [],
+    active: {
+      m4: {
+        code: 'm4', type: 'main', acceptedAt: clock, spawnVillageId: va,
+        submitted: {}, camps: [{ id: campId, q: 6, r: 6, cleared: false }], campCleared: 0, progress: 0,
+      },
+    },
+  });
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'rats', q: 6, r: 6, task: true, ownerVillageId: va });
+  assert.equal(spawned.ok, true, `测试任务营地生成失败: ${spawned.reason ?? ''}`);
+  await grant(app, va, { wood: 100, clay: 100, iron: 100, crop: 100 });
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 1 } });
+  const fast = await send(app, 'movement.SendRaid', { villageId: va, targetId: campId, troops: { legionnaire: 1 } });
+  assert.equal(fast.ok, true, `先到军队出发失败: ${fast.reason ?? ''}`);
+  const fastMovement = app.store.get<any>('movement', (fast.payload as any).id);
+  assert.ok(fastMovement, '先到军队应写入 movement');
+
+  // 复制一条尚未抵达的慢军队，保持同一目标但使用独立 id，模拟多支军队先后抵达。
+  const slowMovement = {
+    ...fastMovement,
+    id: 'mv-taskcamp-slow',
+    arriveAt: fastMovement.arriveAt + 60_000,
+    nextStepAt: fastMovement.nextStepAt + 60_000,
+    stepToken: fastMovement.stepToken + 10,
+  };
+  app.store.set('movement', slowMovement.id, slowMovement);
+
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: {
+      villageId: va, side: 'attacker', targetKind: 'pve', targetId: campId,
+      attackerWins: true, campCleared: true, movementId: fastMovement.id,
+      fromXY: fastMovement.fromXY, toXY: fastMovement.toXY, originalFromXY: fastMovement.originalFromXY ?? fastMovement.fromXY,
+      survivors: { legionnaire: 1 }, deployedTroops: { legionnaire: 1 }, looted: {},
+    },
+  } as any);
+
+  const recalled = app.store.get<any>('movement', slowMovement.id);
+  assert.ok(recalled, '慢军队应保留为返程 movement');
+  assert.equal(recalled.type, 'return', '任务营地清除后慢军队应立即返程');
+  assert.equal(recalled.targetId, undefined, '返程军队不应继续保留已清除营地目标');
+});
+
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
   const app = freshApp();
   const regRes = await reg(app, '携旗测试');
