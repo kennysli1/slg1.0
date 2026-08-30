@@ -157,6 +157,18 @@ test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼�
   assert.ok(s4.edges.length >= 1, '任务关系不应在运行时目录中丢失');
 });
 
+test('交付对话：所有 deliver 段配置收下回复', () => {
+  const cfg = loadGameConfig(configDir);
+  const deliver = Object.values(cfg.dialogues).filter((dialogue) => dialogue.trigger === 'deliver');
+  assert.ok(deliver.length > 0, '应存在 deliver 对话');
+  for (const dialogue of deliver) {
+    assert.ok(
+      dialogue.replies.some((reply) => reply.key === 'take' && reply.label === '收下'),
+      `${dialogue.code}#${dialogue.segment} 应配置 take:收下`,
+    );
+  }
+});
+
 test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
   assert.ok(cfg.constants.m8AttackDelaySec > 0, 'M8 攻城倒计时应来自可调配置且为正数');

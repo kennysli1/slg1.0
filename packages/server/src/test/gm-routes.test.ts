@@ -336,6 +336,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(page.body, /match\(\/\\d\+\|\\D\+\/g\)/, '对话编辑器自然排序必须保留数字匹配正则');
     assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
     assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
+    assert.match(page.body, /r\.trigger==='deliver'.*take:收下/, '新增 deliver 对话段落应默认提供收下回复');
     assert.match(page.body, /\{villageName\}/, '对话编辑器应说明村庄变量');
     assert.match(page.body, /\{fiefName\}/, '对话编辑器应说明封地变量');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
@@ -372,6 +373,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
     assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
     assert.match(byKey.get('m8_deliver:1')?.npcText ?? '', /英明的战略决策/);
+    assert.equal(byKey.get('m8_deliver:1')?.replies, 'take:收下', '交付对话应在配置中心提供收下回复');
     assert.match(byKey.get('m9_accept:1')?.npcText ?? '', /乘胜追击/);
     assert.match(byKey.get('m9_deliver:1')?.npcText ?? '', /洗劫干净/);
     assert.equal(byKey.get('m8_deliver_success:1'), undefined);
@@ -438,7 +440,7 @@ test('配置中心：新增支线任务时自动补齐空白接取/交付对话�
     assert.equal(save.statusCode, 200, save.body);
     const dialogues = parseCsvStructured(readFileSync(join(tempConfig, 'dialogues.csv'), 'utf8'));
     assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_accept' && row.taskCode === 's_future_test' && row.trigger === 'accept'));
-    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver' && row.replies === 'take:收下'));
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
