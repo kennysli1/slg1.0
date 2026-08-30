@@ -74,6 +74,17 @@ test('dialogue：同一对象的多段文本按 segment 顺序一次返回', asy
   assert.equal(dialogue.segments[1].npcText, '请把我们的消息带回家。');
 });
 
+test('dialogue：M11 交付返回完整的两段长老对话', async () => {
+  const app = createGameApp({ now: () => 2_650_000, manualScheduler: true });
+  app.setupWorld();
+  const started = await send(app, 'dialogue.StartForTask', { taskCode: 'm11', trigger: 'deliver' });
+  assert.equal(started.ok, true, started.reason);
+  const dialogue = (started.payload as any).dialogue;
+  assert.equal(dialogue.segmentCount, 2);
+  assert.deepEqual(dialogue.segments.map((item: any) => item.segment), [1, 2]);
+  assert.match(dialogue.segments[1].npcText, /议会厅/);
+});
+
 test('dialogue：自动任务对话快照也携带完整段落组', async () => {
   const app = createGameApp({ now: () => 2_700_000, manualScheduler: true });
   app.setupWorld();

@@ -400,13 +400,13 @@ export class WorldModule {
   }
 
   /** 放弃/删村：把村庄地块变回 empty。 */
-  private clearVillage(cmd: Command): CommandResult {
+  private async clearVillage(cmd: Command): Promise<CommandResult> {
     const { refId } = cmd.payload as { refId: string };
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
       if (t.kind === 'village' && t.refId === refId) {
         this.store.set<Tile>(COLLECTION_TILE, hexKey(t.q, t.r), { q: t.q, r: t.r, kind: 'empty' });
         // 村庄消失：通知行军模块——所有前往该村庄的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
-        void this._bus.emit({
+        await this._bus.emit({
           name: 'world.VillageRemoved', source: WorldModule.NAME, ts: this._now(),
           payload: { villageId: refId, q: t.q, r: t.r },
         } as DomainEvent);
@@ -452,17 +452,15 @@ export class WorldModule {
   }
 
   /** 移除指定坐标上的 PvE/任务营地地块（任务营地清除用）：仅当该格确为对应 refId 的 pve/taskcamp 时才清空，避免误清村庄/其它目标。幂等。 */
-  private removeTile(cmd: Command): CommandResult {
+  private async removeTile(cmd: Command): Promise<CommandResult> {
     const { q, r, refId } = cmd.payload as { q: number; r: number; refId: string };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const matches = this.store.all<Tile>(COLLECTION_TILE).filter((tile) =>
       (tile.kind === 'pve' || tile.kind === 'taskcamp') && tile.refId === refId);
-    if (matches.length === 0) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
     for (const tile of matches) this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { q: tile.q, r: tile.r, kind: 'empty' });
-    // PvE/任务营地地块消失：通知行军模块——所有前往该目标的出征/商队应立即原路返回
-    // （见 movement.onTargetRemoved）。pve.Remove 已发过同一事件，这里再兜底一次，
-    // 保证无论地块由哪条路径移除（pve.Remove / 直接 world.RemoveTile），商队都不会继续冲向已消失的目标。
-    void this._bus.emit({
+    // PvE/任务营地地块消失：World 是地图实体的唯一 owner，因此由这里发出唯一的
+    // TargetRemoved 事件。即使地块已被旧存档清掉也要发事件，保证仍在途的军队能返程。
+    await this._bus.emit({
       name: 'pve.TargetRemoved', source: WorldModule.NAME, ts: this._now(),
       payload: { id: refId, q: w.q, r: w.r },
     } as DomainEvent);

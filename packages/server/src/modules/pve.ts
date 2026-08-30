@@ -183,7 +183,15 @@ export class PveModule {
   private async remove(cmd: Command): Promise<CommandResult> {
     const { id } = cmd.payload as { id: string };
     const s = this.load(id);
-    if (!s) return { ok: true, payload: {} }; // 已不存在，幂等成功
+    if (!s) {
+      // 目标状态可能已被旧流程删掉，但地图或行军记录仍残留；仍广播失效事件，
+      // 让在途部队不会继续驶向一个已经不存在的目的地。
+      await this._bus.emit({
+        name: 'pve.TargetRemoved', source: PveModule.NAME, ts: this.now(),
+        payload: { id },
+      } as DomainEvent);
+      return { ok: true, payload: {} };
+    }
     this.scheduler.cancelByOwner(`pve:${id}`);
     this.scheduler.cancelByOwner(`pve:recovery:${id}`);
     this.store.delete(COLLECTION, id);
@@ -191,11 +199,7 @@ export class PveModule {
       name: 'world.RemoveTile', from: PveModule.NAME,
       payload: { q: s.q, r: s.r, refId: id },
     });
-    // 目标被移除：通知行军模块——所有前往该目标的出征/商队应原路返回（见 movement.onTargetRemoved）。
-    void this._bus.emit({
-      name: 'pve.TargetRemoved', source: PveModule.NAME, ts: this.now(),
-      payload: { id, q: s.q, r: s.r },
-    } as DomainEvent);
+    // world.RemoveTile 已在清除地图实体后同步广播 TargetRemoved；不要在此重复广播。
     return { ok: true, payload: { id } };
   }
 
