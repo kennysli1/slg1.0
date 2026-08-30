@@ -14,7 +14,7 @@ import { worldW, worldH } from './config.js';
 import type { StoredNotification } from '@slg/shared';
 import {
   getCache, setCache, setPopState, getPopState, markResFetched, setPendingTreasures,
-  addReport, seedReports, patchMovement, dropMovement, type ReportKind, type StoredReport,
+  addReport, seedReports, patchMovement, replaceMovementSnapshot, dropMovement, type ReportKind, type StoredReport,
 } from './state.js';
 import {
   bumpData, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
@@ -27,6 +27,10 @@ import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyR
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 
 let mapCenterLegacy: { q: number; r: number } | null = null;
+// 刷新请求可能由动作、推送和切页同时触发。旧请求晚返回时不能覆盖新快照，
+// 尤其不能把目标消失后的返程路径覆盖回出征路径。
+let refreshGeneration = 0;
+let movementRefreshGeneration = 0;
 
 /**
  * GM 可直接调整村庄坐标/名称；玩家快照不会主动推送这些字段。
@@ -83,6 +87,8 @@ export function setSessionLostHandler(fn: (msg: string) => void): void { onSessi
  */
 export async function refreshAll(options: { includeArea?: boolean; waitForTasks?: boolean } = {}): Promise<void> {
   if (!me) return;
+  const generation = ++refreshGeneration;
+  const movementGeneration = ++movementRefreshGeneration;
   const includeArea = options.includeArea !== false;
   try {
     const center = getMapCenter() ?? { q: me.q, r: me.r };
@@ -103,6 +109,10 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
       req('GetKingdomState').catch(() => ({ ok: false } as any)),
     ]);
 
+    // 只允许最后一次全量刷新写入完整快照；更晚发起的轻量行军刷新
+    // 可以单独取代 moves/playerMoves，而不会被旧全量响应覆盖。
+    if (generation !== refreshGeneration) return;
+
     const failed = [res, vil, army, ...(includeArea ? [area] : []), moves, playerMoves].find((x) => !x.ok);
     if (failed) {
       const code = failed.error?.code ?? 'failed';
@@ -112,10 +122,12 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     }
 
     if (area.ok) reconcileVillagesFromArea(area.payload);
+    const includeLatestMovement = movementGeneration === movementRefreshGeneration;
     setCache({
       ...getCache(),
       res: res.payload, vil: vil.payload, army: army.payload,
-      ...(area.ok ? { area: area.payload } : {}), moves: moves.payload, playerMoves: playerMoves.payload,
+      ...(area.ok ? { area: area.payload } : {}),
+      ...(includeLatestMovement ? { moves: moves.payload, playerMoves: playerMoves.payload } : {}),
       treasures: treasures.ok ? treasures.payload : null,
       reputation: reputation.ok ? reputation.payload : null,
       alchemy: alchemy.ok ? alchemy.payload : null,
@@ -252,8 +264,8 @@ function applyPopPayload(p: any, merge = false): void {
   });
 }
 
-function pushReport(line: string, kind: ReportKind = 'info', details?: Record<string, any>): void {
-  addReport(line, kind, Date.now(), details);
+function pushReport(line: string, kind: ReportKind = 'info', details?: Record<string, any>, ts: number = Date.now()): void {
+  addReport(line, kind, ts, details);
   bumpReports();
 }
 
@@ -317,10 +329,12 @@ export async function refreshForeignMoves(): Promise<void> {
 /** 只刷新己方行军与实时来袭预警，不拉资源、建筑、任务或地图大包。 */
 export async function refreshMovements(): Promise<void> {
   if (!me) return;
+  const generation = ++movementRefreshGeneration;
   const [moves, playerMoves] = await Promise.all([
     req('ListMovements').catch(() => ({ ok: false } as any)),
     req('ListPlayerMovements').catch(() => ({ ok: false } as any)),
   ]);
+  if (generation !== movementRefreshGeneration) return;
   if (!moves.ok && !playerMoves.ok) return;
   setCache({
     ...getCache(),
@@ -349,7 +363,7 @@ export async function hydrateReports(): Promise<void> {
     const seeded: StoredReport[] = [];
     for (const n of list) {
       if (!isReportEvent(n.event)) continue;
-      const text = notificationText(n.event, n.payload);
+      const text = notificationText(n.event, n.payload, n.ts);
       if (text) {
         const details = n.event === 'BattleEnded' ? n.payload : undefined;
         seeded.push({ text, kind: notificationKind(n.event, n.payload), ts: n.ts, ...(details ? { details } : {}) });
@@ -363,12 +377,13 @@ export async function hydrateReports(): Promise<void> {
 }
 
 /** 推送分发：把服务端事件变成战报文案 + 必要的数据刷新。 */
-export function handlePush(event: string, payload: any): void {
+export function handlePush(event: string, payload: any, ts?: number): void {
   // 战报文案 + 语义分类（分类来自事件名，不靠猜文案）
-  const text = isReportEvent(event) ? notificationText(event, payload) : null;
+  const eventTs = Number.isFinite(Number(ts)) ? Number(ts) : Date.now();
+  const text = isReportEvent(event) ? notificationText(event, payload, eventTs) : null;
   if (text) {
     const details = event === 'BattleEnded' ? payload : undefined;
-    pushReport(text, notificationKind(event, payload), details);
+    pushReport(text, notificationKind(event, payload), details, eventTs);
   }
 
   // 战斗实时快照
@@ -417,14 +432,29 @@ export function handlePush(event: string, payload: any): void {
     return;
   }
 
+  // 行军状态改变只需重拉两份行军快照。特别是目标消失后的原地掉头，
+  // 必须尽快拿到新的反向路径与 turningPoint，不能等待全量刷新完成。
+  if (event === 'MarchSent') {
+    movementRefreshGeneration++;
+    if (payload?.movement?.id) replaceMovementSnapshot(payload.movement);
+    bumpData();
+    void refreshMovements();
+    scheduleForeignRefresh(0);
+    return;
+  }
+
   // 行军逐格推送：增量合并，避免 refreshAll 开销；1s 后补一次外国军队视野
   if (event === 'MarchStep') {
+    // 增量步进已经比任何在途全量请求更新；让旧请求只能保留其它数据，
+    // 不能把当前位置和 turningPoint 写回旧值。
+    movementRefreshGeneration++;
     patchMovement(payload as MarchStepPush);
     bumpData();
     scheduleForeignRefresh(1000);
     return;
   }
   if (event === 'MarchRemoved') {
+    movementRefreshGeneration++;
     dropMovement((payload as MarchRemovedPush).id);
     bumpData();
     return;

@@ -155,7 +155,7 @@ export function notificationText(event: string, payload: any, ts?: number): stri
 }
 
 /** 把一条服务端推送事件转成战报文案（追加到 reports）。 */
-export function handlePush(event: string, payload: any): void {
+export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'BattleTick') {
     setBattleSnapshot(payload);
     return;
@@ -218,8 +218,9 @@ export function handlePush(event: string, payload: any): void {
     }
   }
 
-  const text = notificationText(event, payload);
-  if (text) addReport(text);
+  const eventTs = Number.isFinite(Number(ts)) ? Number(ts) : Date.now();
+  const text = notificationText(event, payload, eventTs);
+  if (text) addReport(text, 'info', eventTs);
 }
 
 /** 用服务端历史通知播种战报列表（登录后调用一次）。 */
