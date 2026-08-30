@@ -148,7 +148,7 @@ export function patchMovement(push: MarchStepPush): void {
       if (idx >= 0) {
         const movements = [...source.movements];
         const prev = movements[idx];
-        movements[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, status: push.status, arriveAt: push.arriveAt };
+        movements[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, turningPoint: push.turningPoint, status: push.status, arriveAt: push.arriveAt };
         next.movements = movements;
         changed = true;
       }
@@ -158,7 +158,7 @@ export function patchMovement(push: MarchStepPush): void {
       if (idx >= 0) {
         const incomingWarnings = [...source.incomingWarnings];
         const prev = incomingWarnings[idx];
-        incomingWarnings[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, arriveAt: push.arriveAt };
+        incomingWarnings[idx] = { ...prev, pos: push.pos, stepIndex: push.stepIndex, nextStepAt: push.nextStepAt, perStepMs: push.perStepMs, turningPoint: push.turningPoint, arriveAt: push.arriveAt };
         next.incomingWarnings = incomingWarnings;
         changed = true;
       }

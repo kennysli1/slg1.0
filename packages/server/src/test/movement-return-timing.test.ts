@@ -40,7 +40,7 @@ test('目标消失中途掉头：返程时长等于出发后实际经过时间�
   const outboundPath = [...atFirstGrid.path];
   const outboundIndex = atFirstGrid.stepIndex as number;
   const departureAt = atFirstGrid.departAt as number;
-  const partialMs = 500;
+  const partialMs = Math.max(1, Math.floor(Number(atFirstGrid.perStepMs) / 2));
   clock += partialMs;
 
   const removed = await send(app, 'pve.Remove', { id: 'pve-0' });
@@ -51,6 +51,17 @@ test('目标消失中途掉头：返程时长等于出发后实际经过时间�
   assert.equal(returning.type, 'return');
   assert.deepEqual(returning.path, outboundPath.slice(0, outboundIndex + 1).reverse(), '返程路径必须是已走去程的反向前缀');
   assert.deepEqual(returning.path[0], atFirstGrid.pos, '返程路径首格必须是实际掉头所在格');
+
+  // 地图仍需从当前段内的实际位置开始返程，不能随着离散 pos 回跳到首个返程格心。
+  const listed = await send(app, 'movement.List', { villageId: player.villageId });
+  const listedMovement = (listed.payload as any).movements.find((m: any) => m.id === movementId);
+  const turningPoint = listedMovement?.turningPoint;
+  assert.ok(turningPoint, '掉头时应下发连续位置过渡');
+  assert.deepEqual(turningPoint.from, outboundPath[outboundIndex], '连续过渡起点应为掉头前所在格');
+  assert.deepEqual(turningPoint.to, outboundPath[outboundIndex + 1], '连续过渡终点应为掉头前下一格');
+  assert.equal(turningPoint.startedAt, clock, '连续过渡应从目标消失时刻开始');
+  assert.equal(turningPoint.durationMs, partialMs, '连续过渡时长应等于当前段已行进时间');
+  assert.ok(Math.abs(turningPoint.progress - 0.5) < 1 / Number(atFirstGrid.perStepMs), '连续过渡比例应与当前段内位置一致');
 
   const expectedMs = clock - departureAt;
   assert.equal(returning.arriveAt - clock, expectedMs, '返程 arriveAt 应按出发后实际经过时间计算');
