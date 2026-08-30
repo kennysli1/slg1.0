@@ -382,6 +382,8 @@ export interface UnitDef {
   traits: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
+  /** units.csv 是否显式提供 popCost；缺列/空值时行军按1人口回退并记录警告。 */
+  popCostConfigured?: boolean;
   /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买；营地购买的服役期限由 contractSec 管理，任务奖励可直接授予无期限兵力。 */
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
@@ -475,6 +477,12 @@ export interface GameConstants {
   hillsVisionBonus: number;
   /** 丘陵军队行军速度倍率（默认 2/3，即速度减少 1/3）。 */
   hillsMarchSpeedMultiplier: number;
+  /** 军队规模减速：免惩罚的人口基准。 */
+  marchSizeReferencePop: number;
+  /** 军队规模减速：超出基准人口后的惩罚系数。 */
+  marchSizePenalty: number;
+  /** 军队规模减速：速度倍率下限。 */
+  marchSizeMinMultiplier: number;
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
   marchPointBase: number;
   marchPointPerRallypointLevel: number;
@@ -1093,6 +1101,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: num(r.popCost, 1),
+      popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
     };
   }
 
@@ -1121,6 +1130,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: 0,
+      popCostConfigured: true,
       isMercenary: true,
       goldCost: num(r.goldCost, 0),
       commandCost: Math.max(1, num(r.commandCost, 1)),
@@ -1286,6 +1296,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     forestVisionPenalty: cn('forest_vision_penalty', 2),
     hillsVisionBonus: cn('hills_vision_bonus', 1),
     hillsMarchSpeedMultiplier: cn('hills_march_speed_multiplier', 2 / 3),
+    marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
+    marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
+    marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
@@ -2036,6 +2049,11 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.hillsVisionBonus < 0) errors.push(`game_constants.csv hills_vision_bonus 必须≥0`);
   if (c.hillsMarchSpeedMultiplier <= 0 || c.hillsMarchSpeedMultiplier > 1) {
     errors.push(`game_constants.csv hills_march_speed_multiplier 必须在(0,1]`);
+  }
+  if (c.marchSizeReferencePop < 0) errors.push(`game_constants.csv march_size_reference_pop 必须≥0`);
+  if (c.marchSizePenalty < 0) errors.push(`game_constants.csv march_size_penalty 必须≥0`);
+  if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
+    errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
   }
   if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
   if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);

@@ -859,6 +859,28 @@ function sectionTerrain(){
   return '<div class="sec"><h2>地图格子特性 / 地形参数</h2>'+h+'</div>';
 }
 
+// ── 军队规模专用视图：规模减速参数写入 game_constants.csv，影响新派出的行军。 ──
+var MARCH_SIZE_ROWS = [
+  ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
+  ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
+  ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+];
+function sectionMarchSize(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">军队有效人口按实际携带部队的数量 × units.csv 的 popCost 计算；先应用兵种/科技/全局/地形速度，再对每个路径段统一应用规模减速。商队固定速度不受影响；已在途行军不会因热重载改变原定时间。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
+    var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
 // ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
 var CITY_STATE_ROWS = [
   ['kingdom_city_state_count','地图城邦数量','每张地图随机生成的城邦数量'],
@@ -1219,6 +1241,7 @@ function render(){
   html += sectionFounding();
   html += sectionReputation();
   html += sectionTerrain();
+  html += sectionMarchSize();
   html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();

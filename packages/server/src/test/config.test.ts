@@ -19,6 +19,9 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.storageBase, 800, '基础容量');
   assert.equal(c.mapSize, 20, '地图尺寸');
   assert.equal(c.mapViewRadius, 6, '视野半径');
+  assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
+  assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
+  assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
 });
 
 test('开局模板：village_templates.csv 展开预置建筑', () => {
@@ -349,6 +352,25 @@ test('校验器：关键常量范围非法应抛错', () => {
     constants: { ...cfg.constants, combatTickMs: 0, marchSpeedMultiplier: 0 },
   };
   assert.throws(() => validateGameConfig(bad), /combat_tick_ms|march_speed_multiplier/);
+});
+
+test('校验器：军队规模参数范围非法应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const badReference: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeReferencePop: -1 },
+  };
+  assert.throws(() => validateGameConfig(badReference), /march_size_reference_pop/);
+  const badPenalty: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizePenalty: -0.1 },
+  };
+  assert.throws(() => validateGameConfig(badPenalty), /march_size_penalty/);
+  const badMinimum: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeMinMultiplier: 1.1 },
+  };
+  assert.throws(() => validateGameConfig(badMinimum), /march_size_min_multiplier/);
 });
 
 test('特性：多效果特性正确展开', () => {

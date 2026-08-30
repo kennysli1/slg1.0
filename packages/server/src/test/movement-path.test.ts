@@ -527,3 +527,165 @@ test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均�
   assert.equal(Object.hasOwn(victimReport?.defenderLosses ?? {}, 'legionnaire'), false, '被伏击方损失中不能混入伏击方军团兵');
   assert.equal(Object.keys(victimReport?.defenderLosses ?? {}).every((code) => code === 'equimperatoris' || code === 'merc_archer'), true, '被伏击方损失只能来自自己的兵种');
 });
+
+function effectiveArmyPopulation(app: GameApp, troops: Record<string, number>): number {
+  return Object.entries(troops).reduce((sum, [code, raw]) => {
+    const numeric = Number(raw);
+    const count = Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+    if (count <= 0) return sum;
+    const configured = app.config.units[code]?.popCost;
+    const popCost = typeof configured === 'number' && Number.isFinite(configured) ? Math.max(0, configured) : 1;
+    return sum + count * popCost;
+  }, 0);
+}
+
+function expectedMarchMs(app: GameApp, troops: Record<string, number>, steps: number, slowestSpeed: number): number {
+  const c = app.config.constants;
+  const reference = Math.max(0, Number(c.marchSizeReferencePop));
+  const penalty = Math.max(0, Number(c.marchSizePenalty));
+  const minimum = Math.max(0.0001, Math.min(1, Number(c.marchSizeMinMultiplier)));
+  const excess = Math.max(0, effectiveArmyPopulation(app, troops) - reference);
+  const sizeMultiplier = Math.max(minimum, Math.min(1, 1 / (1 + penalty * excess)));
+  const base = 3_600_000 / (slowestSpeed * Number(c.marchSpeedMultiplier));
+  const existingSegmentMs = Math.max(1, Math.round(base));
+  const segmentMs = Math.max(1, Math.ceil(existingSegmentMs / sizeMultiplier));
+  return Math.max(3_000, steps * segmentMs);
+}
+
+function expectedMarchSeconds(app: GameApp, troops: Record<string, number>, steps: number, slowestSpeed: number): number {
+  return Math.round(expectedMarchMs(app, troops, steps, slowestSpeed) / 1000);
+}
+
+test('行军规模减速：按实际 popCost 计算并逐段叠加，20 人口保持原速', async () => {
+  const app = freshApp();
+  app.config.constants.marchSpeedMultiplier = 1;
+  // 将地形影响设为中性，专门验证规模系数而不改变丘陵规则本身。
+  app.config.constants.hillsMarchSpeedMultiplier = 1;
+  const reg = await send(app, 'player.Register', { name: '规模减速', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  const W = app.config.constants.worldW;
+  const target = { q: (p.q + 10) % W, r: p.r };
+  const steps = hexDistanceWrapped({ q: p.q, r: p.r }, target, W, app.config.constants.worldH);
+  const slowest = await send(app, 'military.GetMarchSpeedSnapshot', { villageId: p.villageId, troops: { legionnaire: 20 } });
+  assert.equal(slowest.ok, true, `应能取得最慢兵种速度: ${slowest.reason ?? ''}`);
+  const slowestSpeed = Number((slowest.payload as any).slowestSpeed);
+  const preview = async (troops: Record<string, number>) => {
+    const result = await send(app, 'movement.PreviewMarch', { villageId: p.villageId, ...target, mode: 'raid', troops });
+    assert.equal(result.ok, true, `规模行军预览应成功: ${result.reason ?? ''}`);
+    return result.payload as any;
+  };
+
+  for (const count of [20, 100, 300, 600, 1000]) {
+    const troops = { legionnaire: count };
+    const actual = await preview(troops);
+    assert.equal(
+      actual.travelSec,
+      expectedMarchSeconds(app, troops, steps, slowestSpeed),
+      `${count} 个军团兵的到达时间应符合规模减速公式`,
+    );
+  }
+
+  const mixedTroops = { legionnaire: 20, catapult: 20 };
+  const mixedSnapshot = await send(app, 'military.GetMarchSpeedSnapshot', { villageId: p.villageId, troops: mixedTroops });
+  assert.equal(mixedSnapshot.ok, true);
+  const mixed = await preview(mixedTroops);
+  assert.equal(
+    mixed.travelSec,
+    expectedMarchSeconds(app, mixedTroops, steps, Number((mixedSnapshot.payload as any).slowestSpeed)),
+    '混合兵种应先取最慢兵种，再叠加实际 popCost 规模减速',
+  );
+});
+
+test('商队固定速度不受军队规模参数影响', async () => {
+  const app = freshApp();
+  app.config.constants.marchSizePenalty = 10;
+  app.config.constants.marchSizeMinMultiplier = 0.1;
+  const ra = await send(app, 'player.Register', { name: '商队源', password: 'pass123', tribe: 'romans' });
+  const rb = await send(app, 'player.Register', { name: '商队目标', password: 'pass123', tribe: 'romans' });
+  const from = (ra.payload as any).player;
+  const to = (rb.payload as any).player;
+  const sent = await send(app, 'movement.SendCaravan', {
+    fromVillage: from.villageId, targetVillage: to.villageId, cargo: { wood: 1 },
+  });
+  assert.equal(sent.ok, true, `商队应可出发: ${sent.reason ?? ''}`);
+  const mv = movements(app).find((m) => m.type === 'caravan');
+  assert.ok(mv, '应创建商队行军');
+  const distance = hexDistanceWrapped({ q: from.q, r: from.r }, { q: to.q, r: to.r }, app.config.constants.worldW, app.config.constants.worldH);
+  const expectedTotal = Math.max(3_000, Math.round((distance / app.config.constants.tradeCaravanSpeed) * 3_600)) * 1_000;
+  assert.equal(mv.arriveAt - mv.departAt, expectedTotal, '商队仍应使用独立固定速度');
+});
+
+test('缺失 popCost 时按1人口回退且不阻断行军', async () => {
+  const app = freshApp();
+  app.config.constants.marchSpeedMultiplier = 1;
+  app.config.constants.hillsMarchSpeedMultiplier = 1;
+  (app.config.units.legionnaire as any).popCost = undefined;
+  const reg = await send(app, 'player.Register', { name: '缺失人口成本', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  const target = { q: (p.q + 8) % app.config.constants.worldW, r: p.r };
+  const result = await send(app, 'movement.PreviewMarch', { villageId: p.villageId, ...target, mode: 'raid', troops: { legionnaire: 100 } });
+  assert.equal(result.ok, true, `缺失 popCost 不应使预览失败: ${result.reason ?? ''}`);
+  const snapshot = await send(app, 'military.GetMarchSpeedSnapshot', { villageId: p.villageId, troops: { legionnaire: 100 } });
+  assert.equal(snapshot.ok, true);
+  const steps = hexDistanceWrapped({ q: p.q, r: p.r }, target, app.config.constants.worldW, app.config.constants.worldH);
+  assert.equal(result.payload?.travelSec, expectedMarchSeconds(app, { legionnaire: 100 }, steps, Number((snapshot.payload as any).slowestSpeed)));
+});
+
+test('返程按战斗后幸存 popCost 重新计算规模速度', async () => {
+  const app = freshApp();
+  app.config.constants.marchSpeedMultiplier = 1;
+  app.config.constants.hillsMarchSpeedMultiplier = 1;
+  const reg = await send(app, 'player.Register', { name: '规模返程', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 100 });
+  const target = app.store.all<any>('pve').find((x) => hexDistanceWrapped({ q: p.q, r: p.r }, { q: x.q, r: x.r }, app.config.constants.worldW, app.config.constants.worldH) >= 8);
+  assert.ok(target, '测试需要较远 PvE 目标');
+  const sent = await send(app, 'movement.SendRaid', { villageId: p.villageId, targetId: target.id, troops: { legionnaire: 100 } });
+  assert.equal(sent.ok, true, `去程应成功: ${sent.reason ?? ''}`);
+  const outbound = movements(app).find((m) => m.id === (sent.payload as any).id);
+  assert.ok(outbound, '应存在去程行军');
+  const returnSnapshot = await send(app, 'military.GetMarchSpeedSnapshot', { villageId: p.villageId, troops: { legionnaire: 20 } });
+  assert.equal(returnSnapshot.ok, true);
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: {
+      side: 'attacker', fromVillage: p.villageId, fromXY: outbound.fromXY, toXY: outbound.toXY,
+      originalFromXY: outbound.originalFromXY, movementId: outbound.id, targetKind: 'pve', targetId: target.id,
+      survivors: { legionnaire: 20 }, loot: {}, treasures: [],
+    },
+  } as any);
+  const returning = movements(app).find((m) => m.type === 'return');
+  assert.ok(returning, '战斗结束后应创建返程军');
+  const returnSteps = hexDistanceWrapped(returning.fromXY, returning.toXY, app.config.constants.worldW, app.config.constants.worldH);
+  assert.equal(
+    returning.arriveAt - returning.departAt,
+    expectedMarchMs(app, { legionnaire: 20 }, returnSteps, Number((returnSnapshot.payload as any).slowestSpeed)),
+    '返程应按幸存者规模重新计算速度',
+  );
+});
+
+test('行军途中兵力与配置变化不改变已确定的到达时间', async () => {
+  const app = freshApp();
+  app.config.constants.marchSpeedMultiplier = 1;
+  app.config.constants.hillsMarchSpeedMultiplier = 1;
+  const reg = await send(app, 'player.Register', { name: '途中固定', password: 'pass123', tribe: 'romans' });
+  const p = (reg.payload as any).player;
+  await giveTroops(app, p.villageId, { legionnaire: 100 });
+  const target = app.store.all<any>('pve').find((x) => hexDistanceWrapped({ q: p.q, r: p.r }, { q: x.q, r: x.r }, app.config.constants.worldW, app.config.constants.worldH) >= 8);
+  assert.ok(target, '测试需要较远 PvE 目标');
+  const sent = await send(app, 'movement.SendRaid', { villageId: p.villageId, targetId: target.id, troops: { legionnaire: 100 } });
+  assert.equal(sent.ok, true);
+  const outbound = movements(app).find((m) => m.id === (sent.payload as any).id);
+  assert.ok(outbound && outbound.path.length > 2, '测试需要至少两段去程');
+  const originalArriveAt = outbound.arriveAt;
+  const originalPerStepMs = outbound.perStepMs;
+  const changedConfig = { ...app.config, constants: { ...app.config.constants, marchSizePenalty: 1, marchSizeMinMultiplier: 0.1 } };
+  app.movement.setConfig(changedConfig);
+  outbound.troops = { legionnaire: 1 };
+  app.store.set('movement', outbound.id, outbound);
+  await app.scheduler.advanceTo(clock + originalPerStepMs, setClock);
+  const after = movements(app).find((m) => m.id === outbound.id);
+  assert.ok(after, '改变规模后仍应保留在途军');
+  assert.equal(after.arriveAt, originalArriveAt, '行军中途不应因配置或兵力变化改写 arriveAt');
+  assert.equal(after.perStepMs, originalPerStepMs, '行军中途应继续使用派出时确定的逐段耗时');
+});
