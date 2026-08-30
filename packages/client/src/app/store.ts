@@ -18,7 +18,7 @@ export const tick = signal(0);
 export const dataVersion = signal(0);
 export function bumpData(): void { dataVersion.value++; }
 
-/** 战报列表版本号（战报是数组原地 unshift，靠版本号触发重渲）。 */
+/** 战报列表版本号（战报数组原地更新，靠版本号触发重渲）。 */
 export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 

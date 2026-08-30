@@ -267,8 +267,8 @@ function startGame() {
 }
 
 // ---------- 推送分发 ----------
-onPush((event, payload) => {
-  handlePush(event, payload);
+onPush((event, payload, ts) => {
+  handlePush(event, payload, ts);
   // 拓荒成功：刷新村列表（SelectVillage 回当前村即可拿完整 villages）
   if (event === 'VillageFounded' && me?.villageId) {
     void selectVillage(me.villageId).then((r) => {

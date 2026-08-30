@@ -12,7 +12,7 @@ import { escapeHtml, escapeAttr } from '../shared/utils/escape.js';
 import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
-import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement } from '../app/state.js';
+import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { populationTooltip } from '../shell/ResourceBar.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
@@ -91,6 +91,26 @@ describe('地图定位', () => {
       assert.deepEqual(source.incomingWarnings[0].pos, { q: 1, r: 0 });
       assert.equal(source.incomingWarnings[0].stepIndex, 1);
     }
+    setCache(previous);
+  });
+
+  it('掉头推送的完整快照会立即替换旧出征路径', () => {
+    const previous = getCache();
+    const outbound = {
+      id: 'mv-turn', type: 'raid', dir: 'out', status: 'marching',
+      from: { q: 0, r: 0 }, originalFrom: { q: 0, r: 0 }, to: { q: 2, r: 0 },
+      path: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }], pos: { q: 1, r: 0 }, stepIndex: 1,
+      perStepMs: 1000, nextStepAt: 2000, arriveAt: 3000, troops: {}, recallable: false, stoppable: false,
+    } as any;
+    const returning = {
+      ...outbound, type: 'return', to: { q: 0, r: 0 }, path: [{ q: 1, r: 0 }, { q: 0, r: 0 }], stepIndex: 0,
+      turningPoint: { from: { q: 1, r: 0 }, to: { q: 2, r: 0 }, progress: 0.5, startedAt: 1500, durationMs: 500 },
+    } as any;
+    setCache({ moves: { movements: [outbound], incomingWarnings: [] }, playerMoves: { movements: [outbound], incomingWarnings: [] } });
+    replaceMovementSnapshot(returning);
+    assert.equal(getCache().moves.movements[0].type, 'return');
+    assert.deepEqual(getCache().playerMoves.movements[0].path, returning.path);
+    assert.equal(getCache().playerMoves.movements[0].turningPoint.progress, 0.5);
     setCache(previous);
   });
 
@@ -633,6 +653,27 @@ describe('notificationKind', () => {
 
   it('未知事件归 info（不抛错）', () => {
     assert.equal(notificationKind('SomethingBrandNew'), 'info');
+  });
+});
+
+describe('战报时间线排序', () => {
+  it('历史战报按服务端事件时间降序，而不是按接口返回顺序', () => {
+    seedReports([
+      { text: '旧', kind: 'battle', ts: 100 },
+      { text: '新', kind: 'battle', ts: 300 },
+      { text: '中', kind: 'battle', ts: 200 },
+    ]);
+    assert.deepEqual(getReports().map((report) => report.ts), [300, 200, 100]);
+    seedReports([]);
+  });
+
+  it('实时战报即使乱序到达也按事件时间插入正确位置', () => {
+    seedReports([]);
+    addReport('新', 'battle', 300);
+    addReport('旧', 'battle', 100);
+    addReport('中', 'battle', 200);
+    assert.deepEqual(getReports().map((report) => report.ts), [300, 200, 100]);
+    seedReports([]);
   });
 });
 

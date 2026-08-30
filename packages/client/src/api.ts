@@ -7,7 +7,7 @@ import { checkForUpdate } from './version.js';
  * 多人版：不再写死村庄；登录后服务器据会话自动注入自己的 villageId。
  */
 
-type PushHandler = (event: string, payload: any) => void;
+type PushHandler = (event: string, payload: any, ts?: number) => void;
 
 let ws: WebSocket | null = null;
 let seq = 0;
@@ -233,7 +233,8 @@ export function connect(onOpen: () => void, onClose: () => void): void {
         console.warn('[api] push 消息缺少 event 字段');
         return;
       }
-      pushHandler((msg as WirePush).event, (msg as WirePush).payload);
+      // 保留服务端事件发生时间；战报排序和倒计时不能使用浏览器收到消息的时间。
+      pushHandler((msg as WirePush).event, (msg as WirePush).payload, (msg as WirePush).ts);
     }
   };
 }

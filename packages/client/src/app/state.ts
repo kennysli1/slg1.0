@@ -3,7 +3,7 @@
  * 各 feature 模块通过这里读写，避免互相直接依赖。
  */
 import { resourceKeys } from './config.js';
-import type { ListMovementsPayload, MarchStepPush } from '@slg/shared';
+import type { ListMovementsPayload, MarchStepPush, Movement } from '@slg/shared';
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
@@ -169,6 +169,24 @@ export function patchMovement(push: MarchStepPush): void {
   cache.playerMoves = patchOne(cache.playerMoves);
 }
 
+/**
+ * 用服务端在行军状态切换瞬间下发的完整快照替换现有条目。
+ * 目标消失后的返程不能等待全量刷新，否则旧请求可能让地图先回到旧路线。
+ */
+export function replaceMovementSnapshot(snapshot: Movement): void {
+  if (!snapshot?.id) return;
+  const replaceOne = (source: ListMovementsPayload | undefined): ListMovementsPayload | undefined => {
+    if (!source?.movements) return source;
+    const idx = source.movements.findIndex((m) => m.id === snapshot.id);
+    if (idx < 0) return source;
+    const movements = [...source.movements];
+    movements[idx] = snapshot;
+    return { ...source, movements };
+  };
+  cache.moves = replaceOne(cache.moves);
+  cache.playerMoves = replaceOne(cache.playerMoves);
+}
+
 /** 增量更新：从 cache.moves.movements 中移除指定 id 的行军条目。 */
 export function dropMovement(id: string): void {
   const dropOne = (source: ListMovementsPayload | undefined): ListMovementsPayload | undefined => {
@@ -183,20 +201,35 @@ export function dropMovement(id: string): void {
 export function getReports(): StoredReport[] { return reports; }
 
 /**
+ * 战报统一按事件发生时间倒序排列。历史通知和实时推送的到达顺序
+ * 不一定相同，不能用 unshift/push 的接收顺序代替服务端事件时间。
+ * Array#sort 在当前运行环境中稳定，相同时间戳会保留原有顺序。
+ */
+function sortReportsNewestFirst(): void {
+  reports.sort((a, b) => {
+    const at = Number.isFinite(Number(a.ts)) ? Number(a.ts) : 0;
+    const bt = Number.isFinite(Number(b.ts)) ? Number(b.ts) : 0;
+    return bt - at;
+  });
+}
+
+/**
  * 追加一条战报。`kind` 由 `notificationKind(event, payload)` 算好后传进来 ——
  * 分类必须来自事件名，**不能**回头去猜已渲染的中文文案（宝物名里带「人口」之类
  * 就会误判）。`ts` 缺省为现在。
  */
 export function addReport(text: string, kind: ReportKind = 'info', ts: number = Date.now(), details?: Record<string, any>): void {
-  reports.unshift({ text, kind, ts, ...(details ? { details } : {}) });
-  if (reports.length > 60) reports.pop();
+  reports.push({ text, kind, ts, ...(details ? { details } : {}) });
+  sortReportsNewestFirst();
+  if (reports.length > 60) reports.splice(60);
 }
 
 /** 用服务端历史通知初始化战报列表（登录后调用一次，替换当前内存内容）。 */
 export function seedReports(list: StoredReport[]): void {
   reports.length = 0;
-  // 历史条目是 old→new 顺序，unshift 逐条反序 → 最终 reports[0] 为最新
-  for (let i = list.length - 1; i >= 0; i--) reports.unshift(list[i]);
+  reports.push(...(Array.isArray(list) ? list : []));
+  sortReportsNewestFirst();
+  if (reports.length > 60) reports.splice(60);
 }
 
 /** 待领取宝物（军队带回、待确认）：来自 ListTreasures.pending，用于报告页交互卡片。 */

@@ -3721,7 +3721,13 @@ export class MovementModule {
     // 视觉上表现为「未返程 / 运送倒计时被重置」。网关按 villageId 定向推送，客户端 refreshAll 重拉行军列表。
     void this.bus.emit({
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
-      payload: { id: mv.id, type: mv.type, villageId: mv.fromVillage, q: mv.toXY.q, r: mv.toXY.r, arriveAt: mv.arriveAt },
+      // 掉头事件同时带上完整己方快照，客户端可在刷新请求返回前立即切换到
+      // 反向路径与 turningPoint；该字段只发给出发村，不向目标方泄露军情。
+      payload: {
+        id: mv.id, type: mv.type, villageId: mv.fromVillage,
+        q: mv.toXY.q, r: mv.toXY.r, arriveAt: mv.arriveAt,
+        movement: this.toWire(mv, mv.fromVillage),
+      },
     } as DomainEvent);
   }
 

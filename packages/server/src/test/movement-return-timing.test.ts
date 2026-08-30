@@ -43,6 +43,11 @@ test('目标消失中途掉头：返程时长等于出发后实际经过时间�
   const partialMs = Math.max(1, Math.floor(Number(atFirstGrid.perStepMs) / 2));
   clock += partialMs;
 
+  const sentEvents: any[] = [];
+  app.bus.on('movement.Sent', (event: any) => {
+    if (event.payload?.id === movementId) sentEvents.push(event.payload);
+  });
+
   const removed = await send(app, 'pve.Remove', { id: 'pve-0' });
   assert.equal(removed.ok, true, `移除目标应成功: ${removed.reason ?? ''}`);
 
@@ -62,6 +67,10 @@ test('目标消失中途掉头：返程时长等于出发后实际经过时间�
   assert.equal(turningPoint.startedAt, clock, '连续过渡应从目标消失时刻开始');
   assert.equal(turningPoint.durationMs, partialMs, '连续过渡时长应等于当前段已行进时间');
   assert.ok(Math.abs(turningPoint.progress - 0.5) < 1 / Number(atFirstGrid.perStepMs), '连续过渡比例应与当前段内位置一致');
+  const returnSent = sentEvents.at(-1);
+  assert.ok(returnSent?.movement, '掉头推送应携带完整快照，客户端无需等待全量刷新');
+  assert.ok(returnSent.movement.turningPoint, '掉头推送的完整快照应保留连续位置过渡');
+  assert.deepEqual(returnSent.movement.path, returning.path, '掉头推送快照应使用返程反向路径');
 
   const expectedMs = clock - departureAt;
   assert.equal(returning.arriveAt - clock, expectedMs, '返程 arriveAt 应按出发后实际经过时间计算');
