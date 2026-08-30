@@ -152,6 +152,8 @@ export class MovementModule {
   private villageIndex = new Map<string, Set<string>>();
   /** 当前进程内的逐段计时缓存；旧存档没有缓存时由 World 重新计算。 */
   private timingCache = new Map<string, PathTiming>();
+  /** 已记录过缺失 popCost 的兵种，避免同一配置在每个路径段重复刷警告。 */
+  private warnedMissingPopCost = new Set<string>();
 
   constructor(
     private store: Store,
@@ -434,13 +436,50 @@ export class MovementModule {
     }
   }
 
-  /** 计算一支部队的人口权重总量（用于三池口粮·士兵池，v2）。 */
-  private calcTroopsPopCost(troops: Record<string, number>): number {
+  /** 读取兵种的人口成本；旧/异常配置缺失时按1处理但不阻断行军。 */
+  private unitPopCost(code: string): number {
+    const def = this.config.units[code];
+    const raw = def?.popCost;
+    if (def?.popCostConfigured === false || typeof raw !== 'number' || !Number.isFinite(raw)) {
+      if (!this.warnedMissingPopCost.has(code)) {
+        this.warnedMissingPopCost.add(code);
+        log.warn('兵种缺少 popCost，军队规模按1人口计算', { unit: code });
+      }
+      return 1;
+    }
+    return Math.max(0, raw);
+  }
+
+  /** 计算一支部队的有效人口（只计实际携带且数量大于0的兵）。 */
+  private armyPopulation(troops: Record<string, number>): number {
     let sum = 0;
-    for (const [unit, n] of Object.entries(troops)) {
-      sum += (this.config.units[unit]?.popCost ?? 0) * n;
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const numeric = Number(raw);
+      const count = Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+      if (count <= 0) continue;
+      sum += count * this.unitPopCost(unit);
     }
     return sum;
+  }
+
+  /** 按有效军队人口计算规模减速倍率；商队由独立固定速度处理，不参与该规则。 */
+  private marchSizeMultiplier(troops: Record<string, number>, type: MovementRecord['type']): number {
+    if (type === 'caravan') return 1;
+    const c = this.config.constants;
+    const referenceRaw = Number(c.marchSizeReferencePop);
+    const penaltyRaw = Number(c.marchSizePenalty);
+    const minimumRaw = Number(c.marchSizeMinMultiplier);
+    const reference = Number.isFinite(referenceRaw) ? Math.max(0, referenceRaw) : 20;
+    const penalty = Number.isFinite(penaltyRaw) ? Math.max(0, penaltyRaw) : 0.0015;
+    const minimum = Number.isFinite(minimumRaw) ? Math.max(0.0001, Math.min(1, minimumRaw)) : 0.45;
+    const excess = Math.max(0, this.armyPopulation(troops) - reference);
+    const raw = 1 / (1 + penalty * excess);
+    return Math.max(minimum, Math.min(1, raw));
+  }
+
+  /** 计算一支部队的人口权重总量（用于三池口粮·士兵池，v2）。 */
+  private calcTroopsPopCost(troops: Record<string, number>): number {
+    return this.armyPopulation(troops);
   }
 
   /** 更新某村的在途总 popCost 与在途兵力，通知 population（动员足迹）与 military（粮耗）。 */
@@ -1510,7 +1549,7 @@ export class MovementModule {
     return 3_600_000 / slowest;
   }
 
-  /** 单个路径段耗时：部队从当前格离开时若当前格是丘陵，则该段速度降为 2/3。 */
+  /** 单个路径段耗时：先应用现有地形规则，再应用军队规模减速。 */
   private async segmentDurationMs(
     villageId: string,
     troops: Record<string, number>,
@@ -1518,11 +1557,13 @@ export class MovementModule {
     from: Hex,
   ): Promise<number> {
     const base = await this.baseStepMs(villageId, troops, type);
+    let existing = base;
     if (type !== 'caravan' && (await this.terrainAt(from)) === 'hills') {
       const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
-      return Math.max(1, Math.round(base / hillsMultiplier));
+      existing = Math.max(1, Math.round(base / hillsMultiplier));
     }
-    return Math.max(1, Math.round(base));
+    const sizeMultiplier = this.marchSizeMultiplier(troops, type);
+    return Math.max(1, Math.ceil(existing / sizeMultiplier));
   }
 
   /** 计算整条最短路径的逐段耗时；路径算法本身仍始终使用 linePathWrapped。 */
@@ -1537,9 +1578,13 @@ export class MovementModule {
     const base = await this.baseStepMs(villageId, troops, type);
     const terrains = await Promise.all(path.slice(0, -1).map((point) => this.terrainAt(point)));
     const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
-    let segmentMs = terrains.map((terrain) => Math.max(1, Math.round(
+    const existingSegmentMs = terrains.map((terrain) => Math.max(1, Math.round(
       type !== 'caravan' && terrain === 'hills' ? base / hillsMultiplier : base,
     )));
+    const sizeMultiplier = this.marchSizeMultiplier(troops, type);
+    let segmentMs = type === 'caravan'
+      ? existingSegmentMs
+      : existingSegmentMs.map((ms) => Math.max(1, Math.ceil(ms / sizeMultiplier)));
     const minimumMs = type === 'caravan' ? 3_000_000 : 3_000;
     const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
     // 商队原有口径是全程统一分摊（且有 3000 秒最低时长），保持逐格调度与 arriveAt 一致。

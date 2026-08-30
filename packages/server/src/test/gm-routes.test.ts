@@ -211,6 +211,10 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /forest_vision_penalty/, 'GM 页面应提供森林视野参数');
     assert.match(res.body, /hills_vision_bonus/, 'GM 页面应提供丘陵视野参数');
     assert.match(res.body, /hills_march_speed_multiplier/, 'GM 页面应提供丘陵行军速度参数');
+    assert.match(res.body, /军队规模行军参数/, 'GM 页面应提供军队规模减速参数板块');
+    assert.match(res.body, /march_size_reference_pop/, 'GM 页面应提供规模免惩罚人口基准');
+    assert.match(res.body, /march_size_penalty/, 'GM 页面应提供规模减速系数');
+    assert.match(res.body, /march_size_min_multiplier/, 'GM 页面应提供规模减速最低速度比例');
     assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
     assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
     assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
@@ -683,6 +687,32 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
     assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
 
+    const marchSizeSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: {
+        march_size_reference_pop: { value: '30' },
+        march_size_penalty: { value: '0.002' },
+        march_size_min_multiplier: { value: '0.5' },
+      } }),
+    });
+    assert.equal(marchSizeSave.statusCode, 200, `规模减速参数覆盖应成功：${marchSizeSave.body}`);
+    assert.equal(app.config.constants.marchSizeReferencePop, 30, '规模免惩罚人口基准应热重载');
+    assert.equal(app.config.constants.marchSizePenalty, 0.002, '规模减速系数应热重载');
+    assert.equal(app.config.constants.marchSizeMinMultiplier, 0.5, '规模减速下限应热重载');
+    const marchSizeData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    for (const [key, value] of [
+      ['march_size_reference_pop', 30],
+      ['march_size_penalty', 0.002],
+      ['march_size_min_multiplier', 0.5],
+    ] as const) {
+      const row = (marchSizeData.constants ?? []).find((r) => r.key === key);
+      assert.equal(Number(row?.value), value, `balance/data 应返回修改后的 ${key}`);
+    }
+
     const reputationData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       kingdom_services?: Array<Record<string, unknown>>;
       treasures?: Array<Record<string, unknown>>;
@@ -715,6 +745,9 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(restarted.config.buildings.treasury.levels[1].treasureSlots, 7, '重启后应读取 GM 写回的 building_levels.csv');
     assert.equal(restarted.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '重启后应保留酒馆支线概率');
     assert.equal(restarted.config.constants.foundResourceCostBase, 4321, '重启后应读取 GM 写回的 game_constants.csv');
+    assert.equal(restarted.config.constants.marchSizeReferencePop, 30, '重启后应读取规模免惩罚人口基准');
+    assert.equal(restarted.config.constants.marchSizePenalty, 0.002, '重启后应读取规模减速系数');
+    assert.equal(restarted.config.constants.marchSizeMinMultiplier, 0.5, '重启后应读取规模减速下限');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;
