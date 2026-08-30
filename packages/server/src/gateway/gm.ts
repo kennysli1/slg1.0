@@ -460,6 +460,8 @@ interface BalanceTable {
   /** 复合主键（多列组合，key 用 '|' 连接）；存在时按多列匹配行。 */
   keyComposite?: string[];
   numeric?: string[];
+  /** 可编辑的文本字段（用于任务 params 等按 kind 解析的值）。 */
+  text?: string[];
   numericByType?: boolean;
   labels: string[];
 }
@@ -578,6 +580,17 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
     labels: ['id', 'code', 'name', 'category', 'rarity', 'effectType', 'applyType'],
   },
+  // 任务中的声望目标/效果也在声望专用视图集中展示；params 保持字符串，由运行时按 kind 校验。
+  quest_objectives: {
+    file: 'quest_objectives.csv', key: 'id',
+    text: ['params'],
+    labels: ['id', 'questCode', 'phase', 'kind', 'order'],
+  },
+  quest_effects: {
+    file: 'quest_effects.csv', key: 'id',
+    text: ['params'],
+    labels: ['id', 'questCode', 'phase', 'kind', 'order'],
+  },
   constants: {
     file: 'game_constants.csv', key: 'key',
     numericByType: true, // 用行内 type 列判定（number/bool/string）
@@ -638,6 +651,8 @@ export function applyBalanceEdits(srcDir: string, targetDir: string, table: Bala
         const n = Number(newVal);
         if (!Number.isFinite(n)) throw new Error(table.file + ' 行 ' + keyVal + ' 字段 ' + h + '="' + newVal + '" 不是合法数字');
         merged[h] = String(n);
+      } else if (table.text?.includes(h)) {
+        merged[h] = newVal;
       }
       // 非声明可编辑字段：忽略（不覆盖原值）
     }
@@ -693,8 +708,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -729,7 +744,7 @@ function sectionGeneric(table){
     rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -760,6 +775,22 @@ var REP_ROWS = [
   ['reputation_good_pvp_reward','正声望击杀奖励','每消灭十点敌方士兵人口增加的声望值'],
   ['reputation_evil_pvp_target_threshold','负声望攻击目标门槛','目标声望必须严格大于门槛'],
   ['reputation_evil_pvp_reward','负声望击杀奖励','每消灭十点敌方士兵人口增加的负声望绝对值'],
+  ['kingdom_task_tribute_weight','上贡任务声望权重','影响可获得上贡声望奖励的任务抽取概率'],
+  ['kingdom_task_clear_pve_weight','清理PvE任务声望权重','影响可获得清理PvE声望奖励的任务抽取概率'],
+  ['kingdom_task_attack_evil_weight','攻打负声望任务权重','影响可获得攻打玩家声望奖励的任务抽取概率'],
+  ['kingdom_task_eliminate_troops_weight','消灭兵力任务权重','影响可获得消灭兵力声望奖励的任务抽取概率'],
+  ['kingdom_task_evil_target_threshold','负声望任务目标门槛','王国任务指定玩家时使用的负声望绝对值门槛'],
+  ['kingdom_task_tribute_reward_reputation','上贡任务奖励声望','完成并领取上贡任务时增加的声望'],
+  ['kingdom_task_clear_pve_reward_reputation','清理PvE任务奖励声望','完成并领取清理PvE任务时增加的声望'],
+  ['kingdom_task_attack_evil_reward_reputation','攻打玩家任务奖励声望','完成并领取攻打负声望玩家任务时增加的声望'],
+  ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力任务奖励声望','完成并领取消灭兵力任务时增加的声望'],
+  ['kingdom_pve_killed_population_per_reputation','王国PvE声望人口阈值','每累计消灭多少王国PvE军队人口扣1点声望；跨战斗累加'],
+  ['kingdom_pve_retaliation_chunk','王国PvE报复批次','通过人口累计扣分每达到此数量时检查一次主城报复'],
+  ['kingdom_pve_retaliation_raid_threshold','封地掠夺声望阈值','玩家声望小于等于此值时，主城对应封地派雇佣军掠夺'],
+  ['kingdom_pve_retaliation_siege_threshold','封地攻城声望阈值','玩家声望小于等于此值时，将封地报复升级为攻城'],
+  ['kingdom_fief_mercenary_min_ratio','封地雇佣军比例下限','声望触发报复时，雇佣军占封地守军总人口的比例下限'],
+  ['kingdom_fief_mercenary_max_ratio','封地雇佣军比例上限','声望触发报复时，雇佣军占封地守军总人口的比例上限'],
+  ['kingdom_city_state_reputation_penalty','旧版城邦固定扣分（弃用）','仅兼容旧配置，不再参与声望结算'],
   ['reputation_good_pop_growth_per_point','正声望人口增长/点','每点正声望带来的人口增长倍率'],
   ['reputation_good_pop_growth_cap','正声望人口增长上限','正声望人口增长倍率上限'],
   ['reputation_evil_pop_growth_penalty_per_point','负声望人口下降/点','每点负声望带来的人口增长下降倍率'],
@@ -781,19 +812,10 @@ var KINGDOM_ROWS = [
   ['kingdom_task_interval_min_sec','循环最短间隔','领取或失败后下一任务的最短等待'],
   ['kingdom_task_interval_max_sec','循环最长间隔','领取或失败后下一任务的最长等待'],
   ['kingdom_task_duration_sec','任务有效期','超时失败且无惩罚'],
-  ['kingdom_task_tribute_weight','上贡权重','四类任务的相对抽取权重'],
-  ['kingdom_task_clear_pve_weight','清理PvE权重','只选本象限地图已有普通PvE'],
-  ['kingdom_task_attack_evil_weight','攻打负声望玩家权重','无合格目标时自动排除'],
-  ['kingdom_task_eliminate_troops_weight','消灭兵力权重','无合格目标时自动排除'],
   ['kingdom_task_tribute_amount_min','上贡最小数量','随机资源需求下限'],
   ['kingdom_task_tribute_amount_max','上贡最大数量','随机资源需求上限'],
   ['kingdom_task_eliminate_troops_min','消灭兵力最小值','累计实际战损人数'],
   ['kingdom_task_eliminate_troops_max','消灭兵力最大值','累计实际战损人数'],
-  ['kingdom_task_evil_target_threshold','负声望目标门槛','目标声望严格小于此值的负数'],
-  ['kingdom_task_tribute_reward_reputation','上贡奖励声望','手动领取时结算'],
-  ['kingdom_task_clear_pve_reward_reputation','清理PvE奖励声望','手动领取时结算'],
-  ['kingdom_task_attack_evil_reward_reputation','攻打玩家奖励声望','手动领取时结算'],
-  ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力奖励声望','手动领取时结算'],
 ];
 
 // ── M8 专用视图：避免在长的全局常量表里漏看任务村攻城倒计时。 ──
@@ -881,7 +903,6 @@ var CITY_STATE_ROWS = [
   ['kingdom_city_state_recovery_min_sec','兵力恢复最短秒数','默认 43200 秒（12 小时）'],
   ['kingdom_city_state_recovery_max_sec','兵力恢复最长秒数','默认 172800 秒（48 小时）'],
   ['kingdom_city_state_recovery_resource_extra_sec','资源恢复额外秒数','资源比兵力恢复再多 21600 秒（6 小时）'],
-  ['kingdom_city_state_reputation_penalty','旧版城邦固定扣分（弃用）','已改为按王国 PvE 消灭人口累计扣分；仅为旧配置兼容保留，不再参与结算'],
   ['kingdom_fief_unit_count','封地随机兵种数','四个领主封地统一标准；从对应种族兵种池随机抽取'],
   ['kingdom_fief_unit_min','封地每种兵最少','封地每种随机兵种的数量下限'],
   ['kingdom_fief_unit_max','封地每种兵最多','封地每种随机兵种的数量上限'],
@@ -896,12 +917,6 @@ var CITY_STATE_ROWS = [
   ['kingdom_capital_resource_max','王都资源上限','王都四类资源各自随机上限'],
   ['kingdom_capital_gold_min','王都金币下限','王都金币随机下限'],
   ['kingdom_capital_gold_max','王都金币上限','王都金币随机上限'],
-  ['kingdom_pve_killed_population_per_reputation','王国 PvE 声望人口阈值','每累计消灭多少王国 PvE 军队人口扣 1 点声望；跨战斗累加'],
-  ['kingdom_pve_retaliation_chunk','王国 PvE 报复批次','通过人口累计扣分每达到此数量时检查一次主城报复'],
-  ['kingdom_pve_retaliation_raid_threshold','封地掠夺阈值','玩家声望小于等于此值时，主城对应封地派雇佣军掠夺'],
-  ['kingdom_pve_retaliation_siege_threshold','封地攻城阈值','玩家声望小于等于此值时，将封地报复升级为攻城'],
-  ['kingdom_fief_mercenary_min_ratio','封地雇佣军比例下限','报复部队随机取封地守军总人口的比例下限'],
-  ['kingdom_fief_mercenary_max_ratio','封地雇佣军比例上限','报复部队随机取封地守军总人口的比例上限'],
   ['kingdom_city_state_resource_field_level','资源田保底等级','四种城外资源田至少达到此等级'],
   ['kingdom_city_state_inner_building_count_min','城内建筑最少数','随机城内建筑数量下限'],
   ['kingdom_city_state_inner_building_count_max','城内建筑最多数','随机城内建筑数量上限'],
@@ -913,7 +928,6 @@ var CITY_STATE_ROWS = [
   ['kingdom_city_state_outer_building_pool','城外建筑池','格式为 woodcutter|claypit|ironmine…'],
 ];
 var CITY_STATE_STRING_KEYS = { kingdom_city_state_tier_weights: true, kingdom_city_state_tribe_pool: true, kingdom_city_state_unit_pool: true, kingdom_city_state_unit_pool_romans: true, kingdom_city_state_unit_pool_gauls: true, kingdom_city_state_unit_pool_teutons: true, kingdom_city_state_inner_building_pool: true, kingdom_city_state_outer_building_pool: true };
-var CITY_STATE_SIGNED_KEYS = { kingdom_pve_retaliation_raid_threshold: true, kingdom_pve_retaliation_siege_threshold: true };
 function sectionCityState(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
@@ -923,8 +937,7 @@ function sectionCityState(){
     var item = CITY_STATE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
     var textInput = !!CITY_STATE_STRING_KEYS[item[0]];
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
-    var signedInput = !!CITY_STATE_SIGNED_KEYS[item[0]];
-    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput || signedInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
@@ -968,10 +981,34 @@ function sectionFounding(){
   h += '</tbody></table>';
   return '<div class="sec"><h2>拓荒参数</h2>'+h+'</div>';
 }
+
+// 声望相关的行级配置也在此处编辑，避免管理员还要在任务/宝物/议会厅表之间来回查找。
+function reputationCsvTable(table, title, rows, labels, fields, filter, inputType){
+  var selected = (rows || []).filter(filter || function(){ return true; });
+  if (!selected.length) return '';
+  var type = inputType || 'number';
+  var h = '<h3 style="margin:12px 0 6px;color:#8ed5ff;font-size:12px">'+esc(title)+'</h3>';
+  h += '<table class="bt"><thead><tr>';
+  for (var i=0;i<labels.length;i++) h += '<th>'+esc(labels[i])+'</th>';
+  for (var j=0;j<fields.length;j++) h += '<th>'+esc(fields[j][1])+'</th>';
+  h += '</tr></thead><tbody>';
+  for (var k=0;k<selected.length;k++){
+    var row = selected[k], key = row.id == null ? '' : String(row.id);
+    h += '<tr>';
+    for (var a=0;a<labels.length;a++) h += '<td class="lbl">'+esc(row[labels[a]])+'</td>';
+    for (var b=0;b<fields.length;b++){
+      var field = fields[b][0], value = row[field] == null ? '' : row[field];
+      h += '<td><input type="'+type+'" '+(type === 'number' ? 'step="any" ' : '')+'value="'+esc(value)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(field)+'" oninput="onEdit(this)"></td>';
+    }
+    h += '</tr>';
+  }
+  return h+'</tbody></table>';
+}
+
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、负声望军队攻防、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉任务的声望结算可在任务效果表的 adjust_reputation 行调整，宝物本身不再扣除声望。</div>';
+  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。所有会增加/扣除声望、以声望作为门槛或由声望派生效果的全局参数均集中在此：PvP、王国任务、王国 PvE 击杀累计、封地报复、人口增长、军队攻防、金币税收和 PvE 宝物掉落。任务中的声望目标/效果、宝物被动声望和议会厅声望价格也在本板块直接编辑；保存后分别写回对应 CSV。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<REP_ROWS.length;j++){
     var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -980,6 +1017,12 @@ function sectionReputation(){
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
+  h += reputationCsvTable('kingdom_services', '议会厅服务声望价格（kingdom_services.csv）', DATA.kingdom_services, ['id','code','name','category'], [['reputationCost','声望价格']], null, 'number');
+  h += reputationCsvTable('treasures', '宝物被动声望（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['reputationValue','主宝物栏声望修正']], null, 'number');
+  h += reputationCsvTable('treasures', '直接声望宝物效果（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['effectValue','声望效果值']], function(row){ return row.effectType === 'reputation'; }, 'number');
+  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most'; }, 'number');
+  h += reputationCsvTable('quest_effects', '任务声望调整（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','声望变化值']], function(row){ return row.kind === 'adjust_reputation'; }, 'number');
+  h += reputationCsvTable('quest_effects', '正声望兑换佣兵（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','兑换参数（兵种:每点数量）']], function(row){ return row.kind === 'grant_mercenaries_by_positive_reputation'; }, 'text');
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
 }
 
@@ -1182,7 +1225,7 @@ function render(){
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects') continue; // 已在专用视图合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;
