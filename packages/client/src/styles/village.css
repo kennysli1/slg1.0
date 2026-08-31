@@ -1576,9 +1576,11 @@
 
 /* 王国页：以军政账本替代主城场景，资源与军务仍严格跟随当前村庄。 */
 .kingdom-resource-ledger { margin-bottom: var(--s-5); }
-.kingdom-resource-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s-2); }
+.kingdom-resource-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-2); }
 .kingdom-resource-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s-2); min-width: 0; padding: var(--s-2); border-left: 2px solid var(--line-strong); background: var(--c-panel-2); }
 .kingdom-resource-row.is-stopped { border-left-color: var(--c-ember); }
+.kingdom-resource-row.is-capped { border-left-color: var(--c-ember); }
+.kingdom-resource-row.is-famine { border-left-color: var(--status-danger); }
 .kingdom-resource-row .icon { width: calc(var(--s-5) - var(--s-1)); height: calc(var(--s-5) - var(--s-1)); }
 .kingdom-resource-copy { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .kingdom-resource-copy > span { color: var(--c-ink-soft); font-size: var(--f-2xs); }
@@ -1590,7 +1592,7 @@
 .kingdom-section-intro { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); padding: 0 var(--s-1); color: var(--c-ink-soft); }
 .kingdom-section-intro > span { color: var(--c-gold-hi); font-family: var(--ff-han); font-size: var(--f-lg); font-weight: 700; }
 .kingdom-section-intro small { color: var(--c-ink-dim); font-size: var(--f-xs); }
-@media (max-width: 720px) { .kingdom-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kingdom-resource-row:last-child { grid-column: 1 / -1; } .kingdom-section-intro { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 720px) { .kingdom-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kingdom-section-intro { align-items: flex-start; flex-direction: column; } }
 
 /* ── 帝国指挥桌面：首屏只摘要，完整城务/军务按工作区展开 ── */
 .empire-command-desk { gap: var(--s-3); }
