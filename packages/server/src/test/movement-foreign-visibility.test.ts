@@ -156,3 +156,43 @@ test('ListForeign：视野内他国军队对外可见且脱敏，己方/不可�
   assert.equal(kingdom.type, 'return', '复仇军战后应保持返程类型');
   assert.equal(kingdom.troops, undefined, '王国 NPC 返程不得泄露兵力');
 });
+
+test('王国复仇军战后返程保留 NPC 标识并在地图外军列表可见', async () => {
+  const app = freshApp();
+  const A = await register(app, '复仇军返程观察者');
+  const W = app.config.constants.worldW ?? 41;
+  const H = app.config.constants.worldH ?? 41;
+  const origin = wrapHex({ q: A.q + 3, r: A.r + 1 }, W, H);
+  const target = { q: A.q, r: A.r };
+  const movementId = 'mv-retaliation-attacking';
+  setMovement(app, {
+    id: movementId, type: 'attack', battleType: 'raid', npcService: true,
+    kingdomMercenary: true, taskCode: 'kingdom_retaliation', returnPveId: 'kingdom-fief-sw',
+    fromVillage: 'kingdom-fief:kingdom-fief-sw', targetVillage: A.villageId,
+    fromXY: origin, originalFromXY: origin, toXY: target,
+    troops: { merc_knight: 12 }, loot: {}, treasures: [],
+    departAt: clock, arriveAt: clock + 100000,
+    path: [origin, target], stepIndex: 1, pos: target,
+    perStepMs: 1000, nextStepAt: clock + 1000, status: 'paused', stepToken: 1,
+  });
+
+  await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {
+    side: 'attacker', targetKind: 'village', targetId: A.villageId,
+    movementId, fromVillage: 'kingdom-fief:kingdom-fief-sw', fromXY: origin,
+    toXY: target, originalFromXY: origin, survivors: { merc_knight: 10 }, loot: { wood: 20 },
+    npcService: true, taskCode: 'kingdom_retaliation', kingdomMercenary: true,
+    returnPveId: 'kingdom-fief-sw',
+  } } as any);
+
+  const returned = app.store.all<any>('movement').find((m) => m.kingdomMercenary && m.type === 'return');
+  assert.ok(returned, '战斗胜利后应生成复仇军返程记录');
+  assert.equal(returned.npcService, true, '返程必须保留 npcService');
+  assert.equal(returned.taskCode, 'kingdom_retaliation', '返程必须保留复仇军 taskCode');
+  assert.equal(returned.returnPveId, 'kingdom-fief-sw', '返程必须保留来源封地');
+
+  const foreign = await send(app, 'movement.ListForeign', { playerId: A.id });
+  assert.equal(foreign.ok, true, `ListForeign 应成功: ${foreign.reason ?? ''}`);
+  const visible = (foreign.payload as any).movements.find((m: any) => m.id === returned.id);
+  assert.ok(visible, '玩家视野内的复仇军返程应出现在地图外军列表');
+  assert.equal(visible.ownerVillageName, '封地复仇军');
+});
