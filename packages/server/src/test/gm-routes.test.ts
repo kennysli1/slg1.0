@@ -319,16 +319,18 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
   }
 });
 
-test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
+test('/config/dialogues 保存空回复和删除段落，并拒绝未知任务绑定', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   const root = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
   const tempConfig = join(root, 'config');
+  const dataDir = join(root, 'data');
   try {
     const seed = buildFastify();
     cpSync(seed.app.configDir, tempConfig, { recursive: true });
     await seed.fastify.close();
-    const { fastify, app } = buildFastify(undefined, tempConfig);
+    mkdirSync(dataDir, { recursive: true });
+    const { fastify, app } = buildFastify(join(dataDir, 'game.json'), tempConfig);
     await fastify.ready();
     const page = await fastify.inject({ method: 'GET', url: '/config/dialogues' });
     assert.equal(page.statusCode, 200);
@@ -387,12 +389,34 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{villageName\}/, '配置中心应保存 M12 村庄变量');
     assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{fiefName\}/, '配置中心应保存 M12 封地变量');
     assert.doesNotMatch(byKey.get('m12_accept:1')?.npcText ?? '', /\{封地\}/, '配置中心不应保存中文封地占位符');
+    const m11Segment2 = parsed.rows.find((row) => row.code === 'm11_deliver' && row.segment === '2');
+    assert.ok(m11Segment2, '测试需要 M11 交付第二段');
+    m11Segment2.replies = '';
     const saved = await fastify.inject({
       method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows: parsed.rows }),
     });
     assert.equal(saved.statusCode, 200, saved.body);
     assert.match(app.config.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, '保存后服务端热重载仍应保留变量');
+    assert.equal(app.config.dialogues['m11_deliver:2']?.replies.length, 0, '空 replies 应立即热重载');
+    const sharedDialogues = parseCsvStructured(readFileSync(join(dataDir, 'config', 'dialogues.csv'), 'utf8'));
+    assert.equal(sharedDialogues.rows.find((row) => row.code === 'm11_deliver' && row.segment === '2')?.replies, '',
+      '共享 CSV 必须保存配置中心的明确空值');
+    const deleted = await fastify.inject({
+      method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        rows: parsed.rows.filter((row) => !(row.code === 'm11_deliver' && row.segment === '2')),
+      }),
+    });
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    assert.equal(app.config.dialogues['m11_deliver:2'], undefined, '删除的段落应立即从运行时配置移除');
+    const tombstones = JSON.parse(readFileSync(join(dataDir, 'config', 'config_row_tombstones.json'), 'utf8')) as {
+      version: number;
+      tables: Record<string, string[][]>;
+    };
+    assert.equal(tombstones.version, 1);
+    assert.ok(tombstones.tables['dialogues.csv']?.some((values) => values[0] === 'm11_deliver' && values[1] === '2'),
+      '配置中心删除段落必须写入持久化删除记录');
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);

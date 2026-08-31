@@ -2,20 +2,21 @@
 /**
  * Merge a persisted GM CSV over the canonical release CSV.
  *
- * The persisted file is an overlay, not a replacement: values for rows that
- * still exist in the canonical table are kept, while new canonical rows and
- * columns are imported automatically. Persisted-only rows are intentionally
- * ignored so a removed/renamed setting cannot resurrect on the next release.
- * Comments, ordering and the canonical header are preserved.
+ * The config center is authoritative for every column it already knows,
+ * including explicit blank values. Canonical Git config contributes only new
+ * columns/rows and structural fields. Config-center-only rows are retained;
+ * rows explicitly deleted in the editor are removed through the optional
+ * tombstone metadata file. Comments, ordering and the canonical header are
+ * preserved.
  *
- * Usage: node scripts/merge-persisted-config.mjs <canonical> <persisted> <name>
+ * Usage: node scripts/merge-persisted-config.mjs <canonical> <persisted> <name> [tombstones]
  */
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const [canonicalPath, persistedPath, fileName] = process.argv.slice(2);
+const [canonicalPath, persistedPath, fileName, tombstonesPath] = process.argv.slice(2);
 if (!canonicalPath || !persistedPath || !fileName) {
-  console.error('用法：merge-persisted-config.mjs <canonical> <persisted> <name>');
+  console.error('用法：merge-persisted-config.mjs <canonical> <persisted> <name> [tombstones]');
   process.exit(2);
 }
 
@@ -101,6 +102,27 @@ function rowKey(row, columns, label) {
   return values.join('\u001f');
 }
 
+function readTombstones(path, name, columns) {
+  if (!path || !existsSync(path)) return new Set();
+  const parsed = JSON.parse(readFileSync(path, 'utf8'));
+  if (parsed?.version !== 1 || !parsed.tables || typeof parsed.tables !== 'object' || Array.isArray(parsed.tables)) {
+    throw new Error('配置行删除记录格式无效');
+  }
+  const rows = parsed.tables[name] ?? [];
+  if (!Array.isArray(rows)) throw new Error(`${name} 配置行删除记录必须是数组`);
+  const result = new Set();
+  for (const values of rows) {
+    if (!Array.isArray(values) || values.length !== columns.length
+      || values.some((value) => typeof value !== 'string' || value === '')) {
+      throw new Error(`${name} 配置行删除记录主键无效`);
+    }
+    const key = values.join('\u001f');
+    if (result.has(key)) throw new Error(`${name} 配置行删除记录主键重复：${key}`);
+    result.add(key);
+  }
+  return result;
+}
+
 const canonical = parse(readFileSync(canonicalPath, 'utf8'));
 const persisted = parse(readFileSync(persistedPath, 'utf8'));
 const keyColumns = KEY_COLUMNS[fileName] ?? [canonical.header[0]];
@@ -116,10 +138,25 @@ for (const row of persisted.rows) {
   persistedByKey.set(key, row);
 }
 
+const tombstones = readTombstones(tombstonesPath, fileName, keyColumns);
+for (const key of tombstones) {
+  if (persistedByKey.has(key)) {
+    throw new Error(`${fileName} 同一行同时存在于共享 CSV 和删除记录：${key}`);
+  }
+}
+
 const persistedColumns = new Set(persisted.header);
+const canonicalKeys = new Set();
+const removedCanonicalRows = new Set();
 for (let i = 0; i < canonical.rows.length; i += 1) {
   const target = canonical.rows[i];
-  const overlay = persistedByKey.get(rowKey(target, keyColumns, `${fileName} 默认行`));
+  const key = rowKey(target, keyColumns, `${fileName} 默认行`);
+  canonicalKeys.add(key);
+  if (tombstones.has(key)) {
+    removedCanonicalRows.add(i);
+    continue;
+  }
+  const overlay = persistedByKey.get(key);
   if (!overlay) continue;
   // Only fields present in the canonical header can be overlaid. This keeps
   // newly removed fields out while preserving every manually edited value.
@@ -127,23 +164,40 @@ for (let i = 0; i < canonical.rows.length; i += 1) {
     if (!persistedColumns.has(column)) continue;
     const structural = CANONICAL_STRUCTURAL_FIELDS[fileName]?.[target.code];
     if (structural?.has(column)) continue;
-    // A blank in an old shared row means “no override” for a newly introduced
-    // numeric/config column. Do not let it erase a non-empty canonical default
-    // (notably tavern.taskSideQuestChance=0.5). Explicit zero remains a real
-    // override because it is serialized as the string "0".
-    if ((overlay[column] ?? '') === '' && (target[column] ?? '') !== '') continue;
+    // Presence in the persisted header means the config center owns this
+    // cell. An empty string is an explicit clear, not "no override". A Git
+    // default is used only when the persisted CSV predates the whole column.
     target[column] = overlay[column] ?? '';
   }
 }
 
+// Rows created in the config center must survive code deployments even before
+// their asynchronous config PR reaches main. Git-only rows are already kept by
+// the canonical iteration above; explicit editor deletions are represented by
+// tombstones so they are not confused with newly introduced canonical rows.
+const persistedOnlyRows = [];
+for (const row of persisted.rows) {
+  const key = rowKey(row, keyColumns, `${fileName} 持久化行`);
+  if (canonicalKeys.has(key)) continue;
+  persistedOnlyRows.push(Object.fromEntries(canonical.header.map((column) => [column, row[column] ?? ''])));
+}
+
+const dataPositionByRawIndex = new Map(canonical.rowIndices.map((rawIndex, dataPosition) => [rawIndex, dataPosition]));
+const outputRaw = [];
 for (let i = 0; i < canonical.raw.length; i += 1) {
-  const dataPos = canonical.rowIndices.indexOf(i);
-  if (dataPos !== -1) {
+  const dataPos = dataPositionByRawIndex.get(i);
+  if (dataPos !== undefined) {
+    if (removedCanonicalRows.has(dataPos)) continue;
     const row = canonical.rows[dataPos];
-    canonical.raw[i] = canonical.header.map((h) => row[h] ?? '').join(',');
+    outputRaw.push(canonical.header.map((h) => row[h] ?? '').join(','));
+  } else {
+    outputRaw.push(canonical.raw[i]);
   }
 }
-let output = canonical.raw.join('\n');
+let insertAt = outputRaw.length;
+while (insertAt > 0 && outputRaw[insertAt - 1].trim() === '') insertAt -= 1;
+outputRaw.splice(insertAt, 0, ...persistedOnlyRows.map((row) => canonical.header.map((h) => row[h] ?? '').join(',')));
+let output = outputRaw.join('\n');
 if (canonical.bom) output = `\ufeff${output}`;
 const tempPath = join(dirname(canonicalPath), `.${fileName}.${process.pid}.merge-tmp`);
 writeFileSync(tempPath, output, 'utf8');
