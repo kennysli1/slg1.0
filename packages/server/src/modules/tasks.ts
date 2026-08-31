@@ -1923,13 +1923,13 @@ export class TasksModule {
     }
   }
 
-  /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
+  /** 刷新酒馆随机任务（按权重重新抽取并替换当前未接取任务）。 */
   private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
     const info = await this.tavernInfo(villageId);
     if (info.level <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
-    await this.refreshOffered(villageId, info);
+    await this.refreshOffered(villageId, info, true);
     return { ok: true, payload: await this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
@@ -2659,13 +2659,19 @@ export class TasksModule {
       await this.pushList(villageId);
       return; // 酒馆已无，不再续排
     }
-    await this.refreshOffered(villageId, info);
+    await this.refreshOffered(villageId, info, true);
     this.scheduleRefresh(villageId, info);
   }
 
-  /** 按槽位填充酒馆：每个空槽独立按概率抽取支线，否则抽取日常。 */
-  private async refreshOffered(villageId: string, info: TavernInfo): Promise<void> {
+  /**
+   * 刷新酒馆任务：每个刷新周期都重新抽取全部 mixed 槽位，替换尚未接取的任务。
+   * `replaceExisting=false` 仅用于启动恢复和酒馆建成/升级时补齐空槽，避免重启时
+   * 无故丢掉玩家尚未接取的任务；已接取任务始终保存在 active，不受刷新影响。
+   */
+  private async refreshOffered(villageId: string, info: TavernInfo, replaceExisting = false): Promise<void> {
     const s = this.ensureState(villageId);
+    const replacedCount = replaceExisting ? s.offered.length : 0;
+    if (replaceExisting) s.offered = [];
     const need = info.maxTasks - s.offered.length;
     if (need <= 0) return;
 
@@ -2701,7 +2707,8 @@ export class TasksModule {
       s.offered.push(code);
       changed = true;
     }
-    if (!changed) return;
+    // 即使新池暂时为空，替换刷新也必须持久化清空旧槽位并通知客户端。
+    if (!changed && replacedCount <= 0) return;
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
   }
