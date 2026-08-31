@@ -1,0 +1,105 @@
+/**
+ * Dice Lab 的纯规则层：普通六面骰计分、合法选项和回合动作。
+ * 该文件不依赖 KOW 状态或网络，服务器与客户端共用以保证预览和权威校验一致。
+ */
+
+export type Die = { id: string; value: number };
+
+export type ScoreOption = {
+  dieIds: string[];
+  score: number;
+  label: string;
+};
+
+export type DiceRng = () => number;
+
+export const TARGET_SCORE = 4_000;
+
+export function fairRoll(rng: DiceRng = Math.random): number {
+  return Math.floor(rng() * 6) + 1;
+}
+
+export function rollDice(count: number, rng: DiceRng = Math.random, rollId = 0): Die[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${rollId}-${index}`,
+    value: fairRoll(rng),
+  }));
+}
+
+function countsFor(values: number[]): number[] {
+  const counts = Array.from({ length: 7 }, () => 0);
+  for (const value of values) {
+    if (!Number.isInteger(value) || value < 1 || value > 6) return counts;
+    counts[value]++;
+  }
+  return counts;
+}
+
+/**
+ * 返回一组骰子全部被计分时的最高分；null 表示其中有无法计分的骰子。
+ * 特殊组合只保留最基础的六连顺和三对，避免第一版混入特殊骰子规则。
+ */
+export function scoreValues(values: number[]): number | null {
+  if (values.length === 0 || values.length > 6) return null;
+  const counts = countsFor(values);
+
+  if (values.length === 6 && counts.slice(1).every((count) => count === 1)) return 1_500;
+  if (values.length === 6 && counts.slice(1).filter((count) => count === 2).length === 3) return 1_500;
+
+  let score = 0;
+  let consumed = 0;
+  for (let value = 1; value <= 6; value++) {
+    const count = counts[value];
+    if (count < 3) continue;
+    const base = value === 1 ? 1_000 : value * 100;
+    const multiplier = count >= 6 ? 8 : count >= 5 ? 4 : count >= 4 ? 2 : 1;
+    score += base * multiplier;
+    consumed += count;
+  }
+
+  for (const value of [1, 5]) {
+    const remaining = counts[value] >= 3 ? 0 : counts[value];
+    score += remaining * (value === 1 ? 100 : 50);
+    consumed += remaining;
+  }
+  return consumed === values.length ? score : null;
+}
+
+export function scoreOption(dice: Die[], dieIds: string[]): ScoreOption | null {
+  if (dieIds.length === 0) return null;
+  const idSet = new Set(dieIds);
+  if (idSet.size !== dieIds.length) return null;
+  const selected = dice.filter((die) => idSet.has(die.id));
+  if (selected.length !== dieIds.length) return null;
+  const score = scoreValues(selected.map((die) => die.value));
+  if (score === null) return null;
+  return {
+    dieIds: selected.map((die) => die.id),
+    score,
+    label: selected.map((die) => die.value).sort((a, b) => a - b).join('、'),
+  };
+}
+
+/** 枚举最多 63 个非空子集，供按钮预览和 AI 选择使用。 */
+export function legalOptions(dice: Die[]): ScoreOption[] {
+  const options: ScoreOption[] = [];
+  for (let mask = 1; mask < (1 << dice.length); mask++) {
+    const ids = dice.filter((_, index) => (mask & (1 << index)) !== 0).map((die) => die.id);
+    const option = scoreOption(dice, ids);
+    if (option) options.push(option);
+  }
+  return options.sort((a, b) => b.score - a.score || a.dieIds.length - b.dieIds.length);
+}
+
+export function isHotDice(dice: Die[], option: ScoreOption): boolean {
+  return option.dieIds.length === dice.length;
+}
+
+export function remainingDice(dice: Die[], option: ScoreOption): Die[] {
+  const used = new Set(option.dieIds);
+  return dice.filter((die) => !used.has(die.id));
+}
+
+export function formatScore(score: number): string {
+  return score.toLocaleString('zh-CN');
+}

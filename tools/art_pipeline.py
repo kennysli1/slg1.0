@@ -25,7 +25,9 @@ import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ART = os.path.join(ROOT, "packages", "client", "public", "art")
+# 默认仍输出正式客户端资源；实验包可通过 ART_PIPELINE_ROOT 指定自己的资源目录，
+# 防止独立实验场的美术产物污染主游戏资源。
+ART = os.environ.get("ART_PIPELINE_ROOT", os.path.join(ROOT, "packages", "client", "public", "art"))
 
 # 抠像阈值：key = min(R,B) - G，纯洋红上 key=255，中世纪暖色主体上 key<=0
 KEY_LO, KEY_HI = 45, 165

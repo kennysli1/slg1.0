@@ -1,0 +1,31 @@
+{
+  "name": "@slg/dice-lab",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch src/server/main.ts",
+    "dev:client": "vite --config vite.config.ts",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "tsc -p tsconfig.client.json && vite build --config vite.config.ts",
+    "start": "node dist/server/main.js",
+    "test": "tsx --test src/test/*.test.ts",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.2",
+    "fastify": "^5.9.0",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^20.11.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}
