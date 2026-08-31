@@ -3,7 +3,7 @@ import { me } from '../api.js';
 import { tick, dataVersion, sessionVersion, villageSwitching, showToast } from '../app/store.js';
 import { switchVillage } from '../app/refresh.js';
 import { errText } from '../shared/ui/text.js';
-import { getCache, type PopSnapshot } from '../app/state.js';
+import { getCache } from '../app/state.js';
 import { gameConstants } from '../app/config.js';
 import { Icon } from '../ui/index.js';
 
@@ -18,7 +18,6 @@ export function ResourceBar() {
     </div>
   );
 }
-
 /** 全局村庄选择器：资源栏属于应用壳，因此在任意页签都能看到当前操作村并切换。 */
 function VillagePicker() {
   sessionVersion.value;
@@ -89,22 +88,4 @@ function ReputationCell() {
       <div class="res-meta"><span class="res-rate">{alignment}</span></div>
     </div>
   );
-}
-
-/** 人口告警文案由人口面板与单测复用；不再属于顶栏资源显示。 */
-export function populationTooltip(
-  state: Pick<PopSnapshot, 'hardCap' | 'inFamine' | 'overflowRatio' | 'soldierPop'>,
-  population: number,
-  civilian: number,
-  growth: number,
-): string {
-  const overflow = Math.max(0, Math.min(1, state.overflowRatio ?? 0));
-  const reasons: string[] = [];
-  if (state.inFamine) reasons.push('饥荒中，人口正在减少');
-  if (overflow > 0) reasons.push(`仓储溢出使人口增长降低 ${Math.round(overflow * 100)}%`);
-  const alarm = reasons.length ? `；红框原因：${reasons.join('；')}` : '';
-  const change = `变化 ${growth >= 0 ? '+' : ''}${growth}/时`;
-  return state.inFamine
-    ? `人口：${population}/${state.hardCap}${alarm}；${change}`
-    : `人口：${population}/${state.hardCap}；平民 ${civilian}；军队 ${state.soldierPop}${alarm}；增长 ${growth >= 0 ? '+' : ''}${growth}/时`;
 }

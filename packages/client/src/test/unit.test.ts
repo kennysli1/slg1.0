@@ -14,7 +14,7 @@ import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
-import { populationTooltip } from '../shell/ResourceBar.js';
+import { populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
@@ -591,15 +591,55 @@ describe('notificationText - 伏击报告视角', () => {
 });
 
 
-describe('人口资源条红框说明', () => {
+describe('村庄资源栏受限状态', () => {
+  it('资源停产后仍显示服务端提供的当前理论产量', () => {
+    const rate = resourceLedgerRate(true, 0, 137.4);
+    assert.equal(rate.ratePerHour, 137.4);
+    assert.equal(rate.label, '停产 · +137/时');
+  });
+
+  it('资源正常生产时继续显示净变化率', () => {
+    const rate = resourceLedgerRate(false, 0.025, 137.4);
+    assert.equal(rate.ratePerHour, 90);
+    assert.equal(rate.label, '+90/时');
+  });
+
+  it('人口达到上限后显示潜在增长率而不是零', () => {
+    const state = {
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 0, potentialGrowthPerHour: 12, cropDeficitRate: 0,
+    };
+    const growth = populationLedgerGrowth(state, 300);
+    assert.equal(growth.atCap, true);
+    assert.equal(growth.growthPerHour, 12);
+    assert.equal(growth.label, '已满 · +12/时');
+  });
+
+  it('人口悬浮说明同时显示劳动人口和军队人口', () => {
+    const state = {
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 10,
+      growthPerHour: 4, potentialGrowthPerHour: 4, cropDeficitRate: 0,
+    };
+    const text = populationTooltip(state, 210, 120, 4);
+    assert.match(text, /劳动人口 120/);
+    assert.match(text, /军队人口 80/);
+    assert.match(text, /训练中 10/);
+  });
+
   it('仓储溢出时说明人口增长扣减比例', () => {
-    const text = populationTooltip({ hardCap: 300, inFamine: false, overflowRatio: 0.35, soldierPop: 80 }, 200, 120, 4);
-    assert.match(text, /红框原因：仓储溢出使人口增长降低 35%/);
+    const text = populationTooltip({
+      hardCap: 300, inFamine: false, overflowRatio: 0.35, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 4, potentialGrowthPerHour: 4, cropDeficitRate: 0,
+    }, 200, 120, 4);
+    assert.match(text, /告警：仓储溢出使人口增长降低 35%/);
   });
 
   it('饥荒时说明人口正在减少', () => {
-    const text = populationTooltip({ hardCap: 300, inFamine: true, overflowRatio: 0, soldierPop: 80 }, 200, 120, -3);
-    assert.match(text, /红框原因：饥荒中，人口正在减少/);
+    const text = populationTooltip({
+      hardCap: 300, inFamine: true, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 0, potentialGrowthPerHour: 4, cropDeficitRate: 3,
+    }, 200, 120, -3);
+    assert.match(text, /告警：饥荒中，人口正在减少/);
   });
 });
 
