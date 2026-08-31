@@ -9,16 +9,6 @@ while read local_ref local_sha remote_ref remote_sha; do
   esac
 done
 
-# push 前重复执行无外部副作用的验证，防提交后到推送前环境漂移。配置同步
-# 之后 main 中的 CSV 是管理员确认过的运行时事实；仅工具/文档改动走同一套
-# 配置结构校验，触及业务代码或 CSV 的提交仍走完整回归。
-if git rev-parse --verify origin/main >/dev/null 2>&1 \
-  && ! git diff --name-only origin/main...HEAD | grep -qE '^(packages/|config/)'; then
-  npm run build:shared \
-    && npm run lint:all \
-    && npm run typecheck \
-    && npm run verify:config-sync \
-    && npm run test:ops
-else
-  npm run verify:quick
-fi
+# 提交验证与不可绕过的 PR CI 已经分别证明当前快照；push 不再重复跑高成本构建/测试。
+# --no-verify 也不能绕过远端 CI，push hook 只负责禁止直推主分支。
+exit 0

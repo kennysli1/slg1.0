@@ -60,8 +60,9 @@ npm run test:server      # 跑后端测试（all.test.ts barrel 汇总全部 *.t
 npm run lint:all         # 前后端 ESLint 与架构红线
 npm run guard            # 变更契约检查
 npm run test:deploy      # 隔离启动生产产物，验证 HTTP/静态前端/真实 WebSocket
-npm run verify:commit    # 提交总闸门：完整测试 + 本地生产冒烟
-npm run verify           # 提交前全量验证
+npm run verify:changed   # 提交闸门：按变更范围验证
+npm run verify:commit    # 手动执行提交总闸门
+npm run verify           # CI/发版前全量验证（含发布布局、产物冒烟与 audit）
 npm run deploy:prod      # 显式生产部署；始终发布远程 origin/main
 
 npm run reset:season     # 刷档：留账号+地图位置，进度归零（新赛季）

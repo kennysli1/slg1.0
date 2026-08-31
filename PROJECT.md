@@ -103,7 +103,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 - 改实时游戏状态/任务进度：从 `/gm` 操作，写入 `game.json/WAL`，不改变 CSV。
 - 改业务：先从本页 owner 表定位模块，再读对应参考文档和测试。
 - 加外部 action：`gateway/routes.ts` + owner 的内部契约；破坏性协议变更升级 `WIRE_VERSION`。
-- 改存档：升级 `SAVE_SCHEMA_VERSION`，在 CHANGELOG 标记 `[需刷档]`。
+- 改存档：只有不兼容落盘结构才升 `SAVE_SCHEMA_VERSION`，并在 CHANGELOG 标记 `[需刷档]` 与迁移/重置方案。
 - 看最近变化：只读 `CHANGELOG.md`。
 - 生产部署：`npm run deploy:prod`；只发布远程 `origin/main` 到不可变 `releases/<SHA>`，由 `current` 原子切换，数据独立放在 `shared/`。
 
@@ -111,8 +111,8 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 
 ```bash
 npm run guard
-npm run verify:quick
-npm run test:deploy
+npm run verify:changed   # 本地提交闸门按变更范围验证
+npm run verify           # CI/发版前全量：含发布布局、产物冒烟与 audit
 ```
 
 提交钩子只执行本地验证，不改变生产环境。合并到远程 `main` 后，再显式执行生产部署。
