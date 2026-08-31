@@ -193,3 +193,33 @@ test('侦察军：不触发普通遭遇战或伏击战', async () => {
   }
   assert.equal(intercepted.some((p) => p?.battleType === 'ambush' || p?.battleType === undefined), false, '侦察军不得触发遭遇或伏击');
 });
+
+test('王国 NPC 行军：不触发普通遭遇战或伏击战', async () => {
+  const app = freshApp();
+  const player = await register(app, 'NPC 免疫测试');
+  const pos = { q: player.q, r: player.r };
+  const common = {
+    fromXY: pos, toXY: { q: pos.q + 1, r: pos.r }, path: [pos, { q: pos.q + 1, r: pos.r }],
+    stepIndex: 0, pos, troops: { legionnaire: 5 }, loot: {}, cargo: {}, treasures: [],
+    departAt: clock, arriveAt: clock + 60_000, perStepMs: 1_000, nextStepAt: clock + 1_000,
+    status: 'marching', stepToken: 1,
+  };
+  const playerMarch = { ...common, id: 'player-march', type: 'attack', fromVillage: player.villageId } as any;
+  const npcMarch = {
+    ...common, id: 'npc-march', type: 'attack', npcService: true,
+    fromVillage: 'kingdom-fief:kingdom-fief-sw', taskCode: 'kingdom_retaliation',
+  } as any;
+  (app.movement as any).save(playerMarch);
+  (app.movement as any).save(npcMarch);
+
+  assert.equal(await (app.movement as any).findEncounter(playerMarch), undefined, '玩家军队不应与 NPC 触发遭遇');
+  assert.equal(await (app.movement as any).findEncounter(npcMarch), undefined, 'NPC 军队不应主动触发遭遇');
+
+  const npcAmbush = {
+    ...common, id: 'npc-ambush', type: 'ambush', npcService: true, status: 'stationed',
+    fromVillage: 'kingdom-fief:kingdom-fief-sw', taskCode: 'kingdom_retaliation',
+  } as any;
+  (app.movement as any).save(npcAmbush);
+  assert.equal(await (app.movement as any).findAmbush(playerMarch), undefined, '玩家军队不应被 NPC 伏击');
+  assert.equal(await (app.movement as any).findAmbush(npcMarch), undefined, 'NPC 军队不应触发伏击检查');
+});

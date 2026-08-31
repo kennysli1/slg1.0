@@ -12,13 +12,13 @@ const log = makeLogger('mercenary');
  * 领域模块 · Mercenary（雇佣兵营地）
  *
  * 职责：管理每个村庄的一处雇佣兵营地（mercenarycamp 建筑）。营地周期性刷新可雇佣名单（offers），
- * 玩家用金币购买名单上的雇佣兵 → 永久写入 military.troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
+ * 玩家用金币购买名单上的雇佣兵 → 写入 military.troops 并登记有期限合同（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
  *
  * 设计要点：
  *  - 营地等级决定：刷新间隔(refreshSec)、每次刷新数量(mercCount)、可存储刷新次数(maxStored)。
  *  - 自动刷新：到 nextRefreshAt 时刷新名单并 +1 存储次数（存满为止）。
  *  - 玩家手动刷新：消耗一次 storedRefreshes，立即重roll名单（存储机制让低等级营地也能囤刷新机会）。
- *  - 雇佣：扣金币(economy.TrySpend) → military.AddMercenaries 入 troops → 消费该 offer（同一名额不可重复雇）。
+ *  - 雇佣：扣金币(economy.TrySpend) → military.AddMercenaries 入 troops → 登记 contractSec 到期移除 → 消费该 offer（同一名额不可重复雇）。
  *  - 与 economy/population 无环：金币只进不出（人口交税在 population），此处只花金币。
  */
 
@@ -266,7 +266,7 @@ export class MercenaryModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
-    // 永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）
+    // 写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）；营地购买的期限由下方合同记录。
     await this.commands.send({
       name: 'military.AddMercenaries', from: MercenaryModule.NAME,
       payload: { villageId, units: { [code]: 1 } },

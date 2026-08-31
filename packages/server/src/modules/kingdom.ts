@@ -55,6 +55,7 @@ interface KingdomState {
   nextIssueAt: number;
   taskSeq: number;
   orderSeq: number;
+  retaliationSeq: number;
   task?: KingdomTask;
   orders: KingdomOrder[];
 }
@@ -90,12 +91,19 @@ export class KingdomModule {
 
   init(): void {
     this.commands.register('kingdom.GetState', (c) => this.getState(c));
+    this.commands.register('kingdom.GetFief', (c) => this.getFief(c));
     this.commands.register('kingdom.GetOverview', (c) => this.getOverview(c));
     this.commands.register('kingdom.SubmitTribute', (c) => this.submitTribute(c));
     this.commands.register('kingdom.ClaimTask', (c) => this.claimTask(c));
     this.commands.register('kingdom.BuyService', (c) => this.buyService(c));
     this.bus.on('player.Registered', (evt) => void this.onPlayerRegistered(evt));
     this.bus.on('combat.BattleEnded', (evt) => void this.onBattleEnded(evt));
+    this.bus.on('reputation.Changed', (evt) => this.onReputationChanged(evt));
+    // 议会厅是王国任务系统的入口。建成后立即挂载该玩家的首个任务计时器，
+    // 避免玩家必须重新打开页面或等待旧的（无议会厅时已取消的）计时器。
+    this.bus.on('building.Built', (evt) => void this.onCouncilChanged(evt));
+    this.bus.on('building.Upgraded', (evt) => void this.onCouncilChanged(evt));
+    this.bus.on('building.Demolished', (evt) => void this.onCouncilChanged(evt));
   }
 
   resume(): void {
@@ -136,6 +144,7 @@ export class KingdomModule {
       ...state,
       taskSeq: Math.max(0, Math.floor(state.taskSeq ?? 0)),
       orderSeq: Math.max(0, Math.floor(state.orderSeq ?? 0)),
+      retaliationSeq: Math.max(0, Math.floor(state.retaliationSeq ?? 0)),
       nextIssueAt: Number.isFinite(state.nextIssueAt) ? state.nextIssueAt : 0,
       orders: Array.isArray(state.orders) ? state.orders.slice(-20) : [],
     };
@@ -148,7 +157,7 @@ export class KingdomModule {
         this.n('kingdom_task_initial_min_sec', 300),
         this.n('kingdom_task_initial_max_sec', 600),
       ) * 1000,
-      taskSeq: 0, orderSeq: 0, orders: [],
+      taskSeq: 0, orderSeq: 0, retaliationSeq: 0, orders: [],
     };
     this.store.set(COLLECTION, playerId, state);
     if (arm) this.armTask(state);
@@ -248,9 +257,44 @@ export class KingdomModule {
     for (const player of ((list.payload as any)?.players ?? [])) {
       const state = await this.ensure(String(player.id));
       if (!state) continue;
-      this.armTask(state);
+      if (await this.hasCouncil(String(player.id))) this.armTask(state);
+      else this.scheduler.cancelByOwner(`kingdom-task:${state.playerId}`);
       for (const order of state.orders.filter((o) => o.status === 'pending')) this.armOrder(order);
     }
+  }
+
+  /** 王国任务是玩家级全局任务，但只有拥有至少一座议会厅时才启用。 */
+  private async hasCouncil(playerId: string): Promise<boolean> {
+    const result = await this.commands.send({ name: 'player.Get', from: KingdomModule.NAME, payload: { playerId } });
+    if (!result.ok) return false;
+    const villages = ((result.payload as any)?.player?.villages ?? []) as Array<{ id?: string }>;
+    for (const village of villages) {
+      if (!village.id) continue;
+      const level = await this.commands.send({
+        name: 'building.GetBuildingLevel', from: KingdomModule.NAME,
+        payload: { villageId: village.id, kind: 'council' },
+      });
+      if (level.ok && Number((level.payload as any)?.level ?? 0) > 0) return true;
+    }
+    return false;
+  }
+
+  private async onCouncilChanged(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { villageId?: string; kind?: string };
+    if (p.kind !== 'council' || !p.villageId) return;
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: KingdomModule.NAME, payload: { villageId: p.villageId } });
+    const playerId = String((owner.payload as any)?.player?.id ?? (owner.payload as any)?.playerId ?? '');
+    if (!owner.ok || !playerId) return;
+    const state = await this.ensure(playerId);
+    if (!state || !(await this.hasCouncil(playerId))) return;
+    // 议会厅拆除时不创建新任务；重建后若没有进行中的/待领取任务则立即发令。
+    if (state.task?.status === 'active' || state.task?.status === 'ready') {
+      this.armTask(state);
+      return;
+    }
+    state.nextIssueAt = this.now();
+    this.store.set(COLLECTION, playerId, state);
+    await this.issueTask(playerId);
   }
 
   private armTask(state: KingdomState): void {
@@ -308,6 +352,14 @@ export class KingdomModule {
   private async issueTask(playerId: string): Promise<void> {
     const state = await this.ensure(playerId);
     if (!state) return;
+    if (!(await this.hasCouncil(playerId))) {
+      // 没有议会厅时不应继续递归调度；议会厅建成事件会重新唤醒任务循环。
+      state.nextIssueAt = 0;
+      this.store.set(COLLECTION, playerId, state);
+      this.scheduler.cancelByOwner(`kingdom-task:${playerId}`);
+      await this.emitUpdated(state, 'disabled');
+      return;
+    }
     // ready 表示目标已经完成，必须等玩家领取后才开始下一轮，不能因为旧期限已过而重发任务。
     if (state.task?.status === 'ready') {
       this.armTask(state);
@@ -378,6 +430,7 @@ export class KingdomModule {
 
   private async submitTribute(cmd: Command): Promise<CommandResult> {
     const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
+    if (!(await this.hasCouncil(playerId))) return { ok: false, payload: {}, reason: 'council_required' };
     const state = await this.ensure(playerId);
     const task = state?.task;
     if (!state || !task || task.status !== 'active' || task.kind !== 'tribute' || !task.resource || !task.amount) return { ok: false, payload: {}, reason: 'kingdom_task_not_submittable' };
@@ -390,6 +443,7 @@ export class KingdomModule {
 
   private async claimTask(cmd: Command): Promise<CommandResult> {
     const { playerId } = cmd.payload as { playerId: string };
+    if (!(await this.hasCouncil(playerId))) return { ok: false, payload: {}, reason: 'council_required' };
     const state = await this.ensure(playerId);
     const task = state?.task;
     if (!state || !task || task.status !== 'ready') return { ok: false, payload: {}, reason: 'kingdom_task_not_ready' };
@@ -406,8 +460,13 @@ export class KingdomModule {
     const { playerId, villageId } = cmd.payload as { playerId: string; villageId?: string };
     const state = await this.ensure(playerId);
     if (!state) return { ok: false, payload: {}, reason: 'player_not_found' };
-    if (state.nextIssueAt <= this.now() && (!state.task || ['failed', 'claimed'].includes(state.task.status))) await this.issueTask(playerId);
-    else this.armTask(state);
+    const kingdomEnabled = await this.hasCouncil(playerId);
+    if (kingdomEnabled) {
+      if (state.nextIssueAt <= this.now() && (!state.task || ['failed', 'claimed'].includes(state.task.status))) await this.issueTask(playerId);
+      else this.armTask(state);
+    } else {
+      this.scheduler.cancelByOwner(`kingdom-task:${playerId}`);
+    }
     const fresh = this.store.get<KingdomState>(COLLECTION, playerId) ?? state;
     const levelResult = villageId
       ? await this.commands.send({ name: 'building.GetBuildingLevel', from: KingdomModule.NAME, payload: { villageId, kind: 'council' } })
@@ -418,12 +477,22 @@ export class KingdomModule {
       ok: true,
       payload: {
         playerId, villageId, fief: fresh.fief, fiefName: FIEF_NAMES[fresh.fief],
-        nextIssueAt: fresh.nextIssueAt, task: fresh.task ?? null, orders: fresh.orders.slice(-10).reverse(),
+        kingdomEnabled,
+        nextIssueAt: fresh.nextIssueAt, task: kingdomEnabled ? (fresh.task ?? null) : null, orders: fresh.orders.slice(-10).reverse(),
         councilLevel: Number((levelResult.payload as any)?.level ?? 0),
         services: Object.values(this.config.kingdomServices).sort((a, b) => a.minCouncilLevel - b.minCouncilLevel || a.id - b.id),
         landmarks,
       },
     };
+  }
+
+  /** 任务/对话等内部只读调用：获取玩家所属封地，不触发王国任务签发或其它页面副作用。 */
+  private async getFief(cmd: Command): Promise<CommandResult> {
+    const playerId = String((cmd.payload as { playerId?: unknown }).playerId ?? '').trim();
+    if (!playerId) return { ok: false, payload: {}, reason: 'playerId_required' };
+    const state = await this.ensure(playerId);
+    if (!state) return { ok: false, payload: {}, reason: 'player_not_found' };
+    return { ok: true, payload: { playerId, fief: state.fief, fiefName: FIEF_NAMES[state.fief] } };
   }
 
   private async buyService(cmd: Command): Promise<CommandResult> {
@@ -553,6 +622,69 @@ export class KingdomModule {
     this.store.set(COLLECTION, state.playerId, state);
     if (refund) await this.commands.send({ name: 'reputation.Adjust', from: KingdomModule.NAME, payload: { playerId: state.playerId, delta: order.reputationCost, reason: 'kingdom_service_refund' } });
     await this.emitUpdated(state, 'service_failed');
+  }
+
+  /** 王国 PvE 声望批次达到阈值后，由玩家出生象限对应的封地派出一次性雇佣军。 */
+  private async onReputationChanged(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { playerId?: string; value?: number; kingdomPvePenaltyChunks?: number };
+    const chunks = Math.max(0, Math.floor(Number(p.kingdomPvePenaltyChunks ?? 0)));
+    if (!p.playerId || chunks <= 0) return;
+    const reputation = Number(p.value ?? 0);
+    const state = await this.ensure(p.playerId);
+    if (!state) return;
+    const battleType: 'raid' | 'siege' = reputation <= this.config.constants.kingdomPveRetaliationSiegeThreshold ? 'siege' : 'raid';
+    for (let i = 0; i < chunks; i++) await this.dispatchRetaliation(state, battleType);
+  }
+
+  private async dispatchRetaliation(state: KingdomState, battleType: 'raid' | 'siege'): Promise<void> {
+    const player = await this.commands.send({ name: 'player.Get', from: KingdomModule.NAME, payload: { playerId: state.playerId } });
+    if (!player.ok) return;
+    const villages = ((player.payload as any)?.player?.villages ?? []) as Array<{ id: string; q: number; r: number; isCapital?: boolean }>;
+    const capital = villages.find((v) => v.isCapital) ?? villages[0];
+    if (!capital) return;
+    const sourcePveId = `kingdom-fief-${state.fief}`;
+    const source = await this.commands.send({ name: 'pve.GetTarget', from: KingdomModule.NAME, payload: { id: sourcePveId } });
+    if (!source.ok) return;
+    const sourceData = source.payload as any;
+    const defender = (sourceData.defender ?? {}) as Record<string, { count?: number }>;
+    // “总人口”按守军兵种的 popCost 折算；雇佣军本身不占玩家人口，
+    // 因此这里把折算后的人口直接作为派出雇佣军的人数目标。
+    const totalGarrisonPopulation = Object.entries(defender).reduce((sum, [code, unit]) => {
+      const count = Math.max(0, Math.floor(Number(unit.count) || 0));
+      return sum + count * Math.max(1, this.config.units[code]?.popCost ?? 1);
+    }, 0);
+    if (totalGarrisonPopulation <= 0) return;
+    const minRatio = this.config.constants.kingdomFiefMercenaryMinRatio;
+    const maxRatio = this.config.constants.kingdomFiefMercenaryMaxRatio;
+    const desired = Math.max(1, this.randomInt(Math.ceil(totalGarrisonPopulation * minRatio), Math.floor(totalGarrisonPopulation * maxRatio)));
+    const mercCodes = Object.keys(this.config.units).filter((code) => this.config.units[code]?.isMercenary);
+    if (mercCodes.length === 0) return;
+    const shuffled = [...mercCodes].sort(() => this.rng() - 0.5);
+    const selected = shuffled.slice(0, Math.max(1, Math.min(3, shuffled.length)));
+    const troops: Record<string, number> = {};
+    let remaining = desired;
+    selected.forEach((code, index) => {
+      const slotsLeft = selected.length - index;
+      const count = index === selected.length - 1 ? remaining : this.randomInt(0, Math.max(0, Math.floor(remaining / slotsLeft)));
+      if (count > 0) { troops[code] = count; remaining -= count; }
+    });
+    if (remaining > 0) troops[selected[0]!] = (troops[selected[0]!] ?? 0) + remaining;
+    const attackerSnapshot: Snapshot = {};
+    for (const [code, count] of Object.entries(troops)) {
+      const unit = this.config.units[code];
+      if (!unit || count <= 0) continue;
+      attackerSnapshot[code] = { count, form: unit.form, meleeAtk: unit.meleeAtk, rangedAtk: unit.rangedAtk, meleeDef: unit.meleeDef, rangedDef: unit.rangedDef, carry: unit.carry, traits: unit.traits.flatMap((trait) => this.config.unitTraits[trait]?.effects ?? []) };
+    }
+    if (Object.keys(attackerSnapshot).length === 0) return;
+    const anchors = kingdomLandmarkAnchors(this.config.constants.worldW, this.config.constants.worldH, this.n('kingdom_fief_offset_ratio', 0.25));
+    const origin = anchors.find((a) => a.id === sourcePveId);
+    if (!origin) return;
+    state.retaliationSeq += 1;
+    this.store.set(COLLECTION, state.playerId, state);
+    await this.commands.send({
+      name: 'movement.SendKingdomRetaliation', from: KingdomModule.NAME,
+      payload: { sourcePveId, fromXY: { q: origin.q, r: origin.r }, targetVillage: capital.id, troops, attackerSnapshot, battleType, retaliationId: `kpr-${state.playerId}-${state.retaliationSeq}` },
+    });
   }
 
   private async onBattleEnded(evt: DomainEvent): Promise<void> {

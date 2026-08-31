@@ -18,7 +18,7 @@ import { confirmOwnedVillage } from './owned-village-selection.js';
 import type { Movement } from '@slg/shared';
 
 type WorkflowStep = 1 | 2 | 3;
-type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'ambush';
+type DispatchMode = 'attack' | 'raid' | 'transport' | 'transfer' | 'reinforce' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'ambush' | 'investigate';
 type NumberMap = Record<string, number>;
 
 interface TargetMeta {
@@ -32,11 +32,16 @@ interface TargetMeta {
   isOwn?: boolean;
   declareWar?: boolean;
   targetKind?: string;
+  kingdomCityState?: boolean;
+  cityStateTier?: 1 | 2 | 3;
+  cityStateTribe?: 'romans' | 'gauls' | 'teutons';
   taskInfo?: TaskCampInfo;
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
-const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', auto_explore: '自动探索', scout: '侦察', ambush: '伏击' }[mode]);
+const modeLabel = (mode: DispatchMode): string => ({ transport: '转移', transfer: '转移', reinforce: '增援', raid: '掠夺', attack: '攻城', garrison: '驻扎', explore: '探索', auto_explore: '自动探索', scout: '侦察', ambush: '伏击', investigate: '调查' }[mode]);
+const cityTierLabel = (tier?: number): string => tier === 1 ? '一级' : tier === 2 ? '二级' : tier === 3 ? '三级' : '';
+const cityTribeLabel = (tribe?: string): string => tribe === 'romans' ? '罗马' : tribe === 'gauls' ? '高卢' : tribe === 'teutons' ? '条顿' : '';
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2;
@@ -129,11 +134,13 @@ function Assessment({
     ? '派军队前往该坐标。抵达后若仍为空地便会原地驻扎；若已被设施或其他军队占据，部队将在前一格驻扎。'
     : meta.mode === 'ambush'
     ? '派军队前往该空地隐蔽伏击。抵达后视野缩小为1，只会被一格内的敌方军队发现；伏击战结束后双方幸存部队都会返城。'
+    : meta.mode === 'investigate'
+    ? '军队抵达秘密营地后进行调查，不发动战斗，随后驻扎等待下一条命令。选择掠夺会使寻找神秘人任务失败。'
     : isTransport
     ? '转移只能携带部队与随队宝物，不能携带木材、泥土、钢或粮食。'
     : meta.mode === 'raid'
       ? '野怪据点会触发掠夺战。确认兵力与宝物后再派出部队。'
-    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 营地只能侦察资源与守军。可携带侦察兵或冒险者；冒险者不参与侦察战，遇到守方侦察兵会全部被发现并歼灭。幸存部队会立即返城，携带宝物会随军返回，若全军覆没则被守方缴获。' : '可携带侦察兵或冒险者。冒险者不参与侦察战，遇到守方侦察兵会全部被发现并歼灭；抵达后获得目标情报，幸存部队会立即返城，携带宝物会随军返回，若全军覆没则被守方缴获。') : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
+    : meta.mode === 'reinforce' ? '盟军或中立村庄可接收增援，部队抵达后并入目标村。' : meta.mode === 'scout' ? (meta.kingdomCityState ? '王国城邦可侦察资源、守军与城内外建筑；若被城邦侦察兵发现，将发生侦察战并扣除2点声望。' : (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 营地只能侦察资源与守军。可携带侦察兵或冒险者；冒险者不参与侦察战，遇到守方侦察兵会全部被发现并歼灭。幸存部队会立即返城，携带宝物会随军返回，若全军覆没则被守方缴获。' : '可携带侦察兵或冒险者。冒险者不参与侦察战，遇到守方侦察兵会全部被发现并歼灭；抵达后获得目标情报，幸存部队会立即返城，携带宝物会随军返回，若全军覆没则被守方缴获。')) : '这是其他玩家的村庄。请在确认前复核外交状态与编队。';
   const preparationLabel: Record<DispatchMode, string> = {
     attack: '编组攻城部队',
     raid: '编组掠夺部队',
@@ -142,6 +149,7 @@ function Assessment({
     reinforce: '编组增援部队',
     garrison: '编组驻扎部队',
     ambush: '编组伏击部队',
+    investigate: '编组调查部队',
     explore: '编组探索部队',
     auto_explore: '编组自动探索部队',
     scout: '编组侦察部队',
@@ -153,13 +161,15 @@ function Assessment({
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">
-          {meta.mode === 'explore' || meta.mode === 'auto_explore' ? '未探索区域' : meta.mode === 'garrison' || meta.mode === 'ambush' ? '野外空地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
+          {meta.mode === 'explore' || meta.mode === 'auto_explore' ? '未探索区域' : meta.mode === 'garrison' || meta.mode === 'ambush' ? '野外空地' : meta.mode === 'investigate' ? '任务营地' : isTransport ? '己方村庄转移' : meta.mode === 'reinforce' ? '盟军增援' : meta.kingdomCityState ? '王国城邦' : meta.mode === 'raid' ? '掠夺目标' : meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? 'PvE 侦察目标' : '玩家村庄侦察目标'}
         </div>
         <p>{copy}</p>
         <div class="expedition-facts">
           <span>目标坐标 <b>{meta.q},{meta.r}</b></span>
           <span>行军距离 <b>{meta.dist} 格</b></span>
-          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'auto_explore' || meta.mode === 'ambush' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
+          {meta.kingdomCityState && <span>城邦等级 <b>{cityTierLabel(meta.cityStateTier)}</b></span>}
+          {meta.kingdomCityState && <span>所属种族 <b>{cityTribeLabel(meta.cityStateTribe)}</b></span>}
+          <span>行动类型 <Tag kind={isTransport || meta.mode === 'reinforce' ? 'steel' : meta.mode === 'raid' ? 'ember' : meta.mode === 'garrison' || meta.mode === 'explore' || meta.mode === 'auto_explore' || meta.mode === 'ambush' || meta.mode === 'investigate' ? 'gold' : 'crimson'}>{modeLabel(meta.mode)}</Tag></span>
         </div>
       </section>
 
@@ -173,16 +183,18 @@ function Assessment({
 }
 
 function targetAssessmentTitle(meta: TargetMeta): string {
-  if (meta.targetKind === 'empty') return '可拓荒空地';
+  if (meta.targetKind === 'empty') return '野外空地';
   if (meta.targetKind === 'unexplored') return '未探索区域';
+  if (meta.kingdomCityState) return '王国城邦';
   if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return 'PvE 营地';
   if (meta.targetKind === 'own_village' || meta.isOwn) return '己方村庄';
   return '玩家村庄';
 }
 
 function targetAssessmentCopy(meta: TargetMeta): string {
-  if (meta.targetKind === 'empty') return '这是可行动的空地。可驻扎；拥有拓荒者时还可拓荒建村。';
+  if (meta.targetKind === 'empty') return '这是可行动的空地。驻扎军可继续驻扎或伏击。';
   if (meta.targetKind === 'unexplored') return '该格尚未探索。只能执行探索，军队抵达后会立即返城。';
+  if (meta.kingdomCityState) return '这是王国阵营的 PvE 城邦。可侦察、掠夺或攻城；这些行动会扣除2点声望。';
   if (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') return '这是地图上的 PvE 营地。可侦察资源与守军，或派兵掠夺。';
   if (meta.targetKind === 'own_village' || meta.isOwn) return '这是己方村庄。可将部队和随队宝物转移过去。';
   return '服务端会根据双方外交状态提供可用行动；中立目标的攻击行为会同时宣战。';
@@ -372,7 +384,7 @@ function Preparation({
   return (
     <div class="target-body expedition-body">
       <TroopPlanner troops={troops} setTroops={setTroops} transport={isTransfer} scoutOnly={meta.mode === 'scout'} />
-      {meta.mode === 'scout' && meta.targetKind !== 'pve' && meta.targetKind !== 'taskcamp' && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
+      {meta.mode === 'scout' && (meta.targetKind !== 'pve' && meta.targetKind !== 'taskcamp' || meta.kingdomCityState) && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
       {/* 转移行军不携带物资；资源转运统一走贸易中心的“转移资源”栏。 */}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
       <div class="expedition-validation" aria-live="polite">
@@ -393,7 +405,7 @@ function Confirmation({
   useEffect(() => {
     let live = true;
     const villageTarget = meta.targetKind === 'village' || meta.targetKind === 'own_village';
-    void req('PreviewMarch', { q: meta.q, r: meta.r, mode: meta.mode === 'transfer' ? 'transfer' : meta.mode, ...(villageTarget ? { targetVillage: meta.refId } : {}), troops })
+    void req('PreviewMarch', { q: meta.q, r: meta.r, mode: meta.mode === 'transfer' ? 'transfer' : meta.mode, ...(villageTarget ? { targetVillage: meta.refId } : meta.refId ? { targetId: meta.refId } : {}), troops })
       .then((res) => { if (live && res.ok) setPreview(res.payload); }).catch(() => undefined);
     return () => { live = false; };
   }, [meta.mode, meta.q, meta.r, meta.refId, JSON.stringify(troops)]);
@@ -443,7 +455,7 @@ function ExpeditionWorkflow({
     let ok = false;
     if (meta.mode === 'scout') {
       const isPve = meta.targetKind === 'pve' || meta.targetKind === 'taskcamp';
-      ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve ? 'scout_resources' : scoutType }), { okToast: '侦察部队出发' });
+      ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve && !meta.kingdomCityState ? 'scout_resources' : scoutType }), { okToast: '侦察部队出发' });
     } else if (meta.mode === 'transport' || meta.mode === 'transfer') {
       ok = await act(req('SendTransport', {
         targetVillage: meta.refId, troops: selectedTroops, cargo: {}, treasures: selectedTreasures, mode: 'transfer',
@@ -458,12 +470,14 @@ function ExpeditionWorkflow({
       ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '驻扎部队出发' });
     } else if (meta.mode === 'ambush') {
       ok = await act(req('SendAmbush', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '伏击部队出发' });
+    } else if (meta.mode === 'investigate') {
+      ok = await act(req('SendInvestigate', { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '调查部队出发' });
     } else if (meta.mode === 'explore') {
       ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '探索部队出发，抵达后将返城' });
     } else if (meta.mode === 'auto_explore') {
       ok = await act(req('SendAutoExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '自动探索部队已出发' });
     } else {
-      ok = await act(req('SendAttack', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar }), { okToast: '攻城部队出发' });
+      ok = await act(req('SendAttack', { ...(meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? { targetId: meta.refId } : { targetVillage: meta.refId, declareWar: !!meta.declareWar }), troops: selectedTroops, treasures: selectedTreasures }), { okToast: '攻城部队出发' });
     }
     if (ok) onClose();
   }
@@ -497,6 +511,9 @@ function ModeSelectPanel({ base, kind, onClose }: { base: TargetMeta; kind: stri
           q: Number.isFinite(Number(payload.q)) ? Number(payload.q) : prev.q,
           r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
           name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
+          kingdomCityState: payload.cityState === true,
+          cityStateTier: payload.cityStateTier,
+          cityStateTribe: payload.cityStateTribe,
         }));
         setOptions((payload.modes ?? []) as ModeOption[]);
       })
@@ -571,30 +588,128 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
   );
 }
 
-/** 驻扎军“行军”后的目标确认：兵力与宝物保持在原军中，不会重新扣兵或多占行军点。 */
+/**
+ * 驻扎军“行军”后的目标模式选择与确认。
+ *
+ * 这里不能根据目标类型在客户端硬编码一个模式：驻扎军续行与首次派遣
+ * 使用的是同一套外交/目标规则，服务端 GetMarchOptions 才是唯一权威来源。
+ * 续行仍保持原军的兵力和宝物，不重新扣兵或增加行军点。
+ */
 function GarrisonContinuation({ movementId, movementType, target, onClose }: {
-  movementId: string; movementType?: 'garrison' | 'ambush'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string }; onClose: () => void;
+  movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate'; target: { refId: string; kind: string; q: number; r: number; name: string; visibility?: string; cityState?: boolean; cityStateTier?: 1 | 2 | 3; cityStateTribe?: 'romans' | 'gauls' | 'teutons' }; onClose: () => void;
 }) {
-  const mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'ambush' = target.kind === 'pve'
-    ? 'raid'
-    : target.kind === 'village' ? 'attack' : target.visibility === 'unexplored' ? 'explore' : movementType === 'ambush' ? 'ambush' : 'garrison';
-  const label = mode === 'raid' ? '掠夺' : mode === 'attack' ? '攻城' : mode === 'explore' ? '探索' : mode === 'ambush' ? '伏击' : '驻扎';
-  const depth = mode === 'explore' ? unexploredDepth(target.q, target.r) : 0;
-  const maxExploreDepth = rallypointLevel();
-  const allowExplore = mode !== 'explore' || (depth >= 1 && depth <= maxExploreDepth);
+  const targetKind = target.visibility === 'unexplored' ? 'unexplored' : target.kind;
+  const [options, setOptions] = useState<ModeOption[] | null>(null);
+  const [choice, setChoice] = useState<ModeOption | null>(null);
+  const [resolvedTarget, setResolvedTarget] = useState(target);
+
+  useEffect(() => {
+    let live = true;
+    setOptions(null);
+    setChoice(null);
+    setResolvedTarget(target);
+    void req('GetMarchOptions', {
+      q: target.q,
+      r: target.r,
+      kind: targetKind,
+      refId: target.refId || undefined,
+      movementId,
+    }).then((res) => {
+      if (!live || !res.ok) return;
+      const payload = res.payload as any;
+      setResolvedTarget((prev) => ({
+        ...prev,
+        q: Number.isFinite(Number(payload.q)) ? Number(payload.q) : prev.q,
+        r: Number.isFinite(Number(payload.r)) ? Number(payload.r) : prev.r,
+        name: typeof payload.name === 'string' && payload.name ? payload.name : prev.name,
+        cityState: payload.cityState === true,
+        cityStateTier: payload.cityStateTier,
+        cityStateTribe: payload.cityStateTribe,
+      }));
+      const available = (payload.modes ?? []) as ModeOption[];
+      // 伏击只能从城镇直接派出；抵达后不再提供任何续行模式。
+      // 其余筛选（例如混合编队不得侦察）由服务端按 movementId 完成。
+      setOptions(movementType === 'ambush' ? [] : available);
+    }).catch(() => { if (live) setOptions([]); });
+    return () => { live = false; };
+  }, [movementId, target.q, target.r, target.refId, target.kind, target.visibility, targetKind, movementType]);
+
+  const continueLabel = movementType === 'ambush' ? '伏击军' : movementType === 'investigate' ? '调查军' : '驻扎军';
+  const chosenMode = choice?.mode;
+  const chosenLabel = choice?.label ?? '';
+  const isVillage = targetKind === 'village' || targetKind === 'own_village';
+  const isPve = targetKind === 'pve' || targetKind === 'taskcamp';
+
   async function continueMarch() {
-    const payload: Record<string, unknown> = { movementId, q: target.q, r: target.r, mode };
-    if (mode === 'raid') payload.targetId = target.refId;
-    if (mode === 'attack') payload.targetVillage = target.refId;
-    if (await act(req('ContinueGarrison', payload), { okToast: `${movementType === 'ambush' ? '伏击军' : '驻扎军'}开始${label}` })) {
+    if (!choice) return;
+    const mode = choice.mode;
+    const payload: Record<string, unknown> = {
+      movementId,
+      q: resolvedTarget.q,
+      r: resolvedTarget.r,
+      mode,
+    };
+    if (isPve && ['scout', 'raid', 'investigate', 'attack'].includes(mode)) payload.targetId = resolvedTarget.refId;
+    if (isVillage && ['scout', 'raid', 'attack', 'reinforce', 'transfer'].includes(mode)) payload.targetVillage = resolvedTarget.refId;
+    if (await act(req('ContinueGarrison', payload), { okToast: `${continueLabel}开始${chosenLabel}` })) {
       garrisonContinue.value = null;
       onClose();
     }
   }
+
+  if (!choice) {
+    const headerMeta: TargetMeta = {
+      refId: resolvedTarget.refId,
+      q: resolvedTarget.q,
+      r: resolvedTarget.r,
+      name: resolvedTarget.name,
+      dist: 0,
+      icon: isPve ? 'pve_bandits' : 'bld_main',
+      mode: 'garrison',
+      targetKind,
+      kingdomCityState: !!(resolvedTarget as any).cityState,
+      cityStateTier: resolvedTarget.cityStateTier,
+      cityStateTribe: resolvedTarget.cityStateTribe,
+    };
+    return (
+      <Panel variant="gold" corners class="map-target-panel">
+        <WorkflowHeader meta={headerMeta} step={1} onClose={onClose} />
+        <TargetAssessment meta={headerMeta} options={options} onChoose={setChoice} />
+        <div class="target-foot expedition-foot"><Btn onClick={onClose}>取消选择</Btn></div>
+      </Panel>
+    );
+  }
+
   return (
-    <Panel variant={mode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
-      <div class="target-head"><IconPlate icon={mode === 'garrison' || mode === 'ambush' ? 'pve_bandits' : 'bld_main'} label={target.name} size="sm" plate="gold" /><div class="target-heading-copy"><div class="target-title">选择行军模式</div><div class="target-coord">({target.q},{target.r})</div></div><button type="button" class="target-close" onClick={onClose} aria-label="取消行军模式">×</button></div>
-      <div class="target-body expedition-body"><section class="expedition-confirm-card"><div class="expedition-kicker">保持编队</div><h3>{label}至「{target.name}」</h3><p>{allowExplore ? `该军队会从当前${movementType === 'ambush' ? '伏击' : '驻扎'}地出发，保持所携部队和宝物，并继续占用原有的一个行军点。` : `该未探索格深度为 ${depth < 0 ? '未知' : depth}，当前集结点 ${maxExploreDepth} 级，最多探索 ${maxExploreDepth} 格深；无法探索。`}</p></section><div class="target-foot expedition-foot expedition-foot--split"><Btn onClick={onClose}>{allowExplore ? '取消' : '返回'}</Btn>{allowExplore && <Btn variant={mode === 'attack' ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{label}</Btn>}</div></div>
+    <Panel variant={chosenMode === 'attack' ? 'danger' : 'gold'} corners class="map-target-panel">
+      <WorkflowHeader meta={{
+        refId: resolvedTarget.refId,
+        q: resolvedTarget.q,
+        r: resolvedTarget.r,
+        name: resolvedTarget.name,
+        dist: 0,
+        icon: isPve ? 'pve_bandits' : 'bld_main',
+        mode: chosenMode ?? 'garrison',
+        targetKind,
+        kingdomCityState: !!(resolvedTarget as any).cityState,
+        cityStateTier: resolvedTarget.cityStateTier,
+        cityStateTribe: resolvedTarget.cityStateTribe,
+        declareWar: choice?.requiresDeclaration,
+      }} step={3} onClose={onClose} />
+      <div class="target-body expedition-body">
+        <section class="expedition-confirm-card">
+          <div class="expedition-kicker">保持编队</div>
+          <h3>{chosenLabel}至「{resolvedTarget.name}」</h3>
+          <p>该{continueLabel}会从当前驻扎地出发，保持所携部队和宝物，并继续占用原有的一个行军点。</p>
+        </section>
+        {(choice?.requiresDeclaration || chosenMode === 'raid' || chosenMode === 'attack') && (
+          <p class="expedition-warning">{choice?.requiresDeclaration ? '该目标当前为中立玩家，确认后将同时宣战。' : `确认后${chosenLabel}抵达目标将立即执行。`}</p>
+        )}
+        <div class="target-foot expedition-foot expedition-foot--split">
+          <Btn onClick={() => setChoice(null)}>返回模式选择</Btn>
+          <Btn variant={chosenMode === 'attack' || choice?.requiresDeclaration ? 'danger' : 'primary'} size="lg" onClick={continueMarch}>确认{chosenLabel}</Btn>
+        </div>
+      </div>
     </Panel>
   );
 }
@@ -602,14 +717,15 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
 /** 点击地图上己方驻扎军所在格：召回 / 续行，与行军列表一致。 */
 function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => void }) {
   const ambush = move.type === 'ambush';
+  const investigating = move.type === 'investigate';
   const q = move.pos?.q ?? 0;
   const r = move.pos?.r ?? 0;
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <div class="target-head">
-        <IconPlate icon="pve_bandits" label={ambush ? '野外伏击' : '野外驻扎'} size="sm" plate="gold" />
+        <IconPlate icon="pve_bandits" label={investigating ? '调查军' : ambush ? '野外伏击' : '野外驻扎'} size="sm" plate="gold" />
         <div class="target-heading-copy">
-          <div class="target-title">己方{ambush ? '伏击' : '驻扎'}军</div>
+          <div class="target-title">己方{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军</div>
           <div class="target-coord">({q},{r})</div>
         </div>
         <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
@@ -617,18 +733,18 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
       <div class="target-body expedition-body">
         <section class="expedition-assessment">
           <div class="expedition-kicker">驻扎中</div>
-          <p>该格有你的{ambush ? '伏击' : '驻扎'}军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
+          <p>该格有你的{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
         </section>
         <div class="target-foot expedition-foot expedition-foot--split">
           <Btn onClick={async () => {
-            if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: `${ambush ? '伏击军' : '驻扎军'}开始返程` })) onClose();
+            if (await act(req('RecallGarrison', { movementId: move.id }), { okToast: `${investigating ? '调查军' : ambush ? '伏击军' : '驻扎军'}开始返程` })) onClose();
           }}>召回</Btn>
-          <Btn variant="primary" onClick={() => {
-            garrisonContinue.value = { movementId: move.id, movementType: ambush ? 'ambush' : 'garrison' };
+          {!ambush && <Btn variant="primary" onClick={() => {
+            garrisonContinue.value = { movementId: move.id, movementType: investigating ? 'investigate' : 'garrison' };
             selected.value = null;
-            showToast(`请在地图上选择${ambush ? '伏击军' : '驻扎军'}的下一处行军目标`);
+            showToast(`请在地图上选择${investigating ? '调查军' : '驻扎军'}的下一处行军目标`);
             onClose();
-          }}>选择行军模式</Btn>
+          }}>选择行军模式</Btn>}
         </div>
       </div>
     </Panel>
@@ -735,12 +851,13 @@ function EnemyArmyPanel({ sel, onClose }: { sel: SelectedTarget; onClose: () => 
 }
 
 /** 驻扎军选择行军模式后，在地图上点选下一处目标。 */
-function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garrison' | 'ambush'; onCancel: () => void }) {
+function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garrison' | 'ambush' | 'investigate'; onCancel: () => void }) {
   const ambush = movementType === 'ambush';
+  const investigating = movementType === 'investigate';
   return (
     <Panel variant="gold" corners class="map-target-panel">
       <div class="target-head">
-        <IconPlate icon="pve_bandits" label={ambush ? '伏击模式' : '驻扎模式'} size="sm" plate="gold" />
+        <IconPlate icon="pve_bandits" label={investigating ? '调查模式' : ambush ? '伏击模式' : '驻扎模式'} size="sm" plate="gold" />
         <div class="target-heading-copy">
           <div class="target-title">选择下一处目标</div>
           <div class="target-coord">点击地图上的空地、野怪或玩家村庄</div>
@@ -748,7 +865,7 @@ function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garriso
         <button type="button" class="target-close" onClick={onCancel} aria-label="取消行军模式">×</button>
       </div>
       <div class="target-body expedition-body">
-        <p class="expedition-modal-copy">编队与宝物保持在原{ambush ? '伏击' : '驻扎'}军中，不会重新扣兵或多占行军点。</p>
+        <p class="expedition-modal-copy">编队与宝物保持在原{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军中，不会重新扣兵或多占行军点。</p>
         <div class="target-foot expedition-foot">
           <Btn onClick={onCancel}>取消选择</Btn>
         </div>

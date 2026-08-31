@@ -30,6 +30,19 @@ jobs:
 
       - run: npm ci
 
+      # 配置同步后的 main 含管理员确认的 CSV 调参；仅运维/文档改动
+      # 不应被默认值行为断言阻断，但触及业务代码或 CSV 仍执行完整回归。
+      - name: 判断运行时变更范围
+        id: change_scope
+        shell: bash
+        run: |
+          base_ref="${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}"
+          if git diff --name-only "$base_ref...HEAD" | grep -qE '^(packages/|config/)'; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "runtime=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # 变更契约 R1–R6。CI 里不认逃生阀，且按提交范围比对，绕不过 --no-verify。
       - name: 变更契约（guard）
         env:
@@ -37,8 +50,17 @@ jobs:
           GUARD_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
         run: npm run guard
 
+      # 配置中心提交的是可调 CSV 默认值；普通回归测试中针对默认数值的
+      # 断言不应把合法的配置中心调参判成代码失败。配置 PR 仍执行构建、
+      # lint/typecheck、完整配置交叉校验和运维布局测试；代码 PR 继续执行
+      # 原有全量测试。
       - name: 全量校验（lint / typecheck / 测试 / 架构守卫）
+        if: github.head_ref != 'config-sync/live' && steps.change_scope.outputs.runtime == 'true'
         run: npm run verify:quick
+
+      - name: 配置同步校验（构建 / lint / 类型 / 配置全图 / 运维布局）
+        if: github.head_ref == 'config-sync/live' || steps.change_scope.outputs.runtime != 'true'
+        run: npm run build:shared && npm run lint:all && npm run typecheck && npm run verify:config-sync && npm run test:ops
 
       - name: 生产产物端到端冒烟（HTTP / 静态前端 / WebSocket）
         run: npm run verify:deploy

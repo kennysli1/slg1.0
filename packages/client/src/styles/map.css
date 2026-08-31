@@ -99,13 +99,56 @@
   stroke: var(--c-gold-dim);
   stroke-width: 2;
 }
-.hex-ring--enemy {
+.hex-ring--neutral {
   stroke: var(--c-steel);
   stroke-width: 2;
+}
+.hex-ring--allied {
+  stroke: var(--c-jade);
+  stroke-width: 2.5;
+}
+.hex-ring--hostile {
+  stroke: var(--c-crimson-hi);
+  stroke-width: 2.5;
 }
 .hex-ring--pve {
   stroke: var(--c-crimson-hi);
   stroke-width: 2;
+}
+
+/* 王都/封地由多个真实地块组成一个上窄下宽的大三角。底层只重铺同种地貌底色，
+   用来遮住原六边形/丘陵纹理的内部线；这不是常驻高光。 */
+.landmark-merged-ground {
+  pointer-events: none;
+}
+.landmark-merged-shape {
+  fill: transparent;
+  stroke: var(--c-crimson-hi);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  transition: fill var(--t-fast), stroke var(--t-fast), stroke-width var(--t-fast), filter var(--t-fast);
+  pointer-events: none;
+}
+.landmark-merged--hovered .landmark-merged-shape {
+  /* 只有悬停时才高光整个大三角，移开即恢复普通 PvE 外框。 */
+  fill: var(--border-subtle);
+  stroke: var(--terrain-hover-edge);
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 5px rgb(246 224 170 / 58%));
+}
+.landmark-icon {
+  pointer-events: none;
+  filter: saturate(.84) contrast(1.08) drop-shadow(0 4px 6px rgb(0 0 0 / 86%));
+}
+.landmark-label { pointer-events: none; }
+.landmark-merged-hit {
+  cursor: pointer;
+  pointer-events: all;
+}
+.landmark-merged-hit-path {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.5;
 }
 /* 任务营地：鎏金描边 + 脉冲，和 PvE 的红色区分开 */
 .hex-ring--task {
@@ -162,6 +205,13 @@
 .hex-cell:hover .hex-hit {
   fill: var(--border-subtle);
   stroke: var(--terrain-hover-edge);
+}
+.hex-cell--landmark .hex-hit {
+  pointer-events: none;
+}
+.hex-cell--landmark:hover .hex-hit {
+  fill: transparent;
+  stroke: transparent;
 }
 
 /* ---------- 六边形名字标签 ---------- */
@@ -509,6 +559,9 @@
 }
 .map-legend-dot--self    { background: var(--c-gold); box-shadow: 0 0 6px rgba(216,177,104,.6); }
 .map-legend-dot--own     { background: var(--c-gold-dim); }
+.map-legend-dot--neutral { background: var(--c-steel); }
+.map-legend-dot--allied  { background: var(--c-jade); }
+.map-legend-dot--hostile { background: var(--c-crimson-hi); }
 .map-legend-dot--enemy   { background: var(--c-steel); }
 .map-legend-dot--pve     { background: var(--c-crimson); }
 .map-legend-line {

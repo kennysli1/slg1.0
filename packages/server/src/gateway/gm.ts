@@ -21,18 +21,60 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
 import { loadGameConfig } from '../infra/config.js';
 
-/** 对话编辑器的确定性顺序：先按稳定 code，再按同一对象的段落号。 */
+/** 数字感知的稳定字符串排序：m2 应排在 m10 前面。 */
+function compareNatural(a: string, b: string): number {
+  const chunksA = a.match(/\d+|\D+/g) ?? [''];
+  const chunksB = b.match(/\d+|\D+/g) ?? [''];
+  const length = Math.min(chunksA.length, chunksB.length);
+  for (let i = 0; i < length; i++) {
+    const chunkA = chunksA[i];
+    const chunkB = chunksB[i];
+    const numericA = /^\d+$/.test(chunkA);
+    const numericB = /^\d+$/.test(chunkB);
+    if (numericA && numericB) {
+      const normalizedA = chunkA.replace(/^0+(?=\d)/, '');
+      const normalizedB = chunkB.replace(/^0+(?=\d)/, '');
+      if (normalizedA.length !== normalizedB.length) return normalizedA.length - normalizedB.length;
+      if (normalizedA !== normalizedB) return normalizedA < normalizedB ? -1 : 1;
+      if (chunkA.length !== chunkB.length) return chunkA.length - chunkB.length;
+      continue;
+    }
+    if (chunkA !== chunkB) return chunkA < chunkB ? -1 : 1;
+  }
+  return chunksA.length - chunksB.length;
+}
+
+/** 对话 code 排序：下划线是分隔符，优先于后续数字；各段内部按自然数字顺序。 */
+function compareDialogueCode(a: string, b: string): number {
+  const partsA = String(a ?? '').split('_');
+  const partsB = String(b ?? '').split('_');
+  const length = Math.min(partsA.length, partsB.length);
+  for (let i = 0; i < length; i++) {
+    const order = compareNatural(partsA[i], partsB[i]);
+    if (order !== 0) return order;
+  }
+  // 共有前缀时，先结束的 code 优先；等价于让 '_' 优先于后续数字/文字。
+  return partsA.length - partsB.length;
+}
+
+/** 对话编辑器的确定性顺序：先按 code，再按 taskCode、段落号和 id。 */
 function sortDialogueRows(rows: CsvRow[]): CsvRow[] {
   return [...rows].sort((a, b) => {
     const codeA = String(a.code ?? '');
     const codeB = String(b.code ?? '');
-    if (codeA !== codeB) return codeA < codeB ? -1 : 1;
+    const codeOrder = compareDialogueCode(codeA, codeB);
+    if (codeOrder !== 0) return codeOrder;
+
+    const taskCodeA = String(a.taskCode ?? '');
+    const taskCodeB = String(b.taskCode ?? '');
+    const taskCodeOrder = compareNatural(taskCodeA, taskCodeB);
+    if (taskCodeOrder !== 0) return taskCodeOrder;
 
     const segmentA = Number(a.segment);
     const segmentB = Number(b.segment);
@@ -72,7 +114,7 @@ function ensureDefaultSideDialogueRows(rows: CsvRow[], questRows: CsvRow[]): { r
       if (existing.has(key)) continue;
       result.push({
         id: String(nextId++), code: `${taskCode}_${trigger}`, taskCode, trigger, segment: '1',
-        npcName: '', npcText: '', replies: '',
+        npcName: '', npcText: '', replies: trigger === 'deliver' ? 'take:收下' : '',
       });
       existing.add(key);
       added++;
@@ -418,6 +460,8 @@ interface BalanceTable {
   /** 复合主键（多列组合，key 用 '|' 连接）；存在时按多列匹配行。 */
   keyComposite?: string[];
   numeric?: string[];
+  /** 可编辑的文本字段（用于任务 params 等按 kind 解析的值）。 */
+  text?: string[];
   numericByType?: boolean;
   labels: string[];
 }
@@ -439,6 +483,25 @@ const QUEST_MODULE_TABLES = [
  * 只记录允许合并的配置文件名，避免旧整文件遮蔽新的代码/配置变更。
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
+const CONFIG_ROW_TOMBSTONES_FILE = 'config_row_tombstones.json';
+
+interface ConfigRowTombstones {
+  version: 1;
+  tables: Record<string, string[][]>;
+}
+
+type ConfigRowsSnapshot = Record<string, CsvRow[]>;
+
+const WHOLE_TABLE_KEY_COLUMNS: Record<string, string[]> = {
+  'dialogues.csv': ['code', 'segment'],
+  'quest_lines.csv': ['code'],
+  'quests.csv': ['id'],
+  'quest_conditions.csv': ['id'],
+  'quest_objectives.csv': ['id'],
+  'quest_effects.csv': ['id'],
+  'quest_edges.csv': ['id'],
+};
+
 function persistentConfigDir(gameApp: GameApp): string | null {
   if (!gameApp.balanceOverridePath) return null;
   const dataDir = dirname(gameApp.balanceOverridePath);
@@ -456,10 +519,61 @@ function persistentConfigDir(gameApp: GameApp): string | null {
   return join(dataDir, 'config');
 }
 
-function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
+function configKeyColumns(file: string, header: readonly string[]): string[] {
+  const wholeTableColumns = WHOLE_TABLE_KEY_COLUMNS[file];
+  if (wholeTableColumns) return wholeTableColumns;
+  const balance = Object.values(BALANCE_TABLES).find((table) => table.file === file);
+  if (balance?.keyComposite) return balance.keyComposite;
+  if (balance?.key) return [balance.key];
+  return header.length > 0 ? [header[0]] : [];
+}
+
+function configRowIdentity(row: CsvRow, columns: readonly string[], label: string): string[] {
+  const values = columns.map((column) => row[column]);
+  if (values.some((value) => value === undefined || value === '')) {
+    throw new Error(`${label} 缺少主键列 ${columns.join('+')}`);
+  }
+  return values as string[];
+}
+
+function rowIdentityKey(values: readonly string[]): string {
+  return JSON.stringify(values);
+}
+
+function readConfigRowTombstones(path: string): ConfigRowTombstones {
+  if (!existsSync(path)) return { version: 1, tables: {} };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ConfigRowTombstones>;
+  if (parsed.version !== 1 || !parsed.tables || typeof parsed.tables !== 'object' || Array.isArray(parsed.tables)) {
+    throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 格式无效`);
+  }
+  for (const [file, rows] of Object.entries(parsed.tables)) {
+    if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file) || !Array.isArray(rows)
+      || rows.some((values) => !Array.isArray(values) || values.some((value) => typeof value !== 'string' || value === ''))) {
+      throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 的 ${file} 行主键无效`);
+    }
+  }
+  return { version: 1, tables: parsed.tables };
+}
+
+function writeConfigRowTombstones(path: string, state: ConfigRowTombstones): void {
+  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tempPath, path);
+}
+
+function snapshotConfigRows(dir: string, files: readonly string[]): ConfigRowsSnapshot {
+  return Object.fromEntries(files.map((file) => {
+    const rows = parseCsvStructured(readFileSync(join(dir, file), 'utf8')).rows;
+    return [file, rows.map((row) => ({ ...row }))];
+  }));
+}
+
+function persistConfigFiles(gameApp: GameApp, files: readonly string[], previousRows: ConfigRowsSnapshot = {}): void {
   const targetDir = persistentConfigDir(gameApp);
   if (!targetDir || files.length === 0) return;
   mkdirSync(targetDir, { recursive: true });
+  const tombstonesPath = join(targetDir, CONFIG_ROW_TOMBSTONES_FILE);
+  const tombstones = readConfigRowTombstones(tombstonesPath);
   const manifestPath = join(dirname(gameApp.balanceOverridePath!), GM_CONFIG_MANIFEST);
   let existing: string[] = [];
   try {
@@ -474,16 +588,42 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
   for (const file of files) {
     // 调用方只传入固定的 CSV 表名；再次限制路径，防止 GM 请求借此越界写文件。
     if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名: ${file}`);
-    copyFileSync(join(gameApp.configDir, file), join(targetDir, file));
+    const sourcePath = join(gameApp.configDir, file);
+    const persistedPath = join(targetDir, file);
+    const nextDoc = parseCsvStructured(readFileSync(sourcePath, 'utf8'));
+    const columns = configKeyColumns(file, nextDoc.header);
+    if (columns.length === 0 || columns.some((column) => !nextDoc.header.includes(column))) {
+      throw new Error(`${file} 缺少稳定主键列`);
+    }
+    const before = previousRows[file]
+      ?? (existsSync(persistedPath) ? parseCsvStructured(readFileSync(persistedPath, 'utf8')).rows : nextDoc.rows);
+    const beforeByKey = new Map(before.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存前行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const nextByKey = new Map(nextDoc.rows.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存后行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const tableTombstones = new Map((tombstones.tables[file] ?? []).map((values) => [rowIdentityKey(values), values]));
+    for (const [key, values] of beforeByKey) {
+      if (!nextByKey.has(key)) tableTombstones.set(key, values);
+    }
+    for (const key of nextByKey.keys()) tableTombstones.delete(key);
+    const sorted = [...tableTombstones.values()].sort((left, right) => rowIdentityKey(left).localeCompare(rowIdentityKey(right)));
+    if (sorted.length > 0) tombstones.tables[file] = sorted;
+    else delete tombstones.tables[file];
+    copyFileSync(sourcePath, persistedPath);
     all.add(file);
   }
+  writeConfigRowTombstones(tombstonesPath, tombstones);
   writeFileSync(manifestPath, [...all].sort().join('\n') + '\n', 'utf8');
 }
 
 export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
-    numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -535,6 +675,17 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     file: 'treasures.csv', key: 'id',
     numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
     labels: ['id', 'code', 'name', 'category', 'rarity', 'effectType', 'applyType'],
+  },
+  // 任务中的声望目标/效果也在声望专用视图集中展示；params 保持字符串，由运行时按 kind 校验。
+  quest_objectives: {
+    file: 'quest_objectives.csv', key: 'id',
+    text: ['params'],
+    labels: ['id', 'questCode', 'phase', 'kind', 'order'],
+  },
+  quest_effects: {
+    file: 'quest_effects.csv', key: 'id',
+    text: ['params'],
+    labels: ['id', 'questCode', 'phase', 'kind', 'order'],
   },
   constants: {
     file: 'game_constants.csv', key: 'key',
@@ -596,6 +747,8 @@ export function applyBalanceEdits(srcDir: string, targetDir: string, table: Bala
         const n = Number(newVal);
         if (!Number.isFinite(n)) throw new Error(table.file + ' 行 ' + keyVal + ' 字段 ' + h + '="' + newVal + '" 不是合法数字');
         merged[h] = String(n);
+      } else if (table.text?.includes(h)) {
+        merged[h] = newVal;
       }
       // 非声明可编辑字段：忽略（不覆盖原值）
     }
@@ -651,8 +804,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -676,14 +829,18 @@ function sectionGeneric(table){
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
     var kingdomKeys = {}; for (var ki=0;ki<KINGDOM_ROWS.length;ki++) kingdomKeys[KINGDOM_ROWS[ki][0]] = true;
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
+    var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
+    var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -714,6 +871,22 @@ var REP_ROWS = [
   ['reputation_good_pvp_reward','正声望击杀奖励','每消灭十点敌方士兵人口增加的声望值'],
   ['reputation_evil_pvp_target_threshold','负声望攻击目标门槛','目标声望必须严格大于门槛'],
   ['reputation_evil_pvp_reward','负声望击杀奖励','每消灭十点敌方士兵人口增加的负声望绝对值'],
+  ['kingdom_task_tribute_weight','上贡任务声望权重','影响可获得上贡声望奖励的任务抽取概率'],
+  ['kingdom_task_clear_pve_weight','清理PvE任务声望权重','影响可获得清理PvE声望奖励的任务抽取概率'],
+  ['kingdom_task_attack_evil_weight','攻打负声望任务权重','影响可获得攻打玩家声望奖励的任务抽取概率'],
+  ['kingdom_task_eliminate_troops_weight','消灭兵力任务权重','影响可获得消灭兵力声望奖励的任务抽取概率'],
+  ['kingdom_task_evil_target_threshold','负声望任务目标门槛','王国任务指定玩家时使用的负声望绝对值门槛'],
+  ['kingdom_task_tribute_reward_reputation','上贡任务奖励声望','完成并领取上贡任务时增加的声望'],
+  ['kingdom_task_clear_pve_reward_reputation','清理PvE任务奖励声望','完成并领取清理PvE任务时增加的声望'],
+  ['kingdom_task_attack_evil_reward_reputation','攻打玩家任务奖励声望','完成并领取攻打负声望玩家任务时增加的声望'],
+  ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力任务奖励声望','完成并领取消灭兵力任务时增加的声望'],
+  ['kingdom_pve_killed_population_per_reputation','王国PvE声望人口阈值','每累计消灭多少王国PvE军队人口扣1点声望；跨战斗累加'],
+  ['kingdom_pve_retaliation_chunk','王国PvE报复批次','通过人口累计扣分每达到此数量时检查一次主城报复'],
+  ['kingdom_pve_retaliation_raid_threshold','封地掠夺声望阈值','玩家声望小于等于此值时，主城对应封地派雇佣军掠夺'],
+  ['kingdom_pve_retaliation_siege_threshold','封地攻城声望阈值','玩家声望小于等于此值时，将封地报复升级为攻城'],
+  ['kingdom_fief_mercenary_min_ratio','封地雇佣军比例下限','声望触发报复时，雇佣军占封地守军总人口的比例下限'],
+  ['kingdom_fief_mercenary_max_ratio','封地雇佣军比例上限','声望触发报复时，雇佣军占封地守军总人口的比例上限'],
+  ['kingdom_city_state_reputation_penalty','旧版城邦固定扣分（弃用）','仅兼容旧配置，不再参与声望结算'],
   ['reputation_good_pop_growth_per_point','正声望人口增长/点','每点正声望带来的人口增长倍率'],
   ['reputation_good_pop_growth_cap','正声望人口增长上限','正声望人口增长倍率上限'],
   ['reputation_evil_pop_growth_penalty_per_point','负声望人口下降/点','每点负声望带来的人口增长下降倍率'],
@@ -735,19 +908,10 @@ var KINGDOM_ROWS = [
   ['kingdom_task_interval_min_sec','循环最短间隔','领取或失败后下一任务的最短等待'],
   ['kingdom_task_interval_max_sec','循环最长间隔','领取或失败后下一任务的最长等待'],
   ['kingdom_task_duration_sec','任务有效期','超时失败且无惩罚'],
-  ['kingdom_task_tribute_weight','上贡权重','四类任务的相对抽取权重'],
-  ['kingdom_task_clear_pve_weight','清理PvE权重','只选本象限地图已有普通PvE'],
-  ['kingdom_task_attack_evil_weight','攻打负声望玩家权重','无合格目标时自动排除'],
-  ['kingdom_task_eliminate_troops_weight','消灭兵力权重','无合格目标时自动排除'],
   ['kingdom_task_tribute_amount_min','上贡最小数量','随机资源需求下限'],
   ['kingdom_task_tribute_amount_max','上贡最大数量','随机资源需求上限'],
   ['kingdom_task_eliminate_troops_min','消灭兵力最小值','累计实际战损人数'],
   ['kingdom_task_eliminate_troops_max','消灭兵力最大值','累计实际战损人数'],
-  ['kingdom_task_evil_target_threshold','负声望目标门槛','目标声望严格小于此值的负数'],
-  ['kingdom_task_tribute_reward_reputation','上贡奖励声望','手动领取时结算'],
-  ['kingdom_task_clear_pve_reward_reputation','清理PvE奖励声望','手动领取时结算'],
-  ['kingdom_task_attack_evil_reward_reputation','攻打玩家奖励声望','手动领取时结算'],
-  ['kingdom_task_eliminate_troops_reward_reputation','消灭兵力奖励声望','手动领取时结算'],
 ];
 
 // ── M8 专用视图：避免在长的全局常量表里漏看任务村攻城倒计时。 ──
@@ -768,6 +932,134 @@ function sectionM8(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>M8 任务村参数</h2>'+h+'</div>';
+}
+
+// ── 地图地形专用视图：不再让森林/丘陵规则埋在全局常量长表中。 ──
+var TERRAIN_ROWS = [
+  ['forest_vision_penalty','森林方向视野衰减','军队位于森林或朝森林方向观察时减少的视野格数'],
+  ['hills_vision_bonus','丘陵视野加成','军队位于丘陵格时额外增加的视野格数'],
+  ['hills_march_speed_multiplier','丘陵行军速度倍率','经过丘陵格的路径段速度倍率；0.6666666667 表示速度降低三分之一'],
+];
+function sectionTerrain(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">地图地貌由世界种子生成：森林会按方向降低视野，丘陵会增加驻军视野但降低经过该格的行军速度；拓荒只允许平原。修改后保存会写回 game_constants.csv 并热重载。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TERRAIN_ROWS.length;j++){
+    var item = TERRAIN_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>地图格子特性 / 地形参数</h2>'+h+'</div>';
+}
+
+// ── 军队规模专用视图：规模减速参数写入 game_constants.csv，影响新派出的行军。 ──
+var MARCH_SIZE_ROWS = [
+  ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
+  ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
+  ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+];
+function sectionMarchSize(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">军队有效人口按实际携带部队的数量 × units.csv 的 popCost 计算；先应用兵种/科技/全局/地形速度，再对每个路径段统一应用规模减速。商队固定速度不受影响；已在途行军不会因热重载改变原定时间。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
+    var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
+// ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
+var CITY_STATE_ROWS = [
+  ['kingdom_city_state_count','地图城邦数量','每张地图随机生成的城邦数量'],
+  ['kingdom_city_state_generation_version','城邦生成规则版本','提升版本后启动时按新规则重生成既有城邦'],
+  ['kingdom_city_state_tier_weights','城邦等级权重','格式为 1:权重|2:权重|3:权重'],
+  ['kingdom_city_state_tribe_pool','随机种族池','格式为 romans|gauls|teutons'],
+  ['kingdom_city_state_resource_min','旧版资源下限','兼容旧存档/旧配置；新生成城邦使用下方三级资源范围'],
+  ['kingdom_city_state_resource_max','旧版资源上限','兼容旧存档/旧配置；新生成城邦使用下方三级资源范围'],
+  ['kingdom_city_state_gold_min','旧版金币下限','兼容旧存档/旧配置；新生成城邦使用下方三级金币范围'],
+  ['kingdom_city_state_gold_max','旧版金币上限','兼容旧存档/旧配置；新生成城邦使用下方三级金币范围'],
+  ['kingdom_city_state_troops_per_resource','旧版资源折算兵力','兼容旧存档/旧配置；新生成城邦按等级每种兵数量生成'],
+  ['kingdom_city_state_troop_min','旧版总兵力下限','兼容旧存档/旧配置；新生成城邦使用下方三级每种兵范围'],
+  ['kingdom_city_state_troop_max','旧版总兵力上限','兼容旧存档/旧配置；新生成城邦使用下方三级每种兵范围'],
+  ['kingdom_city_state_scout_ratio','旧版侦察兵比例','兼容旧存档/旧配置；新生成城邦按种族兵种池随机抽取侦察兵'],
+  ['kingdom_city_state_unit_pool','旧版通用兵种池','兼容旧存档/旧配置；新生成城邦使用下方三种族兵种池'],
+  ['kingdom_city_state_unit_pool_romans','罗马兵种池','只从罗马兵种池中抽取'],
+  ['kingdom_city_state_unit_pool_gauls','高卢兵种池','只从高卢兵种池中抽取'],
+  ['kingdom_city_state_unit_pool_teutons','条顿兵种池','只从条顿兵种池中抽取'],
+  ['kingdom_city_state_tier1_unit_count','一级随机兵种数','默认 3 种'],
+  ['kingdom_city_state_tier1_unit_min','一级每种兵最少','默认 0'],
+  ['kingdom_city_state_tier1_unit_max','一级每种兵最多','默认 20'],
+  ['kingdom_city_state_tier1_resource_min','一级资源最少','四类资源各自随机下限；少量资源'],
+  ['kingdom_city_state_tier1_resource_max','一级资源最多','四类资源各自随机上限；少量资源'],
+  ['kingdom_city_state_tier1_gold_min','一级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier1_gold_max','一级金币最多','金币随机上限'],
+  ['kingdom_city_state_tier2_unit_count','二级随机兵种数','默认 4 种'],
+  ['kingdom_city_state_tier2_unit_min','二级每种兵最少','默认 5'],
+  ['kingdom_city_state_tier2_unit_max','二级每种兵最多','默认 35'],
+  ['kingdom_city_state_tier2_resource_min','二级资源最少','四类资源各自随机下限；中量资源'],
+  ['kingdom_city_state_tier2_resource_max','二级资源最多','四类资源各自随机上限；中量资源'],
+  ['kingdom_city_state_tier2_gold_min','二级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier2_gold_max','二级金币最多','金币随机上限'],
+  ['kingdom_city_state_tier3_unit_count','三级随机兵种数','默认 5 种'],
+  ['kingdom_city_state_tier3_unit_min','三级每种兵最少','默认 10'],
+  ['kingdom_city_state_tier3_unit_max','三级每种兵最多','默认 50'],
+  ['kingdom_city_state_tier3_resource_min','三级资源最少','四类资源各自随机下限；大量资源'],
+  ['kingdom_city_state_tier3_resource_max','三级资源最多','四类资源各自随机上限；大量资源'],
+  ['kingdom_city_state_tier3_gold_min','三级金币最少','金币随机下限'],
+  ['kingdom_city_state_tier3_gold_max','三级金币最多','金币随机上限'],
+  ['kingdom_city_state_raid_defense_min_ratio','掠夺防守比例下限','城邦随机分配用于防守掠夺的兵力比例'],
+  ['kingdom_city_state_raid_defense_max_ratio','掠夺防守比例上限','城邦随机分配用于防守掠夺的兵力比例'],
+  ['kingdom_city_state_recovery_min_sec','兵力恢复最短秒数','默认 43200 秒（12 小时）'],
+  ['kingdom_city_state_recovery_max_sec','兵力恢复最长秒数','默认 172800 秒（48 小时）'],
+  ['kingdom_city_state_recovery_resource_extra_sec','资源恢复额外秒数','资源比兵力恢复再多 21600 秒（6 小时）'],
+  ['kingdom_fief_unit_count','封地随机兵种数','四个领主封地统一标准；从对应种族兵种池随机抽取'],
+  ['kingdom_fief_unit_min','封地每种兵最少','封地每种随机兵种的数量下限'],
+  ['kingdom_fief_unit_max','封地每种兵最多','封地每种随机兵种的数量上限'],
+  ['kingdom_fief_resource_min','封地资源下限','封地四类资源各自随机下限'],
+  ['kingdom_fief_resource_max','封地资源上限','封地四类资源各自随机上限'],
+  ['kingdom_fief_gold_min','封地金币下限','封地金币随机下限'],
+  ['kingdom_fief_gold_max','封地金币上限','封地金币随机上限'],
+  ['kingdom_capital_unit_count','王都随机兵种数','王都从对应种族兵种池随机抽取的兵种数量'],
+  ['kingdom_capital_unit_min','王都每种兵最少','王都每种随机兵种的数量下限'],
+  ['kingdom_capital_unit_max','王都每种兵最多','王都每种随机兵种的数量上限'],
+  ['kingdom_capital_resource_min','王都资源下限','王都四类资源各自随机下限'],
+  ['kingdom_capital_resource_max','王都资源上限','王都四类资源各自随机上限'],
+  ['kingdom_capital_gold_min','王都金币下限','王都金币随机下限'],
+  ['kingdom_capital_gold_max','王都金币上限','王都金币随机上限'],
+  ['kingdom_city_state_resource_field_level','资源田保底等级','四种城外资源田至少达到此等级'],
+  ['kingdom_city_state_inner_building_count_min','城内建筑最少数','随机城内建筑数量下限'],
+  ['kingdom_city_state_inner_building_count_max','城内建筑最多数','随机城内建筑数量上限'],
+  ['kingdom_city_state_outer_building_count_min','城外建筑最少数','随机城外建筑数量下限（至少四座资源田）'],
+  ['kingdom_city_state_outer_building_count_max','城外建筑最多数','随机城外建筑数量上限'],
+  ['kingdom_city_state_building_level_min','随机建筑最低等级','非资源田保底建筑的随机等级下限'],
+  ['kingdom_city_state_building_level_max','随机建筑最高等级','非资源田保底建筑的随机等级上限'],
+  ['kingdom_city_state_inner_building_pool','城内建筑池','格式为 warehouse|granary|barracks…'],
+  ['kingdom_city_state_outer_building_pool','城外建筑池','格式为 woodcutter|claypit|ironmine…'],
+];
+var CITY_STATE_STRING_KEYS = { kingdom_city_state_tier_weights: true, kingdom_city_state_tribe_pool: true, kingdom_city_state_unit_pool: true, kingdom_city_state_unit_pool_romans: true, kingdom_city_state_unit_pool_gauls: true, kingdom_city_state_unit_pool_teutons: true, kingdom_city_state_inner_building_pool: true, kingdom_city_state_outer_building_pool: true };
+function sectionCityState(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">城邦按等级随机生成：一级 3 种兵、每种 0–20；二级 4 种兵、每种 5–35；三级 5 种兵、每种 10–50。每座城邦随机选择罗马/高卢/条顿之一，并只抽取该种族兵种池。侦察可选择“资源与守军”或“城内外建筑”两种模式。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<CITY_STATE_ROWS.length;j++){
+    var item = CITY_STATE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var textInput = !!CITY_STATE_STRING_KEYS[item[0]];
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="'+(textInput ? 'text' : 'number')+'" '+(textInput ? '' : 'min="0" step="any" ')+'value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>王国城邦参数（三级/三种族） · 王国 PvE（城邦/封地/王都）</h2>'+h+'</div>';
 }
 
 function sectionKingdom(){
@@ -807,10 +1099,34 @@ function sectionFounding(){
   h += '</tbody></table>';
   return '<div class="sec"><h2>拓荒参数</h2>'+h+'</div>';
 }
+
+// 声望相关的行级配置也在此处编辑，避免管理员还要在任务/宝物/议会厅表之间来回查找。
+function reputationCsvTable(table, title, rows, labels, fields, filter, inputType){
+  var selected = (rows || []).filter(filter || function(){ return true; });
+  if (!selected.length) return '';
+  var type = inputType || 'number';
+  var h = '<h3 style="margin:12px 0 6px;color:#8ed5ff;font-size:12px">'+esc(title)+'</h3>';
+  h += '<table class="bt"><thead><tr>';
+  for (var i=0;i<labels.length;i++) h += '<th>'+esc(labels[i])+'</th>';
+  for (var j=0;j<fields.length;j++) h += '<th>'+esc(fields[j][1])+'</th>';
+  h += '</tr></thead><tbody>';
+  for (var k=0;k<selected.length;k++){
+    var row = selected[k], key = row.id == null ? '' : String(row.id);
+    h += '<tr>';
+    for (var a=0;a<labels.length;a++) h += '<td class="lbl">'+esc(row[labels[a]])+'</td>';
+    for (var b=0;b<fields.length;b++){
+      var field = fields[b][0], value = row[field] == null ? '' : row[field];
+      h += '<td><input type="'+type+'" '+(type === 'number' ? 'step="any" ' : '')+'value="'+esc(value)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(field)+'" oninput="onEdit(this)"></td>';
+    }
+    h += '</tr>';
+  }
+  return h+'</tbody></table>';
+}
+
 function sectionReputation(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。人口增长、负声望军队攻防、金币税收和 PvE 宝物掉落效果按声望值线性计算并受上限约束；所有行为数值均可在此修改。娜塔莉任务的声望结算可在任务效果表的 adjust_reputation 行调整，宝物本身不再扣除声望。</div>';
+  var h = '<div class="hint">正声望为正数、负声望为负数、初始声望值为 0。所有会增加/扣除声望、以声望作为门槛或由声望派生效果的全局参数均集中在此：PvP、王国任务、王国 PvE 击杀累计、封地报复、人口增长、军队攻防、金币税收和 PvE 宝物掉落。任务中的声望目标/效果、宝物被动声望和议会厅声望价格也在本板块直接编辑；保存后分别写回对应 CSV。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<REP_ROWS.length;j++){
     var item = REP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -819,6 +1135,12 @@ function sectionReputation(){
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
+  h += reputationCsvTable('kingdom_services', '议会厅服务声望价格（kingdom_services.csv）', DATA.kingdom_services, ['id','code','name','category'], [['reputationCost','声望价格']], null, 'number');
+  h += reputationCsvTable('treasures', '宝物被动声望（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['reputationValue','主宝物栏声望修正']], null, 'number');
+  h += reputationCsvTable('treasures', '直接声望宝物效果（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['effectValue','声望效果值']], function(row){ return row.effectType === 'reputation'; }, 'number');
+  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most'; }, 'number');
+  h += reputationCsvTable('quest_effects', '任务声望调整（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','声望变化值']], function(row){ return row.kind === 'adjust_reputation'; }, 'number');
+  h += reputationCsvTable('quest_effects', '正声望兑换佣兵（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','兑换参数（兵种:每点数量）']], function(row){ return row.kind === 'grant_mercenaries_by_positive_reputation'; }, 'text');
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
 }
 
@@ -883,8 +1205,8 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','主基地最低级','繁荣/级','人口增长/级·时'];
+  var bFields = ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','繁荣/级','人口增长/级·时'];
   var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
@@ -1014,12 +1336,15 @@ function render(){
   html += sectionBuildings();
   html += sectionFounding();
   html += sectionReputation();
+  html += sectionTerrain();
+  html += sectionMarchSize();
+  html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy') continue; // 已在 sectionBuildings 合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects') continue; // 已在专用视图合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;
@@ -1383,6 +1708,9 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
     try {
       const doc = parseCsvStructured(readFileSync(join(dir, 'dialogues.csv'), 'utf-8'));
+      const previousRows: ConfigRowsSnapshot = {
+        'dialogues.csv': doc.rows.map((row) => ({ ...row })),
+      };
       // 支持新增/删除行：移除旧数据行、保留表头/注释，再把当前编辑器行追加到文档尾。
       const oldDataIndices = new Set(doc.rowIndices);
       const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
@@ -1399,7 +1727,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(tmp, 'dialogues.csv'), csv, 'utf-8');
       loadGameConfig(tmp); // 校验失败不写线上配置
       writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
-      persistConfigFiles(gameApp, ['dialogues.csv']);
+      persistConfigFiles(gameApp, ['dialogues.csv'], previousRows);
       gameApp.configAuthority.recordChange(['dialogues.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: doc.rows.length });
@@ -1435,6 +1763,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, [...QUEST_MODULE_TABLES, 'dialogues.csv']);
       const csvByFile: Record<string, string> = {};
       for (const file of QUEST_MODULE_TABLES) {
         const rows = body.tables[file]?.rows;
@@ -1460,7 +1789,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
       const changedFiles = [...QUEST_MODULE_TABLES, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
@@ -1508,6 +1837,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, ['quests.csv', 'dialogues.csv']);
       const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
       const doc = parseCsvStructured(text);
       const header = doc.header;
@@ -1525,7 +1855,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
       const changedFiles = ['quests.csv' as const, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
@@ -1585,6 +1915,8 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     try {
+      const changedFiles = edits.map(([, table]) => table.file);
+      const previousRows = snapshotConfigRows(dir, changedFiles);
       // 校验：把本次编辑应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
@@ -1601,8 +1933,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      const changedFiles = edits.map(([, table]) => table.file);
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       // 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();
@@ -1775,20 +2106,22 @@ const GM_DIALOGUES_HTML = `<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;vertical-align:top}th{position:sticky;top:0;background:#20354c;color:#8ed5ff;white-space:nowrap}input,textarea{width:190px;min-width:120px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}textarea{height:96px;resize:vertical}.small{width:70px;min-width:70px}.row-actions{min-width:54px;white-space:nowrap}a{color:#79cfff}
 </style></head><body>
 <h1>NPC 对话编辑</h1>
-<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是任务接取成功后触发（S3 使用独立的 <b>s3_after_accept</b> 对象），<b>deliver</b> 是交付；M8/M9 的成功文本使用默认触发点，失败文本使用对应的 <b>accept_failure</b>/<b>deliver_failure</b>。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
+<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是任务接取成功后触发（S3 使用独立的 <b>s3_after_accept</b> 对象），<b>deliver</b> 是交付；交付弹窗只有配置了 replies 才显示按钮，没有 replies 时只能点右上角关闭。交付常用 <b>take:收下</b>，M8/M9 的成功文本使用默认触发点，失败文本使用对应的 <b>accept_failure</b>/<b>deliver_failure</b>。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。npcName/npcText 支持服务端变量 <b>{villageName}</b>（当前玩家村庄名）和 <b>{fiefName}</b>（当前玩家所属封地名），配置中心保存变量名，客户端收到的是已替换文本。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
 <div class="bar"><button onclick="addObject()">+ 新增对话对象</button><button class="save" onclick="save()">保存并热重载</button><span id="status">加载中…</span></div>
 <div class="table-wrap"><table id="grid"></table></div>
 <script>
 let token=sessionStorage.getItem('gmToken')??'',header=[],rows=[];
 const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
 async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},token?{'X-GM-Token':token}: {},opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();sessionStorage.setItem('gmToken',token);return api(url,opt)}}let j=await r.json();if(!r.ok||!j.ok)throw Error(j.reason||'请求失败');return j}
-const editable=new Set(['npcName','npcText','replies']);
-function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??'');if(codeA!==codeB)return codeA<codeB?-1:1;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
+ const editable=new Set(['npcName','npcText','replies']);
+ function compareNatural(a,b){let aa=String(a??'').match(/\\d+|\\D+/g)||[''],bb=String(b??'').match(/\\d+|\\D+/g)||[''];let n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let x=aa[i],y=bb[i],nx=/^\\d+$/.test(x),ny=/^\\d+$/.test(y);if(nx&&ny){let ux=x.replace(/^0+(?=\\d)/,''),uy=y.replace(/^0+(?=\\d)/,'');if(ux.length!==uy.length)return ux.length-uy.length;if(ux!==uy)return ux<uy?-1:1;if(x.length!==y.length)return x.length-y.length;continue}if(x!==y)return x<y?-1:1}return aa.length-bb.length}
+function compareDialogueCode(a,b){let aa=String(a??'').split('_'),bb=String(b??'').split('_'),n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let order=compareNatural(aa[i],bb[i]);if(order!==0)return order}return aa.length-bb.length}
+function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??''),codeOrder=compareDialogueCode(codeA,codeB);if(codeOrder!==0)return codeOrder;let taskCodeA=String(a.taskCode??''),taskCodeB=String(b.taskCode??''),taskCodeOrder=compareNatural(taskCodeA,taskCodeB);if(taskCodeOrder!==0)return taskCodeOrder;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
 function sortRows(){rows.sort(rowCompare)}
-function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code 排序，加载 '+rows.length+' 段'}
+function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code（下划线优先、数字感知）、taskCode 排序，加载 '+rows.length+' 段'}
 function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
-function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';rows.push(r);render()}
-function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);rows.splice(i+1,0,r);render()}
+function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';if(r.trigger==='deliver')r.replies='take:收下';rows.push(r);render()}
+function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);if(r.trigger==='deliver')r.replies='take:收下';rows.splice(i+1,0,r);render()}
 function removeRow(i){if(!confirm('删除这一段？'))return;let base=rows[i];rows.splice(i,1);let group=rows.filter(x=>x.id===base.id&&x.code===base.code).sort((a,b)=>(Number(a.segment)||0)-(Number(b.segment)||0));group.forEach((row,index)=>row.segment=String(index+1));render()}
 async function load(){try{let d=await api('/gm/dialogues/data');header=d.header;rows=d.rows||[];render()}catch(e){document.getElementById('status').textContent='加载失败：'+e.message}}
 async function save(){try{document.getElementById('status').textContent='校验并保存中…';let d=await api('/gm/dialogues/save',{method:'POST',body:JSON.stringify({rows})});document.getElementById('status').textContent='已保存并热重载（'+d.count+' 行）'}catch(e){document.getElementById('status').textContent='保存失败：'+e.message}}

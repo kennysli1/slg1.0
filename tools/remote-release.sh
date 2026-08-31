@@ -126,18 +126,20 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
 fi
 
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
-# 都把共享 CSV 按主键合并到 Git 的默认 CSV：保留已有手调值，同时带入新增列/行，
-# 不会让旧整文件覆盖遮住新参数。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
+# 都把共享 CSV 按主键合并到 Git 的默认 CSV：配置中心已有单元格（包括空值）
+# 和自建行保持权威，Git 只补新增列/行；编辑器明确删除的行由共享删除记录移除。
+# 文件名只允许单层 CSV，防止 manifest 误写出配置目录。
 apply_persisted_config() {
   local target="$1"
   local manifest="$SHARED/data/balance_csv_files.list"
+  local tombstones="$SHARED/config/config_row_tombstones.json"
   [[ -f "$manifest" ]] || return 0
   while IFS= read -r file || [[ -n "$file" ]]; do
     [[ "$file" =~ ^[A-Za-z0-9_.-]+\.csv$ ]] || continue
     [[ -f "$SHARED/config/$file" && -d "$target/config" ]] || continue
     local merger="$target/scripts/merge-persisted-config.mjs"
     if [[ -f "$merger" ]]; then
-      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file"
+      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file" "$tombstones"
     else
       # 仅兼容没有该工具的旧 release/测试夹具；新发布包始终走按主键合并。
       echo "    警告：$merger 不存在，暂时整文件覆盖 $file" >&2
@@ -159,6 +161,17 @@ migrate_legacy_config() {
   KOW_STATE_DIR="$SHARED/data" \
   KOW_MIGRATION_BACKUP_DIR="$SHARED/data" \
     "$NODE_BIN" "$target/packages/server/dist/infra/config-authority.js" --migrate
+}
+
+archive_legacy_source() {
+  # 首次迁移前，旧生产目录 BASE/data 里可能还留有一份覆盖文件。若不把
+  # 这份已复制并成功迁移的源文件移走，下一次发布会再次复制/迁移它，
+  # 反复生成相同的配置 revision 和 GitHub PR。仅在迁移成功且 shared 中
+  # 已不存在活动覆盖时归档；失败会在此之前触发回滚，源文件保持可重试。
+  local source="$BASE/data/balance_overrides.json"
+  [[ -f "$source" && ! -e "$SHARED/data/balance_overrides.json" ]] || return 0
+  mkdir -p "$BASE/backups"
+  mv "$source" "$BASE/backups/balance_overrides.legacy-source.$(date -u +%Y%m%dT%H%M%SZ).json"
 }
 
 PREVIOUS_MODE=legacy
@@ -222,6 +235,7 @@ fi
 # 把新增参数遮住。目标 release 已存在时也同样重新合并（例如同一 SHA 重试发布）。
 apply_persisted_config "$TARGET"
 migrate_legacy_config "$TARGET"
+archive_legacy_source
 # 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
 apply_persisted_config "$TARGET"
 

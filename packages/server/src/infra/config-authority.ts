@@ -138,7 +138,7 @@ function isRemovedLegacyRow(name: string, rowKey: string, rows: CsvRow[], table:
 
 /** 仅供一次性迁移使用的旧 JSON 表映射。迁移后运行时不再读取 JSON。 */
 const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
-  buildings: { file: 'buildings.csv', key: 'id', numeric: ['maxLevel', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'] },
+  buildings: { file: 'buildings.csv', key: 'id', numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'] },
   building_levels: { file: 'building_levels.csv', keyComposite: ['code', 'level'], numeric: ['costWood', 'costClay', 'costIron', 'costCrop', 'costGold', 'timeSec', 'popCap', 'prod', 'treasureSlots', 'storagePerLevel', 'defensePerLevel', 'buildSpeedupPerLevel', 'trainTimeReducePerLevel', 'trainCostReducePerLevel', 'taskRefreshSec', 'taskMaxTasks', 'taskSideQuestChance', 'vaultProtectWood', 'vaultProtectClay', 'vaultProtectIron', 'vaultProtectCrop', 'vaultProtectGold'] },
   units: { file: 'units.csv', key: 'id', numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'] },
   mercenaries: { file: 'mercenaries.csv', key: 'id', numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'goldCost'] },

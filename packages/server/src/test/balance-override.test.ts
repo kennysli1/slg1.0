@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGameApp } from '../app.js';
 import { applyBalanceEdits, BALANCE_TABLES } from '../gateway/gm.js';
-import { mergeOverridesIntoRows } from '../infra/config.js';
+import { loadGameConfig, mergeOverridesIntoRows } from '../infra/config.js';
 import { ConfigAuthority, migrateLegacyBalanceOverrides } from '../infra/config-authority.js';
 import { parseCsvStructured } from '../infra/csv.js';
 
@@ -131,6 +131,7 @@ test('旧覆盖迁移：新版主基地删除的旧等级行只归档，不阻�
   const state = tempDir('kow-config-migration-main-level-');
   const overridePath = join(state, 'balance_overrides.json');
   try {
+    const baselineMainL4 = loadGameConfig(cfg.dir).buildings.main.levels[4].popCap;
     writeFileSync(overridePath, JSON.stringify({
       building_levels: {
         'main|5': { popCap: '99' },
@@ -144,7 +145,7 @@ test('旧覆盖迁移：新版主基地删除的旧等级行只归档，不阻�
     assert.equal(existsSync(overridePath), false);
     const app = createGameApp({ now: () => 1, manualScheduler: true, configDir: cfg.dir });
     assert.equal(app.config.buildings.main.levels[1].popCap, 11);
-    assert.equal(app.config.buildings.main.levels[4].popCap, 20);
+    assert.equal(app.config.buildings.main.levels[4].popCap, baselineMainL4);
   } finally {
     cfg.cleanup();
     rmSync(state, { recursive: true, force: true });
@@ -199,6 +200,79 @@ test('发布配置合并：旧十级城镇中心不能覆盖新版主基地四�
     assert.equal(rows.find((row) => row.code === 'main')?.maxLevel, '4');
     assert.equal(rows.find((row) => row.code === 'main')?.name, '主基地');
     assert.equal(rows.find((row) => row.code === 'warehouse')?.maxLevel, '10');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('发布配置合并：配置中心空值、自建行与 Git 新行同时保留', () => {
+  const dir = tempDir('kow-dialogue-merge-script-');
+  const canonical = join(dir, 'dialogues.csv');
+  const persisted = join(dir, 'persisted-dialogues.csv');
+  try {
+    writeFileSync(canonical, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段,take:收下',
+      '39,m11_deliver,m11,deliver,2,长老,第二段,take:收下',
+      '40,m12_accept,m12,accept,1,使者,Git 新增对话,accept:接受任务',
+      '',
+    ].join('\n'));
+    writeFileSync(persisted, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段（已调参）,take:收下',
+      '39,m11_deliver,m11,deliver,2,长老,第二段（已调参）,',
+      '99,custom_deliver,m11,deliver,1,长老,配置中心新增对话,',
+      '',
+    ].join('\n'));
+    const repoRoot = existsSync(join(process.cwd(), 'scripts', 'merge-persisted-config.mjs'))
+      ? process.cwd()
+      : join(process.cwd(), '..', '..');
+    execFileSync(process.execPath, [join(repoRoot, 'scripts', 'merge-persisted-config.mjs'), canonical, persisted, 'dialogues.csv'], { stdio: 'pipe' });
+    const rows = parseCsvStructured(readFileSync(canonical, 'utf8')).rows;
+    assert.equal(rows.length, 4);
+    assert.equal(rows.find((row) => row.segment === '1')?.npcText, '第一段（已调参）');
+    const second = rows.find((row) => row.code === 'm11_deliver' && row.segment === '2');
+    assert.equal(second?.npcText, '第二段（已调参）');
+    assert.equal(second?.replies, '', '配置中心明确清空的 replies 不能被 Git 默认值补回');
+    assert.ok(rows.some((row) => row.code === 'm12_accept'), 'Git 新增行仍应进入新 release');
+    assert.ok(rows.some((row) => row.code === 'custom_deliver'), '配置中心新增行在配置 PR 合并前也必须跨部署保留');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('发布配置合并：配置中心删除行通过墓碑跨部署保留', () => {
+  const dir = tempDir('kow-dialogue-delete-merge-script-');
+  const canonical = join(dir, 'dialogues.csv');
+  const persisted = join(dir, 'persisted-dialogues.csv');
+  const tombstones = join(dir, 'config_row_tombstones.json');
+  try {
+    writeFileSync(canonical, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段,take:收下',
+      '39,m11_deliver,m11,deliver,2,长老,第二段,take:收下',
+      '40,m12_accept,m12,accept,1,使者,Git 新增对话,accept:接受任务',
+      '',
+    ].join('\n'));
+    writeFileSync(persisted, [
+      'id,code,taskCode,trigger,segment,npcName,npcText,replies',
+      '39,m11_deliver,m11,deliver,1,长老,第一段,take:收下',
+      '',
+    ].join('\n'));
+    writeFileSync(tombstones, JSON.stringify({
+      version: 1,
+      tables: { 'dialogues.csv': [['m11_deliver', '2']] },
+    }));
+    const repoRoot = existsSync(join(process.cwd(), 'scripts', 'merge-persisted-config.mjs'))
+      ? process.cwd()
+      : join(process.cwd(), '..', '..');
+    execFileSync(process.execPath, [
+      join(repoRoot, 'scripts', 'merge-persisted-config.mjs'), canonical, persisted, 'dialogues.csv', tombstones,
+    ], { stdio: 'pipe' });
+    const rows = parseCsvStructured(readFileSync(canonical, 'utf8')).rows;
+    assert.equal(rows.some((row) => row.code === 'm11_deliver' && row.segment === '2'), false,
+      '配置中心明确删除的段落不能被 Git 行复活');
+    assert.ok(rows.some((row) => row.code === 'm12_accept'), '没有删除记录的 Git 新行仍应进入新 release');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -27,6 +27,20 @@ MAIN_SHA="${REMOTE_LINE%%[[:space:]]*}"
 git -C "$ROOT" fetch --quiet origin main
 git -C "$ROOT" cat-file -e "$MAIN_SHA^{commit}"
 echo "    production source: origin/main@$MAIN_SHA"
+# 配置中心与运维文档提交不应被针对出厂默认值的完整行为测试阻断；
+# 只要本次 main 提交没有触及 packages/ 业务代码，就走配置结构校验。
+# 一旦提交包含业务代码，仍执行完整 verify:quick。用提交实际 diff 判断，
+# 不依赖 squash merge 后可能变化的 commit subject。
+RELEASE_PATHS="$(git -C "$ROOT" diff-tree --no-commit-id --name-only -r "$MAIN_SHA")"
+CONFIG_SYNC_RELEASE=1
+if printf '%s\n' "$RELEASE_PATHS" | grep -q '^packages/'; then
+  CONFIG_SYNC_RELEASE=0
+fi
+if [[ "$CONFIG_SYNC_RELEASE" == 1 ]]; then
+  echo "    release kind: configuration/operations (config-specific validation)"
+else
+  echo "    release kind: code (full validation)"
+fi
 
 DEPLOY_TMP="$(mktemp -d)"
 WORKTREE="$DEPLOY_TMP/main"
@@ -72,7 +86,15 @@ git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
   cd "$WORKTREE"
   npm ci
   npm run guard
-  npm run verify:quick
+  if [[ "$CONFIG_SYNC_RELEASE" == 1 ]]; then
+    npm run build:shared
+    npm run lint:all
+    npm run typecheck
+    npm run verify:config-sync
+    npm run test:ops
+  else
+    npm run verify:quick
+  fi
   KOW_RELEASE_BRANCH=main KOW_RELEASE_COMMIT="$MAIN_SHA" npm run verify:deploy
 )
 

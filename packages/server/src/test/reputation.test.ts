@@ -91,3 +91,35 @@ test('声望：PvP BattleEnded 事件按实际消灭的士兵人口结算', asyn
   const rep = await send(app, 'reputation.GetByVillage', { villageId: va });
   assert.equal((rep.payload as any).value, 2);
 });
+
+test('声望：王国 PvE 击杀人口按25累计，跨战斗保留余数且不再按侦察/攻击固定扣分', async () => {
+  const app = createGameApp({ manualScheduler: true }); app.setupWorld();
+  const reg = (await send(app, 'player.Register', { name: '王国PvE声望', password: 'p1234', tribe: 'romans' })).payload as any;
+  const villageId = reg.player.villageId;
+  app.pve.create('rep-kingdom-city', 'kingdom_city_state', 4, 4);
+  const emitBattle = async (losses: Record<string, number>) => app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: 0, payload: {
+    side: 'attacker', targetKind: 'pve', targetId: 'rep-kingdom-city', fromVillage: villageId, defenderLossesAttributed: losses,
+  } } as any);
+  await emitBattle({ legionnaire: 24 });
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, 0);
+  await emitBattle({ legionnaire: 1 });
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, -1);
+  await emitBattle({ legionnaire: 24 });
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, -1);
+});
+
+test('王国 PvE 声望批次：-10 触发封地掠夺，-20 改为攻城，雇佣军不占玩家驻军', async () => {
+  const app = createGameApp({ manualScheduler: true }); app.setupWorld();
+  const reg = (await send(app, 'player.Register', { name: '王国报复', password: 'p1234', tribe: 'romans' })).payload as any;
+  const villageId = reg.player.villageId;
+  await app.bus.emit({ name: 'reputation.Changed', source: 'test', ts: 0, payload: { playerId: reg.player.id, value: -10, kingdomPvePenaltyChunks: 1 } } as any);
+  const first = app.store.all<any>('movement').find((m) => m.kingdomMercenary);
+  assert.ok(first);
+  assert.equal(first.battleType, 'raid');
+  assert.equal(first.npcService, true);
+  assert.ok(String(first.fromVillage).startsWith('kingdom-fief:'));
+  assert.equal((await send(app, 'military.GetArmy', { villageId })).ok, true);
+  await app.bus.emit({ name: 'reputation.Changed', source: 'test', ts: 0, payload: { playerId: reg.player.id, value: -20, kingdomPvePenaltyChunks: 1 } } as any);
+  const all = app.store.all<any>('movement').filter((m) => m.kingdomMercenary);
+  assert.ok(all.some((m) => m.battleType === 'siege'));
+});

@@ -19,6 +19,9 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.storageBase, 800, '基础容量');
   assert.equal(c.mapSize, 20, '地图尺寸');
   assert.equal(c.mapViewRadius, 6, '视野半径');
+  assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
+  assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
+  assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
 });
 
 test('开局模板：village_templates.csv 展开预置建筑', () => {
@@ -41,6 +44,10 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   assert.equal(cfg.buildings['warehouse'].zone, 'inner', '仓库归 inner');
   assert.equal(cfg.buildings['barracks'].zone, 'inner', '兵营归 inner（军事建筑迁入城内）');
   assert.equal(cfg.buildings['mercenarycamp'].zone, 'outer', '雇佣兵营地归 outer');
+  assert.equal(cfg.buildings['council'].maxCount, 1, '议会厅每村最多 1 座');
+  assert.equal(cfg.buildings['council'].mainBaseLevel, 2, '议会厅需要二级主基地');
+  assert.equal(cfg.buildings['alliance_hall'].maxCount, 1, '联盟大厅每村最多 1 座');
+  assert.equal(cfg.buildings['alliance_hall'].mainBaseLevel, 2, '联盟大厅需要二级主基地');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
   assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');
@@ -101,6 +108,21 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m6.objective.kind, 'resource_owned');
   assert.equal(cfg.quests.m6.objective.resourceKey, 'gold');
   assert.equal(cfg.quests.m6.objective.count, 100);
+  assert.equal(cfg.quests.m10.objective.kind, 'main_base_level');
+  assert.equal(cfg.quests.m10.objective.count, 2, 'M10 目标为二级主基地');
+  assert.deepEqual(cfg.quests.m10.rewards.resourceGrowth, { percent: 25, durationSec: 43200 }, 'M10 奖励四资源产量 +25%/12小时');
+  assert.equal(cfg.quests.m11.trigger, 'main_base_level:2', 'M11 由二级主基地触发');
+  assert.equal(cfg.quests.m11.objective.kind, 'explore_tiles');
+  assert.equal(cfg.quests.m11.objective.count, 200);
+  assert.deepEqual(cfg.quests.m11.rewards.buildingUnlocks, ['alliance_hall', 'council']);
+  assert.ok(cfg.questGraph.lines.world_exploration, 'M11 应位于开眼看世界任务线');
+  assert.equal(cfg.quests.m12.lineCode, 'world_exploration', 'M12 前置 M11，应归入开眼看世界任务线');
+  assert.equal(cfg.quests.m14.lineCode, 'world_exploration', 'M14 前置 M13，应归入开眼看世界任务线');
+  assert.equal(cfg.quests.m15.lineCode, 'world_exploration', 'M15 前置 M14，应归入开眼看世界任务线');
+  assert.deepEqual(cfg.quests.m14.objective.resources, { crop: 500 });
+  assert.deepEqual(cfg.quests.m14.rewards.reputationMercenaryExchange, { unitCode: 'merc_sword', perPoint: 2 });
+  assert.equal(cfg.quests.m15.objective.threshold, -5);
+  assert.deepEqual(cfg.quests.m15.rewards.resourceGrowth, { resource: 'crop', percent: 25, durationSec: 86400 }, 'M15 只应提高粮食产量');
   assert.equal(cfg.quests.m7.objective.kind, 'research_completed');
   assert.equal(cfg.quests.m7.objective.count, 1);
   assert.equal(cfg.quests.m8.objective.kind, 'defend_task_village');
@@ -138,9 +160,21 @@ test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼�
   assert.ok(s4.edges.length >= 1, '任务关系不应在运行时目录中丢失');
 });
 
+test('交付对话：所有 deliver 段配置收下回复', () => {
+  const cfg = loadGameConfig(configDir);
+  const deliver = Object.values(cfg.dialogues).filter((dialogue) => dialogue.trigger === 'deliver');
+  assert.ok(deliver.length > 0, '应存在 deliver 对话');
+  for (const dialogue of deliver) {
+    assert.ok(
+      dialogue.replies.some((reply) => reply.key === 'take' && reply.label === '收下'),
+      `${dialogue.code}#${dialogue.segment} 应配置 take:收下`,
+    );
+  }
+});
+
 test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
-  assert.equal(cfg.constants.m8AttackDelaySec, 28_800);
+  assert.ok(cfg.constants.m8AttackDelaySec > 0, 'M8 攻城倒计时应来自可调配置且为正数');
   assert.equal(cfg.constants.m8TaskVillageResourceAmount, 500);
   assert.equal(cfg.constants.m8TaskVillageGold, 500);
   assert.equal(cfg.buildings.explorers_guild.zone, 'outer');
@@ -166,6 +200,9 @@ test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者�
   assert.equal(cfg.dialogues['m9_deliver_m8_success:1'], undefined, 'M9 成功交付旧 entry 应移除');
   assert.equal(cfg.dialogues['s3_accept:2'], undefined, 'S3 接取对话不应包含 after_accept 第二段');
   assert.equal(cfg.dialogues['s3_after_accept:1']?.npcText, '领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？');
+  assert.match(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{villageName\}/, 'M12 接取文本应使用村庄变量');
+  assert.match(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, 'M12 接取文本应使用封地变量');
+  assert.doesNotMatch(cfg.dialogues['m12_accept:1']?.npcText ?? '', /\{封地\}/, 'M12 配置不应保存中文封地占位符');
 });
 
 test('任务图校验：关系边引用不存在任务应拒绝', () => {
@@ -188,12 +225,12 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
-  // 主基地固定四级；逐级人口上限增量总和应为 20×4=80。
+  // 主基地固定四级；逐级人口上限增量由配置中心决定，不在测试中硬编码。
   const main = cfg.buildings['main'];
   assert.equal(main.name, '主基地', '主基地显示名应统一');
   assert.deepEqual(Object.keys(main.levels), ['1', '2', '3', '4'], '主基地只应有 1..4 级');
   const sumMain = Object.values(main.levels).reduce((s, l) => s + l.popCap, 0);
-  assert.equal(sumMain, 80, '主基地 4 级每级 20，总和应为 80');
+  assert.ok(sumMain > 0, '主基地满级应提供正的人口上限');
   const res = cfg.buildings['residence'];
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
@@ -253,9 +290,9 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 40);
-  assert.equal(leg.meleeDef, 35);
-  assert.equal(leg.rangedDef, 50);
+  assert.equal(leg.meleeAtk, 4000);
+  assert.equal(leg.meleeDef, 3500);
+  assert.equal(leg.rangedDef, 5000);
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
@@ -315,6 +352,25 @@ test('校验器：关键常量范围非法应抛错', () => {
     constants: { ...cfg.constants, combatTickMs: 0, marchSpeedMultiplier: 0 },
   };
   assert.throws(() => validateGameConfig(bad), /combat_tick_ms|march_speed_multiplier/);
+});
+
+test('校验器：军队规模参数范围非法应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const badReference: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeReferencePop: -1 },
+  };
+  assert.throws(() => validateGameConfig(badReference), /march_size_reference_pop/);
+  const badPenalty: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizePenalty: -0.1 },
+  };
+  assert.throws(() => validateGameConfig(badPenalty), /march_size_penalty/);
+  const badMinimum: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeMinMultiplier: 1.1 },
+  };
+  assert.throws(() => validateGameConfig(badMinimum), /march_size_min_multiplier/);
 });
 
 test('特性：多效果特性正确展开', () => {

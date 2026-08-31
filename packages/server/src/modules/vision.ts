@@ -2,12 +2,29 @@ import type { Command, CommandResult } from '@slg/shared';
 import type { Store } from '../infra/store.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { GameConfig } from '../infra/config.js';
-import { hexDistanceWrapped } from '../infra/hex.js';
+import { hexDistanceWrapped, linePathWrapped } from '../infra/hex.js';
 
-type TileSnapshot = { q: number; r: number; kind: string; refId?: string; name?: string; icon?: string; terrain?: 'plain' | 'forest' | 'hills' };
+type Terrain = 'plain' | 'forest' | 'hills';
+type MapVillageRelation = 'allied' | 'neutral' | 'hostile';
+type TileSnapshot = {
+  q: number;
+  r: number;
+  kind: string;
+  refId?: string;
+  name?: string;
+  icon?: string;
+  terrain?: Terrain;
+};
 interface VisionState { playerId: string; explored: Record<string, TileSnapshot>; }
 interface RevealReceipt { playerId: string; revealId: string; newlyRevealed: TileSnapshot[]; }
-interface Source { q: number; r: number; radius: number; }
+interface Source {
+  q: number;
+  r: number;
+  radius: number;
+  /** 城市视野不受地貌影响；在途军队视野按森林方向/丘陵加成计算。 */
+  terrainAware?: boolean;
+  terrain?: Map<string, Terrain>;
+}
 const COLLECTION = 'vision';
 const RECEIPT_COLLECTION = 'vision_reveal';
 
@@ -43,7 +60,55 @@ export class VisionModule {
     const sources: Source[] = (player.villages ?? []).map((v: any) => ({ q: v.q, r: v.r, radius: cityRadius }));
     const marchRes = await this.commands.send({ name: 'movement.ListVisionSources', from: VisionModule.NAME, payload: { playerId } });
     if (marchRes.ok) sources.push(...((marchRes.payload as any).sources ?? []));
+    await Promise.all(sources.filter((source) => source.terrainAware).map(async (source) => {
+      source.terrain = await this.terrainAround(source.q, source.r, this.terrainQueryRadius(source));
+    }));
     return sources;
+  }
+
+  /** 读取军队视野源周围的地貌，避免把地貌状态复制到 vision owner。 */
+  private async terrainAround(q: number, r: number, radius: number): Promise<Map<string, Terrain>> {
+    const area = await this.commands.send({
+      name: 'world.GetArea', from: VisionModule.NAME,
+      payload: { cq: q, cr: r, r: Math.max(0, radius), includeEmpty: true },
+    });
+    const terrain = new Map<string, Terrain>();
+    if (!area.ok) return terrain;
+    for (const tile of ((area.payload as any)?.tiles ?? [])) {
+      const value = tile?.terrain;
+      if (value === 'forest' || value === 'hills' || value === 'plain') terrain.set(`${tile.q},${tile.r}`, value);
+    }
+    return terrain;
+  }
+
+  private sourceRadius(source: Source): number {
+    const base = Math.max(0, Math.floor(Number(source.radius) || 0));
+    const at = source.terrain?.get(`${source.q},${source.r}`);
+    const hillsBonus = source.terrainAware && at === 'hills'
+      ? Math.max(0, Math.floor(Number(this.config.constants.hillsVisionBonus) || 0))
+      : 0;
+    return base + hillsBonus;
+  }
+
+  private terrainQueryRadius(source: Source): number {
+    return Math.max(0, Math.floor(Number(source.radius) || 0))
+      + Math.max(0, Math.floor(Number(this.config.constants.hillsVisionBonus) || 0));
+  }
+
+  /** 目标方向上只要穿过森林，军队该方向的视野半径减少配置的格数。 */
+  private forestObstructed(source: Source, q: number, r: number, W: number, H: number): boolean {
+    if (!source.terrainAware || !source.terrain) return false;
+    const path = linePathWrapped({ q: source.q, r: source.r }, { q, r }, W, H);
+    return path.slice(1).some((point) => source.terrain!.get(`${point.q},${point.r}`) === 'forest');
+  }
+
+  private visibleFrom(source: Source, q: number, r: number, W: number, H: number): boolean {
+    const distance = hexDistanceWrapped({ q, r }, source, W, H);
+    const radius = this.sourceRadius(source);
+    if (distance > radius) return false;
+    if (!this.forestObstructed(source, q, r, W, H)) return true;
+    const penalty = Math.max(0, Math.floor(Number(this.config.constants.forestVisionPenalty) || 0));
+    return distance <= Math.max(0, radius - penalty);
   }
 
   /** 给行军模块的服务器权威可见性查询，同时返回未探索格距已知区域的最小深度。 */
@@ -53,7 +118,7 @@ export class VisionModule {
     if (!sources) return { ok: false, payload: {}, reason: 'player_not_found' };
     const { W, H } = await this.worldDimensions();
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
-    const visible = (x: number, y: number) => sources.some((s) => hexDistanceWrapped({ q: x, r: y }, s, W, H) <= s.radius);
+    const visible = (x: number, y: number) => sources.some((source) => this.visibleFrom(source, x, y, W, H));
     if (visible(q, r)) return { ok: true, payload: { visibility: 'visible', unexploredDepth: 0 } };
     if (state.explored[`${q},${r}`]) return { ok: true, payload: { visibility: 'explored', unexploredDepth: 0 } };
     let depth = Number.POSITIVE_INFINITY;
@@ -73,7 +138,7 @@ export class VisionModule {
     const tiles: string[] = [];
     for (let r = 0; r < H; r++) {
       for (let q = 0; q < W; q++) {
-        if (sources.some((s) => hexDistanceWrapped({ q, r }, s, W, H) <= s.radius)) tiles.push(`${q},${r}`);
+        if (sources.some((source) => this.visibleFrom(source, q, r, W, H))) tiles.push(`${q},${r}`);
       }
     }
     return { ok: true, payload: { tiles } };
@@ -88,29 +153,34 @@ export class VisionModule {
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
     const count = new Set(Object.keys(state.explored));
     for (let r = 0; r < H; r++) for (let q = 0; q < W; q++) {
-      if (sources.some((s) => hexDistanceWrapped({ q, r }, s, W, H) <= s.radius)) count.add(`${q},${r}`);
+      if (sources.some((source) => this.visibleFrom(source, q, r, W, H))) count.add(`${q},${r}`);
     }
     return { ok: true, payload: { count: count.size } };
   }
 
   /** 行军每到一格即把它当刻视野内的地块写为已探索，保证玩家不打开地图也不会丢探索进度。 */
   private async reveal(cmd: Command): Promise<CommandResult> {
-    const { playerId, q, r, radius, revealId } = cmd.payload as { playerId: string; q: number; r: number; radius: number; revealId?: string };
+    const { playerId, q, r, radius, terrainAware, revealId } = cmd.payload as {
+      playerId: string; q: number; r: number; radius: number; terrainAware?: boolean; revealId?: string;
+    };
     const receiptKey = revealId ? `${playerId}:${revealId}` : undefined;
     if (receiptKey) {
       const receipt = this.store.get<RevealReceipt>(RECEIPT_COLLECTION, receiptKey);
       if (receipt) return { ok: true, payload: { newlyRevealed: receipt.newlyRevealed } };
     }
     const { W, H } = await this.worldDimensions();
+    const source: Source = {
+      q, r, radius: Math.max(0, Math.floor(Number(radius) || 0)), terrainAware: terrainAware === true,
+    };
+    if (source.terrainAware) source.terrain = await this.terrainAround(q, r, this.terrainQueryRadius(source));
     const raw = await this.commands.send({ name: 'world.GetArea', from: VisionModule.NAME, payload: { cq: q, cr: r, full: true, includeEmpty: true } });
     if (!raw.ok) return { ok: false, payload: {}, reason: raw.reason };
     const nowTiles = new Map<string, TileSnapshot>();
     for (const tile of ((raw.payload as any)?.tiles ?? [])) nowTiles.set(`${tile.q},${tile.r}`, tile);
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
-    const sight = Math.max(0, Math.floor(Number(radius) || 0));
     const newlyRevealed: TileSnapshot[] = [];
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      if (hexDistanceWrapped({ q, r }, { q: x, r: y }, W, H) > sight) continue;
+      if (!this.visibleFrom(source, x, y, W, H)) continue;
       const key = `${x},${y}`;
       const tile = nowTiles.get(key) ?? { q: x, r: y, kind: 'empty' };
       if (!state.explored[key]) newlyRevealed.push(tile);
@@ -147,6 +217,49 @@ export class VisionModule {
     return { ok: true, payload: { playerIds } };
   }
 
+  /**
+   * 地块本身只保存村庄，不复制外交状态。每次地图响应都从 Player + Diplomacy
+   * 读取当前关系，因此宣战、结盟后边框会随下一次地图刷新更新，也不会污染探索快照。
+   */
+  private async withVillageRelations<T extends TileSnapshot>(playerId: string, tiles: T[]): Promise<Array<T & { relation?: MapVillageRelation }>> {
+    const playersResult = await this.commands.send({ name: 'player.ListAll', from: VisionModule.NAME, payload: {} });
+    const ownerByVillage = new Map<string, string>();
+    if (playersResult.ok) {
+      for (const player of ((playersResult.payload as any)?.players ?? [])) {
+        if (typeof player?.id !== 'string') continue;
+        for (const village of (player.villages ?? [])) {
+          if (typeof village?.id === 'string') ownerByVillage.set(village.id, player.id);
+        }
+      }
+    }
+
+    const targetOwners = new Set<string>();
+    for (const tile of tiles) {
+      if (tile.kind !== 'village' || !tile.refId) continue;
+      const owner = ownerByVillage.get(tile.refId);
+      if (owner && owner !== playerId) targetOwners.add(owner);
+    }
+
+    const relationByOwner = new Map<string, MapVillageRelation>([[playerId, 'allied']]);
+    await Promise.all([...targetOwners].map(async (targetPlayerId) => {
+      const result = await this.commands.send({
+        name: 'diplomacy.GetRelation', from: VisionModule.NAME,
+        payload: { playerId, targetPlayerId },
+      });
+      const relation = (result.payload as any)?.relation;
+      relationByOwner.set(
+        targetPlayerId,
+        relation === 'allied' || relation === 'hostile' ? relation : 'neutral',
+      );
+    }));
+
+    return tiles.map((tile) => {
+      if (tile.kind !== 'village' || !tile.refId) return tile;
+      const owner = ownerByVillage.get(tile.refId);
+      return { ...tile, relation: owner ? (relationByOwner.get(owner) ?? 'neutral') : 'neutral' };
+    });
+  }
+
   private async filterArea(cmd: Command): Promise<CommandResult> {
     const { playerId, tiles } = cmd.payload as { playerId: string; tiles: TileSnapshot[] };
     const sources = await this.sourcesFor(playerId);
@@ -156,7 +269,7 @@ export class VisionModule {
     const current = new Map<string, TileSnapshot>();
     for (const t of tiles) current.set(`${t.q},${t.r}`, t);
     const state = this.store.get<VisionState>(COLLECTION, playerId) ?? { playerId, explored: {} };
-    const visible = (q: number, r: number) => sources.some((s) => hexDistanceWrapped({ q, r }, s, W, H) <= s.radius);
+    const visible = (q: number, r: number) => sources.some((source) => this.visibleFrom(source, q, r, W, H));
     const out: Array<TileSnapshot & { visibility: 'unexplored' | 'explored' | 'visible' }> = [];
     let dirty = false;
     for (let r = 0; r < H; r++) for (let q = 0; q < W; q++) {
@@ -179,6 +292,6 @@ export class VisionModule {
       else out.push({ q, r, kind: 'empty', visibility: 'unexplored' });
     }
     if (dirty) this.store.set(COLLECTION, playerId, state);
-    return { ok: true, payload: { tiles: out } };
+    return { ok: true, payload: { tiles: await this.withVillageRelations(playerId, out) } };
   }
 }

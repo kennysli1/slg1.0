@@ -16,3 +16,9 @@ id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCoold
 10,s2,show_of_force,耀武扬威,兵力达到20后携带军旗与至少20名士兵清理任意营地并将军旗带回城内,side,village,0,0,0,0
 11,s3,villager_story,村民的请求,成功掠夺PvE营地后村民向你求助；送达幸福村获得娜塔莉，掠夺则获得秘密字条,side,village,0,0,0,0
 12,s4,villager_story,调查坐标,使用秘密字条获得的战报标记了可疑坐标，前往探查,side,village,0,0,0,0
+13,m10,main_foundation,向前一步,将主基地升级到二级,main,global,0,0,0,0
+14,m11,world_exploration,开眼看世界,探索地图200格并解锁联盟大厅和议会厅,main,global,0,0,0,0
+15,m12,world_exploration,使者来访,清理两处强盗营地并带回“我的努力”,main,global,0,0,0,0
+16,m13,world_exploration,寻找神秘人,找到秘密营地并调查,main,global,0,0,0,0
+17,m14,world_exploration,一份礼物,向神秘人上交500粮食,main,global,0,0,0,0
+18,m15,world_exploration,小试屠刀,声望值达到-5或更低,main,global,0,0,0,0

@@ -1,13 +1,43 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createGameApp } from '../app.js';
-import { kingdomLandmarkAnchors } from '../infra/world-generation.js';
+import { kingdomLandmarkAnchors, kingdomLandmarkFootprintOffsets } from '../infra/world-generation.js';
 
 const send = (app: ReturnType<typeof createGameApp>, name: string, payload: any) => app.commands.send({ name, from: 'test', payload });
+
+/** 王国任务在议会厅建成后才启用；测试直接装配一座已建成的议会厅，
+ * 避免为每个任务用例等待建筑队列，同时保持真实的模块门槛。 */
+function addCouncil(app: ReturnType<typeof createGameApp>, villageId: string): void {
+  const state = app.store.get<any>('building', villageId);
+  if (!state) throw new Error(`building state missing: ${villageId}`);
+  if (!state.placed.some((p: any) => p.kind === 'council')) {
+    state.placed.push({ slotId: 'inner-council-test', kind: 'council', zone: 'inner', level: 1 });
+    app.store.set('building', villageId, state);
+  }
+}
 
 test('王国地标：王都位于世界中心，四封地位于四象限中心且成为真实 PvE', () => {
   const app = createGameApp({ manualScheduler: true });
   app.setupWorld();
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-capital').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2, '1': 3 },
+    '王都应为上窄下宽的 1+2+3 倒三角',
+  );
+  assert.deepEqual(
+    kingdomLandmarkFootprintOffsets('kingdom-fief-ne').reduce<Record<number, number>>((rows, cell) => {
+      rows[cell.r] = (rows[cell.r] ?? 0) + 1;
+      return rows;
+    }, {}),
+    { '-1': 1, '0': 2 },
+    '封地应为上窄下宽的 1+2 倒三角',
+  );
   const expected = kingdomLandmarkAnchors(app.config.constants.worldW, app.config.constants.worldH, Number(app.config.constants.raw.kingdom_fief_offset_ratio));
   for (const anchor of expected) {
     const pve = app.store.get<any>('pve', anchor.id);
@@ -15,6 +45,14 @@ test('王国地标：王都位于世界中心，四封地位于四象限中心�
     assert.equal(pve.type, anchor.type);
     assert.deepEqual({ q: pve.q, r: pve.r }, { q: anchor.q, r: anchor.r });
     assert.ok(Object.values(pve.defender as Record<string, { count: number }>).reduce((sum, unit) => sum + unit.count, 0) > 0);
+    const footprint = app.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(footprint.length, anchor.id === 'kingdom-capital' ? 6 : 3, `${anchor.id} 应占用三角形格子数`);
+    assert.equal(footprint.filter((tile) => tile.landmarkCenter === true).length, 1, `${anchor.id} 应保留唯一中心格`);
+    assert.deepEqual(
+      new Set(footprint.map((tile) => `${tile.q},${tile.r}`)),
+      new Set((anchor.footprint ?? [{ q: anchor.q, r: anchor.r }]).map((cell) => `${cell.q},${cell.r}`)),
+      `${anchor.id} 应按规划的三角形占地写入地图`,
+    );
   }
 });
 
@@ -31,6 +69,74 @@ test('王国地标：即使未探索也会在地图返回公开地标标记', as
     const tile = tiles.find((t) => t.refId === id);
     assert.ok(tile, `${id} 应存在地图标记`);
     assert.notEqual(tile.visibility, 'unexplored', `${id} 不应被战争迷雾隐藏`);
+  }
+});
+
+test('王国地标迁移：切换倒三角后清除旧版本遗留占地', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-migration-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchor = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    ).find((item) => item.id === 'kingdom-capital')!;
+    // 旧版正三角形的这些格不属于当前上窄下宽占地，模拟升级前的持久化残留。
+    // 选一块当前计划没有其它目标占用的格，避免覆盖无关 PvE。
+    const stale = [
+      { q: anchor.q + 1, r: anchor.r }, { q: anchor.q + 2, r: anchor.r },
+      { q: anchor.q + 1, r: anchor.r + 1 }, { q: anchor.q, r: anchor.r + 2 },
+    ].find((cell) => !initial.store.get('world_tile', `${cell.q},${cell.r}`)
+      || initial.store.get<any>('world_tile', `${cell.q},${cell.r}`)?.kind === 'empty');
+    assert.ok(stale, '测试需要一块可写入旧版本遗留格的空地');
+    initial.store.set('world_tile', `${stale.q},${stale.r}`, {
+      q: stale.q, r: stale.r, kind: 'pve', refId: anchor.id,
+      name: '王都', icon: 'pve_fortress', faction: 'kingdom', landmark: 'capital', landmarkCenter: false,
+    });
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    const tiles = restarted.store.all<any>('world_tile').filter((tile) => tile.refId === anchor.id);
+    assert.equal(tiles.length, 6, '重启迁移后王都只能保留 6 个倒三角格');
+    assert.ok(!tiles.some((tile) => tile.q === stale.q && tile.r === stale.r), '旧版遗留格应被清除');
+    assert.equal(restarted.store.get<any>('world_tile', `${stale.q},${stale.r}`)?.kind, 'empty');
+    assert.equal(tiles.filter((tile) => tile.landmarkCenter === true).length, 1, '迁移后仍只能有一个中心格');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('王国地标迁移：重启时会补回持久化为显式空地的缺失格', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slg-landmark-empty-repair-'));
+  const storePath = join(dir, 'game.json');
+  try {
+    const initial = createGameApp({ storePath, manualScheduler: true });
+    initial.setupWorld();
+    const anchors = kingdomLandmarkAnchors(
+      initial.config.constants.worldW,
+      initial.config.constants.worldH,
+      Number(initial.config.constants.raw.kingdom_fief_offset_ratio),
+    );
+
+    // 复现生产存档：目标曾被清除后留下 { kind:'empty' }，并非“没有这条记录”。
+    for (const anchor of anchors) {
+      const missing = (anchor.footprint ?? []).find((cell) => cell.q !== anchor.q || cell.r !== anchor.r)!;
+      initial.store.set('world_tile', `${missing.q},${missing.r}`, { q: missing.q, r: missing.r, kind: 'empty' });
+    }
+    initial.store.flush();
+
+    const restarted = createGameApp({ storePath, manualScheduler: true });
+    for (const anchor of anchors) {
+      const expected = new Set((anchor.footprint ?? []).map((cell) => `${cell.q},${cell.r}`));
+      const actual = restarted.store.all<any>('world_tile')
+        .filter((tile) => tile.refId === anchor.id)
+        .map((tile) => `${tile.q},${tile.r}`);
+      assert.deepEqual(new Set(actual), expected, `${anchor.id} 的显式空地应按同一迁移规则补回`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -173,6 +279,7 @@ test('王国任务：循环上贡有期限，完成后冻结期限并等待手�
   app.setupWorld();
   const reg = await send(app, 'player.Register', { name: '王国任务甲', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 300_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;
@@ -193,6 +300,26 @@ test('王国任务：循环上贡有期限，完成后冻结期限并等待手�
   assert.ok((claimed.payload as any).nextIssueAt > clock, '领取后应安排下一轮任务');
 });
 
+test('王国任务：没有议会厅时不下达也不显示，建成后才启用', async () => {
+  let clock = 1_250_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0 });
+  app.setupWorld();
+  const reg = await send(app, 'player.Register', { name: '王国门槛测试', password: 'p1234', tribe: 'romans' });
+  const player = (reg.payload as any).player;
+  const hidden = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
+  assert.equal((hidden.payload as any).kingdomEnabled, false);
+  assert.equal((hidden.payload as any).task, null);
+  assert.equal(app.store.get<any>('kingdom', player.id)?.task, undefined, '未建议会厅不应生成任务');
+
+  addCouncil(app, player.villageId);
+  const kingdomState = app.store.get<any>('kingdom', player.id)!;
+  kingdomState.nextIssueAt = clock;
+  app.store.set('kingdom', player.id, kingdomState);
+  const shown = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
+  assert.equal((shown.payload as any).kingdomEnabled, true);
+  assert.equal((shown.payload as any).task?.kind, 'tribute');
+});
+
 test('王国任务：指定同象限现有 PvE，清空前不会完成', async () => {
   let clock = 2_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock, rng: () => 0.5 });
@@ -203,6 +330,7 @@ test('王国任务：指定同象限现有 PvE，清空前不会完成', async (
   app.config.constants.raw.kingdom_task_eliminate_troops_weight = 0;
   const reg = await send(app, 'player.Register', { name: '王国任务乙', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 450_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;
@@ -225,6 +353,7 @@ test('王国任务：超时失败不扣声望，并保留下一轮循环时间',
   app.setupWorld();
   const reg = await send(app, 'player.Register', { name: '王国任务丙', password: 'p1234', tribe: 'romans' });
   const player = (reg.payload as any).player;
+  addCouncil(app, player.villageId);
   await app.scheduler.advanceTo(clock + 300_000, (t) => { clock = t; });
   const issued = await send(app, 'kingdom.GetState', { playerId: player.id, villageId: player.villageId });
   const task = (issued.payload as any).task;

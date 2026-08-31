@@ -115,7 +115,7 @@ export class PlayerModule {
 
 
   /** 放弃分城时由 app 注入的清理回调（清进度/地图/行军）。 */
-  private wipeVillage?: (villageId: string) => void;
+  private wipeVillage?: (villageId: string) => void | Promise<void>;
   /** 放弃锁秒数（来自常量，app 注入；默认 86400）。 */
   private abandonLockSec = 86400;
 
@@ -150,7 +150,7 @@ export class PlayerModule {
   }
 
   /** app 在组装后注入：清理单村进度与地图。 */
-  setVillageWiper(fn: (villageId: string) => void, abandonLockSec?: number): void {
+  setVillageWiper(fn: (villageId: string) => void | Promise<void>, abandonLockSec?: number): void {
     this.wipeVillage = fn;
     if (abandonLockSec !== undefined) this.abandonLockSec = abandonLockSec;
   }
@@ -437,7 +437,7 @@ export class PlayerModule {
   /**
    * 放弃分城：非主城、过锁定期 → 卸归属 + 清理进度/地图。
    */
-  private abandonVillage(cmd: Command): CommandResult {
+  private async abandonVillage(cmd: Command): Promise<CommandResult> {
     const { playerId, villageId } = cmd.payload as { playerId: string; villageId: string };
     const p = this.load(playerId);
     if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
@@ -459,7 +459,7 @@ export class PlayerModule {
       payload: { playerId, villageId },
     } as Command);
     if (!det.ok) return det;
-    this.wipeVillage(villageId);
+    await this.wipeVillage(villageId);
     return { ok: true, payload: { player: (det.payload as any).player, abandoned: villageId } };
   }
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { hexDistanceWrapped } from '../infra/hex.js';
 
 let clock = 1_000_000;
 function freshApp(): GameApp {
@@ -21,6 +22,27 @@ const spawnResidentCamp = (app: GameApp, id = 'camp-other') =>
   send(app, 'pve.Spawn', { id, type: 'rats', q: 30, r: 30, task: false, noRespawn: false });
 
 const m1Fields = ['woodcutter', 'claypit', 'ironmine', 'cropland'];
+
+test('任务营地选点：同一搜索范围内按稳定种子随机分散，不固定命中相邻格', async () => {
+  const app = freshApp();
+  const registered = await reg(app, '任务营地随机选点');
+  assert.equal(registered.ok, true, `注册应成功: ${registered.reason ?? ''}`);
+  const player = (registered.payload as any).player;
+  const center = { q: player.q, r: player.r };
+  const radius = 4;
+  const picks = new Map<string, number>();
+  for (let i = 0; i < 20; i++) {
+    const result = await send(app, 'world.FindFreeTile', {
+      centerQ: center.q, centerR: center.r, radius, salt: `taskcamp-test-${i}`,
+    });
+    assert.equal(result.ok, true, `范围内应能找到空地: ${result.reason ?? ''}`);
+    const point = result.payload as { q: number; r: number };
+    picks.set(`${point.q},${point.r}`, hexDistanceWrapped(center, point, app.config.constants.worldW, app.config.constants.worldH));
+  }
+  assert.ok(picks.size > 1, '不同任务营地种子不应总命中同一格');
+  assert.ok([...picks.values()].some((distance) => distance > 1), '应有任务营地落在非紧邻村庄的范围内');
+});
+
 async function repairM1Fields(app: GameApp, villageId: string): Promise<void> {
   await grant(app, villageId, { wood: 99999, clay: 99999, iron: 99999, crop: 99999 });
   for (const kind of m1Fields) {
@@ -195,6 +217,45 @@ test('主线 m2 建造两栋城内建筑；m5 累计探索含初始视野；m6 �
   await send(app, 'task.Deliver', { villageId: va, code: 'm6' });
   const afterDeliver = (await send(app, 'economy.GetResources', { villageId: va })).payload as any;
   assert.ok(afterDeliver.resources.gold >= beforeDeliver.resources.gold, 'm6 目标检查不应扣除金币');
+});
+
+test('主线 m10/m11：二级主基地触发，M10 可立即就绪，M11 交付解锁唯一建筑', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '主基地阶段任务');
+  const player = (regRes.payload as any).player;
+  const villageId = player.villageId as string;
+  await grant(app, villageId, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
+
+  // 二级主基地完成后，M11（无前置、仅主基地门槛）应进入可接取列表。
+  const upgrade = await send(app, 'building.Upgrade', { villageId, slotId: 'center' });
+  assert.equal(upgrade.ok, true, `主基地升级应成功: ${upgrade.reason ?? ''}`);
+  await app.scheduler.advanceTo((upgrade.payload as any).finishAt, setClock);
+  let state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.offeredMain.some((item: any) => item.code === 'm11'), '二级主基地应触发 M11');
+
+  // 模拟前置主线已完成后接取 M10；已有二级主基地应立即就绪。
+  const taskState = app.store.get<any>('task', villageId)!;
+  taskState.completedMain.push('m9');
+  taskState.offeredMain.push('m10');
+  app.store.set('task', villageId, taskState);
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm10' })).ok, true);
+  state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.active.find((item: any) => item.code === 'm10')?.ready, '已有二级主基地的 M10 应直接就绪');
+  const m10 = await send(app, 'task.Deliver', { villageId, code: 'm10' });
+  const m10Growth = (m10.payload as any).rewards.resourceGrowth ?? {};
+  assert.equal(m10Growth.percent, 25, 'M10 应发放四资源 +25%');
+  assert.equal(m10Growth.durationSec, 43200, 'M10 应持续12小时');
+
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm11' })).ok, true);
+  const vision = app.store.get<any>('vision', player.id) ?? { playerId: player.id, explored: {} };
+  for (let i = 0; i < 210; i++) vision.explored[`m11-${i}`] ??= { q: i, r: 0, kind: 'empty' };
+  app.store.set('vision', player.id, vision);
+  state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(state.active.find((item: any) => item.code === 'm11')?.ready, 'M11 达到 200 格后应就绪');
+  const m11 = await send(app, 'task.Deliver', { villageId, code: 'm11' });
+  assert.deepEqual((m11.payload as any).rewards.buildingUnlocks, ['alliance_hall', 'council']);
+  const building = app.store.get<any>('building', villageId)!;
+  assert.deepEqual(building.unlockedBuildings.sort(), ['alliance_hall', 'council']);
 });
 
 test('M2：已有建筑拆除后重建不计数，新的空槽 1 级建造才计数', async () => {
@@ -440,6 +501,55 @@ test('任务营地战败不推进任务，营地仍在地图上等待再次出�
   assert.ok(m4, '战败后任务仍应 active');
   assert.equal(m4.campCleared, 0, '战败不应推进清营进度');
   assert.equal(m4.camps[0].cleared, false, '战败不应标记营地已清理');
+});
+
+test('任务营地被先到军队清除后，仍在途的后续军队立即返程', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务营地清除返程');
+  const va = (regRes.payload as any).player.villageId as string;
+  const campId = 'taskcamp-return-after-clear';
+  app.store.set('task', va, {
+    villageId: va, completedMain: [], completedSide: [], abandonedSide: [], offered: [], offeredSide: [], firedTriggers: [],
+    active: {
+      m4: {
+        code: 'm4', type: 'main', acceptedAt: clock, spawnVillageId: va,
+        submitted: {}, camps: [{ id: campId, q: 6, r: 6, cleared: false }], campCleared: 0, progress: 0,
+      },
+    },
+  });
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'rats', q: 6, r: 6, task: true, ownerVillageId: va });
+  assert.equal(spawned.ok, true, `测试任务营地生成失败: ${spawned.reason ?? ''}`);
+  await grant(app, va, { wood: 100, clay: 100, iron: 100, crop: 100 });
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 1 } });
+  const fast = await send(app, 'movement.SendRaid', { villageId: va, targetId: campId, troops: { legionnaire: 1 } });
+  assert.equal(fast.ok, true, `先到军队出发失败: ${fast.reason ?? ''}`);
+  const fastMovement = app.store.get<any>('movement', (fast.payload as any).id);
+  assert.ok(fastMovement, '先到军队应写入 movement');
+
+  // 复制一条尚未抵达的慢军队，保持同一目标但使用独立 id，模拟多支军队先后抵达。
+  const slowMovement = {
+    ...fastMovement,
+    id: 'mv-taskcamp-slow',
+    arriveAt: fastMovement.arriveAt + 60_000,
+    nextStepAt: fastMovement.nextStepAt + 60_000,
+    stepToken: fastMovement.stepToken + 10,
+  };
+  app.store.set('movement', slowMovement.id, slowMovement);
+
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: {
+      villageId: va, side: 'attacker', targetKind: 'pve', targetId: campId,
+      attackerWins: true, campCleared: true, movementId: fastMovement.id,
+      fromXY: fastMovement.fromXY, toXY: fastMovement.toXY, originalFromXY: fastMovement.originalFromXY ?? fastMovement.fromXY,
+      survivors: { legionnaire: 1 }, deployedTroops: { legionnaire: 1 }, looted: {},
+    },
+  } as any);
+
+  const recalled = app.store.get<any>('movement', slowMovement.id);
+  assert.ok(recalled, '慢军队应保留为返程 movement');
+  assert.equal(recalled.type, 'return', '任务营地清除后慢军队应立即返程');
+  assert.equal(recalled.targetId, undefined, '返程军队不应继续保留已清除营地目标');
 });
 
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {

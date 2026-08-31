@@ -90,6 +90,8 @@ export interface BuildingDef {
   cost: (lv: number) => Record<string, number>;
   timeSec: (lv: number) => number;
   maxLevel: number;
+  /** 每座村庄最多可建造数量；-1 表示不限制。 */
+  maxCount: number;
   /** 建造该建筑所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   requires: { kind: string; level: number }[]; // kind=code（由数字ID解析而来）
@@ -148,7 +150,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -179,6 +181,9 @@ export interface QuestObjective {
   researchCode?: string;
   /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
   taskVillageCode?: string;
+  /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
+  /** reputation_at_most：玩家声望值达到 threshold 或更低。 */
+  threshold?: number;
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -190,8 +195,16 @@ export interface QuestRewards {
   population?: number;
   /** grant_population_growth：人口增长速率临时倍率；percent=10 表示 +10%。 */
   populationGrowth?: { percent: number; durationSec: number };
+  /** grant_resource_growth：资源产量临时倍率；默认作用于四种资源，可用 resource 指定单一资源。 */
+  resourceGrowth?: { percent: number; durationSec: number; resource?: string };
+  /** unlock_buildings：交付时解锁指定建筑代码。 */
+  buildingUnlocks?: string[];
   /** grant_research_points：交付时加入学院科研点。 */
   researchPoints?: number;
+  /** 按交付时的正声望兑换无期限佣兵；兑换后声望归零。 */
+  reputationMercenaryExchange?: { unitCode: string; perPoint: number };
+  /** 实际结算返回的任务佣兵（不属于静态配置）。 */
+  mercenaries?: Record<string, number>;
 }
 
 /** 按前置任务 m8 结局选择的奖励。key 使用 m8_success / m8_failure。 */
@@ -217,6 +230,8 @@ export type QuestScope = 'global' | 'village';
 export interface QuestDef {
   id: number;
   code: string;
+  /** 所属任务线 code（与 quests.csv / questGraph 保持一致）。 */
+  lineCode: string;
   name: string;
   desc: string;
   type: QuestType;
@@ -367,7 +382,9 @@ export interface UnitDef {
   traits: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
-  /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买、永久拥有；不进训练队列。 */
+  /** units.csv 是否显式提供 popCost；缺列/空值时行军按1人口回退并记录警告。 */
+  popCostConfigured?: boolean;
+  /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买；营地购买的服役期限由 contractSec 管理，任务奖励可直接授予无期限兵力。 */
   isMercenary?: boolean;
   /** 雇佣兵单价（金币）。仅 isMercenary=true 时有意义。 */
   goldCost?: number;
@@ -381,6 +398,12 @@ export interface PveTemplate {
   type: string; // code
   name: string;
   icon: string; // 基名
+  /** 阵营；普通 PvE 为 neutral，王国城邦为 kingdom。 */
+  faction?: 'neutral' | 'kingdom';
+  /** 王国城邦使用运行时随机资源、兵力与建筑生成。 */
+  cityState?: boolean;
+  /** 王国 PvE 生成档位：普通城邦、统一标准封地或更高标准王都。 */
+  kingdomProfile?: 'city_state' | 'fief' | 'capital';
   defender: Record<string, {
     count: number;
     form: UnitForm;
@@ -448,6 +471,18 @@ export interface GameConstants {
   ambushAttackBonus: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
+  /** 森林方向视野衰减格数（仅军队视野）。 */
+  forestVisionPenalty: number;
+  /** 丘陵军队视野额外增加格数。 */
+  hillsVisionBonus: number;
+  /** 丘陵军队行军速度倍率（默认 2/3，即速度减少 1/3）。 */
+  hillsMarchSpeedMultiplier: number;
+  /** 军队规模减速：免惩罚的人口基准。 */
+  marchSizeReferencePop: number;
+  /** 军队规模减速：超出基准人口后的惩罚系数。 */
+  marchSizePenalty: number;
+  /** 军队规模减速：速度倍率下限。 */
+  marchSizeMinMultiplier: number;
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
   marchPointBase: number;
   marchPointPerRallypointLevel: number;
@@ -455,6 +490,94 @@ export interface GameConstants {
   notificationsPerVillage: number;
   /** PvE 战利品随机浮动幅度（0.2=±20%，均值不变；确定性 LCG 取种，可复现）。 */
   pveLootVariance: number;
+  /** 王国城邦：地图额外生成数量。 */
+  kingdomCityStateCount: number;
+  /** 王国城邦：四类基础资源随机上下限。 */
+  kingdomCityStateResourceMin: number;
+  kingdomCityStateResourceMax: number;
+  /** 王国城邦：金币随机上下限。 */
+  kingdomCityStateGoldMin: number;
+  kingdomCityStateGoldMax: number;
+  /** 王国城邦：每点资源折算的守军数量，随后受最小/最大兵力限制。 */
+  kingdomCityStateTroopsPerResource: number;
+  kingdomCityStateTroopMin: number;
+  kingdomCityStateTroopMax: number;
+  /** 王国城邦：守军中用于侦察战的侦察兵比例。 */
+  kingdomCityStateScoutRatio: number;
+  /** 王国城邦：参与掠夺防守的守军比例随机上下限。 */
+  kingdomCityStateRaidDefenseMinRatio: number;
+  kingdomCityStateRaidDefenseMaxRatio: number;
+  /** 王国城邦：兵力恢复随机时长与资源额外恢复时长。 */
+  kingdomCityStateRecoveryMinSec: number;
+  kingdomCityStateRecoveryMaxSec: number;
+  kingdomCityStateRecoveryResourceExtraSec: number;
+  /** 王国城邦：侦察战/掠夺/攻城触发的声望扣除绝对值。 */
+  kingdomCityStateReputationPenalty: number;
+  /** 王国城邦：资源田保底等级。 */
+  kingdomCityStateResourceFieldLevel: number;
+  /** 王国城邦：城内/城外随机建筑数量和等级范围。 */
+  kingdomCityStateInnerBuildingCountMin: number;
+  kingdomCityStateInnerBuildingCountMax: number;
+  kingdomCityStateOuterBuildingCountMin: number;
+  kingdomCityStateOuterBuildingCountMax: number;
+  kingdomCityStateBuildingLevelMin: number;
+  kingdomCityStateBuildingLevelMax: number;
+  /** 王国城邦：以 | 分隔的随机池；空/无效项由运行时过滤。 */
+  kingdomCityStateUnitPool: string[];
+  kingdomCityStateInnerBuildingPool: string[];
+  kingdomCityStateOuterBuildingPool: string[];
+  /** 王国城邦：生成规则版本；提升后启动时重生成既有城邦。 */
+  kingdomCityStateGenerationVersion: number;
+  /** 王国城邦：等级 1/2/3 的随机权重。 */
+  kingdomCityStateTierWeights: Record<1 | 2 | 3, number>;
+  /** 王国城邦：随机种族与各族兵种池。 */
+  kingdomCityStateTribePool: string[];
+  kingdomCityStateUnitPools: Record<'romans' | 'gauls' | 'teutons', string[]>;
+  /** 王国城邦：三级城邦每种兵的数量、四类资源和金币范围。 */
+  kingdomCityStateTier1UnitCount: number;
+  kingdomCityStateTier1UnitMin: number;
+  kingdomCityStateTier1UnitMax: number;
+  kingdomCityStateTier1ResourceMin: number;
+  kingdomCityStateTier1ResourceMax: number;
+  kingdomCityStateTier1GoldMin: number;
+  kingdomCityStateTier1GoldMax: number;
+  kingdomCityStateTier2UnitCount: number;
+  kingdomCityStateTier2UnitMin: number;
+  kingdomCityStateTier2UnitMax: number;
+  kingdomCityStateTier2ResourceMin: number;
+  kingdomCityStateTier2ResourceMax: number;
+  kingdomCityStateTier2GoldMin: number;
+  kingdomCityStateTier2GoldMax: number;
+  kingdomCityStateTier3UnitCount: number;
+  kingdomCityStateTier3UnitMin: number;
+  kingdomCityStateTier3UnitMax: number;
+  kingdomCityStateTier3ResourceMin: number;
+  kingdomCityStateTier3ResourceMax: number;
+  kingdomCityStateTier3GoldMin: number;
+  kingdomCityStateTier3GoldMax: number;
+  /** 王国封地/王都高等级 PvE 档位：每种兵数量、资源与金币范围。 */
+  kingdomFiefUnitCount: number;
+  kingdomFiefUnitMin: number;
+  kingdomFiefUnitMax: number;
+  kingdomFiefResourceMin: number;
+  kingdomFiefResourceMax: number;
+  kingdomFiefGoldMin: number;
+  kingdomFiefGoldMax: number;
+  kingdomCapitalUnitCount: number;
+  kingdomCapitalUnitMin: number;
+  kingdomCapitalUnitMax: number;
+  kingdomCapitalResourceMin: number;
+  kingdomCapitalResourceMax: number;
+  kingdomCapitalGoldMin: number;
+  kingdomCapitalGoldMax: number;
+  /** 王国 PvE 声望惩罚：每累计消灭的人口数扣 1 点；每累计扣除多少点触发一次报复检查。 */
+  kingdomPveKilledPopulationPerReputation: number;
+  kingdomPveRetaliationChunk: number;
+  kingdomPveRetaliationRaidThreshold: number;
+  kingdomPveRetaliationSiegeThreshold: number;
+  /** 封地派出的雇佣军占封地守军总兵力的随机比例。 */
+  kingdomFiefMercenaryMinRatio: number;
+  kingdomFiefMercenaryMaxRatio: number;
   /** 人口：劳动人口占总人口比例达到此值时，繁荣度额外加成达到上限（默认 0.70）。 */
   popProsperityFullRatio: number;
   /** 人口：繁荣度满值时对资源/建造/训练/研究速度的额外加成（默认 +30%=0.30）。 */
@@ -698,6 +821,23 @@ function parseConstantValue(raw: string, type: string): number | boolean | strin
   return num(raw);
 }
 
+function parseConstantList(raw: unknown, fallback: string): string[] {
+  const value = typeof raw === 'string' && raw.trim() ? raw : fallback;
+  return value.split('|').map((item) => item.trim()).filter(Boolean);
+}
+
+/** 解析王国城邦等级权重："1:1|2:1|3:1"。非法/非正权重由调用方按默认值补齐。 */
+function parseCityStateTierWeights(raw: unknown): Record<1 | 2 | 3, number> {
+  const out: Record<1 | 2 | 3, number> = { 1: 1, 2: 1, 3: 1 };
+  if (typeof raw !== 'string') return out;
+  for (const part of raw.split('|')) {
+    const [tierText, weightText] = part.split(':');
+    const tier = Number(tierText), weight = Number(weightText);
+    if ((tier === 1 || tier === 2 || tier === 3) && Number.isFinite(weight) && weight >= 0) out[tier] = weight;
+  }
+  return out;
+}
+
 /** 解析 "main:1|rallypoint:1" → { main:1, rallypoint:1 }。 */
 function parseLeveledList(s: string): Record<string, number> {
   const out: Record<string, number> = {};
@@ -746,6 +886,31 @@ function parsePopulationGrowthReward(s: string): { percent: number; durationSec:
   }
   if (!Number.isFinite(percent) || !Number.isFinite(durationSec) || percent <= 0 || durationSec <= 0) return null;
   return { percent, durationSec };
+}
+
+/**
+ * 解析资源产量奖励：`percent:durationSec` 作用于四种资源，
+ * `resource:percent:durationSec` 只作用于指定资源（例如 `crop:25:86400`）。
+ */
+function parseResourceGrowthReward(s: string): { percent: number; durationSec: number; resource?: string } | null {
+  if (!s?.trim()) return null;
+  const parts = s.split('|').map((v) => v.trim()).filter(Boolean);
+  const resourceKeys = new Set(['wood', 'clay', 'iron', 'crop']);
+  let resource: string | undefined;
+  let percent = 0;
+  let durationSec = 0;
+  const colonParts = parts[0]?.split(':').map((value) => value.trim()) ?? [];
+  if (colonParts.length >= 3 && resourceKeys.has(colonParts[0])) {
+    resource = colonParts[0];
+    percent = num(colonParts[1], 0);
+    durationSec = num(colonParts[2], 0);
+  } else {
+    const [rawPercent, rawDuration] = colonParts;
+    percent = num(rawPercent, 0);
+    durationSec = num(rawDuration, 0);
+  }
+  if (!Number.isFinite(percent) || !Number.isFinite(durationSec) || percent <= 0 || durationSec <= 0) return null;
+  return resource ? { resource, percent, durationSec } : { percent, durationSec };
 }
 
 /** 解析 dialogues.csv 的 replies：accept:接受任务|leave:离开。 */
@@ -816,7 +981,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   assertUniqueRows(buildingRows, 'buildings.csv');
   // 应用遗留平衡覆盖（玩家在 /gm/balance 的旧版本手动修改；CSV 是当前默认事实源，JSON 仅作兼容）
   if (overrides?.buildings) {
-    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
+    buildingRows = mergeOverridesIntoRows(buildingRows, { file: 'buildings.csv', key: 'id', numeric: ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'] }, overrides.buildings);
   }
   const buildingIdToCode = new Map<number, string>();
   for (const r of buildingRows) buildingIdToCode.set(num(r.id), r.code);
@@ -874,6 +1039,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       },
       timeSec: (lv: number) => lvl[lv]?.timeSec ?? 0,
       maxLevel: num(r.maxLevel, 10),
+      maxCount: num(r.maxCount, -1),
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: parseRequires(r.requires, buildingIdToCode),
       prosperityPerLevel: num(r.prosperityPerLevel, 5),
@@ -935,6 +1101,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: num(r.popCost, 1),
+      popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
     };
   }
 
@@ -963,6 +1130,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
       popCost: 0,
+      popCostConfigured: true,
       isMercenary: true,
       goldCost: num(r.goldCost, 0),
       commandCost: Math.max(1, num(r.commandCost, 1)),
@@ -1026,7 +1194,11 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of pveRows) {
     pveIdToCode.set(num(r.id), r.code);
     pveTemplates[r.code] = {
-      id: num(r.id), type: r.code, name: r.name, icon: r.icon, respawnSec: num(r.respawnSec, 120),
+      id: num(r.id), type: r.code, name: r.name, icon: r.icon,
+      faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
+      cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
+      kingdomProfile: r.kingdomProfile === 'fief' || r.kingdomProfile === 'capital' ? r.kingdomProfile : (r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state' ? 'city_state' : undefined),
+      respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
     };
@@ -1097,6 +1269,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     raw[r.key] = parseConstantValue(r.value, r.type);
   }
   const cn = (k: string, def: number) => (typeof raw[k] === 'number' ? (raw[k] as number) : def);
+  const cs = (k: string, def: string) => (typeof raw[k] === 'string' ? String(raw[k]) : def);
   const constants: GameConstants = {
     wallBonusPerLevel: cn('wall_bonus_per_level', 0.03),
     mainBuildSpeedupPerLevel: cn('main_build_speedup_per_level', 0.05),
@@ -1120,9 +1293,89 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
+    forestVisionPenalty: cn('forest_vision_penalty', 2),
+    hillsVisionBonus: cn('hills_vision_bonus', 1),
+    hillsMarchSpeedMultiplier: cn('hills_march_speed_multiplier', 2 / 3),
+    marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
+    marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
+    marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
+    kingdomCityStateCount: Math.max(0, Math.floor(cn('kingdom_city_state_count', 8))),
+    kingdomCityStateResourceMin: Math.max(0, cn('kingdom_city_state_resource_min', 1000)),
+    kingdomCityStateResourceMax: Math.max(0, cn('kingdom_city_state_resource_max', 5000)),
+    kingdomCityStateGoldMin: Math.max(0, cn('kingdom_city_state_gold_min', 0)),
+    kingdomCityStateGoldMax: Math.max(0, cn('kingdom_city_state_gold_max', 1000)),
+    kingdomCityStateTroopsPerResource: Math.max(0, cn('kingdom_city_state_troops_per_resource', 0.04)),
+    kingdomCityStateTroopMin: Math.max(0, Math.floor(cn('kingdom_city_state_troop_min', 100))),
+    kingdomCityStateTroopMax: Math.max(0, Math.floor(cn('kingdom_city_state_troop_max', 10000))),
+    kingdomCityStateScoutRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_scout_ratio', 0.05))),
+    kingdomCityStateRaidDefenseMinRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_raid_defense_min_ratio', 0.2))),
+    kingdomCityStateRaidDefenseMaxRatio: Math.max(0, Math.min(1, cn('kingdom_city_state_raid_defense_max_ratio', 0.8))),
+    kingdomCityStateRecoveryMinSec: Math.max(1, cn('kingdom_city_state_recovery_min_sec', 43200)),
+    kingdomCityStateRecoveryMaxSec: Math.max(1, cn('kingdom_city_state_recovery_max_sec', 172800)),
+    kingdomCityStateRecoveryResourceExtraSec: Math.max(0, cn('kingdom_city_state_recovery_resource_extra_sec', 21600)),
+    kingdomCityStateReputationPenalty: Math.max(0, Math.floor(cn('kingdom_city_state_reputation_penalty', 2))),
+    kingdomCityStateResourceFieldLevel: Math.max(1, Math.floor(cn('kingdom_city_state_resource_field_level', 3))),
+    kingdomCityStateInnerBuildingCountMin: Math.max(0, Math.floor(cn('kingdom_city_state_inner_building_count_min', 3))),
+    kingdomCityStateInnerBuildingCountMax: Math.max(0, Math.floor(cn('kingdom_city_state_inner_building_count_max', 8))),
+    kingdomCityStateOuterBuildingCountMin: Math.max(4, Math.floor(cn('kingdom_city_state_outer_building_count_min', 4))),
+    kingdomCityStateOuterBuildingCountMax: Math.max(4, Math.floor(cn('kingdom_city_state_outer_building_count_max', 8))),
+    kingdomCityStateBuildingLevelMin: Math.max(1, Math.floor(cn('kingdom_city_state_building_level_min', 1))),
+    kingdomCityStateBuildingLevelMax: Math.max(1, Math.floor(cn('kingdom_city_state_building_level_max', 5))),
+    kingdomCityStateUnitPool: parseConstantList(cs('kingdom_city_state_unit_pool', 'legionnaire|praetorian|imperian|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire'),
+    kingdomCityStateInnerBuildingPool: parseConstantList(cs('kingdom_city_state_inner_building_pool', 'warehouse|granary|barracks|stable|workshop|academy|smithy|hospital|residence|treasury|tavern|vault|council'), 'warehouse|granary'),
+    kingdomCityStateOuterBuildingPool: parseConstantList(cs('kingdom_city_state_outer_building_pool', 'woodcutter|claypit|ironmine|cropland|wall|mercenarycamp|tradecenter|explorers_guild'), 'woodcutter|claypit|ironmine|cropland|wall'),
+    kingdomCityStateGenerationVersion: Math.max(1, Math.floor(cn('kingdom_city_state_generation_version', 3))),
+    kingdomCityStateTierWeights: parseCityStateTierWeights(cs('kingdom_city_state_tier_weights', '1:1|2:1|3:1')),
+    kingdomCityStateTribePool: parseConstantList(cs('kingdom_city_state_tribe_pool', 'romans|gauls|teutons'), 'romans|gauls|teutons').filter((tribe): tribe is 'romans' | 'gauls' | 'teutons' => tribe === 'romans' || tribe === 'gauls' || tribe === 'teutons'),
+    kingdomCityStateUnitPools: {
+      romans: parseConstantList(cs('kingdom_city_state_unit_pool_romans', 'legionnaire|praetorian|imperian|equlegati|equimperatoris|equcaesaris|ram|catapult'), 'legionnaire|praetorian|imperian|equlegati|equimperatoris|equcaesaris|ram|catapult'),
+      gauls: parseConstantList(cs('kingdom_city_state_unit_pool_gauls', 'phalanx|swordsman|pathfinder|theutates|druidrider|haeduan|gaulram|gcaultrebuchet'), 'phalanx|swordsman|pathfinder|theutates|druidrider|haeduan|gaulram|gcaultrebuchet'),
+      teutons: parseConstantList(cs('kingdom_city_state_unit_pool_teutons', 'clubswinger|spearman|axeman|teuscout|paladin|teutonknight|teuram|teucatapult'), 'clubswinger|spearman|axeman|teuscout|paladin|teutonknight|teuram|teucatapult'),
+    },
+    kingdomCityStateTier1UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier1_unit_count', 3))),
+    kingdomCityStateTier1UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier1_unit_min', 0))),
+    kingdomCityStateTier1UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier1_unit_max', 20))),
+    kingdomCityStateTier1ResourceMin: Math.max(0, cn('kingdom_city_state_tier1_resource_min', 500)),
+    kingdomCityStateTier1ResourceMax: Math.max(0, cn('kingdom_city_state_tier1_resource_max', 1500)),
+    kingdomCityStateTier1GoldMin: Math.max(0, cn('kingdom_city_state_tier1_gold_min', 0)),
+    kingdomCityStateTier1GoldMax: Math.max(0, cn('kingdom_city_state_tier1_gold_max', 300)),
+    kingdomCityStateTier2UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier2_unit_count', 4))),
+    kingdomCityStateTier2UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier2_unit_min', 5))),
+    kingdomCityStateTier2UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier2_unit_max', 35))),
+    kingdomCityStateTier2ResourceMin: Math.max(0, cn('kingdom_city_state_tier2_resource_min', 1500)),
+    kingdomCityStateTier2ResourceMax: Math.max(0, cn('kingdom_city_state_tier2_resource_max', 5000)),
+    kingdomCityStateTier2GoldMin: Math.max(0, cn('kingdom_city_state_tier2_gold_min', 300)),
+    kingdomCityStateTier2GoldMax: Math.max(0, cn('kingdom_city_state_tier2_gold_max', 1200)),
+    kingdomCityStateTier3UnitCount: Math.max(1, Math.floor(cn('kingdom_city_state_tier3_unit_count', 5))),
+    kingdomCityStateTier3UnitMin: Math.max(0, Math.floor(cn('kingdom_city_state_tier3_unit_min', 10))),
+    kingdomCityStateTier3UnitMax: Math.max(0, Math.floor(cn('kingdom_city_state_tier3_unit_max', 50))),
+    kingdomCityStateTier3ResourceMin: Math.max(0, cn('kingdom_city_state_tier3_resource_min', 5000)),
+    kingdomCityStateTier3ResourceMax: Math.max(0, cn('kingdom_city_state_tier3_resource_max', 15000)),
+    kingdomCityStateTier3GoldMin: Math.max(0, cn('kingdom_city_state_tier3_gold_min', 1200)),
+    kingdomCityStateTier3GoldMax: Math.max(0, cn('kingdom_city_state_tier3_gold_max', 5000)),
+    kingdomFiefUnitCount: Math.max(1, Math.floor(cn('kingdom_fief_unit_count', 7))),
+    kingdomFiefUnitMin: Math.max(0, Math.floor(cn('kingdom_fief_unit_min', 30))),
+    kingdomFiefUnitMax: Math.max(0, Math.floor(cn('kingdom_fief_unit_max', 100))),
+    kingdomFiefResourceMin: Math.max(0, cn('kingdom_fief_resource_min', 15000)),
+    kingdomFiefResourceMax: Math.max(0, cn('kingdom_fief_resource_max', 30000)),
+    kingdomFiefGoldMin: Math.max(0, cn('kingdom_fief_gold_min', 5000)),
+    kingdomFiefGoldMax: Math.max(0, cn('kingdom_fief_gold_max', 10000)),
+    kingdomCapitalUnitCount: Math.max(1, Math.floor(cn('kingdom_capital_unit_count', 10))),
+    kingdomCapitalUnitMin: Math.max(0, Math.floor(cn('kingdom_capital_unit_min', 50))),
+    kingdomCapitalUnitMax: Math.max(0, Math.floor(cn('kingdom_capital_unit_max', 150))),
+    kingdomCapitalResourceMin: Math.max(0, cn('kingdom_capital_resource_min', 30000)),
+    kingdomCapitalResourceMax: Math.max(0, cn('kingdom_capital_resource_max', 60000)),
+    kingdomCapitalGoldMin: Math.max(0, cn('kingdom_capital_gold_min', 10000)),
+    kingdomCapitalGoldMax: Math.max(0, cn('kingdom_capital_gold_max', 20000)),
+    kingdomPveKilledPopulationPerReputation: Math.max(1, Math.floor(cn('kingdom_pve_killed_population_per_reputation', 25))),
+    kingdomPveRetaliationChunk: Math.max(1, Math.floor(cn('kingdom_pve_retaliation_chunk', 5))),
+    kingdomPveRetaliationRaidThreshold: Math.min(0, Math.floor(cn('kingdom_pve_retaliation_raid_threshold', -10))),
+    kingdomPveRetaliationSiegeThreshold: Math.min(0, Math.floor(cn('kingdom_pve_retaliation_siege_threshold', -20))),
+    kingdomFiefMercenaryMinRatio: Math.max(0, Math.min(1, cn('kingdom_fief_mercenary_min_ratio', 0.4))),
+    kingdomFiefMercenaryMaxRatio: Math.max(0, Math.min(1, cn('kingdom_fief_mercenary_max_ratio', 0.7))),
     popProsperityFullRatio: cn('pop_prosperity_full_ratio', 0.70),
     popProsperityMaxBonus: cn('pop_prosperity_max_bonus', 0.30),
     popOvercapPenaltyFullRatio: cn('pop_overcap_penalty_full_ratio', 2.0),
@@ -1397,7 +1650,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       const [buildingZone, count] = row.params.split(':');
       return { kind: row.kind, buildingZone: (buildingZone?.trim() || 'inner') as 'inner' | 'outer', count: Math.max(1, num(count, 1)) };
     }
-    if (row.kind === 'population_reached' || row.kind === 'explore_tiles') {
+    if (row.kind === 'population_reached' || row.kind === 'explore_tiles' || row.kind === 'main_base_level') {
       return { kind: row.kind, count: Math.max(1, num(row.params, 1)) };
     }
     if (row.kind === 'resource_owned') {
@@ -1414,7 +1667,15 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     }
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
+    if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
+    if (row.kind === 'reputation_at_most') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
+  };
+  const parseReputationMercenaryExchange = (s: string): { unitCode: string; perPoint: number } | null => {
+    const [unitCode, rawPerPoint] = (s ?? '').split(':').map((value) => value.trim());
+    const perPoint = num(rawPerPoint, 0);
+    if (!unitCode || !Number.isFinite(perPoint) || perPoint <= 0) return null;
+    return { unitCode, perPoint };
   };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
     const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
@@ -1425,6 +1686,15 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const populationGrowth = rows
       .map((x) => x.kind === 'grant_population_growth' ? parsePopulationGrowthReward(x.params) : null)
       .find((value): value is { percent: number; durationSec: number } => !!value);
+    const resourceGrowth = rows
+      .map((x) => x.kind === 'grant_resource_growth' ? parseResourceGrowthReward(x.params) : null)
+      .find((value): value is { percent: number; durationSec: number } => !!value);
+    const buildingUnlocks = rows
+      .filter((x) => x.kind === 'unlock_buildings')
+      .flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
+    const reputationMercenaryExchange = rows
+      .map((x) => x.kind === 'grant_mercenaries_by_positive_reputation' ? parseReputationMercenaryExchange(x.params) : null)
+      .find((value): value is { unitCode: string; perPoint: number } => !!value);
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
@@ -1432,6 +1702,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (population > 0) out.population = population;
     if (researchPoints > 0) out.researchPoints = researchPoints;
     if (populationGrowth) out.populationGrowth = populationGrowth;
+    if (resourceGrowth) out.resourceGrowth = resourceGrowth;
+    if (buildingUnlocks.length) out.buildingUnlocks = [...new Set(buildingUnlocks)];
+    if (reputationMercenaryExchange) out.reputationMercenaryExchange = reputationMercenaryExchange;
     return out;
   };
   const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
@@ -1486,14 +1759,15 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const conditionalRewards = conditionalRewardsOf(allEffects);
     const requires = questGraph.edges.filter((x) => x.toQuest === def.code && x.relation === 'requires').sort((a, b) => a.order - b.order).map((x) => x.fromQuest);
     const offer = questGraph.conditions.filter((x) => x.questCode === def.code && x.phase === 'offer');
-    if (offer.length > 1) throw new Error(`任务 ${def.code} 当前兼容引擎每次只支持一个 offer 条件`);
+    // 一个任务可以由多个独立 offer 条件共同触发；运行时会按声明的 group
+    // 逐项评估。legacy trigger 仅保留第一条供旧客户端显示。
     const trigger = offer[0]
       ? (offer[0].kind === 'pve_camp_cleared' || offer[0].kind === 'secret_note_used' || offer[0].kind === 'tavern_refresh'
         ? offer[0].kind
         : `${offer[0].kind}:${offer[0].value}`)
       : undefined;
     quests[def.code] = {
-      id: def.id, code: def.code, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
+      id: def.id, code: def.code, lineCode: def.lineCode, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       conditionalRewards,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
@@ -1587,6 +1861,7 @@ export function validateGameConfig(config: GameConfig): void {
       if (b.zone !== 'outer') errors.push(`buildings.csv[${b.kind}] 有产出(resource)必须归 outer 区`);
     }
     if (b.maxLevel <= 0) errors.push(`buildings.csv[${b.kind}] maxLevel 必须>0（当前${b.maxLevel}）`);
+    if (b.maxCount !== -1 && (!Number.isInteger(b.maxCount) || b.maxCount < 1)) errors.push(`buildings.csv[${b.kind}] maxCount 必须为 -1 或正整数（当前${b.maxCount}）`);
     if (!Number.isInteger(b.mainBaseLevel) || b.mainBaseLevel < 1) errors.push(`buildings.csv[${b.kind}] mainBaseLevel 必须是≥1的整数`);
     // 逐等级参数（building_levels.csv）：必须覆盖 1..maxLevel；popCap≥0；prod 仅资源田且≥0
     for (let lv = 1; lv <= b.maxLevel; lv++) {
@@ -1685,8 +1960,9 @@ export function validateGameConfig(config: GameConfig): void {
   // pve：每个模板必须有守军；spawn 目标必须存在且坐标在地图内
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
-    // happy_village（幸福村）是 0 守军的 NPC 村庄（玩家可接受订单送达，或掠夺触发失败），特例放行
-    if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village') errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
+    if (p.faction !== 'neutral' && p.faction !== 'kingdom') errors.push(`pve_targets.csv[${p.type}] faction 必须是 neutral 或 kingdom`);
+    // happy_village（幸福村）和 kingdom_city_state（运行时随机生成）允许不在静态守军表中配置。
+    if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
   }
   for (const s of config.pveSpawns) {
     if (!pveCodes.has(s.type)) errors.push(`pve_spawns.csv[${s.id}] targetId 指向的目标 ${s.type} 不在 pve_targets.csv`);
@@ -1699,7 +1975,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -1769,6 +2045,49 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
   if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
+  if (c.forestVisionPenalty < 0) errors.push(`game_constants.csv forest_vision_penalty 必须≥0`);
+  if (c.hillsVisionBonus < 0) errors.push(`game_constants.csv hills_vision_bonus 必须≥0`);
+  if (c.hillsMarchSpeedMultiplier <= 0 || c.hillsMarchSpeedMultiplier > 1) {
+    errors.push(`game_constants.csv hills_march_speed_multiplier 必须在(0,1]`);
+  }
+  if (c.marchSizeReferencePop < 0) errors.push(`game_constants.csv march_size_reference_pop 必须≥0`);
+  if (c.marchSizePenalty < 0) errors.push(`game_constants.csv march_size_penalty 必须≥0`);
+  if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
+    errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
+  }
+  if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
+  if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);
+  if (c.kingdomCityStateGoldMin < 0 || c.kingdomCityStateGoldMax < c.kingdomCityStateGoldMin) errors.push(`game_constants.csv kingdom_city_state_gold_min/max 范围非法`);
+  if (c.kingdomCityStateTroopsPerResource < 0) errors.push(`game_constants.csv kingdom_city_state_troops_per_resource 必须≥0`);
+  if (c.kingdomCityStateTroopMin < 0 || c.kingdomCityStateTroopMax < c.kingdomCityStateTroopMin) errors.push(`game_constants.csv kingdom_city_state_troop_min/max 范围非法`);
+  if (c.kingdomCityStateScoutRatio < 0 || c.kingdomCityStateScoutRatio > 1) errors.push(`game_constants.csv kingdom_city_state_scout_ratio 必须在[0,1]`);
+  if (c.kingdomCityStateRaidDefenseMinRatio < 0 || c.kingdomCityStateRaidDefenseMaxRatio > 1 || c.kingdomCityStateRaidDefenseMaxRatio < c.kingdomCityStateRaidDefenseMinRatio) errors.push(`game_constants.csv kingdom_city_state_raid_defense_min/max_ratio 范围非法`);
+  if (c.kingdomCityStateRecoveryMinSec <= 0 || c.kingdomCityStateRecoveryMaxSec < c.kingdomCityStateRecoveryMinSec) errors.push(`game_constants.csv kingdom_city_state_recovery_min/max_sec 范围非法`);
+  if (c.kingdomCityStateRecoveryResourceExtraSec < 0) errors.push(`game_constants.csv kingdom_city_state_recovery_resource_extra_sec 必须≥0`);
+  if (c.kingdomCityStateReputationPenalty < 0) errors.push(`game_constants.csv kingdom_city_state_reputation_penalty 必须≥0`);
+  if (c.kingdomFiefUnitMin < 0 || c.kingdomFiefUnitMax < c.kingdomFiefUnitMin || c.kingdomCapitalUnitMin < 0 || c.kingdomCapitalUnitMax < c.kingdomCapitalUnitMin) errors.push(`game_constants.csv 王国封地/王都兵力范围非法`);
+  if (c.kingdomFiefResourceMin < 0 || c.kingdomFiefResourceMax < c.kingdomFiefResourceMin || c.kingdomCapitalResourceMin < 0 || c.kingdomCapitalResourceMax < c.kingdomCapitalResourceMin) errors.push(`game_constants.csv 王国封地/王都资源范围非法`);
+  if (c.kingdomFiefGoldMin < 0 || c.kingdomFiefGoldMax < c.kingdomFiefGoldMin || c.kingdomCapitalGoldMin < 0 || c.kingdomCapitalGoldMax < c.kingdomCapitalGoldMin) errors.push(`game_constants.csv 王国封地/王都金币范围非法`);
+  if (c.kingdomPveKilledPopulationPerReputation <= 0 || c.kingdomPveRetaliationChunk <= 0) errors.push(`game_constants.csv 王国 PvE 声望累计参数必须>0`);
+  if (c.kingdomPveRetaliationSiegeThreshold > c.kingdomPveRetaliationRaidThreshold) errors.push(`game_constants.csv 王国 PvE 报复阈值顺序非法`);
+  if (c.kingdomFiefMercenaryMinRatio < 0 || c.kingdomFiefMercenaryMaxRatio > 1 || c.kingdomFiefMercenaryMaxRatio < c.kingdomFiefMercenaryMinRatio) errors.push(`game_constants.csv 王国封地雇佣军比例范围非法`);
+  if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
+  if (c.kingdomCityStateInnerBuildingCountMin < 0 || c.kingdomCityStateInnerBuildingCountMax < c.kingdomCityStateInnerBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_inner_building_count_min/max 范围非法`);
+  if (c.kingdomCityStateBuildingLevelMin <= 0 || c.kingdomCityStateBuildingLevelMax < c.kingdomCityStateBuildingLevelMin) errors.push(`game_constants.csv kingdom_city_state_building_level_min/max 范围非法`);
+  if (c.kingdomCityStateGenerationVersion < 1 || !Number.isInteger(c.kingdomCityStateGenerationVersion)) errors.push(`game_constants.csv kingdom_city_state_generation_version 必须为正整数`);
+  if (c.kingdomCityStateTribePool.length === 0) errors.push(`game_constants.csv kingdom_city_state_tribe_pool 不能为空`);
+  if (Object.values(c.kingdomCityStateTierWeights).every((weight) => weight <= 0)) errors.push(`game_constants.csv kingdom_city_state_tier_weights 至少需要一个正权重`);
+  const cityTiers = [
+    [1, c.kingdomCityStateTier1UnitCount, c.kingdomCityStateTier1UnitMin, c.kingdomCityStateTier1UnitMax, c.kingdomCityStateTier1ResourceMin, c.kingdomCityStateTier1ResourceMax, c.kingdomCityStateTier1GoldMin, c.kingdomCityStateTier1GoldMax],
+    [2, c.kingdomCityStateTier2UnitCount, c.kingdomCityStateTier2UnitMin, c.kingdomCityStateTier2UnitMax, c.kingdomCityStateTier2ResourceMin, c.kingdomCityStateTier2ResourceMax, c.kingdomCityStateTier2GoldMin, c.kingdomCityStateTier2GoldMax],
+    [3, c.kingdomCityStateTier3UnitCount, c.kingdomCityStateTier3UnitMin, c.kingdomCityStateTier3UnitMax, c.kingdomCityStateTier3ResourceMin, c.kingdomCityStateTier3ResourceMax, c.kingdomCityStateTier3GoldMin, c.kingdomCityStateTier3GoldMax],
+  ] as const;
+  for (const [tier, unitCount, unitMin, unitMax, resourceMin, resourceMax, goldMin, goldMax] of cityTiers) {
+    if (!Number.isInteger(unitCount) || unitCount < 1) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_unit_count 必须为正整数`);
+    if (!Number.isInteger(unitMin) || unitMin < 0 || !Number.isInteger(unitMax) || unitMax < unitMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_unit_min/max 范围非法`);
+    if (resourceMin < 0 || resourceMax < resourceMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_resource_min/max 范围非法`);
+    if (goldMin < 0 || goldMax < goldMin) errors.push(`game_constants.csv kingdom_city_state_tier${tier}_gold_min/max 范围非法`);
+  }
   if (c.notificationsPerVillage <= 0) errors.push(`game_constants.csv notifications_per_village 必须>0`);
   // 人口常量范围校验（硬上限模型）
   if (c.popProsperityFullRatio <= 0 || c.popProsperityFullRatio > 1) errors.push(`game_constants.csv pop_prosperity_full_ratio 必须在(0,1]`);
@@ -1852,7 +2171,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -1874,7 +2193,7 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'build_buildings') {
       if (q.objective.buildingZone !== 'inner' && q.objective.buildingZone !== 'outer') errors.push(`quests.csv[${q.code}] build_buildings 区域必须是 inner/outer`);
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] build_buildings 数量必须≥1`);
-    } else if (q.objective.kind === 'population_reached' || q.objective.kind === 'explore_tiles') {
+    } else if (q.objective.kind === 'population_reached' || q.objective.kind === 'explore_tiles' || q.objective.kind === 'main_base_level') {
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 数量必须≥1`);
     } else if (q.objective.kind === 'resource_owned') {
       if (!q.objective.resourceKey || !resourceKeys.has(q.objective.resourceKey)) errors.push(`quests.csv[${q.code}] resource_owned 资源 ${q.objective.resourceKey} 不在 resources.csv`);
@@ -1901,12 +2220,16 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] raid_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'defend_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
+    } else if (q.objective.kind === 'investigate_task_village') {
+      if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
+    } else if (q.objective.kind === 'reputation_at_most') {
+      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] reputation_at_most 必须指定数值阈值`);
     }
-    // 触发条件校验：仅随机任务可带 trigger；格式 = kind:arg
+    // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
-      if (q.type !== 'side') errors.push(`quests.csv[${q.code}] 仅支线任务可设触发条件 trigger`);
+      if (q.type !== 'side' && !(q.type === 'main' && (q.trigger.startsWith('main_base_level:') || q.trigger.startsWith('building_level:') || q.trigger.startsWith('treasure_used:')))) errors.push(`quests.csv[${q.code}] 仅支线或主基地/建筑/宝物使用门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}（支持 building_built:<建筑code> / troops_reached:<数量> / pve_camp_cleared / secret_note_used / tavern_refresh）`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);
@@ -1951,6 +2274,21 @@ export function validateGameConfig(config: GameConfig): void {
     if (row.kind === 'grant_population_growth' && !parsePopulationGrowthReward(row.params)) {
       errors.push(`quest_effects.csv[${row.id}] grant_population_growth 参数必须是 percent:durationSec（如 10:86400）`);
     }
+    if (row.kind === 'grant_resource_growth' && !parseResourceGrowthReward(row.params)) {
+      errors.push(`quest_effects.csv[${row.id}] grant_resource_growth 参数必须是 percent:durationSec（如 25:43200）`);
+    }
+    if (row.kind === 'grant_mercenaries_by_positive_reputation') {
+      const [unitCode, rawPerPoint] = row.params.split(':').map((value) => value.trim());
+      const perPoint = num(rawPerPoint, 0);
+      const unit = config.units[unitCode];
+      if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 兑换兵种 ${unitCode} 必须是 merc 雇佣兵`);
+      if (!Number.isFinite(perPoint) || perPoint <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries_by_positive_reputation 的每点数量必须>0`);
+    }
+    if (row.kind === 'unlock_buildings') {
+      for (const kind of row.params.split('|').map((value) => value.trim()).filter(Boolean)) {
+        if (!config.buildings[kind]) errors.push(`quest_effects.csv[${row.id}] 解锁建筑 ${kind} 不在 buildings.csv`);
+      }
+    }
   }
   for (const row of config.questGraph.edges) {
     if (!graphQuestCodes.has(row.fromQuest)) errors.push(`quest_edges.csv[${row.id}] 起点任务不存在：${row.fromQuest}`);
@@ -1967,7 +2305,8 @@ export function validateGameConfig(config: GameConfig): void {
     dialogueCodes.add(d.code);
     if (!Number.isInteger(d.id) || d.id < 1) errors.push(`dialogues.csv[${d.code}] id 必须为正整数`);
     if (!Number.isInteger(d.segment) || d.segment < 1) errors.push(`dialogues.csv[${d.code}] segment 必须为正整数`);
-    if (!questCodes.has(d.taskCode)) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
+    // 宝物使用对话沿用 t1…tN 的排序 taskCode，但并不绑定任务。
+    if (!questCodes.has(d.taskCode) && !(d.trigger === 'use' && /^t\d+$/.test(d.taskCode) && /_use$/.test(d.code))) errors.push(`dialogues.csv[${d.code}] taskCode=${d.taskCode} 不在 quests.csv`);
     if (!d.trigger) errors.push(`dialogues.csv[${d.code}] trigger 不能为空`);
     dialogueTriggers.add(`${d.taskCode}:${d.trigger}`);
     const group = dialogueGroups.get(d.code) ?? [];

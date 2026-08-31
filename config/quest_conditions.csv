@@ -5,3 +5,6 @@ c-s2-troops,s2,offer,all,troops_reached,20
 c-villager-pve,s3,offer,all,pve_camp_cleared,1
 c-investigate-note,s4,offer,all,secret_note_used,1
 c-m1-clean,m1,success,any,no_damaged_resource_level,woodcutter|claypit|ironmine|cropland
+c-m11-mainbase,m11,offer,all,main_base_level,2
+c-m12-council,m12,offer,all,building_level,council:1
+c-m13-effort,m13,offer,all,treasure_used,my_effort
