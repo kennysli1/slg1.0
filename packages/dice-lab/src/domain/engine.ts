@@ -107,9 +107,10 @@ function playerRoll(state: DiceGameState, selectedDieIds: string[] | undefined, 
 
 function playerBust(state: DiceGameState, rng: DiceRng): ActionResult {
   const lost = state.turnScore;
+  const bustedDice = state.dice;
   state.turnScore = 0;
   state.dice = [];
-  append(state, { kind: 'bust', side: 'player', points: lost, message: `爆骰，本轮 ${lost} 分全部丢失` });
+  append(state, { kind: 'bust', side: 'player', dice: bustedDice, points: lost, message: `爆骰，本轮 ${lost} 分全部丢失` });
   const aiEvents = runAiTurn(state, state.difficulty, rng);
   return { state, aiEvents };
 }
@@ -134,7 +135,7 @@ function runAiTurn(state: DiceGameState, difficulty: Difficulty, rng: DiceRng): 
   while (true) {
     const options = legalOptions(dice);
     if (options.length === 0) {
-      append(state, { kind: 'bust', side: 'ai', points: turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` });
+      append(state, { kind: 'bust', side: 'ai', dice, points: turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` });
       break;
     }
     const decision: AiDecision = chooseAiDecision(

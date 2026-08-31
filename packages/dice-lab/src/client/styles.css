@@ -25,6 +25,16 @@ input, select { color: #f1eadc; background: #111b21; border: 1px solid #5e7180; 
 .action-row { margin-top: 19px; flex-wrap: wrap; } .restart-button { width: 100%; margin-top: 13px; } .notice { color: var(--gold-hi); margin: 14px 0 0; min-height: 21px; }
 .event-log { margin: 20px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; max-height: 440px; overflow-y: auto; } .event-log li { color: var(--muted); font-size: 14px; line-height: 1.45; padding: 9px 10px; background: rgba(8,15,19,.35); border-left: 2px solid #526974; } .event-log li span { display: inline-block; min-width: 34px; color: var(--gold); font-weight: 700; } .event-log .event-ai { border-left-color: var(--red); } .event-log .event-ai span { color: #e6b0a8; }
 .rules-foot { color: #86969d; text-align: center; font-size: 13px; margin-top: 24px; }
+.bust-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(5, 10, 13, .76); backdrop-filter: blur(3px); animation: bust-fade-in .16s ease-out; }
+.bust-result { width: min(680px, 100%); padding: 30px; text-align: center; border-color: rgba(185, 86, 79, .72); box-shadow: 0 24px 80px rgba(0, 0, 0, .58); }
+.bust-result h2 { color: #f1b0a6; font-size: 34px; margin: 4px 0 18px; }
+.bust-result p:not(.eyebrow) { color: var(--gold-hi); margin: 18px 0 8px; font-size: 18px; }
+.bust-dice { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
+.bust-die { position: relative; width: 68px; height: 68px; }
+.bust-die .die-art { padding: 10px; }
+.bust-die .pip { width: 11px; height: 11px; }
+.bust-die > span { position: absolute; right: -4px; bottom: -7px; min-width: 21px; padding: 2px 5px; color: #1a2023; background: var(--gold-hi); border-radius: 9px; font-size: 12px; font-weight: 700; }
+@keyframes bust-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 760px) { .dice-lab { padding: 20px 14px 40px; } .lab-header { align-items: flex-start; } .lab-header-actions { flex-direction: column; align-items: flex-end; gap: 9px; } .setup-grid, .play-layout { grid-template-columns: 1fr; } .scoreboard { grid-template-columns: 1fr 120px 1fr; } .score-side strong { font-size: 27px; } .play-card, .log-card, .setup-card { padding: 17px; } .dice-tray { min-height: 178px; gap: 10px; } .die-button { width: 61px; height: 61px; border-radius: 10px; } .die-art { padding: 10px; } .pip { width: 10px; height: 10px; } .action-row > button { flex: 1 1 145px; } .selection-readout { align-items: flex-start; flex-wrap: wrap; } .selection-readout small { width: 100%; margin-left: 0; } }
 
 /* AI-generated art is decorative only; layout and pip positions remain CSS-owned. */
