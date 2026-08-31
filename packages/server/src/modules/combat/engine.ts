@@ -10,6 +10,10 @@ export interface CombatTickInput {
   combatStrength: number;
   dt: number;
   defenderWallMultiplier: number;
+  /** 攻击方携带的敌方骑兵防御削弱倍率。 */
+  attackerCavalryDefMultiplier?: number;
+  /** 防守方携带的敌方骑兵防御削弱倍率（野战/行军防守方）。 */
+  defenderCavalryDefMultiplier?: number;
 }
 
 export interface CombatTickResult {
@@ -35,8 +39,8 @@ export function simulateCombatTick(input: CombatTickInput): CombatTickResult {
   const defender = cloneSnapshot(input.defender);
   const attackerBefore = aggregateCounts(attacker);
   const defenderBefore = aggregateCounts(defender);
-  const killsToDefender = computeKills(attacker, defender, input.combatStrength, input.dt, input.defenderWallMultiplier);
-  const killsToAttacker = computeKills(defender, attacker, input.combatStrength, input.dt, 1);
+  const killsToDefender = computeKills(attacker, defender, input.combatStrength, input.dt, input.defenderWallMultiplier, input.attackerCavalryDefMultiplier ?? 1);
+  const killsToAttacker = computeKills(defender, attacker, input.combatStrength, input.dt, 1, input.defenderCavalryDefMultiplier ?? 1);
   const defenderPending = applyKills(defender, killsToDefender + input.defenderPending);
   const attackerPending = applyKills(attacker, killsToAttacker + input.attackerPending);
   return {
@@ -137,7 +141,7 @@ export function countDelta(before: Record<string, number>, after: Record<string,
   return out;
 }
 
-function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defenderWallMultiplier: number): number {
+function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defenderWallMultiplier: number, cavalryDefMultiplier = 1): number {
   const attackerHasMelee = hasAliveForm(A, 'melee');
   const defenderHasMelee = hasAliveForm(B, 'melee');
   let meleeDamage = 0;
@@ -162,8 +166,9 @@ function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defenderW
   for (const unit of Object.values(B)) {
     if (unit.form !== targetForm || unit.count <= 0 || (priority && !unit.ambushPriority)) continue;
     rowCount += unit.count;
-    effectiveMeleeHp += unit.count * unit.meleeDef * traitMult(unit, 'def_melee') / Math.max(0.05, traitMult(unit, 'dmg_taken_melee'));
-    effectiveRangedHp += unit.count * unit.rangedDef * traitMult(unit, 'def_ranged') / Math.max(0.05, traitMult(unit, 'dmg_taken_ranged'));
+    const unitDefMultiplier = unit.isCavalry ? Math.max(0, cavalryDefMultiplier) : 1;
+    effectiveMeleeHp += unit.count * unit.meleeDef * unitDefMultiplier * traitMult(unit, 'def_melee') / Math.max(0.05, traitMult(unit, 'dmg_taken_melee'));
+    effectiveRangedHp += unit.count * unit.rangedDef * unitDefMultiplier * traitMult(unit, 'def_ranged') / Math.max(0.05, traitMult(unit, 'dmg_taken_ranged'));
   }
   if (rowCount <= 0) return 0;
   const meleeDefenseAverage = Math.max(0.5, (effectiveMeleeHp / rowCount) * defenderWallMultiplier);

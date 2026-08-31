@@ -640,6 +640,14 @@
     "subject": "a single golden idol: a small solid gold statuette of a seated crowned figure with folded arms and ruby eyes, standing on a stepped square gold plinth engraved with fine patterns"
   },
   {
+    "base": "trs_horse_rope",
+    "zh": "绞马索",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single horse snare rope: a rugged braided leather lasso in a compact coil with a clearly visible loop, bronze fittings and a small iron toggle weight, no horse or rider"
+  },
+  {
     "base": "pve_rats",
     "zh": "老鼠窝",
     "category": "pve",

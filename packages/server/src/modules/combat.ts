@@ -456,6 +456,11 @@ export class CombatModule {
       return 1 + totalDef;
     })();
 
+    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）。绞马索属于
+    // 携带方的效果，只对承伤方骑兵防御生效；驻城守军没有携带宝物清单，
+    // 不会错误继承守方城内宝库效果。
+    const attackerCavalryDefMult = this.enemyCavalryDefMultiplier(Object.values(b.contributions).flatMap((c) => c.treasures ?? []));
+    const defenderCavalryDefMult = this.enemyCavalryDefMultiplier(b.defenderContribution?.treasures ?? []);
     const result = simulateCombatTick({
       attacker: b.attacker,
       defender: b.defender,
@@ -464,6 +469,8 @@ export class CombatModule {
       combatStrength: k,
       dt,
       defenderWallMultiplier: wallMult,
+      attackerCavalryDefMultiplier: attackerCavalryDefMult,
+      defenderCavalryDefMultiplier: defenderCavalryDefMult,
     });
     b.attacker = result.attacker;
     b.defender = result.defender;
@@ -508,6 +515,17 @@ export class CombatModule {
     }
 
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
+  }
+
+  /** 取一方携带的最强敌方骑兵防御削弱；同一件独特宝物不会重复叠乘。 */
+  private enemyCavalryDefMultiplier(codes: string[]): number {
+    let multiplier = 1;
+    for (const code of codes) {
+      const treasure = this.config.treasures[code];
+      if (!treasure || treasure.effectType !== 'enemyCavalryDef') continue;
+      multiplier = Math.min(multiplier, Math.max(0, 1 - treasure.effectValue / 100));
+    }
+    return multiplier;
   }
 
   /** 进入可恢复结算状态；结算失败时保留 battle 记录，重启后由 resume() 继续。 */
@@ -931,7 +949,7 @@ function mergeCounts(target: Record<string, number>, source: Record<string, numb
   for (const [code, count] of Object.entries(source)) target[code] = (target[code] ?? 0) + count;
 }
 
-/** 日志用：快照摘要，列出每兵种数量+关键战斗属性+特性名。 */
+  /** 日志用：快照摘要，列出每兵种数量+关键战斗属性+特性名。 */
 function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
   return Object.entries(snap).map(([key, u]) => ({
     code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,

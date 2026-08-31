@@ -53,6 +53,8 @@ export interface TreasureEffects {
   techIntervalMult: number;
   /** 黑色徽章：清理 PvE 营地时的额外掉落概率。 */
   pveDropRateBonus: number;
+  /** 绞马索：攻击方对敌方骑兵防御的倍率（默认 1，30% 削弱为 0.7）。 */
+  enemyCavalryDefMult: number;
 }
 
 interface TreasureState {
@@ -513,6 +515,7 @@ export class TreasureModule {
     let soldierFoodReduce = 0;
     let techIntervalMult = 1;
     let pveDropRateBonus = 0;
+    let enemyCavalryDefMult = 1;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -559,6 +562,11 @@ export class TreasureModule {
           defMult = 1 + (defMult - 1) + frac;
           pveDropRateBonus += 0.05;
           break;
+        case 'enemyCavalryDef':
+          // 同一宝物栏位已由 uniqueEffect 防止重复；多支军队同时携带时
+          // Combat 取最强单项，避免跨军队重复乘算造成非预期指数削弱。
+          enemyCavalryDefMult = Math.min(enemyCavalryDefMult, Math.max(0, 1 - frac));
+          break;
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -566,7 +574,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus, enemyCavalryDefMult };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。

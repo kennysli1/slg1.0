@@ -831,13 +831,13 @@ function sectionGeneric(table){
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
     var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
     var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : meta.numeric;
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
@@ -975,6 +975,20 @@ function sectionMarchSize(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
+// ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
+function sectionCavalry(){
+  var rows = DATA.constants || [], row = null;
+  for (var i=0;i<rows.length;i++) if (rows[i].key === 'cavalry_unit_codes') { row = rows[i]; break; }
+  if (!row) return '';
+  var value = row.value == null ? '' : row.value;
+  var h = '<div class="hint">以 | 分隔兵种 code。猎马人累计击杀和绞马索的敌方骑兵判定均读取此列表；保存后只影响新结算/新事件，不改变历史战报。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  h += '<tr><td class="lbl">骑兵兵种代码 <small style="color:#7a86a8">(cavalry_unit_codes)</small></td>';
+  h += '<td><input type="text" value="'+esc(value)+'" data-t="constants" data-k="cavalry_unit_codes" data-f="value" oninput="onEdit(this)"></td>';
+  h += '<td class="lbl">多个兵种代码用 | 分隔</td></tr></tbody></table>';
+  return '<div class="sec"><h2>骑兵分类参数</h2>'+h+'</div>';
 }
 
 // ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
@@ -1338,6 +1352,7 @@ function render(){
   html += sectionReputation();
   html += sectionTerrain();
   html += sectionMarchSize();
+  html += sectionCavalry();
   html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();

@@ -22,3 +22,4 @@ o-m12,m12,clear_camp,bandits:2,1
 o-m13,m13,investigate_task_village,secret_camp,1
 o-m14,m14,submit_resources,crop:500,1
 o-m15,m15,reputation_at_most,-5,1
+o-s5,s5,kill_units,cavalry:50,1

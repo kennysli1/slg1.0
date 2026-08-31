@@ -131,6 +131,7 @@ export interface TreasureDef {
    *  - reputation：主宝物栏被动声望修正（value=整数，可为负）
    *  - instantGold：获得时立即结算一次的金币数（value=数量）
    *  - ritualBuff：使用后扣除劳动人口，全资源产量加成持续一段时间（value=百分比；时长/人口见 game_constants）
+   *  - enemyCavalryDef：敌方骑兵防御倍率降低（value=百分比；绞马索使用）
    *  - honestHeart：复合效果（value=百分比，统一作用于以下四项）：全军攻击+value%、全军防御+value%、金币收入+value%、科技点判定间隔×(1-value/100)（更快）
    */
   effectType: string;
@@ -150,7 +151,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'kill_units';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -184,6 +185,8 @@ export interface QuestObjective {
   /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
   /** reputation_at_most：玩家声望值达到 threshold 或更低。 */
   threshold?: number;
+  /** kill_units：累计击杀指定类别的敌方兵力（人口数）；当前支持 cavalry。 */
+  unitCategory?: string;
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -483,6 +486,8 @@ export interface GameConstants {
   marchSizePenalty: number;
   /** 军队规模减速：速度倍率下限。 */
   marchSizeMinMultiplier: number;
+  /** 骑兵兵种代码（由 cavalry_unit_codes 以 | 分隔配置），用于猎马人任务与绞马索效果。 */
+  cavalryUnitCodes: string[];
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
   marchPointBase: number;
   marchPointPerRallypointLevel: number;
@@ -1299,6 +1304,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
     marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
     marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
+    cavalryUnitCodes: parseConstantList(cs('cavalry_unit_codes', 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'), 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
     pveLootVariance: cn('pve_loot_variance', 0.2),
@@ -1665,6 +1671,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       const [researchCode, count] = row.params.includes(':') ? row.params.split(':') : ['', row.params];
       return { kind: row.kind, researchCode: researchCode?.trim() || undefined, count: Math.max(1, num(count, 1)) };
     }
+    if (row.kind === 'kill_units') {
+      const [unitCategory, count] = row.params.split(':');
+      return { kind: row.kind, unitCategory: unitCategory?.trim() || 'cavalry', count: Math.max(1, num(count, 1)) };
+    }
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
@@ -1975,7 +1985,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -2171,7 +2181,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'kill_units']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2216,6 +2226,9 @@ export function validateGameConfig(config: GameConfig): void {
     } else if (q.objective.kind === 'research_completed') {
       if (q.objective.researchCode && !config.research[q.objective.researchCode]) errors.push(`quests.csv[${q.code}] research_completed 科技 ${q.objective.researchCode} 不在 research.csv`);
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] research_completed 数量必须≥1`);
+    } else if (q.objective.kind === 'kill_units') {
+      if (!q.objective.unitCategory) errors.push(`quests.csv[${q.code}] kill_units 必须指定兵种类别`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] kill_units 数量必须≥1`);
     } else if (q.objective.kind === 'raid_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] raid_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'defend_task_village') {
