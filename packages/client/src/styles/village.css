@@ -1626,9 +1626,9 @@
 .empire-village-task-row__meta small { white-space: nowrap; }
 .empire-village-task-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-2xs); line-height: 1.45; }
 .empire-workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s-4); }
+.empire-workspace-layout { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-entry { min-width: 0; }
 .empire-workspace-panel { display: flex; min-height: 144px; height: 144px; flex-direction: column; }
-.empire-workspace-entry.is-open .empire-workspace-panel { min-height: 0; height: auto; }
 .empire-workspace-topline { display: flex; min-height: 100%; align-items: stretch; justify-content: space-between; gap: var(--s-3); }
 .empire-workspace-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--s-1); }
 .empire-workspace-copy h2 { margin: 0; color: var(--c-ink); font-family: var(--ff-han); font-size: var(--f-lg); line-height: 1.2; }
@@ -1644,7 +1644,9 @@
 .empire-workspace-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .empire-workspace-entry.is-open .empire-workspace-toggle { border-color: var(--c-gold-dim); }
 .empire-workspace-entry.is-open .empire-workspace-toggle i { transform: rotate(180deg); }
-.empire-workspace-content { display: grid; gap: var(--s-4); margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.empire-workspace-expanded { min-width: 0; }
+.empire-workspace-expanded-panel { min-width: 0; }
+.empire-workspace-content { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-content .kingdom-army-management { margin-top: 0; }
 .empire-active-panel { border-left: calc(var(--s-1) / 2) solid var(--status-warning); }
 
@@ -1692,11 +1694,18 @@
 .village-command-dock__village .vil-switcher-trigger { height: 100%; box-sizing: border-box; }
 .village-command-dock__resources .kingdom-resource-ledger,
 .village-command-dock__resources .kingdom-resource-ledger > .panel {
+  width: 100%;
   height: 100%;
   margin: 0;
   box-sizing: border-box;
 }
-.village-command-dock__resources .kingdom-resource-grid { height: 100%; align-items: stretch; }
+.village-command-dock__resources .kingdom-resource-grid {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  align-items: stretch;
+}
 .kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
 .kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
 .village-command-dock__eyebrow {
@@ -1709,8 +1718,8 @@
   line-height: 1;
 }
 
-/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
- * 展开只增加卡片内部内容，始终保留原有双列位置。 */
+/* 工作区摘要布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
+ * 展开内容脱离双列摘要卡片，固定占用其下方的整行面板。 */
 .empire-workspace-grid--both-closed,
 .empire-workspace-grid--both-open,
 .empire-workspace-grid--development-open,
