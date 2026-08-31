@@ -220,14 +220,15 @@ export class PveModule {
       this.migrateTaskVillageDefender(s);
       const current = this.load(s.id) ?? s;
       this.migrateTaskVillageLoot(current);
-      if (current.cityState) {
+      const kingdomCurrent = this.migrateLegacyKingdomCityState(this.load(s.id) ?? current);
+      if (kingdomCurrent.cityState) {
         // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
-        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe) {
-          this.regenerateCityState(current);
+        if (kingdomCurrent.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !kingdomCurrent.kingdomProfile || !kingdomCurrent.cityStateTribe) {
+          this.regenerateCityState(kingdomCurrent);
           continue;
         }
-        this.settleRecovery(current);
-        if (current.recovery) this.scheduleRecovery(current);
+        this.settleRecovery(kingdomCurrent);
+        if (kingdomCurrent.recovery) this.scheduleRecovery(kingdomCurrent);
         continue;
       }
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
@@ -376,6 +377,24 @@ export class PveModule {
   }
 
   /**
+   * 判断存档中的目标是否由当前配置定义为王国 PvE 城市目标。
+   *
+   * 王都/封地最初曾按普通 PvE 写入存档，后来才增加 cityState 标记。
+   * 如果只看存档字段，旧记录会一直没有攻城选项；配置中心的模板才是
+   * 目标类型的权威来源。
+   */
+  private isConfiguredKingdomCityState(s: PveState): boolean {
+    return this.config.pveTemplates[s.type]?.cityState === true;
+  }
+
+  /** 将旧版王国目标升级为当前城市目标档位，并保留其地图坐标。 */
+  private migrateLegacyKingdomCityState(s: PveState): PveState {
+    if (s.cityState || !this.isConfiguredKingdomCityState(s)) return s;
+    this.regenerateCityState(s);
+    return this.load(s.id) ?? s;
+  }
+
+  /**
    * 旧版 M8 曾把条顿棍棒兵错误写成独立的 club 标签。只迁移仍保留该标签
    * 的天王老子村：保留存档中的数量，战斗属性统一替换为 units.csv 的
    * clubswinger 模板，并从存档中删除 club，避免继续向地图/战报泄露旧兵种。
@@ -429,7 +448,7 @@ export class PveModule {
     this.migrateTaskVillageDefender(s);
     const afterDefender = this.load(s.id) ?? s;
     this.migrateTaskVillageLoot(afterDefender);
-    let current = this.load(s.id) ?? afterDefender;
+    let current = this.migrateLegacyKingdomCityState(this.load(s.id) ?? afterDefender);
     if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe)) {
       this.regenerateCityState(current);
       current = this.load(current.id) ?? current;
