@@ -3118,7 +3118,7 @@ export class MovementModule {
     // 必须转发 mv.treasures：Combat 只有拿到携带宝物清单，才能在 BattleEnded 中回传 treasures，
     // 进而 onBattleEnded 在全灭时调用 treasure.LoseCarried 把宝物转交防守方（否则携带记录被孤立→宝物凭空消失）。
     const carried = mv.treasures && mv.treasures.length > 0 ? mv.treasures : [];
-    await this.commands.send({
+    const engaged = await this.commands.send({
       name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
         targetKind, targetId, targetXY: mv.toXY,
@@ -3130,6 +3130,11 @@ export class MovementModule {
         treasures: carried,
       },
     });
+    if (!engaged.ok) {
+      log('进入战斗失败·恢复返程', { movementId: mv.id, targetKind, targetId, reason: engaged.reason });
+      await this.startReturn(mv);
+      return;
+    }
     mv.status = 'paused';
     mv.stepToken += 1;
     this.save(mv);
@@ -3366,7 +3371,7 @@ export class MovementModule {
     const bSnap = await this.attackerSnapshot(b);
     const aCarried = (a.treasures ?? []).filter((t) => t);
     const bCarried = (b.treasures ?? []).filter((t) => t);
-    await this.commands.send({
+    const engaged = await this.commands.send({
       name: 'combat.Engage',
       from: MovementModule.NAME,
       payload: {
@@ -3391,6 +3396,9 @@ export class MovementModule {
         },
       },
     });
+    if (!engaged.ok) {
+      await this.recoverEngageFailure([a, b], engaged.reason ?? 'field_engage_rejected');
+    }
   }
 
   /** 伏击战：伏击方作为 attacker，路过军队作为 defenderField；战斗结束后双方都回到出发城。 */
@@ -3403,7 +3411,7 @@ export class MovementModule {
     void this.bus.emit({ name: 'movement.Intercepted', source: MovementModule.NAME, ts: this.now(), payload: { villageId: target.fromVillage, at: target.pos, opponentVillage: ambush.fromVillage, battleType: 'ambush' } } as DomainEvent);
     const aSnap = await this.attackerSnapshot(ambush);
     const bSnap = await this.attackerSnapshot(target);
-    await this.commands.send({
+    const engaged = await this.commands.send({
       name: 'combat.Engage', from: MovementModule.NAME,
       payload: {
         targetKind: 'field', battleType: 'ambush', targetId: `ambush:${ambush.id}:${target.id}`, targetXY: target.pos,
@@ -3417,6 +3425,18 @@ export class MovementModule {
         },
       },
     });
+    if (!engaged.ok) {
+      await this.recoverEngageFailure([ambush, target], engaged.reason ?? 'ambush_engage_rejected');
+    }
+  }
+
+  /** combat 准入失败时，解除已经暂停的行军，避免 movement 永久卡在 paused。 */
+  private async recoverEngageFailure(movements: MovementRecord[], reason: string): Promise<void> {
+    log('战斗准入失败·参与者恢复返程', { movementIds: movements.map((movement) => movement.id), reason });
+    for (const movement of movements) {
+      const current = this.load(movement.id);
+      if (current?.status === 'paused') await this.startReturn(current);
+    }
   }
 
   /** 战斗结束事件：为幸存者安排带战利品返程；全歼时按 pve/pvp 处理携带宝物。field 侧：幸存者继续行军。 */
