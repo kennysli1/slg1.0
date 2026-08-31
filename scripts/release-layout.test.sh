@@ -33,7 +33,7 @@ printf 'legacy-balance' > "$BASE/data/balance_overrides.json"
 printf 'legacy-log' > "$BASE/logs/out.log"
 printf 'legacy-config' > "$BASE/ecosystem.config.cjs"
 printf "module.exports = { apps: [{ name: 'kow' }, { name: 'kow-test-01' }] };\n" > "$FIXTURE/ecosystem.config.cjs"
-printf 'id,code\n1,main\n' > "$FIXTURE/config/buildings.csv"
+printf 'id,code\n1,main\n2,git-only\n' > "$FIXTURE/config/buildings.csv"
 # 发布布局测试不需要重复加载完整游戏配置；这里提供一个最小迁移入口，
 # 真实迁移逻辑由 server 的 config-authority 单测覆盖。测试仍会验证发布器
 # 在启动前强制要求并调用这个编译产物，避免漏打包导致半套发布。
@@ -41,7 +41,8 @@ printf 'process.exit(0);\n' > "$FIXTURE/packages/server/dist/infra/config-author
 cp "$ROOT/scripts/merge-persisted-config.mjs" "$FIXTURE/scripts/merge-persisted-config.mjs"
 # 模拟 GM 已保存的共享 CSV：后续 release 必须以它覆盖仓库默认值。
 printf 'buildings.csv\n' > "$BASE/shared/data/balance_csv_files.list"
-printf 'id,code\n1,gm-main\n' > "$BASE/shared/config/buildings.csv"
+printf 'id,code\n1,gm-main\n3,gm-added\n' > "$BASE/shared/config/buildings.csv"
+printf '{"version":1,"tables":{"buildings.csv":[["2"]]}}\n' > "$BASE/shared/config/config_row_tombstones.json"
 COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$FIXTURE" ecosystem.config.cjs config packages scripts
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$KOW_TEST_PM2_LOG"\n' > "$FAKE_PM2"
 chmod +x "$FAKE_PM2"
@@ -61,6 +62,8 @@ run_helper deploy "$BASE" "$STATE1" "$ARCHIVE" "$SHA1"
 [[ "$(<"$BASE/releases/$SHA1/.release-commit")" == "$SHA1" ]]
 [[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA1" ]]
 grep -Fxq '1,gm-main' "$BASE/releases/$SHA1/config/buildings.csv"
+grep -Fxq '3,gm-added' "$BASE/releases/$SHA1/config/buildings.csv"
+! grep -Fq '2,git-only' "$BASE/releases/$SHA1/config/buildings.csv"
 grep -Fxq 'delete kow' "$PM2_LOG"
 grep -Fxq 'delete kow-test-01' "$PM2_LOG"
 grep -Fq "start $BASE/current/ecosystem.config.cjs --only kow --update-env" "$PM2_LOG"

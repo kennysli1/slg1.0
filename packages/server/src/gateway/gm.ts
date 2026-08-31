@@ -21,7 +21,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
@@ -483,6 +483,25 @@ const QUEST_MODULE_TABLES = [
  * 只记录允许合并的配置文件名，避免旧整文件遮蔽新的代码/配置变更。
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
+const CONFIG_ROW_TOMBSTONES_FILE = 'config_row_tombstones.json';
+
+interface ConfigRowTombstones {
+  version: 1;
+  tables: Record<string, string[][]>;
+}
+
+type ConfigRowsSnapshot = Record<string, CsvRow[]>;
+
+const WHOLE_TABLE_KEY_COLUMNS: Record<string, string[]> = {
+  'dialogues.csv': ['code', 'segment'],
+  'quest_lines.csv': ['code'],
+  'quests.csv': ['id'],
+  'quest_conditions.csv': ['id'],
+  'quest_objectives.csv': ['id'],
+  'quest_effects.csv': ['id'],
+  'quest_edges.csv': ['id'],
+};
+
 function persistentConfigDir(gameApp: GameApp): string | null {
   if (!gameApp.balanceOverridePath) return null;
   const dataDir = dirname(gameApp.balanceOverridePath);
@@ -500,10 +519,61 @@ function persistentConfigDir(gameApp: GameApp): string | null {
   return join(dataDir, 'config');
 }
 
-function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
+function configKeyColumns(file: string, header: readonly string[]): string[] {
+  const wholeTableColumns = WHOLE_TABLE_KEY_COLUMNS[file];
+  if (wholeTableColumns) return wholeTableColumns;
+  const balance = Object.values(BALANCE_TABLES).find((table) => table.file === file);
+  if (balance?.keyComposite) return balance.keyComposite;
+  if (balance?.key) return [balance.key];
+  return header.length > 0 ? [header[0]] : [];
+}
+
+function configRowIdentity(row: CsvRow, columns: readonly string[], label: string): string[] {
+  const values = columns.map((column) => row[column]);
+  if (values.some((value) => value === undefined || value === '')) {
+    throw new Error(`${label} 缺少主键列 ${columns.join('+')}`);
+  }
+  return values as string[];
+}
+
+function rowIdentityKey(values: readonly string[]): string {
+  return JSON.stringify(values);
+}
+
+function readConfigRowTombstones(path: string): ConfigRowTombstones {
+  if (!existsSync(path)) return { version: 1, tables: {} };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ConfigRowTombstones>;
+  if (parsed.version !== 1 || !parsed.tables || typeof parsed.tables !== 'object' || Array.isArray(parsed.tables)) {
+    throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 格式无效`);
+  }
+  for (const [file, rows] of Object.entries(parsed.tables)) {
+    if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file) || !Array.isArray(rows)
+      || rows.some((values) => !Array.isArray(values) || values.some((value) => typeof value !== 'string' || value === ''))) {
+      throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 的 ${file} 行主键无效`);
+    }
+  }
+  return { version: 1, tables: parsed.tables };
+}
+
+function writeConfigRowTombstones(path: string, state: ConfigRowTombstones): void {
+  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tempPath, path);
+}
+
+function snapshotConfigRows(dir: string, files: readonly string[]): ConfigRowsSnapshot {
+  return Object.fromEntries(files.map((file) => {
+    const rows = parseCsvStructured(readFileSync(join(dir, file), 'utf8')).rows;
+    return [file, rows.map((row) => ({ ...row }))];
+  }));
+}
+
+function persistConfigFiles(gameApp: GameApp, files: readonly string[], previousRows: ConfigRowsSnapshot = {}): void {
   const targetDir = persistentConfigDir(gameApp);
   if (!targetDir || files.length === 0) return;
   mkdirSync(targetDir, { recursive: true });
+  const tombstonesPath = join(targetDir, CONFIG_ROW_TOMBSTONES_FILE);
+  const tombstones = readConfigRowTombstones(tombstonesPath);
   const manifestPath = join(dirname(gameApp.balanceOverridePath!), GM_CONFIG_MANIFEST);
   let existing: string[] = [];
   try {
@@ -518,9 +588,35 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
   for (const file of files) {
     // 调用方只传入固定的 CSV 表名；再次限制路径，防止 GM 请求借此越界写文件。
     if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名: ${file}`);
-    copyFileSync(join(gameApp.configDir, file), join(targetDir, file));
+    const sourcePath = join(gameApp.configDir, file);
+    const persistedPath = join(targetDir, file);
+    const nextDoc = parseCsvStructured(readFileSync(sourcePath, 'utf8'));
+    const columns = configKeyColumns(file, nextDoc.header);
+    if (columns.length === 0 || columns.some((column) => !nextDoc.header.includes(column))) {
+      throw new Error(`${file} 缺少稳定主键列`);
+    }
+    const before = previousRows[file]
+      ?? (existsSync(persistedPath) ? parseCsvStructured(readFileSync(persistedPath, 'utf8')).rows : nextDoc.rows);
+    const beforeByKey = new Map(before.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存前行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const nextByKey = new Map(nextDoc.rows.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存后行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const tableTombstones = new Map((tombstones.tables[file] ?? []).map((values) => [rowIdentityKey(values), values]));
+    for (const [key, values] of beforeByKey) {
+      if (!nextByKey.has(key)) tableTombstones.set(key, values);
+    }
+    for (const key of nextByKey.keys()) tableTombstones.delete(key);
+    const sorted = [...tableTombstones.values()].sort((left, right) => rowIdentityKey(left).localeCompare(rowIdentityKey(right)));
+    if (sorted.length > 0) tombstones.tables[file] = sorted;
+    else delete tombstones.tables[file];
+    copyFileSync(sourcePath, persistedPath);
     all.add(file);
   }
+  writeConfigRowTombstones(tombstonesPath, tombstones);
   writeFileSync(manifestPath, [...all].sort().join('\n') + '\n', 'utf8');
 }
 
@@ -1612,6 +1708,9 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
     try {
       const doc = parseCsvStructured(readFileSync(join(dir, 'dialogues.csv'), 'utf-8'));
+      const previousRows: ConfigRowsSnapshot = {
+        'dialogues.csv': doc.rows.map((row) => ({ ...row })),
+      };
       // 支持新增/删除行：移除旧数据行、保留表头/注释，再把当前编辑器行追加到文档尾。
       const oldDataIndices = new Set(doc.rowIndices);
       const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
@@ -1628,7 +1727,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(tmp, 'dialogues.csv'), csv, 'utf-8');
       loadGameConfig(tmp); // 校验失败不写线上配置
       writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
-      persistConfigFiles(gameApp, ['dialogues.csv']);
+      persistConfigFiles(gameApp, ['dialogues.csv'], previousRows);
       gameApp.configAuthority.recordChange(['dialogues.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: doc.rows.length });
@@ -1664,6 +1763,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, [...QUEST_MODULE_TABLES, 'dialogues.csv']);
       const csvByFile: Record<string, string> = {};
       for (const file of QUEST_MODULE_TABLES) {
         const rows = body.tables[file]?.rows;
@@ -1689,7 +1789,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
       const changedFiles = [...QUEST_MODULE_TABLES, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
@@ -1737,6 +1837,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, ['quests.csv', 'dialogues.csv']);
       const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
       const doc = parseCsvStructured(text);
       const header = doc.header;
@@ -1754,7 +1855,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
       const changedFiles = ['quests.csv' as const, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
@@ -1814,6 +1915,8 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     try {
+      const changedFiles = edits.map(([, table]) => table.file);
+      const previousRows = snapshotConfigRows(dir, changedFiles);
       // 校验：把本次编辑应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
@@ -1830,8 +1933,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      const changedFiles = edits.map(([, table]) => table.file);
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       // 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();

@@ -126,18 +126,20 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
 fi
 
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
-# 都把共享 CSV 按主键合并到 Git 的默认 CSV：保留已有手调值，同时带入新增列/行，
-# 不会让旧整文件覆盖遮住新参数。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
+# 都把共享 CSV 按主键合并到 Git 的默认 CSV：配置中心已有单元格（包括空值）
+# 和自建行保持权威，Git 只补新增列/行；编辑器明确删除的行由共享删除记录移除。
+# 文件名只允许单层 CSV，防止 manifest 误写出配置目录。
 apply_persisted_config() {
   local target="$1"
   local manifest="$SHARED/data/balance_csv_files.list"
+  local tombstones="$SHARED/config/config_row_tombstones.json"
   [[ -f "$manifest" ]] || return 0
   while IFS= read -r file || [[ -n "$file" ]]; do
     [[ "$file" =~ ^[A-Za-z0-9_.-]+\.csv$ ]] || continue
     [[ -f "$SHARED/config/$file" && -d "$target/config" ]] || continue
     local merger="$target/scripts/merge-persisted-config.mjs"
     if [[ -f "$merger" ]]; then
-      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file"
+      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file" "$tombstones"
     else
       # 仅兼容没有该工具的旧 release/测试夹具；新发布包始终走按主键合并。
       echo "    警告：$merger 不存在，暂时整文件覆盖 $file" >&2
