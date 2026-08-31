@@ -772,6 +772,42 @@ test('酒馆支线：按槽位概率刷新 → 接取 → 放弃后永久不再�
   assert.ok(!(p2.active ?? []).some((a: any) => a.code === 's1'), '放弃后 S1 不应再 active');
 });
 
+test('酒馆刷新会替换未接取任务且保留已接取任务', async () => {
+  clock = 1_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const regRes = await reg(app, '酒馆刷新替换');
+  const va = (regRes.payload as any).player.villageId;
+  app.config.buildings.tavern.levels[1].taskRefreshSec = 1;
+  app.config.buildings.tavern.levels[1].taskSideQuestChance = 0;
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
+  await tick();
+
+  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(build.ok, true, '建酒馆应成功');
+  await app.scheduler.advanceTo((build.payload as any).finishAt, setClock);
+  await tick();
+  await tick();
+
+  const state = app.store.get<any>('task', va)!;
+  assert.equal(state.offered.length, 2, '酒馆初次建成应填满两个任务槽');
+  state.offered = ['s1'];
+  app.store.set('task', va, state);
+
+  const manual = await send(app, 'task.GmRefreshRandom', { villageId: va });
+  assert.equal(manual.ok, true, 'GM 刷新应成功');
+  assert.equal(state.offered.length, 2, '刷新后应重新填满所有槽位');
+  assert.ok(!state.offered.includes('s1'), '刷新后不应保留被替换的未接取任务');
+  assert.ok(state.active.m1, '刷新不应影响已接取任务');
+
+  state.offered = ['s1'];
+  app.store.set('task', va, state);
+  await app.scheduler.advanceTo(clock + 1_000, setClock);
+  await tick();
+  await tick();
+  assert.ok(!state.offered.includes('s1'), '定时刷新也应替换未接取任务');
+});
+
 test('猎马人：累计击杀骑兵人口，跨战斗累加并在 50 人时就绪', async () => {
   const app = freshApp();
   const regRes = await reg(app, '猎马人累计击杀');
