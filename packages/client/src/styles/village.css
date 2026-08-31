@@ -1210,10 +1210,14 @@
 /* ---------- 任务条（村庄页常驻） ---------- */
 .task-bar {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-2);
 }
 .task-menu {
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
@@ -1252,6 +1256,7 @@
   font-weight: 800;
 }
 .task-menu-scope-sub {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--c-ink-soft);
@@ -1288,6 +1293,8 @@
 }
 .task-menu-scope-body {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-2);
   padding: var(--s-2);
@@ -1301,6 +1308,8 @@
 .task-menu--category > summary > span:first-of-type { font-weight: 700; }
 .task-menu--category .task-menu-body {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-1);
   padding: var(--s-2);
@@ -1328,9 +1337,11 @@
   font-size: var(--f-2xs);
   white-space: nowrap;
 }
-.task-menu-task-body { padding: 0 var(--s-2) var(--s-2); }
+.task-menu-task-body { width: 100%; min-width: 0; padding: 0 var(--s-2) var(--s-2); }
 .task-menu--task .task-card,
 .task-menu--task .task-offer {
+  width: 100%;
+  min-width: 0;
   border: 0;
   border-radius: 0;
   padding: var(--s-2) 0 0;
@@ -1351,6 +1362,8 @@
   gap: var(--s-2);
 }
 .task-card {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
   padding: var(--s-2) var(--s-3);
@@ -1382,12 +1395,15 @@
   font-size: var(--f-md);
 }
 .task-card-desc {
+  min-width: 0;
   font-size: var(--f-sm);
   color: var(--c-ink-soft);
   margin: 2px 0 6px;
   line-height: 1.5;
 }
 .task-card-obj {
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1430,6 +1446,7 @@
 }
 /* 奖励展示区 */
 .task-card-reward {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1442,6 +1459,7 @@
 }
 .task-reward-list {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
@@ -1473,6 +1491,24 @@
   gap: var(--s-2);
   margin-top: var(--s-2);
   flex-wrap: wrap;
+}
+
+/* 任务详情在桌面端使用整行宽度：说明横跨全卡，目标与奖励并列，操作回到下一整行。 */
+.task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(14rem, 1fr);
+  column-gap: var(--s-5);
+  align-items: start;
+}
+.task-card-head,
+.task-card-desc,
+.task-card-actions { grid-column: 1 / -1; }
+.task-card-obj { grid-column: 1; }
+.task-card-reward { grid-column: 2; grid-row: auto; margin-top: 0; }
+
+@media (max-width: 720px) {
+  .task-card { display: block; }
+  .task-card-reward { margin-top: 2px; }
 }
 
 /* 酒馆里的可接取任务 */

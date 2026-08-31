@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
-import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
+import { Btn, Tag, Icon, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
 import { buildingInfo, resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
@@ -93,7 +93,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
           const info = resInfo(k);
           return (
             <span class="task-reward-chip" key={k}>
-              {info.icon ? <img class="task-reward-ico" src={info.icon} alt="" /> : null}
+              {info.icon ? <Icon icon={info.icon} label={info.name} size="2xs" class="task-reward-ico" decorative /> : null}
               {info.name} {fmt(v)}
             </span>
           );
@@ -102,7 +102,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
           const t = treasureInfo(code);
           return (
             <span class="task-reward-chip task-reward-chip--tre" key={code} title={t ? treasureEffectText(t) : code}>
-              {t?.icon ? <img class="task-reward-ico" src={t.icon} alt="" /> : null}
+              {t?.icon ? <Icon icon={t.icon} label={t.name} size="2xs" class="task-reward-ico" decorative /> : null}
               {t?.name ?? code}
             </span>
           );
