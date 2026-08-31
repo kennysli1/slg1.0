@@ -1,4 +1,4 @@
-import type { DiceGameState } from '../domain/engine.js';
+import type { DiceGameState, GameEvent } from '../domain/engine.js';
 import type { ScoreOption } from '../domain/rules.js';
 
 export type ClientSessionView = {
@@ -6,4 +6,5 @@ export type ClientSessionView = {
   revision: number;
   state: DiceGameState;
   selectableOptions: ScoreOption[];
+  aiEvents: GameEvent[];
 };

@@ -2,7 +2,7 @@
  * Dice Lab 的临时会话 owner。会话只存在内存，刷新、进程重启或过期后不会恢复，也不会触碰 KOW 存档。
  */
 import { randomBytes, randomInt } from 'node:crypto';
-import { applyAction, createGame, selectableOptions, type DiceGameState, type PlayerAction } from '../domain/engine.js';
+import { applyAction, createGame, selectableOptions, type DiceGameState, type GameEvent, type PlayerAction } from '../domain/engine.js';
 import type { Difficulty, DiceRng, ScoreOption } from '../domain/index.js';
 
 export type SessionView = {
@@ -10,6 +10,7 @@ export type SessionView = {
   revision: number;
   state: DiceGameState;
   selectableOptions: ScoreOption[];
+  aiEvents: GameEvent[];
 };
 
 type RecordItem = {
@@ -58,7 +59,7 @@ export class DiceLabSessions {
     if (result.error) throw new SessionError('invalid_action', result.error);
     item.revision += 1;
     item.lastTouchedAt = Date.now();
-    return this.view(item);
+    return this.view(item, result.aiEvents);
   }
 
   remove(id: string): void {
@@ -73,8 +74,8 @@ export class DiceLabSessions {
     return item;
   }
 
-  private view(item: RecordItem): SessionView {
-    return { id: item.id, revision: item.revision, state: item.state, selectableOptions: selectableOptions(item.state) };
+  private view(item: RecordItem, aiEvents: GameEvent[] = []): SessionView {
+    return { id: item.id, revision: item.revision, state: item.state, selectableOptions: selectableOptions(item.state), aiEvents };
   }
 
   private prune(): void {

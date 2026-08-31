@@ -24,6 +24,15 @@ export type GameEvent = {
   message: string;
 };
 
+export type RoundResult = {
+  winner: 'player' | 'ai';
+  kind: string;
+  label: string;
+  points: number;
+  dice: Die[];
+  message: string;
+};
+
 export type TurnScoreEntry = {
   label: string;
   score: number;
@@ -40,6 +49,7 @@ export type DiceGameState = {
   dice: Die[];
   rollNumber: number;
   winner?: 'player' | 'ai';
+  result?: RoundResult;
   events: GameEvent[];
 };
 
@@ -67,10 +77,18 @@ function append(state: DiceGameState, event: GameEvent): void {
   state.events = [...state.events.slice(-39), event];
 }
 
-function newRoll(state: DiceGameState, count: number, rng: DiceRng, side: 'player' | 'ai'): Die[] {
+function newRoll(
+  state: DiceGameState,
+  count: number,
+  rng: DiceRng,
+  side: 'player' | 'ai',
+  eventCollector?: GameEvent[],
+): Die[] {
   state.rollNumber += 1;
   const dice = rollDice(count, rng, state.rollNumber);
-  append(state, { kind: 'roll', side, dice, message: side === 'player' ? '你掷出了骰子' : 'NPC掷出了骰子' });
+  const event: GameEvent = { kind: 'roll', side, dice, message: side === 'player' ? '你掷出了骰子' : 'NPC掷出了骰子' };
+  append(state, event);
+  eventCollector?.push(event);
   return dice;
 }
 
@@ -78,15 +96,30 @@ function selectedOption(state: DiceGameState, selectedDieIds: string[]): ScoreOp
   return scoreOption(state.dice, selectedDieIds);
 }
 
-function finishIfReached(state: DiceGameState, side: 'player' | 'ai'): boolean {
+function finishIfReached(
+  state: DiceGameState,
+  side: 'player' | 'ai',
+  result: { kind?: string; label?: string; points?: number; dice?: Die[] } = {},
+  eventCollector?: GameEvent[],
+): boolean {
   const score = side === 'player' ? state.playerScore : state.aiScore;
   if (score < state.targetScore) return false;
   state.phase = 'finished';
   state.winner = side;
-  append(state, {
+  const event: GameEvent = {
     kind: side === 'player' ? 'win' : 'loss', side,
     points: score, message: side === 'player' ? '你先达到目标分数，赢得对局' : 'NPC先达到目标分数，对局结束',
-  });
+  };
+  append(state, event);
+  eventCollector?.push(event);
+  state.result = {
+    winner: side,
+    kind: result.kind ?? '对局结算',
+    label: result.label ?? '—',
+    points: result.points ?? score,
+    dice: result.dice ? result.dice.map((die) => ({ ...die })) : [],
+    message: event.message,
+  };
   return true;
 }
 
@@ -101,7 +134,7 @@ function playerRoll(state: DiceGameState, selectedDieIds: string[] | undefined, 
   if (!option) return { state, error: '所选骰子不是完整的合法计分组合', aiEvents: [] };
   state.turnScore += option.score;
   state.turnBreakdown = [...state.turnBreakdown, { label: option.label, score: option.score }];
-  append(state, { kind: 'keep', side: 'player', option, points: option.score, message: `保留 ${option.label}，获得 ${option.score} 分` });
+  append(state, { kind: 'keep', side: 'player', dice: state.dice.slice(), option, points: option.score, message: `保留 ${option.label}，获得 ${option.score} 分` });
   const rest = remainingDice(state.dice, option);
   if (isHotDice(state.dice, option)) {
     append(state, { kind: 'hot_dice', side: 'player', points: option.score, message: '热骰：重新掷出六枚骰子' });
@@ -127,52 +160,66 @@ function playerBust(state: DiceGameState, rng: DiceRng): ActionResult {
 function playerBank(state: DiceGameState, selectedDieIds: string[], rng: DiceRng): ActionResult {
   const option = selectedOption(state, selectedDieIds);
   if (!option) return { state, error: '收分前必须选择完整的合法计分组合', aiEvents: [] };
+  const finalDice = state.dice.slice();
   const gained = state.turnScore + option.score;
   state.playerScore += gained;
   state.turnScore = 0;
   state.turnBreakdown = [];
-  state.dice = [];
   append(state, { kind: 'bank', side: 'player', option, points: gained, message: `收下本轮分数 ${gained}` });
-  if (finishIfReached(state, 'player')) return { state, aiEvents: [] };
+  if (finishIfReached(state, 'player', { kind: option.kind, label: option.label, points: gained, dice: finalDice })) {
+    state.dice = finalDice;
+    return { state, aiEvents: [] };
+  }
+  state.dice = [];
   const aiEvents = runAiTurn(state, state.difficulty, rng);
   return { state, aiEvents };
 }
 
 function runAiTurn(state: DiceGameState, difficulty: Difficulty, rng: DiceRng): GameEvent[] {
-  const before = state.events.length;
-  let dice = newRoll(state, 6, rng, 'ai');
+  const aiEvents: GameEvent[] = [];
+  let dice = newRoll(state, 6, rng, 'ai', aiEvents);
   let turnScore = 0;
   while (true) {
     const options = legalOptions(dice);
     if (options.length === 0) {
-      append(state, { kind: 'bust', side: 'ai', dice, points: turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` });
+      const event: GameEvent = { kind: 'bust', side: 'ai', dice, points: turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` };
+      append(state, event);
+      aiEvents.push(event);
       break;
     }
     const decision: AiDecision = chooseAiDecision(
       difficulty, dice, turnScore, state.aiScore, state.playerScore, state.targetScore, rng,
     );
     turnScore += decision.option.score;
-    append(state, {
-      kind: 'keep', side: 'ai', option: decision.option, points: decision.option.score,
+    const keepEvent: GameEvent = {
+      kind: 'keep', side: 'ai', dice: dice.slice(), option: decision.option, points: decision.option.score,
       message: `NPC保留 ${decision.option.label}，获得 ${decision.option.score} 分`,
-    });
+    };
+    append(state, keepEvent);
+    aiEvents.push(keepEvent);
     const rest = remainingDice(dice, decision.option);
     if (decision.bank) {
       state.aiScore += turnScore;
-      append(state, { kind: 'bank', side: 'ai', option: decision.option, points: turnScore, message: `NPC收下本轮 ${turnScore} 分` });
-      if (finishIfReached(state, 'ai')) break;
+      const bankEvent: GameEvent = { kind: 'bank', side: 'ai', dice: dice.slice(), option: decision.option, points: turnScore, message: `NPC收下本轮 ${turnScore} 分` };
+      append(state, bankEvent);
+      aiEvents.push(bankEvent);
+      if (finishIfReached(state, 'ai', { kind: decision.option.kind, label: decision.option.label, points: turnScore, dice })) {
+        state.dice = dice.slice();
+      }
       break;
     }
     if (isHotDice(dice, decision.option)) {
-      append(state, { kind: 'hot_dice', side: 'ai', points: turnScore, message: 'NPC触发热骰，重新掷出六枚骰子' });
-      dice = newRoll(state, 6, rng, 'ai');
+      const hotDiceEvent: GameEvent = { kind: 'hot_dice', side: 'ai', dice: dice.slice(), points: turnScore, message: 'NPC触发热骰，重新掷出六枚骰子' };
+      append(state, hotDiceEvent);
+      aiEvents.push(hotDiceEvent);
+      dice = newRoll(state, 6, rng, 'ai', aiEvents);
     } else {
-      dice = newRoll(state, rest.length, rng, 'ai');
+      dice = newRoll(state, rest.length, rng, 'ai', aiEvents);
     }
   }
-  state.dice = [];
+  if (state.phase !== 'finished') state.dice = [];
   state.turnScore = 0;
-  return state.events.slice(before);
+  return aiEvents;
 }
 
 export function applyAction(
@@ -184,6 +231,7 @@ export function applyAction(
   if (action.type === 'forfeit') {
     state.phase = 'finished'; state.winner = 'ai'; state.dice = []; state.turnScore = 0; state.turnBreakdown = [];
     append(state, { kind: 'loss', side: 'ai', message: '你放弃了对局' });
+    state.result = { winner: 'ai', kind: '放弃对局', label: '—', points: 0, dice: [], message: '你放弃了对局' };
     return { state, aiEvents: [] };
   }
   if (action.type === 'roll') return playerRoll(state, action.selectedDieIds, rng);
