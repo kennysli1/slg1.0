@@ -131,6 +131,17 @@ export class PopulationModule {
       const { villageId } = evt.payload as { villageId: string };
       void this.refreshHardCap(villageId);
     });
+    // 战斗损坏会把建筑等级降到 0（或降低到更低等级），修复完成会通过
+    // building.Repaired 恢复目标等级。两者都必须重算缓存硬上限，否则
+    // 破坏/修复后 population.hardCap 会与 building.GetPopCap 脱节。
+    this.bus.on('building.BattleDamaged', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      if (villageId) void this.refreshHardCap(villageId);
+    });
+    this.bus.on('building.Repaired', (evt: DomainEvent) => {
+      const { villageId } = evt.payload as { villageId: string };
+      if (villageId) void this.refreshHardCap(villageId);
+    });
 
     // 经济进入粮食赤字 → 启动饥荒减员（若未在运行）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
