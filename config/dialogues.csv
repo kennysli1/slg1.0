@@ -41,7 +41,8 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 32,s1_deliver,s1,deliver,1,,s1_deliver,take:收下
 8,s2_accept,s2,accept,1,,s2_accept,accept:接受任务|leave:离开
 33,s2_deliver,s2,deliver,1,,s2_deliver,take:收下
-1,s3_accept,s3,accept,1,幸福村的村民,感谢你清除了附近的威胁。我是邻村幸福村的居民，这些强盗在附近为非作歹，我们的粮食都被他们抢去了。请问你能伸出援手，帮我们解决一下燃眉之急吗？我们只需要一些救急的粮食，让我们的妇女和儿童不再饿肚子。作为回报，我们可以送你一份礼物。,accept:接受任务|leave:离开
+1,s3_accept,s3,accept,1,幸福村的村民,感谢你清除了附近的威胁。我是邻村幸福村的居民，这些强盗在附近为非作歹，我们的粮食都被他们抢去了。请问你能伸出援手，帮我们解决一下燃眉之急吗？我们只需要一些救急的粮食，让我们的妇女和儿童不再饿肚子。作为回报，我们可以送你一份礼物。,accept:接受任务
+1,s3_accept,s3,accept,2,幸福村的村民,领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？,
 10,s3_after_accept,s3,after_accept,1,{villageName}的村民,领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？,
 34,s3_deliver,s3,deliver,1,,s3_deliver,take:收下
 31,s3_deliver_failure,s3,deliver_failure,1,,,
