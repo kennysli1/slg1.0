@@ -1999,6 +1999,9 @@ export class TasksModule {
         const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind } });
         return level.ok && Number((level.payload as any)?.level) >= Math.max(1, Number(rawLevel) || 1);
       }
+      // tavern_refresh 表示“进入酒馆支线池”，本身不是 firedTriggers 事件；
+      // refreshOffered 已在槽位刷新时选中该池，不能因没有同名事件而误删。
+      if (row.kind === 'tavern_refresh') return true;
       const key = row.kind + (value ? `:${value}` : '');
       return state.firedTriggers.includes(row.kind) || state.firedTriggers.includes(key);
     };
@@ -2068,12 +2071,53 @@ export class TasksModule {
     return true;
   }
 
+  /** 按 BattleEnded 的防守方实际损失推进累计击杀目标；NPC 服务军队不计入玩家任务。 */
+  private async advanceKillObjectives(villageId: string, losses: Record<string, number>): Promise<void> {
+    const entries = Object.entries(losses)
+      .map(([code, raw]) => [code, Math.max(0, Math.floor(Number(raw) || 0))] as const)
+      .filter(([, count]) => count > 0);
+    if (!entries.length) return;
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      const ready: string[] = [];
+      let changed = false;
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || q.objective.kind !== 'kill_units' || inst.readyToDeliver || this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        const category = q.objective.unitCategory ?? '';
+        if (category !== 'cavalry') continue;
+        const cavalryCodes = new Set(this.config.constants.cavalryUnitCodes);
+        // “人口”沿用声望/军队口径：每个死亡单位按 units.csv 的 popCost 计，
+        // 佣兵等缺省/零 popCost 单位按 1 人口计；不把侦察兵等非骑兵混入。
+        const killed = entries.reduce((sum, [unitCode, count]) => {
+          if (!cavalryCodes.has(unitCode)) return sum;
+          return sum + count * Math.max(1, this.config.units[unitCode]?.popCost ?? 1);
+        }, 0);
+        if (killed <= 0) continue;
+        const target = q.objective.count ?? 1;
+        const next = Math.min(target, Math.max(0, inst.progress ?? 0) + killed);
+        inst.progress = next;
+        inst.executionVillageId = villageId;
+        changed = true;
+        if (next >= target) ready.push(code);
+      }
+      if (!changed) continue;
+      this.store.set(COLLECTION, storageVillageId, state);
+      for (const code of ready) await this.markReady(villageId, code);
+      if (!ready.length) await this.pushList(villageId);
+    }
+  }
+
   // ── 战斗结束：推进 clear_camp ──
   private async onBattleEnded(evt: DomainEvent): Promise<void> {
-    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number>; survivors?: Record<string, number>; taskCode?: string; npcService?: boolean };
+    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number>; survivors?: Record<string, number>; defenderLosses?: Record<string, number>; defenderLossesAttributed?: Record<string, number>; taskCode?: string; npcService?: boolean };
     if (p.side !== 'attacker') return;
     const villageId = p.villageId;
     const targetId = p.targetId;
+    // 击杀累计必须在各种目标类型的专属早退分支之前处理；只统计玩家实际
+    // 发起的战斗，王国 NPC 服务军队的 BattleEnded 不应替玩家完成任务。
+    if (villageId && !p.npcService) {
+      await this.advanceKillObjectives(villageId, p.defenderLossesAttributed ?? p.defenderLosses ?? {});
+    }
     // m13 规定只要对秘密营地选择掠夺即失败（无论战斗胜负），
     // 失败仍需玩家在任务页确认后结束，避免任务凭空消失。
     if (p.targetKind === 'pve' && targetId) {
@@ -2632,7 +2676,7 @@ export class TasksModule {
       !s.active[q.code] &&
       !selected.has(q.code),
     );
-    const sidePool = this.catalog.all().filter((q) =>
+    const sideCandidates = this.catalog.all().filter((q) =>
       q.type === 'side' &&
       q.trigger === 'tavern_refresh' &&
       !s.active[q.code] &&
@@ -2641,6 +2685,9 @@ export class TasksModule {
       !selected.has(q.code) &&
       !this.sideClaimedByPlayer(villageId, q.code),
     );
+    const sidePool = (await Promise.all(sideCandidates.map(async (q) => (
+      await this.offerConditionsSatisfied(villageId, q) ? q : null
+    )))).filter((q): q is QuestDef => q !== null);
     const chance = Math.min(1, Math.max(0, info.sideQuestChance));
     let changed = false;
     for (let i = 0; i < need; i++) {
@@ -3033,6 +3080,7 @@ export class TasksModule {
       researchCode: q.objective.researchCode ?? null,
       taskVillageCode: q.objective.taskVillageCode ?? null,
       threshold: q.objective.threshold ?? null,
+      unitCategory: q.objective.unitCategory ?? null,
     };
   }
 

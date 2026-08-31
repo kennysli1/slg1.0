@@ -57,6 +57,7 @@ function objText(task: any): string {
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
   if (o.kind === 'research_completed') return `拥有学院并研发科技 ×${o.count}`;
+  if (o.kind === 'kill_units') return `累计击杀${o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种')} ${o.count} 人口`;
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
@@ -536,7 +537,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
         </div>
       )}
-      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level') && (
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units') && (
         <div class="task-card-obj">
           <div class="task-card-prog">
             <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
@@ -547,6 +548,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'resource_owned' && <span class="task-prog-hint">不消耗资源，只检查主城当前拥有量</span>}
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
             {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
+            {o.kind === 'kill_units' && <span class="task-prog-hint">累计消灭敌方{ o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种') }人口</span>}
           </div>
         </div>
       )}

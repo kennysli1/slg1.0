@@ -304,13 +304,14 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
     assert.equal(modulesRes.statusCode, 200);
     const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
     assert.equal(modules.ok, true);
-    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 6);
+    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 7);
     assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
     const graphRes = await fastify.inject({ method: 'GET', url: '/config/quest-graph/data' });
     assert.equal(graphRes.statusCode, 200);
     const graph = JSON.parse(graphRes.body) as { ok: boolean; graph?: { quests: Record<string, unknown>; edges: unknown[] } };
     assert.equal(graph.ok, true);
     assert.ok(graph.graph?.quests.s2, '关系图必须包含耀武扬威');
+    assert.ok(graph.graph?.quests.s5, '关系图必须包含猎马人');
     assert.ok((graph.graph?.edges.length ?? 0) >= 5);
     await fastify.close();
   } finally {

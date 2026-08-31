@@ -494,9 +494,14 @@ export class CombatModule {
     const attackerBefore = aggregateCounts(b.attacker);
     const defenderBefore = aggregateCounts(b.defender);
 
-    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）
-    const killsToDef = computeKills(b.attacker, b.defender, k, dt, wallMult);
-    const killsToAtk = computeKills(b.defender, b.attacker, k, dt, 1);
+    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）。绞马索属于
+    // 攻击方携带效果，只对承伤方的骑兵防御生效；野战时防守方携带的
+    // 同类宝物也反向生效。驻城守军没有携带宝物清单，不会错误继承守方
+    // 城内宝库效果。
+    const attackerCavalryDefMult = this.enemyCavalryDefMultiplier(Object.values(b.contributions).flatMap((c) => c.treasures ?? []));
+    const defenderCavalryDefMult = this.enemyCavalryDefMultiplier(b.defenderContribution?.treasures ?? []);
+    const killsToDef = computeKills(b.attacker, b.defender, k, dt, wallMult, attackerCavalryDefMult);
+    const killsToAtk = computeKills(b.defender, b.attacker, k, dt, 1, defenderCavalryDefMult);
 
     b.defenderPending = applyKills(b.defender, killsToDef + b.defenderPending);
     b.attackerPending = applyKills(b.attacker, killsToAtk + b.attackerPending);
@@ -539,6 +544,17 @@ export class CombatModule {
     }
 
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
+  }
+
+  /** 取一方携带的最强敌方骑兵防御削弱；同一件独特宝物不会重复叠乘。 */
+  private enemyCavalryDefMultiplier(codes: string[]): number {
+    let multiplier = 1;
+    for (const code of codes) {
+      const treasure = this.config.treasures[code];
+      if (!treasure || treasure.effectType !== 'enemyCavalryDef') continue;
+      multiplier = Math.min(multiplier, Math.max(0, 1 - treasure.effectValue / 100));
+    }
+    return multiplier;
   }
 
   /** 结算：算损失/幸存/战利品 → 发 Command 让 owner 改状态 → 发 Event 出战报与返程信息。 */
@@ -1172,7 +1188,7 @@ function countDelta(before: Record<string, number>, after: Record<string, number
  * A 阵营这一 tick 对 B 阵营造成的击杀数（§4.3 攻击力选择 + §4.4 承伤公式）。
  * defWallMult：防守方城墙倍率（>1 表示更耐打），只在 B 是防守方时>1。
  */
-function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defWallMult: number): number {
+function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defWallMult: number, cavalryDefMult = 1): number {
   const aMelee = hasAliveForm(A, 'melee');
   const bMelee = hasAliveForm(B, 'melee');
 
@@ -1199,8 +1215,9 @@ function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defWallMu
   for (const u of Object.values(B)) {
     if (u.form !== targetForm || u.count <= 0 || (priority && !u.ambushPriority)) continue;
     rowCount += u.count;
-    effMeleeHP += u.count * u.meleeDef * traitMult(u, 'def_melee') / Math.max(0.05, traitMult(u, 'dmg_taken_melee'));
-    effRangedHP += u.count * u.rangedDef * traitMult(u, 'def_ranged') / Math.max(0.05, traitMult(u, 'dmg_taken_ranged'));
+    const unitDefMult = u.isCavalry ? Math.max(0, cavalryDefMult) : 1;
+    effMeleeHP += u.count * u.meleeDef * unitDefMult * traitMult(u, 'def_melee') / Math.max(0.05, traitMult(u, 'dmg_taken_melee'));
+    effRangedHP += u.count * u.rangedDef * unitDefMult * traitMult(u, 'def_ranged') / Math.max(0.05, traitMult(u, 'dmg_taken_ranged'));
   }
   if (rowCount <= 0) return 0;
 
