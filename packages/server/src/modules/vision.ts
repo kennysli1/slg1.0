@@ -5,7 +5,16 @@ import type { GameConfig } from '../infra/config.js';
 import { hexDistanceWrapped, linePathWrapped } from '../infra/hex.js';
 
 type Terrain = 'plain' | 'forest' | 'hills';
-type TileSnapshot = { q: number; r: number; kind: string; refId?: string; name?: string; icon?: string; terrain?: Terrain };
+type MapVillageRelation = 'allied' | 'neutral' | 'hostile';
+type TileSnapshot = {
+  q: number;
+  r: number;
+  kind: string;
+  refId?: string;
+  name?: string;
+  icon?: string;
+  terrain?: Terrain;
+};
 interface VisionState { playerId: string; explored: Record<string, TileSnapshot>; }
 interface RevealReceipt { playerId: string; revealId: string; newlyRevealed: TileSnapshot[]; }
 interface Source {
@@ -208,6 +217,49 @@ export class VisionModule {
     return { ok: true, payload: { playerIds } };
   }
 
+  /**
+   * 地块本身只保存村庄，不复制外交状态。每次地图响应都从 Player + Diplomacy
+   * 读取当前关系，因此宣战、结盟后边框会随下一次地图刷新更新，也不会污染探索快照。
+   */
+  private async withVillageRelations<T extends TileSnapshot>(playerId: string, tiles: T[]): Promise<Array<T & { relation?: MapVillageRelation }>> {
+    const playersResult = await this.commands.send({ name: 'player.ListAll', from: VisionModule.NAME, payload: {} });
+    const ownerByVillage = new Map<string, string>();
+    if (playersResult.ok) {
+      for (const player of ((playersResult.payload as any)?.players ?? [])) {
+        if (typeof player?.id !== 'string') continue;
+        for (const village of (player.villages ?? [])) {
+          if (typeof village?.id === 'string') ownerByVillage.set(village.id, player.id);
+        }
+      }
+    }
+
+    const targetOwners = new Set<string>();
+    for (const tile of tiles) {
+      if (tile.kind !== 'village' || !tile.refId) continue;
+      const owner = ownerByVillage.get(tile.refId);
+      if (owner && owner !== playerId) targetOwners.add(owner);
+    }
+
+    const relationByOwner = new Map<string, MapVillageRelation>([[playerId, 'allied']]);
+    await Promise.all([...targetOwners].map(async (targetPlayerId) => {
+      const result = await this.commands.send({
+        name: 'diplomacy.GetRelation', from: VisionModule.NAME,
+        payload: { playerId, targetPlayerId },
+      });
+      const relation = (result.payload as any)?.relation;
+      relationByOwner.set(
+        targetPlayerId,
+        relation === 'allied' || relation === 'hostile' ? relation : 'neutral',
+      );
+    }));
+
+    return tiles.map((tile) => {
+      if (tile.kind !== 'village' || !tile.refId) return tile;
+      const owner = ownerByVillage.get(tile.refId);
+      return { ...tile, relation: owner ? (relationByOwner.get(owner) ?? 'neutral') : 'neutral' };
+    });
+  }
+
   private async filterArea(cmd: Command): Promise<CommandResult> {
     const { playerId, tiles } = cmd.payload as { playerId: string; tiles: TileSnapshot[] };
     const sources = await this.sourcesFor(playerId);
@@ -240,6 +292,6 @@ export class VisionModule {
       else out.push({ q, r, kind: 'empty', visibility: 'unexplored' });
     }
     if (dirty) this.store.set(COLLECTION, playerId, state);
-    return { ok: true, payload: { tiles: out } };
+    return { ok: true, payload: { tiles: await this.withVillageRelations(playerId, out) } };
   }
 }

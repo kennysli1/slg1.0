@@ -19,7 +19,8 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, landmarkCenterFromTile, normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
@@ -65,7 +66,7 @@ describe('地图定位', () => {
       (next) => { calls.push('selected'); target = next; },
     );
     assert.deepEqual(calls, ['center:8,-3', 'selected']);
-    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'bld_main' });
+    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'map_player_village_lv1' });
   });
 
   it('只有目标卡明确确认后才请求切村；当前村不会重复请求', async () => {
@@ -653,6 +654,24 @@ describe('notificationKind', () => {
 
   it('未知事件归 info（不抛错）', () => {
     assert.equal(notificationKind('SomethingBrandNew'), 'info');
+  });
+});
+
+describe('玩家村庄地图外观', () => {
+  it('中立、盟军、敌对玩家村庄使用不同描边，己方颜色不受外交值干扰', () => {
+    assert.equal(mapEntityRingKind('village', false, 'neutral'), 'neutral');
+    assert.equal(mapEntityRingKind('village', false, 'allied'), 'allied');
+    assert.equal(mapEntityRingKind('village', false, 'hostile'), 'hostile');
+    assert.equal(mapEntityRingKind('own_village', true, 'hostile'), 'self');
+    assert.equal(mapEntityRingKind('own_village', false, 'hostile'), 'own');
+    assert.equal(normalizeMapVillageRelation('unexpected'), 'neutral');
+  });
+
+  it('四级玩家村庄图标与其他正式美术统一读取 WebP', () => {
+    for (let level = 1; level <= 4; level++) {
+      assert.equal(artPath(`map_player_village_lv${level}`), `/art/map_player_village_lv${level}.webp`);
+    }
+    assert.equal(artPath('bld_main'), '/art/bld_main.webp');
   });
 });
 

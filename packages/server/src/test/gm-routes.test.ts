@@ -69,7 +69,7 @@ test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
     assert.equal(response.statusCode, 200, response.body);
     const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
     assert.equal(moved.ok, true);
-    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'bld_main' });
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'map_player_village_lv1' });
     const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
     assert.equal(previous.ok, true);
     assert.equal((previous.payload as any).tile.kind, 'empty');

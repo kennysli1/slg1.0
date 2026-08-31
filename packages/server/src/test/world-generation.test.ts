@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateWorldPlan } from '../infra/world-generation.js';
 import { hexDistanceWrapped } from '../infra/hex.js';
 import { createGameApp } from '../app.js';
+import { playerVillageMapIcon } from '../modules/world.js';
 
 test('96×96 世界确定性生成 550 个公平出生槽位、5% PvE 与 55/30/15 地貌', () => {
   const anchors = [{ id: 'anchor', type: 'rats', q: -2, r: 3 }];
@@ -72,6 +73,30 @@ test('普通 PlaceVillage 不可占用未使用的首村保留槽', async () => 
     name: 'world.PlaceVillage', from: 'test', payload: { ...(allocated.payload as any), refId: 'spawn-village', name: '首村' },
   });
   assert.equal(idempotent.ok, true, 'AllocateSpawn 已原子占用后，装配阶段 PlaceVillage 应幂等成功');
+});
+
+test('玩家村庄地图图标按主基地 1–4 本逐级切换', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const registered = await app.commands.send({
+    name: 'player.Register', from: 'test', payload: { name: 'stage-icons', password: 'pass1234', tribe: 'romans' },
+  });
+  const player = (registered.payload as any).player;
+  assert.equal(playerVillageMapIcon(-1), 'map_player_village_lv1');
+  assert.equal(playerVillageMapIcon(1), 'map_player_village_lv1');
+  assert.equal(playerVillageMapIcon(2), 'map_player_village_lv2');
+  assert.equal(playerVillageMapIcon(3), 'map_player_village_lv3');
+  assert.equal(playerVillageMapIcon(4), 'map_player_village_lv4');
+  assert.equal(playerVillageMapIcon(99), 'map_player_village_lv4');
+
+  for (const level of [1, 2, 3, 4]) {
+    const updated = await app.commands.send({
+      name: 'world.UpdateVillageStage', from: 'test', payload: { villageId: player.villageId, level },
+    });
+    assert.equal(updated.ok, true);
+    const tile = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: player.q, r: player.r } });
+    assert.equal((tile.payload as any).tile.icon, `map_player_village_lv${level}`);
+  }
 });
 
 test('旧世界补生成 PvE 遇到村庄占位时使用后备点，不产生 orphan', async () => {

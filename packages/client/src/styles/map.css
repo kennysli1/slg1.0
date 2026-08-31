@@ -99,9 +99,17 @@
   stroke: var(--c-gold-dim);
   stroke-width: 2;
 }
-.hex-ring--enemy {
+.hex-ring--neutral {
   stroke: var(--c-steel);
   stroke-width: 2;
+}
+.hex-ring--allied {
+  stroke: var(--c-jade);
+  stroke-width: 2.5;
+}
+.hex-ring--hostile {
+  stroke: var(--c-crimson-hi);
+  stroke-width: 2.5;
 }
 .hex-ring--pve {
   stroke: var(--c-crimson-hi);
@@ -551,6 +559,9 @@
 }
 .map-legend-dot--self    { background: var(--c-gold); box-shadow: 0 0 6px rgba(216,177,104,.6); }
 .map-legend-dot--own     { background: var(--c-gold-dim); }
+.map-legend-dot--neutral { background: var(--c-steel); }
+.map-legend-dot--allied  { background: var(--c-jade); }
+.map-legend-dot--hostile { background: var(--c-crimson-hi); }
 .map-legend-dot--enemy   { background: var(--c-steel); }
 .map-legend-dot--pve     { background: var(--c-crimson); }
 .map-legend-line {
