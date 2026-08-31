@@ -9,6 +9,8 @@ test('爆骰事件保留导致爆骰的点数，便于客户端展示结果', ()
   const result = applyAction(game, { type: 'roll' }, () => rolls[index++] ?? 0.5);
   const bust = result.state.events.find((event) => event.kind === 'bust' && event.side === 'player');
   assert.ok(bust);
+  assert.equal(result.playerBust?.kind, 'bust');
+  assert.deepEqual(result.playerBust?.dice?.map((die) => die.value), [2, 2, 3, 3, 4, 6]);
   assert.deepEqual(bust.dice?.map((die) => die.value), [2, 2, 3, 3, 4, 6]);
   assert.equal(result.state.turnScore, 0);
 });

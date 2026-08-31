@@ -11,6 +11,7 @@ export type SessionView = {
   state: DiceGameState;
   selectableOptions: ScoreOption[];
   aiEvents: GameEvent[];
+  playerBust?: GameEvent;
 };
 
 type RecordItem = {
@@ -59,7 +60,7 @@ export class DiceLabSessions {
     if (result.error) throw new SessionError('invalid_action', result.error);
     item.revision += 1;
     item.lastTouchedAt = Date.now();
-    return this.view(item, result.aiEvents);
+    return this.view(item, result.aiEvents, result.playerBust);
   }
 
   remove(id: string): void {
@@ -74,8 +75,8 @@ export class DiceLabSessions {
     return item;
   }
 
-  private view(item: RecordItem, aiEvents: GameEvent[] = []): SessionView {
-    return { id: item.id, revision: item.revision, state: item.state, selectableOptions: selectableOptions(item.state), aiEvents };
+  private view(item: RecordItem, aiEvents: GameEvent[] = [], playerBust?: GameEvent): SessionView {
+    return { id: item.id, revision: item.revision, state: item.state, selectableOptions: selectableOptions(item.state), aiEvents, playerBust };
   }
 
   private prune(): void {

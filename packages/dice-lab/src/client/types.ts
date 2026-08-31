@@ -7,4 +7,5 @@ export type ClientSessionView = {
   state: DiceGameState;
   selectableOptions: ScoreOption[];
   aiEvents: GameEvent[];
+  playerBust?: GameEvent;
 };
