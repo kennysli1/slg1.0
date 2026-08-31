@@ -16,6 +16,14 @@ export type VillageWorkbenchLayout =
   | 'military-open'
   | 'both-open';
 
+/** Toggle one workbench without changing the other one. */
+export function toggleVillageWorkbench(
+  preferences: VillageWorkbenchPreferences,
+  field: keyof VillageWorkbenchPreferences,
+): VillageWorkbenchPreferences {
+  return { ...preferences, [field]: !preferences[field] };
+}
+
 /**
  * Resolve the workbench geometry from state, rather than asking CSS to infer
  * it from descendants. This keeps the one-open layouts full width and makes

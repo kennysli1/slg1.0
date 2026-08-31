@@ -23,7 +23,7 @@ import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseM
 import { buildLandmarkTriangleOutline, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
-import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
+import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 
@@ -834,6 +834,13 @@ describe('任务页菜单折叠偏好', () => {
 });
 
 describe('王国工作区折叠偏好', () => {
+  it('切换一个工作区时保留另一个工作区的展开状态', () => {
+    const developmentOpen = toggleVillageWorkbench({ developmentOpen: false, militaryOpen: true }, 'developmentOpen');
+    assert.deepEqual(developmentOpen, { developmentOpen: true, militaryOpen: true });
+    const militaryClosed = toggleVillageWorkbench(developmentOpen, 'militaryOpen');
+    assert.deepEqual(militaryClosed, { developmentOpen: true, militaryOpen: false });
+  });
+
   it('用四态纯函数决定工作区布局，单开时可让页面使用全宽', () => {
     assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: false }), 'empire-workspace-grid--both-closed');
     assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: false }), 'empire-workspace-grid--development-open');
