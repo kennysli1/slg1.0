@@ -1734,7 +1734,7 @@
 .empire-village-task-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-2xs); line-height: 1.45; }
 .empire-workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s-4); }
 .empire-workspace-layout { display: grid; min-width: 0; gap: var(--s-4); }
-.empire-workspace-group { display: contents; }
+.empire-workspace-group { display: flex; min-width: 0; flex-direction: column; gap: var(--s-4); }
 .empire-workspace-entry { min-width: 0; }
 .empire-workspace-panel { display: flex; min-height: 144px; height: 144px; flex-direction: column; }
 .empire-workspace-topline { display: flex; min-height: 100%; align-items: stretch; justify-content: space-between; gap: var(--s-3); }
@@ -1827,7 +1827,7 @@
 }
 
 /* 工作区摘要布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
- * 展开内容脱离双列摘要卡片，固定占用其下方的整行面板。 */
+ * 桌面端每个工作区是独立列，展开内容跟随自己的摘要卡；手机端在下方改为单列顺序。 */
 .empire-workspace-grid--both-closed,
 .empire-workspace-grid--both-open,
 .empire-workspace-grid--development-open,
@@ -1836,7 +1836,7 @@
 }
 .empire-workspace-entry,
 .empire-workspace-entry .empire-workspace-panel { min-width: 0; }
-.empire-workspace-expanded { grid-column: 1 / -1; }
+.empire-workspace-expanded { width: 100%; }
 .empire-workspace-grid--both-closed .empire-workspace-entry,
 .empire-workspace-grid--both-closed .empire-workspace-panel { height: 100%; }
 .empire-workspace-entry {
@@ -1881,6 +1881,6 @@
   .empire-workspace-grid--both-open,
   .empire-workspace-grid--development-open,
   .empire-workspace-grid--military-open { grid-template-columns: minmax(0, 1fr); }
-  .empire-workspace-group { display: flex; min-width: 0; flex-direction: column; gap: var(--s-4); }
+  .empire-workspace-group { gap: var(--s-4); }
   .empire-workspace-entry { scroll-margin-top: calc(var(--s-7) + var(--s-6) + var(--s-5) + var(--s-4) + var(--s-3) + var(--s-7)); }
 }
