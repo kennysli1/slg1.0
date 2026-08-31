@@ -3499,7 +3499,7 @@ export class MovementModule {
       this.remove(p.movementId);
       await this.scheduleReturn(
         p.fromVillage, p.toXY, p.originalFromXY ?? p.fromXY, survivors, p.loot ?? {}, [], p.movementId, p.originalFromXY ?? p.fromXY,
-        undefined, false, true, p.returnPveId,
+        undefined, false, true, p.returnPveId, true, 'kingdom_retaliation',
       );
       return;
     }
@@ -3593,6 +3593,8 @@ export class MovementModule {
     scoutReturn = false,
     kingdomMercenary = false,
     returnPveId?: string,
+    npcService = false,
+    taskCode?: string,
   ): Promise<string | undefined> {
     const id = this.nextId();
     await this.launch({
@@ -3600,6 +3602,7 @@ export class MovementModule {
       originalFromXY: originalFromXY ?? toXY,
       troops, loot, treasures, departAt: this.now(), outwardId, autoExplore,
       scoutReturn: scoutReturn || undefined, kingdomMercenary: kingdomMercenary || undefined, returnPveId,
+      npcService: npcService || undefined, taskCode,
     });
     return id;
   }

@@ -112,6 +112,9 @@ test('王国 PvE 声望批次：-10 触发封地掠夺，-20 改为攻城，雇�
   const app = createGameApp({ manualScheduler: true }); app.setupWorld();
   const reg = (await send(app, 'player.Register', { name: '王国报复', password: 'p1234', tribe: 'romans' })).payload as any;
   const villageId = reg.player.villageId;
+  // 每满一个惩罚批次都应检查阈值，但高于 -10 时不能派出复仇军。
+  await app.bus.emit({ name: 'reputation.Changed', source: 'test', ts: 0, payload: { playerId: reg.player.id, value: -1, kingdomPvePenaltyChunks: 1 } } as any);
+  assert.equal(app.store.all<any>('movement').filter((m) => m.kingdomMercenary).length, 0, '声望 -1 不应触发王国复仇军');
   await app.bus.emit({ name: 'reputation.Changed', source: 'test', ts: 0, payload: { playerId: reg.player.id, value: -10, kingdomPvePenaltyChunks: 1 } } as any);
   const first = app.store.all<any>('movement').find((m) => m.kingdomMercenary);
   assert.ok(first);
