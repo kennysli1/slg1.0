@@ -30,6 +30,31 @@ test('combat engine：逐 tick 计算是纯函数，不修改输入快照', () =
   assert.ok(result.defenderPending > 0);
 });
 
+test('combat engine：兰开斯特平方律会放大人数优势', () => {
+  const oneAgainstOne = simulateCombatTick({
+    attacker: { legionnaire: melee(1, 10, 10) },
+    defender: { club: melee(1, 10, 10) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 6,
+    defenderWallMultiplier: 1,
+  });
+  const twoAgainstOne = simulateCombatTick({
+    attacker: { legionnaire: melee(2, 10, 10) },
+    defender: { club: melee(1, 10, 10) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 6,
+    defenderWallMultiplier: 1,
+  });
+
+  assert.ok(oneAgainstOne.defender.club, '势均力敌时双方都应有幸存者');
+  assert.equal(twoAgainstOne.defender.club, undefined, '两倍兵力的一方应在相同时间内清空单个敌人');
+  assert.equal(twoAgainstOne.attacker.legionnaire.count, 2, '人数优势方应保留幸存兵力');
+});
+
 test('settlement plan：按来源拆分伤亡，并计算幸存者运力', () => {
   const battle = {
     id: 'bt-refactor',
