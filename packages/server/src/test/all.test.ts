@@ -8,6 +8,7 @@ import './full-loop.test.js';
 import './building.test.js';
 import './multiplayer-pvp.test.js';
 import './combat.test.js';
+import './combat-refactor.test.js';
 import './hex.test.js';
 import './movement-path.test.js';
 import './movement-index.test.js';
