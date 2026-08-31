@@ -13,8 +13,25 @@ test('外交与行军模式：默认中立、选项由关系决定、显式宣�
   assert.deepEqual((selfOpts.payload as any).modes, [], '当前操作村不应显示转移或切换行为');
   const ownerA = (await send(app, 'player.GetByVillage', { villageId: va })).payload as any;
   const ownerB = (await send(app, 'player.GetByVillage', { villageId: vb })).payload as any;
+  const targetTile = (await send(app, 'world.GetTile', { q: b.player.q, r: b.player.r })).payload as any;
+  app.store.set('vision', ownerA.player.id, {
+    playerId: ownerA.player.id,
+    explored: { [`${b.player.q},${b.player.r}`]: targetTile.tile },
+  });
+  const mapRelation = async () => {
+    const area = await send(app, 'world.GetArea', {
+      cq: a.player.q, cr: a.player.r, r: 1, full: true, playerId: ownerA.player.id,
+    });
+    return ((area.payload as any).tiles as any[]).find((tile) => tile.refId === vb)?.relation;
+  };
   const rel = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal((rel.payload as any).relation, 'neutral');
+  assert.equal(await mapRelation(), 'neutral', '地图应把未设置关系的玩家村庄标记为中立');
+  const allied = await send(app, 'diplomacy.SetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id, relation: 'allied' });
+  assert.equal(allied.ok, true);
+  assert.equal(await mapRelation(), 'allied', '结盟后地图村庄关系应立即变为盟军');
+  await send(app, 'diplomacy.SetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id, relation: 'neutral' });
+  assert.equal(await mapRelation(), 'neutral');
   const opts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: b.player.q, r: b.player.r });
   assert.deepEqual((opts.payload as any).modes.map((m: any) => m.mode), ['reinforce', 'scout', 'raid', 'attack']);
   const staleCoords = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: a.player.q, r: a.player.r });
@@ -24,6 +41,7 @@ test('外交与行军模式：默认中立、选项由关系决定、显式宣�
   assert.equal(war.ok, true);
   const hostile = await send(app, 'diplomacy.GetRelation', { playerId: ownerA.player.id, targetPlayerId: ownerB.player.id });
   assert.equal((hostile.payload as any).relation, 'hostile');
+  assert.equal(await mapRelation(), 'hostile', '宣战后地图村庄关系应立即变为敌对');
   const hostileOpts = await send(app, 'movement.GetMarchOptions', { villageId: va, kind: 'village', refId: vb, q: b.player.q, r: b.player.r });
   assert.deepEqual((hostileOpts.payload as any).modes.map((m: any) => m.mode), ['scout', 'raid', 'attack']);
 });

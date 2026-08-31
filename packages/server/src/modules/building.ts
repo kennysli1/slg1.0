@@ -179,7 +179,7 @@ export class BuildingModule {
     const stage = mainBaseStageInfo(this.tcLevel(s));
     void this.commands.send({
       name: 'world.UpdateVillageStage', from: BuildingModule.NAME,
-      payload: { villageId: s.villageId, level: stage.level, name: stage.name, icon: stage.icon },
+      payload: { villageId: s.villageId, level: stage.level },
     });
   }
 

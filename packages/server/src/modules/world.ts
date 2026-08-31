@@ -39,6 +39,19 @@ export interface Tile {
   landmarkCenter?: boolean;
 }
 
+const PLAYER_VILLAGE_MAP_ICONS = [
+  'map_player_village_lv1',
+  'map_player_village_lv2',
+  'map_player_village_lv3',
+  'map_player_village_lv4',
+] as const;
+
+/** 地图上的玩家村庄阶段只由主基地等级决定，避免各调用方各自维护图标映射。 */
+export function playerVillageMapIcon(level: number): string {
+  const normalized = Math.min(PLAYER_VILLAGE_MAP_ICONS.length, Math.max(1, Math.floor(Number(level) || 1)));
+  return PLAYER_VILLAGE_MAP_ICONS[normalized - 1]!;
+}
+
 interface WorldState {
   w: number; // 环绕平行四边形宽（axial q 周期）
   h: number; // 环绕平行四边形高（axial r 周期）
@@ -117,7 +130,7 @@ export class WorldModule {
   }
 
   private onMainBaseChanged(evt: DomainEvent): void {
-    const p = evt.payload as { villageId?: string; kind?: string; level?: number; name?: string; icon?: string };
+    const p = evt.payload as { villageId?: string; kind?: string; level?: number };
     if (p.kind !== 'main' || !p.villageId || !Number.isFinite(Number(p.level))) return;
     this.updateVillageStage({ payload: p } as Command);
   }
@@ -239,7 +252,7 @@ export class WorldModule {
       const key = hexKey(slot.q, slot.r);
       const tile = this.store.get<Tile>(COLLECTION_TILE, key);
       if (tile && tile.kind !== 'empty') continue;
-      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name, icon: 'bld_main' });
+      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
       return { ok: true, payload: { ...slot } };
     }
     return { ok: false, payload: {}, reason: 'world_capacity_exhausted' };
@@ -315,7 +328,7 @@ export class WorldModule {
     if (this.plan!.spawnSlots.some((slot) => slot.q === w.q && slot.r === w.r)) {
       return { ok: false, payload: {}, reason: 'spawn_slot_reserved' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name, icon: 'bld_main' });
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -328,7 +341,7 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty' && exist.refId !== refId) {
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name, icon: 'bld_main' });
+    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -362,7 +375,8 @@ export class WorldModule {
       this.store.set<Tile>(COLLECTION_TILE, sourceKey, { q: source!.q, r: source!.r, kind: 'empty' });
     }
     this.store.set<Tile>(COLLECTION_TILE, targetKey, {
-      q: target.q, r: target.r, kind: 'village', refId, name, icon: source?.icon ?? targetTile?.icon ?? 'bld_main',
+      q: target.q, r: target.r, kind: 'village', refId, name,
+      icon: source?.icon ?? targetTile?.icon ?? playerVillageMapIcon(1),
     });
     return {
       ok: true,
@@ -374,14 +388,16 @@ export class WorldModule {
     };
   }
 
-  /** 镜像主基地阶段到地图瓦片；名称仍由 Player 的村庄名拥有，这里只更新阶段图标。 */
+  /** 镜像主基地阶段到地图瓦片；名称仍由 Player 拥有，World 统一决定地图图标。 */
   private updateVillageStage(cmd: Command): CommandResult {
-    const p = cmd.payload as { villageId?: string; icon?: string; level?: number };
-    if (!p.villageId || typeof p.icon !== 'string' || !p.icon) return { ok: false, payload: {}, reason: 'bad_village_stage' };
+    const p = cmd.payload as { villageId?: string; level?: number };
+    if (!p.villageId || !Number.isFinite(Number(p.level))) return { ok: false, payload: {}, reason: 'bad_village_stage' };
     const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === p.villageId);
     if (!tile) return { ok: false, payload: {}, reason: 'village_tile_not_found' };
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, icon: p.icon });
-    return { ok: true, payload: { villageId: p.villageId, q: tile.q, r: tile.r, icon: p.icon, level: p.level } };
+    const level = Math.floor(Number(p.level));
+    const icon = playerVillageMapIcon(level);
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, icon });
+    return { ok: true, payload: { villageId: p.villageId, q: tile.q, r: tile.r, icon, level } };
   }
 
   /** 查询 (q,r) 到最近村庄的六边形距离；无村庄时 distance=Infinity 用 -1 表示。 */

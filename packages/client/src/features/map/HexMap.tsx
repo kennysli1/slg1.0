@@ -33,6 +33,7 @@ const HEX_CORNER_STR = hexCorners()
 
 export type Terrain = 'plain' | 'forest' | 'hills';
 type Visibility = 'unexplored' | 'explored' | 'visible';
+export type MapVillageRelation = 'allied' | 'neutral' | 'hostile';
 
 /**
  * 地形只认服务端事实；旧响应缺字段时安全降级平原，未探索格不读取也不保留地形。
@@ -71,12 +72,20 @@ function terrainNoise(q: number, r: number, salt: number): number {
   return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
 }
 
-/** 已占据格根据 tile.kind + 是否是自己，确定描边颜色 key。 */
-function ringKind(kind: string, isSelf: boolean): string {
+/** 已占据格根据归属与当前外交关系确定描边颜色 key。 */
+export function mapEntityRingKind(kind: string, isSelf: boolean, relation?: unknown): string {
   if (kind === 'own_village') return isSelf ? 'self' : 'own';
-  if (kind === 'village') return 'enemy';
+  if (kind === 'village') {
+    if (relation === 'allied') return 'allied';
+    if (relation === 'hostile') return 'hostile';
+    return 'neutral';
+  }
   if (kind === 'pve') return 'pve';
   return '';
+}
+
+export function normalizeMapVillageRelation(value: unknown): MapVillageRelation {
+  return value === 'allied' || value === 'hostile' ? value : 'neutral';
 }
 
 function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
@@ -287,7 +296,7 @@ export function HexMap() {
   const [zoomUi, setZoomUi] = useState(INITIAL_ZOOM);
 
   // ── Tooltip ──
-  type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
+  type TipState = { q: number; r: number; kind: string; name: string; relation?: MapVillageRelation; dist: number; anchorX: number; anchorY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
   const [hoveredLandmarkRef, setHoveredLandmarkRef] = useState('');
@@ -449,6 +458,7 @@ export function HexMap() {
     refId: string;
     name: string;
     icon: string | null;
+    relation: MapVillageRelation | null;
     terrain: Terrain | null;
     visibility: Visibility;
     isSelected: boolean;
@@ -557,6 +567,7 @@ export function HexMap() {
               ? undefined
               : (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
+            let relation: MapVillageRelation | null = null;
             const terrain = terrainFromTile(t, visibility);
 
             if (visibility !== 'unexplored') name = terrainDisplayName(terrain);
@@ -565,16 +576,17 @@ export function HexMap() {
             } else if (isSelf) {
               // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
               kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
-              icon = 'bld_main';
+              icon = t?.icon ?? 'map_player_village_lv1';
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
-              icon = 'bld_main';
+              icon = t?.icon ?? 'map_player_village_lv1';
             } else if (taskCamp) {
               kind = 'pve'; refId = taskCamp.id; name = taskCamp.name ?? (taskCamp.taskVillage ? '天王老子村' : '任务营地');
               icon = taskCamp.icon ?? pveIcon(name);
             } else if (t?.kind === 'village') {
               kind = 'village'; refId = t.refId; name = t.name;
-              icon = 'bld_main';
+              icon = t.icon ?? 'map_player_village_lv1';
+              relation = normalizeMapVillageRelation(t.relation);
             } else if (t?.kind === 'pve') {
               kind = 'pve'; refId = t.refId; name = t.name;
               icon = t.icon ?? pveIcon(t.name);
@@ -585,7 +597,7 @@ export function HexMap() {
             }
 
             cells.push({
-              q, r, camX, camY, kind, refId, name, icon, terrain, visibility,
+              q, r, camX, camY, kind, refId, name, icon, relation, terrain, visibility,
               isSelf, landmark, landmarkCenter,
               isSelected: !!(sel && sel.q === q && sel.r === r),
             });
@@ -926,14 +938,17 @@ export function HexMap() {
 
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const name = cell.getAttribute('data-name') ?? '空地';
-    const key = `${kind}:${q},${r}`;
+    const relation = kind === 'village'
+      ? normalizeMapVillageRelation(cell.getAttribute('data-relation'))
+      : undefined;
+    const key = `${kind}:${relation ?? ''}:${q},${r}`;
     const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
     if (key === hovKey.current) {
       setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
       return;
     }
     hovKey.current = key;
-    setTooltip({ q, r, kind, name, dist, anchorX: anchor.x, anchorY: anchor.y });
+    setTooltip({ q, r, kind, name, relation, dist, anchorX: anchor.x, anchorY: anchor.y });
   }
 
   function marchMarkerPixel(m: any, now: number, refX: number, refY: number): { x: number; y: number } | null {
@@ -1447,7 +1462,7 @@ export function HexMap() {
               );
             })}
             {visibleCells.map((c) => {
-              const rk = ringKind(c.kind, c.isSelf);
+              const rk = mapEntityRingKind(c.kind, c.isSelf, c.relation);
               if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
               if (c.landmark) return null;
               return (
@@ -1515,7 +1530,7 @@ export function HexMap() {
                 key={`hit-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
                 class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}${c.landmark ? ' hex-cell--landmark' : ''}`}
                 transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.relation ? { 'data-relation': c.relation } : {}), ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
               >
                 <polygon class="hex-hit" points={HEX_CORNER_STR} />
                 {/* 王都/封地是合并后的整体目标；点击后不再回退显示某一个内部格的选中环。 */}
@@ -1614,7 +1629,9 @@ export function HexMap() {
         <div class="map-legend">
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--self" />本城</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--own" />己方村庄</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" />玩家(可进攻)</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--neutral" />中立玩家</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--allied" />盟军玩家</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--hostile" />敌对玩家</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--pve" />野怪(可掠夺)</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--attack" />进攻 / 来袭</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--raid" />掠夺</div>
@@ -1656,19 +1673,23 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   );
 }
 
-function tileKindLabel(kind: string, isSelf: boolean, emptyName = '空地'): string {
+function tileKindLabel(kind: string, isSelf: boolean, relation?: MapVillageRelation, emptyName = '空地'): string {
   if (kind === 'own_village') return isSelf ? '本城（己方）' : '己方村庄';
-  if (kind === 'village') return '玩家村庄（可进攻）';
+  if (kind === 'village') {
+    if (relation === 'allied') return '盟军玩家村庄';
+    if (relation === 'hostile') return '敌对玩家村庄';
+    return '中立玩家村庄';
+  }
   if (kind === 'pve') return '野怪据点（可掠夺）';
   if (kind === 'enemy_army') return '敌方军队';
   return `${emptyName}（可拓荒）`;
 }
 
 function HexTooltip({ tip }: {
-  tip: { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number };
+  tip: { q: number; r: number; kind: string; name: string; relation?: MapVillageRelation; dist: number; anchorX: number; anchorY: number };
 }) {
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
-  const label = tileKindLabel(tip.kind, isSelf, tip.name);
+  const label = tileKindLabel(tip.kind, isSelf, tip.relation, tip.name);
 
   const left = Math.min(Math.max(130, tip.anchorX), window.innerWidth - 130);
   const top = Math.min(Math.max(8, tip.anchorY - TIP_ABOVE), window.innerHeight - 120);
