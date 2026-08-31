@@ -1692,11 +1692,18 @@
 .village-command-dock__village .vil-switcher-trigger { height: 100%; box-sizing: border-box; }
 .village-command-dock__resources .kingdom-resource-ledger,
 .village-command-dock__resources .kingdom-resource-ledger > .panel {
+  width: 100%;
   height: 100%;
   margin: 0;
   box-sizing: border-box;
 }
-.village-command-dock__resources .kingdom-resource-grid { height: 100%; align-items: stretch; }
+.village-command-dock__resources .kingdom-resource-grid {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  align-items: stretch;
+}
 .kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
 .kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
 .village-command-dock__eyebrow {
