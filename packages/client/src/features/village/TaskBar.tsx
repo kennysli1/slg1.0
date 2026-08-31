@@ -5,7 +5,7 @@
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
-import { useCallback, useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
@@ -17,6 +17,7 @@ import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
+import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -218,14 +219,50 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
 }
 
 // ── 交付奖励弹窗 ───────────────────────────────────────────────────────────────
-function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
+function RewardModal({ task, previewRewards, rewardVillageId, dialogue, close }: { task: any; previewRewards: any; rewardVillageId?: string; dialogue?: any; close: () => void }) {
   const [segmentIndex, setSegmentIndex] = useState(0);
-  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
-    .filter((item: any) => item && (item.npcName || item.npcText || (item.replies ?? []).length));
+  const [claimed, setClaimed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [rewards, setRewards] = useState(previewRewards);
+  const deliveryInFlight = useRef(false);
+  const segments = visibleDialogueSegments(dialogue);
   const current = segments[segmentIndex] ?? dialogue;
-  const next = () => {
-    if (segmentIndex < segments.length - 1) setSegmentIndex((value) => value + 1);
-    else close();
+  const closeSession = useCallback(() => {
+    if (!deliveryInFlight.current) close();
+  }, [close]);
+  const advanceSegment = useCallback(() => {
+    const next = nextDialogueSegment(segmentIndex, segments.length);
+    if (next == null) close();
+    else setSegmentIndex(next);
+  }, [close, segmentIndex, segments.length]);
+  const onReply = async (key: string) => {
+    if (deliveryInFlight.current) return;
+    const intent = deliverReplyIntent(key, claimed);
+    if (intent === 'close') {
+      closeSession();
+      return;
+    }
+    if (intent === 'advance') {
+      advanceSegment();
+      return;
+    }
+    if (intent !== 'claim') return;
+
+    // useRef 与 busy 双保险：同一渲染帧内的双击也只能发送一个 Deliver。
+    deliveryInFlight.current = true;
+    setBusy(true);
+    let settled: any = null;
+    const ok = await act(req('task.Deliver', { code: task.code }), {
+      okToast: '奖励已领取',
+      onOk: (payload) => { settled = payload; },
+    });
+    if (ok) {
+      setRewards(settled?.rewards ?? previewRewards);
+      setClaimed(true);
+      advanceSegment();
+    }
+    deliveryInFlight.current = false;
+    setBusy(false);
   };
   const res = rewards?.resources ?? null;
   const tres: string[] = rewards?.treasures ?? [];
@@ -241,13 +278,13 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasMercenaryExchange = !!rewards?.reputationMercenaryExchange;
   const hasReputationReset = Number(rewards?.reputationResetFrom) > 0;
   return (
-    <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation || hasReputationReset || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints || hasMercenaries || hasMercenaryExchange
-        ? <p class="task-reward-hint">你获得了以下奖励：</p>
-        : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, reputationResetFrom: rewards?.reputationResetFrom, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints, mercenaries: rewards?.mercenaries, reputationMercenaryExchange: rewards?.reputationMercenaryExchange }} label="本次获得" />
-      {(rewards?.rewardVillageId || task?.rewardVillageId) && (
-        <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
+    <Modal title={`${claimed ? '任务完成' : '领取奖励'} · ${task.name}`} onClose={closeSession}>
+      <p class="task-reward-hint">{claimed ? '已领取以下奖励：' : '完成任务后将获得：'}</p>
+      {(hasRes || hasTres || hasReputation || hasReputationReset || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints || hasMercenaries || hasMercenaryExchange) && (
+        <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, reputationResetFrom: rewards?.reputationResetFrom, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints, mercenaries: rewards?.mercenaries, reputationMercenaryExchange: rewards?.reputationMercenaryExchange }} label={claimed ? '实际奖励' : '预计奖励'} />
+      )}
+      {(rewards?.rewardVillageId || rewardVillageId || task?.rewardVillageId) && (
+        <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? rewardVillageId ?? task.rewardVillageId)}</p>
       )}
       {current && (current.npcName || current.npcText || (current.replies ?? []).length > 0) && (
         <div class="dialogue-session task-delivery-dialogue">
@@ -256,7 +293,7 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
           {(current.replies ?? []).length > 0 && (
             <div class="dialogue-replies" aria-label="玩家回复">
               {(current.replies ?? []).map((reply: any) => (
-                <Btn key={reply.key} variant={reply.key === 'leave' ? 'ghost' : 'primary'} onClick={next}>
+                <Btn key={reply.key} variant={reply.key === 'leave' ? 'ghost' : 'primary'} disabled={busy} onClick={() => void onReply(reply.key)}>
                   {reply.label}
                 </Btn>
               ))}
@@ -313,25 +350,30 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [segmentIndex, setSegmentIndex] = useState(0);
-  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
-    .filter((item: any) => item && (item.npcName || item.npcText));
+  const accepting = useRef(false);
+  const segments = visibleDialogueSegments(dialogue);
   const current = segments[segmentIndex] ?? dialogue;
-  const finish = useCallback(() => {
-    if (segmentIndex < segments.length - 1) {
-      setSegmentIndex((value) => value + 1);
-      return;
-    }
-    close();
+  const closeSession = useCallback(() => close(), [close]);
+  const advanceSegment = useCallback(() => {
+    const next = nextDialogueSegment(segmentIndex, segments.length);
+    if (next == null) close();
+    else setSegmentIndex(next);
   }, [close, segmentIndex, segments.length]);
   const onReply = async (key: string) => {
-    if (busy) return;
-    // 多段对话中每个回复都会推进到下一段；accept 仅在首次出现时真正接取任务。
-    if (key !== 'accept' || accepted) {
-      finish();
+    if (accepting.current) return;
+    const intent = acceptReplyIntent(key, accepted);
+    if (intent === 'close') {
+      closeSession();
       return;
     }
+    if (intent === 'advance') {
+      advanceSegment();
+      return;
+    }
+    accepting.current = true;
     setBusy(true);
     if (!await ensureTaskExecution(task)) {
+      accepting.current = false;
       setBusy(false);
       return;
     }
@@ -339,14 +381,15 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
       okToast: '已接取任务',
       onOk: () => {
         setAccepted(true);
-        finish();
+        advanceSegment();
       },
     });
+    accepting.current = false;
     setBusy(false);
   };
 
   return (
-    <Modal title={current?.npcName || '任务对话'} sub={task.name} onClose={finish}>
+    <Modal title={current?.npcName || '任务对话'} sub={task.name} onClose={closeSession}>
       <div class="dialogue-session">
         <div class="dialogue-npc-text">{current?.npcText ?? ''}</div>
         <div class="dialogue-replies" aria-label="玩家回复">
@@ -405,13 +448,18 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const onDeliver = () => {
     void (async () => {
       if (!await ensureTaskExecution(task)) return;
-      await act(req('task.Deliver', { code: task.code }), {
-      okToast: '任务完成',
-      onOk: (payload) => {
-        openModal((close) => (
-          <RewardModal task={task} rewards={payload?.rewards} dialogue={payload?.dialogue} close={close} />
-        ), `task-reward-${task.code}`);
-      },
+      await act(req('task.StartDeliver', { code: task.code }), {
+        onOk: (payload) => {
+          openModal((close) => (
+            <RewardModal
+              task={task}
+              previewRewards={payload?.previewRewards}
+              rewardVillageId={payload?.rewardVillageId}
+              dialogue={payload?.dialogue}
+              close={close}
+            />
+          ), `task-reward-${task.code}`);
+        },
       });
     })();
   };

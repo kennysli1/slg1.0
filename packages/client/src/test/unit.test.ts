@@ -7,6 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { escapeHtml, escapeAttr } from '../shared/utils/escape.js';
 import { errText } from '../shared/ui/text.js';
@@ -24,6 +25,43 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
+import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
+
+describe('任务接取与奖励领取对话状态机', () => {
+  it('Accept 关闭不推进；离开关闭；只有首次接受任务才请求接取', () => {
+    assert.equal(acceptReplyIntent('leave', false), 'close');
+    assert.equal(acceptReplyIntent('accept', false), 'accept');
+    assert.equal(acceptReplyIntent('accept', true), 'advance', '接取成功后的后续回复不得再次请求 Accept');
+    assert.equal(nextDialogueSegment(0, 2), 1);
+    assert.equal(nextDialogueSegment(1, 2), null);
+  });
+
+  it('Deliver 首次收下才结算，后续收下只推进，领取前异常回复不能跳过确认', () => {
+    assert.equal(deliverReplyIntent('take', false), 'claim');
+    assert.equal(deliverReplyIntent('take', true), 'advance');
+    assert.equal(deliverReplyIntent('leave', false), 'close');
+    assert.equal(deliverReplyIntent('continue', false), 'ignore');
+  });
+
+  it('空 NPC 文本但有收下回复的默认交付段仍可显示', () => {
+    const segments = visibleDialogueSegments({
+      segments: [{ npcName: '', npcText: '', replies: [{ key: 'take', label: '收下' }] }],
+    });
+    assert.equal(segments.length, 1);
+    assert.equal(segments[0].replies?.[0].key, 'take');
+  });
+
+  it('组件接线保持关闭与推进分离，并由任务栏先请求 StartDeliver', () => {
+    const taskBar = readFileSync(new URL('../features/village/TaskBar.tsx', import.meta.url), 'utf8');
+    const autoHost = readFileSync(new URL('../features/village/TaskDialogueHost.tsx', import.meta.url), 'utf8');
+    assert.match(taskBar, /function DialogueModal[\s\S]*onClose=\{closeSession\}/, 'Accept 的 X/Esc/遮罩只能关闭 session');
+    assert.match(taskBar, /req\('task\.StartDeliver'/, '任务栏必须先请求奖励预览');
+    assert.match(taskBar, /deliveryInFlight\.current = true[\s\S]*req\('task\.Deliver'/,
+      '只有首次收下进入互斥后才能正式 Deliver');
+    assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
+    assert.match(autoHost, /req\('task\.ConsumeDialogue'/, '自动对话关闭必须消费整个等待 session');
+  });
+});
 
 describe('王国地标中心标记', () => {
   it('只接受服务端显式中心，缺字段不会把每个占地格当成中心', () => {

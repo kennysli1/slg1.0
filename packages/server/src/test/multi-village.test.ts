@@ -282,7 +282,11 @@ test('任务归属：全局主线可在分城执行，奖励发给最后执行�
 
   await send(app, 'economy.Grant', { villageId: branch, gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
   await repairM1Fields(app, branch);
-  const deliver = await send(app, 'task.Deliver', { villageId: branch, code: 'm1' });
+  // 即使领取时临时操作主城，预览和正式结算仍必须使用最后执行任务的分城。
+  const preview = await send(app, 'task.StartDeliver', { villageId: capital, code: 'm1' });
+  assert.equal(preview.ok, true, preview.reason);
+  assert.equal((preview.payload as any).rewardVillageId, branch);
+  const deliver = await send(app, 'task.Deliver', { villageId: capital, code: 'm1' });
   assert.equal(deliver.ok, true, deliver.reason);
   assert.equal((deliver.payload as any).rewards.rewardVillageId, branch);
   assert.equal((deliver.payload as any).rewards.resources.wood, 100, '全局任务奖励应按 GM 配置发放');

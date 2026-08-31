@@ -47,7 +47,7 @@ export interface WirePush extends WireEnvelope {
 export type WireMessage = WireRequest | WireResponse | WirePush;
 
 /** 当前协议版本 */
-export const WIRE_VERSION = 12;
+export const WIRE_VERSION = 13;
 
 /** 服务端接受的最低协议版本（低于此版本的请求一律拒绝）。 */
 export const WIRE_MIN_VERSION = 10;
