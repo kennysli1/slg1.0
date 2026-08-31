@@ -41,5 +41,24 @@ module.exports = {
       out_file: './logs/test-01/out.log',
       error_file: './logs/test-01/err.log',
     },
+    {
+      // 筛色子实验场：独立进程、端口和内存会话，不加载 KOW 存档。
+      name: 'kow-dice-lab',
+      script: 'packages/dice-lab/dist/server/main.js',
+      node_args: '--enable-source-maps',
+      cwd: __dirname,
+      env: {
+        NODE_ENV: 'production',
+        DICE_LAB_ENABLED: 'on',
+        DICE_LAB_PORT: '8091',
+        DICE_LAB_HOST: '127.0.0.1',
+        DICE_LAB_TOKEN: process.env.DICE_LAB_TOKEN ?? '',
+      },
+      autorestart: true,
+      max_restarts: 10,
+      kill_timeout: 5000,
+      out_file: './logs/dice-lab/out.log',
+      error_file: './logs/dice-lab/err.log',
+    },
   ],
 };

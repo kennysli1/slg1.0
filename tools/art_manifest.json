@@ -640,6 +640,14 @@
     "subject": "a single golden idol: a small solid gold statuette of a seated crowned figure with folded arms and ruby eyes, standing on a stepped square gold plinth engraved with fine patterns"
   },
   {
+    "base": "trs_horse_rope",
+    "zh": "绞马索",
+    "category": "trs",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a single horse snare rope: a rugged braided leather lasso in a compact coil with a clearly visible loop, bronze fittings and a small iron toggle weight, no horse or rider"
+  },
+  {
     "base": "pve_rats",
     "zh": "老鼠窝",
     "category": "pve",
@@ -1150,5 +1158,21 @@
     "mode": "icon",
     "size": 512,
     "subject": "a majestic late-medieval citadel-city at a three-quarter top-down angle: a grand central fortified palace keep, dense stone urban core, layered curtain walls, monumental gatehouse and six tall towers, clearly the highest player settlement stage"
+  },
+  {
+    "base": "ui_dice_lab_die",
+    "zh": "筛色子实验场骰子底图",
+    "category": "ui",
+    "mode": "icon",
+    "size": 256,
+    "subject": "a blank ivory six-sided game die face with a worn antique-gold and dark iron rim, square frontal silhouette, subtle cracks and parchment texture, no pips, no letters, no numbers"
+  },
+  {
+    "base": "ui_dice_lab_scoreboard",
+    "zh": "筛色子实验场计分板",
+    "category": "ui",
+    "mode": "panel",
+    "size": 1600,
+    "subject": "a wide blank antique-gold and dark iron scoreboard plaque with a dark slate center, symmetrical ornamental frame, subtle fantasy medieval metalwork, transparent background, no text, no symbols"
   }
 ]

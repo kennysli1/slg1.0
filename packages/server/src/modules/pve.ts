@@ -327,7 +327,7 @@ export class PveModule {
     const defender: Snapshot = {};
     for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;
-      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, traits: [] };
+      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, isCavalry: c.cavalryUnitCodes.includes(code), traits: [] };
     }
     const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
     const raidDefense: Snapshot = {};
@@ -499,6 +499,11 @@ export class PveModule {
     // 也把幸存守军清成 0（例如 13 -> 3 后又 3 -> 0）。
     const purpose = (cmd.payload as any).purpose as 'raid' | 'siege' | 'scout' | undefined;
     const snapshot = s.cleared ? {} : structuredClone(purpose === 'raid' ? (s.raidDefense ?? s.defender) : s.defender);
+    // 兵种类别由全局配置统一维护；旧存档和旧模板没有 isCavalry 字段，
+    // 在跨模块快照边界补齐，确保绞马索与猎马人任务对所有 PvE 守军一致生效。
+    for (const [code, unit] of Object.entries(snapshot)) {
+      unit.isCavalry = this.config.constants.cavalryUnitCodes.includes(code);
+    }
     const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
     return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
   }

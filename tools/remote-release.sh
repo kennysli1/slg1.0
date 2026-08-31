@@ -43,20 +43,32 @@ has_test_server() {
   grep -Fq "name: 'kow-test-01'" "$config"
 }
 
+has_dice_lab() {
+  local config="$1"
+  grep -Fq "name: 'kow-dice-lab'" "$config"
+}
+
 start_servers() {
   local config="$1"
   # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
   # 每次发布都重建主服与存在于该 release 中的测试服，确保二者均运行构建产物。
   "$PM2_BIN" delete kow >/dev/null 2>&1 || true
   "$PM2_BIN" delete kow-test-01 >/dev/null 2>&1 || true
+  "$PM2_BIN" delete kow-dice-lab >/dev/null 2>&1 || true
   "$PM2_BIN" start "$config" --only kow --update-env
   if has_test_server "$config"; then
     "$PM2_BIN" start "$config" --only kow-test-01 --update-env
+  fi
+  if has_dice_lab "$config"; then
+    "$PM2_BIN" start "$config" --only kow-dice-lab --update-env
   fi
   sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
   "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
   if has_test_server "$config"; then
     "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8081/health >/dev/null
+  fi
+  if has_dice_lab "$config"; then
+    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8091/health >/dev/null
   fi
 }
 

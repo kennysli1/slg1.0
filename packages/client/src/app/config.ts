@@ -178,6 +178,7 @@ export function treasureEffectText(info: TreasureInfo): string {
     soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
     victoryFlag: `全军攻击、防御 +${v}%；每次携旗清营或成功掠夺并归城，额外 +2%`,
     blackBadge: `全军攻击 +${v}%、全军防御 +${v}%、清理 PvE 营地宝物爆率 +5%（无需携带）`,
+    enemyCavalryDef: `敌方骑兵防御 -${v}%`,
   };
   return (map[info.effectType] ?? info.effectType) + reputationText;
 }

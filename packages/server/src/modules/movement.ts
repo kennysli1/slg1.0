@@ -3879,6 +3879,7 @@ export class MovementModule {
         meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk,
         meleeDef: def.meleeDef, rangedDef: def.rangedDef,
         carry: def.carry,
+        isCavalry: this.config.constants.cavalryUnitCodes.includes(u),
         traits: def.traits.flatMap((tc) => {
           const t = this.config.unitTraits[tc];
           return t.effects;

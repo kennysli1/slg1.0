@@ -42,6 +42,33 @@ test('攻城保险库：保护额从拆建筑后的仓储可掠夺量中扣除',
   );
 });
 
+test('绞马索：携带后敌方骑兵防御降低 30%', async () => {
+  const run = async (withRope: boolean) => {
+    const app = freshApp();
+    const target = app.store.get<any>('pve', 'pve-0')!;
+    target.defender = {
+      equimperatoris: { count: 10, form: 'melee', meleeAtk: 25, rangedAtk: 0, meleeDef: 60, rangedDef: 50, carry: 0, traits: [] },
+    };
+    target.cleared = false;
+    app.store.set('pve', 'pve-0', target);
+    let ended: any = null;
+    app.bus.on('combat.BattleEnded', (event) => { if ((event.payload as any).side === 'attacker') ended = event.payload; });
+    await send(app, 'combat.Engage', {
+      targetKind: 'pve', targetId: 'pve-0', targetXY: { q: 0, r: 0 },
+      movementId: withRope ? 'rope-attack' : 'plain-attack', fromVillage: 'v1', fromXY: { q: 0, r: 0 },
+      troops: { legionnaire: 10 }, attackerSnapshot: { legionnaire: melee(10, 40, 35) },
+      treasures: withRope ? ['horse_rope'] : [],
+    });
+    await drain(app);
+    return ended;
+  };
+  const plain = await run(false);
+  const rope = await run(true);
+  assert.ok(plain && rope, '两场战斗都应完成');
+  assert.equal(plain.attackerWins, false, '未携带绞马索时该编队应败北');
+  assert.equal(rope.attackerWins, true, '绞马索降低骑兵防御后该编队应获胜');
+});
+
 test('PvP 战利品规划：四种资源平均且仓储来源优先', () => {
   const plan = planPvpLoot(
     { gold: 0, wood: 1, clay: 1, iron: 1, crop: 1 },
