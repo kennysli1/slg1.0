@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Difficulty } from '../domain/ai.js';
 import type { Die, ScoreOption } from '../domain/rules.js';
 import { scoreOption } from '../domain/rules.js';
@@ -12,6 +12,8 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
   { value: 'hard', label: '困难 NPC', description: '使用期望收益判断收手' },
 ];
 
+const BUST_PREVIEW_MS = 2_500;
+
 export function DiceLabApp() {
   const [token, setToken] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
@@ -19,6 +21,8 @@ export function DiceLabApp() {
   const [session, setSession] = useState<ClientSessionView | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [bustPreview, setBustPreview] = useState<GameEvent | null>(null);
+  const lastBustSignature = useRef('');
   const [notice, setNotice] = useState('输入访问码后开始一局实验对局。刷新页面会开启新对局。');
 
   const state = session?.state;
@@ -26,8 +30,27 @@ export function DiceLabApp() {
     state ? scoreOption(state.dice, [...selected]) : null
   ), [state, selected]);
 
+  useEffect(() => {
+    if (!session) {
+      lastBustSignature.current = '';
+      setBustPreview(null);
+      return;
+    }
+    const event = [...session.state.events].reverse().find((item) => item.kind === 'bust' && item.side === 'player');
+    if (!event) return;
+    const bustCount = session.state.events.filter((item) => item.kind === 'bust' && item.side === 'player').length;
+    const signature = JSON.stringify([bustCount, event.kind, event.side, event.message, event.dice?.map((die) => die.value)]);
+    if (signature === lastBustSignature.current) return;
+    lastBustSignature.current = signature;
+    setBustPreview(event);
+    const timer = window.setTimeout(() => setBustPreview(null), BUST_PREVIEW_MS);
+    return () => window.clearTimeout(timer);
+  }, [session]);
+
   async function start() {
     setBusy(true); setNotice('正在创建实验对局…'); setSelected(new Set());
+    lastBustSignature.current = '';
+    setBustPreview(null);
     try {
       setSession(await createSession(token, difficulty, targetScore));
       setNotice('你先手。点击“掷骰”开始。');
@@ -36,7 +59,7 @@ export function DiceLabApp() {
   }
 
   async function act(action: Parameters<typeof applyAction>[3]) {
-    if (!session || busy) return;
+    if (!session || busy || bustPreview) return;
     setBusy(true); setNotice('服务器正在结算…');
     try {
       setSession(await applyAction(token, session.id, session.revision, action));
@@ -111,10 +134,27 @@ export function DiceLabApp() {
             </div>
             <aside class="log-card panel-card"><div class="turn-heading"><div><span class="eyebrow">事件记录</span><h2>对局记录</h2></div><span class="revision">第 {session.revision} 次结算</span></div><EventLog events={state.events} /></aside>
           </section>
+          {bustPreview && <BustPreview event={bustPreview} />}
         </>
       )}
       <footer class="rules-foot">1点=100 · 5点=50 · 三个相同点数起计分 · 六连顺/三对=1500 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
     </main>
+  );
+}
+
+function BustPreview({ event }: { event: GameEvent }) {
+  return (
+    <div class="bust-overlay" role="alert" aria-live="assertive">
+      <section class="bust-result panel-card">
+        <p class="eyebrow">本次掷骰结果</p>
+        <h2>爆骰</h2>
+        <div class="bust-dice" aria-label="爆骰时掷出的骰子">
+          {(event.dice ?? []).map((die) => <div class="bust-die" key={die.id}><DieFace value={die.value} /><span>{die.value}</span></div>)}
+        </div>
+        <p>{event.message}</p>
+        <small>结果展示结束后，你可以开始下一轮</small>
+      </section>
+    </div>
   );
 }
 
