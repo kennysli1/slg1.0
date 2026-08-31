@@ -119,6 +119,7 @@ export function DiceLabApp() {
           <section class="play-layout">
             <div class="play-card panel-card">
               <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{state.turnScore.toLocaleString()}</b></span></div>
+              <TurnBreakdown entries={state.turnBreakdown} />
               <div class="dice-tray" aria-label="当前骰子">
                 {state.dice.length === 0 && <p class="empty-dice">点击下方按钮掷出六枚骰子</p>}
                 {state.dice.map((die) => <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
@@ -137,8 +138,20 @@ export function DiceLabApp() {
           {bustPreview && <BustPreview event={bustPreview} />}
         </>
       )}
-      <footer class="rules-foot">1点=100 · 5点=50 · 三个相同点数起计分 · 六连顺/三对=1500 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
+      <footer class="rules-foot">1点=100 · 5点=50 · 1-5顺=500 · 2-6顺=750 · 1-6顺=1500 · 三个相同点数起计分 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
     </main>
+  );
+}
+
+function TurnBreakdown({ entries }: { entries: Array<{ label: string; score: number }> }) {
+  const total = entries.reduce((sum, entry) => sum + entry.score, 0);
+  return (
+    <section class="turn-breakdown" aria-label="本轮前面阶段拿分明细">
+      <div class="turn-breakdown-heading"><span>前面阶段已保留</span><strong>{total.toLocaleString()} 分</strong></div>
+      {entries.length === 0 ? <small>还没有前面阶段的拿分记录</small> : (
+        <ul>{entries.map((entry, index) => <li key={`${entry.label}-${index}`}><span>骰子 {entry.label}</span><b>+{entry.score.toLocaleString()}</b></li>)}</ul>
+      )}
+    </section>
   );
 }
 

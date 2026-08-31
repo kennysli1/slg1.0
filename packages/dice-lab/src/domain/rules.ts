@@ -37,14 +37,15 @@ function countsFor(values: number[]): number[] {
 
 /**
  * 返回一组骰子全部被计分时的最高分；null 表示其中有无法计分的骰子。
- * 特殊组合只保留最基础的六连顺和三对，避免第一版混入特殊骰子规则。
+ * 顺子与同点数组合按 KCD2 普通骰子计分表计算；不在表中的组合不产生特殊奖励。
  */
 export function scoreValues(values: number[]): number | null {
   if (values.length === 0 || values.length > 6) return null;
   const counts = countsFor(values);
 
+  if (values.length === 5 && [1, 2, 3, 4, 5].every((value) => counts[value] === 1)) return 500;
+  if (values.length === 5 && [2, 3, 4, 5, 6].every((value) => counts[value] === 1)) return 750;
   if (values.length === 6 && counts.slice(1).every((count) => count === 1)) return 1_500;
-  if (values.length === 6 && counts.slice(1).filter((count) => count === 2).length === 3) return 1_500;
 
   let score = 0;
   let consumed = 0;
