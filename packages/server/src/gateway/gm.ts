@@ -991,6 +991,52 @@ function sectionCavalry(){
   return '<div class="sec"><h2>骑兵分类参数</h2>'+h+'</div>';
 }
 
+// ── 猎马人专用视图：目标数量与绞马索效果分别写回任务/宝物 CSV。 ──
+// 这两个值不是运行时常量，配置中心直接编辑其声明式任务图和宝物目录，避免出现第二份事实源。
+function sectionHorseHunter(){
+  var objectives = DATA.quest_objectives || [], treasures = DATA.treasures || [];
+  var objective = null, rope = null;
+  for (var i=0;i<objectives.length;i++) if (String(objectives[i].id) === 'o-s5') { objective = objectives[i]; break; }
+  for (var j=0;j<treasures.length;j++) if (String(treasures[j].code) === 'horse_rope') { rope = treasures[j]; break; }
+  if (!objective && !rope) return '';
+
+  var target = '';
+  if (objective) {
+    var parts = String(objective.params == null ? '' : objective.params).split(':');
+    target = parts.length > 1 ? parts[parts.length - 1].trim() : '';
+  }
+  var reduction = rope && rope.effectValue != null ? rope.effectValue : '';
+  var h = '<div class="hint">猎马人的可调数值集中在此。保存时分别写回 quest_objectives.csv 与 treasures.csv，并经过完整任务图/宝物配置校验；骑兵分类仍由上方 cavalry_unit_codes 控制。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  if (objective) {
+    h += '<tr><td class="lbl">猎马人累计击杀人口 <small style="color:#7a86a8">(o-s5 / quest_objectives.params)</small></td>';
+    h += '<td><input type="number" min="1" step="1" value="'+esc(target)+'" data-t="quest_objectives" data-k="o-s5" data-f="params" oninput="onHorseHunterTargetEdit(this)"></td>';
+    h += '<td class="lbl">按 cavalry:&lt;数量&gt; 保存；实际进度按骑兵 popCost 累计</td></tr>';
+  }
+  if (rope) {
+    h += '<tr><td class="lbl">绞马索骑兵防御削弱 <small style="color:#7a86a8">(horse_rope / effectValue)</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(reduction)+'" data-t="treasures" data-k="'+esc(String(rope.id))+'" data-f="effectValue" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">百分比数值；30 表示敌方骑兵防御力降低 30%</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>猎马人 / 绞马索参数</h2>'+h+'</div>';
+}
+
+function onHorseHunterTargetEdit(el){
+  var v = String(el.value == null ? '' : el.value).trim();
+  var edits = CHANGES.quest_objectives['o-s5'];
+  if (v === '') {
+    if (edits) {
+      delete edits.params;
+      if (Object.keys(edits).length === 0) delete CHANGES.quest_objectives['o-s5'];
+    }
+  } else {
+    if (!edits) edits = CHANGES.quest_objectives['o-s5'] = {};
+    edits.params = 'cavalry:' + v;
+  }
+  status('已修改「quest_objectives / o-s5 / 目标人口」，记得点保存');
+}
+
 // ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
 var CITY_STATE_ROWS = [
   ['kingdom_city_state_count','地图城邦数量','每张地图随机生成的城邦数量'],
@@ -1353,6 +1399,7 @@ function render(){
   html += sectionTerrain();
   html += sectionMarchSize();
   html += sectionCavalry();
+  html += sectionHorseHunter();
   html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();
