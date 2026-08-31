@@ -40,4 +40,25 @@ input, select { color: #f1eadc; background: #111b21; border: 1px solid #5e7180; 
 
 /* AI-generated art is decorative only; layout and pip positions remain CSS-owned. */
 .scoreboard { padding: 34px 30px; background: rgba(25,37,44,.94) url('/dice-lab/art/ui_dice_lab_scoreboard.png') center / 100% 100% no-repeat; border-color: rgba(216,177,104,.42); }
+.score-side { position: relative; }
+.score-side.is-winner { color: #fff2bc; text-shadow: 0 0 16px rgba(246,224,170,.68); }
+.score-side.is-winner strong { animation: score-pulse 1.2s ease-in-out infinite; }
+.goal-badge { display: inline-flex; align-self: center; margin-top: 4px; padding: 3px 9px; color: #182127; background: var(--gold-hi); border-radius: 999px; font-size: 12px; font-weight: 700; box-shadow: 0 0 0 3px rgba(246,224,170,.16), 0 0 20px rgba(246,224,170,.36); }
+.ai-turn-board { margin: 18px 0 12px; padding: 14px; border: 1px solid rgba(185,86,79,.48); border-radius: 8px; background: rgba(185,86,79,.08); }
+.ai-turn-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #f0c0b5; font-weight: 700; }
+.ai-turn-heading small { color: var(--muted); font-weight: 400; }
+.ai-dice-tray { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; min-height: 96px; margin-top: 12px; padding: 10px; }
+.ai-die { position: relative; width: 64px; height: 64px; border: 2px solid #687d87; border-radius: 11px; background: linear-gradient(145deg, #d7c18b, #8d693a); box-shadow: 0 7px 12px rgba(0,0,0,.33); }
+.ai-die.is-kept { border-color: #f6e0aa; box-shadow: 0 0 0 3px rgba(246,224,170,.24), 0 8px 16px rgba(0,0,0,.38); transform: translateY(-4px); }
+.ai-die .die-art { padding: 10px; }
+.ai-die .pip { width: 10px; height: 10px; }
+.ai-die > span { position: absolute; right: -6px; bottom: -7px; padding: 2px 5px; color: #152027; background: var(--gold-hi); border-radius: 8px; font-size: 10px; font-weight: 700; }
+.ai-action-readout { border-left-color: #b9564f; background: rgba(185,86,79,.1); }
+.ai-action-readout strong { color: #f0c0b5; }
+.round-result { margin-top: 18px; padding: 16px 18px; border: 1px solid rgba(246,224,170,.66); border-radius: 8px; background: linear-gradient(135deg, rgba(216,177,104,.18), rgba(185,86,79,.10)); box-shadow: 0 0 24px rgba(216,177,104,.14); }
+.round-result h3 { margin: 2px 0 9px; color: var(--gold-hi); font-size: 28px; }
+.round-result p:not(.eyebrow) { margin: 5px 0; color: #eee4d2; }
+.round-result small { display: block; margin-top: 11px; line-height: 1.5; }
+.die-static { display: block; cursor: default; }
+@keyframes score-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
 .die-button { background: #cda967 url('/dice-lab/art/ui_dice_lab_die.webp') center / cover no-repeat; }

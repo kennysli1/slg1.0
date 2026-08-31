@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Difficulty } from '../domain/ai.js';
 import type { Die, ScoreOption } from '../domain/rules.js';
 import { scoreOption } from '../domain/rules.js';
-import type { GameEvent } from '../domain/engine.js';
+import type { GameEvent, RoundResult } from '../domain/engine.js';
 import type { ClientSessionView } from './types.js';
 import { applyAction, createSession, DiceLabApiError } from './api.js';
 
@@ -13,6 +13,12 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
 ];
 
 const BUST_PREVIEW_MS = 2_500;
+const AI_ACTION_PAUSE_MS = 850;
+
+type AiPlayback = {
+  events: GameEvent[];
+  index: number;
+};
 
 export function DiceLabApp() {
   const [token, setToken] = useState('');
@@ -22,6 +28,7 @@ export function DiceLabApp() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [bustPreview, setBustPreview] = useState<GameEvent | null>(null);
+  const [aiPlayback, setAiPlayback] = useState<AiPlayback | null>(null);
   const lastBustSignature = useRef('');
   const [notice, setNotice] = useState('输入访问码后开始一局实验对局。刷新页面会开启新对局。');
 
@@ -47,10 +54,23 @@ export function DiceLabApp() {
     return () => window.clearTimeout(timer);
   }, [session]);
 
+  useEffect(() => {
+    if (!aiPlayback) return;
+    if (aiPlayback.index >= aiPlayback.events.length) {
+      setAiPlayback(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setAiPlayback((current) => current ? { ...current, index: current.index + 1 } : current);
+    }, AI_ACTION_PAUSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [aiPlayback]);
+
   async function start() {
     setBusy(true); setNotice('正在创建实验对局…'); setSelected(new Set());
     lastBustSignature.current = '';
     setBustPreview(null);
+    setAiPlayback(null);
     try {
       setSession(await createSession(token, difficulty, targetScore));
       setNotice('你先手。点击“掷骰”开始。');
@@ -59,11 +79,13 @@ export function DiceLabApp() {
   }
 
   async function act(action: Parameters<typeof applyAction>[3]) {
-    if (!session || busy || bustPreview) return;
+    if (!session || busy || bustPreview || aiPlayback) return;
     setBusy(true); setNotice('服务器正在结算…');
     try {
-      setSession(await applyAction(token, session.id, session.revision, action));
+      const nextSession = await applyAction(token, session.id, session.revision, action);
+      setSession(nextSession);
       setSelected(new Set());
+      setAiPlayback(nextSession.aiEvents.length ? { events: nextSession.aiEvents, index: 0 } : null);
       setNotice('');
     } catch (error) {
       setNotice(errorMessage(error));
@@ -72,7 +94,7 @@ export function DiceLabApp() {
   }
 
   function toggleDie(die: Die) {
-    if (!state || state.phase !== 'player' || busy || state.dice.length === 0) return;
+    if (!state || state.phase !== 'player' || busy || aiPlayback || state.dice.length === 0) return;
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(die.id)) next.delete(die.id); else next.add(die.id);
@@ -81,6 +103,7 @@ export function DiceLabApp() {
   }
 
   const currentDifficulty = DIFFICULTIES.find((item) => item.value === difficulty)!;
+  const aiFrame = aiPlayback && aiPlayback.index < aiPlayback.events.length ? aiPlayback.events[aiPlayback.index] : null;
   return (
     <main class="dice-lab">
       <header class="lab-header">
@@ -111,25 +134,27 @@ export function DiceLabApp() {
       {session && state && (
         <>
           <section class="scoreboard panel-card" aria-label="计分板">
-            <div class="score-side player-side"><span class="side-label">你</span><strong>{state.playerScore.toLocaleString()}</strong></div>
+            <div class={`score-side player-side${state.winner === 'player' ? ' is-winner' : ''}`}><span class="side-label">你</span><strong>{state.playerScore.toLocaleString()}</strong>{state.winner === 'player' && <span class="goal-badge">✓ 已达标</span>}</div>
             <div class="target-score"><span>目标</span><strong>{state.targetScore.toLocaleString()}</strong></div>
-            <div class="score-side ai-side"><span class="side-label">{currentDifficulty.label}</span><strong>{state.aiScore.toLocaleString()}</strong></div>
+            <div class={`score-side ai-side${state.winner === 'ai' ? ' is-winner' : ''}`}><span class="side-label">{currentDifficulty.label}</span><strong>{state.aiScore.toLocaleString()}</strong>{state.winner === 'ai' && <span class="goal-badge">✓ 已达标</span>}</div>
           </section>
 
           <section class="play-layout">
             <div class="play-card panel-card">
-              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{state.turnScore.toLocaleString()}</b></span></div>
-              <TurnBreakdown entries={state.turnBreakdown} />
-              <div class="dice-tray" aria-label="当前骰子">
+              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : aiPlayback ? 'NPC掷骰阶段' : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{state.turnScore.toLocaleString()}</b></span></div>
+              {!aiPlayback && <TurnBreakdown entries={state.turnBreakdown} />}
+              {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
+              {!aiPlayback && <div class="dice-tray" aria-label="当前骰子">
                 {state.dice.length === 0 && <p class="empty-dice">点击下方按钮掷出六枚骰子</p>}
-                {state.dice.map((die) => <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
-              </div>
-              <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>
+                {state.dice.map((die) => state.phase === 'finished' ? <div key={die.id} class="die-button die-static" aria-label={`${die.value}点最终骰子`}><DieFace value={die.value} /></div> : <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
+              </div>}
+              {aiPlayback && aiFrame ? <div class="selection-readout ai-action-readout"><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
               <div class="action-row">
-                <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
-                <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || state.phase === 'finished' || !selection}>收下本轮分数</button>
-                <button class="ghost-button" type="button" onClick={() => void act({ type: 'forfeit' })} disabled={busy || state.phase === 'finished'}>放弃对局</button>
+                <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
+                <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished' || !selection}>收下本轮分数</button>
+                <button class="ghost-button" type="button" onClick={() => void act({ type: 'forfeit' })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished'}>放弃对局</button>
               </div>
+              {state.phase === 'finished' && state.result && <RoundResultView result={state.result} />}
               {state.phase === 'finished' && <button class="primary-button restart-button" type="button" onClick={() => void start()}>再来一局</button>}
               {notice && <p class="notice" role="status">{notice}</p>}
             </div>
@@ -138,7 +163,7 @@ export function DiceLabApp() {
           {bustPreview && <BustPreview event={bustPreview} />}
         </>
       )}
-      <footer class="rules-foot">1点=100 · 5点=50 · 1-5顺=500 · 2-6顺=750 · 1-6顺=1500 · 三个相同点数起计分 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
+      <footer class="rules-foot">1点=100 · 5点=50（可与顺子、同点数组合叠加） · 1-5顺=500 · 2-6顺=750 · 1-6顺=1500 · 三个相同点数起计分 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
     </main>
   );
 }
@@ -151,6 +176,39 @@ function TurnBreakdown({ entries }: { entries: Array<{ label: string; score: num
       {entries.length === 0 ? <small>还没有前面阶段的拿分记录</small> : (
         <ul>{entries.map((entry, index) => <li key={`${entry.label}-${index}`}><span>骰子 {entry.label}</span><b>+{entry.score.toLocaleString()}</b></li>)}</ul>
       )}
+    </section>
+  );
+}
+
+function AiTurnBoard({ event }: { event: GameEvent }) {
+  const selectedIds = new Set(event.option?.dieIds ?? []);
+  return (
+    <section class="ai-turn-board" aria-label="NPC回合动作">
+      <div class="ai-turn-heading"><span>NPC当前牌面</span><small>动作会短暂停留，便于查看</small></div>
+      <div class="ai-dice-tray">
+        {(event.dice ?? []).map((die) => <div key={die.id} class={`ai-die${selectedIds.has(die.id) ? ' is-kept' : ''}`}><DieFace value={die.value} /><span>{selectedIds.has(die.id) ? '保留' : '可用'}</span></div>)}
+      </div>
+    </section>
+  );
+}
+
+function describeAiAction(event: GameEvent): string {
+  if (event.kind === 'roll') return '掷骰';
+  if (event.kind === 'keep') return `选择并保留 ${event.option?.label ?? '计分组合'}，+${(event.points ?? 0).toLocaleString()} 分`;
+  if (event.kind === 'bank') return `收下本轮分数 ${(event.points ?? 0).toLocaleString()}`;
+  if (event.kind === 'hot_dice') return '热骰，重新掷出六枚骰子';
+  if (event.kind === 'bust') return `爆骰，本轮 ${(event.points ?? 0).toLocaleString()} 分丢失`;
+  return event.message;
+}
+
+function RoundResultView({ result }: { result: RoundResult }) {
+  return (
+    <section class="round-result" aria-live="polite">
+      <p class="eyebrow">牌桌结算</p>
+      <h3>{result.winner === 'player' ? '胜利' : '失败'}</h3>
+      <p><b>牌型：</b>{result.kind}（{result.label}）</p>
+      <p><b>本次得分：</b>+{result.points.toLocaleString()}</p>
+      <small>结果会保留在牌桌上；点击“再来一局”后才会清除分数和骰子。</small>
     </section>
   );
 }

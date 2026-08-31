@@ -32,6 +32,13 @@ test('普通骰子基础计分', () => {
   assert.equal(scoreValues([6, 6, 6, 6]), 1200);
   assert.equal(scoreValues([6, 6, 6, 6, 6]), 2400);
   assert.equal(scoreValues([6, 6, 6, 6, 6, 6]), 4800);
+  assert.equal(scoreValues([1, 2, 2, 2]), 300);
+  assert.equal(scoreValues([2, 2, 2, 1, 5]), 350);
+  assert.equal(scoreValues([1, 1, 1, 1, 5, 5]), 2100);
+  assert.equal(scoreValues([1, 2, 3, 4, 5, 1]), 600);
+  assert.equal(scoreValues([1, 2, 3, 4, 5, 5]), 550);
+  assert.equal(scoreValues([2, 3, 4, 5, 6, 1]), 1500);
+  assert.equal(scoreValues([2, 3, 4, 5, 6, 5]), 800);
   assert.equal(scoreValues([1, 1, 2, 2, 3, 3]), null);
   assert.equal(scoreValues([2, 3]), null);
 });

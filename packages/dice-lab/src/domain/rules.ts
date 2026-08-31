@@ -9,6 +9,7 @@ export type ScoreOption = {
   dieIds: string[];
   score: number;
   label: string;
+  kind: string;
 };
 
 export type DiceRng = () => number;
@@ -35,6 +36,30 @@ function countsFor(values: number[]): number[] {
   return counts;
 }
 
+const STRAIGHTS: Array<{ values: number[]; score: number }> = [
+  { values: [1, 2, 3, 4, 5, 6], score: 1_500 },
+  { values: [1, 2, 3, 4, 5], score: 500 },
+  { values: [2, 3, 4, 5, 6], score: 750 },
+];
+
+function straightScore(counts: number[]): { score: number; kind: string } | null {
+  for (const straight of STRAIGHTS) {
+    if (!straight.values.every((value) => counts[value] > 0)) continue;
+    const remaining = [...counts];
+    for (const value of straight.values) remaining[value] -= 1;
+    const extraOnes = remaining[1];
+    const extraFives = remaining[5];
+    const onlyScoringExtras = remaining.every((count, value) => value === 0 || value === 1 || value === 5 ? true : count === 0);
+    if (!onlyScoringExtras) continue;
+    const extraScore = extraOnes * 100 + extraFives * 50;
+    return {
+      score: straight.score + extraScore,
+      kind: extraScore > 0 ? '顺子＋单骰' : '顺子',
+    };
+  }
+  return null;
+}
+
 /**
  * 返回一组骰子全部被计分时的最高分；null 表示其中有无法计分的骰子。
  * 顺子与同点数组合按 KCD2 普通骰子计分表计算；不在表中的组合不产生特殊奖励。
@@ -43,9 +68,8 @@ export function scoreValues(values: number[]): number | null {
   if (values.length === 0 || values.length > 6) return null;
   const counts = countsFor(values);
 
-  if (values.length === 5 && [1, 2, 3, 4, 5].every((value) => counts[value] === 1)) return 500;
-  if (values.length === 5 && [2, 3, 4, 5, 6].every((value) => counts[value] === 1)) return 750;
-  if (values.length === 6 && counts.slice(1).every((count) => count === 1)) return 1_500;
+  const straight = straightScore(counts);
+  if (straight) return straight.score;
 
   let score = 0;
   let consumed = 0;
@@ -66,6 +90,16 @@ export function scoreValues(values: number[]): number | null {
   return consumed === values.length ? score : null;
 }
 
+function scoreKind(values: number[]): string {
+  const counts = countsFor(values);
+  const straight = straightScore(counts);
+  if (straight) return straight.kind;
+  if (values.length === 1) return '单骰';
+  const sameKind = values.some((value) => counts[value] >= 3);
+  if (sameKind) return '同点数组合';
+  return '单骰组合';
+}
+
 export function scoreOption(dice: Die[], dieIds: string[]): ScoreOption | null {
   if (dieIds.length === 0) return null;
   const idSet = new Set(dieIds);
@@ -78,6 +112,7 @@ export function scoreOption(dice: Die[], dieIds: string[]): ScoreOption | null {
     dieIds: selected.map((die) => die.id),
     score,
     label: selected.map((die) => die.value).sort((a, b) => a - b).join('、'),
+    kind: scoreKind(selected.map((die) => die.value)),
   };
 }
 
