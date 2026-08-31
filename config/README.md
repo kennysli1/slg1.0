@@ -324,6 +324,9 @@
 | kingdom_pve_retaliation_raid_threshold | -10 | 声望小于等于此值时掠夺主城 |
 | kingdom_pve_retaliation_siege_threshold | -20 | 声望小于等于此值时攻城主城 |
 | kingdom_fief_mercenary_min/max_ratio | 0.4/0.7 | 封地报复雇佣军占封地守军总人口的随机比例 |
+| cavalry_unit_codes | `equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight` | 骑兵兵种代码（以 `|` 分隔）；猎马人任务和绞马索效果共用此分类；任务进度按 `popCost` 计人口 |
+
+`/config/balance` 的“猎马人 / 绞马索参数”板块会集中显示并编辑这条支线的两个数值：猎马人目标人口（`quest_objectives.csv` 的 `o-s5.params`，按 `cavalry:<数量>` 保存）和绞马索骑兵防御削弱百分比（`treasures.csv` 的 `horse_rope.effectValue`）。这里是对应 CSV 行的专用快捷入口，不会生成第二份运行时参数；骑兵兵种分类仍在上方“骑兵分类参数”板块修改。
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
@@ -355,6 +358,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | equipCategory | 自动生效槽类别：`economic/military/social/special` |
 | stackGroup / effectCap | 同类叠加组 / 该效果封顶值 |
 | uniqueEffect | `1` 表示同名只允许一份生效 |
+
+`enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
 
 ## research.csv — 科技树目录
 | 列 | 含义 |
@@ -447,8 +452,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
-| params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果

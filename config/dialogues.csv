@@ -46,4 +46,6 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 31,s3_deliver_failure,s3,deliver_failure,1,,,
 9,s4_accept,s4,accept,1,,,accept:接受任务|leave:离开
 35,s4_deliver,s4,deliver,1,,,take:收下
+36,s5_accept,s5,accept,1,猎马人,边境的骑兵肆意践踏村庄。若你能消灭五十名骑兵，我会把这件绞马索交给你，它能让敌人的骑兵失去防护。 ,accept:接受任务|leave:离开
+37,s5_deliver,s5,deliver,1,猎马人,你已经证明了自己的本领。这件绞马索归你了。 ,take:收下
 11,s4_natalies_returned,s4,natalies_returned,1,被囚禁的娜塔莉们,多谢你拯救了我们，我们都是被那个恶魔村，也就是自称幸福村的那帮恶霸绑架到他们村子并囚禁起来的。那帮畜生强迫我们为他们的人口计划而劳动，甚至导致吃饭的嘴太多了把粮食都吃完了。他们是罪有应得。请释放我们让我们回家，我们的家人会给你丰盛的报酬的。,

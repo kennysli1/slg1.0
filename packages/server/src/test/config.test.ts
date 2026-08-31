@@ -22,6 +22,21 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
+  assert.ok(c.cavalryUnitCodes.includes('equlegati'), '骑兵代码配置应包含罗马骑兵');
+  assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
+});
+
+test('猎马人支线与绞马索宝物配置已接入任务图', () => {
+  const cfg = loadGameConfig(configDir);
+  const hunter = cfg.quests.s5;
+  assert.ok(hunter, '应存在猎马人支线');
+  assert.equal(hunter?.type, 'side');
+  assert.equal(hunter?.trigger, 'tavern_refresh');
+  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 50 });
+  assert.deepEqual(hunter?.rewards.treasures, ['horse_rope']);
+  assert.equal(cfg.treasures.horse_rope.effectType, 'enemyCavalryDef');
+  assert.equal(cfg.treasures.horse_rope.effectValue, 30);
+  assert.equal(cfg.questGraph.conditions.filter((row) => row.questCode === 's5' && row.phase === 'offer').length, 2, '应同时有酒馆池与二级主基地前置');
 });
 
 test('开局模板：village_templates.csv 展开预置建筑', () => {
