@@ -630,6 +630,9 @@ export class KingdomModule {
     const chunks = Math.max(0, Math.floor(Number(p.kingdomPvePenaltyChunks ?? 0)));
     if (!p.playerId || chunks <= 0) return;
     const reputation = Number(p.value ?? 0);
+    // 声望每累计一个惩罚批次都要检查一次，但只有达到封地报复阈值
+    // 才能派兵。此前只判断 chunks，导致声望 -1、-5 等也会错误触发。
+    if (!Number.isFinite(reputation) || reputation > this.config.constants.kingdomPveRetaliationRaidThreshold) return;
     const state = await this.ensure(p.playerId);
     if (!state) return;
     const battleType: 'raid' | 'siege' = reputation <= this.config.constants.kingdomPveRetaliationSiegeThreshold ? 'siege' : 'raid';

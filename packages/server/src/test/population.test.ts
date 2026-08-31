@@ -62,6 +62,43 @@ test('人口：新村创建开局人口=城镇中心popCap（currentPop = mainPo
   assert.ok(p.growthPerHour > 0, `开局应有正增长潜力 growthPerHour，实际 ${p.growthPerHour}`);
 });
 
+test('回归：战斗损坏建筑降低硬上限，修复完成后恢复硬上限', async () => {
+  const app = freshApp();
+  await flushMicrotasks();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 999999, clay: 999999, iron: 999999, crop: 999999, gold: 999999 } });
+
+  const build = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'residence' });
+  assert.equal(build.ok, true, `建造居民楼应成功: ${build.reason ?? ''}`);
+  await app.scheduler.advanceTo((build.payload as any).finishAt + 1, setClock);
+  await flushMicrotasks();
+
+  // 让内城只剩居民楼作为战斗损坏目标，避免同等级建筑的伪随机选择影响断言。
+  const layout = app.store.get<any>('building', 'v1');
+  const rallypoint = layout.placed.find((p: any) => p.kind === 'rallypoint');
+  assert.ok(rallypoint);
+  rallypoint.level = 0;
+  app.store.set('building', 'v1', layout);
+  await app.population.refreshHardCap('v1');
+  const before = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+
+  const hit = await send(app, 'building.ApplyBattleDamage', {
+    villageId: 'v1', zone: 'inner', power: 100, powerPerLevel: 100, mode: 'damage',
+  });
+  assert.equal(hit.ok, true, `战斗损坏应成功: ${hit.reason ?? ''}`);
+  await flushMicrotasks();
+  const during = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  assert.equal(during.hardCap, before.hardCap - 8, '居民楼降为0级后硬上限应立即减少8');
+
+  const damaged = (app.store.get<any>('building', 'v1')).placed.find((p: any) => p.kind === 'residence');
+  assert.ok(damaged?.repairTargetLevel, '居民楼应保留可修复目标等级');
+  const repair = await send(app, 'building.Repair', { villageId: 'v1', slotId: damaged.slotId });
+  assert.equal(repair.ok, true, `修复居民楼应成功: ${repair.reason ?? ''}`);
+  await app.scheduler.advanceTo((repair.payload as any).finishAt + 1, setClock);
+  await flushMicrotasks();
+  const after = (await send(app, 'population.GetSnapshot', { villageId: 'v1' })).payload as any;
+  assert.equal(after.hardCap, before.hardCap, '居民楼修复完成后硬上限应恢复');
+});
+
 test('人口：v5 训练原子转化——currentPop 即时扣减、trainingPopCost 即时增加，totalPop 守恒', async () => {
   const app = freshApp();
   await flushMicrotasks();

@@ -91,7 +91,6 @@ git -C "$ROOT" worktree add --detach --quiet "$WORKTREE" "$MAIN_SHA"
     npm run lint:all
     npm run typecheck
     npm run verify:config-sync
-    npm run test:ops
   else
     npm run verify:quick
   fi

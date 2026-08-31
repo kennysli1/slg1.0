@@ -36,7 +36,8 @@
 
 ### 默认交付闸门（强制）
 
-- 用户提出修改项目且未明确暂停检查时，功能验证通过后必须自动完成 `commit → push 功能分支 → 创建 PR → 等待 checks → squash merge → fetch origin/main → deploy:prod → 验证公网版本`。
+- 用户提出修改项目且未明确暂停检查时，功能验证通过后必须自动完成 `commit → push 功能分支 → 创建 PR → 等待 checks → squash merge → fetch origin/main`。
+- `deploy:prod` 只在用户明确要求上线时执行；部署成功后才做公网版本验证。
 - “功能完成”不等于“交付完成”；checks 通过且可合并时不得无故停留在 Open PR。
 - 仅当用户明确要求“先让我检查”“暂不提交/推送/合并/部署”等，才停止对应阶段。
 - 如部署所需密钥、权限或外部系统不可用，保留现场并报告，不以未部署冒充完成。
@@ -90,7 +91,9 @@ npm run dev -w @slg/client   # 终端B：前端 :5173
 npm run guard                # 变更契约自查（秒级，随时跑）
 npm run lint:all             # 前后端 ESLint（守铁律 #2/#3）
 npm run test:server          # 改完逻辑必跑：全循环 + 并发/协议/WAL/架构守卫
-npm run verify               # 提交前一键全量（guard + build + lint + typecheck + test + audit）
+npm run verify:changed       # 本地按变更范围验证（提交闸门使用）
+npm run verify:quick         # 本地完整业务回归（不含 Linux 发布布局）
+npm run verify               # CI/发版前完整验证（含发布布局、产物冒烟、audit）
 npm run deploy:prod          # 显式生产部署；任意分支可发起，但内容固定为 origin/main
 ```
 
@@ -113,8 +116,4 @@ npm run deploy:prod          # 显式生产部署；任意分支可发起，但�
 4. 该升的版本号升掉（`WIRE_VERSION` / `SAVE_SCHEMA_VERSION`）
 5. 暂存全部候选改动，保持无未暂存/未跟踪文件（确保本地验证对应提交快照）
 6. commit message：`<type>(<scope>): <主题>`，type ∈ feat/fix/docs/refactor/perf/test/chore/config/build/revert
-7. 正常执行 `git commit`：钩子完成本地验证和隔离生产冒烟，不连接生产环境
-
-**索引没更新的改动 = 没做完的改动。** 这不是额外工作，是这次改动的一部分。
-
-**部署**：合并并推送远程 main 后运行 `npm run deploy:prod`。命令可从任意本地分支发起，但只取远程 `origin/main`；见 [`docs/部署手册_腾讯云轻量服务器.md`](./docs/部署手册_腾讯云轻量服务器.md)。
+7. 正常执行 `git commit`：钩子按变更范围验证，运行时改动追加隔离生产冒烟，不连接生产环境
