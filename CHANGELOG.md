@@ -9,6 +9,14 @@
 
 ## [未发布]
 
+### 新增
+
+- 新增独立筛色子实验场 `packages/dice-lab`：普通六面骰规则、热骰/爆骰、三档 NPC、服务器内存会话、静态 Preact UI 和生成的骰子/计分板美术；通过 `kow-dice-lab` PM2 服务和 `/dice-lab/` 同域入口部署，与主游戏存档、Wire 协议和领域状态隔离。
+
+### 变更
+
+- 生产构建、部署启动与冒烟检查纳入独立实验场；新增 `test:dice-lab` 与 `scripts/dice-lab-smoke.mjs`，服务不可用时主游戏代理返回 503 而不影响主游戏路由。
+
 ### 修复
 
 - 修复战斗准入失败后行军可能永久停在 `paused` 的问题；Movement 现在检查 `combat.Engage` 结果，失败会恢复为原路返程。

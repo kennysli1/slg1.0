@@ -8,6 +8,7 @@
 - `packages/shared`：客户端与服务端共享的 Wire 类型及内部消息基础类型。
 - `packages/server`：Fastify、WebSocket、领域逻辑和 JSON/WAL 持久化。
 - `packages/client`：Preact + signals + Vite 客户端。
+- `packages/dice-lab`：独立筛色子实验场（Fastify + Preact），不读取或写入 KOW 游戏存档。
 - `config`：CSV 游戏配置；表清单及编辑约定见 `config/README.md`。
 - `docs`：按需读取的当前参考；`docs/archive` 只保存历史设计，不作为实现依据。
 - `scripts` / `tools`：质量闸门、生产冒烟、部署及美术工具。
@@ -50,6 +51,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
+| `packages/dice-lab` | 独立小游戏服务；内存会话、筛色子规则与 NPC，不属于主游戏领域 owner |
 
 组装与生命周期在 `packages/server/src/app.ts`；外部协议路由在 `packages/server/src/gateway/routes.ts`。基础设施包括 `event-bus.ts`、`command-bus.ts`、`scheduler.ts`、`store.ts`、`config.ts`、`config-authority.ts`（配置中心版本/共享镜像/异步同步）、`csv.ts` 等。
 
@@ -95,6 +97,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `炼金炉模块.md` | 修改炼金炉建筑、宝物输入、炼化结果或收获流程 |
 | `美术资源清单.md` | 查询资产命名与事实源 |
 | `美术生成规范.md` | 生成或替换美术资源 |
+| `筛色子实验场.md` | 开发、测试、运行或部署独立筛色子小游戏 |
 | `部署手册_腾讯云轻量服务器.md` | 生产部署和回滚 |
 
 ## 六、常用路径
