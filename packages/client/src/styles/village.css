@@ -1210,10 +1210,14 @@
 /* ---------- 任务条（村庄页常驻） ---------- */
 .task-bar {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-2);
 }
 .task-menu {
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
@@ -1252,6 +1256,7 @@
   font-weight: 800;
 }
 .task-menu-scope-sub {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--c-ink-soft);
@@ -1288,6 +1293,8 @@
 }
 .task-menu-scope-body {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-2);
   padding: var(--s-2);
@@ -1301,6 +1308,8 @@
 .task-menu--category > summary > span:first-of-type { font-weight: 700; }
 .task-menu--category .task-menu-body {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: var(--s-1);
   padding: var(--s-2);
@@ -1328,9 +1337,11 @@
   font-size: var(--f-2xs);
   white-space: nowrap;
 }
-.task-menu-task-body { padding: 0 var(--s-2) var(--s-2); }
+.task-menu-task-body { width: 100%; min-width: 0; padding: 0 var(--s-2) var(--s-2); }
 .task-menu--task .task-card,
 .task-menu--task .task-offer {
+  width: 100%;
+  min-width: 0;
   border: 0;
   border-radius: 0;
   padding: var(--s-2) 0 0;
@@ -1351,6 +1362,8 @@
   gap: var(--s-2);
 }
 .task-card {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
   padding: var(--s-2) var(--s-3);
@@ -1382,12 +1395,15 @@
   font-size: var(--f-md);
 }
 .task-card-desc {
+  min-width: 0;
   font-size: var(--f-sm);
   color: var(--c-ink-soft);
   margin: 2px 0 6px;
   line-height: 1.5;
 }
 .task-card-obj {
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1430,6 +1446,7 @@
 }
 /* 奖励展示区 */
 .task-card-reward {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1442,6 +1459,7 @@
 }
 .task-reward-list {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
@@ -1473,6 +1491,24 @@
   gap: var(--s-2);
   margin-top: var(--s-2);
   flex-wrap: wrap;
+}
+
+/* 任务详情在桌面端使用整行宽度：说明横跨全卡，目标与奖励并列，操作回到下一整行。 */
+.task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(14rem, 1fr);
+  column-gap: var(--s-5);
+  align-items: start;
+}
+.task-card-head,
+.task-card-desc,
+.task-card-actions { grid-column: 1 / -1; }
+.task-card-obj { grid-column: 1; }
+.task-card-reward { grid-column: 2; grid-row: auto; margin-top: 0; }
+
+@media (max-width: 720px) {
+  .task-card { display: block; }
+  .task-card-reward { margin-top: 2px; }
 }
 
 /* 酒馆里的可接取任务 */
@@ -1626,9 +1662,9 @@
 .empire-village-task-row__meta small { white-space: nowrap; }
 .empire-village-task-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-2xs); line-height: 1.45; }
 .empire-workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--s-4); }
+.empire-workspace-layout { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-entry { min-width: 0; }
 .empire-workspace-panel { display: flex; min-height: 144px; height: 144px; flex-direction: column; }
-.empire-workspace-entry.is-open .empire-workspace-panel { min-height: 0; height: auto; }
 .empire-workspace-topline { display: flex; min-height: 100%; align-items: stretch; justify-content: space-between; gap: var(--s-3); }
 .empire-workspace-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: var(--s-1); }
 .empire-workspace-copy h2 { margin: 0; color: var(--c-ink); font-family: var(--ff-han); font-size: var(--f-lg); line-height: 1.2; }
@@ -1644,7 +1680,9 @@
 .empire-workspace-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .empire-workspace-entry.is-open .empire-workspace-toggle { border-color: var(--c-gold-dim); }
 .empire-workspace-entry.is-open .empire-workspace-toggle i { transform: rotate(180deg); }
-.empire-workspace-content { display: grid; gap: var(--s-4); margin-top: var(--s-4); padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.empire-workspace-expanded { min-width: 0; }
+.empire-workspace-expanded-panel { min-width: 0; }
+.empire-workspace-content { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-content .kingdom-army-management { margin-top: 0; }
 .empire-active-panel { border-left: calc(var(--s-1) / 2) solid var(--status-warning); }
 
@@ -1692,11 +1730,18 @@
 .village-command-dock__village .vil-switcher-trigger { height: 100%; box-sizing: border-box; }
 .village-command-dock__resources .kingdom-resource-ledger,
 .village-command-dock__resources .kingdom-resource-ledger > .panel {
+  width: 100%;
   height: 100%;
   margin: 0;
   box-sizing: border-box;
 }
-.village-command-dock__resources .kingdom-resource-grid { height: 100%; align-items: stretch; }
+.village-command-dock__resources .kingdom-resource-grid {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  align-items: stretch;
+}
 .kingdom-resource-ledger--embedded > .panel { display: flex; align-items: stretch; }
 .kingdom-resource-ledger--embedded .kingdom-resource-row { min-height: 52px; }
 .village-command-dock__eyebrow {
@@ -1709,8 +1754,8 @@
   line-height: 1;
 }
 
-/* 工作区布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
- * 展开只增加卡片内部内容，始终保留原有双列位置。 */
+/* 工作区摘要布局由 villageWorkbenchLayoutClass 明确声明，禁止依赖 :has 推断。
+ * 展开内容脱离双列摘要卡片，固定占用其下方的整行面板。 */
 .empire-workspace-grid--both-closed,
 .empire-workspace-grid--both-open,
 .empire-workspace-grid--development-open,
