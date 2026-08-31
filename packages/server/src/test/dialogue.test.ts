@@ -85,6 +85,118 @@ test('dialogue：M11 交付返回完整的两段长老对话', async () => {
   assert.match(dialogue.segments[1].npcText, /议会厅/);
 });
 
+test('task.StartDeliver：只返回奖励预览和完整交付对话，不改变任务或任何奖励状态', async () => {
+  const app = createGameApp({ now: () => 2_660_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'deliver-preview');
+  const state = app.store.get<any>('task', villageId)!;
+  state.active.m11 = {
+    code: 'm11', type: 'main', executionVillageId: villageId, spawnVillageId: villageId,
+    acceptedAt: 2_660_000, submitted: {}, camps: [], campCleared: 0, progress: 200,
+    readyToDeliver: true,
+  };
+  app.store.set('task', villageId, state);
+  const before = {
+    task: structuredClone(app.store.get<any>('task', villageId)),
+    economy: structuredClone(app.store.get<any>('economy', villageId)),
+    population: structuredClone(app.store.get<any>('population', villageId)),
+    reputation: structuredClone(app.store.get<any>('reputation', villageId)),
+    treasure: structuredClone(app.store.get<any>('treasure', villageId)),
+    military: structuredClone(app.store.get<any>('military', villageId)),
+    research: structuredClone(app.store.get<any>('research', villageId)),
+  };
+
+  const started = await send(app, 'task.StartDeliver', { villageId, code: 'm11' });
+  assert.equal(started.ok, true, started.reason);
+  const payload = started.payload as any;
+  assert.deepEqual(payload.previewRewards.buildingUnlocks, ['alliance_hall', 'council']);
+  assert.equal(payload.rewardVillageId, villageId);
+  assert.equal(payload.dialogue.segmentCount, 2);
+  assert.equal(payload.dialogue.segments[0].replies[0].key, 'take');
+  assert.deepEqual(app.store.get<any>('task', villageId), before.task, '预览不能完成、移除或改写任务');
+  for (const collection of ['economy', 'population', 'reputation', 'treasure', 'military', 'research'] as const) {
+    assert.deepEqual(app.store.get<any>(collection, villageId), before[collection], `预览不能改写 ${collection}`);
+  }
+});
+
+test('task.StartDeliver：空白交付配置仍返回默认收下段，关闭预览后任务保持待领取', async () => {
+  const app = createGameApp({ now: () => 2_670_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'deliver-fallback');
+  const state = app.store.get<any>('task', villageId)!;
+  state.active.m11 = {
+    code: 'm11', type: 'main', executionVillageId: villageId, spawnVillageId: villageId,
+    acceptedAt: 2_670_000, submitted: {}, camps: [], campCleared: 0, progress: 200,
+    readyToDeliver: true,
+  };
+  app.store.set('task', villageId, state);
+  for (const key of Object.keys(app.config.dialogues)) {
+    if (app.config.dialogues[key].taskCode === 'm11' && app.config.dialogues[key].trigger === 'deliver') delete app.config.dialogues[key];
+  }
+
+  const first = await send(app, 'task.StartDeliver', { villageId, code: 'm11' });
+  assert.equal(first.ok, true, first.reason);
+  assert.equal((first.payload as any).dialogue.npcText, '任务奖励已准备好。');
+  assert.deepEqual((first.payload as any).dialogue.replies, [{ key: 'take', label: '收下' }]);
+  assert.equal(app.store.get<any>('task', villageId)?.active?.m11?.readyToDeliver, true);
+
+  // 模拟玩家关闭再打开：StartDeliver 必须仍从第一段返回，任务不能因预览消失。
+  const reopened = await send(app, 'task.StartDeliver', { villageId, code: 'm11' });
+  assert.equal(reopened.ok, true, reopened.reason);
+  assert.equal((reopened.payload as any).dialogue.segment, 1);
+  assert.ok(app.store.get<any>('task', villageId)?.active?.m11);
+});
+
+test('task.StartDeliver：M9 动态奖励分支与正式结算使用相同解析结果', async () => {
+  for (const outcome of ['success', 'failure'] as const) {
+    const app = createGameApp({ now: () => 2_680_000, manualScheduler: true });
+    app.setupWorld();
+    const villageId = await village(app, outcome === 'success' ? 'm9-prev-ok' : 'm9-prev-fail');
+    const state = app.store.get<any>('task', villageId)!;
+    state.active.m9 = {
+      code: 'm9', type: 'main', executionVillageId: villageId, spawnVillageId: villageId,
+      acceptedAt: 2_680_000, submitted: {}, camps: [], campCleared: 0, progress: 1,
+      readyToDeliver: true,
+    };
+    state.outcomes = { m8: outcome };
+    app.store.set('task', villageId, state);
+
+    const started = await send(app, 'task.StartDeliver', { villageId, code: 'm9' });
+    assert.equal(started.ok, true, started.reason);
+    const preview = (started.payload as any).previewRewards;
+    assert.ok((started.payload as any).dialogue.segments[0].replies.some((reply: any) => reply.key === 'take'), '异常分支文本也必须可确认领取');
+    const delivered = await send(app, 'task.Deliver', { villageId, code: 'm9' });
+    assert.equal(delivered.ok, true, delivered.reason);
+    const actual = (delivered.payload as any).rewards;
+    assert.deepEqual(preview.treasures, actual.treasures, `${outcome} 分支宝物预览必须与实发一致`);
+    if (outcome === 'success') assert.equal(preview.population, 5);
+    else assert.equal(preview.population, undefined);
+  }
+});
+
+test('task.Deliver：正式结算失败时任务保持待领取，可在当前段重试', async () => {
+  const app = createGameApp({ now: () => 2_690_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'deliver-retry');
+  const state = app.store.get<any>('task', villageId)!;
+  state.active.s2 = {
+    code: 's2', type: 'side', executionVillageId: villageId, spawnVillageId: villageId,
+    acceptedAt: 2_690_000, submitted: {}, camps: [], campCleared: 0, progress: 1,
+    readyToDeliver: true, qualifiedFlagMovements: ['missing-flag-movement'],
+  };
+  app.store.set('task', villageId, state);
+
+  const started = await send(app, 'task.StartDeliver', { villageId, code: 's2' });
+  assert.equal(started.ok, true, started.reason);
+  const delivered = await send(app, 'task.Deliver', { villageId, code: 's2' });
+  assert.equal(delivered.ok, false);
+  assert.equal(delivered.reason, 'qualifying_flag_not_stored');
+  const active = app.store.get<any>('task', villageId)?.active?.s2;
+  assert.ok(active, '失败后任务不能消失');
+  assert.equal(active.readyToDeliver, true, '失败后必须仍为待领取');
+  assert.deepEqual(active.qualifiedFlagMovements, ['missing-flag-movement'], '失败不能破坏可重试依据');
+});
+
 test('dialogue：自动任务对话快照也携带完整段落组', async () => {
   const app = createGameApp({ now: () => 2_700_000, manualScheduler: true });
   app.setupWorld();

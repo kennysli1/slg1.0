@@ -163,6 +163,12 @@ test('M12 归入开眼看世界；M14 正声望兑换无期限佣兵；M15 负�
   assert.equal((await send(app, 'task.Accept', { villageId, code: 'm14' })).ok, true);
   const submitted = await send(app, 'task.SubmitResources', { villageId, code: 'm14', resources: { crop: 500 } });
   assert.equal(submitted.ok, true, submitted.reason);
+  const m14Preview = await send(app, 'task.StartDeliver', { villageId, code: 'm14' });
+  assert.equal(m14Preview.ok, true, m14Preview.reason);
+  assert.deepEqual((m14Preview.payload as any).previewRewards.mercenaries, { merc_sword: 6 });
+  assert.equal((m14Preview.payload as any).previewRewards.reputationResetFrom, 3);
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId }).then((result) => result.payload as any)).value, 3,
+    'M14 预览不能提前扣除声望');
   const delivered = await send(app, 'task.Deliver', { villageId, code: 'm14' });
   assert.equal(delivered.ok, true, delivered.reason);
   assert.deepEqual((delivered.payload as any).rewards.mercenaries, { merc_sword: 6 });

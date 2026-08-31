@@ -441,6 +441,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           resources: { type: 'record_int', minVal: 0, maxVal: 2_000_000_000 },
         },
       },
+      'task.StartDeliver': { command: 'task.StartDeliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Fail': { command: 'task.Fail', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
