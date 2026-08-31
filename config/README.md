@@ -326,6 +326,8 @@
 | kingdom_fief_mercenary_min/max_ratio | 0.4/0.7 | 封地报复雇佣军占封地守军总人口的随机比例 |
 | cavalry_unit_codes | `equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight` | 骑兵兵种代码（以 `|` 分隔）；猎马人任务和绞马索效果共用此分类；任务进度按 `popCost` 计人口 |
 
+`/config/balance` 的“猎马人 / 绞马索参数”板块会集中显示并编辑这条支线的两个数值：猎马人目标人口（`quest_objectives.csv` 的 `o-s5.params`，按 `cavalry:<数量>` 保存）和绞马索骑兵防御削弱百分比（`treasures.csv` 的 `horse_rope.effectValue`）。这里是对应 CSV 行的专用快捷入口，不会生成第二份运行时参数；骑兵兵种分类仍在上方“骑兵分类参数”板块修改。
+
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
 配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队固定速度不受影响，已在途行军不会因热重载改变原定到达时间。

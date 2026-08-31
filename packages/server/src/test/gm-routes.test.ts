@@ -224,6 +224,10 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /kingdom_pve_retaliation_raid_threshold/, 'GM 页面应提供封地掠夺阈值');
     assert.match(res.body, /kingdom_pve_retaliation_siege_threshold/, 'GM 页面应提供封地攻城阈值');
     assert.match(res.body, /kingdom_fief_mercenary_min_ratio/, 'GM 页面应提供封地雇佣军比例参数');
+    assert.match(res.body, /猎马人 \/ 绞马索参数/, '配置中心应提供猎马人专用参数板块');
+    assert.match(res.body, /o-s5 \/ quest_objectives\.params/, '配置中心应提供猎马人目标人口编辑项');
+    assert.match(res.body, /horse_rope \/ effectValue/, '配置中心应提供绞马索防御削弱编辑项');
+    assert.match(res.body, /onHorseHunterTargetEdit/, '猎马人目标人口应按 cavalry:<数量> 写回任务目标参数');
     const renderStart = res.body.indexOf('function render()');
     const reputationCall = res.body.indexOf('html += sectionReputation();', renderStart);
     const terrainCall = res.body.indexOf('html += sectionTerrain();', renderStart);
@@ -762,6 +766,25 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(app.config.treasures.honest_heart.reputationValue, 2, '宝物被动声望值应热重载');
     assert.equal(app.config.quests.m12.rewards.reputation, 6, '任务声望调整应热重载');
     assert.equal(app.config.quests.m15.objective.threshold, -6, '任务声望目标阈值应热重载');
+
+    const horseHunterSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        quest_objectives: { 'o-s5': { params: 'cavalry:60' } },
+        treasures: { '28': { effectValue: '35' } },
+      }),
+    });
+    assert.equal(horseHunterSave.statusCode, 200, `猎马人/绞马索参数覆盖应成功：${horseHunterSave.body}`);
+    assert.equal(app.config.quests.s5.objective.count, 60, '猎马人目标人口应热重载');
+    assert.equal(app.config.treasures.horse_rope.effectValue, 35, '绞马索防御削弱应热重载');
+    const savedHorseObjective = parseCsvStructured(readFileSync(join(app.configDir, 'quest_objectives.csv'), 'utf8'))
+      .rows.find((row) => row.id === 'o-s5');
+    const savedHorseRope = parseCsvStructured(readFileSync(join(app.configDir, 'treasures.csv'), 'utf8'))
+      .rows.find((row) => row.code === 'horse_rope');
+    assert.equal(savedHorseObjective?.params, 'cavalry:60', '猎马人目标人口必须写回任务目标 CSV');
+    assert.equal(savedHorseRope?.effectValue, '35', '绞马索效果值必须写回宝物 CSV');
 
     await fastify.close();
     // 模拟删档/重启：game.json 会换新，但同一 configDir 和共享 CSV 必须继续作为默认值。
