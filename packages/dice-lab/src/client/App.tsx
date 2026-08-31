@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { Difficulty } from '../domain/ai.js';
 import type { Die, ScoreOption } from '../domain/rules.js';
 import { scoreOption } from '../domain/rules.js';
@@ -12,8 +12,8 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
   { value: 'hard', label: '困难 NPC', description: '使用期望收益判断收手' },
 ];
 
-const BUST_PREVIEW_MS = 2_500;
-const AI_ACTION_PAUSE_MS = 850;
+const BUST_TABLE_DISPLAY_MS = 3_200;
+const AI_ACTION_PAUSE_MS = 1_350;
 
 type AiPlayback = {
   events: GameEvent[];
@@ -27,9 +27,9 @@ export function DiceLabApp() {
   const [session, setSession] = useState<ClientSessionView | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [bustPreview, setBustPreview] = useState<GameEvent | null>(null);
+  const [bustDisplay, setBustDisplay] = useState<GameEvent | null>(null);
+  const [pendingAiEvents, setPendingAiEvents] = useState<GameEvent[] | null>(null);
   const [aiPlayback, setAiPlayback] = useState<AiPlayback | null>(null);
-  const lastBustSignature = useRef('');
   const [notice, setNotice] = useState('输入访问码后开始一局实验对局。刷新页面会开启新对局。');
 
   const state = session?.state;
@@ -38,21 +38,14 @@ export function DiceLabApp() {
   ), [state, selected]);
 
   useEffect(() => {
-    if (!session) {
-      lastBustSignature.current = '';
-      setBustPreview(null);
-      return;
-    }
-    const event = [...session.state.events].reverse().find((item) => item.kind === 'bust' && item.side === 'player');
-    if (!event) return;
-    const bustCount = session.state.events.filter((item) => item.kind === 'bust' && item.side === 'player').length;
-    const signature = JSON.stringify([bustCount, event.kind, event.side, event.message, event.dice?.map((die) => die.value)]);
-    if (signature === lastBustSignature.current) return;
-    lastBustSignature.current = signature;
-    setBustPreview(event);
-    const timer = window.setTimeout(() => setBustPreview(null), BUST_PREVIEW_MS);
+    if (!bustDisplay) return;
+    const timer = window.setTimeout(() => {
+      setBustDisplay(null);
+      if (pendingAiEvents?.length) setAiPlayback({ events: pendingAiEvents, index: 0 });
+      setPendingAiEvents(null);
+    }, BUST_TABLE_DISPLAY_MS);
     return () => window.clearTimeout(timer);
-  }, [session]);
+  }, [bustDisplay, pendingAiEvents]);
 
   useEffect(() => {
     if (!aiPlayback) return;
@@ -68,8 +61,8 @@ export function DiceLabApp() {
 
   async function start() {
     setBusy(true); setNotice('正在创建实验对局…'); setSelected(new Set());
-    lastBustSignature.current = '';
-    setBustPreview(null);
+    setBustDisplay(null);
+    setPendingAiEvents(null);
     setAiPlayback(null);
     try {
       setSession(await createSession(token, difficulty, targetScore));
@@ -79,14 +72,23 @@ export function DiceLabApp() {
   }
 
   async function act(action: Parameters<typeof applyAction>[3]) {
-    if (!session || busy || bustPreview || aiPlayback) return;
+    if (!session || busy || bustDisplay || aiPlayback) return;
     setBusy(true); setNotice('服务器正在结算…');
     try {
       const nextSession = await applyAction(token, session.id, session.revision, action);
       setSession(nextSession);
       setSelected(new Set());
-      setAiPlayback(nextSession.aiEvents.length ? { events: nextSession.aiEvents, index: 0 } : null);
-      setNotice('');
+      if (nextSession.playerBust) {
+        setBustDisplay(nextSession.playerBust);
+        setPendingAiEvents(nextSession.aiEvents);
+        setAiPlayback(null);
+        setNotice('爆骰结果展示中…');
+      } else {
+        setBustDisplay(null);
+        setPendingAiEvents(null);
+        setAiPlayback(nextSession.aiEvents.length ? { events: nextSession.aiEvents, index: 0 } : null);
+        setNotice('');
+      }
     } catch (error) {
       setNotice(errorMessage(error));
       if (error instanceof DiceLabApiError && (error.code === 'not_found' || error.code === 'stale_revision')) setSession(null);
@@ -94,7 +96,7 @@ export function DiceLabApp() {
   }
 
   function toggleDie(die: Die) {
-    if (!state || state.phase !== 'player' || busy || aiPlayback || state.dice.length === 0) return;
+    if (!state || state.phase !== 'player' || busy || bustDisplay || aiPlayback || state.dice.length === 0) return;
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(die.id)) next.delete(die.id); else next.add(die.id);
@@ -144,15 +146,20 @@ export function DiceLabApp() {
               <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : aiPlayback ? 'NPC掷骰阶段' : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{state.turnScore.toLocaleString()}</b></span></div>
               {!aiPlayback && <TurnBreakdown entries={state.turnBreakdown} />}
               {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
-              {!aiPlayback && <div class="dice-tray" aria-label="当前骰子">
-                {state.dice.length === 0 && <p class="empty-dice">点击下方按钮掷出六枚骰子</p>}
-                {state.dice.map((die) => state.phase === 'finished' ? <div key={die.id} class="die-button die-static" aria-label={`${die.value}点最终骰子`}><DieFace value={die.value} /></div> : <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
+              {!aiPlayback && <div class={`dice-tray${bustDisplay ? ' is-bust-table' : ''}`} aria-label={bustDisplay ? '爆骰结果牌面' : '当前骰子'}>
+                {bustDisplay ? <>
+                  <div class="bust-table-heading"><strong>爆骰</strong><span>本轮未收下的分数已丢失</span></div>
+                  <div class="bust-table-dice">{(bustDisplay.dice ?? []).map((die) => <div key={die.id} class="die-button die-static bust-table-die" aria-label={`${die.value}点爆骰结果`}><DieFace value={die.value} /></div>)}</div>
+                </> : <>
+                  {state.dice.length === 0 && <p class="empty-dice">点击下方按钮掷出六枚骰子</p>}
+                  {state.dice.map((die) => state.phase === 'finished' ? <div key={die.id} class="die-button die-static" aria-label={`${die.value}点最终骰子`}><DieFace value={die.value} /></div> : <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
+                </>}
               </div>}
-              {aiPlayback && aiFrame ? <div class="selection-readout ai-action-readout"><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
+              {aiPlayback && aiFrame ? <div class="selection-readout ai-action-readout"><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : bustDisplay ? <div class="selection-readout bust-action-readout"><span>回合状态</span><strong>爆骰</strong><small>{bustDisplay.message} · {pendingAiEvents?.length ? '结果展示结束后进入 NPC 回合' : '结果展示结束后继续游戏'}</small></div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
               <div class="action-row">
-                <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
-                <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished' || !selection}>收下本轮分数</button>
-                <button class="ghost-button" type="button" onClick={() => void act({ type: 'forfeit' })} disabled={busy || Boolean(aiPlayback) || state.phase === 'finished'}>放弃对局</button>
+                <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
+                <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || !selection}>收下本轮分数</button>
+                <button class="ghost-button" type="button" onClick={() => void act({ type: 'forfeit' })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished'}>放弃对局</button>
               </div>
               {state.phase === 'finished' && state.result && <RoundResultView result={state.result} />}
               {state.phase === 'finished' && <button class="primary-button restart-button" type="button" onClick={() => void start()}>再来一局</button>}
@@ -160,7 +167,7 @@ export function DiceLabApp() {
             </div>
             <aside class="log-card panel-card"><div class="turn-heading"><div><span class="eyebrow">事件记录</span><h2>对局记录</h2></div><span class="revision">第 {session.revision} 次结算</span></div><EventLog events={state.events} /></aside>
           </section>
-          {bustPreview && <BustPreview event={bustPreview} />}
+
         </>
       )}
       <footer class="rules-foot">1点=100 · 5点=50（可与顺子、同点数组合叠加） · 1-5顺=500 · 2-6顺=750 · 1-6顺=1500 · 三个相同点数起计分 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</footer>
@@ -186,7 +193,7 @@ function AiTurnBoard({ event }: { event: GameEvent }) {
     <section class="ai-turn-board" aria-label="NPC回合动作">
       <div class="ai-turn-heading"><span>NPC当前牌面</span><small>动作会短暂停留，便于查看</small></div>
       <div class="ai-dice-tray">
-        {(event.dice ?? []).map((die) => <div key={die.id} class={`ai-die${selectedIds.has(die.id) ? ' is-kept' : ''}`}><DieFace value={die.value} /><span>{selectedIds.has(die.id) ? '保留' : '可用'}</span></div>)}
+        {(event.dice ?? []).map((die) => <div key={die.id} class="ai-die-wrap"><div class={`die-button die-static${selectedIds.has(die.id) ? ' is-selected' : ''}`} aria-label={`NPC的${die.value}点骰子${selectedIds.has(die.id) ? '，已保留' : '，可用'}`}><DieFace value={die.value} /></div><span class="ai-die-badge">{selectedIds.has(die.id) ? '保留' : '可用'}</span></div>)}
       </div>
     </section>
   );
@@ -210,22 +217,6 @@ function RoundResultView({ result }: { result: RoundResult }) {
       <p><b>本次得分：</b>+{result.points.toLocaleString()}</p>
       <small>结果会保留在牌桌上；点击“再来一局”后才会清除分数和骰子。</small>
     </section>
-  );
-}
-
-function BustPreview({ event }: { event: GameEvent }) {
-  return (
-    <div class="bust-overlay" role="alert" aria-live="assertive">
-      <section class="bust-result panel-card">
-        <p class="eyebrow">本次掷骰结果</p>
-        <h2>爆骰</h2>
-        <div class="bust-dice" aria-label="爆骰时掷出的骰子">
-          {(event.dice ?? []).map((die) => <div class="bust-die" key={die.id}><DieFace value={die.value} /><span>{die.value}</span></div>)}
-        </div>
-        <p>{event.message}</p>
-        <small>结果展示结束后，你可以开始下一轮</small>
-      </section>
-    </div>
   );
 }
 

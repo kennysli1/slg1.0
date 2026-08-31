@@ -62,6 +62,7 @@ export type ActionResult = {
   state: DiceGameState;
   error?: string;
   aiEvents: GameEvent[];
+  playerBust?: GameEvent;
 };
 
 export function createGame(difficulty: Difficulty, targetScore: number): DiceGameState {
@@ -152,9 +153,10 @@ function playerBust(state: DiceGameState, rng: DiceRng): ActionResult {
   state.turnScore = 0;
   state.turnBreakdown = [];
   state.dice = [];
-  append(state, { kind: 'bust', side: 'player', dice: bustedDice, points: lost, message: `爆骰，本轮 ${lost} 分全部丢失` });
+  const bustEvent: GameEvent = { kind: 'bust', side: 'player', dice: bustedDice, points: lost, message: `爆骰，本轮 ${lost} 分全部丢失` };
+  append(state, bustEvent);
   const aiEvents = runAiTurn(state, state.difficulty, rng);
-  return { state, aiEvents };
+  return { state, aiEvents, playerBust: bustEvent };
 }
 
 function playerBank(state: DiceGameState, selectedDieIds: string[], rng: DiceRng): ActionResult {
