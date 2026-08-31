@@ -492,6 +492,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
         </div>
       )}
       <div class="task-card-desc">{task.desc}</div>
+      <div class="task-card-objective-content">
       {o.kind === 'defend_task_village' && task.taskVillageAttackAt && !task.outcome && (
         <div class="task-card-obj"><span class="task-prog-hint task-prog-hint--warn">
           {task.taskVillageAttackAt > Date.now() ? `天王老子村将在 ${secLeft(task.taskVillageAttackAt)} 后发动攻城` : '天王老子村已发动攻城，等待战斗结果'}
@@ -518,16 +519,20 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       )}
       {o.kind === 'repair_buildings' && (
         <div class="task-card-obj">
-          <div class="task-card-prog">
-            {((o.buildingKinds ?? []) as string[]).map((kind) => {
+          <ol class="task-checklist" aria-label="资源田修复进度">
+            {((o.buildingKinds ?? []) as string[]).map((kind, index) => {
               const done = (task.repairedBuildings ?? []).includes(kind);
+              const info = buildingInfo(kind);
               return (
-                <span key={kind} class={`task-prog-chip${done ? ' done' : ''}`}>
-                  {buildingInfo(kind).name} {done ? '已修复' : '待修复'}
-                </span>
+                <li key={kind} class={`task-checklist-item${done ? ' done' : ''}`}>
+                  <span class="task-checklist-mark" aria-hidden="true">{done ? '✓' : index + 1}</span>
+                  <Icon icon={info.icon} label={info.name} size="2xs" class="task-checklist-icon" decorative />
+                  <span class="task-checklist-name">{info.name}</span>
+                  <span class="task-checklist-status">{done ? '已修复' : '待修复'}</span>
+                </li>
               );
             })}
-          </div>
+          </ol>
           <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
         </div>
       )}
@@ -609,6 +614,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           </div>
         </div>
       )}
+      </div>
 
       <OutcomeRows rewards={task.rewards} failed={task.failureReady === true} />
 
