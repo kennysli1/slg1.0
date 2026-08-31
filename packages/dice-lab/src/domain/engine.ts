@@ -24,6 +24,11 @@ export type GameEvent = {
   message: string;
 };
 
+export type TurnScoreEntry = {
+  label: string;
+  score: number;
+};
+
 export type DiceGameState = {
   phase: GamePhase;
   difficulty: Difficulty;
@@ -31,6 +36,7 @@ export type DiceGameState = {
   playerScore: number;
   aiScore: number;
   turnScore: number;
+  turnBreakdown: TurnScoreEntry[];
   dice: Die[];
   rollNumber: number;
   winner?: 'player' | 'ai';
@@ -52,6 +58,7 @@ export function createGame(difficulty: Difficulty, targetScore: number): DiceGam
   return {
     phase: 'player', difficulty, targetScore,
     playerScore: 0, aiScore: 0, turnScore: 0,
+    turnBreakdown: [],
     dice: [], rollNumber: 0, events: [],
   };
 }
@@ -93,6 +100,7 @@ function playerRoll(state: DiceGameState, selectedDieIds: string[] | undefined, 
   const option = selectedOption(state, selectedDieIds);
   if (!option) return { state, error: '所选骰子不是完整的合法计分组合', aiEvents: [] };
   state.turnScore += option.score;
+  state.turnBreakdown = [...state.turnBreakdown, { label: option.label, score: option.score }];
   append(state, { kind: 'keep', side: 'player', option, points: option.score, message: `保留 ${option.label}，获得 ${option.score} 分` });
   const rest = remainingDice(state.dice, option);
   if (isHotDice(state.dice, option)) {
@@ -109,6 +117,7 @@ function playerBust(state: DiceGameState, rng: DiceRng): ActionResult {
   const lost = state.turnScore;
   const bustedDice = state.dice;
   state.turnScore = 0;
+  state.turnBreakdown = [];
   state.dice = [];
   append(state, { kind: 'bust', side: 'player', dice: bustedDice, points: lost, message: `爆骰，本轮 ${lost} 分全部丢失` });
   const aiEvents = runAiTurn(state, state.difficulty, rng);
@@ -121,6 +130,7 @@ function playerBank(state: DiceGameState, selectedDieIds: string[], rng: DiceRng
   const gained = state.turnScore + option.score;
   state.playerScore += gained;
   state.turnScore = 0;
+  state.turnBreakdown = [];
   state.dice = [];
   append(state, { kind: 'bank', side: 'player', option, points: gained, message: `收下本轮分数 ${gained}` });
   if (finishIfReached(state, 'player')) return { state, aiEvents: [] };
@@ -172,7 +182,7 @@ export function applyAction(
 ): ActionResult {
   if (state.phase === 'finished') return { state, error: '对局已经结束，请重新开始', aiEvents: [] };
   if (action.type === 'forfeit') {
-    state.phase = 'finished'; state.winner = 'ai'; state.dice = []; state.turnScore = 0;
+    state.phase = 'finished'; state.winner = 'ai'; state.dice = []; state.turnScore = 0; state.turnBreakdown = [];
     append(state, { kind: 'loss', side: 'ai', message: '你放弃了对局' });
     return { state, aiEvents: [] };
   }
