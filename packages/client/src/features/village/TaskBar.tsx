@@ -5,11 +5,11 @@
  *  - 清理营地类任务 → 提示前往地图清除标记营地
  *  - 酒馆可接取的随机任务 → 直接接取
  */
-import { useCallback, useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { dataVersion, taskStates, playerTaskState, kingdomState, tick, tab, openModal, selected, showToast } from '../../app/store.js';
 import { me, req, selectVillage } from '../../api.js';
 import { act, setMapCenter } from '../../app/refresh.js';
-import { Btn, Tag, CostRow, confirmDanger } from '../../ui/index.js';
+import { Btn, Tag, Icon, CostRow, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
 import { buildingInfo, resInfo, treasureInfo, treasureEffectText } from '../../app/config.js';
@@ -17,6 +17,8 @@ import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
+import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
+import { DiceQuestModal } from './DiceQuestModal.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -56,9 +58,11 @@ function objText(task: any): string {
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
   if (o.kind === 'research_completed') return `拥有学院并研发科技 ×${o.count}`;
+  if (o.kind === 'kill_units') return `累计击杀${o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种')} ${o.count} 人口`;
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
+  if (o.kind === 'dice_match') return o.diceWinsRequired > 1 ? `投骰子三局两胜（目标 ${o.diceTargetScore} 分）` : `投骰子战胜对手（目标 ${o.diceTargetScore} 分）`;
   return o.kind;
 }
 
@@ -93,7 +97,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
           const info = resInfo(k);
           return (
             <span class="task-reward-chip" key={k}>
-              {info.icon ? <img class="task-reward-ico" src={info.icon} alt="" /> : null}
+              {info.icon ? <Icon icon={info.icon} label={info.name} size="2xs" class="task-reward-ico" decorative /> : null}
               {info.name} {fmt(v)}
             </span>
           );
@@ -102,7 +106,7 @@ function RewardRow({ rewards, label = '奖励' }: { rewards: any; label?: string
           const t = treasureInfo(code);
           return (
             <span class="task-reward-chip task-reward-chip--tre" key={code} title={t ? treasureEffectText(t) : code}>
-              {t?.icon ? <img class="task-reward-ico" src={t.icon} alt="" /> : null}
+              {t?.icon ? <Icon icon={t.icon} label={t.name} size="2xs" class="task-reward-ico" decorative /> : null}
               {t?.name ?? code}
             </span>
           );
@@ -218,7 +222,51 @@ function SubmitModal({ task, close }: { task: any; close: () => void }) {
 }
 
 // ── 交付奖励弹窗 ───────────────────────────────────────────────────────────────
-function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: any; dialogue?: any; close: () => void }) {
+function RewardModal({ task, previewRewards, rewardVillageId, dialogue, close }: { task: any; previewRewards: any; rewardVillageId?: string; dialogue?: any; close: () => void }) {
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const [claimed, setClaimed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [rewards, setRewards] = useState(previewRewards);
+  const deliveryInFlight = useRef(false);
+  const segments = visibleDialogueSegments(dialogue);
+  const current = segments[segmentIndex] ?? dialogue;
+  const closeSession = useCallback(() => {
+    if (!deliveryInFlight.current) close();
+  }, [close]);
+  const advanceSegment = useCallback(() => {
+    const next = nextDialogueSegment(segmentIndex, segments.length);
+    if (next == null) close();
+    else setSegmentIndex(next);
+  }, [close, segmentIndex, segments.length]);
+  const onReply = async (key: string) => {
+    if (deliveryInFlight.current) return;
+    const intent = deliverReplyIntent(key, claimed);
+    if (intent === 'close') {
+      closeSession();
+      return;
+    }
+    if (intent === 'advance') {
+      advanceSegment();
+      return;
+    }
+    if (intent !== 'claim') return;
+
+    // useRef 与 busy 双保险：同一渲染帧内的双击也只能发送一个 Deliver。
+    deliveryInFlight.current = true;
+    setBusy(true);
+    let settled: any = null;
+    const ok = await act(req('task.Deliver', { code: task.code }), {
+      okToast: '奖励已领取',
+      onOk: (payload) => { settled = payload; },
+    });
+    if (ok) {
+      setRewards(settled?.rewards ?? previewRewards);
+      setClaimed(true);
+      advanceSegment();
+    }
+    deliveryInFlight.current = false;
+    setBusy(false);
+  };
   const res = rewards?.resources ?? null;
   const tres: string[] = rewards?.treasures ?? [];
   const hasRes = res && Object.keys(res).length > 0;
@@ -233,23 +281,29 @@ function RewardModal({ task, rewards, dialogue, close }: { task: any; rewards: a
   const hasMercenaryExchange = !!rewards?.reputationMercenaryExchange;
   const hasReputationReset = Number(rewards?.reputationResetFrom) > 0;
   return (
-    <Modal title={`任务完成 · ${task.name}`} onClose={close}>
-      {hasRes || hasTres || hasReputation || hasReputationReset || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints || hasMercenaries || hasMercenaryExchange
-        ? <p class="task-reward-hint">你获得了以下奖励：</p>
-        : <p class="task-reward-hint">任务已完成（本次无奖励，可能已达每日预算上限）。</p>}
-      <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, reputationResetFrom: rewards?.reputationResetFrom, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints, mercenaries: rewards?.mercenaries, reputationMercenaryExchange: rewards?.reputationMercenaryExchange }} label="本次获得" />
-      {(rewards?.rewardVillageId || task?.rewardVillageId) && (
-        <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? task.rewardVillageId)}</p>
+    <Modal title={`${claimed ? '任务完成' : '领取奖励'} · ${task.name}`} onClose={closeSession}>
+      <p class="task-reward-hint">{claimed ? '已领取以下奖励：' : '完成任务后将获得：'}</p>
+      {(hasRes || hasTres || hasReputation || hasReputationReset || hasPopulation || hasPopulationGrowth || hasResourceGrowth || hasBuildingUnlocks || hasResearchPoints || hasMercenaries || hasMercenaryExchange) && (
+        <RewardRow rewards={{ resources: res ?? {}, treasures: tres, reputation: rewards?.reputation, reputationResetFrom: rewards?.reputationResetFrom, population: rewards?.population, populationGrowth: rewards?.populationGrowth, resourceGrowth: rewards?.resourceGrowth, buildingUnlocks: rewards?.buildingUnlocks, researchPoints: rewards?.researchPoints, mercenaries: rewards?.mercenaries, reputationMercenaryExchange: rewards?.reputationMercenaryExchange }} label={claimed ? '实际奖励' : '预计奖励'} />
       )}
-      {dialogue && (dialogue.npcName || dialogue.npcText) && (
+      {(rewards?.rewardVillageId || rewardVillageId || task?.rewardVillageId) && (
+        <p class="task-reward-hint">奖励发放至：{villageName(rewards?.rewardVillageId ?? rewardVillageId ?? task.rewardVillageId)}</p>
+      )}
+      {current && (current.npcName || current.npcText || (current.replies ?? []).length > 0) && (
         <div class="dialogue-session task-delivery-dialogue">
-          {dialogue.npcName && <div class="dialogue-npc-name">{dialogue.npcName}</div>}
-          {dialogue.npcText && <div class="dialogue-npc-text">{dialogue.npcText}</div>}
+          {current.npcName && <div class="dialogue-npc-name">{current.npcName}</div>}
+          {current.npcText && <div class="dialogue-npc-text">{current.npcText}</div>}
+          {(current.replies ?? []).length > 0 && (
+            <div class="dialogue-replies" aria-label="玩家回复">
+              {(current.replies ?? []).map((reply: any) => (
+                <Btn key={reply.key} variant={reply.key === 'leave' ? 'ghost' : 'primary'} disabled={busy} onClick={() => void onReply(reply.key)}>
+                  {reply.label}
+                </Btn>
+              ))}
+            </div>
+          )}
         </div>
       )}
-      <div class="modal-foot">
-        <Btn variant="primary" onClick={close}>收下</Btn>
-      </div>
     </Modal>
   );
 }
@@ -299,25 +353,30 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [segmentIndex, setSegmentIndex] = useState(0);
-  const segments = (Array.isArray(dialogue?.segments) && dialogue.segments.length ? dialogue.segments : [dialogue])
-    .filter((item: any) => item && (item.npcName || item.npcText));
+  const accepting = useRef(false);
+  const segments = visibleDialogueSegments(dialogue);
   const current = segments[segmentIndex] ?? dialogue;
-  const finish = useCallback(() => {
-    if (segmentIndex < segments.length - 1) {
-      setSegmentIndex((value) => value + 1);
-      return;
-    }
-    close();
+  const closeSession = useCallback(() => close(), [close]);
+  const advanceSegment = useCallback(() => {
+    const next = nextDialogueSegment(segmentIndex, segments.length);
+    if (next == null) close();
+    else setSegmentIndex(next);
   }, [close, segmentIndex, segments.length]);
   const onReply = async (key: string) => {
-    if (busy) return;
-    // 多段对话中每个回复都会推进到下一段；accept 仅在首次出现时真正接取任务。
-    if (key !== 'accept' || accepted) {
-      finish();
+    if (accepting.current) return;
+    const intent = acceptReplyIntent(key, accepted);
+    if (intent === 'close') {
+      closeSession();
       return;
     }
+    if (intent === 'advance') {
+      advanceSegment();
+      return;
+    }
+    accepting.current = true;
     setBusy(true);
     if (!await ensureTaskExecution(task)) {
+      accepting.current = false;
       setBusy(false);
       return;
     }
@@ -325,14 +384,15 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
       okToast: '已接取任务',
       onOk: () => {
         setAccepted(true);
-        finish();
+        advanceSegment();
       },
     });
+    accepting.current = false;
     setBusy(false);
   };
 
   return (
-    <Modal title={current?.npcName || '任务对话'} sub={task.name} onClose={finish}>
+    <Modal title={current?.npcName || '任务对话'} sub={task.name} onClose={closeSession}>
       <div class="dialogue-session">
         <div class="dialogue-npc-text">{current?.npcText ?? ''}</div>
         <div class="dialogue-replies" aria-label="玩家回复">
@@ -391,13 +451,18 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const onDeliver = () => {
     void (async () => {
       if (!await ensureTaskExecution(task)) return;
-      await act(req('task.Deliver', { code: task.code }), {
-      okToast: '任务完成',
-      onOk: (payload) => {
-        openModal((close) => (
-          <RewardModal task={task} rewards={payload?.rewards} dialogue={payload?.dialogue} close={close} />
-        ), `task-reward-${task.code}`);
-      },
+      await act(req('task.StartDeliver', { code: task.code }), {
+        onOk: (payload) => {
+          openModal((close) => (
+            <RewardModal
+              task={task}
+              previewRewards={payload?.previewRewards}
+              rewardVillageId={payload?.rewardVillageId}
+              dialogue={payload?.dialogue}
+              close={close}
+            />
+          ), `task-reward-${task.code}`);
+        },
       });
     })();
   };
@@ -417,6 +482,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const onOpenTrade = async () => {
     if (await ensureTaskExecution(task)) openTradeCenter();
   };
+  const onDiceStart = () => {
+    void (async () => {
+      if (!await ensureTaskExecution(task)) return;
+      openModal((close) => <DiceQuestModal task={task} close={close} />, `dice-task-${task.code}`);
+    })();
+  };
 
   return (
     <div class={`task-card task-card--${task.type}`}>
@@ -430,6 +501,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
         </div>
       )}
       <div class="task-card-desc">{task.desc}</div>
+      <div class="task-card-objective-content">
       {o.kind === 'defend_task_village' && task.taskVillageAttackAt && !task.outcome && (
         <div class="task-card-obj"><span class="task-prog-hint task-prog-hint--warn">
           {task.taskVillageAttackAt > Date.now() ? `天王老子村将在 ${secLeft(task.taskVillageAttackAt)} 后发动攻城` : '天王老子村已发动攻城，等待战斗结果'}
@@ -456,20 +528,24 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       )}
       {o.kind === 'repair_buildings' && (
         <div class="task-card-obj">
-          <div class="task-card-prog">
-            {((o.buildingKinds ?? []) as string[]).map((kind) => {
+          <ol class="task-checklist" aria-label="资源田修复进度">
+            {((o.buildingKinds ?? []) as string[]).map((kind, index) => {
               const done = (task.repairedBuildings ?? []).includes(kind);
+              const info = buildingInfo(kind);
               return (
-                <span key={kind} class={`task-prog-chip${done ? ' done' : ''}`}>
-                  {buildingInfo(kind).name} {done ? '已修复' : '待修复'}
-                </span>
+                <li key={kind} class={`task-checklist-item${done ? ' done' : ''}`}>
+                  <span class="task-checklist-mark" aria-hidden="true">{done ? '✓' : index + 1}</span>
+                  <Icon icon={info.icon} label={info.name} size="2xs" class="task-checklist-icon" decorative />
+                  <span class="task-checklist-name">{info.name}</span>
+                  <span class="task-checklist-status">{done ? '已修复' : '待修复'}</span>
+                </li>
               );
             })}
-          </div>
+          </ol>
           <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
         </div>
       )}
-      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level') && (
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units') && (
         <div class="task-card-obj">
           <div class="task-card-prog">
             <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
@@ -480,6 +556,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'resource_owned' && <span class="task-prog-hint">不消耗资源，只检查主城当前拥有量</span>}
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
             {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
+            {o.kind === 'kill_units' && <span class="task-prog-hint">累计消灭敌方{ o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种') }人口</span>}
           </div>
         </div>
       )}
@@ -495,6 +572,17 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       )}
       {o.kind === 'research_completed' && (
         <div class="task-card-obj"><div class="task-card-prog"><span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>已研发 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)} 项科技</span><span class="task-prog-hint">需要先建造学院</span></div></div>
+      )}
+      {o.kind === 'dice_match' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${(task.dicePlayerWins ?? 0) >= (o.diceWinsRequired ?? 1) ? ' done' : ''}`}>
+              对局胜场 {task.dicePlayerWins ?? 0}/{o.diceWinsRequired ?? 1} · NPC {task.diceNpcWins ?? 0}/{o.diceWinsRequired ?? 1}
+            </span>
+            <span class="task-prog-hint">每局目标分数 {o.diceTargetScore ?? 2000}；可随时退出，退出本局计 NPC 胜一局</span>
+            {task.diceLastOutcome === 'npc' && <span class="task-prog-hint task-prog-hint--warn">上一局未获胜，可重新尝试</span>}
+          </div>
+        </div>
       )}
       {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && (task.ready || task.failureReady) && (
         <div class="task-card-obj"><span class={`task-prog-hint ${task.failureReady ? 'task-prog-hint--warn' : 'task-prog-hint--ok'}`}>
@@ -547,6 +635,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           </div>
         </div>
       )}
+      </div>
 
       <OutcomeRows rewards={task.rewards} failed={task.failureReady === true} />
 
@@ -566,6 +655,13 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'deliver_to_npc' && !task.npcPending && (
               <Btn size="sm" variant="primary" onClick={() => void onOpenTrade()}>前往贸易中心</Btn>
             )}
+            {o.kind === 'dice_match' && <Btn size="sm" variant="primary" onClick={onDiceStart}>
+              {task.code === 's6' && task.diceLastOutcome === 'npc'
+                ? '重新尝试'
+                : task.code === 's7' && ((task.dicePlayerWins ?? 0) + (task.diceNpcWins ?? 0) > 0)
+                  ? '继续对局'
+                  : '开始对局'}
+            </Btn>}
           </>
         )}
         {!isMain && !task.failureReady && (

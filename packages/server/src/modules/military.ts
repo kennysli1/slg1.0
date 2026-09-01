@@ -349,6 +349,7 @@ export class MilitaryModule {
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
+      isCavalry: this.config.constants.cavalryUnitCodes.includes(unit),
       traits: def.traits.flatMap((tc) => {
         const t = this.config.unitTraits[tc];
         return t.effects;

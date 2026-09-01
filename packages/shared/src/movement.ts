@@ -11,6 +11,21 @@ export type MovementType =
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
 
+/**
+ * 目标消失/撤回时当前段内的连续掉头状态。
+ *
+ * `from`/`to` 是掉头前正在经过的两个格子，`progress` 是掉头瞬间
+ * 已完成的比例。该字段只用于地图平滑渲染，不改变服务端的离散占格、
+ * 遭遇判定或路径寻路。
+ */
+export interface MovementTurnTransition {
+  from: Hex;
+  to: Hex;
+  progress: number;
+  startedAt: number;
+  durationMs: number;
+}
+
 /** 己方视图：movement.List 下发的完整行军。 */
 export interface Movement {
   id: string;
@@ -39,6 +54,8 @@ export interface Movement {
   stepIndex: number;
   perStepMs: number;
   nextStepAt: number;
+  /** 目标消失/撤回时，地图从当前段内实际位置无缝切入返程。 */
+  turningPoint?: MovementTurnTransition;
   arriveAt: number;
   troops: Record<string, number>;
   cargo?: Record<string, number>;
@@ -68,6 +85,7 @@ export interface ForeignArmy {
   heading: Hex | null;
   perStepMs: number;
   nextStepAt: number;
+  turningPoint?: MovementTurnTransition;
 }
 
 export interface MarchPointState {
@@ -104,6 +122,7 @@ export interface IncomingWarning {
   stepIndex: number;
   perStepMs: number;
   nextStepAt: number;
+  turningPoint?: MovementTurnTransition;
   arriveAt: number;
   intelligence?: IncomingIntelligence;
 }
@@ -129,6 +148,7 @@ export interface MarchStepPush {
   perStepMs: number;
   status: MovementStatus;
   arriveAt: number;
+  turningPoint?: MovementTurnTransition;
 }
 
 export interface MarchRemovedPush {

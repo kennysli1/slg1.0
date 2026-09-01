@@ -58,6 +58,17 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'battle-simulator',
+    publicActions: {
+      GetCatalog: { command: 'battleSimulator.GetCatalog', needAuth: false, schema: {} },
+      Simulate: {
+        command: 'battleSimulator.Simulate', needAuth: false,
+        // 模拟器请求是一个独立 JSON 场景，不允许 Gateway 注入玩家/村庄状态。
+        schema: { scenario: { type: 'json', optional: true } },
+      },
+    },
+    },
+  {
     moduleName: 'diplomacy',
     publicActions: {
       GetRelation: {
@@ -441,6 +452,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           resources: { type: 'record_int', minVal: 0, maxVal: 2_000_000_000 },
         },
       },
+      'task.StartDeliver': { command: 'task.StartDeliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Fail': { command: 'task.Fail', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
@@ -460,6 +472,32 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           taskCode: { type: 'string', minLen: 1, maxLen: 32 },
           trigger: { type: 'string', minLen: 1, maxLen: 64 },
         },
+      },
+    },
+    },
+  {
+    moduleName: 'diceQuest',
+    publicActions: {
+      // 主游戏骰子任务使用独立的临时 session，不访问骰子实验场 HTTP 服务。
+      'dice.StartMatch': {
+        command: 'diceQuest.StartMatch', ownVillage: true, needAuth: true,
+        schema: { taskCode: { type: 'enum', values: ['s6', 's7'] } },
+      },
+      'dice.GetMatch': {
+        command: 'diceQuest.GetMatch', ownVillage: true, needAuth: true,
+        schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
+      },
+      'dice.Action': {
+        command: 'diceQuest.Action', ownVillage: true, needAuth: true,
+        schema: {
+          sessionId: { type: 'string', minLen: 1, maxLen: 160 },
+          type: { type: 'enum', values: ['roll', 'bank', 'forfeit'] },
+          selectedDieIds: { type: 'string_array', optional: true, maxItems: 6, minLen: 1, maxLen: 64 },
+        },
+      },
+      'dice.ExitMatch': {
+        command: 'diceQuest.ExitMatch', ownVillage: true, needAuth: true,
+        schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
       },
     },
     },

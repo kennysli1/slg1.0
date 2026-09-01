@@ -76,13 +76,13 @@ export function checkVersion() {
   if (declaresReset && !bumped) {
     r.fail(
       `CHANGELOG 里声明了 ${RESET_TAG}，但 SAVE_SCHEMA_VERSION 没升`,
-      `把 ${SCHEMA_FILE} 的 SAVE_SCHEMA_VERSION 加 1（当前 ${before ?? '未知'}）`,
+      `把 ${SCHEMA_FILE} 的 SAVE_SCHEMA_VERSION 加 1（当前 ${before ?? '未知'}），并在条目中说明迁移/重置方案`,
     );
   }
   if (bumped && !declaresReset) {
     r.fail(
       `SAVE_SCHEMA_VERSION 升到了 ${after}，但 CHANGELOG 的新条目里没有 ${RESET_TAG}`,
-      `在条目开头加 ${RESET_TAG}，提醒部署时带 --reset respawn`,
+      `在条目开头加 ${RESET_TAG}，并说明为何旧存档无法通过迁移兼容`,
     );
   }
 

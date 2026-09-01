@@ -29,6 +29,8 @@ import { ReputationModule } from './modules/reputation.js';
 import { AlchemyModule } from './modules/alchemy.js';
 import { KingdomModule } from './modules/kingdom.js';
 import { DialoguesModule } from './modules/dialogues.js';
+import { DiceQuestModule } from './modules/dice-quest.js';
+import { BattleSimulatorModule } from './modules/battle-simulator.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
 
@@ -115,6 +117,8 @@ export interface GameApp {
   reputation: ReputationModule;
   alchemy: AlchemyModule;
   kingdom: KingdomModule;
+  diceQuest: DiceQuestModule;
+  battleSimulator: BattleSimulatorModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
@@ -250,11 +254,14 @@ export function createGameApp(opts?: {
   const reputation = new ReputationModule(store, bus, commands, now, config);
   const alchemy = new AlchemyModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   const kingdom = new KingdomModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  const diceQuest = new DiceQuestModule(commands, now, config, opts?.rng ?? Math.random);
+  const battleSimulator = new BattleSimulatorModule(commands, config);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom,
+    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, battleSimulator,
+    diceQuest,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
@@ -262,7 +269,7 @@ export function createGameApp(opts?: {
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
-  const wipeSingleVillage = (villageId: string): void => {
+  const wipeSingleVillage = async (villageId: string): Promise<void> => {
     for (const prefix of [
       `building:${villageId}`,
       `military:${villageId}`,
@@ -278,11 +285,11 @@ export function createGameApp(opts?: {
     trade.wipeSingleVillage(villageId);
     treasure.wipeSingleVillage(villageId);
     alchemy.wipeSingleVillage(villageId);
-    task.wipeSingleVillage(villageId);
+    await task.wipeSingleVillageAndWait(villageId);
     // 通知行军模块：来向该村的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
     // 必须在删除行军记录之前发出，并保留「来向本村」的行军，留给 onVillageRemoved→startReturn
     // 就地改写为返程；否则村庄数据被清后行军记录已删，客户端只看到陈旧倒计时且不刷新。
-    void bus.emit({
+    await bus.emit({
       name: 'world.VillageRemoved', source: 'app', ts: now(),
       payload: { villageId },
     } as any);
@@ -359,7 +366,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },

@@ -183,7 +183,15 @@ export class PveModule {
   private async remove(cmd: Command): Promise<CommandResult> {
     const { id } = cmd.payload as { id: string };
     const s = this.load(id);
-    if (!s) return { ok: true, payload: {} }; // 已不存在，幂等成功
+    if (!s) {
+      // 目标状态可能已被旧流程删掉，但地图或行军记录仍残留；仍广播失效事件，
+      // 让在途部队不会继续驶向一个已经不存在的目的地。
+      await this._bus.emit({
+        name: 'pve.TargetRemoved', source: PveModule.NAME, ts: this.now(),
+        payload: { id },
+      } as DomainEvent);
+      return { ok: true, payload: {} };
+    }
     this.scheduler.cancelByOwner(`pve:${id}`);
     this.scheduler.cancelByOwner(`pve:recovery:${id}`);
     this.store.delete(COLLECTION, id);
@@ -191,11 +199,7 @@ export class PveModule {
       name: 'world.RemoveTile', from: PveModule.NAME,
       payload: { q: s.q, r: s.r, refId: id },
     });
-    // 目标被移除：通知行军模块——所有前往该目标的出征/商队应原路返回（见 movement.onTargetRemoved）。
-    void this._bus.emit({
-      name: 'pve.TargetRemoved', source: PveModule.NAME, ts: this.now(),
-      payload: { id, q: s.q, r: s.r },
-    } as DomainEvent);
+    // world.RemoveTile 已在清除地图实体后同步广播 TargetRemoved；不要在此重复广播。
     return { ok: true, payload: { id } };
   }
 
@@ -216,14 +220,15 @@ export class PveModule {
       this.migrateTaskVillageDefender(s);
       const current = this.load(s.id) ?? s;
       this.migrateTaskVillageLoot(current);
-      if (current.cityState) {
+      const kingdomCurrent = this.migrateLegacyKingdomCityState(this.load(s.id) ?? current);
+      if (kingdomCurrent.cityState) {
         // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
-        if (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe) {
-          this.regenerateCityState(current);
+        if (kingdomCurrent.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !kingdomCurrent.kingdomProfile || !kingdomCurrent.cityStateTribe) {
+          this.regenerateCityState(kingdomCurrent);
           continue;
         }
-        this.settleRecovery(current);
-        if (current.recovery) this.scheduleRecovery(current);
+        this.settleRecovery(kingdomCurrent);
+        if (kingdomCurrent.recovery) this.scheduleRecovery(kingdomCurrent);
         continue;
       }
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
@@ -322,7 +327,7 @@ export class PveModule {
     const defender: Snapshot = {};
     for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;
-      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, traits: [] };
+      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, carry: def.carry, isCavalry: c.cavalryUnitCodes.includes(code), traits: [] };
     }
     const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
     const raidDefense: Snapshot = {};
@@ -369,6 +374,24 @@ export class PveModule {
 
   private load(id: string): PveState | undefined {
     return this.store.get<PveState>(COLLECTION, id);
+  }
+
+  /**
+   * 判断存档中的目标是否由当前配置定义为王国 PvE 城市目标。
+   *
+   * 王都/封地最初曾按普通 PvE 写入存档，后来才增加 cityState 标记。
+   * 如果只看存档字段，旧记录会一直没有攻城选项；配置中心的模板才是
+   * 目标类型的权威来源。
+   */
+  private isConfiguredKingdomCityState(s: PveState): boolean {
+    return this.config.pveTemplates[s.type]?.cityState === true;
+  }
+
+  /** 将旧版王国目标升级为当前城市目标档位，并保留其地图坐标。 */
+  private migrateLegacyKingdomCityState(s: PveState): PveState {
+    if (s.cityState || !this.isConfiguredKingdomCityState(s)) return s;
+    this.regenerateCityState(s);
+    return this.load(s.id) ?? s;
   }
 
   /**
@@ -425,7 +448,7 @@ export class PveModule {
     this.migrateTaskVillageDefender(s);
     const afterDefender = this.load(s.id) ?? s;
     this.migrateTaskVillageLoot(afterDefender);
-    let current = this.load(s.id) ?? afterDefender;
+    let current = this.migrateLegacyKingdomCityState(this.load(s.id) ?? afterDefender);
     if (current.cityState && (current.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !current.kingdomProfile || !current.cityStateTribe)) {
       this.regenerateCityState(current);
       current = this.load(current.id) ?? current;
@@ -476,6 +499,11 @@ export class PveModule {
     // 也把幸存守军清成 0（例如 13 -> 3 后又 3 -> 0）。
     const purpose = (cmd.payload as any).purpose as 'raid' | 'siege' | 'scout' | undefined;
     const snapshot = s.cleared ? {} : structuredClone(purpose === 'raid' ? (s.raidDefense ?? s.defender) : s.defender);
+    // 兵种类别由全局配置统一维护；旧存档和旧模板没有 isCavalry 字段，
+    // 在跨模块快照边界补齐，确保绞马索与猎马人任务对所有 PvE 守军一致生效。
+    for (const [code, unit] of Object.entries(snapshot)) {
+      unit.isCavalry = this.config.constants.cavalryUnitCodes.includes(code);
+    }
     const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
     return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };
   }

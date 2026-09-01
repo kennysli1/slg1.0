@@ -33,6 +33,7 @@ const HEX_CORNER_STR = hexCorners()
 
 export type Terrain = 'plain' | 'forest' | 'hills';
 type Visibility = 'unexplored' | 'explored' | 'visible';
+export type MapVillageRelation = 'allied' | 'neutral' | 'hostile';
 
 /**
  * 地形只认服务端事实；旧响应缺字段时安全降级平原，未探索格不读取也不保留地形。
@@ -71,12 +72,32 @@ function terrainNoise(q: number, r: number, salt: number): number {
   return (Math.imul((q + 97) * 73856093 ^ (r + 193) * 19349663 ^ salt, 0x45d9f3b) >>> 0) / 0xffffffff;
 }
 
-/** 已占据格根据 tile.kind + 是否是自己，确定描边颜色 key。 */
-function ringKind(kind: string, isSelf: boolean): string {
+/** 已占据格根据归属与当前外交关系确定描边颜色 key。 */
+export function mapEntityRingKind(kind: string, isSelf: boolean, relation?: unknown): string {
   if (kind === 'own_village') return isSelf ? 'self' : 'own';
-  if (kind === 'village') return 'enemy';
-  if (kind === 'pve') return 'pve';
+  if (kind === 'village') {
+    if (relation === 'allied') return 'allied';
+    if (relation === 'hostile') return 'hostile';
+    return 'neutral';
+  }
+  // PvE 是可交互目标，不是即时威胁；常驻红框会让整张地图一直处于报警态。
+  // 任务营地另有金色标记，普通 PvE 保留据点图标即可。
   return '';
+}
+
+/**
+ * 外军底座的颜色只表达“当前是否构成动态威胁”。
+ * attack/raid 返程后会被服务端改写为 return，因此不会继续显示红色。
+ */
+export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' | 'neutral' {
+  return (type === 'attack' || type === 'raid')
+    && (status === 'marching' || status === 'paused')
+    ? 'threat'
+    : 'neutral';
+}
+
+export function normalizeMapVillageRelation(value: unknown): MapVillageRelation {
+  return value === 'allied' || value === 'hostile' ? value : 'neutral';
 }
 
 function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
@@ -287,7 +308,7 @@ export function HexMap() {
   const [zoomUi, setZoomUi] = useState(INITIAL_ZOOM);
 
   // ── Tooltip ──
-  type TipState = { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number } | null;
+  type TipState = { q: number; r: number; kind: string; name: string; relation?: MapVillageRelation; dist: number; anchorX: number; anchorY: number } | null;
   const [tooltip, setTooltip] = useState<TipState>(null);
   const hovKey = useRef('');
   const [hoveredLandmarkRef, setHoveredLandmarkRef] = useState('');
@@ -449,6 +470,7 @@ export function HexMap() {
     refId: string;
     name: string;
     icon: string | null;
+    relation: MapVillageRelation | null;
     terrain: Terrain | null;
     visibility: Visibility;
     isSelected: boolean;
@@ -557,6 +579,7 @@ export function HexMap() {
               ? undefined
               : (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
+            let relation: MapVillageRelation | null = null;
             const terrain = terrainFromTile(t, visibility);
 
             if (visibility !== 'unexplored') name = terrainDisplayName(terrain);
@@ -565,16 +588,17 @@ export function HexMap() {
             } else if (isSelf) {
               // me.name 是玩家名，不是村庄名；当前村标签必须来自 villages 快照。
               kind = 'own_village'; refId = me!.villageId; name = currentVillageName(me) ?? me!.name;
-              icon = 'bld_main';
+              icon = t?.icon ?? 'map_player_village_lv1';
             } else if (ownV) {
               kind = 'own_village'; refId = ownV.id; name = ownV.name;
-              icon = 'bld_main';
+              icon = t?.icon ?? 'map_player_village_lv1';
             } else if (taskCamp) {
               kind = 'pve'; refId = taskCamp.id; name = taskCamp.name ?? (taskCamp.taskVillage ? '天王老子村' : '任务营地');
               icon = taskCamp.icon ?? pveIcon(name);
             } else if (t?.kind === 'village') {
               kind = 'village'; refId = t.refId; name = t.name;
-              icon = 'bld_main';
+              icon = t.icon ?? 'map_player_village_lv1';
+              relation = normalizeMapVillageRelation(t.relation);
             } else if (t?.kind === 'pve') {
               kind = 'pve'; refId = t.refId; name = t.name;
               icon = t.icon ?? pveIcon(t.name);
@@ -585,7 +609,7 @@ export function HexMap() {
             }
 
             cells.push({
-              q, r, camX, camY, kind, refId, name, icon, terrain, visibility,
+              q, r, camX, camY, kind, refId, name, icon, relation, terrain, visibility,
               isSelf, landmark, landmarkCenter,
               isSelected: !!(sel && sel.q === q && sel.r === r),
             });
@@ -694,7 +718,20 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!shouldRenderMarchPath(m)) return;
-      const pts = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H)
+      let pathPixels = unwrapPathPixels(m.path, ox.current, oy.current, ref.x, ref.y, W, H);
+      const turn = m.turningPoint;
+      if (turn && m.status === 'marching' && m.stepIndex === 0
+        && Number(turn.durationMs) > 0 && Number.isFinite(Number(turn.progress))) {
+        const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, ref.x, ref.y, W, H);
+        if (pair[0] && pair[1]) {
+          const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+          pathPixels = [{
+            x: pair[0].x + (pair[1].x - pair[0].x) * progress,
+            y: pair[0].y + (pair[1].y - pair[0].y) * progress,
+          }, ...pathPixels];
+        }
+      }
+      const pts = pathPixels
         .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
         .join(' ');
       const t = m.type === 'return' ? 'return'
@@ -729,7 +766,8 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       markers.push(
         <g
@@ -759,7 +797,8 @@ export function HexMap() {
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
           key={`incoming-mk-${m.id}`}
@@ -792,8 +831,10 @@ export function HexMap() {
     const ref = viewRef();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
+      const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
+        ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
+      const tone = foreignArmyMarkerTone(m.type, m.status);
 
       // 朝向箭头：heading 指向下一格，计算像素方向后绘制小三角
       let arrowEl: preact.VNode | null = null;
@@ -820,12 +861,12 @@ export function HexMap() {
           key={`fmk-${m.id}`}
           id={`foreign-mk-${m.id}`}
           data-move-id={m.id}
-          class={`enemy-march-mk enemy-march-mk--${t}`}
+          class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>敌方军队 · {m.type ?? 'return'}</title>
-          <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
-          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
+          <circle class={`march-marker-base march-marker-base--foreign march-marker-base--foreign-${tone}`} cx="-3" cy="-9" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--foreign" cx="-3" cy="-9" r="9.2" />
           <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
@@ -910,14 +951,17 @@ export function HexMap() {
 
     const kind = cell.getAttribute('data-kind') ?? 'empty';
     const name = cell.getAttribute('data-name') ?? '空地';
-    const key = `${kind}:${q},${r}`;
+    const relation = kind === 'village'
+      ? normalizeMapVillageRelation(cell.getAttribute('data-relation'))
+      : undefined;
+    const key = `${kind}:${relation ?? ''}:${q},${r}`;
     const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
     if (key === hovKey.current) {
       setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
       return;
     }
     hovKey.current = key;
-    setTooltip({ q, r, kind, name, dist, anchorX: anchor.x, anchorY: anchor.y });
+    setTooltip({ q, r, kind, name, relation, dist, anchorX: anchor.x, anchorY: anchor.y });
   }
 
   function marchMarkerPixel(m: any, now: number, refX: number, refY: number): { x: number; y: number } | null {
@@ -927,6 +971,44 @@ export function HexMap() {
     const unwrapped = unwrapPathPixels(m.path, ox.current, oy.current, refX, refY, W, H);
     let px = unwrapped[m.stepIndex];
     if (!px) return null;
+    // 目标消失/撤回可能发生在当前段中间。服务端仍用离散格做判定，
+    // 但 turningPoint 让地图先从实际段内位置退回当前格，再接上返程路径，
+    // 避免状态切换时从半格瞬移回上一个格心。
+    const turn = m.turningPoint;
+    if (turn && m.status === 'marching' && m.stepIndex === 0
+      && Number.isFinite(Number(turn.startedAt)) && Number(turn.durationMs) > 0
+      && Number.isFinite(Number(turn.progress))) {
+      const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, refX, refY, W, H);
+      const turnStart = Number(turn.startedAt);
+      const turnDuration = Math.max(1, Number(turn.durationMs));
+      const turnEnd = turnStart + turnDuration;
+      const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+      const turnStartPx = pair[0];
+      const turnNextPx = pair[1];
+      const returnStartPx = unwrapped[0];
+      if (turnStartPx && turnNextPx && returnStartPx) {
+        if (now < turnEnd) {
+          const t = Math.max(0, Math.min(1, (now - turnStart) / turnDuration));
+          return {
+            x: turnStartPx.x + (turnNextPx.x - turnStartPx.x) * progress * (1 - t)
+              + (returnStartPx.x - turnStartPx.x) * t,
+            y: turnStartPx.y + (turnNextPx.y - turnStartPx.y) * progress * (1 - t)
+              + (returnStartPx.y - turnStartPx.y) * t,
+          };
+        }
+        // 第一段返程在服务端包含“当前段已走时间 + 上一格完整段时间”。
+        // 连续过渡结束后，把剩余时间用于正常的当前格→上一格插值。
+        const next = unwrapped[1];
+        if (next) {
+          const remaining = Math.max(1, Number(m.nextStepAt) - turnEnd);
+          const t = Math.max(0, Math.min(1, (now - turnEnd) / remaining));
+          return {
+            x: returnStartPx.x + (next.x - returnStartPx.x) * t,
+            y: returnStartPx.y + (next.y - returnStartPx.y) * t,
+          };
+        }
+      }
+    }
     if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
       const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
       const nxt = unwrapped[m.stepIndex + 1];
@@ -941,6 +1023,30 @@ export function HexMap() {
   function foreignMarkerPixel(m: ForeignArmy, now: number, refX: number, refY: number): { x: number; y: number } | null {
     if (!m.pos) return null;
     const p = cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, refX, refY, W, H);
+    const turn = m.turningPoint;
+    if (turn && m.status === 'marching' && Number.isFinite(Number(turn.startedAt))
+      && Number(turn.durationMs) > 0 && Number.isFinite(Number(turn.progress))) {
+      const pair = unwrapPathPixels([turn.from, turn.to], ox.current, oy.current, refX, refY, W, H);
+      const turnStart = Number(turn.startedAt);
+      const turnDuration = Math.max(1, Number(turn.durationMs));
+      const turnEnd = turnStart + turnDuration;
+      const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+      if (pair[0] && pair[1]) {
+        if (now < turnEnd) {
+          const t = Math.max(0, Math.min(1, (now - turnStart) / turnDuration));
+          const x = pair[0].x + (pair[1].x - pair[0].x) * progress;
+          const y = pair[0].y + (pair[1].y - pair[0].y) * progress;
+          return { x: x + (p.x - pair[0].x) * t, y: y + (p.y - pair[0].y) * t };
+        }
+        if (m.heading && m.nextStepAt) {
+          const nextHex = { q: m.pos.q + m.heading.q, r: m.pos.r + m.heading.r };
+          const np = cameraPixelForHex(nextHex.q, nextHex.r, ox.current, oy.current, refX, refY, W, H);
+          const remaining = Math.max(1, Number(m.nextStepAt) - turnEnd);
+          const t = Math.max(0, Math.min(1, (now - turnEnd) / remaining));
+          return { x: p.x + (np.x - p.x) * t, y: p.y + (np.y - p.y) * t };
+        }
+      }
+    }
     if (m.status === 'marching' && m.heading && m.nextStepAt && m.perStepMs) {
       const t = Math.max(0, Math.min(1, 1 - (m.nextStepAt - now) / m.perStepMs));
       const nextHex = { q: m.pos.q + m.heading.q, r: m.pos.r + m.heading.r };
@@ -1369,7 +1475,7 @@ export function HexMap() {
               );
             })}
             {visibleCells.map((c) => {
-              const rk = ringKind(c.kind, c.isSelf);
+              const rk = mapEntityRingKind(c.kind, c.isSelf, c.relation);
               if (c.visibility === 'unexplored' || (c.kind === 'empty' && !c.isSelected)) return null;
               if (c.landmark) return null;
               return (
@@ -1381,6 +1487,7 @@ export function HexMap() {
                   {/* Entity ring */}
                   {/* 王都/封地使用合并轮廓；不再绘制中心格的单格 PvE 红环。 */}
                   {rk && !c.landmark && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
+                  {c.isSelected && !c.landmark && <polygon class="hex-ring hex-ring--selected" points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
                   {c.icon && !c.landmark && (
                     <image
@@ -1437,7 +1544,7 @@ export function HexMap() {
                 key={`hit-${c.q},${c.r},${c.camX.toFixed(0)},${c.camY.toFixed(0)}`}
                 class={`hex-cell hex-cell--${c.visibility}${c.isSelected ? ' hex-cell--selected' : ''}${c.landmark ? ' hex-cell--landmark' : ''}`}
                 transform={`translate(${c.camX.toFixed(1)},${c.camY.toFixed(1)})`}
-                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
+                {...({ 'data-tq': String(c.q), 'data-tr': String(c.r), 'data-cam-x': String(c.camX), 'data-cam-y': String(c.camY), 'data-kind': c.kind, 'data-ref': c.refId, 'data-name': c.name, 'data-visibility': c.visibility, ...(c.relation ? { 'data-relation': c.relation } : {}), ...(c.landmark ? { 'data-landmark-ref': c.refId } : {}), ...(c.icon ? { 'data-icon': c.icon } : {}) } as any)}
               >
                 <polygon class="hex-hit" points={HEX_CORNER_STR} />
                 {/* 王都/封地是合并后的整体目标；点击后不再回退显示某一个内部格的选中环。 */}
@@ -1536,13 +1643,16 @@ export function HexMap() {
         <div class="map-legend">
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--self" />本城</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--own" />己方村庄</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" />玩家(可进攻)</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--pve" />野怪(可掠夺)</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--neutral" />中立玩家</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--allied" />盟军玩家</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--hostile" />敌对玩家</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--pve" />野怪（常驻目标）</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--attack" />进攻 / 来袭</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--raid" />掠夺</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--return" />返程</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--transport" />运输</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />敌方军队</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />外军（非红色=非即时威胁）</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--threat" />动态威胁：进攻 / 掠夺 / 来袭</div>
           <div class="map-legend-row"><span>🎯</span>任务营地</div>
         </div>
       </div>
@@ -1578,19 +1688,23 @@ function InfoBar({ navCoord, homeCentered, onGoHome }: {
   );
 }
 
-function tileKindLabel(kind: string, isSelf: boolean, emptyName = '空地'): string {
+function tileKindLabel(kind: string, isSelf: boolean, relation?: MapVillageRelation, emptyName = '空地'): string {
   if (kind === 'own_village') return isSelf ? '本城（己方）' : '己方村庄';
-  if (kind === 'village') return '玩家村庄（可进攻）';
+  if (kind === 'village') {
+    if (relation === 'allied') return '盟军玩家村庄';
+    if (relation === 'hostile') return '敌对玩家村庄';
+    return '中立玩家村庄';
+  }
   if (kind === 'pve') return '野怪据点（可掠夺）';
   if (kind === 'enemy_army') return '敌方军队';
   return `${emptyName}（可拓荒）`;
 }
 
 function HexTooltip({ tip }: {
-  tip: { q: number; r: number; kind: string; name: string; dist: number; anchorX: number; anchorY: number };
+  tip: { q: number; r: number; kind: string; name: string; relation?: MapVillageRelation; dist: number; anchorX: number; anchorY: number };
 }) {
   const isSelf = !!(me && me.q === tip.q && me.r === tip.r);
-  const label = tileKindLabel(tip.kind, isSelf, tip.name);
+  const label = tileKindLabel(tip.kind, isSelf, tip.relation, tip.name);
 
   const left = Math.min(Math.max(130, tip.anchorX), window.innerWidth - 130);
   const top = Math.min(Math.max(8, tip.anchorY - TIP_ABOVE), window.innerHeight - 120);

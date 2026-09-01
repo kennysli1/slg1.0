@@ -39,6 +39,19 @@ export interface Tile {
   landmarkCenter?: boolean;
 }
 
+const PLAYER_VILLAGE_MAP_ICONS = [
+  'map_player_village_lv1',
+  'map_player_village_lv2',
+  'map_player_village_lv3',
+  'map_player_village_lv4',
+] as const;
+
+/** 地图上的玩家村庄阶段只由主基地等级决定，避免各调用方各自维护图标映射。 */
+export function playerVillageMapIcon(level: number): string {
+  const normalized = Math.min(PLAYER_VILLAGE_MAP_ICONS.length, Math.max(1, Math.floor(Number(level) || 1)));
+  return PLAYER_VILLAGE_MAP_ICONS[normalized - 1]!;
+}
+
 interface WorldState {
   w: number; // 环绕平行四边形宽（axial q 周期）
   h: number; // 环绕平行四边形高（axial r 周期）
@@ -117,7 +130,7 @@ export class WorldModule {
   }
 
   private onMainBaseChanged(evt: DomainEvent): void {
-    const p = evt.payload as { villageId?: string; kind?: string; level?: number; name?: string; icon?: string };
+    const p = evt.payload as { villageId?: string; kind?: string; level?: number };
     if (p.kind !== 'main' || !p.villageId || !Number.isFinite(Number(p.level))) return;
     this.updateVillageStage({ payload: p } as Command);
   }
@@ -239,7 +252,7 @@ export class WorldModule {
       const key = hexKey(slot.q, slot.r);
       const tile = this.store.get<Tile>(COLLECTION_TILE, key);
       if (tile && tile.kind !== 'empty') continue;
-      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name, icon: 'bld_main' });
+      this.store.set<Tile>(COLLECTION_TILE, key, { ...slot, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
       return { ok: true, payload: { ...slot } };
     }
     return { ok: false, payload: {}, reason: 'world_capacity_exhausted' };
@@ -315,7 +328,7 @@ export class WorldModule {
     if (this.plan!.spawnSlots.some((slot) => slot.q === w.q && slot.r === w.r)) {
       return { ok: false, payload: {}, reason: 'spawn_slot_reserved' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name, icon: 'bld_main' });
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(w.q, w.r), { q: w.q, r: w.r, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -328,7 +341,7 @@ export class WorldModule {
     if (exist && exist.kind !== 'empty' && exist.refId !== refId) {
       return { ok: false, payload: {}, reason: 'tile_occupied' };
     }
-    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name, icon: 'bld_main' });
+    this.store.set<Tile>(COLLECTION_TILE, key, { ...w, kind: 'village', refId, name, icon: playerVillageMapIcon(1) });
     return { ok: true, payload: { q: w.q, r: w.r } };
   }
 
@@ -362,7 +375,8 @@ export class WorldModule {
       this.store.set<Tile>(COLLECTION_TILE, sourceKey, { q: source!.q, r: source!.r, kind: 'empty' });
     }
     this.store.set<Tile>(COLLECTION_TILE, targetKey, {
-      q: target.q, r: target.r, kind: 'village', refId, name, icon: source?.icon ?? targetTile?.icon ?? 'bld_main',
+      q: target.q, r: target.r, kind: 'village', refId, name,
+      icon: source?.icon ?? targetTile?.icon ?? playerVillageMapIcon(1),
     });
     return {
       ok: true,
@@ -374,14 +388,16 @@ export class WorldModule {
     };
   }
 
-  /** 镜像主基地阶段到地图瓦片；名称仍由 Player 的村庄名拥有，这里只更新阶段图标。 */
+  /** 镜像主基地阶段到地图瓦片；名称仍由 Player 拥有，World 统一决定地图图标。 */
   private updateVillageStage(cmd: Command): CommandResult {
-    const p = cmd.payload as { villageId?: string; icon?: string; level?: number };
-    if (!p.villageId || typeof p.icon !== 'string' || !p.icon) return { ok: false, payload: {}, reason: 'bad_village_stage' };
+    const p = cmd.payload as { villageId?: string; level?: number };
+    if (!p.villageId || !Number.isFinite(Number(p.level))) return { ok: false, payload: {}, reason: 'bad_village_stage' };
     const tile = this.store.all<Tile>(COLLECTION_TILE).find((t) => t.kind === 'village' && t.refId === p.villageId);
     if (!tile) return { ok: false, payload: {}, reason: 'village_tile_not_found' };
-    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, icon: p.icon });
-    return { ok: true, payload: { villageId: p.villageId, q: tile.q, r: tile.r, icon: p.icon, level: p.level } };
+    const level = Math.floor(Number(p.level));
+    const icon = playerVillageMapIcon(level);
+    this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { ...tile, icon });
+    return { ok: true, payload: { villageId: p.villageId, q: tile.q, r: tile.r, icon, level } };
   }
 
   /** 查询 (q,r) 到最近村庄的六边形距离；无村庄时 distance=Infinity 用 -1 表示。 */
@@ -400,13 +416,13 @@ export class WorldModule {
   }
 
   /** 放弃/删村：把村庄地块变回 empty。 */
-  private clearVillage(cmd: Command): CommandResult {
+  private async clearVillage(cmd: Command): Promise<CommandResult> {
     const { refId } = cmd.payload as { refId: string };
     for (const t of this.store.all<Tile>(COLLECTION_TILE)) {
       if (t.kind === 'village' && t.refId === refId) {
         this.store.set<Tile>(COLLECTION_TILE, hexKey(t.q, t.r), { q: t.q, r: t.r, kind: 'empty' });
         // 村庄消失：通知行军模块——所有前往该村庄的进攻/运输/商队应原路返回（见 movement.onVillageRemoved）。
-        void this._bus.emit({
+        await this._bus.emit({
           name: 'world.VillageRemoved', source: WorldModule.NAME, ts: this._now(),
           payload: { villageId: refId, q: t.q, r: t.r },
         } as DomainEvent);
@@ -452,17 +468,15 @@ export class WorldModule {
   }
 
   /** 移除指定坐标上的 PvE/任务营地地块（任务营地清除用）：仅当该格确为对应 refId 的 pve/taskcamp 时才清空，避免误清村庄/其它目标。幂等。 */
-  private removeTile(cmd: Command): CommandResult {
+  private async removeTile(cmd: Command): Promise<CommandResult> {
     const { q, r, refId } = cmd.payload as { q: number; r: number; refId: string };
     const w = wrapHex({ q, r }, this.worldW, this.worldH);
     const matches = this.store.all<Tile>(COLLECTION_TILE).filter((tile) =>
       (tile.kind === 'pve' || tile.kind === 'taskcamp') && tile.refId === refId);
-    if (matches.length === 0) return { ok: true, payload: { q: w.q, r: w.r } }; // 已不存在，幂等
     for (const tile of matches) this.store.set<Tile>(COLLECTION_TILE, hexKey(tile.q, tile.r), { q: tile.q, r: tile.r, kind: 'empty' });
-    // PvE/任务营地地块消失：通知行军模块——所有前往该目标的出征/商队应立即原路返回
-    // （见 movement.onTargetRemoved）。pve.Remove 已发过同一事件，这里再兜底一次，
-    // 保证无论地块由哪条路径移除（pve.Remove / 直接 world.RemoveTile），商队都不会继续冲向已消失的目标。
-    void this._bus.emit({
+    // PvE/任务营地地块消失：World 是地图实体的唯一 owner，因此由这里发出唯一的
+    // TargetRemoved 事件。即使地块已被旧存档清掉也要发事件，保证仍在途的军队能返程。
+    await this._bus.emit({
       name: 'pve.TargetRemoved', source: WorldModule.NAME, ts: this._now(),
       payload: { id: refId, q: w.q, r: w.r },
     } as DomainEvent);

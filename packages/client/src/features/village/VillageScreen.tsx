@@ -21,6 +21,7 @@ import {
   readVillageWorkbenchPreferences,
   writeVillageWorkbenchPreferences,
   villageWorkbenchLayoutClass,
+  toggleVillageWorkbench,
   type VillageWorkbenchPreferences,
 } from './workbench-preferences.js';
 
@@ -254,14 +255,13 @@ function ActiveOperationsSummary({ vil }: { vil: any }) {
   );
 }
 
-function WorkspaceEntry({ id, eyebrow, title, summary, open, onToggle, children, utility }: {
+function WorkspaceEntry({ id, eyebrow, title, summary, open, onToggle, utility }: {
   id: string;
   eyebrow: string;
   title: string;
   summary: string;
   open: boolean;
   onToggle: () => void;
-  children: any;
   utility?: any;
 }) {
   const contentId = `${id}-content`;
@@ -283,7 +283,16 @@ function WorkspaceEntry({ id, eyebrow, title, summary, open, onToggle, children,
             </button>
           </div>
         </div>
-        {open && <div id={contentId} class="empire-workspace-content">{children}</div>}
+      </Panel>
+    </section>
+  );
+}
+
+function WorkspaceContents({ id, labelledBy, children }: { id: string; labelledBy: string; children: any }) {
+  return (
+    <section id={id} class="empire-workspace-expanded" aria-labelledby={labelledBy}>
+      <Panel pad class="empire-workspace-expanded-panel">
+        <div class="empire-workspace-content">{children}</div>
       </Panel>
     </section>
   );
@@ -300,9 +309,9 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
   const outerSlots = vil.zones?.outer?.slots ?? 0;
   const placedCount = innerUsed + outerUsed;
   const slotCount = innerSlots + outerSlots;
-  const setWorkspace = (field: keyof VillageWorkbenchPreferences, open: boolean) => {
+  const toggleWorkspace = (field: keyof VillageWorkbenchPreferences) => {
     setPreferences((previous) => {
-      const next = { ...previous, [field]: open };
+      const next = toggleVillageWorkbench(previous, field);
       writeVillageWorkbenchPreferences(playerId, villageId, next);
       return next;
     });
@@ -312,31 +321,43 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
       <VillageCommandDock />
       <div class="vil-dashboard-task-wrap empire-task-banner"><IncomingWarnings /><VillageTaskSummary /></div>
       <ActiveOperationsSummary vil={vil} />
-      <div class={`empire-workspace-grid ${villageWorkbenchLayoutClass(preferences)}`}>
-        <WorkspaceEntry
-          id="village-building-management"
-          eyebrow="发展工作区"
-          title="建筑与城务"
-          summary={`城内 ${innerUsed}/${innerSlots}、城外 ${outerUsed}/${outerSlots}（合计 ${placedCount}/${slotCount}）已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
-          open={preferences.developmentOpen}
-          onToggle={() => setWorkspace('developmentOpen', !preferences.developmentOpen)}
-        >
-          <VillageCommandDeck vil={vil} />
-          {vil.queue?.items?.length > 0 && <Panel pad class="vil-queue-panel empire-active-panel"><QueueStrip queue={vil.queue} /></Panel>}
-          <VillageListView vil={vil} />
-          <section class="vil-detail-section"><SectionHead>人口 · 文明活力</SectionHead><Panel pad><PopPanel /></Panel></section>
-          {hasTreasures && <section class="vil-detail-section"><SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>宝物栏</SectionHead><Panel variant="flat" pad><TreasurePanel /></Panel></section>}
-        </WorkspaceEntry>
-        <WorkspaceEntry
-          id="village-military-workbench"
-          eyebrow="军务工作区"
-          title="军务工作区"
-          summary="训练、驻军、援军、防御与解散均归属当前村庄；展开后可直接执行完整操作。"
-          open={preferences.militaryOpen}
-          onToggle={() => setWorkspace('militaryOpen', !preferences.militaryOpen)}
-        >
-          <VillageArmyManagement />
-        </WorkspaceEntry>
+      <div class={`empire-workspace-layout empire-workspace-grid ${villageWorkbenchLayoutClass(preferences)}`}>
+        <div class="empire-workspace-group">
+          <WorkspaceEntry
+            id="village-building-management"
+            eyebrow="发展工作区"
+            title="建筑与城务"
+            summary={`城内 ${innerUsed}/${innerSlots}、城外 ${outerUsed}/${outerSlots}（合计 ${placedCount}/${slotCount}）已启用；主基地为固定核心不占格，建造、升级、修复、人口与宝物在这里统一管理。`}
+            open={preferences.developmentOpen}
+            onToggle={() => toggleWorkspace('developmentOpen')}
+          />
+          {preferences.developmentOpen && (
+            <WorkspaceContents id="village-building-management-content" labelledBy="village-building-management-title">
+              <div class="village-management-overview">
+                <VillageCommandDeck vil={vil} />
+                <section class="vil-detail-section village-management-population"><SectionHead>人口 · 文明活力</SectionHead><Panel pad><PopPanel /></Panel></section>
+              </div>
+              {vil.queue?.items?.length > 0 && <Panel pad class="vil-queue-panel empire-active-panel"><QueueStrip queue={vil.queue} /></Panel>}
+              <VillageListView vil={vil} />
+              {hasTreasures && <section class="vil-detail-section"><SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>宝物栏</SectionHead><Panel variant="flat" pad><TreasurePanel /></Panel></section>}
+            </WorkspaceContents>
+          )}
+        </div>
+        <div class="empire-workspace-group">
+          <WorkspaceEntry
+            id="village-military-workbench"
+            eyebrow="军务工作区"
+            title="军务工作区"
+            summary="训练、驻军、援军、防御与解散均归属当前村庄；展开后可直接执行完整操作。"
+            open={preferences.militaryOpen}
+            onToggle={() => toggleWorkspace('militaryOpen')}
+          />
+          {preferences.militaryOpen && (
+            <WorkspaceContents id="village-military-workbench-content" labelledBy="village-military-workbench-title">
+              <VillageArmyManagement />
+            </WorkspaceContents>
+          )}
+        </div>
       </div>
     </div>
   );

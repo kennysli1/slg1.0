@@ -503,6 +503,55 @@ test('任务营地战败不推进任务，营地仍在地图上等待再次出�
   assert.equal(m4.camps[0].cleared, false, '战败不应标记营地已清理');
 });
 
+test('任务营地被先到军队清除后，仍在途的后续军队立即返程', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '任务营地清除返程');
+  const va = (regRes.payload as any).player.villageId as string;
+  const campId = 'taskcamp-return-after-clear';
+  app.store.set('task', va, {
+    villageId: va, completedMain: [], completedSide: [], abandonedSide: [], offered: [], offeredSide: [], firedTriggers: [],
+    active: {
+      m4: {
+        code: 'm4', type: 'main', acceptedAt: clock, spawnVillageId: va,
+        submitted: {}, camps: [{ id: campId, q: 6, r: 6, cleared: false }], campCleared: 0, progress: 0,
+      },
+    },
+  });
+  const spawned = await send(app, 'pve.Spawn', { id: campId, type: 'rats', q: 6, r: 6, task: true, ownerVillageId: va });
+  assert.equal(spawned.ok, true, `测试任务营地生成失败: ${spawned.reason ?? ''}`);
+  await grant(app, va, { wood: 100, clay: 100, iron: 100, crop: 100 });
+  await send(app, 'military.AdjustTroops', { villageId: va, delta: { legionnaire: 1 } });
+  const fast = await send(app, 'movement.SendRaid', { villageId: va, targetId: campId, troops: { legionnaire: 1 } });
+  assert.equal(fast.ok, true, `先到军队出发失败: ${fast.reason ?? ''}`);
+  const fastMovement = app.store.get<any>('movement', (fast.payload as any).id);
+  assert.ok(fastMovement, '先到军队应写入 movement');
+
+  // 复制一条尚未抵达的慢军队，保持同一目标但使用独立 id，模拟多支军队先后抵达。
+  const slowMovement = {
+    ...fastMovement,
+    id: 'mv-taskcamp-slow',
+    arriveAt: fastMovement.arriveAt + 60_000,
+    nextStepAt: fastMovement.nextStepAt + 60_000,
+    stepToken: fastMovement.stepToken + 10,
+  };
+  app.store.set('movement', slowMovement.id, slowMovement);
+
+  await app.bus.emit({
+    name: 'combat.BattleEnded', source: 'test', ts: clock,
+    payload: {
+      villageId: va, side: 'attacker', targetKind: 'pve', targetId: campId,
+      attackerWins: true, campCleared: true, movementId: fastMovement.id,
+      fromXY: fastMovement.fromXY, toXY: fastMovement.toXY, originalFromXY: fastMovement.originalFromXY ?? fastMovement.fromXY,
+      survivors: { legionnaire: 1 }, deployedTroops: { legionnaire: 1 }, looted: {},
+    },
+  } as any);
+
+  const recalled = app.store.get<any>('movement', slowMovement.id);
+  assert.ok(recalled, '慢军队应保留为返程 movement');
+  assert.equal(recalled.type, 'return', '任务营地清除后慢军队应立即返程');
+  assert.equal(recalled.targetId, undefined, '返程军队不应继续保留已清除营地目标');
+});
+
 test('「耀武扬威」携旗清空 PvE 营地后记录待回城的出征', async () => {
   const app = freshApp();
   const regRes = await reg(app, '携旗测试');
@@ -695,6 +744,8 @@ test('酒馆支线：按槽位概率刷新 → 接取 → 放弃后永久不再�
   const va = (regRes.payload as any).player.villageId;
   // 固定该村酒馆支线概率为 1，验证 S1 进入酒馆 mixed offered，而不是 offeredSide。
   app.config.buildings.tavern.levels[1].taskSideQuestChance = 1;
+  // s6 也属于新加入的酒馆支线；本用例专测既有 s1，禁用 s6 权重以保持确定性。
+  app.config.quests.s6.weight = 0;
   await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
   await tick();
 
@@ -707,7 +758,7 @@ test('酒馆支线：按槽位概率刷新 → 接取 → 放弃后永久不再�
   const st = await send(app, 'task.GetState', { villageId: va });
   const p = st.payload as any;
   assert.ok((p.offered ?? []).some((o: any) => o.code === 's1'), '酒馆建成后 S1 应进入 mixed offered');
-  assert.ok((p.offered ?? []).some((o: any) => o.type === 'daily'), '支线池抽空后其他槽位仍应补日常任务');
+  // chance=1 时每个槽位都可被支线替换，因此不保证同时存在日常任务。
   assert.ok(!(p.offeredSide ?? []).some((o: any) => o.code === 's1'), '酒馆支线不应进入事件型 offeredSide');
 
   const acc = await send(app, 'task.Accept', { villageId: va, code: 's1' });
@@ -721,6 +772,72 @@ test('酒馆支线：按槽位概率刷新 → 接取 → 放弃后永久不再�
   assert.ok(!(p2.offered ?? []).some((o: any) => o.code === 's1'), '放弃后 S1 不应再在酒馆可接取');
   assert.ok(!(p2.offeredSide ?? []).some((o: any) => o.code === 's1'), '放弃后 S1 不应再在事件型可接取');
   assert.ok(!(p2.active ?? []).some((a: any) => a.code === 's1'), '放弃后 S1 不应再 active');
+});
+
+test('酒馆刷新会替换未接取任务且保留已接取任务', async () => {
+  clock = 1_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const regRes = await reg(app, '酒馆刷新替换');
+  const va = (regRes.payload as any).player.villageId;
+  app.config.buildings.tavern.levels[1].taskRefreshSec = 1;
+  app.config.buildings.tavern.levels[1].taskSideQuestChance = 0;
+  await grant(app, va, { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 });
+  await tick();
+
+  const build = await send(app, 'building.Build', { villageId: va, zone: 'inner', kind: 'tavern' });
+  assert.equal(build.ok, true, '建酒馆应成功');
+  await app.scheduler.advanceTo((build.payload as any).finishAt, setClock);
+  await tick();
+  await tick();
+
+  const state = app.store.get<any>('task', va)!;
+  assert.equal(state.offered.length, 2, '酒馆初次建成应填满两个任务槽');
+  state.offered = ['s1'];
+  app.store.set('task', va, state);
+
+  const manual = await send(app, 'task.GmRefreshRandom', { villageId: va });
+  assert.equal(manual.ok, true, 'GM 刷新应成功');
+  assert.equal(state.offered.length, 2, '刷新后应重新填满所有槽位');
+  assert.ok(!state.offered.includes('s1'), '刷新后不应保留被替换的未接取任务');
+  assert.ok(state.active.m1, '刷新不应影响已接取任务');
+
+  state.offered = ['s1'];
+  app.store.set('task', va, state);
+  await app.scheduler.advanceTo(clock + 1_000, setClock);
+  await tick();
+  await tick();
+  assert.ok(!state.offered.includes('s1'), '定时刷新也应替换未接取任务');
+});
+
+test('猎马人：累计击杀骑兵人口，跨战斗累加并在 50 人时就绪', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '猎马人累计击杀');
+  const va = (regRes.payload as any).player.villageId;
+  const state = app.store.get<any>('task', va)!;
+  state.active.s5 = {
+    code: 's5', type: 'side', acceptedAt: clock, submitted: {}, repairedBuildings: [],
+    camps: [], campCleared: 0, progress: 0,
+  };
+  app.store.set('task', va, state);
+
+  await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {
+    villageId: va, side: 'attacker', targetKind: 'field', targetId: 'movement-defender', attackerWins: false,
+    defenderLosses: { equlegati: 10, equimperatoris: 5, legionnaire: 10 },
+  } } as any);
+  let current = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  let hunter = current.active.find((item: any) => item.code === 's5');
+  assert.equal(hunter.progress, 35, '第一场应按骑兵 popCost 累计 35 人口');
+  assert.equal(hunter.ready, false);
+
+  await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {
+    villageId: va, side: 'attacker', targetKind: 'field', targetId: 'movement-defender-2', attackerWins: true,
+    defenderLossesAttributed: { equimperatoris: 5 },
+  } } as any);
+  current = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  hunter = current.active.find((item: any) => item.code === 's5');
+  assert.equal(hunter.progress, 50, '第二场应继续累加到 50 人');
+  assert.equal(hunter.ready, true, '达到 50 人后应可领取绞马索');
 });
 
 test('日常任务可反复：完成后刷新可再次刷出', async () => {

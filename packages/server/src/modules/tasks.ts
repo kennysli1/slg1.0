@@ -48,6 +48,30 @@ import { TaskPlayerDirectory } from './task/player-directory.js';
 import { TaskCatalog } from './task/catalog.js';
 import { neighborsWrapped, hexDistanceWrapped } from '../infra/hex.js';
 
+type DeliveryRewards = {
+  resources: Record<string, number> | null;
+  treasures: string[];
+  reputation?: number;
+  reputationResetFrom?: number;
+  population?: number;
+  populationGrowth?: { percent: number; durationSec: number; expiresAt?: number };
+  resourceGrowth?: { percent: number; durationSec: number; resource?: string; expiresAt?: number };
+  buildingUnlocks?: string[];
+  researchPoints?: number;
+  mercenaries?: Record<string, number>;
+  reputationMercenaryExchange?: { unitCode: string; perPoint: number };
+  rewardVillageId?: string;
+};
+
+type DeliveryContext = {
+  storageVillageId: string;
+  state: TaskState;
+  instance: TaskInstance;
+  quest: QuestDef;
+  rewardVillageId: string;
+  rewards: QuestRewards;
+};
+
 /** 稀有度排序：普通0/稀有1/史诗2/传说3（用于「稀有及以上」判定）。 */
 function rarityRank(rarity: string): number {
   const order = ['common', 'rare', 'epic', 'legendary'];
@@ -99,8 +123,13 @@ export class TasksModule {
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
+    this.commands.register('task.StartDeliver', (c: Command) => this.startDeliver(c));
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
     this.commands.register('task.Fail', (c: Command) => this.fail(c));
+    // 骰子王小游戏只通过任务模块读写任务进度；临时对局本身由 diceQuest owner 管理。
+    this.commands.register('task.GetDiceMatch', (c: Command) => this.getDiceMatch(c));
+    this.commands.register('task.ResetDiceMatch', (c: Command) => this.resetDiceMatch(c));
+    this.commands.register('task.RecordDiceRound', (c: Command) => this.recordDiceRound(c));
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
@@ -145,7 +174,8 @@ export class TasksModule {
     this.bus.on('treasure.SoldDiscarded', (evt: DomainEvent) => void this.onTreasureSoldDiscarded(evt));
 
     // 战斗结束 → 推进 clear_camp 任务
-    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => void this.onBattleEnded(evt));
+    // Combat 会等待该事件：任务营地清除必须先广播目标失效，慢军队才能在同一结算内返程。
+    this.bus.on('combat.BattleEnded', (evt: DomainEvent) => this.onBattleEnded(evt));
     this.bus.on('military.TroopTrained', (evt: DomainEvent) => void this.onTroopTrained(evt));
     this.bus.on('treasure.CarriedStored', (evt: DomainEvent) => void this.onCarriedStored(evt));
     this.bus.on('treasure.StoredRemoved', (evt: DomainEvent) => void this.onStoredRemoved(evt));
@@ -240,6 +270,11 @@ export class TasksModule {
     const s = this.store.get<TaskState>(COLLECTION, villageId);
     if (s) await this.removeTaskEntities(s);
     this.store.delete(COLLECTION, villageId);
+  }
+
+  /** 等待清理完成的入口，供放弃村庄时同步完成目标失效事件。 */
+  async wipeSingleVillageAndWait(villageId: string): Promise<void> {
+    await this.wipeSingleVillageAsync(villageId);
   }
 
   /** 兼容删号生命周期的同步入口；GM 重置使用上面的 await 版本。 */
@@ -519,6 +554,16 @@ export class TasksModule {
     if (!('q' in check)) return check;
     const { q, storageVillageId, s } = check;
 
+    // S7 接取时一次性支付入场费。StartAccept 只读预览，因此费用不会因
+    // 打开对话或关闭对话而扣除；只有玩家明确点击“接受任务”才结算。
+    if (code === 's7') {
+      const paid = await this.commands.send({
+        name: 'economy.TrySpend', from: TasksModule.NAME,
+        payload: { villageId, cost: { gold: 100 } },
+      });
+      if (!paid.ok) return paid;
+    }
+
     if (q.type === 'daily') {
       s.offered = s.offered.filter((c) => c !== code);
     } else if (q.type === 'side') {
@@ -622,7 +667,136 @@ export class TasksModule {
     return { ok: true, payload: { code, submitted: inst.submitted, remaining: this.remaining(inst, required), completed: complete } };
   }
 
-  // ── 命令：Deliver（手动交付就绪任务，领取奖励）──
+  /** 交付预览和正式结算共用同一套任务、分支与奖励村庄解析。 */
+  private rewardVillageFor(instance: TaskInstance, fallbackVillageId: string): string {
+    return instance.executionVillageId ?? instance.spawnVillageId ?? fallbackVillageId;
+  }
+
+  private rewardDefinition(state: TaskState, instance: TaskInstance, quest: QuestDef): QuestRewards {
+    const outcome = instance.outcome ?? (quest.code === 'm9' ? state.outcomes?.m8 : undefined);
+    const outcomeKey = (quest.code === 'm8' || quest.code === 'm9') && outcome
+      ? (outcome === 'success' ? 'm8_success' : 'm8_failure')
+      : undefined;
+    return (quest.code === 'm9' && outcomeKey ? quest.conditionalRewards?.[outcomeKey] : undefined) ?? quest.rewards;
+  }
+
+  private resolveDeliveryContext(villageId: string, code: string): DeliveryContext | CommandResult {
+    const quest = this.quest(code);
+    if (!quest) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const instance = state.active[code];
+    if (!instance) return { ok: false, payload: {}, reason: 'not_active' };
+    if (!instance.readyToDeliver) return { ok: false, payload: {}, reason: 'not_ready' };
+
+    // 奖励始终发给任务最后一次实际执行时记录的村庄；领取时临时切村不能改写目标。
+    const rewardVillageId = this.rewardVillageFor(instance, villageId);
+    const rewards = this.rewardDefinition(state, instance, quest);
+    return { storageVillageId, state, instance, quest, rewardVillageId, rewards };
+  }
+
+  /** 生成只读奖励预览；不写任务、资源、人口、声望、宝物或军队状态。 */
+  private async previewDeliveryRewards(context: DeliveryContext): Promise<DeliveryRewards | CommandResult> {
+    const { instance, rewardVillageId, rewards } = context;
+    const preview: DeliveryRewards = {
+      resources: rewards.resources ? { ...rewards.resources } : null,
+      treasures: [...(rewards.treasures ?? [])],
+      rewardVillageId,
+    };
+    if (rewards.population) preview.population = rewards.population;
+    if (rewards.populationGrowth) preview.populationGrowth = { ...rewards.populationGrowth };
+    if (rewards.resourceGrowth) preview.resourceGrowth = { ...rewards.resourceGrowth };
+    if (rewards.buildingUnlocks?.length) preview.buildingUnlocks = [...rewards.buildingUnlocks];
+    if (rewards.reputation) preview.reputation = rewards.reputation;
+    if (rewards.researchPoints) preview.researchPoints = rewards.researchPoints;
+
+    if (rewards.reputationMercenaryExchange) {
+      const exchange = rewards.reputationMercenaryExchange;
+      const reputation = await this.commands.send({
+        name: 'reputation.GetByVillage', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId },
+      });
+      if (!reputation.ok) return { ok: false, payload: {}, reason: reputation.reason ?? 'reward_preview_failed' };
+      // 正式结算先应用静态声望奖励，再执行声望换佣兵；预览保持相同顺序。
+      const before = Math.max(0, Math.trunc((Number((reputation.payload as any)?.value) || 0) + (rewards.reputation ?? 0)));
+      if (before > 0) {
+        preview.reputation = (preview.reputation ?? 0) - before;
+        preview.reputationResetFrom = before;
+        preview.mercenaries = { [exchange.unitCode]: Math.max(0, Math.floor(before * exchange.perPoint)) };
+      }
+    }
+
+    if (instance.natalieDecision === 'release') {
+      preview.resources = { ...(preview.resources ?? {}), gold: ((preview.resources ?? {}).gold ?? 0) + 500 };
+      if (!preview.treasures.includes('honest_heart')) preview.treasures.push('honest_heart');
+      preview.reputation = (preview.reputation ?? 0) + this.config.constants.reputationS4ReleaseDelta;
+    }
+    return preview;
+  }
+
+  /** 历史空模板或异常配置的安全确认段，避免任务因没有 NPC 文本而无法领取。 */
+  private defaultDeliverDialogue(code: string): SerializedDialogueSession {
+    const segment: SerializedDialogueSegment = {
+      code: `${code}_deliver_fallback`, taskCode: code, trigger: 'deliver', segment: 1,
+      npcName: '', npcText: '任务奖励已准备好。', replies: [{ key: 'take', label: '收下' }],
+    };
+    return {
+      id: `dialogue-${segment.code}-${Math.floor(this.now())}`,
+      ...segment,
+      segmentCount: 1,
+      segments: [segment],
+    };
+  }
+
+  /** 返回一个至少能在首段显式确认领取的 session，不回写配置对象。 */
+  private confirmableDeliverDialogue(dialogue: SerializedDialogueSession | null, code: string): SerializedDialogueSession {
+    if (!dialogue?.segments?.length) return this.defaultDeliverDialogue(code);
+    const cloned: SerializedDialogueSession = {
+      ...dialogue,
+      replies: dialogue.replies.map((reply) => ({ ...reply })),
+      segments: dialogue.segments.map((segment) => ({
+        ...segment,
+        replies: segment.replies.map((reply) => ({ ...reply })),
+      })),
+    };
+    const first = cloned.segments[0];
+    if (!first.replies.some((reply) => reply.key === 'take')) {
+      first.replies.push({ key: 'take', label: '收下' });
+    }
+    cloned.replies = first.replies.map((reply) => ({ ...reply }));
+    return cloned;
+  }
+
+  // ── 命令：StartDeliver（只读预览，不领取奖励、不完成任务）──
+  private async startDeliver(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    await this.playerDirectory.refreshVillage(villageId);
+    const context = this.resolveDeliveryContext(villageId, code);
+    if (!('quest' in context)) return context;
+    const previewRewards = await this.previewDeliveryRewards(context);
+    if ('ok' in previewRewards) return previewRewards;
+    const dialogueContext = await this.playerDirectory.dialogueContext(context.rewardVillageId);
+    const started = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: {
+        taskCode: code,
+        trigger: this.dialogueTrigger(context.rewardVillageId, code, 'deliver', context.instance),
+        ...dialogueContext,
+      },
+    });
+    const configured = started.ok ? (started.payload as any)?.dialogue ?? null : null;
+    return {
+      ok: true,
+      payload: {
+        code,
+        previewRewards,
+        rewardVillageId: context.rewardVillageId,
+        dialogue: this.confirmableDeliverDialogue(configured, code),
+      },
+    };
+  }
+
+  // ── 命令：Deliver（玩家点击 take 后正式领取奖励）──
   private async deliver(cmd: Command): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
     await this.playerDirectory.refreshVillage(villageId);
@@ -644,46 +818,40 @@ export class TasksModule {
   /** Deliver 的实际逻辑由上层互斥包裹，保证任务奖励（尤其 m8/m9 铁壁勋章）最多发放一次。 */
   private async deliverUnlocked(cmd: Command, storageVillageId: string): Promise<CommandResult> {
     const { villageId, code } = cmd.payload as { villageId: string; code: string };
-    const s = this.ensureState(storageVillageId);
-    const inst = s.active[code];
-    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
-    if (!inst.readyToDeliver) return { ok: false, payload: {}, reason: 'not_ready' };
-    const q = this.quest(code);
-    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
-    if (q.objective.kind === 'carry_flag') {
-      const returned = inst.qualifiedFlagMovements ?? [];
+    const context = this.resolveDeliveryContext(villageId, code);
+    if (!('quest' in context)) return context;
+    // 防御性校验：上层锁键与重新解析的实际任务存储必须一致。
+    if (context.storageVillageId !== storageVillageId) return { ok: false, payload: {}, reason: 'not_active' };
+    const dynamicCheck = await this.previewDeliveryRewards(context);
+    if ('ok' in dynamicCheck) return dynamicCheck;
+    const { state, instance, quest, rewardVillageId } = context;
+    let exchangedVictoryFlag = false;
+    if (quest.objective.kind === 'carry_flag') {
+      const returned = instance.qualifiedFlagMovements ?? [];
       if (!returned.length) return { ok: false, payload: {}, reason: 'qualifying_flag_not_stored' };
       // 多面合格军旗可用时等概率选择一面交付；军旗本体由宝物模块原子替换为胜利旗帜。
       const picked = returned[Math.floor(this.rng() * returned.length)];
       const exchange = await this.commands.send({
         name: 'treasure.ExchangeQuestFlag', from: TasksModule.NAME,
-        payload: { villageId: inst.executionVillageId ?? villageId, fromCode: q.objective.flagCode ?? '', toCode: 'victory_flag' },
+        payload: { villageId: rewardVillageId, fromCode: quest.objective.flagCode ?? '', toCode: 'victory_flag' },
       });
       if (!exchange.ok) {
-        inst.qualifiedFlagMovements = [];
-        inst.readyToDeliver = false;
-        this.store.set(COLLECTION, storageVillageId, s);
-        await this.pushList(villageId);
+        // 领取失败必须保留待领取状态，客户端停留当前段后可重试。
         return { ok: false, payload: {}, reason: 'qualifying_flag_not_stored' };
       }
-      inst.qualifiedFlagMovements = returned.filter((id) => id !== picked);
+      instance.qualifiedFlagMovements = returned.filter((id) => id !== picked);
+      this.store.set(COLLECTION, storageVillageId, state);
+      exchangedVictoryFlag = true;
     }
     const rewards = await this.completeQuest(villageId, code);
-    // 交付对话与奖励同一响应返回。模板默认为空，因此不会改变现有领取流程；
-    // GM 填写后客户端会在奖励明细中展示 NPC 对话，且不会再次执行任务逻辑。
-    const rewardVillageId = (rewards as any)?.rewardVillageId ?? villageId;
-    const context = await this.playerDirectory.dialogueContext(rewardVillageId);
-    const dialogue = await this.commands.send({
-      name: 'dialogue.StartForTask', from: TasksModule.NAME,
-      payload: { taskCode: code, trigger: this.dialogueTrigger(rewardVillageId, code, 'deliver', inst), ...context },
-    });
+    if (!rewards) return { ok: false, payload: {}, reason: 'delivery_failed' };
+    if (exchangedVictoryFlag && !rewards.treasures.includes('victory_flag')) rewards.treasures.push('victory_flag');
     return {
       ok: true,
       payload: {
         code,
-        type: q.type,
+        type: quest.type,
         rewards,
-        dialogue: dialogue.ok ? (dialogue.payload as any)?.dialogue ?? null : null,
       },
     };
   }
@@ -1369,21 +1537,16 @@ export class TasksModule {
   }
 
   // ── 完成任务：发奖励 + 收尾 + 解锁下游主线（返回实际发放的奖励，供客户端弹窗）──
-  private async completeQuest(villageId: string, code: string): Promise<{ resources: Record<string, number> | null; treasures: string[]; reputation?: number; reputationResetFrom?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; mercenaries?: Record<string, number>; rewardVillageId?: string } | null> {
+  private async completeQuest(villageId: string, code: string): Promise<DeliveryRewards | null> {
     const storageVillageId = this.storageVillageForQuest(villageId, code);
     const s = this.ensureState(storageVillageId);
     const inst = s.active[code];
     if (!inst) return null;
     const q = this.quest(code);
     if (!q) return null;
-    const rewardVillageId = q.scope === 'global' ? (inst.executionVillageId ?? villageId) : villageId;
-    // m8 自身无论守城成功/失败都按同一份奖励领取；m9 则按 m8 结局
-    // 从声明式条件奖励中选择人口或铁壁勋章。
-    const outcome = inst.outcome ?? (code === 'm9' ? s.outcomes?.m8 : undefined);
-    const outcomeKey = (code === 'm8' || code === 'm9') && outcome
-      ? (outcome === 'success' ? 'm8_success' : 'm8_failure')
-      : undefined;
-    const rewardsDef: QuestRewards = (code === 'm9' && outcomeKey ? q.conditionalRewards?.[outcomeKey] : undefined) ?? q.rewards;
+    const rewardVillageId = this.rewardVillageFor(inst, villageId);
+    // m8 自身无论守城成功/失败都按同一份奖励领取；m9 则按 m8 结局。
+    const rewardsDef = this.rewardDefinition(s, inst, q);
 
     // 移除残留营地
     for (const c of inst.camps) {
@@ -1395,7 +1558,7 @@ export class TasksModule {
       this.scheduler.cancelByOwner(`task-village:${storageVillageId}:m8`);
     }
 
-    const granted: { resources: Record<string, number> | null; treasures: string[]; reputation?: number; reputationResetFrom?: number; population?: number; populationGrowth?: { percent: number; durationSec: number; expiresAt?: number }; resourceGrowth?: { percent: number; durationSec: number; expiresAt?: number }; buildingUnlocks?: string[]; researchPoints?: number; mercenaries?: Record<string, number>; rewardVillageId?: string } = { resources: null, treasures: [], rewardVillageId };
+    const granted: DeliveryRewards = { resources: null, treasures: [], rewardVillageId };
     // 资源奖励
     if (rewardsDef.resources && Object.keys(rewardsDef.resources).length) {
       await this.commands.send({ name: 'economy.Grant', from: TasksModule.NAME, payload: { villageId: rewardVillageId, gain: rewardsDef.resources } });
@@ -1514,7 +1677,7 @@ export class TasksModule {
           name: 'reputation.AdjustByVillage', from: TasksModule.NAME,
           payload: { villageId: rewardVillageId, delta: releaseReputation, reason: 's4_release_natalies' },
         });
-        granted.reputation = releaseReputation;
+        granted.reputation = (granted.reputation ?? 0) + releaseReputation;
       }
     }
 
@@ -1639,6 +1802,7 @@ export class TasksModule {
     inst.executionVillageId = updateVillageId;
     inst.campCleared = (inst.campCleared ?? 0) + 1;
     this.store.set(COLLECTION, storageVillageId, state);
+    await this.notifyTaskCampRemoved(camp);
 
     if (inst.campCleared >= inst.camps.length) {
       // 临时任务营地不走普通 droprate，也不能随机掉落其它任务专属宝物。
@@ -1674,6 +1838,14 @@ export class TasksModule {
       await this.pushList(updateVillageId);
       await this.pushMap(updateVillageId);
     }
+  }
+
+  /** 任务营地清除后立即使目标失效；实体状态仍保留到任务收尾，避免破坏任务快照。 */
+  private async notifyTaskCampRemoved(camp: TaskCamp): Promise<void> {
+    await this.bus.emit({
+      name: 'pve.TargetRemoved', source: TasksModule.NAME, ts: this.now(),
+      payload: { id: camp.id, q: camp.q, r: camp.r, task: true },
+    } as DomainEvent);
   }
 
   /**
@@ -1765,13 +1937,13 @@ export class TasksModule {
     }
   }
 
-  /** 刷新酒馆随机任务（按权重重新抽取，填满接取上限）。 */
+  /** 刷新酒馆随机任务（按权重重新抽取并替换当前未接取任务）。 */
   private async gmRefreshRandom(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
     const info = await this.tavernInfo(villageId);
     if (info.level <= 0) return { ok: false, payload: {}, reason: 'no_tavern' };
-    await this.refreshOffered(villageId, info);
+    await this.refreshOffered(villageId, info, true);
     return { ok: true, payload: await this.snapshot(villageId, this.ensureState(villageId)) };
   }
 
@@ -1841,6 +2013,9 @@ export class TasksModule {
         const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind } });
         return level.ok && Number((level.payload as any)?.level) >= Math.max(1, Number(rawLevel) || 1);
       }
+      // tavern_refresh 表示“进入酒馆支线池”，本身不是 firedTriggers 事件；
+      // refreshOffered 已在槽位刷新时选中该池，不能因没有同名事件而误删。
+      if (row.kind === 'tavern_refresh') return true;
       const key = row.kind + (value ? `:${value}` : '');
       return state.firedTriggers.includes(row.kind) || state.firedTriggers.includes(key);
     };
@@ -1910,12 +2085,53 @@ export class TasksModule {
     return true;
   }
 
+  /** 按 BattleEnded 的防守方实际损失推进累计击杀目标；NPC 服务军队不计入玩家任务。 */
+  private async advanceKillObjectives(villageId: string, losses: Record<string, number>): Promise<void> {
+    const entries = Object.entries(losses)
+      .map(([code, raw]) => [code, Math.max(0, Math.floor(Number(raw) || 0))] as const)
+      .filter(([, count]) => count > 0);
+    if (!entries.length) return;
+    for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+      const ready: string[] = [];
+      let changed = false;
+      for (const [code, inst] of Object.entries(state.active)) {
+        const q = this.quest(code);
+        if (!q || q.objective.kind !== 'kill_units' || inst.readyToDeliver || this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+        const category = q.objective.unitCategory ?? '';
+        if (category !== 'cavalry') continue;
+        const cavalryCodes = new Set(this.config.constants.cavalryUnitCodes);
+        // “人口”沿用声望/军队口径：每个死亡单位按 units.csv 的 popCost 计，
+        // 佣兵等缺省/零 popCost 单位按 1 人口计；不把侦察兵等非骑兵混入。
+        const killed = entries.reduce((sum, [unitCode, count]) => {
+          if (!cavalryCodes.has(unitCode)) return sum;
+          return sum + count * Math.max(1, this.config.units[unitCode]?.popCost ?? 1);
+        }, 0);
+        if (killed <= 0) continue;
+        const target = q.objective.count ?? 1;
+        const next = Math.min(target, Math.max(0, inst.progress ?? 0) + killed);
+        inst.progress = next;
+        inst.executionVillageId = villageId;
+        changed = true;
+        if (next >= target) ready.push(code);
+      }
+      if (!changed) continue;
+      this.store.set(COLLECTION, storageVillageId, state);
+      for (const code of ready) await this.markReady(villageId, code);
+      if (!ready.length) await this.pushList(villageId);
+    }
+  }
+
   // ── 战斗结束：推进 clear_camp ──
   private async onBattleEnded(evt: DomainEvent): Promise<void> {
-    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number>; survivors?: Record<string, number>; taskCode?: string; npcService?: boolean };
+    const p = evt.payload as { villageId?: string; side?: string; targetKind?: string; targetId?: string; attackerWins?: boolean; movementId?: string; treasures?: string[]; campCleared?: boolean; looted?: Record<string, number>; deployedTroops?: Record<string, number>; survivors?: Record<string, number>; defenderLosses?: Record<string, number>; defenderLossesAttributed?: Record<string, number>; taskCode?: string; npcService?: boolean };
     if (p.side !== 'attacker') return;
     const villageId = p.villageId;
     const targetId = p.targetId;
+    // 击杀累计必须在各种目标类型的专属早退分支之前处理；只统计玩家实际
+    // 发起的战斗，王国 NPC 服务军队的 BattleEnded 不应替玩家完成任务。
+    if (villageId && !p.npcService) {
+      await this.advanceKillObjectives(villageId, p.defenderLossesAttributed ?? p.defenderLosses ?? {});
+    }
     // m13 规定只要对秘密营地选择掠夺即失败（无论战斗胜负），
     // 失败仍需玩家在任务页确认后结束，避免任务凭空消失。
     if (p.targetKind === 'pve' && targetId) {
@@ -2058,6 +2274,7 @@ export class TasksModule {
         inst.executionVillageId = villageId;
         inst.campCleared = (inst.campCleared ?? 0) + 1;
         this.store.set(COLLECTION, storageVillageId, state);
+        await this.notifyTaskCampRemoved(camp);
         if (inst.campCleared >= inst.camps.length) {
           // 任务营地不按宝物 droprate 抽取；S4 仅在最后一处营地发放其明确定义的阶段道具。
           if (code === 's4') {
@@ -2115,6 +2332,17 @@ export class TasksModule {
     if (!state.firedTriggers.includes(trigger)) {
       state.firedTriggers.push(trigger);
       this.store.set(COLLECTION, storageVillageId, state);
+    }
+    // 宝物主动效果是任务触发器的一等事件。除 M13 主线外，骰子王入口
+    // 也由入场券使用触发，并且任务归属使用宝物的当前村庄。
+    if (p.code === 'dice_tournament_ticket') {
+      const sideStorage = this.storageVillageForQuest(p.villageId, 's7');
+      const sideState = this.ensureState(sideStorage);
+      if (!sideState.firedTriggers.includes(trigger)) {
+        sideState.firedTriggers.push(trigger);
+        this.store.set(COLLECTION, sideStorage, sideState);
+      }
+      await this.unlockSideQuests(p.villageId);
     }
     await this.unlockMainQuests(p.villageId);
   }
@@ -2456,13 +2684,19 @@ export class TasksModule {
       await this.pushList(villageId);
       return; // 酒馆已无，不再续排
     }
-    await this.refreshOffered(villageId, info);
+    await this.refreshOffered(villageId, info, true);
     this.scheduleRefresh(villageId, info);
   }
 
-  /** 按槽位填充酒馆：每个空槽独立按概率抽取支线，否则抽取日常。 */
-  private async refreshOffered(villageId: string, info: TavernInfo): Promise<void> {
+  /**
+   * 刷新酒馆任务：每个刷新周期都重新抽取全部 mixed 槽位，替换尚未接取的任务。
+   * `replaceExisting=false` 仅用于启动恢复和酒馆建成/升级时补齐空槽，避免重启时
+   * 无故丢掉玩家尚未接取的任务；已接取任务始终保存在 active，不受刷新影响。
+   */
+  private async refreshOffered(villageId: string, info: TavernInfo, replaceExisting = false): Promise<void> {
     const s = this.ensureState(villageId);
+    const replacedCount = replaceExisting ? s.offered.length : 0;
+    if (replaceExisting) s.offered = [];
     const need = info.maxTasks - s.offered.length;
     if (need <= 0) return;
 
@@ -2473,7 +2707,7 @@ export class TasksModule {
       !s.active[q.code] &&
       !selected.has(q.code),
     );
-    const sidePool = this.catalog.all().filter((q) =>
+    const sideCandidates = this.catalog.all().filter((q) =>
       q.type === 'side' &&
       q.trigger === 'tavern_refresh' &&
       !s.active[q.code] &&
@@ -2482,6 +2716,9 @@ export class TasksModule {
       !selected.has(q.code) &&
       !this.sideClaimedByPlayer(villageId, q.code),
     );
+    const sidePool = (await Promise.all(sideCandidates.map(async (q) => (
+      await this.offerConditionsSatisfied(villageId, q) ? q : null
+    )))).filter((q): q is QuestDef => q !== null);
     const chance = Math.min(1, Math.max(0, info.sideQuestChance));
     let changed = false;
     for (let i = 0; i < need; i++) {
@@ -2495,7 +2732,8 @@ export class TasksModule {
       s.offered.push(code);
       changed = true;
     }
-    if (!changed) return;
+    // 即使新池暂时为空，替换刷新也必须持久化清空旧槽位并通知客户端。
+    if (!changed && replacedCount <= 0) return;
     this.store.set(COLLECTION, villageId, s);
     await this.pushList(villageId);
   }
@@ -2692,6 +2930,108 @@ export class TasksModule {
     }
   }
 
+  /** 骰子小游戏读取任务进度的内部快照，不把 task owner 的存档暴露给其它模块。 */
+  private async getDiceMatch(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId?: string; code?: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q || q.objective.kind !== 'dice_match') return { ok: false, payload: {}, reason: 'not_dice_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    return {
+      ok: true,
+      payload: {
+        code,
+        difficulty: q.objective.diceDifficulty ?? 'easy',
+        targetScore: q.objective.diceTargetScore ?? 2000,
+        winsRequired: q.objective.diceWinsRequired ?? 1,
+        playerWins: inst.dicePlayerWins ?? 0,
+        npcWins: inst.diceNpcWins ?? 0,
+        lastOutcome: inst.diceLastOutcome ?? null,
+      },
+    };
+  }
+
+  /** S6 败局后的“重新尝试”只重置本次单局，不重置任务本身或其它任务状态。 */
+  private async resetDiceMatch(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId?: string; code?: string };
+    if (!villageId || code !== 's6') return { ok: false, payload: {}, reason: 'invalid_dice_retry' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    if (inst.diceLastOutcome !== 'npc') return { ok: true, payload: { reset: false } };
+    inst.dicePlayerWins = 0;
+    inst.diceNpcWins = 0;
+    inst.progress = 0;
+    delete inst.diceLastOutcome;
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return { ok: true, payload: { reset: true } };
+  }
+
+  /** 骰子一局结束后原子推进 s6/s7，所有“待领取/失败”状态仍由 task owner 决定。 */
+  private async recordDiceRound(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
+    if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
+    const q = this.quest(code);
+    if (!q || q.objective.kind !== 'dice_match') return { ok: false, payload: {}, reason: 'not_dice_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    inst.executionVillageId = villageId;
+    inst.dicePlayerWins = (inst.dicePlayerWins ?? 0) + (winner === 'player' ? 1 : 0);
+    inst.diceNpcWins = (inst.diceNpcWins ?? 0) + (winner === 'npc' ? 1 : 0);
+    inst.diceLastOutcome = winner;
+    inst.progress = inst.dicePlayerWins;
+    const needed = Math.max(1, q.objective.diceWinsRequired ?? 1);
+    let outcome: 'player' | 'npc' | null = null;
+    if (inst.dicePlayerWins >= needed) {
+      outcome = 'player';
+      await this.markReady(villageId, code);
+    } else if (inst.diceNpcWins >= needed) {
+      outcome = 'npc';
+      if (code === 's7') {
+        inst.outcome = 'failure';
+        inst.failureReady = true;
+        inst.readyToDeliver = false;
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.pushList(villageId);
+        await this.pushMap(villageId);
+      } else {
+        // S6 失败只记录最近一局，任务仍保持 active，可重新尝试。
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.pushList(villageId);
+        await this.pushMap(villageId);
+      }
+    } else {
+      this.store.set(COLLECTION, storageVillageId, state);
+      await this.pushList(villageId);
+      await this.pushMap(villageId);
+    }
+    const latest = this.ensureState(storageVillageId).active[code];
+    return {
+      ok: true,
+      payload: {
+        code,
+        winner,
+        playerWins: latest?.dicePlayerWins ?? inst.dicePlayerWins ?? 0,
+        npcWins: latest?.diceNpcWins ?? inst.diceNpcWins ?? 0,
+        winsRequired: needed,
+        outcome,
+        ready: latest?.readyToDeliver === true,
+        failureReady: latest?.failureReady === true,
+      },
+    };
+  }
+
   // ── 进度判定 ──
   private submitMet(inst: TaskInstance, required: Record<string, number>): boolean {
     for (const [res, need] of Object.entries(required)) {
@@ -2874,6 +3214,10 @@ export class TasksModule {
       researchCode: q.objective.researchCode ?? null,
       taskVillageCode: q.objective.taskVillageCode ?? null,
       threshold: q.objective.threshold ?? null,
+      unitCategory: q.objective.unitCategory ?? null,
+      diceDifficulty: q.objective.diceDifficulty ?? null,
+      diceTargetScore: q.objective.diceTargetScore ?? null,
+      diceWinsRequired: q.objective.diceWinsRequired ?? null,
     };
   }
 
@@ -2920,6 +3264,9 @@ export class TasksModule {
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
       taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
+      dicePlayerWins: inst.dicePlayerWins ?? 0,
+      diceNpcWins: inst.diceNpcWins ?? 0,
+      diceLastOutcome: inst.diceLastOutcome ?? null,
       failureReady: inst.failureReady === true,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,

@@ -8,6 +8,7 @@
 - `packages/shared`：客户端与服务端共享的 Wire 类型及内部消息基础类型。
 - `packages/server`：Fastify、WebSocket、领域逻辑和 JSON/WAL 持久化。
 - `packages/client`：Preact + signals + Vite 客户端。
+- `packages/dice-lab`：独立筛色子实验场（Fastify + Preact），不读取或写入 KOW 游戏存档。
 - `config`：CSV 游戏配置；表清单及编辑约定见 `config/README.md`。
 - `docs`：按需读取的当前参考；`docs/archive` 只保存历史设计，不作为实现依据。
 - `scripts` / `tools`：质量闸门、生产冒烟、部署及美术工具。
@@ -40,7 +41,8 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `diplomacy.ts` | 玩家对盟军/中立/敌对关系与宣战 |
 | `reputation.ts` | 玩家声望、声望效果与跨模块调整 |
 | `kingdom.ts` | 玩家封地归属、循环王国任务与议会厅服务订单 |
-| `combat.ts` | 进行中的逐 tick 战斗 |
+| `combat.ts` + `combat/` | 进行中的逐 tick 战斗；准入、纯引擎、战利品规划与可恢复结算均归 combat owner |
+| `battle-simulator.ts` | 无持久状态；独立阶段化战斗模拟器，只读取 CSV 派生的 GameConfig，不写入主游戏战斗/玩家/存档状态 |
 | `mercenary.ts` | 雇佣兵营地、候选与刷新任务 |
 | `trade.ts` | NPC/玩家订单、贸易中心与路线占用 |
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |
@@ -48,8 +50,10 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `research.ts` | 科研点、研发任务和已完成科技 |
 | `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9/M13 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
+| `dice-quest.ts` + `dice-quest/` | 骰子王任务的临时对局、普通骰子规则与 NPC 回合；不落盘对局，不依赖骰子实验场 |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
+| `packages/dice-lab` | 独立小游戏服务；内存会话、筛色子规则与 NPC，不属于主游戏领域 owner |
 
 组装与生命周期在 `packages/server/src/app.ts`；外部协议路由在 `packages/server/src/gateway/routes.ts`。基础设施包括 `event-bus.ts`、`command-bus.ts`、`scheduler.ts`、`store.ts`、`config.ts`、`config-authority.ts`（配置中心版本/共享镜像/异步同步）、`csv.ts` 等。
 
@@ -75,6 +79,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `2_2.0设计/06_代码导读.md` | 第一次跟踪端到端链路 |
 | `2_2.0设计/07_扩展与代码规范.md` | 增加内容、机制或模块 |
 | `2_2.0设计/10_兵种特性效果表.md` | 增加战斗特性 |
+| `2_2.0设计/11_阶段化战斗系统方案策划书.md` | 评审和实现阶段化战斗方案 |
 | `2_2.0设计/14_前端设计系统.md` | 修改客户端 UI |
 | `2_2.0设计/改进方向备选池.md` | 选择后续功能 |
 | `经济与金币模块.md` | 修改资源、金币和结算 |
@@ -95,6 +100,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `炼金炉模块.md` | 修改炼金炉建筑、宝物输入、炼化结果或收获流程 |
 | `美术资源清单.md` | 查询资产命名与事实源 |
 | `美术生成规范.md` | 生成或替换美术资源 |
+| `筛色子实验场.md` | 开发、测试、运行或部署独立筛色子小游戏 |
 | `部署手册_腾讯云轻量服务器.md` | 生产部署和回滚 |
 
 ## 六、常用路径
@@ -103,7 +109,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 - 改实时游戏状态/任务进度：从 `/gm` 操作，写入 `game.json/WAL`，不改变 CSV。
 - 改业务：先从本页 owner 表定位模块，再读对应参考文档和测试。
 - 加外部 action：`gateway/routes.ts` + owner 的内部契约；破坏性协议变更升级 `WIRE_VERSION`。
-- 改存档：升级 `SAVE_SCHEMA_VERSION`，在 CHANGELOG 标记 `[需刷档]`。
+- 改存档：只有不兼容落盘结构才升 `SAVE_SCHEMA_VERSION`，并在 CHANGELOG 标记 `[需刷档]` 与迁移/重置方案。
 - 看最近变化：只读 `CHANGELOG.md`。
 - 生产部署：`npm run deploy:prod`；只发布远程 `origin/main` 到不可变 `releases/<SHA>`，由 `current` 原子切换，数据独立放在 `shared/`。
 
@@ -111,8 +117,8 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 
 ```bash
 npm run guard
-npm run verify:quick
-npm run test:deploy
+npm run verify:changed   # 本地提交闸门按变更范围验证
+npm run verify           # CI/发版前全量：含发布布局、产物冒烟与 audit
 ```
 
 提交钩子只执行本地验证，不改变生产环境。合并到远程 `main` 后，再显式执行生产部署。

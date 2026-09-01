@@ -172,12 +172,13 @@ export function treasureEffectText(info: TreasureInfo): string {
     woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,
     cropRate: `粮食产出 +${v}%`, goldRate: `金币产出 +${v}%`, allResRate: `全资源产出 +${v}%`,
     atkMult: `全军攻击 +${v}%`, defMult: `全军防御 +${v}%`,
-    popGrowth: `人口增长 +${v}%`, instantGold: `立即获得 ${v} 金币`,
+    popGrowth: `人口增长 +${v}%`, instantGold: `立即获得 ${v} 金币`, dialogue: '使用后触发对话',
     ritualBuff: `使用后扣除劳动人口，全资源产出 +${v}%（持续2小时）`,
     cavalryTrainSpeed: `骑兵训练时间 -${v}%（使用后翻倍骑兵）`,
     soldierFoodReduce: `所有士兵粮耗 -${v}（军晌≤1的兵不减）`,
     victoryFlag: `全军攻击、防御 +${v}%；每次携旗清营或成功掠夺并归城，额外 +2%`,
     blackBadge: `全军攻击 +${v}%、全军防御 +${v}%、清理 PvE 营地宝物爆率 +5%（无需携带）`,
+    enemyCavalryDef: `敌方骑兵防御 -${v}%`,
   };
   return (map[info.effectType] ?? info.effectType) + reputationText;
 }

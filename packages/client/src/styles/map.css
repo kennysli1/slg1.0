@@ -99,13 +99,22 @@
   stroke: var(--c-gold-dim);
   stroke-width: 2;
 }
-.hex-ring--enemy {
+.hex-ring--neutral {
   stroke: var(--c-steel);
   stroke-width: 2;
 }
-.hex-ring--pve {
+.hex-ring--allied {
+  stroke: var(--c-jade);
+  stroke-width: 2.5;
+}
+.hex-ring--hostile {
   stroke: var(--c-crimson-hi);
-  stroke-width: 2;
+  stroke-width: 2.5;
+}
+.hex-ring--selected {
+  stroke: var(--c-gold-hi);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 5px rgba(246, 224, 170, .62));
 }
 
 /* 王都/封地由多个真实地块组成一个上窄下宽的大三角。底层只重铺同种地貌底色，
@@ -286,6 +295,9 @@
 }
 .march-marker-base--own { fill: var(--c-jade); fill-opacity: .92; }
 .march-marker-base--enemy { fill: var(--c-crimson); fill-opacity: .92; }
+.march-marker-base--foreign { fill: var(--c-steel); fill-opacity: .92; }
+.march-marker-base--foreign-threat { fill: var(--c-crimson); }
+.march-marker-base--foreign-neutral { fill: var(--c-steel); }
 .march-marker-base-ring {
   fill: none;
   stroke-width: 1.4;
@@ -293,6 +305,7 @@
 }
 .march-marker-base-ring--own { stroke: var(--c-gold-hi); }
 .march-marker-base-ring--enemy { stroke: var(--c-ember); }
+.march-marker-base-ring--foreign { stroke: var(--c-ink); }
 .own-march-mk:hover .march-marker-art {
   filter: drop-shadow(0 3px 5px var(--c-void)) brightness(1.12);
   transform: translateY(-1px) scale(1.06);
@@ -551,8 +564,12 @@
 }
 .map-legend-dot--self    { background: var(--c-gold); box-shadow: 0 0 6px rgba(216,177,104,.6); }
 .map-legend-dot--own     { background: var(--c-gold-dim); }
+.map-legend-dot--neutral { background: var(--c-steel); }
+.map-legend-dot--allied  { background: var(--c-jade); }
+.map-legend-dot--hostile { background: var(--c-crimson-hi); }
 .map-legend-dot--enemy   { background: var(--c-steel); }
-.map-legend-dot--pve     { background: var(--c-crimson); }
+.map-legend-dot--pve     { background: var(--c-steel); }
+.map-legend-dot--threat  { background: var(--c-crimson); box-shadow: 0 0 6px rgba(192, 57, 43, .58); }
 .map-legend-line {
   width: 18px; height: 3px;
   border-radius: 2px;

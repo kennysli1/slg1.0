@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import type { WireResponse } from '@slg/shared';
@@ -103,6 +103,9 @@ async function main() {
   } catch { /* 开发环境可能还没有 client/dist */ }
   if (existsSync(clientDist)) {
     await fastify.register(fastifyStatic, { root: clientDist, prefix: '/' });
+    // 独立阶段化战斗模拟器入口：与主游戏使用同一构建产物，但由客户端
+    // 按 pathname 渲染隔离页面，不加载玩家村庄/行军交互。
+    fastify.get('/battle-simulator', (_request, reply) => void reply.sendFile('index.html'));
   }
 
   // 连接计数（用于限制最大并发连接数）
@@ -205,6 +208,35 @@ async function main() {
     reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
     return { buildId, releaseCommit, releaseBranch };
   });
+
+  // Dice Lab 独立进程的窄代理：主服不加载实验规则或状态，只转发 /dice-lab/ 路径。
+  // 代理可关闭；实验服务仍可通过自己的端口直接访问。
+  if (process.env.DICE_LAB_PROXY !== 'off') {
+    const proxyDiceLab = async (request: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+      const rawUrl = typeof request.raw?.url === 'string' ? request.raw.url : '/dice-lab/';
+      const target = `http://127.0.0.1:${Number(process.env.DICE_LAB_PORT ?? 8091)}${rawUrl}`;
+      try {
+        const method = request.raw?.method === 'GET' ? 'GET' : request.raw?.method === 'DELETE' ? 'DELETE' : 'POST';
+        const headers: Record<string, string> = {};
+        const access = request.headers?.['x-dice-lab-token'];
+        if (typeof access === 'string') headers['x-dice-lab-token'] = access;
+        if (method === 'POST') headers['content-type'] = 'application/json';
+        const response = await fetch(target, {
+          method,
+          headers,
+          body: method === 'POST' ? JSON.stringify(request.body ?? {}) : undefined,
+        });
+        reply.code(response.status);
+        const contentType = response.headers.get('content-type');
+        if (contentType) reply.header('content-type', contentType);
+        return Buffer.from(await response.arrayBuffer());
+      } catch {
+        return reply.code(503).send({ ok: false, error: { code: 'dice_lab_unavailable', message: '筛色子实验场暂不可用' } });
+      }
+    };
+    fastify.route({ method: ['GET', 'POST', 'DELETE'], url: '/dice-lab', handler: proxyDiceLab });
+    fastify.route({ method: ['GET', 'POST', 'DELETE'], url: '/dice-lab/*', handler: proxyDiceLab });
+  }
 
   // GM 调试 API（始终挂载；如需关闭设 GM_ENABLED=off）
   if (process.env.GM_ENABLED !== 'off') {

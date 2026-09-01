@@ -99,3 +99,25 @@ test('王国 PvE 高等级档位：四封地统一标准且高于三级城邦，
   assert.ok(Object.values(capital.loot).reduce((sum: number, value: any) => sum + Number(value), 0) >= Object.values(fief.loot).reduce((sum: number, value: any) => sum + Number(value), 0));
   assert.equal(new Set(fief.buildings.filter((b: any) => b.zone === 'outer' && ['woodcutter', 'claypit', 'ironmine', 'cropland'].includes(b.kind)).map((b: any) => b.kind)).size, 4);
 });
+
+test('王国 PvE 旧存档迁移：普通 PvE 记录升级后封地和王都都提供攻城', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const ids = ['kingdom-capital', 'kingdom-fief-ne', 'kingdom-fief-se', 'kingdom-fief-sw', 'kingdom-fief-nw'];
+  for (const id of ids) {
+    const target = app.store.get<any>('pve', id);
+    assert.ok(target, `${id} 应存在`);
+    // 模拟城市目标功能上线前的旧存档：类型仍是 royal_*，但没有 cityState 标记。
+    app.store.set('pve', id, { ...target, cityState: false, kingdomProfile: undefined, cityStateGenerationVersion: undefined });
+    const tiles = app.store.all<any>('world_tile').filter((tile) => tile.refId === id);
+    for (const tile of tiles) app.store.set('world_tile', `${tile.q},${tile.r}`, { ...tile, cityState: false });
+  }
+
+  app.pve.resume();
+  for (const id of ids) {
+    const target = app.store.get<any>('pve', id);
+    assert.equal(target?.cityState, true, `${id} 应迁移为王国城市目标`);
+    const options = await app.commands.send({ name: 'movement.GetMarchOptions', from: 'test', payload: { villageId: 'test-village', kind: 'pve', refId: id, q: target.q, r: target.r } });
+    assert.ok((options.payload as any).modes.some((mode: any) => mode.mode === 'attack'), `${id} 应显示攻城选项`);
+  }
+});

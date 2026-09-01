@@ -28,7 +28,7 @@ test('学院建造后 academy 参数更新', async () => {
   assert.equal(academy.highestLevel, 0);
 });
 
-test('科技树查询返回配置的 27 个科技 + 正确的 status', async () => {
+test('科技树查询返回配置的 33 个科技 + 正确的 status', async () => {
   const app = freshApp();
   const regRes = await reg(app, '测试2', 'pass1');
   assert.equal(regRes.ok, true, `注册应成功: ${regRes.reason ?? ''}`);
@@ -36,7 +36,7 @@ test('科技树查询返回配置的 27 个科技 + 正确的 status', async () 
   const r = await send(app, 'research.GetTechTree', { villageId: va });
   assert.equal(r.ok, true);
   const techs = (r.payload as any).techs;
-  assert.equal(techs.length, 27, `应有27个科技，实际: ${techs.length}`);
+  assert.equal(techs.length, 33, `应有33个科技，实际: ${techs.length}`);
   const t1 = techs.find((t: any) => t.code === 'melee_attack_i');
   assert.ok(t1, 'melee_attack_i 应存在');
   assert.equal(t1.status, 'available', '无前置的 tier-1 科技应 available（但无学院就无法支付 RP）');

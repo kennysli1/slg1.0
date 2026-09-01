@@ -8,10 +8,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function run(command, args, label) {
   console.log(`\n==> ${label}`);
-  // Windows 下 node 的 spawnSync('npm') 不会自动解析 .cmd；经 shell 执行保持与终端 npm 一致。
+  // Windows 下只有 npm 需要经过 shell 解析 .cmd；Node 自身路径可能含空格，不能交给 shell 拼接。
   const result = spawnSync(command, args, {
     cwd: ROOT, stdio: 'inherit', env: process.env,
-    shell: process.platform === 'win32',
+    shell: process.platform === 'win32' && command === 'npm',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
@@ -30,39 +30,13 @@ function stagedPaths() {
     .filter(Boolean);
 }
 
-// 禁止 Git 用机器名猜测作者身份；否则 GitHub 无法归属贡献，服务器提交也无法追责到人。
-const authorIdent = output('git', ['var', 'GIT_AUTHOR_IDENT']);
-const authorEmail = authorIdent.match(/<([^>]+)>/)?.[1] ?? '';
-if (!authorEmail || /(?:\.local|localhost\.localdomain)$/i.test(authorEmail)) {
-  console.error(`\n✘ 提交已阻止：请先显式配置可识别的 Git 邮箱（当前：${authorEmail || '空'}）。`);
-  console.error('  git config user.email "你的 GitHub 邮箱或 noreply 邮箱"');
-  process.exit(1);
-}
-
-// 构建必须对应即将提交的 index。否则未暂存代码可能让错误快照“替身通过”。
-const unstaged = spawnSync('git', ['diff', '--quiet'], { cwd: ROOT }).status !== 0;
-const untracked = output('git', ['ls-files', '--others', '--exclude-standard']);
-if (unstaged || untracked) {
-  console.error('\n✘ 提交已阻止：工作区必须与暂存区完全一致，才能证明部署的就是即将提交的内容。');
-  if (unstaged) console.error('  - 存在未暂存改动');
-  if (untracked) console.error(`  - 存在未跟踪文件：\n${untracked.split('\n').map((f) => `    ${f}`).join('\n')}`);
-  process.exit(1);
-}
-
+// commit-msg 只在说明格式通过后调用这里；快照检查统一复用一次，手动运行 verify:commit 也不会漏掉。
+run(process.execPath, ['scripts/commit-snapshot.mjs'], 'G0 · 提交作者与快照');
 run('npm', ['run', 'guard'], 'G1 · 变更契约');
+run('npm', ['run', 'verify:changed'], 'G2 · 按变更范围验证');
 const paths = stagedPaths();
 const touchesRuntime = paths.some((path) => path.startsWith('packages/') || path.startsWith('config/'));
-if (!touchesRuntime) {
-  // 配置中心写入的 CSV 是管理员确认过的运行时事实，不能再用出厂默认值
-  // 行为断言阻断仅工具/文档改动的提交；配置结构仍需完整校验。
-  run('npm', ['run', 'build:shared'], 'G2 · 构建共享协议');
-  run('npm', ['run', 'lint:all'], 'G2 · 静态检查');
-  run('npm', ['run', 'typecheck'], 'G2 · 类型检查');
-  run('npm', ['run', 'verify:config-sync'], 'G2 · 配置全图校验');
-  run('npm', ['run', 'test:ops'], 'G2 · release 布局测试');
-} else {
-  run('npm', ['run', 'verify:quick'], 'G2 · 完整构建、静态检查与全部测试');
-}
-run('npm', ['run', 'verify:deploy'], 'G3 · 构建并执行本地生产部署端到端冒烟');
+if (touchesRuntime) run('npm', ['run', 'verify:deploy'], 'G3 · 构建并执行本地生产部署端到端冒烟');
+else console.log('\n==> G3 · 非运行时改动，跳过生产产物冒烟');
 
 console.log('\n✔ 提交总闸门通过：当前暂存快照已完成本地验证；生产部署仅允许显式部署 origin/main。');

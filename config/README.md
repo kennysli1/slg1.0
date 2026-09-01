@@ -37,14 +37,14 @@
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
-| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
+| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`simTraits` 为独立阶段化模拟器特性引用；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
-| 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
+| 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维/模拟器生命值与特性 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸、M8任务村参数等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
 | 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量、宝库槽位或保险库资源保护量 |
-| 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
+| 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、阶段化模拟器生命值、价格或增删雇佣兵 |
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率；`my_effort` 使用 `my_effort_use` 对话，`black_badge` 提供 PvE 掉率与军队加成 |
@@ -60,6 +60,8 @@
 | 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 | 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
 | 表25 | `dialogues.csv` | **NPC 对话 session 目录** | 调任务触发点、NPC 名称/文本和玩家回复选项 |
+
+`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:2`），用于骰子王任务的独立对局目标。
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -162,7 +164,9 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits | 特性ID列表（逗号分隔，引用 **unit_traits.csv 的数字 id**，可空） |
+| traits | 线上战斗特性ID列表（竖线分隔，引用 **unit_traits.csv 的数字 id**，可空） |
+| hp | 阶段化战斗模拟器的单兵生命值伤亡池（只读 CSV 的实验规则） |
+| simTraits | 阶段化战斗模拟器专用特性ID列表；与 `traits` 分开，避免影响线上旧战斗 |
 
 > 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
 
@@ -175,10 +179,12 @@
 | form | `melee` 或 `ranged` |
 | meleeAtk/rangedAtk | 近战/远程攻击 |
 | meleeDef/rangedDef | 近战/远程防御 |
+| hp | 阶段化战斗模拟器的单兵生命值伤亡池 |
 | speed / carry | 行军速度 / 单兵载货量 |
 | upkeep | 每小时耗粮；雇佣兵当前固定为 0 |
 | costWood/costClay/costIron/costCrop | 普通训练资源成本；雇佣兵固定为 0 |
-| trainSec / building / traits | 训练秒数 / 所需建筑 / 特性；当前均留空或为 0 |
+| trainSec / building / traits | 训练秒数 / 所需建筑 / 线上战斗特性；当前均留空或为 0 |
+| simTraits | 阶段化模拟器特性ID列表（竖线分隔；与线上 `traits` 隔离） |
 | popCost | 训练/在途/驻军占用的人口；所有兵种返程、解散都会按此值返还。拓荒者每名占用 5 人口，成功建城后由出发城永久转移，新城以 5 人口开局 |
 | goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
 | commandCost | 单份合同占用的佣兵统御容量 |
@@ -203,7 +209,9 @@
 | effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
 | value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
 
-> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成)。
+> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成) / `enemy_cavalry_atk`(敌骑兵攻击修正) / `ally_ranged_def`(己方另一兵种远程防御修正) / `enemy_ranged_melee_def`(敌远程兵近战防御修正) / `cavalry_charge_atk`(冲锋阶段骑兵攻击修正)。同一属性按加法叠加，减益最低到 0。
+
+阶段化战斗模拟器页面为 `/battle-simulator`。它通过 `battleSimulator.GetCatalog` / `battleSimulator.Simulate` 读取这些 CSV 配置，不读写主游戏存档。
 > 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
 
 ## pve_targets.csv — PvE 目标模板
@@ -231,7 +239,9 @@
 | form | 形态：`melee` / `ranged` |
 | meleeAtk/rangedAtk | 近战/远程攻击力 |
 | meleeDef/rangedDef | 近战/远程防御 |
+| hp | 阶段化模拟器的单兵生命值伤亡池 |
 | carry | 载货（守军一般0） |
+| traits | 阶段化模拟器特性ID列表（竖线分隔；引用 `unit_traits.csv`，可空） |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
 
@@ -273,6 +283,14 @@
 | key | 默认 | 作用 |
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
+| battle_sim_melee_rounds | 6 | 模拟器第三阶段全军近战互殴轮数 |
+| combat_phase_cavalry_vs_cavalry_coeff | 1 | 模拟器骑兵对冲伤害系数 |
+| combat_phase_cavalry_vs_melee_coeff | 1 | 模拟器骑兵冲击近战步兵伤害系数 |
+| combat_phase_cavalry_vs_ranged_coeff | 1 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
+| combat_phase_ranged_strike_coeff | 1 | 模拟器远程打击伤害系数（目标用远程防御） |
+| combat_phase_melee_round_coeff | 1 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_phase_compare_epsilon | 0.0001 | 模拟器攻城最终阶段判断数值相等的容差 |
+| combat_phase_min_survivor_units | 1 | 模拟器攻城最终阶段胜方至少保留单位数 |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
 | main_build_speedup_cap | 0.6 | 主基地提速上限（最多-60%） |
 | storage_base | 800 | 仓库/粮仓基础容量 |
@@ -286,6 +304,9 @@
 | forest_vision_penalty | 2 | 军队视野朝森林方向减少的格数 |
 | hills_vision_bonus | 1 | 军队位于丘陵时视野增加的格数 |
 | hills_march_speed_multiplier | 0.6666666667 | 军队位于丘陵时的行军速度倍率（默认 2/3） |
+| march_size_reference_pop | 20 | 军队规模减速的免惩罚人口基准 |
+| march_size_penalty | 0.0015 | 超出基准人口后的规模减速系数 |
+| march_size_min_multiplier | 0.45 | 军队规模减速后的最低速度比例 |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 | kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
@@ -321,10 +342,13 @@
 | kingdom_pve_retaliation_raid_threshold | -10 | 声望小于等于此值时掠夺主城 |
 | kingdom_pve_retaliation_siege_threshold | -20 | 声望小于等于此值时攻城主城 |
 | kingdom_fief_mercenary_min/max_ratio | 0.4/0.7 | 封地报复雇佣军占封地守军总人口的随机比例 |
+| cavalry_unit_codes | `equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight` | 骑兵兵种代码（以 `|` 分隔）；猎马人任务和绞马索效果共用此分类；任务进度按 `popCost` 计人口 |
+
+`/config/balance` 的“猎马人 / 绞马索参数”板块会集中显示并编辑这条支线的两个数值：猎马人目标人口（`quest_objectives.csv` 的 `o-s5.params`，按 `cavalry:<数量>` 保存）和绞马索骑兵防御削弱百分比（`treasures.csv` 的 `horse_rope.effectValue`）。这里是对应 CSV 行的专用快捷入口，不会生成第二份运行时参数；骑兵兵种分类仍在上方“骑兵分类参数”板块修改。
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；它们仍写入同一张 `game_constants.csv`。
+配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队固定速度不受影响，已在途行军不会因热重载改变原定到达时间。
 
 M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
@@ -353,13 +377,15 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | stackGroup / effectCap | 同类叠加组 / 该效果封顶值 |
 | uniqueEffect | `1` 表示同名只允许一份生效 |
 
+`enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
+
 ## research.csv — 科技树目录
 | 列 | 含义 |
 |----|------|
 | id / code | 数字主键 / 稳定英文代码（前置引用用 code） |
 | name / desc / icon | 显示名 / 说明 / 图标基名 |
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
-| tier | 层级，1 为最底层；界面按层分组显示 |
+| tier | 层级，1 为顶层；界面按层从上到下分组显示 |
 | mainBaseLevel | 研发所需主基地最低等级；默认 1，配置中心可调 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
@@ -369,9 +395,9 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | techCode / order | 所属科技 code / 同科技内展示与应用顺序 |
-| effectType | 效果类型；必须是服务端白名单中的真实已接线效果 |
-| effectKey | 作用目标，如资源 code、`all`、`form:melee` |
-| effectValue | 效果值；倍率类填小数，`0.15` 表示 +15% |
+| effectType | 效果类型；必须是服务端白名单中的真实已接线效果，含 `unit_unlock` 兵种解锁与 `building_unlock` 建筑解锁 |
+| effectKey | 作用目标，如资源 code、`all`、`form:melee` 或建筑/兵种 code |
+| effectValue | 效果值；倍率类填小数，`0.15` 表示 +15%；解锁类填 `1` |
 | cap | 该叠加组最终上限 |
 
 ## academy.csv — 学院逐级出点参数
@@ -444,8 +470,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗） |
-| params | 目标参数；资源用 `wood:200|clay:200`，其他格式按 `任务模块.md` 说明 |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果
@@ -481,7 +507,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | taskCode | 绑定的任务代码；对话由任务动作启动 |
 | trigger | 触发点，例如 `accept`（点击接取任务）或 `deliver`（领取奖励）；宝物使用对话固定为 `use`，代码为 `<treasureCode>_use`、taskCode 从 `t1` 起独立排序；M8/M9 的成功文本使用默认触发点，失败分支使用 `accept_failure` / `deliver_failure` |
 | npcName / npcText | 对话对象名称与 NPC 文本（不要填写英文逗号）；支持服务端展示变量 `{villageName}`（当前玩家村庄名）和 `{fiefName}`（当前玩家所属封地名），配置中心保存变量名，运行时由服务端替换后再下发客户端 |
-| replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，离开只关闭对话不改变任务状态 |
+| replies | 玩家回复列表，格式 `key:显示文本|key2:显示文本`；当前任务接取约定 `accept` 与 `leave`，交付常用 `take:收下`；没有配置回复时对话弹窗不显示底部按钮，玩家只能通过右上角关闭 |
 
 同一 `id`、`code`、`taskCode`、`trigger` 的多段对话按 `segment` 升序依次显示；玩家关闭当前段或选择回复后进入下一段，最后一段结束。配置中心对话编辑器只允许修改 `npcName`、`npcText`、`replies`，通过“+ 段落”新增同一对象的下一段。
 
@@ -503,7 +529,7 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 ---
 
 ## 改了之后怎么生效
-- 配置中心（`/config`）保存先做完整校验并热重载当前进程，同时写入 `shared/config`；异步同步队列只上传 CSV 差异，不阻塞 GM 或玩家请求。发布时共享 CSV 会按主键合并到 Git 默认 CSV：保留已有手调值，并自动带入新行/新列；共享文件中只存在的旧行不会复活。
+- 配置中心（`/config`）保存先做完整校验并热重载当前进程，同时写入 `shared/config`；异步同步队列只上传 CSV 差异，不阻塞 GM 或玩家请求。发布时配置中心是现有生产值的权威：共享 CSV 已有单元格（包括空值）和自建行覆盖 Git，明确删除的行记录在 `config_row_tombstones.json` 且不会被 Git 复活；Git 只补共享文件从未包含的新列与未被删除的新行。结构删除或改名必须走显式迁移。
 - GitHub 配置 PR 合并、`npm run deploy:prod` 发布后，新 release 读取同一份 CSV；删档/重启只处理 `game.json` 进度，不回退配置。
 - 本地直接编辑仓库 CSV 仍可在开发服重启后生效，但正式环境应使用配置中心的 PR 流程。
 - 改 CSV **不需要改任何代码、不需要重新编译**。

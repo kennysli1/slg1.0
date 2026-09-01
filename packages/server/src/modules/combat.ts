@@ -4,8 +4,29 @@ import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
-import type { CombatUnit, Snapshot, TraitEffect } from '../infra/combat-types.js';
+import type { Snapshot } from '../infra/combat-types.js';
 import { makeLogger } from '../infra/logger.js';
+// eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的内部边界；架构测试按 owner 归并校验。
+import type { Battle, Contribution, DefenderContribution } from './combat/types.js';
+// eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的纯计算层。
+import {
+  aggregateCounts,
+  applyAmbushBonus,
+  applyAmbushSnapshot,
+  countDelta,
+  filterNonSiegeWeapons,
+  filterSiegeWeapons,
+  sampleBattleRounds,
+  simulateCombatTick,
+  totalCount,
+  totalPower,
+} from './combat/engine.js';
+// eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的结算辅助层。
+import { mergeResources, planPvpLoot, scaleResources, subtractProtected } from './combat/loot.js';
+// eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的结算规划层。
+import { buildSettlementPlan } from './combat/resolution.js';
+
+export { planPvpLoot, subtractProtected };
 
 const log = makeLogger('combat');
 
@@ -22,84 +43,15 @@ const log = makeLogger('combat');
  *  - 一地一场战：同一目标只有一个战场；后到的部队按阵营并入，下一 tick 生效。
  *  - 两排：前排=melee，后排=ranged。永远先掉前排，前排全灭才掉后排。
  *  - 远程兵按"己方/敌方近战是否存活"切换用 rangedAtk / meleeAtk（§4.3）。
- *  - 逐 tick 减员，势均力敌打得久、一边倒最快（§4.4 雪球公式）。
+ *  - 逐 tick 按兰开斯特平方律减员，人数优势会在战斗过程中持续放大（§4.4）。
  *  - 打到一方归零结束，不撤退（§4.5）。
  *
  * 本轮范围：PvE/PvP 单场 + 攻击方并入（一地一场战）+ 每 tick 实时快照推送。
  * 暂缓：协防 reinforce、PvE 多人合战分战利品（见 08 文档§七）。
  */
 
-/** 一支来攻部队的贡献记录（用于战斗结束后各自返程/分战利品）。 */
-interface Contribution {
-  movementId: string;
-  fromVillage: string;
-  fromXY: { q: number; r: number }; // 六边形轴坐标（对 combat 为不透明透传，用于结束后返程）
-  /** 原始出征兵力（code -> count），返程按幸存比例分配。 */
-  troops: Record<string, number>;
-  /** 该军队携带的宝物 code（军队携带宝物机制）；全歼时按 pve/pvp 规则处理。 */
-  treasures: string[];
-  /** 王国议会厅购买的 NPC 军队：不占玩家人口，也不触发玩家伤亡回收或营地宝物掉落。 */
-  npcService?: boolean;
-  kingdomMercenary?: boolean;
-  returnPveId?: string;
-}
-
-/** 防守方独立兵力池：本村驻军与每支临时援军在战斗快照中保持来源边界。 */
-interface DefenderContribution {
-  sourceId: string;
-  movementId?: string;
-  fromVillage?: string;
-  npcService?: boolean;
-  troops: Record<string, number>;
-}
-
-interface BattleRound {
-  round: number;
-  attackerLosses: Record<string, number>;
-  defenderLosses: Record<string, number>;
-  attacker: Record<string, number>;
-  defender: Record<string, number>;
-}
-
-interface Battle {
-  id: string;
-  targetKind: 'village' | 'pve' | 'field';
-  /** 玩家村战斗模式；PvE/野战没有该字段。 */
-  battleType?: 'raid' | 'siege' | 'ambush';
-  /** 任务标识，供任务模块识别 NPC 攻城等特殊战斗。 */
-  taskCode?: string;
-  targetId: string; // 防守方村 id、PvE 目标 id 或野战时的 defender movement id
-  targetXY: { q: number; r: number }; // 六边形轴坐标（不透明透传）
-  wallLevel: number;
-  /** 进攻方：key = `${movementId}#${code}`（多支来攻并入时按贡献命名空间隔离，各自 smithy 数值不同）。 */
-  attacker: Snapshot;
-  /** 防守方：key = code（单一来源：驻军或 PvE 守军）。 */
-  defender: Snapshot;
-  /** 防守方开战时各兵种原始数量（结束时算实际损失，交回 owner 扣兵）。 */
-  defenderOriginal: Record<string, number>;
-  /** 防守方来源索引；旧战斗没有该字段时按目标村驻军兼容。 */
-  defenderContributions?: Record<string, DefenderContribution>;
-  contributions: Record<string, Contribution>; // movementId -> 贡献
-  /** 野战时防守方行军贡献（用于 BattleEnded 中恢复防守方行军）。 */
-  defenderContribution?: Contribution;
-  /** 分数击杀累加（不足1个的伤害留到下tick，保证战斗必然推进）。 */
-  attackerPending: number;
-  defenderPending: number;
-  /** 开战时双方阵容（包含之后并入的进攻部队），用于战报回放。 */
-  initialAttacker: Record<string, number>;
-  initialDefender: Record<string, number>;
-  /** 每轮结算后的兵力快照，战斗结束后写入 BattleEnded。 */
-  rounds: BattleRound[];
-  attackPower0: number; // 开战时总攻(战报展示)
-  defensePower0: number;
-  startedAt: number;
-  ticks: number;
-  status: 'active' | 'ended';
-}
-
 const COLLECTION = 'battle';
 const MAX_TICKS = 20000; // 安全阀：极端情况下(双方都0攻)兜底结束，避免无限循环
-const MAX_REPLAY_ROUNDS = 120; // 战报只保留均匀抽样的关键轮次，避免极端战斗产生数 MB 推送/存档
 
 export class CombatModule {
   static readonly NAME = 'combat';
@@ -136,8 +88,14 @@ export class CombatModule {
 
   /** 重启恢复：为所有进行中的战场重新登记下一 tick。 */
   resume(): void {
-    for (const b of this.store.all<Battle>(COLLECTION)) {
-      if (b.status === 'active') this.scheduler.schedule(this.tickMs(), () => this.tick(b.id), `combat:${b.id}`, `battle:${b.id}`);
+    for (const raw of this.store.all<Battle>(COLLECTION)) {
+      const b = this.load(raw.id);
+      if (!b) continue;
+      if (b.status === 'active') {
+        this.scheduler.schedule(this.tickMs(), () => this.tick(b.id), `combat:${b.id}`, `battle:${b.id}`);
+      } else if (b.status === 'resolving') {
+        this.scheduler.schedule(0, () => this.resumeResolution(b.id), `combat:${b.id}`, `battle:${b.id}`);
+      }
     }
   }
 
@@ -157,11 +115,15 @@ export class CombatModule {
     return `bt-${n}`;
   }
 
-  /** 找到目标格上进行中的战场（一地一场战）。 */
-  private findActive(targetId: string): Battle | undefined {
-    const battle = this.store.all<Battle>(COLLECTION).find((b) => b.targetId === targetId && b.status === 'active');
+  /** 找到目标上的进行中战场；按 targetKind+targetId 隔离 PvE、村庄和野战。 */
+  private findActive(targetId: string, targetKind?: Battle['targetKind']): Battle | undefined {
+    const battle = this.store.all<Battle>(COLLECTION).find((b) => b.targetId === targetId && (!targetKind || b.targetKind === targetKind) && b.status === 'active');
     if (battle) this.ensureBattleLog(battle);
     return battle;
+  }
+
+  private battleKey(targetKind: Battle['targetKind'], targetId: string): string {
+    return `${targetKind}:${targetId}`;
   }
 
   /** 兼容上线前已落盘的进行中战斗，首次访问时补齐战报回放字段。 */
@@ -169,13 +131,15 @@ export class CombatModule {
     b.initialAttacker ??= aggregateCounts(b.attacker);
     b.initialDefender ??= aggregateCounts(b.defender);
     b.rounds ??= [];
+    // 新增字段均为可选兼容字段，旧战斗在第一次访问时惰性初始化。
+    if (b.status === 'ended') b.status = 'resolving';
   }
 
   // ---- Commands ----
 
   private getBattle(cmd: Command): CommandResult {
-    const { targetId, villageId } = cmd.payload as { targetId: string; villageId?: string };
-    const b = this.findActive(targetId);
+    const { targetId, targetKind, villageId } = cmd.payload as { targetId: string; targetKind?: Battle['targetKind']; villageId?: string };
+    const b = this.findActive(targetId, targetKind);
     if (!b) return { ok: true, payload: { battle: null } };
     if (villageId && !this.canViewBattle(b, villageId)) {
       return { ok: false, payload: {}, reason: 'battle_forbidden' };
@@ -269,7 +233,8 @@ export class CombatModule {
 
     const contribId = p.movementId;
     const treasures = p.treasures ?? [];
-    const existing = this.findActive(p.targetId);
+    const battleKey = this.battleKey(p.targetKind, p.targetId);
+    const existing = this.findActive(p.targetId, p.targetKind);
     if (existing) {
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
@@ -287,10 +252,10 @@ export class CombatModule {
 
     // 同步预占：标记该 targetId 正在被新建流程占用
     // 若已有其他并发 Engage 在预占中，直接返回等它完成后再并入
-    if (this.claiming.has(p.targetId)) {
+    if (this.claiming.has(battleKey)) {
       // 短路等待：再做一次 findActive（此时另一个 engage 可能已写入 store）
       // 若仍未就绪（极罕见的 ABA 场景），保守地返回 merged=false 让调用方重试
-      const raceCheck = this.findActive(p.targetId);
+      const raceCheck = this.findActive(p.targetId, p.targetKind);
       if (raceCheck) {
         raceCheck.contributions[contribId] = {
           movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
@@ -345,17 +310,17 @@ export class CombatModule {
       return { ok: true, payload: { battleId: id, merged: false } };
     }
 
-    this.claiming.add(p.targetId);
+    this.claiming.add(battleKey);
 
     let fetchedDefender: { defender: Snapshot; wallLevel: number; defenderContributions?: Record<string, DefenderContribution> } | null = null;
     try {
       fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId, p.battleType);
     } finally {
-      this.claiming.delete(p.targetId);
+      this.claiming.delete(battleKey);
     }
 
     // 二次安全检查：fetchDefender 是 async，并发 Engage 可能在此期间已创建战场
-    const raceExisting = this.findActive(p.targetId);
+    const raceExisting = this.findActive(p.targetId, p.targetKind);
     if (raceExisting) {
       // 安全并入
       raceExisting.contributions[contribId] = {
@@ -491,36 +456,47 @@ export class CombatModule {
       return 1 + totalDef;
     })();
 
-    const attackerBefore = aggregateCounts(b.attacker);
-    const defenderBefore = aggregateCounts(b.defender);
-
-    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）
-    const killsToDef = computeKills(b.attacker, b.defender, k, dt, wallMult);
-    const killsToAtk = computeKills(b.defender, b.attacker, k, dt, 1);
-
-    b.defenderPending = applyKills(b.defender, killsToDef + b.defenderPending);
-    b.attackerPending = applyKills(b.attacker, killsToAtk + b.attackerPending);
+    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）。绞马索属于
+    // 携带方的效果，只对承伤方骑兵防御生效；驻城守军没有携带宝物清单，
+    // 不会错误继承守方城内宝库效果。
+    const attackerCavalryDefMult = this.enemyCavalryDefMultiplier(Object.values(b.contributions).flatMap((c) => c.treasures ?? []));
+    const defenderCavalryDefMult = this.enemyCavalryDefMultiplier(b.defenderContribution?.treasures ?? []);
+    const result = simulateCombatTick({
+      attacker: b.attacker,
+      defender: b.defender,
+      attackerPending: b.attackerPending,
+      defenderPending: b.defenderPending,
+      combatStrength: k,
+      dt,
+      defenderWallMultiplier: wallMult,
+      attackerCavalryDefMultiplier: attackerCavalryDefMult,
+      defenderCavalryDefMultiplier: defenderCavalryDefMult,
+    });
+    b.attacker = result.attacker;
+    b.defender = result.defender;
+    b.attackerPending = result.attackerPending;
+    b.defenderPending = result.defenderPending;
 
     const atkAlive = totalCount(b.attacker);
     const defAlive = totalCount(b.defender);
 
-    const attackerAfter = aggregateCounts(b.attacker);
-    const defenderAfter = aggregateCounts(b.defender);
+    const attackerAfter = result.attackerAfter;
+    const defenderAfter = result.defenderAfter;
     b.rounds.push({
       round: b.ticks,
-      attackerLosses: countDelta(attackerBefore, attackerAfter),
-      defenderLosses: countDelta(defenderBefore, defenderAfter),
+      attackerLosses: countDelta(result.attackerBefore, attackerAfter),
+      defenderLosses: countDelta(result.defenderBefore, defenderAfter),
       attacker: attackerAfter,
       defender: defenderAfter,
     });
 
     // 每10 tick 记录一次兵力变化（避免刷屏）
     if (b.ticks % 10 === 0) {
-      log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(killsToDef * 100) / 100, killsToAtk: Math.round(killsToAtk * 100) / 100 });
+      log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(result.killsToDefender * 100) / 100, killsToAtk: Math.round(result.killsToAttacker * 100) / 100 });
     }
 
     if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= MAX_TICKS) {
-      await this.finish(b);
+      await this.beginResolution(b);
       return;
     }
 
@@ -532,8 +508,8 @@ export class CombatModule {
       this.emitToParties(b, 'combat.BattleTick', (villageId, side) => ({
         villageId, side, battleId: id,
         attacker: attackerAfter, defender: defenderAfter,
-        attackerLosses: b.rounds[b.rounds.length - 1].attackerLosses,
-        defenderLosses: b.rounds[b.rounds.length - 1].defenderLosses,
+        attackerLosses: b.rounds[b.rounds.length - 1]!.attackerLosses,
+        defenderLosses: b.rounds[b.rounds.length - 1]!.defenderLosses,
         round: b.ticks,
       }));
     }
@@ -541,49 +517,46 @@ export class CombatModule {
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
   }
 
+  /** 取一方携带的最强敌方骑兵防御削弱；同一件独特宝物不会重复叠乘。 */
+  private enemyCavalryDefMultiplier(codes: string[]): number {
+    let multiplier = 1;
+    for (const code of codes) {
+      const treasure = this.config.treasures[code];
+      if (!treasure || treasure.effectType !== 'enemyCavalryDef') continue;
+      multiplier = Math.min(multiplier, Math.max(0, 1 - treasure.effectValue / 100));
+    }
+    return multiplier;
+  }
+
+  /** 进入可恢复结算状态；结算失败时保留 battle 记录，重启后由 resume() 继续。 */
+  private async beginResolution(b: Battle): Promise<void> {
+    if (b.status !== 'active') return;
+    b.status = 'resolving';
+    b.resolution ??= { id: `${b.id}:${b.startedAt}`, step: 'apply_domain', startedAt: this.now() };
+    this.store.set(COLLECTION, b.id, b);
+    await this.finish(b);
+  }
+
+  private async resumeResolution(id: string): Promise<void> {
+    const battle = this.load(id);
+    if (!battle || battle.status !== 'resolving') return;
+    await this.finish(battle);
+  }
+
   /** 结算：算损失/幸存/战利品 → 发 Command 让 owner 改状态 → 发 Event 出战报与返程信息。 */
   private async finish(b: Battle): Promise<void> {
-    b.status = 'ended';
+    b.status = 'resolving';
+    b.resolution ??= { id: `${b.id}:${b.startedAt}`, step: 'apply_domain', startedAt: this.now() };
     this.store.set(COLLECTION, b.id, b);
 
+    const settlementPlan = buildSettlementPlan(b);
     const defAlive = totalCount(b.defender);
-    const attackerWins = defAlive <= 0;
+    const attackerWins = b.resolution.attackerWins ?? settlementPlan.attackerWins;
+    b.resolution.attackerWins = attackerWins;
 
     // 防守方实际损失（原始 - 现存）。内部快照按来源命名空间，
     // 同时生成按兵种聚合的战报数据和按来源扣兵数据。
-    const defenderLosses: Record<string, number> = {};
-    const defenderLossesByMovement: Record<string, Record<string, number>> = {};
-    const residentDefenderLosses: Record<string, number> = {};
-    for (const [key, orig] of Object.entries(b.defenderOriginal)) {
-      const dead = orig - (b.defender[key]?.count ?? 0);
-      if (dead <= 0) continue;
-      const split = key.indexOf('#');
-      const sourceId = split >= 0 ? key.slice(0, split) : `resident:${b.targetId}`;
-      const code = split >= 0 ? key.slice(split + 1) : key;
-      defenderLosses[code] = (defenderLosses[code] ?? 0) + dead;
-      const source = b.defenderContributions?.[sourceId];
-      if (source?.movementId) {
-        const sourceLosses = defenderLossesByMovement[source.movementId] ?? {};
-        sourceLosses[code] = (sourceLosses[code] ?? 0) + dead;
-        defenderLossesByMovement[source.movementId] = sourceLosses;
-      } else {
-        residentDefenderLosses[code] = (residentDefenderLosses[code] ?? 0) + dead;
-      }
-    }
-
-    // 进攻方按 code 聚合的损失（战报用）
-    const attackerLosses: Record<string, number> = {};
-    for (const [cid, contrib] of Object.entries(b.contributions)) {
-      for (const [code, orig] of Object.entries(contrib.troops)) {
-        const alive = b.attacker[`${cid}#${code}`]?.count ?? 0;
-        const dead = orig - alive;
-        if (dead > 0) attackerLosses[code] = (attackerLosses[code] ?? 0) + dead;
-      }
-    }
-
-    // 进攻方总幸存载货能力（决定能搬多少）
-    let totalCarry = 0;
-    for (const u of Object.values(b.attacker)) totalCarry += u.count * u.carry;
+    const { attackerLosses, defenderLosses, defenderLossesByMovement, residentDefenderLosses, totalCarry } = settlementPlan;
 
     log('战斗结束', { battleId: b.id, ticks: b.ticks, attackerWins, atkAlive: totalCount(b.attacker), defAlive, attackerLosses, defenderLosses, totalCarry });
 
@@ -594,7 +567,8 @@ export class CombatModule {
       return;
     }
 
-    // 应用防守方损失 + 取战利品
+    // 应用防守方损失 + 取战利品。完成后先持久化域状态结果，
+    // 后续战报/返程失败时可以从同一份结算快照继续，不会重新规划战利品。
     let looted: Record<string, number> = {};
     let storedLoot: Record<string, number> = {};
     let buildingLoot: Record<string, number> = {};
@@ -602,7 +576,8 @@ export class CombatModule {
     let campCleared = false;
     let isTaskCamp = false;
     let isNoRespawn = false;
-    if (b.targetKind === 'pve') {
+    const shouldApplyDomain = b.resolution.step === 'apply_domain';
+    if (shouldApplyDomain && b.targetKind === 'pve') {
       const apply = await this.commands.send({
         name: 'pve.ApplyResult', from: CombatModule.NAME,
         payload: {
@@ -626,7 +601,7 @@ export class CombatModule {
       if (campCleared && attackerWins && isNoRespawn) {
         await this.commands.send({ name: 'pve.Remove', from: CombatModule.NAME, payload: { id: b.targetId } });
       }
-    } else {
+    } else if (shouldApplyDomain) {
       // PvP：扣防守方兵力
       if (Object.keys(residentDefenderLosses).length) {
         const delta: Record<string, number> = {};
@@ -716,9 +691,34 @@ export class CombatModule {
       log('PvP 结算', { target: b.targetId, battleType, buildingDamage, buildingLoot, storedLoot, looted });
     }
 
+    if (!shouldApplyDomain) {
+      looted = b.resolution.looted ?? {};
+      storedLoot = b.resolution.storedLoot ?? {};
+      buildingLoot = b.resolution.buildingLoot ?? {};
+      buildingDamage = b.resolution.buildingDamage ?? [];
+      campCleared = !!b.resolution.campCleared;
+      isTaskCamp = !!b.resolution.isTaskCamp;
+      isNoRespawn = !!b.resolution.isNoRespawn;
+    } else {
+      b.resolution.looted = looted;
+      b.resolution.storedLoot = storedLoot;
+      b.resolution.buildingLoot = buildingLoot;
+      b.resolution.buildingDamage = buildingDamage;
+      b.resolution.campCleared = campCleared;
+      b.resolution.isTaskCamp = isTaskCamp;
+      b.resolution.isNoRespawn = isNoRespawn;
+      b.resolution.attackerLosses = attackerLosses;
+      b.resolution.defenderLosses = defenderLosses;
+      b.resolution.step = 'emit_attacker_reports';
+      b.resolution.attackerReportIndex ??= 0;
+      this.store.set(COLLECTION, b.id, b);
+    }
+
     const totalLootCarry = totalCarry || 1;
     const reportBase = {
       attackerWins,
+      resolutionId: b.resolution.id,
+      phase: 'resolved' as const,
       attackPower: Math.round(b.attackPower0),
       defensePower: Math.round(b.defensePower0),
       attackerLosses,
@@ -751,7 +751,9 @@ export class CombatModule {
     const remainingDefenderLosses = { ...defenderLosses };
 
     // 每支来攻部队：算各自幸存兵力 + 按载货比例分战利品 → 发结束事件（Movement 据此返程）
+    const attackerReportStart = b.resolution.attackerReportIndex ?? 0;
     for (const [index, [cid, contrib]] of contributionEntries.entries()) {
+      if (index < attackerReportStart) continue;
       const survivors: Record<string, number> = {};
       const attackerLossesForVillage: Record<string, number> = {};
       let carry = 0;
@@ -810,7 +812,12 @@ export class CombatModule {
           survivors, loot: share, looted: share, treasures: contrib.treasures, deployedTroops: contrib.troops, defenderLossesAttributed, npcService: !!contrib.npcService, kingdomMercenary: !!contrib.kingdomMercenary, returnPveId: contrib.returnPveId, ...reportBase,
         },
       } as DomainEvent);
+      b.resolution.attackerReportIndex = index + 1;
+      this.store.set(COLLECTION, b.id, b);
     }
+
+    b.resolution.step = 'emit_defender_report';
+    this.store.set(COLLECTION, b.id, b);
 
     // 防守方玩家（村庄战）收一份战报 + 登记战死即时回收
     if (b.targetKind === 'village') {
@@ -844,6 +851,8 @@ export class CombatModule {
   /** 野战结算：双方同等对待，各自处理伤亡回收，然后发 BattleEnded（targetKind:'field'）给双方。 */
   private async finishField(b: Battle, attackerLosses: Record<string, number>, defenderLosses: Record<string, number>, attackerWins: boolean): Promise<void> {
     const reportBase = {
+      resolutionId: b.resolution?.id,
+      phase: 'resolved' as const,
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
       attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, battleType: b.battleType,
       battleLabel: b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
@@ -935,328 +944,12 @@ export class CombatModule {
   }
 }
 
-// ───────────────── 纯计算辅助（无状态，作用于快照） ─────────────────
-
-/** 某特性效果在一个单位上的累计倍率（1 + Σvalue）。 */
-function traitMult(u: CombatUnit, effect: TraitEffect): number {
-  let m = 1;
-  for (const t of u.traits ?? []) if (t.effect === effect) m += t.value;
-  return m;
-}
-
-/** 该阵营是否还有存活的某形态兵。 */
-function hasAliveForm(snap: Snapshot, form: 'melee' | 'ranged'): boolean {
-  for (const u of Object.values(snap)) if (u.form === form && u.count > 0) return true;
-  return false;
-}
-
-/** 阵营总兵力。 */
-function totalCount(snap: Snapshot): number {
-  let n = 0;
-  for (const u of Object.values(snap)) n += u.count;
-  return n;
-}
-
-/** 粗略总战力（战报展示用：count×(近攻+远攻)）。 */
-function totalPower(snap: Snapshot): number {
-  let p = 0;
-  for (const u of Object.values(snap)) p += u.count * (u.meleeAtk + u.rangedAtk);
-  return p;
-}
-
-/** 复制并放大攻击字段；防御、速度和运力不受伏击加成影响。 */
-function applyAmbushBonus(unit: CombatUnit, bonus: number): CombatUnit {
-  const mult = 1 + Math.max(0, Number(bonus) || 0);
-  return { ...unit, meleeAtk: unit.meleeAtk * mult, rangedAtk: unit.rangedAtk * mult };
-}
-
-function applyAmbushSnapshot(snap: Snapshot, bonus: number): Snapshot {
-  return Object.fromEntries(Object.entries(snap).map(([code, unit]) => [code, applyAmbushBonus(unit, bonus)]));
-}
-
-/** 只保留攻城武器（兵种表以 workshop 为训练建筑；代码命名兼容三族器械）。 */
-function filterSiegeWeapons(snap: Snapshot): Snapshot {
-  const out: Snapshot = {};
-  for (const [key, unit] of Object.entries(snap)) {
-    const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
-    if (/ram|catapult|trebuchet/i.test(code)) out[key] = unit;
-  }
-  return out;
-}
-
-/** 去除攻城武器，供普通部队建筑破坏结算；攻城武器不能重复计入破坏战力。 */
-function filterNonSiegeWeapons(snap: Snapshot): Snapshot {
-  const out: Snapshot = {};
-  for (const [key, unit] of Object.entries(snap)) {
-    const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
-    if (!/ram|catapult|trebuchet/i.test(code)) out[key] = unit;
-  }
-  return out;
-}
-
-function mergeResources(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
-  const out = { ...a };
-  for (const [key, value] of Object.entries(b)) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) out[key] = (out[key] ?? 0) + n;
-  }
-  return out;
-}
-
-/** 从攻城战可掠夺存量中扣除保险库保护额；保护额不会形成负数库存。 */
-export function subtractProtected(
-  resources: Record<string, number>,
-  protectedAmount: Record<string, number>,
-): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(resources)) {
-    const available = Math.max(0, Number(value) || 0);
-    const safe = Math.max(0, Number(protectedAmount[key]) || 0);
-    out[key] = Math.max(0, available - safe);
-  }
-  return out;
-}
-
-const BASIC_LOOT_RESOURCES = ['wood', 'clay', 'iron', 'crop'] as const;
-
-type LootPlan = {
-  /** 从仓库/粮仓实际扣除的战利品。 */
-  stored: Record<string, number>;
-  /** 从被拆建筑收益中带回的战利品（建筑状态本身不扣资源）。 */
-  building: Record<string, number>;
-  /** 两种来源合计，供战报/返程使用。 */
-  looted: Record<string, number>;
-};
-
-/**
- * 规划 PvP 战利品装载：金币优先，四种基础资源在各自来源内尽量平均。
- *
- * 仓储来源优先于建筑来源只针对四种基础资源；仓储不足时才用建筑拆除收益补齐。
- * 返回值中的 stored 只能传给 economy.TakeLoot，避免把建筑收益误扣到守方库存。
- */
-export function planPvpLoot(
-  storedAvailable: Record<string, number>,
-  buildingLoot: Record<string, number>,
-  carry: number,
-): LootPlan {
-  const stored: Record<string, number> = {};
-  const building: Record<string, number> = {};
-  let remaining = Math.max(0, Math.floor(Number(carry) || 0));
-
-  // 金币无仓储上限，但仍占用部队的单位运力；仓库金币优先于建筑拆除所得金币。
-  const storedGold = positiveInt(storedAvailable.gold);
-  const storedGoldTake = Math.min(storedGold, remaining);
-  if (storedGoldTake > 0) stored.gold = storedGoldTake;
-  remaining -= storedGoldTake;
-
-  const buildingGold = positiveInt(buildingLoot.gold);
-  const buildingGoldTake = Math.min(buildingGold, remaining);
-  if (buildingGoldTake > 0) building.gold = buildingGoldTake;
-  remaining -= buildingGoldTake;
-
-  // 四种资源先平均取仓储战利品，再用剩余运力平均取建筑拆除收益。
-  const storedBasic = allocateAverage(storedAvailable, remaining);
-  mergeInto(stored, storedBasic);
-  remaining -= sumResources(storedBasic);
-
-  const buildingBasic = allocateAverage(buildingLoot, remaining);
-  mergeInto(building, buildingBasic);
-
-  return {
-    stored,
-    building,
-    looted: mergeResources(building, stored),
-  };
-}
-
-function positiveInt(value: unknown): number {
-  const n = Math.floor(Number(value) || 0);
-  return Math.max(0, n);
-}
-
-/** 在给定来源中按四种资源尽量等量分配有限运力，短缺资源会让位给其他资源。 */
-function allocateAverage(source: Record<string, number>, carry: number): Record<string, number> {
-  const available: Record<string, number> = {};
-  for (const key of BASIC_LOOT_RESOURCES) available[key] = positiveInt(source[key]);
-  const out: Record<string, number> = {};
-  let remaining = Math.max(0, Math.floor(Number(carry) || 0));
-
-  while (remaining > 0) {
-    const active = BASIC_LOOT_RESOURCES.filter((key) => (available[key] ?? 0) > (out[key] ?? 0));
-    if (active.length === 0) break;
-    const share = Math.floor(remaining / active.length);
-    if (share <= 0) {
-      // 不足一轮时逐个补齐，结果仍保持四种资源数量差不超过 1（受库存短缺约束）。
-      for (const key of active) {
-        if (remaining <= 0) break;
-        if ((out[key] ?? 0) < (available[key] ?? 0)) {
-          out[key] = (out[key] ?? 0) + 1;
-          remaining -= 1;
-        }
-      }
-      continue;
-    }
-    for (const key of active) {
-      if (remaining <= 0) break;
-      const room = (available[key] ?? 0) - (out[key] ?? 0);
-      const take = Math.min(room, share);
-      if (take > 0) {
-        out[key] = (out[key] ?? 0) + take;
-        remaining -= take;
-      }
-    }
-  }
-  return out;
-}
-
-function mergeInto(target: Record<string, number>, source: Record<string, number>): void {
-  for (const [key, value] of Object.entries(source)) target[key] = (target[key] ?? 0) + value;
-}
-
-function sumResources(resources: Record<string, number>): number {
-  return Object.values(resources).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-}
-
-function scaleResources(resources: Record<string, number>, ratio: number): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(resources)) {
-    const n = Math.floor(Math.max(0, Number(value) || 0) * Math.max(0, ratio));
-    if (n > 0) out[key] = n;
-  }
-  return out;
-}
-
-/** 按 code 聚合数量（去掉贡献命名空间前缀），用于推送/展示。 */
-function aggregateCounts(snap: Snapshot): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, u] of Object.entries(snap)) {
-    if (u.count <= 0) continue;
-    const code = key.includes('#') ? key.slice(key.indexOf('#') + 1) : key;
-    out[code] = (out[code] ?? 0) + u.count;
-  }
-  return out;
-}
-
 /** 把一支增援部队的兵种数量并入战报阵容。 */
 function mergeCounts(target: Record<string, number>, source: Record<string, number>): void {
   for (const [code, count] of Object.entries(source)) target[code] = (target[code] ?? 0) + count;
 }
 
-/**
- * 战斗运算仍保留完整逐轮状态直到结算，但对外战报只发送固定数量的均匀采样。
- * 首尾轮始终保留；totalRounds 由调用方单独下发，客户端可明确标注这是关键轮次回放。
- */
-function sampleBattleRounds<T>(rounds: T[]): T[] {
-  if (rounds.length <= MAX_REPLAY_ROUNDS) return rounds;
-  const sampled: T[] = [];
-  let previous = -1;
-  for (let i = 0; i < MAX_REPLAY_ROUNDS; i++) {
-    const index = Math.round((i * (rounds.length - 1)) / (MAX_REPLAY_ROUNDS - 1));
-    if (index !== previous) sampled.push(rounds[index]);
-    previous = index;
-  }
-  return sampled;
-}
-
-/** 计算一轮中各兵种实际减少的数量（只记录正数）。 */
-function countDelta(before: Record<string, number>, after: Record<string, number>): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const code of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const lost = (before[code] ?? 0) - (after[code] ?? 0);
-    if (lost > 0) out[code] = lost;
-  }
-  return out;
-}
-
-/**
- * A 阵营这一 tick 对 B 阵营造成的击杀数（§4.3 攻击力选择 + §4.4 承伤公式）。
- * defWallMult：防守方城墙倍率（>1 表示更耐打），只在 B 是防守方时>1。
- */
-function computeKills(A: Snapshot, B: Snapshot, k: number, dt: number, defWallMult: number): number {
-  const aMelee = hasAliveForm(A, 'melee');
-  const bMelee = hasAliveForm(B, 'melee');
-
-  let meleeDmg = 0;
-  let rangedDmg = 0;
-  for (const u of Object.values(A)) {
-    if (u.count <= 0) continue;
-    if (u.form === 'melee') {
-      meleeDmg += u.count * u.meleeAtk * traitMult(u, 'atk_melee');
-    } else {
-      // 远程兵：己方近战在→放后排(rangedAtk)；己方近战没了但敌方近战在→被迫肉搏(meleeAtk)；都没近战→对射(rangedAtk)
-      if (aMelee || !bMelee) rangedDmg += u.count * u.rangedAtk * traitMult(u, 'atk_ranged');
-      else meleeDmg += u.count * u.meleeAtk * traitMult(u, 'atk_melee');
-    }
-  }
-  if (meleeDmg <= 0 && rangedDmg <= 0) return 0;
-
-  // B 的当前承伤排：前排(melee)还活着就打前排，否则打后排(ranged)
-  const targetForm: 'melee' | 'ranged' = bMelee ? 'melee' : 'ranged';
-  let rowCount = 0;
-  let effMeleeHP = 0; // 该排对近战的等效耐久
-  let effRangedHP = 0; // 该排对远程的等效耐久
-  const priority = Object.values(B).some((u) => u.ambushPriority && u.count > 0);
-  for (const u of Object.values(B)) {
-    if (u.form !== targetForm || u.count <= 0 || (priority && !u.ambushPriority)) continue;
-    rowCount += u.count;
-    effMeleeHP += u.count * u.meleeDef * traitMult(u, 'def_melee') / Math.max(0.05, traitMult(u, 'dmg_taken_melee'));
-    effRangedHP += u.count * u.rangedDef * traitMult(u, 'def_ranged') / Math.max(0.05, traitMult(u, 'dmg_taken_ranged'));
-  }
-  if (rowCount <= 0) return 0;
-
-  const mDefAvg = Math.max(0.5, (effMeleeHP / rowCount) * defWallMult);
-  const rDefAvg = Math.max(0.5, (effRangedHP / rowCount) * defWallMult);
-
-  return k * dt * (meleeDmg / mDefAvg + rangedDmg / rDefAvg);
-}
-
-/**
- * 把 killsFloat 击杀数摊到承伤排各兵种上并扣减，返回剩余的分数击杀(<1，留到下tick)。
- * 承伤排=前排(melee)若还有活兵，否则后排(ranged)。
- */
-function applyKills(snap: Snapshot, killsFloat: number): number {
-  const n = Math.floor(killsFloat);
-  const frac = killsFloat - n;
-  if (n <= 0) return killsFloat;
-
-  const targetForm: 'melee' | 'ranged' = hasAliveForm(snap, 'melee') ? 'melee' : 'ranged';
-  const priority = Object.values(snap).some((u) => u.ambushPriority && u.count > 0);
-  const row = Object.entries(snap).filter(([, u]) => u.form === targetForm && u.count > 0 && (!priority || u.ambushPriority));
-  const rowCount = row.reduce((a, [, u]) => a + u.count, 0);
-  if (rowCount <= 0) return frac;
-
-  // 击杀数 >= 整排 → 整排清空
-  if (n >= rowCount) {
-    for (const [, u] of row) u.count = 0;
-    pruneZero(snap);
-    return frac;
-  }
-
-  // 按数量比例分配，最大余数法保证正好击杀 n 个
-  const alloc = row.map(([key, u]) => {
-    const exact = (n * u.count) / rowCount;
-    return { key, u, base: Math.floor(exact), rem: exact - Math.floor(exact) };
-  });
-  let assigned = alloc.reduce((a, x) => a + x.base, 0);
-  alloc.sort((x, y) => y.rem - x.rem);
-  let i = 0;
-  while (assigned < n) {
-    const a = alloc[i % alloc.length];
-    if (a.base < a.u.count) { a.base += 1; assigned += 1; }
-    i += 1;
-    if (i > alloc.length * 3) break; // 兜底防呆
-  }
-  for (const a of alloc) a.u.count = Math.max(0, a.u.count - a.base);
-  pruneZero(snap);
-  return frac;
-}
-
-/** 移除数量归零的条目。 */
-function pruneZero(snap: Snapshot): void {
-  for (const [key, u] of Object.entries(snap)) if (u.count <= 0) delete snap[key];
-}
-
-/** 日志用：快照摘要，列出每兵种数量+关键战斗属性+特性名。 */
+  /** 日志用：快照摘要，列出每兵种数量+关键战斗属性+特性名。 */
 function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
   return Object.entries(snap).map(([key, u]) => ({
     code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,

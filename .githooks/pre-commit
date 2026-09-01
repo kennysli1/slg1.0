@@ -1,3 +1,3 @@
 #!/bin/sh
-# 快速确认提交快照；完整闸门由 commit-msg 在格式校验后执行，避免无效说明浪费数分钟。
-exec node scripts/commit-snapshot.mjs
+# 只做 Git 暂存内容的格式快检；快照/作者检查由 commit-msg 调用的 commit-gate 统一执行一次。
+exec git diff --cached --check

@@ -69,7 +69,7 @@ test('GM 修改玩家村庄坐标时同步移动 World 地块', async () => {
     assert.equal(response.statusCode, 200, response.body);
     const moved = await app.commands.send({ name: 'world.GetTileByRef', from: 'test', payload: { refId: 'v-gm-sync', kind: 'village' } });
     assert.equal(moved.ok, true);
-    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'bld_main' });
+    assert.deepEqual((moved.payload as any).tile, { q: 17, r: 35, kind: 'village', refId: 'v-gm-sync', name: '测试村', icon: 'map_player_village_lv1' });
     const previous = await app.commands.send({ name: 'world.GetTile', from: 'test', payload: { q: 12, r: 14 } });
     assert.equal(previous.ok, true);
     assert.equal((previous.payload as any).tile.kind, 'empty');
@@ -211,6 +211,10 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /forest_vision_penalty/, 'GM 页面应提供森林视野参数');
     assert.match(res.body, /hills_vision_bonus/, 'GM 页面应提供丘陵视野参数');
     assert.match(res.body, /hills_march_speed_multiplier/, 'GM 页面应提供丘陵行军速度参数');
+    assert.match(res.body, /军队规模行军参数/, 'GM 页面应提供军队规模减速参数板块');
+    assert.match(res.body, /march_size_reference_pop/, 'GM 页面应提供规模免惩罚人口基准');
+    assert.match(res.body, /march_size_penalty/, 'GM 页面应提供规模减速系数');
+    assert.match(res.body, /march_size_min_multiplier/, 'GM 页面应提供规模减速最低速度比例');
     assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
     assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
     assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
@@ -220,6 +224,10 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /kingdom_pve_retaliation_raid_threshold/, 'GM 页面应提供封地掠夺阈值');
     assert.match(res.body, /kingdom_pve_retaliation_siege_threshold/, 'GM 页面应提供封地攻城阈值');
     assert.match(res.body, /kingdom_fief_mercenary_min_ratio/, 'GM 页面应提供封地雇佣军比例参数');
+    assert.match(res.body, /猎马人 \/ 绞马索参数/, '配置中心应提供猎马人专用参数板块');
+    assert.match(res.body, /o-s5 \/ quest_objectives\.params/, '配置中心应提供猎马人目标人口编辑项');
+    assert.match(res.body, /horse_rope \/ effectValue/, '配置中心应提供绞马索防御削弱编辑项');
+    assert.match(res.body, /onHorseHunterTargetEdit/, '猎马人目标人口应按 cavalry:<数量> 写回任务目标参数');
     const renderStart = res.body.indexOf('function render()');
     const reputationCall = res.body.indexOf('html += sectionReputation();', renderStart);
     const terrainCall = res.body.indexOf('html += sectionTerrain();', renderStart);
@@ -269,12 +277,20 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     const center = await fastify.inject({ method: 'GET', url: '/config' });
     assert.equal(center.statusCode, 200);
     assert.match(center.body, /配置中心（CSV）/);
+    assert.match(center.body, /需要确认的配置冲突/);
+    assert.match(center.body, /\/config\/sync\/conflicts/);
+    assert.match(center.body, /确认全部文件并更新 PR/);
+    const centerScript = center.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(centerScript, '配置中心首页应包含初始化脚本');
+    assert.doesNotThrow(() => new Function(centerScript), '配置中心首页脚本必须是合法 JavaScript');
     const page = await fastify.inject({ method: 'GET', url: '/config/quest-modules' });
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /\/config\/quest-modules\/data/);
     const status = await fastify.inject({ method: 'GET', url: '/config/status' });
     assert.equal(status.statusCode, 200);
     assert.equal(JSON.parse(status.body).ok, true);
+    assert.equal(JSON.parse(status.body).syncState, 'idle');
+    assert.equal(JSON.parse(status.body).pullRequest, null);
     const sync = await fastify.inject({ method: 'POST', url: '/config/sync' });
     assert.equal(sync.statusCode, 200);
     assert.equal(JSON.parse(sync.body).ok, true);
@@ -300,13 +316,14 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
     assert.equal(modulesRes.statusCode, 200);
     const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
     assert.equal(modules.ok, true);
-    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 6);
+    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 8);
     assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
     const graphRes = await fastify.inject({ method: 'GET', url: '/config/quest-graph/data' });
     assert.equal(graphRes.statusCode, 200);
     const graph = JSON.parse(graphRes.body) as { ok: boolean; graph?: { quests: Record<string, unknown>; edges: unknown[] } };
     assert.equal(graph.ok, true);
     assert.ok(graph.graph?.quests.s2, '关系图必须包含耀武扬威');
+    assert.ok(graph.graph?.quests.s5, '关系图必须包含猎马人');
     assert.ok((graph.graph?.edges.length ?? 0) >= 5);
     await fastify.close();
   } finally {
@@ -315,16 +332,18 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
   }
 });
 
-test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', async () => {
+test('/config/dialogues 保存空回复和删除段落，并拒绝未知任务绑定', async () => {
   const prev = process.env.GM_TOKEN;
   delete process.env.GM_TOKEN;
   const root = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
   const tempConfig = join(root, 'config');
+  const dataDir = join(root, 'data');
   try {
     const seed = buildFastify();
     cpSync(seed.app.configDir, tempConfig, { recursive: true });
     await seed.fastify.close();
-    const { fastify, app } = buildFastify(undefined, tempConfig);
+    mkdirSync(dataDir, { recursive: true });
+    const { fastify, app } = buildFastify(join(dataDir, 'game.json'), tempConfig);
     await fastify.ready();
     const page = await fastify.inject({ method: 'GET', url: '/config/dialogues' });
     assert.equal(page.statusCode, 200);
@@ -336,6 +355,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(page.body, /match\(\/\\d\+\|\\D\+\/g\)/, '对话编辑器自然排序必须保留数字匹配正则');
     assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
     assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
+    assert.match(page.body, /r\.trigger==='deliver'.*take:收下/, '新增 deliver 对话段落应默认提供收下回复');
     assert.match(page.body, /\{villageName\}/, '对话编辑器应说明村庄变量');
     assert.match(page.body, /\{fiefName\}/, '对话编辑器应说明封地变量');
     const data = await fastify.inject({ method: 'GET', url: '/config/dialogues/data' });
@@ -372,6 +392,7 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(byKey.get('m7_accept:1')?.npcText ?? '', /社会的进步离不开科技的发展/);
     assert.match(byKey.get('m8_accept:1')?.npcText ?? '', /携款潜逃的畜生/);
     assert.match(byKey.get('m8_deliver:1')?.npcText ?? '', /英明的战略决策/);
+    assert.equal(byKey.get('m8_deliver:1')?.replies, 'take:收下', '交付对话应在配置中心提供收下回复');
     assert.match(byKey.get('m9_accept:1')?.npcText ?? '', /乘胜追击/);
     assert.match(byKey.get('m9_deliver:1')?.npcText ?? '', /洗劫干净/);
     assert.equal(byKey.get('m8_deliver_success:1'), undefined);
@@ -381,12 +402,34 @@ test('/config/dialogues 编辑器返回 S3 对话并拒绝未知任务绑定', a
     assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{villageName\}/, '配置中心应保存 M12 村庄变量');
     assert.match(byKey.get('m12_accept:1')?.npcText ?? '', /\{fiefName\}/, '配置中心应保存 M12 封地变量');
     assert.doesNotMatch(byKey.get('m12_accept:1')?.npcText ?? '', /\{封地\}/, '配置中心不应保存中文封地占位符');
+    const m11Segment2 = parsed.rows.find((row) => row.code === 'm11_deliver' && row.segment === '2');
+    assert.ok(m11Segment2, '测试需要 M11 交付第二段');
+    m11Segment2.replies = '';
     const saved = await fastify.inject({
       method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows: parsed.rows }),
     });
     assert.equal(saved.statusCode, 200, saved.body);
     assert.match(app.config.dialogues['m12_accept:1']?.npcText ?? '', /\{fiefName\}/, '保存后服务端热重载仍应保留变量');
+    assert.equal(app.config.dialogues['m11_deliver:2']?.replies.length, 0, '空 replies 应立即热重载');
+    const sharedDialogues = parseCsvStructured(readFileSync(join(dataDir, 'config', 'dialogues.csv'), 'utf8'));
+    assert.equal(sharedDialogues.rows.find((row) => row.code === 'm11_deliver' && row.segment === '2')?.replies, '',
+      '共享 CSV 必须保存配置中心的明确空值');
+    const deleted = await fastify.inject({
+      method: 'POST', url: '/config/dialogues/save', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        rows: parsed.rows.filter((row) => !(row.code === 'm11_deliver' && row.segment === '2')),
+      }),
+    });
+    assert.equal(deleted.statusCode, 200, deleted.body);
+    assert.equal(app.config.dialogues['m11_deliver:2'], undefined, '删除的段落应立即从运行时配置移除');
+    const tombstones = JSON.parse(readFileSync(join(dataDir, 'config', 'config_row_tombstones.json'), 'utf8')) as {
+      version: number;
+      tables: Record<string, string[][]>;
+    };
+    assert.equal(tombstones.version, 1);
+    assert.ok(tombstones.tables['dialogues.csv']?.some((values) => values[0] === 'm11_deliver' && values[1] === '2'),
+      '配置中心删除段落必须写入持久化删除记录');
     const configured = new Set(parsed.rows.map((row) => `${row.taskCode}:${row.trigger}`));
     for (const code of ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 's1', 's2', 's3', 's4']) {
       assert.ok(configured.has(`${code}:accept`), `GM 对话表应预置 ${code} 接取模板`);
@@ -438,7 +481,7 @@ test('配置中心：新增支线任务时自动补齐空白接取/交付对话�
     assert.equal(save.statusCode, 200, save.body);
     const dialogues = parseCsvStructured(readFileSync(join(tempConfig, 'dialogues.csv'), 'utf8'));
     assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_accept' && row.taskCode === 's_future_test' && row.trigger === 'accept'));
-    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver'));
+    assert.ok(dialogues.rows.some((row) => row.code === 's_future_test_deliver' && row.taskCode === 's_future_test' && row.trigger === 'deliver' && row.replies === 'take:收下'));
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
@@ -681,6 +724,32 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(Number(foundingBase?.value), 4321, 'balance/data 应返回修改后的拓荒基础成本');
     assert.equal(Number(foundingGrowth?.value), 1.5, 'balance/data 应返回修改后的拓荒成本倍率');
 
+    const marchSizeSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: {
+        march_size_reference_pop: { value: '30' },
+        march_size_penalty: { value: '0.002' },
+        march_size_min_multiplier: { value: '0.5' },
+      } }),
+    });
+    assert.equal(marchSizeSave.statusCode, 200, `规模减速参数覆盖应成功：${marchSizeSave.body}`);
+    assert.equal(app.config.constants.marchSizeReferencePop, 30, '规模免惩罚人口基准应热重载');
+    assert.equal(app.config.constants.marchSizePenalty, 0.002, '规模减速系数应热重载');
+    assert.equal(app.config.constants.marchSizeMinMultiplier, 0.5, '规模减速下限应热重载');
+    const marchSizeData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    for (const [key, value] of [
+      ['march_size_reference_pop', 30],
+      ['march_size_penalty', 0.002],
+      ['march_size_min_multiplier', 0.5],
+    ] as const) {
+      const row = (marchSizeData.constants ?? []).find((r) => r.key === key);
+      assert.equal(Number(row?.value), value, `balance/data 应返回修改后的 ${key}`);
+    }
+
     const reputationData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       kingdom_services?: Array<Record<string, unknown>>;
       treasures?: Array<Record<string, unknown>>;
@@ -706,6 +775,25 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(app.config.quests.m12.rewards.reputation, 6, '任务声望调整应热重载');
     assert.equal(app.config.quests.m15.objective.threshold, -6, '任务声望目标阈值应热重载');
 
+    const horseHunterSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        quest_objectives: { 'o-s5': { params: 'cavalry:60' } },
+        treasures: { '28': { effectValue: '35' } },
+      }),
+    });
+    assert.equal(horseHunterSave.statusCode, 200, `猎马人/绞马索参数覆盖应成功：${horseHunterSave.body}`);
+    assert.equal(app.config.quests.s5.objective.count, 60, '猎马人目标人口应热重载');
+    assert.equal(app.config.treasures.horse_rope.effectValue, 35, '绞马索防御削弱应热重载');
+    const savedHorseObjective = parseCsvStructured(readFileSync(join(app.configDir, 'quest_objectives.csv'), 'utf8'))
+      .rows.find((row) => row.id === 'o-s5');
+    const savedHorseRope = parseCsvStructured(readFileSync(join(app.configDir, 'treasures.csv'), 'utf8'))
+      .rows.find((row) => row.code === 'horse_rope');
+    assert.equal(savedHorseObjective?.params, 'cavalry:60', '猎马人目标人口必须写回任务目标 CSV');
+    assert.equal(savedHorseRope?.effectValue, '35', '绞马索效果值必须写回宝物 CSV');
+
     await fastify.close();
     // 模拟删档/重启：game.json 会换新，但同一 configDir 和共享 CSV 必须继续作为默认值。
     const restarted = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath: join(dataDir, 'fresh-game.json'), configDir: tempConfig });
@@ -713,6 +801,9 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(restarted.config.buildings.treasury.levels[1].treasureSlots, 7, '重启后应读取 GM 写回的 building_levels.csv');
     assert.equal(restarted.config.buildings.tavern.levels[1].taskSideQuestChance, 0, '重启后应保留酒馆支线概率');
     assert.equal(restarted.config.constants.foundResourceCostBase, 4321, '重启后应读取 GM 写回的 game_constants.csv');
+    assert.equal(restarted.config.constants.marchSizeReferencePop, 30, '重启后应读取规模免惩罚人口基准');
+    assert.equal(restarted.config.constants.marchSizePenalty, 0.002, '重启后应读取规模减速系数');
+    assert.equal(restarted.config.constants.marchSizeMinMultiplier, 0.5, '重启后应读取规模减速下限');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;

@@ -15,12 +15,14 @@ import { TechTreeScreen } from '../features/research/TechTreeScreen.js';
 import { ReportsScreen } from '../features/reports/ReportsScreen.js';
 import { TasksScreen } from '../features/village/TaskBar.js';
 import { TaskDialogueHost } from '../features/village/TaskDialogueHost.js';
+import { BattleSimulatorScreen } from '../features/simulator/BattleSimulatorScreen.js';
 
-type Phase = 'boot' | 'login' | 'game';
+type Phase = 'boot' | 'login' | 'game' | 'simulator';
 
 export function App() {
   const [phase, setPhase] = useState<Phase>('boot');
   const [notice, setNotice] = useState('连接服务器中…');
+  const simulatorMode = typeof window !== 'undefined' && window.location.pathname === '/battle-simulator';
 
   useEffect(() => {
     setSessionLostHandler((message) => { setNotice(message); setPhase('login'); });
@@ -28,6 +30,10 @@ export function App() {
     connect(
       () => {
         void (async () => {
+          if (simulatorMode) {
+            setPhase('simulator');
+            return;
+          }
           await loadGameConfig();
           if (!me) {
             setNotice('');
@@ -63,6 +69,7 @@ export function App() {
     void refreshAll();
   }
 
+  if (phase === 'simulator') return <BattleSimulatorScreen />;
   if (phase !== 'game') {
     return (
       <>

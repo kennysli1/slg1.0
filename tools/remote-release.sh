@@ -43,20 +43,32 @@ has_test_server() {
   grep -Fq "name: 'kow-test-01'" "$config"
 }
 
+has_dice_lab() {
+  local config="$1"
+  grep -Fq "name: 'kow-dice-lab'" "$config"
+}
+
 start_servers() {
   local config="$1"
   # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
   # 每次发布都重建主服与存在于该 release 中的测试服，确保二者均运行构建产物。
   "$PM2_BIN" delete kow >/dev/null 2>&1 || true
   "$PM2_BIN" delete kow-test-01 >/dev/null 2>&1 || true
+  "$PM2_BIN" delete kow-dice-lab >/dev/null 2>&1 || true
   "$PM2_BIN" start "$config" --only kow --update-env
   if has_test_server "$config"; then
     "$PM2_BIN" start "$config" --only kow-test-01 --update-env
+  fi
+  if has_dice_lab "$config"; then
+    "$PM2_BIN" start "$config" --only kow-dice-lab --update-env
   fi
   sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
   "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
   if has_test_server "$config"; then
     "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8081/health >/dev/null
+  fi
+  if has_dice_lab "$config"; then
+    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8091/health >/dev/null
   fi
 }
 
@@ -81,6 +93,50 @@ restore_previous() {
   fi
 }
 
+# Keep a small rollback window so immutable release directories cannot fill the
+# production disk indefinitely.  Only validated, non-current release directories
+# are removed; shared data/logs/config and the active release are never touched.
+prune_old_releases() {
+  local keep_count="${KOW_DEPLOY_KEEP_RELEASES:-5}"
+  [[ "$keep_count" =~ ^[1-9][0-9]*$ ]] || keep_count=5
+  local current_real=""
+  if [[ -L "$CURRENT" ]]; then
+    current_real="$(readlink -f "$CURRENT" 2>/dev/null || true)"
+  fi
+
+  local -a ordered=()
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ordered+=("${line#* }")
+  done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr)
+
+  local remaining="$keep_count" removed=0 target real name
+  for target in "${ordered[@]}"; do
+    real="$(readlink -f "$target" 2>/dev/null || true)"
+    name="$(basename "$real")"
+    # Resolve the target and require a release-shaped directory directly below
+    # $RELEASES before any recursive removal.
+    [[ "$(dirname "$real")" == "$RELEASES" ]] || continue
+    [[ "$name" =~ ^[0-9a-f]{40}$ ]] || continue
+    [[ -f "$real/.release-commit" ]] || continue
+    if [[ -n "$current_real" && "$real" == "$current_real" ]]; then
+      # The active release counts toward the retention limit.
+      if (( remaining > 0 )); then
+        remaining=$((remaining - 1))
+      fi
+      continue
+    fi
+    if (( remaining > 0 )); then
+      remaining=$((remaining - 1))
+      continue
+    fi
+    rm -rf -- "$real"
+    removed=$((removed + 1))
+  done
+  echo "    release retention: 保留最多 $keep_count 个（含当前），清理旧 release $removed 个"
+}
+
 if [[ "$ACTION" == rollback ]]; then
   echo "==> 切回上一个生产版本" >&2
   trap 'rm -rf "$LOCK"' EXIT
@@ -97,6 +153,7 @@ if [[ "$ACTION" == finalize ]]; then
     echo "    旧 .git 已归档到 $legacy_git"
   fi
   "$PM2_BIN" save >/dev/null
+  prune_old_releases
   rm -rf "$LOCK"
   exit 0
 fi
@@ -126,18 +183,20 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
 fi
 
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
-# 都把共享 CSV 按主键合并到 Git 的默认 CSV：保留已有手调值，同时带入新增列/行，
-# 不会让旧整文件覆盖遮住新参数。文件名只允许单层 CSV，防止 manifest 误写出配置目录。
+# 都把共享 CSV 按主键合并到 Git 的默认 CSV：配置中心已有单元格（包括空值）
+# 和自建行保持权威，Git 只补新增列/行；编辑器明确删除的行由共享删除记录移除。
+# 文件名只允许单层 CSV，防止 manifest 误写出配置目录。
 apply_persisted_config() {
   local target="$1"
   local manifest="$SHARED/data/balance_csv_files.list"
+  local tombstones="$SHARED/config/config_row_tombstones.json"
   [[ -f "$manifest" ]] || return 0
   while IFS= read -r file || [[ -n "$file" ]]; do
     [[ "$file" =~ ^[A-Za-z0-9_.-]+\.csv$ ]] || continue
     [[ -f "$SHARED/config/$file" && -d "$target/config" ]] || continue
     local merger="$target/scripts/merge-persisted-config.mjs"
     if [[ -f "$merger" ]]; then
-      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file"
+      "$NODE_BIN" "$merger" "$target/config/$file" "$SHARED/config/$file" "$file" "$tombstones"
     else
       # 仅兼容没有该工具的旧 release/测试夹具；新发布包始终走按主键合并。
       echo "    警告：$merger 不存在，暂时整文件覆盖 $file" >&2

@@ -21,7 +21,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../infra/store.js';
 import type { GameApp } from '../app.js';
-import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, cpSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, lstatSync, realpathSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
@@ -114,7 +114,7 @@ function ensureDefaultSideDialogueRows(rows: CsvRow[], questRows: CsvRow[]): { r
       if (existing.has(key)) continue;
       result.push({
         id: String(nextId++), code: `${taskCode}_${trigger}`, taskCode, trigger, segment: '1',
-        npcName: '', npcText: '', replies: '',
+        npcName: '', npcText: '', replies: trigger === 'deliver' ? 'take:收下' : '',
       });
       existing.add(key);
       added++;
@@ -438,15 +438,29 @@ refreshAll();
 const CONFIG_CENTER_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>配置中心</title>
 <style>
-*{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:900px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:block;padding:11px 13px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8}
+*{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:1180px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:inline-block;padding:9px 12px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit;margin:3px 4px 3px 0}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8;overflow:auto;max-height:260px}.sync-state{display:inline-block;padding:5px 9px;border-radius:4px;background:#245b3d;color:#b9f6c8;margin:5px 0}.sync-state.warn{background:#6b4c1d;color:#ffe1a3}.sync-state.bad{background:#6d2d34;color:#ffd1d5}.pr-link{margin-left:8px}.conflict{border:1px solid #8e5f3b;border-radius:7px;padding:14px;margin:12px 0;background:#241e1a}.conflict h3{margin:0 0 8px;color:#ffd08a}.source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.source-grid section{min-width:0}.source-grid h4{margin:4px 0;color:#9dd8ff;font-size:12px}.source-grid pre{margin:0;padding:9px;background:#0b1219;border:1px solid #2b4358;white-space:pre-wrap;overflow:auto;max-height:180px;font:11px ui-monospace,monospace;color:#c4d1df}.resolved{width:100%;min-height:220px;background:#0b1219;border:1px solid #65c7ff;border-radius:4px;color:#e5eef8;padding:9px;font:12px ui-monospace,monospace}.resolve-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.resolve-bar select{background:#0b1219;color:#e5eef8;border:1px solid #557692;border-radius:4px;padding:7px;font:inherit}.hidden{display:none}@media(max-width:780px){.source-grid{grid-template-columns:1fr}}
 </style></head><body><main>
 <h1>配置中心（CSV）</h1>
 <div class="card"><div class="grid">
 <a href="/config/balance">平衡参数与常量</a><a href="/config/quest-modules">任务定义模块</a><a href="/config/quests">任务目录</a><a href="/config/quest-graph">任务关系图（只读审查）</a><a href="/config/dialogues">任务/NPC 对话</a>
 </div></div>
-<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR；合并 PR 后再按部署规范发布，才会成为后续版本和删档后的默认值。</div>
-<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><pre id="status">加载中…</pre></div>
-<script>let token=sessionStorage.getItem('gmToken')??'';function headers(){let h={};if(token)h['X-GM-Token']=token;return h}async function loadStatus(){let r=await fetch('/config/status',{headers:headers()});if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();if(token)sessionStorage.setItem('gmToken',token);return loadStatus();}}let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}async function syncNow(){let r=await fetch('/config/sync',{method:'POST',headers:headers()});let d=await r.json();document.getElementById('status').textContent=JSON.stringify(d,null,2)}loadStatus();</script>
+<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR。下方会显示 PR 检查与冲突状态；冲突时可逐文件确认最终内容，配置中心值默认作为权威版本。</div>
+<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><div id="state" class="sync-state">加载中…</div><span id="pr"></span><pre id="status">加载中…</pre></div>
+<div id="conflicts" class="card hidden"><h2>需要确认的配置冲突</h2><div class="meta">配置中心内容是运行时权威。每个文件都可以查看 main、PR 当前版本和配置中心版本，编辑“最终提交内容”后一次性提交。提交前会执行整套 CSV 校验。</div><div id="conflict-list"></div><div class="resolve-bar"><button id="resolve" onclick="resolveConflicts()">确认全部文件并更新 PR</button><span id="resolve-status" class="meta"></span></div></div>
+<script>
+let token=sessionStorage.getItem('gmToken')??'';let latest=null;let conflictData=null;
+function headers(){let h={};if(token)h['X-GM-Token']=token;return h}
+async function request(url,opt={}){opt.headers=Object.assign({},opt.headers||{},headers(),opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();if(token)sessionStorage.setItem('gmToken',token);return request(url,opt)}}let d=await r.json();if(!r.ok&&!d.ok)throw Error(d.reason||'请求失败');return d}
+function esc(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function renderStatus(d){latest=d;let state=d.syncState||'idle';let labels={idle:'尚未同步',pending:'等待同步',checking:'PR 检查中',conflict:'PR 存在冲突',ready:'可以合并',merged:'已合并 main',error:'同步失败'};let el=document.getElementById('state');el.textContent=labels[state]||state;el.className='sync-state '+(state==='conflict'||state==='error'?'bad':state==='checking'||state==='pending'?'warn':'');let pr=document.getElementById('pr');pr.innerHTML=d.pullRequestUrl?'<a class="pr-link" target="_blank" rel="noreferrer" href="'+esc(d.pullRequestUrl)+'">打开 GitHub PR</a>':'';document.getElementById('status').textContent=JSON.stringify(d,null,2);if(state==='conflict')loadConflicts();else document.getElementById('conflicts').classList.add('hidden')}
+async function loadStatus(){try{renderStatus(await request('/config/status'))}catch(e){document.getElementById('state').textContent='状态读取失败：'+e.message;document.getElementById('state').className='sync-state bad'}}
+async function syncNow(){try{renderStatus(await request('/config/sync',{method:'POST'}));}catch(e){document.getElementById('state').textContent='同步失败：'+e.message;document.getElementById('state').className='sync-state bad';loadStatus()}}
+function setResolution(file,source){let card=document.querySelector('[data-file="'+CSS.escape(file)+'"]');if(!card||!conflictData)return;let entry=conflictData.files.find(x=>x.file===file);let area=card.querySelector('textarea');area.value=source==='authority'?entry.authority:source==='main'?entry.main:entry.branch;area.dataset.source=source}
+function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
+async function loadConflicts(){try{renderConflicts(await request('/config/sync/conflicts'))}catch(e){document.getElementById('resolve-status').textContent='冲突读取失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}}
+async function resolveConflicts(){if(!conflictData||!latest?.pullRequest)return;let button=document.getElementById('resolve');button.disabled=true;document.getElementById('resolve-status').textContent='提交并校验中…';try{let files=[...document.querySelectorAll('.conflict')].map(function(card){return {file:card.dataset.file,content:card.querySelector('textarea').value}});let d=await request('/config/sync/resolve',{method:'POST',body:JSON.stringify({expectedHeadSha:latest.pullRequest.headSha,files})});renderStatus(d);document.getElementById('resolve-status').textContent=d.syncState==='conflict'?'仍需处理冲突':'已提交解决版本，等待 PR 检查';}catch(e){document.getElementById('resolve-status').textContent='提交失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}finally{button.disabled=false}}
+loadStatus();
+</script>
 </main></body></html>`;
 
 /**
@@ -483,6 +497,25 @@ const QUEST_MODULE_TABLES = [
  * 只记录允许合并的配置文件名，避免旧整文件遮蔽新的代码/配置变更。
  */
 const GM_CONFIG_MANIFEST = 'balance_csv_files.list';
+const CONFIG_ROW_TOMBSTONES_FILE = 'config_row_tombstones.json';
+
+interface ConfigRowTombstones {
+  version: 1;
+  tables: Record<string, string[][]>;
+}
+
+type ConfigRowsSnapshot = Record<string, CsvRow[]>;
+
+const WHOLE_TABLE_KEY_COLUMNS: Record<string, string[]> = {
+  'dialogues.csv': ['code', 'segment'],
+  'quest_lines.csv': ['code'],
+  'quests.csv': ['id'],
+  'quest_conditions.csv': ['id'],
+  'quest_objectives.csv': ['id'],
+  'quest_effects.csv': ['id'],
+  'quest_edges.csv': ['id'],
+};
+
 function persistentConfigDir(gameApp: GameApp): string | null {
   if (!gameApp.balanceOverridePath) return null;
   const dataDir = dirname(gameApp.balanceOverridePath);
@@ -500,10 +533,61 @@ function persistentConfigDir(gameApp: GameApp): string | null {
   return join(dataDir, 'config');
 }
 
-function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
+function configKeyColumns(file: string, header: readonly string[]): string[] {
+  const wholeTableColumns = WHOLE_TABLE_KEY_COLUMNS[file];
+  if (wholeTableColumns) return wholeTableColumns;
+  const balance = Object.values(BALANCE_TABLES).find((table) => table.file === file);
+  if (balance?.keyComposite) return balance.keyComposite;
+  if (balance?.key) return [balance.key];
+  return header.length > 0 ? [header[0]] : [];
+}
+
+function configRowIdentity(row: CsvRow, columns: readonly string[], label: string): string[] {
+  const values = columns.map((column) => row[column]);
+  if (values.some((value) => value === undefined || value === '')) {
+    throw new Error(`${label} 缺少主键列 ${columns.join('+')}`);
+  }
+  return values as string[];
+}
+
+function rowIdentityKey(values: readonly string[]): string {
+  return JSON.stringify(values);
+}
+
+function readConfigRowTombstones(path: string): ConfigRowTombstones {
+  if (!existsSync(path)) return { version: 1, tables: {} };
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ConfigRowTombstones>;
+  if (parsed.version !== 1 || !parsed.tables || typeof parsed.tables !== 'object' || Array.isArray(parsed.tables)) {
+    throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 格式无效`);
+  }
+  for (const [file, rows] of Object.entries(parsed.tables)) {
+    if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file) || !Array.isArray(rows)
+      || rows.some((values) => !Array.isArray(values) || values.some((value) => typeof value !== 'string' || value === ''))) {
+      throw new Error(`${CONFIG_ROW_TOMBSTONES_FILE} 的 ${file} 行主键无效`);
+    }
+  }
+  return { version: 1, tables: parsed.tables };
+}
+
+function writeConfigRowTombstones(path: string, state: ConfigRowTombstones): void {
+  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  renameSync(tempPath, path);
+}
+
+function snapshotConfigRows(dir: string, files: readonly string[]): ConfigRowsSnapshot {
+  return Object.fromEntries(files.map((file) => {
+    const rows = parseCsvStructured(readFileSync(join(dir, file), 'utf8')).rows;
+    return [file, rows.map((row) => ({ ...row }))];
+  }));
+}
+
+function persistConfigFiles(gameApp: GameApp, files: readonly string[], previousRows: ConfigRowsSnapshot = {}): void {
   const targetDir = persistentConfigDir(gameApp);
   if (!targetDir || files.length === 0) return;
   mkdirSync(targetDir, { recursive: true });
+  const tombstonesPath = join(targetDir, CONFIG_ROW_TOMBSTONES_FILE);
+  const tombstones = readConfigRowTombstones(tombstonesPath);
   const manifestPath = join(dirname(gameApp.balanceOverridePath!), GM_CONFIG_MANIFEST);
   let existing: string[] = [];
   try {
@@ -518,9 +602,35 @@ function persistConfigFiles(gameApp: GameApp, files: readonly string[]): void {
   for (const file of files) {
     // 调用方只传入固定的 CSV 表名；再次限制路径，防止 GM 请求借此越界写文件。
     if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名: ${file}`);
-    copyFileSync(join(gameApp.configDir, file), join(targetDir, file));
+    const sourcePath = join(gameApp.configDir, file);
+    const persistedPath = join(targetDir, file);
+    const nextDoc = parseCsvStructured(readFileSync(sourcePath, 'utf8'));
+    const columns = configKeyColumns(file, nextDoc.header);
+    if (columns.length === 0 || columns.some((column) => !nextDoc.header.includes(column))) {
+      throw new Error(`${file} 缺少稳定主键列`);
+    }
+    const before = previousRows[file]
+      ?? (existsSync(persistedPath) ? parseCsvStructured(readFileSync(persistedPath, 'utf8')).rows : nextDoc.rows);
+    const beforeByKey = new Map(before.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存前行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const nextByKey = new Map(nextDoc.rows.map((row) => {
+      const values = configRowIdentity(row, columns, `${file} 保存后行`);
+      return [rowIdentityKey(values), values] as const;
+    }));
+    const tableTombstones = new Map((tombstones.tables[file] ?? []).map((values) => [rowIdentityKey(values), values]));
+    for (const [key, values] of beforeByKey) {
+      if (!nextByKey.has(key)) tableTombstones.set(key, values);
+    }
+    for (const key of nextByKey.keys()) tableTombstones.delete(key);
+    const sorted = [...tableTombstones.values()].sort((left, right) => rowIdentityKey(left).localeCompare(rowIdentityKey(right)));
+    if (sorted.length > 0) tombstones.tables[file] = sorted;
+    else delete tombstones.tables[file];
+    copyFileSync(sourcePath, persistedPath);
     all.add(file);
   }
+  writeConfigRowTombstones(tombstonesPath, tombstones);
   writeFileSync(manifestPath, [...all].sort().join('\n') + '\n', 'utf8');
 }
 
@@ -538,13 +648,21 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   units: {
     file: 'units.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    text: ['simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
+  },
+  unit_traits: {
+    file: 'unit_traits.csv', key: 'id',
+    numeric: ['value1', 'value2', 'value3', 'value4', 'value5'],
+    text: ['effect1', 'effect2', 'effect3', 'effect4', 'effect5'],
+    labels: ['id', 'code', 'name'],
   },
   // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
   mercenaries: {
     file: 'mercenaries.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'goldCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'carry', 'goldCost'],
+    text: ['traits', 'simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
   // 雇佣兵营地刷新参数（merc_camp.csv）：level → {refreshSec, mercCount, maxStoredRefreshes}
@@ -571,7 +689,8 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   pve_defenders: {
     file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'],
-    numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'carry'],
+    numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'carry'],
+    text: ['traits'],
     labels: ['targetId', 'unitCode', 'name', 'form'],
   },
   // 宝物目录（treasures.csv）：id → {effectValue, reputationValue, priceGold, dropRate} 可编辑；其余为展示标签
@@ -708,8 +827,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -735,16 +854,16 @@ function sectionGeneric(table){
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
     var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
     var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
-  var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -760,7 +879,8 @@ function sectionGeneric(table){
     for (var b=0;b<fields.length;b++){
       var f = fields[b];
       var val = row[f]==null?'':row[f];
-      h += '<td><input type="number" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
+      var isText = (meta.text || []).indexOf(f) >= 0;
+      h += '<td><input type="'+(isText ? 'text' : 'number')+'" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
     }
     h += '</tr>';
   }
@@ -857,6 +977,88 @@ function sectionTerrain(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>地图格子特性 / 地形参数</h2>'+h+'</div>';
+}
+
+// ── 军队规模专用视图：规模减速参数写入 game_constants.csv，影响新派出的行军。 ──
+var MARCH_SIZE_ROWS = [
+  ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
+  ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
+  ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+];
+function sectionMarchSize(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">军队有效人口按实际携带部队的数量 × units.csv 的 popCost 计算；先应用兵种/科技/全局/地形速度，再对每个路径段统一应用规模减速。商队固定速度不受影响；已在途行军不会因热重载改变原定时间。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
+    var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
+// ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
+function sectionCavalry(){
+  var rows = DATA.constants || [], row = null;
+  for (var i=0;i<rows.length;i++) if (rows[i].key === 'cavalry_unit_codes') { row = rows[i]; break; }
+  if (!row) return '';
+  var value = row.value == null ? '' : row.value;
+  var h = '<div class="hint">以 | 分隔兵种 code。猎马人累计击杀和绞马索的敌方骑兵判定均读取此列表；保存后只影响新结算/新事件，不改变历史战报。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  h += '<tr><td class="lbl">骑兵兵种代码 <small style="color:#7a86a8">(cavalry_unit_codes)</small></td>';
+  h += '<td><input type="text" value="'+esc(value)+'" data-t="constants" data-k="cavalry_unit_codes" data-f="value" oninput="onEdit(this)"></td>';
+  h += '<td class="lbl">多个兵种代码用 | 分隔</td></tr></tbody></table>';
+  return '<div class="sec"><h2>骑兵分类参数</h2>'+h+'</div>';
+}
+
+// ── 猎马人专用视图：目标数量与绞马索效果分别写回任务/宝物 CSV。 ──
+// 这两个值不是运行时常量，配置中心直接编辑其声明式任务图和宝物目录，避免出现第二份事实源。
+function sectionHorseHunter(){
+  var objectives = DATA.quest_objectives || [], treasures = DATA.treasures || [];
+  var objective = null, rope = null;
+  for (var i=0;i<objectives.length;i++) if (String(objectives[i].id) === 'o-s5') { objective = objectives[i]; break; }
+  for (var j=0;j<treasures.length;j++) if (String(treasures[j].code) === 'horse_rope') { rope = treasures[j]; break; }
+  if (!objective && !rope) return '';
+
+  var target = '';
+  if (objective) {
+    var parts = String(objective.params == null ? '' : objective.params).split(':');
+    target = parts.length > 1 ? parts[parts.length - 1].trim() : '';
+  }
+  var reduction = rope && rope.effectValue != null ? rope.effectValue : '';
+  var h = '<div class="hint">猎马人的可调数值集中在此。保存时分别写回 quest_objectives.csv 与 treasures.csv，并经过完整任务图/宝物配置校验；骑兵分类仍由上方 cavalry_unit_codes 控制。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  if (objective) {
+    h += '<tr><td class="lbl">猎马人累计击杀人口 <small style="color:#7a86a8">(o-s5 / quest_objectives.params)</small></td>';
+    h += '<td><input type="number" min="1" step="1" value="'+esc(target)+'" data-t="quest_objectives" data-k="o-s5" data-f="params" oninput="onHorseHunterTargetEdit(this)"></td>';
+    h += '<td class="lbl">按 cavalry:&lt;数量&gt; 保存；实际进度按骑兵 popCost 累计</td></tr>';
+  }
+  if (rope) {
+    h += '<tr><td class="lbl">绞马索骑兵防御削弱 <small style="color:#7a86a8">(horse_rope / effectValue)</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(reduction)+'" data-t="treasures" data-k="'+esc(String(rope.id))+'" data-f="effectValue" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">百分比数值；30 表示敌方骑兵防御力降低 30%</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>猎马人 / 绞马索参数</h2>'+h+'</div>';
+}
+
+function onHorseHunterTargetEdit(el){
+  var v = String(el.value == null ? '' : el.value).trim();
+  var edits = CHANGES.quest_objectives['o-s5'];
+  if (v === '') {
+    if (edits) {
+      delete edits.params;
+      if (Object.keys(edits).length === 0) delete CHANGES.quest_objectives['o-s5'];
+    }
+  } else {
+    if (!edits) edits = CHANGES.quest_objectives['o-s5'] = {};
+    edits.params = 'cavalry:' + v;
+  }
+  status('已修改「quest_objectives / o-s5 / 目标人口」，记得点保存');
 }
 
 // ── 王国城邦专用视图：等级、种族、兵种和资源规则集中展示。 ──
@@ -1219,6 +1421,9 @@ function render(){
   html += sectionFounding();
   html += sectionReputation();
   html += sectionTerrain();
+  html += sectionMarchSize();
+  html += sectionCavalry();
+  html += sectionHorseHunter();
   html += sectionCityState();
   html += sectionKingdom();
   html += sectionM8();
@@ -1332,14 +1537,40 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.get('/config/quest-modules', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_QUEST_MODULES_HTML)));
   fastify.get('/config/quest-graph', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_QUEST_GRAPH_HTML)));
   fastify.get('/config/dialogues', (_req, reply) => void reply.type('text/html; charset=utf-8').send(configPage(GM_DIALOGUES_HTML)));
-  fastify.get('/config/status', (req, reply) => {
+  fastify.get('/config/status', async (req, reply) => {
     if (!auth(req, reply)) return;
-    void reply.send({ ok: true, ...gameApp.configAuthority.status() });
+    const status = await gameApp.configAuthority.inspectStatus();
+    const blocked = status.syncState === 'conflict' || status.syncState === 'error' || Boolean(status.lastStatusError);
+    void reply.send({ ok: !blocked, ...status });
   });
   fastify.post('/config/sync', async (req, reply) => {
     if (!auth(req, reply)) return;
-    const status = await gameApp.configAuthority.flush();
-    void reply.send({ ok: !status.lastError, ...status });
+    await gameApp.configAuthority.flush();
+    const inspected = await gameApp.configAuthority.inspectStatus();
+    const blocked = inspected.syncState === 'conflict' || inspected.syncState === 'error' || Boolean(inspected.lastStatusError);
+    void reply.send({ ok: !blocked, ...inspected });
+  });
+  fastify.get('/config/sync/conflicts', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    try {
+      const details = await gameApp.configAuthority.conflictDetails();
+      void reply.send({ ok: true, ...details });
+    } catch (err) {
+      void reply.code(409).send({ ok: false, reason: err instanceof Error ? err.message : String(err) });
+    }
+  });
+  fastify.post('/config/sync/resolve', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    try {
+      const body = (req.body ?? {}) as { expectedHeadSha?: string; files?: Array<{ file?: string; content?: string }> };
+      const files = (body.files ?? []).map((entry) => ({ file: entry.file ?? '', content: entry.content ?? '' }));
+      const status = await gameApp.configAuthority.resolveConflicts({ expectedHeadSha: body.expectedHeadSha, files });
+      const inspected = await gameApp.configAuthority.inspectStatus();
+      const blocked = inspected.syncState === 'conflict' || inspected.syncState === 'error' || Boolean(inspected.lastStatusError);
+      void reply.send({ ok: !blocked, ...inspected });
+    } catch (err) {
+      void reply.code(409).send({ ok: false, reason: err instanceof Error ? err.message : String(err) });
+    }
   });
   fastify.all('/config/*', configProxy);
 
@@ -1589,6 +1820,9 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-dialogues-'));
     try {
       const doc = parseCsvStructured(readFileSync(join(dir, 'dialogues.csv'), 'utf-8'));
+      const previousRows: ConfigRowsSnapshot = {
+        'dialogues.csv': doc.rows.map((row) => ({ ...row })),
+      };
       // 支持新增/删除行：移除旧数据行、保留表头/注释，再把当前编辑器行追加到文档尾。
       const oldDataIndices = new Set(doc.rowIndices);
       const raw = doc.raw.filter((_, index) => !oldDataIndices.has(index));
@@ -1605,7 +1839,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(tmp, 'dialogues.csv'), csv, 'utf-8');
       loadGameConfig(tmp); // 校验失败不写线上配置
       writeFileSync(join(dir, 'dialogues.csv'), csv, 'utf-8');
-      persistConfigFiles(gameApp, ['dialogues.csv']);
+      persistConfigFiles(gameApp, ['dialogues.csv'], previousRows);
       gameApp.configAuthority.recordChange(['dialogues.csv']);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: doc.rows.length });
@@ -1641,6 +1875,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quest-graph-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, [...QUEST_MODULE_TABLES, 'dialogues.csv']);
       const csvByFile: Record<string, string> = {};
       for (const file of QUEST_MODULE_TABLES) {
         const rows = body.tables[file]?.rows;
@@ -1666,7 +1901,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       for (const file of QUEST_MODULE_TABLES) writeFileSync(join(dir, file), csvByFile[file], 'utf-8');
       const changedFiles = [...QUEST_MODULE_TABLES, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true });
@@ -1714,6 +1949,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     const tmp = mkdtempSync(join(tmpdir(), 'kow-quests-'));
     let dialogueAdded = 0;
     try {
+      const previousRows = snapshotConfigRows(dir, ['quests.csv', 'dialogues.csv']);
       const text = readFileSync(join(dir, 'quests.csv'), 'utf-8');
       const doc = parseCsvStructured(text);
       const header = doc.header;
@@ -1731,7 +1967,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       writeFileSync(join(dir, 'quests.csv'), csv, 'utf-8');
       const changedFiles = ['quests.csv' as const, ...(dialogueAdded > 0 ? ['dialogues.csv' as const] : [])];
       if (dialogueAdded > 0) copyFileSync(join(tmp, 'dialogues.csv'), join(dir, 'dialogues.csv'));
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       gameApp.reloadConfig();
       void reply.send({ ok: true, count: rows.length });
@@ -1791,6 +2027,8 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       return;
     }
     try {
+      const changedFiles = edits.map(([, table]) => table.file);
+      const previousRows = snapshotConfigRows(dir, changedFiles);
       // 校验：把本次编辑应用到临时 configDir 副本，跑 loadGameConfig；失败整段回滚。
       const tmp = mkdtempSync(join(tmpdir(), 'kow-balance-'));
       try {
@@ -1807,8 +2045,7 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
-      const changedFiles = edits.map(([, table]) => table.file);
-      persistConfigFiles(gameApp, changedFiles);
+      persistConfigFiles(gameApp, changedFiles, previousRows);
       gameApp.configAuthority.recordChange(changedFiles);
       // 热重载（内存 + 存量村庄派生值即时生效）
       gameApp.reloadConfig();
@@ -1981,7 +2218,7 @@ const GM_DIALOGUES_HTML = `<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;padding:16px;background:#101722;color:#dce7f7;font:13px ui-monospace,monospace}h1{margin:0 0 6px;color:#65c7ff;font-size:19px}.hint{color:#9bb0c9;margin:0 0 14px;line-height:1.55}.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}button{background:#173550;border:1px solid #65c7ff;color:#dce7f7;border-radius:4px;padding:6px 9px;cursor:pointer;font:inherit}.save{border-color:#74d68c;color:#b9f6c8}.danger{border-color:#db7272;color:#ffb6b6}#status{color:#f1c575}.table-wrap{overflow:auto;border:1px solid #304c69;max-height:calc(100vh - 180px)}table{border-collapse:collapse;min-width:100%;background:#121d2b}th,td{border:1px solid #29435e;padding:4px;vertical-align:top}th{position:sticky;top:0;background:#20354c;color:#8ed5ff;white-space:nowrap}input,textarea{width:190px;min-width:120px;background:#0d1622;border:1px solid #365671;border-radius:2px;color:#e5eef8;padding:4px;font:inherit}textarea{height:96px;resize:vertical}.small{width:70px;min-width:70px}.row-actions{min-width:54px;white-space:nowrap}a{color:#79cfff}
 </style></head><body>
 <h1>NPC 对话编辑</h1>
-<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是任务接取成功后触发（S3 使用独立的 <b>s3_after_accept</b> 对象），<b>deliver</b> 是交付；M8/M9 的成功文本使用默认触发点，失败文本使用对应的 <b>accept_failure</b>/<b>deliver_failure</b>。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。npcName/npcText 支持服务端变量 <b>{villageName}</b>（当前玩家村庄名）和 <b>{fiefName}</b>（当前玩家所属封地名），配置中心保存变量名，客户端收到的是已替换文本。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
+<p class="hint">同一 <b>id</b> 对象可以包含多个有序段落；触发后玩家关闭对话或选择回复，会立即进入下一段直到结束。<b>accept</b> 是接取/自动激活，<b>after_accept</b> 是任务接取成功后触发（S3 使用独立的 <b>s3_after_accept</b> 对象），<b>deliver</b> 是交付；交付弹窗只有配置了 replies 才显示按钮，没有 replies 时只能点右上角关闭。交付常用 <b>take:收下</b>，M8/M9 的成功文本使用默认触发点，失败文本使用对应的 <b>accept_failure</b>/<b>deliver_failure</b>。replies 格式为 <b>key:玩家看到的文字|key2:文字</b>。npcName/npcText 支持服务端变量 <b>{villageName}</b>（当前玩家村庄名）和 <b>{fiefName}</b>（当前玩家所属封地名），配置中心保存变量名，客户端收到的是已替换文本。只有 npcName、npcText、replies 可编辑，id/code/taskCode/trigger/段落序号由对象和段落操作维护；空白模板不会阻塞任务接取。</p>
 <div class="bar"><button onclick="addObject()">+ 新增对话对象</button><button class="save" onclick="save()">保存并热重载</button><span id="status">加载中…</span></div>
 <div class="table-wrap"><table id="grid"></table></div>
 <script>
@@ -1995,8 +2232,8 @@ function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??''),c
 function sortRows(){rows.sort(rowCompare)}
 function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code（下划线优先、数字感知）、taskCode 排序，加载 '+rows.length+' 段'}
 function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
-function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';rows.push(r);render()}
-function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);rows.splice(i+1,0,r);render()}
+function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';if(r.trigger==='deliver')r.replies='take:收下';rows.push(r);render()}
+function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);if(r.trigger==='deliver')r.replies='take:收下';rows.splice(i+1,0,r);render()}
 function removeRow(i){if(!confirm('删除这一段？'))return;let base=rows[i];rows.splice(i,1);let group=rows.filter(x=>x.id===base.id&&x.code===base.code).sort((a,b)=>(Number(a.segment)||0)-(Number(b.segment)||0));group.forEach((row,index)=>row.segment=String(index+1));render()}
 async function load(){try{let d=await api('/gm/dialogues/data');header=d.header;rows=d.rows||[];render()}catch(e){document.getElementById('status').textContent='加载失败：'+e.message}}
 async function save(){try{document.getElementById('status').textContent='校验并保存中…';let d=await api('/gm/dialogues/save',{method:'POST',body:JSON.stringify({rows})});document.getElementById('status').textContent='已保存并热重载（'+d.count+' 行）'}catch(e){document.getElementById('status').textContent='保存失败：'+e.message}}

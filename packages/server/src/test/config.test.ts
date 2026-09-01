@@ -19,6 +19,24 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.storageBase, 800, '基础容量');
   assert.equal(c.mapSize, 20, '地图尺寸');
   assert.equal(c.mapViewRadius, 6, '视野半径');
+  assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
+  assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
+  assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
+  assert.ok(c.cavalryUnitCodes.includes('equlegati'), '骑兵代码配置应包含罗马骑兵');
+  assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
+});
+
+test('猎马人支线与绞马索宝物配置已接入任务图', () => {
+  const cfg = loadGameConfig(configDir);
+  const hunter = cfg.quests.s5;
+  assert.ok(hunter, '应存在猎马人支线');
+  assert.equal(hunter?.type, 'side');
+  assert.equal(hunter?.trigger, 'tavern_refresh');
+  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 50 });
+  assert.deepEqual(hunter?.rewards.treasures, ['horse_rope']);
+  assert.equal(cfg.treasures.horse_rope.effectType, 'enemyCavalryDef');
+  assert.equal(cfg.treasures.horse_rope.effectValue, 30);
+  assert.equal(cfg.questGraph.conditions.filter((row) => row.questCode === 's5' && row.phase === 'offer').length, 2, '应同时有酒馆池与二级主基地前置');
 });
 
 test('开局模板：village_templates.csv 展开预置建筑', () => {
@@ -157,6 +175,18 @@ test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼�
   assert.ok(s4.edges.length >= 1, '任务关系不应在运行时目录中丢失');
 });
 
+test('交付对话：所有 deliver 段配置收下回复', () => {
+  const cfg = loadGameConfig(configDir);
+  const deliver = Object.values(cfg.dialogues).filter((dialogue) => dialogue.trigger === 'deliver');
+  assert.ok(deliver.length > 0, '应存在 deliver 对话');
+  for (const dialogue of deliver) {
+    assert.ok(
+      dialogue.replies.some((reply) => reply.key === 'take' && reply.label === '收下'),
+      `${dialogue.code}#${dialogue.segment} 应配置 take:收下`,
+    );
+  }
+});
+
 test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者兵种均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
   assert.ok(cfg.constants.m8AttackDelaySec > 0, 'M8 攻城倒计时应来自可调配置且为正数');
@@ -275,14 +305,14 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 40);
-  assert.equal(leg.meleeDef, 35);
-  assert.equal(leg.rangedDef, 50);
+  assert.equal(leg.meleeAtk, 34);
+  assert.equal(leg.meleeDef, 58);
+  assert.equal(leg.rangedDef, 52);
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 多特性解析（| 分隔）：禁卫兵引用 trait 1(shield)+2(heavy_armor)，两个都应生效
-  assert.deepEqual(cfg.units['praetorian'].traits, ['shield', 'heavy_armor']);
+  // 多特性解析（| 分隔）：禁卫兵引用 trait 2(heavy_armor)+9(disciplined)，两个都应生效
+  assert.deepEqual(cfg.units['praetorian'].traits, ['heavy_armor', 'disciplined']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
   assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });
@@ -337,6 +367,25 @@ test('校验器：关键常量范围非法应抛错', () => {
     constants: { ...cfg.constants, combatTickMs: 0, marchSpeedMultiplier: 0 },
   };
   assert.throws(() => validateGameConfig(bad), /combat_tick_ms|march_speed_multiplier/);
+});
+
+test('校验器：军队规模参数范围非法应抛错', () => {
+  const cfg = loadGameConfig(configDir);
+  const badReference: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeReferencePop: -1 },
+  };
+  assert.throws(() => validateGameConfig(badReference), /march_size_reference_pop/);
+  const badPenalty: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizePenalty: -0.1 },
+  };
+  assert.throws(() => validateGameConfig(badPenalty), /march_size_penalty/);
+  const badMinimum: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, marchSizeMinMultiplier: 1.1 },
+  };
+  assert.throws(() => validateGameConfig(badMinimum), /march_size_min_multiplier/);
 });
 
 test('特性：多效果特性正确展开', () => {

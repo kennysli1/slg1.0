@@ -7,22 +7,73 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { escapeHtml, escapeAttr } from '../shared/utils/escape.js';
 import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
-import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement } from '../app/state.js';
+import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
-import { populationTooltip } from '../shell/ResourceBar.js';
+import { populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, landmarkCenterFromTile, normalizeIncomingWarningForRender, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
-import { readVillageWorkbenchPreferences, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
+import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
+import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
+import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
+
+describe('阶段化战斗模拟器的科技与宝物多选', () => {
+  it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
+    let selected = toggleMultiSelection([], 'tech-a', true);
+    selected = toggleMultiSelection(selected, 'tech-b', true);
+    assert.deepEqual(selected, ['tech-a', 'tech-b']);
+    selected = toggleMultiSelection(selected, 'tech-a', false);
+    assert.deepEqual(selected, ['tech-b']);
+    assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+  });
+});
+
+describe('任务接取与奖励领取对话状态机', () => {
+  it('Accept 关闭不推进；离开关闭；只有首次接受任务才请求接取', () => {
+    assert.equal(acceptReplyIntent('leave', false), 'close');
+    assert.equal(acceptReplyIntent('accept', false), 'accept');
+    assert.equal(acceptReplyIntent('accept', true), 'advance', '接取成功后的后续回复不得再次请求 Accept');
+    assert.equal(nextDialogueSegment(0, 2), 1);
+    assert.equal(nextDialogueSegment(1, 2), null);
+  });
+
+  it('Deliver 首次收下才结算，后续收下只推进，领取前异常回复不能跳过确认', () => {
+    assert.equal(deliverReplyIntent('take', false), 'claim');
+    assert.equal(deliverReplyIntent('take', true), 'advance');
+    assert.equal(deliverReplyIntent('leave', false), 'close');
+    assert.equal(deliverReplyIntent('continue', false), 'ignore');
+  });
+
+  it('空 NPC 文本但有收下回复的默认交付段仍可显示', () => {
+    const segments = visibleDialogueSegments({
+      segments: [{ npcName: '', npcText: '', replies: [{ key: 'take', label: '收下' }] }],
+    });
+    assert.equal(segments.length, 1);
+    assert.equal(segments[0].replies?.[0].key, 'take');
+  });
+
+  it('组件接线保持关闭与推进分离，并由任务栏先请求 StartDeliver', () => {
+    const taskBar = readFileSync(new URL('../features/village/TaskBar.tsx', import.meta.url), 'utf8');
+    const autoHost = readFileSync(new URL('../features/village/TaskDialogueHost.tsx', import.meta.url), 'utf8');
+    assert.match(taskBar, /function DialogueModal[\s\S]*onClose=\{closeSession\}/, 'Accept 的 X/Esc/遮罩只能关闭 session');
+    assert.match(taskBar, /req\('task\.StartDeliver'/, '任务栏必须先请求奖励预览');
+    assert.match(taskBar, /deliveryInFlight\.current = true[\s\S]*req\('task\.Deliver'/,
+      '只有首次收下进入互斥后才能正式 Deliver');
+    assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
+    assert.match(autoHost, /req\('task\.ConsumeDialogue'/, '自动对话关闭必须消费整个等待 session');
+  });
+});
 
 describe('王国地标中心标记', () => {
   it('只接受服务端显式中心，缺字段不会把每个占地格当成中心', () => {
@@ -65,7 +116,7 @@ describe('地图定位', () => {
       (next) => { calls.push('selected'); target = next; },
     );
     assert.deepEqual(calls, ['center:8,-3', 'selected']);
-    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'bld_main' });
+    assert.deepEqual(target, { refId: 'v-branch', kind: 'own_village', q: 8, r: -3, name: '许昌', icon: 'map_player_village_lv1' });
   });
 
   it('只有目标卡明确确认后才请求切村；当前村不会重复请求', async () => {
@@ -91,6 +142,26 @@ describe('地图定位', () => {
       assert.deepEqual(source.incomingWarnings[0].pos, { q: 1, r: 0 });
       assert.equal(source.incomingWarnings[0].stepIndex, 1);
     }
+    setCache(previous);
+  });
+
+  it('掉头推送的完整快照会立即替换旧出征路径', () => {
+    const previous = getCache();
+    const outbound = {
+      id: 'mv-turn', type: 'raid', dir: 'out', status: 'marching',
+      from: { q: 0, r: 0 }, originalFrom: { q: 0, r: 0 }, to: { q: 2, r: 0 },
+      path: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }], pos: { q: 1, r: 0 }, stepIndex: 1,
+      perStepMs: 1000, nextStepAt: 2000, arriveAt: 3000, troops: {}, recallable: false, stoppable: false,
+    } as any;
+    const returning = {
+      ...outbound, type: 'return', to: { q: 0, r: 0 }, path: [{ q: 1, r: 0 }, { q: 0, r: 0 }], stepIndex: 0,
+      turningPoint: { from: { q: 1, r: 0 }, to: { q: 2, r: 0 }, progress: 0.5, startedAt: 1500, durationMs: 500 },
+    } as any;
+    setCache({ moves: { movements: [outbound], incomingWarnings: [] }, playerMoves: { movements: [outbound], incomingWarnings: [] } });
+    replaceMovementSnapshot(returning);
+    assert.equal(getCache().moves.movements[0].type, 'return');
+    assert.deepEqual(getCache().playerMoves.movements[0].path, returning.path);
+    assert.equal(getCache().playerMoves.movements[0].turningPoint.progress, 0.5);
     setCache(previous);
   });
 
@@ -570,15 +641,55 @@ describe('notificationText - 伏击报告视角', () => {
 });
 
 
-describe('人口资源条红框说明', () => {
+describe('村庄资源栏受限状态', () => {
+  it('资源停产后仍显示服务端提供的当前理论产量', () => {
+    const rate = resourceLedgerRate(true, 0, 137.4);
+    assert.equal(rate.ratePerHour, 137.4);
+    assert.equal(rate.label, '停产 · +137/时');
+  });
+
+  it('资源正常生产时继续显示净变化率', () => {
+    const rate = resourceLedgerRate(false, 0.025, 137.4);
+    assert.equal(rate.ratePerHour, 90);
+    assert.equal(rate.label, '+90/时');
+  });
+
+  it('人口达到上限后显示潜在增长率而不是零', () => {
+    const state = {
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 0, potentialGrowthPerHour: 12, cropDeficitRate: 0,
+    };
+    const growth = populationLedgerGrowth(state, 300);
+    assert.equal(growth.atCap, true);
+    assert.equal(growth.growthPerHour, 12);
+    assert.equal(growth.label, '已满 · +12/时');
+  });
+
+  it('人口悬浮说明同时显示劳动人口和军队人口', () => {
+    const state = {
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 10,
+      growthPerHour: 4, potentialGrowthPerHour: 4, cropDeficitRate: 0,
+    };
+    const text = populationTooltip(state, 210, 120, 4);
+    assert.match(text, /劳动人口 120/);
+    assert.match(text, /军队人口 80/);
+    assert.match(text, /训练中 10/);
+  });
+
   it('仓储溢出时说明人口增长扣减比例', () => {
-    const text = populationTooltip({ hardCap: 300, inFamine: false, overflowRatio: 0.35, soldierPop: 80 }, 200, 120, 4);
-    assert.match(text, /红框原因：仓储溢出使人口增长降低 35%/);
+    const text = populationTooltip({
+      hardCap: 300, inFamine: false, overflowRatio: 0.35, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 4, potentialGrowthPerHour: 4, cropDeficitRate: 0,
+    }, 200, 120, 4);
+    assert.match(text, /告警：仓储溢出使人口增长降低 35%/);
   });
 
   it('饥荒时说明人口正在减少', () => {
-    const text = populationTooltip({ hardCap: 300, inFamine: true, overflowRatio: 0, soldierPop: 80 }, 200, 120, -3);
-    assert.match(text, /红框原因：饥荒中，人口正在减少/);
+    const text = populationTooltip({
+      hardCap: 300, inFamine: true, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 0, potentialGrowthPerHour: 4, cropDeficitRate: 3,
+    }, 200, 120, -3);
+    assert.match(text, /告警：饥荒中，人口正在减少/);
   });
 });
 
@@ -633,6 +744,54 @@ describe('notificationKind', () => {
 
   it('未知事件归 info（不抛错）', () => {
     assert.equal(notificationKind('SomethingBrandNew'), 'info');
+  });
+});
+
+describe('玩家村庄地图外观', () => {
+  it('中立、盟军、敌对玩家村庄使用不同描边，己方颜色不受外交值干扰', () => {
+    assert.equal(mapEntityRingKind('village', false, 'neutral'), 'neutral');
+    assert.equal(mapEntityRingKind('village', false, 'allied'), 'allied');
+    assert.equal(mapEntityRingKind('village', false, 'hostile'), 'hostile');
+    assert.equal(mapEntityRingKind('own_village', true, 'hostile'), 'self');
+    assert.equal(mapEntityRingKind('own_village', false, 'hostile'), 'own');
+    assert.equal(normalizeMapVillageRelation('unexpected'), 'neutral');
+  });
+
+  it('普通 PvE 不常驻红框，红色外军标记只保留给在途进攻/掠夺', () => {
+    assert.equal(mapEntityRingKind('pve', false), '');
+    assert.equal(foreignArmyMarkerTone('attack', 'marching'), 'threat');
+    assert.equal(foreignArmyMarkerTone('raid', 'paused'), 'threat');
+    assert.equal(foreignArmyMarkerTone('return', 'marching'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('garrison', 'stationed'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('attack', 'stationed'), 'neutral');
+  });
+
+  it('四级玩家村庄图标与其他正式美术统一读取 WebP', () => {
+    for (let level = 1; level <= 4; level++) {
+      assert.equal(artPath(`map_player_village_lv${level}`), `/art/map_player_village_lv${level}.webp`);
+    }
+    assert.equal(artPath('bld_main'), '/art/bld_main.webp');
+  });
+});
+
+describe('战报时间线排序', () => {
+  it('历史战报按服务端事件时间降序，而不是按接口返回顺序', () => {
+    seedReports([
+      { text: '旧', kind: 'battle', ts: 100 },
+      { text: '新', kind: 'battle', ts: 300 },
+      { text: '中', kind: 'battle', ts: 200 },
+    ]);
+    assert.deepEqual(getReports().map((report) => report.ts), [300, 200, 100]);
+    seedReports([]);
+  });
+
+  it('实时战报即使乱序到达也按事件时间插入正确位置', () => {
+    seedReports([]);
+    addReport('新', 'battle', 300);
+    addReport('旧', 'battle', 100);
+    addReport('中', 'battle', 200);
+    assert.deepEqual(getReports().map((report) => report.ts), [300, 200, 100]);
+    seedReports([]);
   });
 });
 
@@ -696,6 +855,13 @@ describe('任务页菜单折叠偏好', () => {
 });
 
 describe('王国工作区折叠偏好', () => {
+  it('切换一个工作区时保留另一个工作区的展开状态', () => {
+    const developmentOpen = toggleVillageWorkbench({ developmentOpen: false, militaryOpen: true }, 'developmentOpen');
+    assert.deepEqual(developmentOpen, { developmentOpen: true, militaryOpen: true });
+    const militaryClosed = toggleVillageWorkbench(developmentOpen, 'militaryOpen');
+    assert.deepEqual(militaryClosed, { developmentOpen: true, militaryOpen: false });
+  });
+
   it('用四态纯函数决定工作区布局，单开时可让页面使用全宽', () => {
     assert.equal(villageWorkbenchLayoutClass({ developmentOpen: false, militaryOpen: false }), 'empire-workspace-grid--both-closed');
     assert.equal(villageWorkbenchLayoutClass({ developmentOpen: true, militaryOpen: false }), 'empire-workspace-grid--development-open');

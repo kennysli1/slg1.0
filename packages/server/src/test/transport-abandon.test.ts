@@ -260,6 +260,7 @@ test('商队：目标村被放弃(wipeSingleVillage)后也应原路返程（补 
   // 一条从 capital 发往 vid2 的在途商队
   const car = await send(app, 'movement.SendCaravan', { fromVillage: capital, targetVillage: vid2, cargo: { wood: 50 } });
   assert.equal(car.ok, true, car.reason);
+  const departureAt = clock;
 
   // 推进到行程中段，确认仍在途
   const list0 = (await send(app, 'movement.List', { villageId: capital })).payload as any;
@@ -287,7 +288,7 @@ test('商队：目标村被放弃(wipeSingleVillage)后也应原路返程（补 
   assert.deepEqual(mvAfter.to, mv0.from, '商队应转向出发村 capital（立即返程）');
   const rawMv = app.store.get<any>('movement', (car.payload as any).id);
   assert.equal(rawMv.returning, true, '商队应置 returning=true（原始 store）');
-  assert.ok(rawMv.arriveAt > clock && rawMv.arriveAt !== mv0.arriveAt, '倒计时应重置为返程耗时');
+  assert.equal(rawMv.arriveAt - clock, clock - departureAt, '倒计时应按出发后实际经过时间重置为返程耗时');
 
   // 跑完剩余行程，货物应退回发货村 capital
   await drain(app);

@@ -27,3 +27,5 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 25,honest_heart,正直的心,trs_blessing,special,epic,honestHeart,10,0,0,passive,special,honestHeart,50,1,0
 26,my_effort,我的努力,trs_effort,special,epic,dialogue,0,0,0,instant,special,my_effort,0,1,
 27,black_badge,黑色徽章,trs_black_badge,military,epic,blackBadge,15,0,0,passive,military,blackBadge,100,1,
+28,horse_rope,绞马索,trs_horse_rope,military,epic,enemyCavalryDef,30,0,0,passive,military,enemyCavalryDef,100,1,
+29,dice_tournament_ticket,投骰子竞标赛入场券,trs_ticket,special,epic,dialogue,0,0,0,instant,special,dice_tournament_ticket,0,1,

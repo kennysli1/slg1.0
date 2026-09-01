@@ -59,6 +59,16 @@ function pveIconByName(name?: string): string {
   return pveInfoByType(type)?.icon ?? 'pve_bandits';
 }
 
+/** 目标消失/撤回时，返回掉头瞬间当前段内的连续像素位置。 */
+function turningPointPixel(m: any): { x: number; y: number } | null {
+  const turn = m?.turningPoint;
+  if (!turn || !turn.from || !turn.to || !Number.isFinite(Number(turn.progress))) return null;
+  const progress = Math.max(0, Math.min(1, Number(turn.progress)));
+  const from = hexToPixel(turn.from);
+  const to = hexToPixel(turn.to);
+  return lerpPixel(from, to, progress);
+}
+
 /** 收集视野内所有格坐标（六边形半径 R，以 center 为中心）。 */
 function viewHexes(center: { q: number; r: number }, R: number): Hex[] {
   const out: Hex[] = [];
@@ -139,7 +149,15 @@ export function renderMap(): string {
   let paths = '';
   for (const m of moves) {
     if (!m.path || m.path.length < 2) continue;
-    const pts = m.path
+    const turn = m.turningPoint;
+    const pathPoints: Hex[] = turn && turn.from && turn.to && m.stepIndex === 0 && m.status === 'marching'
+      && Number.isFinite(Number(turn.progress))
+      ? [{
+        q: Number(turn.from.q) + (Number(turn.to.q) - Number(turn.from.q)) * Math.max(0, Math.min(1, Number(turn.progress))),
+        r: Number(turn.from.r) + (Number(turn.to.r) - Number(turn.from.r)) * Math.max(0, Math.min(1, Number(turn.progress))),
+      }, ...m.path]
+      : m.path;
+    const pts = pathPoints
       .map((h: Hex) => { const p = hexToPixel(h); return `${(p.x + ox).toFixed(1)},${(p.y + oy).toFixed(1)}`; })
       .join(' ');
     const cls = m.type === 'return' ? 'march-path march-return'
@@ -153,7 +171,7 @@ export function renderMap(): string {
   let markers = '';
   moves.forEach((m: any, i: number) => {
     if (!m.pos) return;
-    const p = hexToPixel(m.pos);
+    const p = turningPointPixel(m) ?? hexToPixel(m.pos);
     const label = m.type === 'attack' ? '⚔️'
       : m.type === 'raid' ? '🏇'
       : m.type === 'found' ? '🚩'
@@ -336,7 +354,24 @@ let animTimer: number | null = null;function startMarchAnimation(ox: number, oy:
       if (!cur) return;
       let px = hexToPixel(cur);
       // marching 且有下一格 → 在当前格与下一格间按剩余时间插值
-      if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
+      const turn = m.turningPoint;
+      const turnStart = Number(turn?.startedAt);
+      const turnDuration = Number(turn?.durationMs);
+      const turnEnd = turnStart + Math.max(1, turnDuration);
+      if (turn && m.status === 'marching' && m.stepIndex === 0 && turnDuration > 0
+        && Number.isFinite(Number(turn.progress)) && Number.isFinite(turnStart)) {
+        const turnPos = turningPointPixel(m);
+        const returnStart = hexToPixel(cur);
+        if (turnPos && now < turnEnd) {
+          const t = Math.max(0, Math.min(1, (now - turnStart) / turnDuration));
+          px = lerpPixel(turnPos, returnStart, t);
+        } else if (m.path.length > 1) {
+          const next = hexToPixel(m.path[1]);
+          const remaining = Math.max(1, Number(m.nextStepAt) - turnEnd);
+          const t = Math.max(0, Math.min(1, (now - turnEnd) / remaining));
+          px = lerpPixel(returnStart, next, t);
+        }
+      } else if (m.status === 'marching' && m.stepIndex < m.path.length - 1 && m.nextStepAt && m.perStepMs) {
         const next = m.path[m.stepIndex + 1];
         const remain = m.nextStepAt - now;
         const t = Math.max(0, Math.min(1, 1 - remain / m.perStepMs));
