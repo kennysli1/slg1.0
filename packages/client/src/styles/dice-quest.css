@@ -16,7 +16,7 @@
 .dice-quest-round-label { color: var(--c-gold); font-size: var(--f-lg); font-weight: 700; }
 .dice-quest-turn-score { position: absolute; right: var(--s-5); top: var(--s-5); color: var(--c-ink-soft); }
 .dice-quest-turn-score b { color: var(--c-gold); font: 700 var(--f-xl) var(--ff-num); }
-.dice-quest-breakdown { padding: var(--s-3); border: 1px solid rgba(216,177,104,.24); border-radius: var(--r-sm); background: rgba(216,177,104,.06); }
+.dice-quest-breakdown { min-height: 104px; padding: var(--s-3); border: 1px solid rgba(216,177,104,.24); border-radius: var(--r-sm); background: rgba(216,177,104,.06); }
 .dice-quest-breakdown-heading { display: flex; justify-content: space-between; gap: var(--s-3); color: var(--c-ink-soft); font-size: var(--f-sm); }
 .dice-quest-breakdown-heading strong { color: var(--c-gold); }
 .dice-quest-breakdown small { display: block; margin-top: var(--s-2); color: var(--c-ink-soft); }

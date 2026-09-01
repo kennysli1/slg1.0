@@ -92,6 +92,13 @@ describe('骰子任务逐帧回放', () => {
     assert.match(source, /\}, \[task\.code\]\);/);
     assert.doesNotMatch(source, /\[task\.code,\s*close\]/);
   });
+
+  it('放弃动作直接结束牌桌且前面阶段面板预留首条记录高度', () => {
+    const source = readFileSync(new URL('../features/village/DiceQuestModal.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../styles/dice-quest.css', import.meta.url), 'utf8');
+    assert.match(source, /if \(type === 'forfeit'\)[\s\S]*?setPlayback\(null\)[\s\S]*?return true;/);
+    assert.match(styles, /\.dice-quest-breakdown \{[^}]*min-height:/);
+  });
 });
 
 describe('兵种训练卡基础属性', () => {
