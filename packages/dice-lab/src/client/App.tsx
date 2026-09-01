@@ -12,11 +12,12 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
   { value: 'hard', label: '困难 NPC', description: '使用期望收益判断收手' },
 ];
 
-// 爆骰牌面在上一版基础上再停留 0.5 秒，确保结果与红色提示都能看清。
-const BUST_TABLE_DISPLAY_MS = 3_700;
+// 爆骰牌面在上一版基础上再停留 0.25 秒，确保结果与红色提示都能看清，
+// 同时避免爆骰回放过长影响继续操作。
+const BUST_TABLE_DISPLAY_MS = 3_450;
 const BUST_REVEAL_DELAY_MS = 900;
 const AI_ACTION_PAUSE_MS = 1_350;
-const AI_BUST_ACTION_PAUSE_MS = AI_ACTION_PAUSE_MS + 500;
+const AI_BUST_ACTION_PAUSE_MS = AI_ACTION_PAUSE_MS + 250;
 
 type AiPlayback = {
   events: GameEvent[];
