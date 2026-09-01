@@ -277,12 +277,17 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     const center = await fastify.inject({ method: 'GET', url: '/config' });
     assert.equal(center.statusCode, 200);
     assert.match(center.body, /配置中心（CSV）/);
+    assert.match(center.body, /需要确认的配置冲突/);
+    assert.match(center.body, /\/config\/sync\/conflicts/);
+    assert.match(center.body, /确认全部文件并更新 PR/);
     const page = await fastify.inject({ method: 'GET', url: '/config/quest-modules' });
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /\/config\/quest-modules\/data/);
     const status = await fastify.inject({ method: 'GET', url: '/config/status' });
     assert.equal(status.statusCode, 200);
     assert.equal(JSON.parse(status.body).ok, true);
+    assert.equal(JSON.parse(status.body).syncState, 'idle');
+    assert.equal(JSON.parse(status.body).pullRequest, null);
     const sync = await fastify.inject({ method: 'POST', url: '/config/sync' });
     assert.equal(sync.statusCode, 200);
     assert.equal(JSON.parse(sync.body).ok, true);
