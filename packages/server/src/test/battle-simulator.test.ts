@@ -28,7 +28,7 @@ function addTestUnit(target: GameConfig, code: string, overrides: Partial<UnitDe
 
 test('阶段化模拟器配置：兵种生命值与模拟器特性来自 CSV，雇佣兵/NPC 默认可为空', () => {
   const cfg = config();
-  assert.equal(cfg.units.praetorian.hp, 160);
+  assert.equal(cfg.units.praetorian.hp, 100);
   assert.deepEqual(cfg.units.praetorian.simTraits, ['cavalry_hunter']);
   assert.deepEqual(cfg.units.legionnaire.simTraits, ['legion_ranged_guard']);
   assert.deepEqual(cfg.units.axeman.simTraits, ['axe_linebreaker']);

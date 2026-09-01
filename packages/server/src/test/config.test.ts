@@ -32,7 +32,7 @@ test('猎马人支线与绞马索宝物配置已接入任务图', () => {
   assert.ok(hunter, '应存在猎马人支线');
   assert.equal(hunter?.type, 'side');
   assert.equal(hunter?.trigger, 'tavern_refresh');
-  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 50 });
+  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 8 });
   assert.deepEqual(hunter?.rewards.treasures, ['horse_rope']);
   assert.equal(cfg.treasures.horse_rope.effectType, 'enemyCavalryDef');
   assert.equal(cfg.treasures.horse_rope.effectValue, 30);
@@ -305,14 +305,14 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 34);
-  assert.equal(leg.meleeDef, 58);
-  assert.equal(leg.rangedDef, 52);
+  assert.equal(leg.meleeAtk, 40);
+  assert.equal(leg.meleeDef, 35);
+  assert.equal(leg.rangedDef, 50);
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 多特性解析（| 分隔）：禁卫兵引用 trait 2(heavy_armor)+9(disciplined)，两个都应生效
-  assert.deepEqual(cfg.units['praetorian'].traits, ['heavy_armor', 'disciplined']);
+  // 多特性解析（| 分隔）：禁卫兵引用当前权威 CSV 中的盾牌与重甲特性
+  assert.deepEqual(cfg.units['praetorian'].traits, ['shield', 'heavy_armor']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
   assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });
