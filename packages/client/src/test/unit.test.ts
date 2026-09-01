@@ -28,6 +28,71 @@ import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
+import { projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+
+describe('骰子任务逐帧回放', () => {
+  const base = (): DiceQuestReplayBase => ({
+    playerScore: 200,
+    aiScore: 300,
+    turnScore: 0,
+    turnBreakdown: [],
+    dice: [],
+    match: { playerWins: 0, npcWins: 0, winsRequired: 2 },
+  });
+
+  it('NPC 连续掷骰不会重置本轮累计，收下动作出现后才更新总分', () => {
+    const firstDice = [{ id: 'a', value: 1 }, { id: 'b', value: 2 }];
+    const secondDice = [{ id: 'c', value: 5 }];
+    const events = [
+      { kind: 'roll', side: 'ai' as const, dice: firstDice, message: 'NPC掷出了骰子' },
+      { kind: 'keep', side: 'ai' as const, dice: firstDice, option: { dieIds: ['a'], score: 100, label: '1' }, turnScore: 100, message: '保留1' },
+      { kind: 'roll', side: 'ai' as const, dice: secondDice, message: 'NPC掷出了骰子' },
+      { kind: 'keep', side: 'ai' as const, dice: secondDice, option: { dieIds: ['c'], score: 50, label: '5' }, turnScore: 150, message: '保留5' },
+      { kind: 'bank', side: 'ai' as const, dice: secondDice, points: 150, turnScore: 150, message: '收下150分' },
+    ];
+    const beforeBank = projectDiceQuestReplay(base(), events.slice(0, 4), false, { playerWins: 0, npcWins: 0, winsRequired: 2 });
+    assert.equal(beforeBank.turnScore, 150);
+    assert.equal(beforeBank.aiScore, 300, '总分不能在收下动作出现前提前更新');
+    assert.deepEqual(beforeBank.turnBreakdown, [{ label: '1', score: 100 }, { label: '5', score: 50 }]);
+
+    const banked = projectDiceQuestReplay(base(), events, false, { playerWins: 0, npcWins: 0, winsRequired: 2 });
+    assert.equal(banked.turnScore, 150);
+    assert.equal(banked.aiScore, 450);
+  });
+
+  it('爆骰文字出现前保留阶段分，红色爆骰帧出现后才归零', () => {
+    const started = base();
+    started.turnScore = 100;
+    started.turnBreakdown = [{ label: '1', score: 100 }];
+    started.dice = [{ id: 'old', value: 1 }];
+    const bustDice = [{ id: 'new', value: 2 }];
+    const events = [
+      { kind: 'roll', side: 'player' as const, dice: bustDice, message: '你掷出了骰子' },
+      { kind: 'bust', side: 'player' as const, dice: bustDice, points: 100, message: '爆骰' },
+    ];
+    const reveal = projectDiceQuestReplay(started, events, false, started.match);
+    assert.equal(reveal.turnScore, 100);
+    assert.deepEqual(reveal.turnBreakdown, [{ label: '1', score: 100 }]);
+    assert.deepEqual(reveal.dice, bustDice);
+
+    const alert = projectDiceQuestReplay(started, events, true, started.match);
+    assert.equal(alert.turnScore, 0);
+    assert.deepEqual(alert.turnBreakdown, []);
+  });
+
+  it('胜负事件出现时才更新多局比分', () => {
+    const events = [{ kind: 'loss', side: 'ai' as const, message: '你放弃了本局对局' }];
+    const view = projectDiceQuestReplay(base(), events, false, { playerWins: 0, npcWins: 1, winsRequired: 2 });
+    assert.deepEqual(view.match, { playerWins: 0, npcWins: 1, winsRequired: 2 });
+  });
+
+  it('叠加放弃确认框不会因 close 回调变化而重新创建牌桌', () => {
+    const source = readFileSync(new URL('../features/village/DiceQuestModal.tsx', import.meta.url), 'utf8');
+    assert.match(source, /const closeRef = useRef\(close\)/);
+    assert.match(source, /\}, \[task\.code\]\);/);
+    assert.doesNotMatch(source, /\[task\.code,\s*close\]/);
+  });
+});
 
 describe('兵种训练卡基础属性', () => {
   it('有宝物或科技最终加成时仍显示 CSV 基础攻防与速度', () => {

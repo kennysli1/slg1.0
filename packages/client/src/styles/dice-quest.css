@@ -24,7 +24,7 @@
 .dice-quest-breakdown li { display: inline-flex; align-items: center; gap: var(--s-2); padding: 5px 8px; color: var(--c-ink); background: rgba(7,20,25,.42); border: 1px solid rgba(109,133,143,.32); border-radius: var(--r-sm); font-size: var(--f-sm); }
 .dice-quest-breakdown li b { color: var(--c-gold); }
 .dice-quest-dice { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--s-3); min-height: 180px; padding: var(--s-4); border-radius: var(--r-md); background: rgba(7,20,25,.46); }
-.dice-quest-die { position: relative; width: 76px; height: 76px; padding: 0; border: 2px solid #e0c276; border-radius: 12px; color: #30271c; background: #cda967 url('/art/ui_dice_quest_die.webp') center / cover no-repeat; box-shadow: 0 4px 12px rgba(0,0,0,.22); cursor: pointer; }
+.dice-quest-die { position: relative; width: 76px; height: 76px; padding: 0; border: 2px solid #e0c276; border-radius: 12px; color: #30271c; background: #cda967 url('/art/ui_dice_quest_die.webp') center / cover no-repeat; box-shadow: 0 4px 12px rgba(0,0,0,.22); cursor: pointer; animation: dice-quest-settle .18s ease-out; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .dice-quest-die:hover:not(:disabled), .dice-quest-die.is-selected { transform: translateY(-4px); border-color: #fff1a9; box-shadow: 0 0 0 3px rgba(226,184,82,.35), 0 7px 14px rgba(0,0,0,.25); }
 .dice-quest-die:disabled { cursor: default; opacity: .96; }
 .dice-quest-die span:not(.dice-quest-die-art) { position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%); min-width: 30px; color: var(--c-gold); font-size: 10px; white-space: nowrap; }
@@ -56,6 +56,8 @@
 .dice-quest-history li.is-ai b { color: #9cd2ff; }
 .dice-quest-rules-foot { padding-top: var(--s-2); color: var(--c-ink-soft); text-align: center; font-size: var(--f-xs); line-height: 1.6; }
 .dice-quest-loading { min-width: 360px; padding: var(--s-6); color: var(--c-ink-soft); text-align: center; }
+@keyframes dice-quest-settle { from { opacity: .72; transform: translateY(-3px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .dice-quest-die { animation: none; transition: none; } }
 @media (max-width: 720px) {
   .dice-quest-shell { min-width: 0; }
   .dice-quest-table { min-height: 320px; padding: var(--s-3); }

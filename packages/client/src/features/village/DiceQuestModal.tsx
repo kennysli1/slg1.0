@@ -5,17 +5,14 @@ import { showToast } from '../../app/store.js';
 import { reloadPlayerTasks } from '../../app/refresh.js';
 import { Btn, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
+import {
+  projectDiceQuestReplay,
+  type DiceQuestDie as Die,
+  type DiceQuestEvent as DiceEvent,
+  type DiceQuestMatchScore,
+  type DiceQuestReplayBase,
+} from './dice-quest-replay.js';
 
-type Die = { id: string; value: number };
-type DiceEvent = {
-  kind: string;
-  side: 'player' | 'ai';
-  dice?: Die[];
-  option?: { dieIds: string[]; score: number; label: string };
-  points?: number;
-  turnScore?: number;
-  message: string;
-};
 type Snapshot = {
   sessionId: string;
   taskCode: string;
@@ -25,14 +22,18 @@ type Snapshot = {
   match: { playerWins: number; npcWins: number; winsRequired: number };
   round?: { outcome?: 'player' | 'npc'; ready?: boolean; failureReady?: boolean } | null;
 };
+type PlaybackState = {
+  base: DiceQuestReplayBase;
+  events: DiceEvent[];
+  index: number;
+  bustAlertVisible: boolean;
+  finalMatch: DiceQuestMatchScore;
+};
 
-const DICE_EVENT_INTERVAL_MS = 1_050;
-// 在上一版基础上再增加 0.25 秒，让新牌面、阶段积分与爆骰提示有完整的观察时间，
-// 同时避免爆骰回放过长影响继续操作。
-const BUST_EVENT_INTERVAL_MS = DICE_EVENT_INTERVAL_MS + 750;
-const BUST_ALERT_DELAY_MS = 900;
-const EVENT_CLEAR_DELAY_MS = 750;
-const BUST_CLEAR_DELAY_MS = EVENT_CLEAR_DELAY_MS + 750;
+// 每一帧展示完才安排下一帧，浏览器短暂卡顿后不会把多个绝对定时器挤在一起执行。
+const DICE_EVENT_HOLD_MS = 780;
+const BUST_REVEAL_HOLD_MS = 800;
+const BUST_ALERT_HOLD_MS = 850;
 
 function dieFace(value: number): JSX.Element {
   const positions: Record<number, number[]> = {
@@ -47,156 +48,163 @@ function dieFace(value: number): JSX.Element {
 export function DiceQuestModal({ task, close }: { task: any; close: () => void }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [shownEvent, setShownEvent] = useState<DiceEvent | null>(null);
-  const [shownEventIndex, setShownEventIndex] = useState(-1);
+  const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [busy, setBusy] = useState(true);
-  const [npcScoreHold, setNpcScoreHold] = useState<{ score: number; wins: number } | null>(null);
-  const [playerTurnHold, setPlayerTurnHold] = useState<{ score: number; breakdown: { label: string; score: number }[] } | null>(null);
-  const [bustAlertVisible, setBustAlertVisible] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'roll' | 'bank' | 'forfeit' | null>(null);
   const timers = useRef<number[]>([]);
   const closed = useRef(false);
   const sessionClosed = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const actionPending = useRef(false);
+  const closeRef = useRef(close);
+  closeRef.current = close;
   const taskName = task?.name ?? task?.code ?? '骰子对局';
 
   const clearTimers = () => { for (const id of timers.current) window.clearTimeout(id); timers.current = []; };
   useEffect(() => () => { closed.current = true; clearTimers(); }, []);
 
-  const playEvents = (events: DiceEvent[]) => {
+  const playEvents = (base: DiceQuestReplayBase, events: DiceEvent[], finalMatch: DiceQuestMatchScore) => {
     clearTimers();
-    setBustAlertVisible(false);
     if (!events.length) {
-      setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); setPlayerTurnHold(null); setSelected([]);
+      setPlayback(null); setSelected([]);
       return;
     }
-    let delay = 0;
-    events.forEach((event, index) => {
-      const eventDelay = delay;
-      const timer = window.setTimeout(() => {
-        if (!closed.current) {
-          setShownEvent(event); setShownEventIndex(index); setBustAlertVisible(false);
-          if (event.kind === 'bust') {
-            const alert = window.setTimeout(() => { if (!closed.current) setBustAlertVisible(true); }, BUST_ALERT_DELAY_MS);
-            timers.current.push(alert);
-          }
-        }
-        if (index === events.length - 1) {
-          const clear = window.setTimeout(() => {
-            if (!closed.current) {
-              setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); setPlayerTurnHold(null); setBustAlertVisible(false); setSelected([]);
-            }
-          }, event.kind === 'bust' ? BUST_CLEAR_DELAY_MS : EVENT_CLEAR_DELAY_MS);
-          timers.current.push(clear);
-        }
-      }, eventDelay);
-      timers.current.push(timer);
-      // 爆骰揭示阶段额外停留 0.25 秒；其余动作保持原有节奏。
-      delay += event.kind === 'bust' ? BUST_EVENT_INTERVAL_MS : DICE_EVENT_INTERVAL_MS;
-    });
+
+    const finish = () => {
+      if (closed.current) return;
+      setPlayback(null); setSelected([]);
+    };
+    const show = (index: number) => {
+      if (closed.current) return;
+      const event = events[index];
+      setPlayback({ base, events, index, bustAlertVisible: false, finalMatch });
+      const advance = () => index + 1 < events.length ? show(index + 1) : finish();
+      if (event.kind === 'bust') {
+        const reveal = window.setTimeout(() => {
+          if (closed.current) return;
+          setPlayback({ base, events, index, bustAlertVisible: true, finalMatch });
+          const alert = window.setTimeout(advance, BUST_ALERT_HOLD_MS);
+          timers.current = [alert];
+        }, BUST_REVEAL_HOLD_MS);
+        timers.current = [reveal];
+        return;
+      }
+      const next = window.setTimeout(advance, DICE_EVENT_HOLD_MS);
+      timers.current = [next];
+    };
+    // 首帧与响应快照在同一批更新中提交，不闪现服务端最终牌面。
+    show(0);
   };
 
   useEffect(() => {
     let alive = true;
     void req('dice.StartMatch', { taskCode: task.code }).then((result) => {
       if (!alive) return;
-      if (!result.ok) { showToast('无法开始骰子对局', 'bad'); close(); return; }
-      setSnapshot(result.payload as Snapshot);
-      setNpcScoreHold(null);
-      setPlayerTurnHold(null);
-      setBustAlertVisible(false);
+      if (!result.ok) { showToast('无法开始骰子对局', 'bad'); closeRef.current(); return; }
+      const started = result.payload as Snapshot;
+      sessionIdRef.current = started.sessionId;
+      sessionClosed.current = false;
+      setSnapshot(started);
+      setPlayback(null);
       setShowHistory(false);
       setBusy(false);
-    }).catch(() => { if (alive) { showToast('骰子对局连接失败', 'bad'); close(); } });
+    }).catch(() => { if (alive) { showToast('骰子对局连接失败', 'bad'); closeRef.current(); } });
     return () => { alive = false; };
-  }, [task.code, close]);
+    // close 由弹层宿主创建，叠加确认框时引用会变化；牌桌只能按任务 code 初始化一次。
+  }, [task.code]);
 
   const state = snapshot?.state;
-  const boardDice = shownEvent?.dice ?? state?.dice ?? [];
+  const shownEvent = playback?.events[playback.index] ?? null;
   const isBustEvent = shownEvent?.kind === 'bust';
-  const isBust = isBustEvent && bustAlertVisible;
-  const activeSide = shownEvent?.side ?? 'player';
-  const playbackEvents = shownEventIndex >= 0 ? snapshot?.events.slice(0, shownEventIndex + 1) ?? [] : [];
-  const aiBoundary = (() => {
-    // bank/bust 本身是本阶段的结算事件，查找边界时要保留它之前的 keep；
-    // 同一 NPC 回合中的 roll 只是继续掷骰，不能作为阶段边界。
-    const current = playbackEvents.at(-1);
-    const end = current && (current.kind === 'bank' || current.kind === 'bust')
-      ? playbackEvents.length - 2
-      : playbackEvents.length - 1;
-    for (let index = end; index >= 0; index--) {
-      const event = playbackEvents[index];
-      // roll 只是同一 NPC 回合的下一次掷骰，不能切断之前已经保留的组合；
-      // 只有 bank/bust 才结束阶段，避免“每次投骰子本轮累计归零”。
-      if (event.side === 'ai' && (event.kind === 'bank' || event.kind === 'bust')) return index;
-    }
-    return -1;
-  })();
-  const aiStageEvents = playbackEvents
-    .slice(aiBoundary + 1)
-    .filter((event) => event.side === 'ai' && event.kind === 'keep' && event.option);
-  const aiTurnScoreEvent = [...playbackEvents].reverse().find((event) => event.side === 'ai' && typeof event.turnScore === 'number');
-  const aiStageScore = aiTurnScoreEvent?.turnScore ?? aiStageEvents.reduce((sum, event) => sum + Number(event.option?.score ?? event.points ?? 0), 0);
-  const turnBreakdown = activeSide === 'ai' && shownEvent
-    ? (isBust ? [] : aiStageEvents.map((event) => ({ label: event.option!.label, score: event.option!.score })))
-    : playerTurnHold && !isBust ? playerTurnHold.breakdown : state?.turnBreakdown ?? [];
-  const turnScore = activeSide === 'ai' && shownEvent
-    ? (isBust ? 0 : aiStageScore)
-    : playerTurnHold && !isBust ? playerTurnHold.score : state?.turnScore ?? 0;
+  const isBust = isBustEvent && Boolean(playback?.bustAlertVisible);
+  const playbackEvents = playback ? playback.events.slice(0, playback.index + 1) : [];
+  const playbackView = playback
+    ? projectDiceQuestReplay(playback.base, playbackEvents, isBust, playback.finalMatch)
+    : null;
+  const boardDice = playbackView?.dice ?? state?.dice ?? [];
+  const activeSide = playbackView?.activeSide ?? 'player';
+  const turnBreakdown = playbackView?.turnBreakdown ?? state?.turnBreakdown ?? [];
+  const turnScore = playbackView?.turnScore ?? state?.turnScore ?? 0;
   const selectedOption = useMemo(() => snapshot?.selectableOptions.find((option) => option.dieIds.length === selected.length && option.dieIds.every((id) => selected.includes(id))), [snapshot, selected]);
-  const replaying = shownEventIndex >= 0 || npcScoreHold !== null || playerTurnHold !== null;
-  const displayedNpcScore = npcScoreHold?.score ?? state?.aiScore ?? 0;
-  const displayedNpcWins = npcScoreHold?.wins ?? snapshot?.match.npcWins ?? 0;
+  const replaying = playback !== null;
+  const displayedPlayerScore = playbackView?.playerScore ?? state?.playerScore ?? 0;
+  const displayedNpcScore = playbackView?.aiScore ?? state?.aiScore ?? 0;
+  const displayedMatch = playbackView?.match ?? snapshot?.match ?? { playerWins: 0, npcWins: 0, winsRequired: 1 };
 
   const act = async (type: 'roll' | 'bank' | 'forfeit'): Promise<boolean> => {
-    if (!snapshot || busy || replaying) return false;
+    if (!snapshot || busy || replaying || actionPending.current) return false;
     if ((type === 'roll' || type === 'bank') && state?.dice.length && !selectedOption) {
       showToast('请选择完整的计分组合', 'bad');
       return false;
     }
     const actionSelection = [...selected];
+    const before = snapshot;
+    actionPending.current = true;
     setBusy(true);
-    if (type !== 'bank') setSelected([]);
+    setPendingAction(type);
     try {
-      const result = await req('dice.Action', { sessionId: snapshot.sessionId, type, ...(actionSelection.length ? { selectedDieIds: actionSelection } : {}) });
+      const sendAction = (sessionId: string) => req('dice.Action', {
+        sessionId,
+        type,
+        ...(actionSelection.length ? { selectedDieIds: actionSelection } : {}),
+      });
+      let result = await sendAction(sessionIdRef.current ?? before.sessionId);
+      if (!result.ok && result.error?.code === 'dice_session_not_found') {
+        // 服务重启或旧页面会丢失内存牌桌。普通操作自动重开并让玩家重新掷骰；
+        // 已确认的“放弃”则在新牌桌上重试，保证 NPC 局分一定写入任务进度。
+        const restarted = await req('dice.StartMatch', { taskCode: task.code });
+        if (!restarted.ok) {
+          showToast('牌桌重新准备失败，请稍后再试', 'bad');
+          return false;
+        }
+        const fresh = restarted.payload as Snapshot;
+        sessionIdRef.current = fresh.sessionId;
+        sessionClosed.current = false;
+        if (type === 'forfeit') {
+          result = await sendAction(fresh.sessionId);
+        } else {
+          clearTimers();
+          setSnapshot(fresh);
+          setPlayback(null);
+          setSelected([]);
+          showToast('牌桌已重新准备，本局从头开始', 'info');
+          return false;
+        }
+      }
       if (!result.ok) {
-        if (result.error?.code === 'dice_session_not_found') {
-          showToast('本局牌桌已失效，请从任务栏重新开始对局', 'bad');
-          sessionClosed.current = true;
-          await reloadPlayerTasks();
-          close();
-        } else showToast(result.error?.code ?? '骰子动作失败', 'bad');
-        setBusy(false);
+        showToast(result.error?.code ?? '骰子动作失败', 'bad');
         return false;
       }
       const next = result.payload as Snapshot;
-      const npcOperation = (next.events ?? []).some((event) => event.side === 'ai');
-      const npcScoreChanged = next.state.aiScore !== snapshot.state.aiScore || next.match.npcWins !== snapshot.match.npcWins;
-      setNpcScoreHold(npcOperation && npcScoreChanged ? { score: snapshot.state.aiScore, wins: snapshot.match.npcWins } : null);
-      const playerBust = (next.events ?? []).some((event) => event.side === 'player' && event.kind === 'bust');
-      setPlayerTurnHold(playerBust ? {
-        // 服务端在发现爆骰后会清空 turnScore/turnBreakdown；把本次请求中
-        // 爆骰前已经保留的操作补回展示快照，直到红色爆骰提示出现前都不剧透。
-        score: snapshot.state.turnScore + (next.events ?? [])
-          .filter((event) => event.side === 'player' && event.kind === 'keep' && event.option)
-          .reduce((sum, event) => sum + Number(event.option?.score ?? event.points ?? 0), 0),
-        breakdown: [
-          ...snapshot.state.turnBreakdown.map((item) => ({ ...item })),
-          ...(next.events ?? [])
-            .filter((event) => event.side === 'player' && event.kind === 'keep' && event.option)
-            .map((event) => ({ label: event.option!.label, score: event.option!.score })),
-        ],
-      } : null);
-      setSnapshot(next); playEvents(next.events ?? []); setBusy(false);
+      sessionIdRef.current = next.sessionId;
+      const base: DiceQuestReplayBase = {
+        playerScore: before.state.playerScore,
+        aiScore: before.state.aiScore,
+        turnScore: before.state.turnScore,
+        turnBreakdown: before.state.turnBreakdown.map((item) => ({ ...item })),
+        dice: before.state.dice.map((die) => ({ ...die })),
+        match: { ...before.match },
+      };
+      playEvents(base, next.events ?? [], next.match);
+      setSnapshot(next);
       return true;
-    } catch { showToast('骰子对局连接失败', 'bad'); setBusy(false); return false; }
+    } catch {
+      showToast('骰子对局连接失败', 'bad');
+      return false;
+    } finally {
+      actionPending.current = false;
+      setBusy(false);
+      setPendingAction(null);
+    }
   };
 
   const exit = async () => {
-    if (sessionClosed.current) { close(); return; }
+    if (sessionClosed.current) { closeRef.current(); return; }
     sessionClosed.current = true;
-    if (!snapshot) { close(); return; }
-    await req('dice.ExitMatch', { sessionId: snapshot.sessionId }).catch(() => {});
-    close();
+    const sessionId = sessionIdRef.current;
+    if (sessionId) await req('dice.ExitMatch', { sessionId }).catch(() => {});
+    closeRef.current();
   };
   const quit = async () => {
     if (!snapshot || busy || replaying) return;
@@ -218,24 +226,35 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const playerWon = snapshot.round?.outcome === 'player' || state.winner === 'player';
   const visibleWinner = replaying ? undefined : state.winner;
   const breakdownTotal = turnBreakdown.reduce((sum, item) => sum + item.score, 0);
-  const playerEventOption = shownEvent?.side === 'player' && shownEvent.kind === 'keep' ? shownEvent.option : undefined;
+  const playerEventOption = shownEvent?.side === 'player' && (shownEvent.kind === 'keep' || shownEvent.kind === 'bank') ? shownEvent.option : undefined;
   const currentSelection = activeSide === 'ai' && shownEvent
-    ? shownEvent.option
+    ? shownEvent.kind === 'bank'
+      ? `收下 ${(shownEvent.points ?? 0).toLocaleString()} 分`
+      : shownEvent.option
       ? `+${shownEvent.option.score.toLocaleString()}`
       : shownEvent.kind === 'bust' ? (isBust ? '爆骰' : '—') : '—'
-    : playerEventOption
+    : shownEvent?.side === 'player' && shownEvent.kind === 'bank'
+      ? `收下 ${(shownEvent.points ?? 0).toLocaleString()} 分`
+      : playerEventOption
       ? `+${playerEventOption.score.toLocaleString()}`
       : selectedOption ? `+${selectedOption.score.toLocaleString()}` : '请选择完整计分组合';
   const currentSelectionDetail = activeSide === 'ai' && shownEvent
     ? shownEvent.option ? `骰子：${shownEvent.option.label}` : (isBust ? shownEvent.message : undefined)
     : playerEventOption ? `骰子：${playerEventOption.label}` : selectedOption ? `骰子：${selectedOption.label}` : undefined;
+  const pendingLabel = pendingAction === 'roll'
+    ? '正在掷骰…'
+    : pendingAction === 'bank'
+      ? '正在收下本轮分数…'
+      : pendingAction === 'forfeit'
+        ? '正在结算放弃结果…'
+        : null;
   return (
     <Modal title={`骰子王 · ${taskName}`} sub={task.code === 's7' ? '三局两胜 · 简单 NPC · 目标 2000 分' : '单局 · 简单 NPC · 目标 2000 分'} onClose={finished ? exit : quit} wide>
       <div class="dice-quest-shell">
         <div class="dice-quest-scoreboard">
-          <div class={visibleWinner === 'player' ? 'dice-quest-scoreboard__winner' : ''}><span>你</span><strong>{state.playerScore}</strong>{visibleWinner === 'player' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {snapshot.match.playerWins}/{snapshot.match.winsRequired} 局</small></div>
+          <div class={visibleWinner === 'player' ? 'dice-quest-scoreboard__winner' : ''}><span>你</span><strong>{displayedPlayerScore}</strong>{visibleWinner === 'player' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedMatch.playerWins}/{displayedMatch.winsRequired} 局</small></div>
           <div class="dice-quest-target"><span>目标</span><strong>{state.targetScore}</strong><small>先达目标得分</small></div>
-          <div class={`dice-quest-scoreboard__npc${visibleWinner === 'ai' ? ' dice-quest-scoreboard__winner' : ''}`}><span>普通 NPC</span><strong>{displayedNpcScore}</strong>{visibleWinner === 'ai' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedNpcWins}/{snapshot.match.winsRequired} 局</small></div>
+          <div class={`dice-quest-scoreboard__npc${visibleWinner === 'ai' ? ' dice-quest-scoreboard__winner' : ''}`}><span>普通 NPC</span><strong>{displayedNpcScore}</strong>{visibleWinner === 'ai' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedMatch.npcWins}/{displayedMatch.winsRequired} 局</small></div>
         </div>
         <div class={`dice-quest-table dice-quest-table--${activeSide}${isBust ? ' dice-quest-table--bust' : ''}`}>
           <div class="dice-quest-round-label">{finished ? '本局结算' : activeSide === 'ai' ? 'NPC掷骰阶段' : '你的掷骰阶段'}</div>
@@ -247,14 +266,14 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
           <div class="dice-quest-dice" aria-label="骰子">
             {boardDice.map((die) => {
               const active = selected.includes(die.id);
-              const npcKept = activeSide === 'ai' && shownEvent?.kind === 'keep' && shownEvent.option?.dieIds.includes(die.id);
-              return <button type="button" key={die.id} class={`dice-quest-die${active || npcKept ? ' is-selected' : ''}`} onClick={() => toggleDie(die.id)} disabled={activeSide !== 'player' || busy || replaying || finished}>{dieFace(die.value)}<span>{active ? '已选' : npcKept ? '保留' : ''}</span></button>;
+              const replayKept = playbackView?.selectedDieIds.includes(die.id) ?? false;
+              return <button type="button" key={die.id} class={`dice-quest-die${active || replayKept ? ' is-selected' : ''}`} onClick={() => toggleDie(die.id)} disabled={activeSide !== 'player' || busy || replaying || finished}>{dieFace(die.value)}<span>{active || (replayKept && activeSide === 'player') ? '已选' : replayKept ? '保留' : ''}</span></button>;
             })}
           </div>
           <div class={`dice-quest-selection-readout${activeSide === 'ai' ? ' is-ai' : ''}`}>
             <span>{activeSide === 'ai' ? 'NPC本次操作' : '本次选择'}</span>
-            <strong>{currentSelection}</strong>
-            {currentSelectionDetail && <small>{currentSelectionDetail}</small>}
+            <strong>{pendingLabel ?? currentSelection}</strong>
+            {!pendingLabel && currentSelectionDetail && <small>{currentSelectionDetail}</small>}
           </div>
           {isBust && <div class="dice-quest-bust-text">爆骰！本轮分数全部丢失</div>}
           {finished && <div class={`dice-quest-result ${playerWon ? 'is-win' : 'is-loss'}`}>
