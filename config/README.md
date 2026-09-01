@@ -37,14 +37,14 @@
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
-| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/速度/视野/载货/耗粮/造价、加新兵种、加新部族；冒险者为 `all` 通用侦察兵种 |
+| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`simTraits` 为独立阶段化模拟器特性引用；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
-| 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维 |
+| 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维/模拟器生命值与特性 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
 | 表8 | `game_constants.csv` | **全局常量**（城墙、容量公式、地图尺寸、M8任务村参数等） | 调平衡参数；原先写死在代码里的常量都在这 |
 | 表9 | `village_templates.csv` | **各部族开局预置建筑**（含资源田）+ 初始资源 | 改新手村开局；给不同部族不同起手 |
 | 表10 | `building_levels.csv` | **建筑逐等级独立参数** | 调某一级建筑成本、耗时、人口、产量、宝库槽位或保险库资源保护量 |
-| 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、价格或增删雇佣兵 |
+| 表11 | `mercenaries.csv` | **雇佣兵目录与金币价格** | 调雇佣兵属性、阶段化模拟器生命值、价格或增删雇佣兵 |
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率；`my_effort` 使用 `my_effort_use` 对话，`black_badge` 提供 PvE 掉率与军队加成 |
@@ -162,7 +162,9 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits | 特性ID列表（逗号分隔，引用 **unit_traits.csv 的数字 id**，可空） |
+| traits | 线上战斗特性ID列表（竖线分隔，引用 **unit_traits.csv 的数字 id**，可空） |
+| hp | 阶段化战斗模拟器的单兵生命值伤亡池（只读 CSV 的实验规则） |
+| simTraits | 阶段化战斗模拟器专用特性ID列表；与 `traits` 分开，避免影响线上旧战斗 |
 
 > 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
 
@@ -175,10 +177,12 @@
 | form | `melee` 或 `ranged` |
 | meleeAtk/rangedAtk | 近战/远程攻击 |
 | meleeDef/rangedDef | 近战/远程防御 |
+| hp | 阶段化战斗模拟器的单兵生命值伤亡池 |
 | speed / carry | 行军速度 / 单兵载货量 |
 | upkeep | 每小时耗粮；雇佣兵当前固定为 0 |
 | costWood/costClay/costIron/costCrop | 普通训练资源成本；雇佣兵固定为 0 |
-| trainSec / building / traits | 训练秒数 / 所需建筑 / 特性；当前均留空或为 0 |
+| trainSec / building / traits | 训练秒数 / 所需建筑 / 线上战斗特性；当前均留空或为 0 |
+| simTraits | 阶段化模拟器特性ID列表（竖线分隔；与线上 `traits` 隔离） |
 | popCost | 训练/在途/驻军占用的人口；所有兵种返程、解散都会按此值返还。拓荒者每名占用 5 人口，成功建城后由出发城永久转移，新城以 5 人口开局 |
 | goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
 | commandCost | 单份合同占用的佣兵统御容量 |
@@ -203,7 +207,9 @@
 | effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
 | value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
 
-> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成)。
+> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成) / `enemy_cavalry_atk`(敌骑兵攻击修正) / `ally_ranged_def`(己方另一兵种远程防御修正) / `enemy_ranged_melee_def`(敌远程兵近战防御修正) / `cavalry_charge_atk`(冲锋阶段骑兵攻击修正)。同一属性按加法叠加，减益最低到 0。
+
+阶段化战斗模拟器页面为 `/battle-simulator`。它通过 `battleSimulator.GetCatalog` / `battleSimulator.Simulate` 读取这些 CSV 配置，不读写主游戏存档。
 > 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
 
 ## pve_targets.csv — PvE 目标模板
@@ -231,7 +237,9 @@
 | form | 形态：`melee` / `ranged` |
 | meleeAtk/rangedAtk | 近战/远程攻击力 |
 | meleeDef/rangedDef | 近战/远程防御 |
+| hp | 阶段化模拟器的单兵生命值伤亡池 |
 | carry | 载货（守军一般0） |
+| traits | 阶段化模拟器特性ID列表（竖线分隔；引用 `unit_traits.csv`，可空） |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
 
@@ -273,6 +281,14 @@
 | key | 默认 | 作用 |
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
+| battle_sim_melee_rounds | 6 | 模拟器第三阶段全军近战互殴轮数 |
+| combat_phase_cavalry_vs_cavalry_coeff | 1 | 模拟器骑兵对冲伤害系数 |
+| combat_phase_cavalry_vs_melee_coeff | 1 | 模拟器骑兵冲击近战步兵伤害系数 |
+| combat_phase_cavalry_vs_ranged_coeff | 1 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
+| combat_phase_ranged_strike_coeff | 1 | 模拟器远程打击伤害系数（目标用远程防御） |
+| combat_phase_melee_round_coeff | 1 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_phase_compare_epsilon | 0.0001 | 模拟器攻城最终阶段判断数值相等的容差 |
+| combat_phase_min_survivor_units | 1 | 模拟器攻城最终阶段胜方至少保留单位数 |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
 | main_build_speedup_cap | 0.6 | 主基地提速上限（最多-60%） |
 | storage_base | 800 | 仓库/粮仓基础容量 |

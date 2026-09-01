@@ -11,6 +11,8 @@
 
 ### 新增
 
+- 新增独立阶段化战斗模拟器：服务器端无状态 `battle-simulator` 模块与 `/battle-simulator` 页面只读取 CSV 兵种、特性、PvE 守军、科技、宝物和全局常量，不读写主游戏存档；支持自由编队、伏击/掠夺/遭遇/攻城模式、科技/宝物/城墙加成、可复现随机种子，并输出各阶段攻防/生命伤亡池、损失分配和特性目标报告。
+- 兵种、雇佣兵和 PvE 守军新增模拟器生命值字段；`units.csv.simTraits`、`mercenaries.csv.simTraits`、`pve_defenders.csv.traits` 与 `unit_traits.csv` 可在配置中心编辑。禁卫兵/方阵兵/长矛兵配置反骑兵，军团兵配置协同远程防御，斧兵配置破阵，非侦察骑兵配置冲锋加成，其余雇佣兵/NPC 特性暂为空。
 - 新增独立筛色子实验场 `packages/dice-lab`：普通六面骰规则、热骰/爆骰、三档 NPC、服务器内存会话、静态 Preact UI 和生成的骰子/计分板美术；通过 `kow-dice-lab` PM2 服务和 `/dice-lab/` 同域入口部署，与主游戏存档、Wire 协议和领域状态隔离。
 - 新增支线任务「猎马人」（二级主基地后进入酒馆支线池），跨战斗累计击杀 50 人口骑兵后奖励宝物「绞马索」。
 - 新增 `cavalry_unit_codes` 配置和 `enemyCavalryDef` 宝物效果；绞马索使携带军队面对的敌方骑兵防御降低 30%，并接入 PvE/PvP/野战战斗快照。
