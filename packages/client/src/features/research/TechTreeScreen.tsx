@@ -172,7 +172,7 @@ function techFocus(t: any): string | null {
   return labels[effect.effectType] ?? null;
 }
 
-/** 一个分支的科技阶段列；军事节点按攻防形态明确分流。 */
+/** 一个分支的科技阶段树；军事节点按攻防形态明确分流。 */
 function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   branch: Branch;
   techs: any[];
@@ -195,15 +195,15 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
         <span><i class="tech-legend-dot tech-legend-dot--ready" />可研发</span>
         <span><i class="tech-legend-dot tech-legend-dot--locked" />等待前置</span>
       </div>
-      <div class="tech-tree-columns">
+      <div class="tech-tree-stages">
         {tiers.map((tier, index) => (
-          <section key={tier} class="tech-tree-column">
-            <div class="tech-column-head">
-              <span class="tech-column-index">{toRoman(Number(tier))}</span>
+          <section key={tier} class="tech-tree-stage">
+            <div class="tech-stage-head">
+              <span class="tech-stage-index">{toRoman(Number(tier))}</span>
               <span>阶段 {tier}</span>
               <small>{list.filter((t) => t.tier === tier).length} 项</small>
             </div>
-            <div class="tech-column-nodes">
+            <div class="tech-stage-nodes">
               {list.filter((t) => t.tier === tier).map((t) => (
                 <TechNode
                   key={t.code}
@@ -215,7 +215,7 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
                 />
               ))}
             </div>
-            {index < tiers.length - 1 && <div class="tech-column-arrow" aria-hidden="true">›</div>}
+            {index < tiers.length - 1 && <div class="tech-stage-arrow" aria-hidden="true">↓</div>}
           </section>
         ))}
       </div>

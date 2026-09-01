@@ -79,33 +79,21 @@
 .tech-legend-dot--done { background: var(--c-jade); }
 .tech-legend-dot--ready { background: var(--c-gold); }
 .tech-legend-dot--locked { background: var(--c-ink-dim); }
-.tech-tree-columns {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--s-3);
-  align-items: start;
-}
-.tech-tree-column {
-  position: relative;
-  min-width: 0;
-  padding: var(--s-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: rgba(0, 0, 0, .12);
-}
-.tech-column-head {
+.tech-tree-stages { display: flex; flex-direction: column; gap: 0; }
+.tech-tree-stage { position: relative; min-width: 0; }
+.tech-stage-head {
   display: flex;
   align-items: center;
   gap: var(--s-2);
   min-height: 30px;
-  padding: 0 var(--s-1) var(--s-2);
+  padding: var(--s-1) var(--s-1) var(--s-2);
   color: var(--c-ink-soft);
   font-family: var(--ff-han);
   font-size: var(--f-xs);
   font-weight: 700;
   letter-spacing: 1px;
 }
-.tech-column-head small {
+.tech-stage-head small {
   margin-left: auto;
   color: var(--c-ink-dim);
   font-family: var(--ff-body);
@@ -113,7 +101,7 @@
   font-weight: 400;
   letter-spacing: 0;
 }
-.tech-column-index {
+.tech-stage-index {
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -126,22 +114,18 @@
   font-size: var(--f-sm);
   letter-spacing: 0;
 }
-.tech-column-nodes {
+.tech-stage-nodes {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--s-2);
 }
-.tech-column-arrow {
-  position: absolute;
-  z-index: 2;
-  top: 50%;
-  right: calc(var(--s-3) * -1 - 10px);
+.tech-stage-arrow {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 28px;
+  height: 34px;
   color: var(--tech-branch);
   font-family: var(--ff-num);
-  font-size: var(--f-2xl);
+  font-size: var(--f-xl);
   line-height: 1;
   text-shadow: 0 0 var(--s-2) var(--tech-branch);
 }
@@ -194,26 +178,11 @@
 /* 科技页只保留当前研究与完整树两个决策区域。 */
 .tech-command-desk { display: flex; flex-direction: column; gap: var(--s-5); }
 .tech-full-tree { display: flex; flex-direction: column; gap: var(--s-3); padding-top: var(--s-4); border-top: 1px solid var(--line); }
-@media (max-width: 960px) {
-  .tech-tree-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tech-column-arrow { display: none; }
-}
 @media (max-width: 720px) {
   .tech-command-desk { gap: var(--s-4); }
   .tech-tree-board { padding: var(--s-3); }
-  .tech-tree-columns { grid-template-columns: minmax(0, 1fr); gap: var(--s-4); }
-  .tech-tree-column { padding-bottom: var(--s-3); }
-  .tech-tree-column:not(:last-child)::after {
-    content: '↓';
-    position: absolute;
-    bottom: calc(var(--s-4) * -1);
-    left: 50%;
-    color: var(--tech-branch);
-    font-family: var(--ff-num);
-    font-size: var(--f-xl);
-    text-shadow: 0 0 var(--s-2) var(--tech-branch);
-    transform: translateX(-50%);
-  }
+  .tech-stage-nodes { grid-template-columns: minmax(0, 1fr); }
+  .tech-stage-arrow { height: 30px; }
   .tech-tree-legend { justify-content: flex-start; }
   .tech-branch-btn { min-height: 40px; }
   .tech-node-action .btn { min-height: 40px; }
