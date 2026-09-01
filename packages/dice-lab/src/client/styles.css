@@ -47,6 +47,7 @@ input, select { color: #f1eadc; background: #111b21; border: 1px solid #5e7180; 
 .ai-side { color: var(--blue); }
 .ai-side.is-winner { color: var(--blue-hi); text-shadow: 0 0 16px rgba(121,185,229,.64); }
 .score-side.is-winner { color: #fff2bc; text-shadow: 0 0 16px rgba(246,224,170,.68); }
+.score-side.ai-side.is-winner { color: var(--blue-hi); text-shadow: 0 0 16px rgba(121,185,229,.64); }
 .score-side.is-winner strong { animation: score-pulse 1.2s ease-in-out infinite; }
 .goal-badge { display: inline-flex; align-self: center; margin-top: 4px; padding: 3px 9px; color: #182127; background: var(--gold-hi); border-radius: 999px; font-size: 12px; font-weight: 700; box-shadow: 0 0 0 3px rgba(246,224,170,.16), 0 0 20px rgba(246,224,170,.36); }
 .ai-turn-board { margin: 18px 0 12px; padding: 14px; border: 1px solid rgba(82,157,211,.58); border-radius: 8px; background: rgba(43,112,164,.14); }
