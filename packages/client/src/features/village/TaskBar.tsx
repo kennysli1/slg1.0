@@ -18,6 +18,7 @@ import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
+import { DiceQuestModal } from './DiceQuestModal.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -61,6 +62,7 @@ function objText(task: any): string {
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
+  if (o.kind === 'dice_match') return o.diceWinsRequired > 1 ? `投骰子三局两胜（目标 ${o.diceTargetScore} 分）` : `投骰子战胜对手（目标 ${o.diceTargetScore} 分）`;
   return o.kind;
 }
 
@@ -480,6 +482,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const onOpenTrade = async () => {
     if (await ensureTaskExecution(task)) openTradeCenter();
   };
+  const onDiceStart = () => {
+    void (async () => {
+      if (!await ensureTaskExecution(task)) return;
+      openModal((close) => <DiceQuestModal task={task} close={close} />, `dice-task-${task.code}`);
+    })();
+  };
 
   return (
     <div class={`task-card task-card--${task.type}`}>
@@ -565,6 +573,17 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       {o.kind === 'research_completed' && (
         <div class="task-card-obj"><div class="task-card-prog"><span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>已研发 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)} 项科技</span><span class="task-prog-hint">需要先建造学院</span></div></div>
       )}
+      {o.kind === 'dice_match' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${(task.dicePlayerWins ?? 0) >= (o.diceWinsRequired ?? 1) ? ' done' : ''}`}>
+              对局胜场 {task.dicePlayerWins ?? 0}/{o.diceWinsRequired ?? 1} · NPC {task.diceNpcWins ?? 0}/{o.diceWinsRequired ?? 1}
+            </span>
+            <span class="task-prog-hint">每局目标分数 {o.diceTargetScore ?? 2000}；可随时退出，退出本局计 NPC 胜一局</span>
+            {task.diceLastOutcome === 'npc' && <span class="task-prog-hint task-prog-hint--warn">上一局未获胜，可重新尝试</span>}
+          </div>
+        </div>
+      )}
       {(o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && (task.ready || task.failureReady) && (
         <div class="task-card-obj"><span class={`task-prog-hint ${task.failureReady ? 'task-prog-hint--warn' : 'task-prog-hint--ok'}`}>
           {task.failureReady ? '任务失败，请确认任务失败' : '目标已达成，请领取奖励'}
@@ -636,6 +655,13 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'deliver_to_npc' && !task.npcPending && (
               <Btn size="sm" variant="primary" onClick={() => void onOpenTrade()}>前往贸易中心</Btn>
             )}
+            {o.kind === 'dice_match' && <Btn size="sm" variant="primary" onClick={onDiceStart}>
+              {task.code === 's6' && task.diceLastOutcome === 'npc'
+                ? '重新尝试'
+                : task.code === 's7' && ((task.dicePlayerWins ?? 0) + (task.diceNpcWins ?? 0) > 0)
+                  ? '继续对局'
+                  : '开始对局'}
+            </Btn>}
           </>
         )}
         {!isMain && !task.failureReady && (

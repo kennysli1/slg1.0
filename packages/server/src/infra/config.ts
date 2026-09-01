@@ -151,7 +151,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'kill_units';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'kill_units' | 'dice_match';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -187,6 +187,10 @@ export interface QuestObjective {
   threshold?: number;
   /** kill_units：累计击杀指定类别的敌方兵力（人口数）；当前支持 cavalry。 */
   unitCategory?: string;
+  /** dice_match：参数为 difficulty:targetScore:winsRequired。 */
+  diceDifficulty?: 'easy' | 'normal' | 'hard';
+  diceTargetScore?: number;
+  diceWinsRequired?: number;
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -1679,6 +1683,17 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
     if (row.kind === 'reputation_at_most') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
+    if (row.kind === 'dice_match') {
+      const [difficulty, targetScore, winsRequired] = row.params.split(':');
+      const normalized = difficulty === 'normal' || difficulty === 'hard' ? difficulty : 'easy';
+      return {
+        kind: row.kind,
+        count: Math.max(1, num(winsRequired, 1)),
+        diceDifficulty: normalized,
+        diceTargetScore: Math.max(1, num(targetScore, 2000)),
+        diceWinsRequired: Math.max(1, num(winsRequired, 1)),
+      };
+    }
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
   const parseReputationMercenaryExchange = (s: string): { unitCode: string; perPoint: number } | null => {
@@ -2181,7 +2196,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'kill_units']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'kill_units', 'dice_match']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2237,6 +2252,10 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'reputation_at_most') {
       if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] reputation_at_most 必须指定数值阈值`);
+    } else if (q.objective.kind === 'dice_match') {
+      if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
+      if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
+      if (!q.objective.diceDifficulty || !['easy', 'normal', 'hard'].includes(q.objective.diceDifficulty)) errors.push(`quests.csv[${q.code}] dice_match 难度无效`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {

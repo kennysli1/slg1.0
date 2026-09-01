@@ -73,3 +73,4 @@ import './kingdom.test.js';
 import './kingdom-overview.test.js';
 import './dialogue.test.js';
 import './task-m12-m13.test.js';
+import './dice-quest.test.js';

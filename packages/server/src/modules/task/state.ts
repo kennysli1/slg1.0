@@ -56,6 +56,10 @@ export interface TaskInstance {
   taskVillageAttackAt?: number;
   taskVillageAttackDispatched?: boolean;
   outcome?: 'success' | 'failure';
+  /** 骰子王任务：已赢/已输的对局场数及最近一局结果。 */
+  dicePlayerWins?: number;
+  diceNpcWins?: number;
+  diceLastOutcome?: 'player' | 'npc';
 }
 
 export interface PendingTaskDialogue {

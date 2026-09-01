@@ -1,0 +1,44 @@
+.dice-quest-shell { display: flex; flex-direction: column; gap: var(--s-4); min-width: min(760px, 82vw); }
+.dice-quest-scoreboard { display: grid; grid-template-columns: 1fr .8fr 1fr; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--c-line); border-radius: var(--r-md); background: rgba(25,37,44,.94) url('/art/ui_dice_quest_scoreboard.png') center / 100% 100% no-repeat; text-align: center; }
+.dice-quest-scoreboard div { display: flex; flex-direction: column; gap: 2px; }
+.dice-quest-scoreboard span { color: var(--c-ink-soft); font-size: var(--f-sm); }
+.dice-quest-scoreboard strong { color: var(--c-gold); font: 700 30px var(--ff-num); }
+.dice-quest-scoreboard small { color: var(--c-ink-soft); font-size: var(--f-xs); }
+.dice-quest-scoreboard__npc strong { color: #78b8ec; }
+.dice-quest-target strong { color: var(--c-ink); }
+.dice-quest-scoreboard__winner strong { text-shadow: 0 0 14px rgba(255,224,124,.9); }
+.dice-quest-scoreboard__npc.dice-quest-scoreboard__winner strong { text-shadow: 0 0 14px rgba(120,184,236,.9); }
+.dice-quest-win-mark { color: var(--c-gold); font-size: var(--f-xs); font-style: normal; font-weight: 700; }
+.dice-quest-scoreboard__npc .dice-quest-win-mark { color: #9cd2ff; }
+.dice-quest-table { position: relative; min-height: 390px; display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-5); border: 1px solid var(--c-line); border-radius: var(--r-md); background: #20343b; transition: background .2s ease, border-color .2s ease; }
+.dice-quest-table--ai { background: #213f54; border-color: #5b91b9; }
+.dice-quest-table--bust { background: #4d292b; border-color: #d66e6e; }
+.dice-quest-round-label { color: var(--c-gold); font-size: var(--f-lg); font-weight: 700; }
+.dice-quest-turn-score { position: absolute; right: var(--s-5); top: var(--s-5); color: var(--c-ink-soft); }
+.dice-quest-turn-score b { color: var(--c-gold); font: 700 var(--f-xl) var(--ff-num); }
+.dice-quest-reserved { min-height: 26px; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.dice-quest-dice { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--s-3); min-height: 180px; padding: var(--s-4); border-radius: var(--r-md); background: rgba(7,20,25,.46); }
+.dice-quest-die { position: relative; width: 76px; height: 76px; padding: 0; border: 2px solid #e0c276; border-radius: 12px; color: #30271c; background: #cda967 url('/art/ui_dice_quest_die.webp') center / cover no-repeat; box-shadow: 0 4px 12px rgba(0,0,0,.22); cursor: pointer; }
+.dice-quest-die:hover:not(:disabled), .dice-quest-die.is-selected { transform: translateY(-4px); border-color: #fff1a9; box-shadow: 0 0 0 3px rgba(226,184,82,.35), 0 7px 14px rgba(0,0,0,.25); }
+.dice-quest-die:disabled { cursor: default; opacity: .96; }
+.dice-quest-die span:not(.dice-quest-die-art) { position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%); min-width: 30px; color: var(--c-gold); font-size: 10px; white-space: nowrap; }
+.dice-quest-die-art { width: 100%; height: 100%; padding: 14px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+.dice-quest-pip { width: 13px; height: 13px; align-self: center; justify-self: center; border-radius: 50%; background: #24252a; box-shadow: inset 1px 1px 2px rgba(255,255,255,.25); }
+.dice-quest-pip-0 { grid-area: 1 / 1; } .dice-quest-pip-1 { grid-area: 1 / 2; } .dice-quest-pip-2 { grid-area: 1 / 3; }
+.dice-quest-pip-3 { grid-area: 2 / 1; } .dice-quest-pip-4 { grid-area: 2 / 2; } .dice-quest-pip-5 { grid-area: 2 / 3; }
+.dice-quest-pip-6 { grid-area: 3 / 1; } .dice-quest-pip-7 { grid-area: 3 / 2; } .dice-quest-pip-8 { grid-area: 3 / 3; }
+.dice-quest-bust-text, .dice-quest-result { padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); text-align: center; font-weight: 700; }
+.dice-quest-result { display: flex; flex-direction: column; gap: 3px; }
+.dice-quest-bust-text { color: #ffd1d1; background: rgba(154,45,45,.6); }
+.dice-quest-result.is-win { color: #ffe6a6; background: rgba(95,122,56,.65); }
+.dice-quest-result.is-loss { color: #ffd1d1; background: rgba(154,45,45,.65); }
+.dice-quest-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--s-3); }
+.dice-quest-loading { min-width: 360px; padding: var(--s-6); color: var(--c-ink-soft); text-align: center; }
+@media (max-width: 720px) {
+  .dice-quest-shell { min-width: 0; }
+  .dice-quest-table { min-height: 320px; padding: var(--s-3); }
+  .dice-quest-die { width: 58px; height: 58px; }
+  .dice-quest-die-art { padding: 10px; }
+  .dice-quest-pip { width: 10px; height: 10px; }
+  .dice-quest-turn-score { position: static; }
+}
