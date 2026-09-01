@@ -29,3 +29,5 @@ e-m14-reputation-mercenaries,m14,deliver,grant_mercenaries_by_positive_reputatio
 e-m15-research,m15,deliver,grant_research_points,10,1
 e-m15-crop-growth,m15,deliver,grant_resource_growth,crop:25:86400,2
 e-s5-rope,s5,deliver,grant_treasure,horse_rope,1
+e-s6-ticket,s6,deliver,grant_treasure,dice_tournament_ticket,1
+e-s7-gold,s7,deliver,grant_resources,gold:200,1

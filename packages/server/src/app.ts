@@ -29,6 +29,7 @@ import { ReputationModule } from './modules/reputation.js';
 import { AlchemyModule } from './modules/alchemy.js';
 import { KingdomModule } from './modules/kingdom.js';
 import { DialoguesModule } from './modules/dialogues.js';
+import { DiceQuestModule } from './modules/dice-quest.js';
 import { BattleSimulatorModule } from './modules/battle-simulator.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
@@ -116,6 +117,7 @@ export interface GameApp {
   reputation: ReputationModule;
   alchemy: AlchemyModule;
   kingdom: KingdomModule;
+  diceQuest: DiceQuestModule;
   battleSimulator: BattleSimulatorModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
@@ -252,12 +254,14 @@ export function createGameApp(opts?: {
   const reputation = new ReputationModule(store, bus, commands, now, config);
   const alchemy = new AlchemyModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   const kingdom = new KingdomModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
+  const diceQuest = new DiceQuestModule(commands, now, config, opts?.rng ?? Math.random);
   const battleSimulator = new BattleSimulatorModule(commands, config);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
     player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, battleSimulator,
+    diceQuest,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
@@ -362,7 +366,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, battleSimulator, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },

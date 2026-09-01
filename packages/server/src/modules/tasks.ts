@@ -126,6 +126,10 @@ export class TasksModule {
     this.commands.register('task.StartDeliver', (c: Command) => this.startDeliver(c));
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
     this.commands.register('task.Fail', (c: Command) => this.fail(c));
+    // 骰子王小游戏只通过任务模块读写任务进度；临时对局本身由 diceQuest owner 管理。
+    this.commands.register('task.GetDiceMatch', (c: Command) => this.getDiceMatch(c));
+    this.commands.register('task.ResetDiceMatch', (c: Command) => this.resetDiceMatch(c));
+    this.commands.register('task.RecordDiceRound', (c: Command) => this.recordDiceRound(c));
     // GM 运维命令（由 GM 面板经 commands.send({from:'gm'}) 调用，不暴露给客户端）
     this.commands.register('task.GmComplete', (c: Command) => this.gmComplete(c));
     this.commands.register('task.GmReopenCompleted', (c: Command) => this.gmReopenCompleted(c));
@@ -549,6 +553,16 @@ export class TasksModule {
     const check = await this.validateAccept(villageId, code);
     if (!('q' in check)) return check;
     const { q, storageVillageId, s } = check;
+
+    // S7 接取时一次性支付入场费。StartAccept 只读预览，因此费用不会因
+    // 打开对话或关闭对话而扣除；只有玩家明确点击“接受任务”才结算。
+    if (code === 's7') {
+      const paid = await this.commands.send({
+        name: 'economy.TrySpend', from: TasksModule.NAME,
+        payload: { villageId, cost: { gold: 100 } },
+      });
+      if (!paid.ok) return paid;
+    }
 
     if (q.type === 'daily') {
       s.offered = s.offered.filter((c) => c !== code);
@@ -2319,6 +2333,17 @@ export class TasksModule {
       state.firedTriggers.push(trigger);
       this.store.set(COLLECTION, storageVillageId, state);
     }
+    // 宝物主动效果是任务触发器的一等事件。除 M13 主线外，骰子王入口
+    // 也由入场券使用触发，并且任务归属使用宝物的当前村庄。
+    if (p.code === 'dice_tournament_ticket') {
+      const sideStorage = this.storageVillageForQuest(p.villageId, 's7');
+      const sideState = this.ensureState(sideStorage);
+      if (!sideState.firedTriggers.includes(trigger)) {
+        sideState.firedTriggers.push(trigger);
+        this.store.set(COLLECTION, sideStorage, sideState);
+      }
+      await this.unlockSideQuests(p.villageId);
+    }
     await this.unlockMainQuests(p.villageId);
   }
 
@@ -2905,6 +2930,108 @@ export class TasksModule {
     }
   }
 
+  /** 骰子小游戏读取任务进度的内部快照，不把 task owner 的存档暴露给其它模块。 */
+  private async getDiceMatch(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId?: string; code?: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q || q.objective.kind !== 'dice_match') return { ok: false, payload: {}, reason: 'not_dice_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    return {
+      ok: true,
+      payload: {
+        code,
+        difficulty: q.objective.diceDifficulty ?? 'easy',
+        targetScore: q.objective.diceTargetScore ?? 2000,
+        winsRequired: q.objective.diceWinsRequired ?? 1,
+        playerWins: inst.dicePlayerWins ?? 0,
+        npcWins: inst.diceNpcWins ?? 0,
+        lastOutcome: inst.diceLastOutcome ?? null,
+      },
+    };
+  }
+
+  /** S6 败局后的“重新尝试”只重置本次单局，不重置任务本身或其它任务状态。 */
+  private async resetDiceMatch(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId?: string; code?: string };
+    if (!villageId || code !== 's6') return { ok: false, payload: {}, reason: 'invalid_dice_retry' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    if (inst.diceLastOutcome !== 'npc') return { ok: true, payload: { reset: false } };
+    inst.dicePlayerWins = 0;
+    inst.diceNpcWins = 0;
+    inst.progress = 0;
+    delete inst.diceLastOutcome;
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return { ok: true, payload: { reset: true } };
+  }
+
+  /** 骰子一局结束后原子推进 s6/s7，所有“待领取/失败”状态仍由 task owner 决定。 */
+  private async recordDiceRound(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
+    if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
+    const q = this.quest(code);
+    if (!q || q.objective.kind !== 'dice_match') return { ok: false, payload: {}, reason: 'not_dice_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (inst.readyToDeliver || inst.failureReady) return { ok: false, payload: {}, reason: 'match_already_decided' };
+    inst.executionVillageId = villageId;
+    inst.dicePlayerWins = (inst.dicePlayerWins ?? 0) + (winner === 'player' ? 1 : 0);
+    inst.diceNpcWins = (inst.diceNpcWins ?? 0) + (winner === 'npc' ? 1 : 0);
+    inst.diceLastOutcome = winner;
+    inst.progress = inst.dicePlayerWins;
+    const needed = Math.max(1, q.objective.diceWinsRequired ?? 1);
+    let outcome: 'player' | 'npc' | null = null;
+    if (inst.dicePlayerWins >= needed) {
+      outcome = 'player';
+      await this.markReady(villageId, code);
+    } else if (inst.diceNpcWins >= needed) {
+      outcome = 'npc';
+      if (code === 's7') {
+        inst.outcome = 'failure';
+        inst.failureReady = true;
+        inst.readyToDeliver = false;
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.pushList(villageId);
+        await this.pushMap(villageId);
+      } else {
+        // S6 失败只记录最近一局，任务仍保持 active，可重新尝试。
+        this.store.set(COLLECTION, storageVillageId, state);
+        await this.pushList(villageId);
+        await this.pushMap(villageId);
+      }
+    } else {
+      this.store.set(COLLECTION, storageVillageId, state);
+      await this.pushList(villageId);
+      await this.pushMap(villageId);
+    }
+    const latest = this.ensureState(storageVillageId).active[code];
+    return {
+      ok: true,
+      payload: {
+        code,
+        winner,
+        playerWins: latest?.dicePlayerWins ?? inst.dicePlayerWins ?? 0,
+        npcWins: latest?.diceNpcWins ?? inst.diceNpcWins ?? 0,
+        winsRequired: needed,
+        outcome,
+        ready: latest?.readyToDeliver === true,
+        failureReady: latest?.failureReady === true,
+      },
+    };
+  }
+
   // ── 进度判定 ──
   private submitMet(inst: TaskInstance, required: Record<string, number>): boolean {
     for (const [res, need] of Object.entries(required)) {
@@ -3088,6 +3215,9 @@ export class TasksModule {
       taskVillageCode: q.objective.taskVillageCode ?? null,
       threshold: q.objective.threshold ?? null,
       unitCategory: q.objective.unitCategory ?? null,
+      diceDifficulty: q.objective.diceDifficulty ?? null,
+      diceTargetScore: q.objective.diceTargetScore ?? null,
+      diceWinsRequired: q.objective.diceWinsRequired ?? null,
     };
   }
 
@@ -3134,6 +3264,9 @@ export class TasksModule {
       taskVillageAttackAt: inst.taskVillageAttackAt ?? null,
       taskVillageAttackDispatched: inst.taskVillageAttackDispatched === true,
       outcome: inst.outcome ?? null,
+      dicePlayerWins: inst.dicePlayerWins ?? 0,
+      diceNpcWins: inst.diceNpcWins ?? 0,
+      diceLastOutcome: inst.diceLastOutcome ?? null,
       failureReady: inst.failureReady === true,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,
