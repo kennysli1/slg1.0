@@ -190,7 +190,7 @@ export function DiceLabApp() {
               <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{aiPlayback ? 'NPC掷骰阶段' : state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{(aiProgress?.turnScore ?? state.turnScore).toLocaleString()}</b></span></div>
               <TurnBreakdown entries={aiProgress?.entries ?? (bustDisplay ? bustBreakdown ?? [] : state.turnBreakdown)} />
               {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
-              {!aiPlayback && <div class={`dice-tray${bustDisplay ? (bustPhase === 'alert' ? ' is-bust-table' : ' is-bust-reveal') : ''}`} aria-label={bustDisplay ? (bustPhase === 'alert' ? '爆骰结果牌面' : '爆骰待确认牌面') : '当前骰子'}>
+              {!aiPlayback && <div class={`dice-tray${bustDisplay && bustPhase === 'alert' ? ' is-bust-table' : ''}`} aria-label={bustDisplay ? (bustPhase === 'alert' ? '爆骰结果牌面' : '爆骰待确认牌面') : '当前骰子'}>
                 {bustDisplay ? <>
                   {bustPhase === 'alert' && <div class="bust-table-heading is-alert"><strong>爆骰</strong><span>本轮未收下的分数已丢失</span></div>}
                   <div class="bust-table-dice">{(bustDisplay.dice ?? []).map((die) => <div key={die.id} class="die-button die-static bust-table-die" aria-label={bustPhase === 'alert' ? `${die.value}点爆骰结果` : `${die.value}点骰子`}><DieFace value={die.value} /></div>)}</div>
