@@ -1756,6 +1756,10 @@
 .empire-workspace-expanded-panel { min-width: 0; }
 .empire-workspace-content { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-content .kingdom-army-management { margin-top: 0; }
+.village-management-overview { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s-4); }
+.village-management-overview > * { min-width: 0; }
+.village-management-population { display: flex; min-width: 0; flex-direction: column; }
+.village-management-population > .panel { flex: 1 1 auto; }
 .empire-active-panel { border-left: calc(var(--s-1) / 2) solid var(--status-warning); }
 
 @media (max-width: 1120px) {
@@ -1765,7 +1769,8 @@
 @media (max-width: 720px) {
   .empire-command-desk { gap: var(--s-3); }
   .empire-operations-grid,
-  .empire-workspace-grid { grid-template-columns: minmax(0, 1fr); }
+  .empire-workspace-grid,
+  .village-management-overview { grid-template-columns: minmax(0, 1fr); }
   .empire-operation-item { padding: 0 0 var(--s-2); border-right: 0; border-bottom: 1px solid var(--line); }
   .empire-workspace-panel { min-height: 0; height: auto; }
   .empire-workspace-topline { align-items: flex-start; flex-direction: column; }

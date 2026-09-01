@@ -103,6 +103,9 @@ async function main() {
   } catch { /* 开发环境可能还没有 client/dist */ }
   if (existsSync(clientDist)) {
     await fastify.register(fastifyStatic, { root: clientDist, prefix: '/' });
+    // 独立阶段化战斗模拟器入口：与主游戏使用同一构建产物，但由客户端
+    // 按 pathname 渲染隔离页面，不加载玩家村庄/行军交互。
+    fastify.get('/battle-simulator', (_request, reply) => void reply.sendFile('index.html'));
   }
 
   // 连接计数（用于限制最大并发连接数）

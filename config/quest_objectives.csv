@@ -23,3 +23,5 @@ o-m13,m13,investigate_task_village,secret_camp,1
 o-m14,m14,submit_resources,crop:500,1
 o-m15,m15,reputation_at_most,-5,1
 o-s5,s5,kill_units,cavalry:50,1
+o-s6,s6,dice_match,easy:2000:1,1
+o-s7,s7,dice_match,easy:2000:2,1

@@ -42,6 +42,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `reputation.ts` | 玩家声望、声望效果与跨模块调整 |
 | `kingdom.ts` | 玩家封地归属、循环王国任务与议会厅服务订单 |
 | `combat.ts` + `combat/` | 进行中的逐 tick 战斗；准入、纯引擎、战利品规划与可恢复结算均归 combat owner |
+| `battle-simulator.ts` | 无持久状态；独立阶段化战斗模拟器，只读取 CSV 派生的 GameConfig，不写入主游戏战斗/玩家/存档状态 |
 | `mercenary.ts` | 雇佣兵营地、候选与刷新任务 |
 | `trade.ts` | NPC/玩家订单、贸易中心与路线占用 |
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |
@@ -49,6 +50,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `research.ts` | 科研点、研发任务和已完成科技 |
 | `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9/M13 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
+| `dice-quest.ts` + `dice-quest/` | 骰子王任务的临时对局、普通骰子规则与 NPC 回合；不落盘对局，不依赖骰子实验场 |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
 | `packages/dice-lab` | 独立小游戏服务；内存会话、筛色子规则与 NPC，不属于主游戏领域 owner |
@@ -77,6 +79,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `2_2.0设计/06_代码导读.md` | 第一次跟踪端到端链路 |
 | `2_2.0设计/07_扩展与代码规范.md` | 增加内容、机制或模块 |
 | `2_2.0设计/10_兵种特性效果表.md` | 增加战斗特性 |
+| `2_2.0设计/11_阶段化战斗系统方案策划书.md` | 评审和实现阶段化战斗方案 |
 | `2_2.0设计/14_前端设计系统.md` | 修改客户端 UI |
 | `2_2.0设计/改进方向备选池.md` | 选择后续功能 |
 | `经济与金币模块.md` | 修改资源、金币和结算 |

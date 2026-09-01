@@ -20,12 +20,24 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
+import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
+
+describe('阶段化战斗模拟器的科技与宝物多选', () => {
+  it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
+    let selected = toggleMultiSelection([], 'tech-a', true);
+    selected = toggleMultiSelection(selected, 'tech-b', true);
+    assert.deepEqual(selected, ['tech-a', 'tech-b']);
+    selected = toggleMultiSelection(selected, 'tech-a', false);
+    assert.deepEqual(selected, ['tech-b']);
+    assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+  });
+});
 
 describe('任务接取与奖励领取对话状态机', () => {
   it('Accept 关闭不推进；离开关闭；只有首次接受任务才请求接取', () => {
@@ -743,6 +755,15 @@ describe('玩家村庄地图外观', () => {
     assert.equal(mapEntityRingKind('own_village', true, 'hostile'), 'self');
     assert.equal(mapEntityRingKind('own_village', false, 'hostile'), 'own');
     assert.equal(normalizeMapVillageRelation('unexpected'), 'neutral');
+  });
+
+  it('普通 PvE 不常驻红框，红色外军标记只保留给在途进攻/掠夺', () => {
+    assert.equal(mapEntityRingKind('pve', false), '');
+    assert.equal(foreignArmyMarkerTone('attack', 'marching'), 'threat');
+    assert.equal(foreignArmyMarkerTone('raid', 'paused'), 'threat');
+    assert.equal(foreignArmyMarkerTone('return', 'marching'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('garrison', 'stationed'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('attack', 'stationed'), 'neutral');
   });
 
   it('四级玩家村庄图标与其他正式美术统一读取 WebP', () => {

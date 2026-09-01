@@ -331,6 +331,7 @@ export class ResearchModule {
     const completed = this.effectiveCompleted(villageId);
     const combat: Record<string, { atk: number; def: number }> = {};
     const unlocks = new Set<string>();
+    const buildingUnlocks = new Set<string>();
     let trainSpeed = 0;
     let marchSpeed = 0;
     for (const code of completed) {
@@ -344,11 +345,13 @@ export class ResearchModule {
           if (e.effectType === 'combat_atk') combat[key].atk = Math.min(e.cap, combat[key].atk + value);
           else combat[key].def = Math.min(e.cap, combat[key].def + value);
         } else if (e.effectType === 'unit_unlock') unlocks.add(e.effectKey);
+        else if (e.effectType === 'building_unlock') buildingUnlocks.add(e.effectKey);
         else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
         else if (e.effectType === 'march_speed') marchSpeed = Math.min(e.cap, marchSpeed + value);
         else this.applyEffect(villageId, tech, e);
       }
     }
+    await this.commands.send({ name: 'building.SetTechUnlockedBuildings', from: ResearchModule.NAME, payload: { villageId, unlocks: [...buildingUnlocks] } });
     await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed, marchSpeed } });
   }
 

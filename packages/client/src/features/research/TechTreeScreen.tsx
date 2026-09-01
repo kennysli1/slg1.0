@@ -16,10 +16,10 @@ import '../../styles/research.css';
 
 type Branch = 'military' | 'production' | 'social';
 
-const BRANCHES: { key: Branch; name: string; icon: string; desc: string }[] = [
-  { key: 'military', name: '军事', icon: 'ui_icon_atk', desc: '攻防倍率与兵种解锁' },
-  { key: 'production', name: '生产', icon: 'res_wood', desc: '产量、仓储与建造效率' },
-  { key: 'social', name: '社会', icon: 'ui_icon_pop', desc: '人口、贸易与治理' },
+const BRANCHES: { key: Branch; name: string; icon: string }[] = [
+  { key: 'military', name: '军事', icon: 'ui_icon_atk' },
+  { key: 'production', name: '生产', icon: 'res_wood' },
+  { key: 'social', name: '社会', icon: 'ui_icon_pop' },
 ];
 
 export function TechTreeScreen() {
@@ -40,15 +40,11 @@ export function TechTreeScreen() {
   const techs: any[] = tree.techs ?? [];
   const academyCount: number = state?.academy?.academyCount ?? 0;
   const researching = state?.researching ?? null;
-  const candidates = techs.filter((tech) => tech.status === 'available').slice(0, 3);
-  const names = new Map(techs.map((tech) => [tech.code, tech.name]));
 
   return (
     <div class="tech-command-desk">
       <section class="tech-current-research">
-        <SectionHead sub={academyCount > 0 ? `${academyCount} 座学院 · 研究跟随当前村庄` : '尚未建造学院'}>
-          当前研究
-        </SectionHead>
+        <SectionHead>当前研究</SectionHead>
         <RpPanel rp={rp} state={state} researching={researching} />
       </section>
 
@@ -56,27 +52,6 @@ export function TechTreeScreen() {
         <Empty icon="🏛️" title="尚未建造学院">
           <p>把<b>主基地</b>升到 <b>Lv3</b>，再在<b>城内空槽</b>建造一所<b>学院</b>即可解锁科技页面。</p>
         </Empty>
-      )}
-
-      {academyCount > 0 && !researching && (
-        <section class="tech-next-research">
-          <SectionHead sub="先展示此刻可投入的方向；其余节点仍在完整树中可查">下一步决策</SectionHead>
-          {candidates.length ? (
-            <div class="tech-next-grid">
-              {candidates.map((tech, index) => (
-                <TechNode
-                  key={tech.code}
-                  t={tech}
-                  rp={rp}
-                  researchingCode={researching?.code ?? null}
-                  names={names}
-                  academyAvailable
-                  primary={index === 0}
-                />
-              ))}
-            </div>
-          ) : <Empty icon="📚" title="暂无可立即研究的科技">完成当前研究或补足科研点后，下一步方向会显示在这里。</Empty>}
-        </section>
       )}
 
       <section class="tech-full-tree">
@@ -96,7 +71,7 @@ export function TechTreeScreen() {
             ))}
           </div>
         }>
-          完整科技树
+          科技树
         </SectionHead>
         <TechBranch
           branch={branch}
@@ -145,10 +120,7 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
               <span class="num">{(curProb * 100).toFixed(1)}%</span>
             </div>
             <Bar pct={(curProb / Math.max(0.01, maxProb)) * 100} kind="steel" thin />
-            <div class="rp-prob-foot">
-              连续失败 {failStreak} 次（失败会累积概率，上限 {(maxProb * 100).toFixed(0)}%）
-              {intervalSec > 0 && <> · 每 {fmtDur(intervalSec * 1000)} 判定一次</>}
-            </div>
+            <div class="rp-prob-foot">连续失败 {failStreak} 次 · 上限 {(maxProb * 100).toFixed(0)}%</div>
           </div>
         )}
       </div>
@@ -179,7 +151,28 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
   );
 }
 
-/** 一个分支的科技节点路径，按 tier 由上而下推进。 */
+function toRoman(value: number): string {
+  return ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ'][Math.max(0, value - 1)] ?? String(value);
+}
+
+/** 从服务端效果生成极短的专精标签，避免用一段解释性副文案占位。 */
+function techFocus(t: any): string | null {
+  const effects = Array.isArray(t.effects) && t.effects.length ? t.effects : [t];
+  const effect = effects.find((item: any) => item.effectType);
+  if (!effect) return null;
+  if (effect.effectType === 'combat_atk' || effect.effectType === 'combat_def') {
+    const form = effect.effectKey === 'form:melee' ? '近战' : effect.effectKey === 'form:ranged' ? '远程' : '全军';
+    return `${form}${effect.effectType === 'combat_atk' ? '攻击' : '防御'}`;
+  }
+  const labels: Record<string, string> = {
+    resource_rate: '资源产出', storage_cap: '资源容量', build_speed: '建筑效率',
+    train_speed: '训练效率', march_speed: '行军速度', pop_growth: '人口增长',
+    mechanism: '制度效果', unit_unlock: '兵种解锁', building_unlock: '建筑解锁',
+  };
+  return labels[effect.effectType] ?? null;
+}
+
+/** 一个分支的科技阶段树；军事节点按攻防形态明确分流。 */
 function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   branch: Branch;
   techs: any[];
@@ -196,44 +189,46 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   const names = new Map(techs.map((t) => [t.code, t.name]));
 
   return (
-    <div class={`tech-path tech-path--${branch}`}>
-      <div class="tech-path-legend" aria-label="科技树状态说明">
+    <div class={`tech-tree-board tech-tree-board--${branch}`}>
+      <div class="tech-tree-legend" aria-label="科技树状态">
         <span><i class="tech-legend-dot tech-legend-dot--done" />已掌握</span>
         <span><i class="tech-legend-dot tech-legend-dot--ready" />可研发</span>
         <span><i class="tech-legend-dot tech-legend-dot--locked" />等待前置</span>
       </div>
-      {tiers.map((tier, index) => (
-        <div key={tier} class="tech-stage">
-          <div class="tech-tier-label">
-            <span>阶段 {tier}</span>
-            <small>{index === 0 ? '奠定学派根基' : index === tiers.length - 1 ? '分支终极成果' : '承接前序研究'}</small>
-          </div>
-          <div class="tech-stage-nodes">
-            {list.filter((t) => t.tier === tier).map((t) => (
-              <TechNode
-                key={t.code}
-                t={t}
-                rp={rp}
-                researchingCode={researchingCode}
-                names={names}
-                academyAvailable={academyAvailable}
-              />
-            ))}
-          </div>
-          {index < tiers.length - 1 && <div class="tech-path-link" aria-hidden="true"><span /></div>}
-        </div>
-      ))}
+      <div class="tech-tree-stages">
+        {tiers.map((tier, index) => (
+          <section key={tier} class="tech-tree-stage">
+            <div class="tech-stage-head">
+              <span class="tech-stage-index">{toRoman(Number(tier))}</span>
+              <span>阶段 {tier}</span>
+              <small>{list.filter((t) => t.tier === tier).length} 项</small>
+            </div>
+            <div class="tech-stage-nodes">
+              {list.filter((t) => t.tier === tier).map((t) => (
+                <TechNode
+                  key={t.code}
+                  t={t}
+                  rp={rp}
+                  researchingCode={researchingCode}
+                  names={names}
+                  academyAvailable={academyAvailable}
+                />
+              ))}
+            </div>
+            {index < tiers.length - 1 && <div class="tech-stage-arrow" aria-hidden="true">↓</div>}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
 
-function TechNode({ t, rp, researchingCode, names, academyAvailable, primary = false }: {
+function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
   t: any;
   rp: number;
   researchingCode: string | null;
   names: Map<string, string>;
   academyAvailable: boolean;
-  primary?: boolean;
 }) {
   const completed = t.status === 'completed';
   const researching = t.status === 'researching' || researchingCode === t.code;
@@ -246,6 +241,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable, primary = f
       : locked ? 'locked'
         : canStart ? 'ready' : 'poor';
   const requires: string[] = t.requires ?? [];
+  const focus = techFocus(t);
 
   async function start() {
     await act(req('StartResearch', { techCode: t.code }), { okToast: `开始研发「${t.name}」` });
@@ -272,7 +268,8 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable, primary = f
         {t.scope === 'player' && <Tag kind="gold" title="对全部村庄生效">全局</Tag>}
       </div>
 
-      <div class="tech-node-effect">{t.desc || '该科技的具体效果由服务器配置下发。'}</div>
+      {focus && <div class="tech-node-focus">{focus}</div>}
+      <div class="tech-node-effect">{t.desc}</div>
 
       <div class="tech-node-meta">
         <span><Icon icon="bld_academy" label="科研点" size="2xs" /> <b>{fmt(t.rpCost)}</b> RP</span>
@@ -293,7 +290,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable, primary = f
               : locked ? <Tag>前置未满足</Tag>
               : poor ? <Tag kind="crimson">科研点不足</Tag>
                 : (
-                  <Btn size="sm" variant={primary ? 'primary' : 'default'} disabled={!canStart} onClick={start}
+                  <Btn size="sm" variant="primary" disabled={!canStart} onClick={start}
                     title={researchingCode ? '已有科技在研发中' : `研发 ${t.name}`}>
                     {researchingCode ? '有研发进行中' : '研发'}
                   </Btn>

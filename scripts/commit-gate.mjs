@@ -8,10 +8,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function run(command, args, label) {
   console.log(`\n==> ${label}`);
-  // Windows 下 node 的 spawnSync('npm') 不会自动解析 .cmd；经 shell 执行保持与终端 npm 一致。
+  // Windows 下只有 npm 需要经过 shell 解析 .cmd；Node 自身路径可能含空格，不能交给 shell 拼接。
   const result = spawnSync(command, args, {
     cwd: ROOT, stdio: 'inherit', env: process.env,
-    shell: process.platform === 'win32',
+    shell: process.platform === 'win32' && command === 'npm',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);

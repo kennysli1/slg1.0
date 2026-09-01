@@ -333,10 +333,12 @@ function VillageWorkbench({ vil, playerId, villageId }: { vil: any; playerId: st
           />
           {preferences.developmentOpen && (
             <WorkspaceContents id="village-building-management-content" labelledBy="village-building-management-title">
-              <VillageCommandDeck vil={vil} />
+              <div class="village-management-overview">
+                <VillageCommandDeck vil={vil} />
+                <section class="vil-detail-section village-management-population"><SectionHead>人口 · 文明活力</SectionHead><Panel pad><PopPanel /></Panel></section>
+              </div>
               {vil.queue?.items?.length > 0 && <Panel pad class="vil-queue-panel empire-active-panel"><QueueStrip queue={vil.queue} /></Panel>}
               <VillageListView vil={vil} />
-              <section class="vil-detail-section"><SectionHead>人口 · 文明活力</SectionHead><Panel pad><PopPanel /></Panel></section>
               {hasTreasures && <section class="vil-detail-section"><SectionHead sub={`${(getCache().treasures?.activeCodes?.length ?? 0)}/${getCache().treasures?.mainSlots ?? 0}`}>宝物栏</SectionHead><Panel variant="flat" pad><TreasurePanel /></Panel></section>}
             </WorkspaceContents>
           )}

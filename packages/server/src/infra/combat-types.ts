@@ -20,7 +20,11 @@ export type TraitEffect =
   | 'atk_ranged' //        自身远程攻击力加成倍率
   | 'atk_melee' //         自身近战攻击力加成倍率
   | 'def_ranged' //        自身远程防御加成倍率
-  | 'def_melee'; //        自身近战防御加成倍率
+  | 'def_melee' //        自身近战防御加成倍率
+  | 'enemy_cavalry_atk' // 敌方骑兵攻击力修正（战斗模拟器）
+  | 'ally_ranged_def' //   己方另一兵种远程防御力修正（战斗模拟器）
+  | 'enemy_ranged_melee_def' // 敌方远程兵近战防御力修正（战斗模拟器）
+  | 'cavalry_charge_atk'; // 非侦察骑兵冲锋阶段自身近战攻击力修正
 
 export const TRAIT_EFFECTS: readonly TraitEffect[] = [
   'dmg_taken_ranged',
@@ -29,6 +33,10 @@ export const TRAIT_EFFECTS: readonly TraitEffect[] = [
   'atk_melee',
   'def_ranged',
   'def_melee',
+  'enemy_cavalry_atk',
+  'ally_ranged_def',
+  'enemy_ranged_melee_def',
+  'cavalry_charge_atk',
 ];
 
 /** 特性定义（来自 unit_traits.csv，解析在 config.ts）。一条特性可携带多个 effect。 */
@@ -51,6 +59,8 @@ export interface CombatUnit {
   rangedAtk: number;
   meleeDef: number;
   rangedDef: number;
+  /** 生命值伤亡池（阶段化战斗模拟器使用；主战斗兼容旧快照时可缺省）。 */
+  hp?: number;
   carry: number;
   /** 该兵种携带的特性效果（已从 traits id 解析成效果列表，combat 直接用）。 */
   traits?: { effect: TraitEffect; value: number }[];
