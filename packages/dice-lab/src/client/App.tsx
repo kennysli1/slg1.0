@@ -12,9 +12,11 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
   { value: 'hard', label: '困难 NPC', description: '使用期望收益判断收手' },
 ];
 
-const BUST_TABLE_DISPLAY_MS = 3_200;
+// 爆骰牌面在上一版基础上再停留 0.5 秒，确保结果与红色提示都能看清。
+const BUST_TABLE_DISPLAY_MS = 3_700;
 const BUST_REVEAL_DELAY_MS = 900;
 const AI_ACTION_PAUSE_MS = 1_350;
+const AI_BUST_ACTION_PAUSE_MS = AI_ACTION_PAUSE_MS + 500;
 
 type AiPlayback = {
   events: GameEvent[];
@@ -85,9 +87,10 @@ export function DiceLabApp() {
       setAiPlayback(null);
       return;
     }
+    const event = aiPlayback.events[aiPlayback.index];
     const timer = window.setTimeout(() => {
       setAiPlayback((current) => current ? { ...current, index: current.index + 1 } : current);
-    }, AI_ACTION_PAUSE_MS);
+    }, event.kind === 'bust' ? AI_BUST_ACTION_PAUSE_MS : AI_ACTION_PAUSE_MS);
     return () => window.clearTimeout(timer);
   }, [aiPlayback]);
 
@@ -187,7 +190,7 @@ export function DiceLabApp() {
 
           <section class="play-layout">
             <div class="play-card panel-card">
-              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{aiPlayback ? 'NPC掷骰阶段' : state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{(aiProgress?.turnScore ?? state.turnScore).toLocaleString()}</b></span></div>
+              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{aiPlayback ? 'NPC掷骰阶段' : state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{(aiProgress?.turnScore ?? (bustDisplay ? (bustPhase === 'alert' ? 0 : (bustBreakdown ?? []).reduce((sum, entry) => sum + entry.score, 0)) : state.turnScore)).toLocaleString()}</b></span></div>
               <TurnBreakdown entries={aiProgress?.entries ?? (bustDisplay ? bustBreakdown ?? [] : state.turnBreakdown)} />
               {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
               {!aiPlayback && <div class={`dice-tray${bustDisplay && bustPhase === 'alert' ? ' is-bust-table' : ''}`} aria-label={bustDisplay ? (bustPhase === 'alert' ? '爆骰结果牌面' : '爆骰待确认牌面') : '当前骰子'}>
