@@ -178,6 +178,15 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
       }
       const next = result.payload as Snapshot;
       sessionIdRef.current = next.sessionId;
+      if (type === 'forfeit') {
+        // 放弃是明确的退出动作：服务端已经记录 NPC 获胜，本地不再回放
+        // 这次动作附带的 NPC 回合或结算事件，避免关闭前牌桌继续变化。
+        clearTimers();
+        setSnapshot(next);
+        setPlayback(null);
+        setSelected([]);
+        return true;
+      }
       const base: DiceQuestReplayBase = {
         playerScore: before.state.playerScore,
         aiScore: before.state.aiScore,
