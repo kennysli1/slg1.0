@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { req } from '../../api.js';
 import { showToast } from '../../app/store.js';
+import { reloadPlayerTasks } from '../../app/refresh.js';
 import { Btn, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 
@@ -25,10 +26,11 @@ type Snapshot = {
 };
 
 const DICE_EVENT_INTERVAL_MS = 1_050;
-const BUST_EVENT_INTERVAL_MS = DICE_EVENT_INTERVAL_MS + 500;
+// 在上一版基础上再增加 0.5 秒，让新牌面、阶段积分与爆骰提示有完整的观察时间。
+const BUST_EVENT_INTERVAL_MS = DICE_EVENT_INTERVAL_MS + 1_000;
 const BUST_ALERT_DELAY_MS = 900;
 const EVENT_CLEAR_DELAY_MS = 750;
-const BUST_CLEAR_DELAY_MS = EVENT_CLEAR_DELAY_MS + 500;
+const BUST_CLEAR_DELAY_MS = EVENT_CLEAR_DELAY_MS + 1_000;
 
 function dieFace(value: number): JSX.Element {
   const positions: Record<number, number[]> = {
@@ -52,6 +54,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const [showHistory, setShowHistory] = useState(false);
   const timers = useRef<number[]>([]);
   const closed = useRef(false);
+  const sessionClosed = useRef(false);
   const taskName = task?.name ?? task?.code ?? '骰子对局';
 
   const clearTimers = () => { for (const id of timers.current) window.clearTimeout(id); timers.current = []; };
@@ -157,14 +160,25 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
       setNpcScoreHold(npcOperation && npcScoreChanged ? { score: snapshot.state.aiScore, wins: snapshot.match.npcWins } : null);
       const playerBust = (next.events ?? []).some((event) => event.side === 'player' && event.kind === 'bust');
       setPlayerTurnHold(playerBust ? {
-        score: snapshot.state.turnScore,
-        breakdown: snapshot.state.turnBreakdown.map((item) => ({ ...item })),
+        // 服务端在发现爆骰后会清空 turnScore/turnBreakdown；把本次请求中
+        // 爆骰前已经保留的操作补回展示快照，直到红色爆骰提示出现前都不剧透。
+        score: snapshot.state.turnScore + (next.events ?? [])
+          .filter((event) => event.side === 'player' && event.kind === 'keep' && event.option)
+          .reduce((sum, event) => sum + Number(event.option?.score ?? event.points ?? 0), 0),
+        breakdown: [
+          ...snapshot.state.turnBreakdown.map((item) => ({ ...item })),
+          ...(next.events ?? [])
+            .filter((event) => event.side === 'player' && event.kind === 'keep' && event.option)
+            .map((event) => ({ label: event.option!.label, score: event.option!.score })),
+        ],
       } : null);
       setSnapshot(next); playEvents(next.events ?? []); setBusy(false);
     } catch { showToast('骰子对局连接失败', 'bad'); setBusy(false); }
   };
 
   const exit = async () => {
+    if (sessionClosed.current) { close(); return; }
+    sessionClosed.current = true;
     if (!snapshot) { close(); return; }
     await req('dice.ExitMatch', { sessionId: snapshot.sessionId }).catch(() => {});
     close();
@@ -174,8 +188,9 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
     const ok = await confirmDanger({ title: '放弃本局对局', body: '放弃本局会判定 NPC 赢得这一局，确定退出吗？', confirmText: '确认放弃' });
     if (!ok) return;
     await act('forfeit');
-    await req('dice.ExitMatch', { sessionId: snapshot.sessionId }).catch(() => {});
-    close();
+    // 放弃会写入 s6/s7 的胜场进度；先只刷新任务栏，再幂等关闭临时牌桌。
+    await reloadPlayerTasks();
+    await exit();
   };
   const toggleDie = (id: string) => {
     if (busy || replaying || !state || state.phase !== 'player' || !state.dice.length) return;

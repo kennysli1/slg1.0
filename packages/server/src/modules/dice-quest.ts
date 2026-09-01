@@ -106,7 +106,11 @@ export class DiceQuestModule {
   private exitMatch(cmd: Command): CommandResult {
     const { villageId, sessionId } = cmd.payload as { villageId?: string; sessionId?: string };
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
-    if (!session || session.villageId !== villageId) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
+    // 退出是幂等清理：用户关闭弹窗、刷新页面或旧弹窗在重新开桌后
+    // 可能重复发送同一个 sessionId。此时牌桌已经不存在，仍视为退出成功，
+    // 避免把正常的关闭动作显示成 dice_session_not_found。
+    if (!session) return { ok: true, payload: { sessionId, alreadyClosed: true } };
+    if (session.villageId !== villageId) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
     this.sessions.delete(session.id);
     return { ok: true, payload: { sessionId: session.id } };
   }

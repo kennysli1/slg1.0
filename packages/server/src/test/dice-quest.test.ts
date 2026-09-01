@@ -94,6 +94,51 @@ test('骰子王：s7 支付入场费并累计两场胜利后可领取', async ()
   assert.equal(state.active.find((item: any) => item.code === 's7')?.ready, true);
 });
 
+test('骰子王：s7 放弃局数持久化，第二次放弃后任务直接失败', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-s7-forfeit');
+  await activate(app, villageId, 's7');
+
+  const first = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's7' });
+  assert.equal(first.ok, true, first.reason);
+  const firstSessionId = (first.payload as any).sessionId;
+  const firstLost = await send(app, 'diceQuest.Action', { villageId, sessionId: firstSessionId, type: 'forfeit' });
+  assert.equal(firstLost.ok, true, firstLost.reason);
+  assert.deepEqual((firstLost.payload as any).round, {
+    code: 's7', winner: 'npc', playerWins: 0, npcWins: 1, winsRequired: 2,
+    outcome: null, ready: false, failureReady: false,
+  });
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: firstSessionId })).ok, true);
+
+  const resumed = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's7' });
+  assert.equal(resumed.ok, true, resumed.reason);
+  assert.deepEqual((resumed.payload as any).match, { playerWins: 0, npcWins: 1, winsRequired: 2 });
+  const secondSessionId = (resumed.payload as any).sessionId;
+  const secondLost = await send(app, 'diceQuest.Action', { villageId, sessionId: secondSessionId, type: 'forfeit' });
+  assert.equal(secondLost.ok, true, secondLost.reason);
+  assert.deepEqual((secondLost.payload as any).round, {
+    code: 's7', winner: 'npc', playerWins: 0, npcWins: 2, winsRequired: 2,
+    outcome: 'npc', ready: false, failureReady: true,
+  });
+  const task = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(task.active.find((item: any) => item.code === 's7')?.failureReady, true);
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: secondSessionId })).ok, true);
+});
+
+test('骰子王：重复退出已清理牌桌视为成功', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-exit');
+  await activate(app, villageId, 's6');
+  const started = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's6' });
+  const sessionId = (started.payload as any).sessionId;
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId })).ok, true);
+  const repeated = await send(app, 'diceQuest.ExitMatch', { villageId, sessionId });
+  assert.equal(repeated.ok, true, repeated.reason);
+  assert.equal((repeated.payload as any).alreadyClosed, true);
+});
+
 test('骰子王：入场券使用后解锁 s7，且普通骰子的一和五可与同点数组合叠加', async () => {
   const app = createGameApp({ manualScheduler: true, rng: () => 0 });
   app.setupWorld();
