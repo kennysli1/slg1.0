@@ -29,9 +29,6 @@
 .rp-researching > .progress { flex: 1; }
 .rp-next { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
 
-.tech-hint { margin-bottom: var(--s-4); font-size: var(--f-sm); color: var(--c-ink-soft); line-height: 1.6; }
-.tech-hint b { color: var(--c-gold); }
-
 /* ---------- 分支切换 ---------- */
 .tech-branch-tabs {
   display: inline-flex; gap: var(--s-1); padding: 3px;
@@ -51,8 +48,8 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4);
 }
 
-/* ---------- 科技节点路径 ---------- */
-.tech-path {
+/* ---------- 科技树指挥台 ---------- */
+.tech-tree-board {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -64,20 +61,10 @@
   box-shadow: var(--sh-2);
   overflow: hidden;
 }
-.tech-path::before {
-  content: '';
-  position: absolute;
-  top: var(--s-6);
-  bottom: var(--s-6);
-  left: 50%;
-  width: 1px;
-  background: var(--line-strong);
-  transform: translateX(-50%);
-}
-.tech-path--military { --tech-branch: var(--c-crimson-hi); }
-.tech-path--production { --tech-branch: var(--c-jade); }
-.tech-path--social { --tech-branch: var(--c-violet); }
-.tech-path-legend {
+.tech-tree-board--military { --tech-branch: var(--c-crimson-hi); }
+.tech-tree-board--production { --tech-branch: var(--c-jade); }
+.tech-tree-board--social { --tech-branch: var(--c-violet); }
+.tech-tree-legend {
   position: relative;
   z-index: 1;
   display: flex;
@@ -87,55 +74,76 @@
   color: var(--c-ink-dim);
   font-size: var(--f-2xs);
 }
-.tech-path-legend span { display: inline-flex; align-items: center; gap: var(--s-1); }
+.tech-tree-legend span { display: inline-flex; align-items: center; gap: var(--s-1); }
 .tech-legend-dot { width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--c-ink-dim); }
 .tech-legend-dot--done { background: var(--c-jade); }
 .tech-legend-dot--ready { background: var(--c-gold); }
 .tech-legend-dot--locked { background: var(--c-ink-dim); }
-.tech-stage { position: relative; z-index: 1; }
-.tech-tier-label {
-  display: flex; align-items: center; gap: var(--s-2);
-  justify-content: center;
-  font-family: var(--ff-han); font-size: var(--f-xs); color: var(--c-ink-soft);
-  letter-spacing: 2px; margin-bottom: var(--s-3);
+.tech-tree-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-3);
+  align-items: start;
 }
-.tech-tier-label span {
+.tech-tree-column {
+  position: relative;
+  min-width: 0;
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, .12);
+}
+.tech-column-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 30px;
+  padding: 0 var(--s-1) var(--s-2);
+  color: var(--c-ink-soft);
+  font-family: var(--ff-han);
+  font-size: var(--f-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.tech-column-head small {
+  margin-left: auto;
+  color: var(--c-ink-dim);
+  font-family: var(--ff-body);
+  font-size: var(--f-2xs);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.tech-column-index {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
   color: var(--c-ink-on-gold);
-  padding: var(--s-1) var(--s-3);
-  border-radius: var(--r-pill);
   background: linear-gradient(180deg, var(--c-gold-hi), var(--c-gold));
   box-shadow: var(--sh-1);
+  font-family: var(--ff-num);
+  font-size: var(--f-sm);
+  letter-spacing: 0;
 }
-.tech-tier-label small { font-family: var(--ff-body); font-size: var(--f-2xs); letter-spacing: 0; color: var(--c-ink-dim); }
-.tech-stage-nodes {
+.tech-column-nodes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 360px));
-  justify-content: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
 }
-.tech-path-link {
-  position: relative;
-  height: var(--s-6);
-  display: flex;
-  justify-content: center;
-}
-.tech-path-link::before {
-  content: '';
+.tech-column-arrow {
   position: absolute;
-  top: 0;
-  bottom: calc(var(--s-2) * -1);
-  width: 1px;
-  background: var(--tech-branch);
-  box-shadow: 0 0 var(--s-2) var(--tech-branch);
-}
-.tech-path-link span {
-  align-self: end;
-  width: 0;
-  height: 0;
-  border-left: var(--s-2) solid transparent;
-  border-right: var(--s-2) solid transparent;
-  border-top: var(--s-2) solid var(--tech-branch);
-  z-index: 1;
+  z-index: 2;
+  top: 50%;
+  right: calc(var(--s-3) * -1 - 10px);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 28px;
+  color: var(--tech-branch);
+  font-family: var(--ff-num);
+  font-size: var(--f-2xl);
+  line-height: 1;
+  text-shadow: 0 0 var(--s-2) var(--tech-branch);
 }
 .tech-node {
   position: relative;
@@ -143,7 +151,7 @@
   flex-direction: column;
   gap: var(--s-2);
   min-width: 0;
-  padding: var(--s-3);
+  padding: var(--s-2);
   border-color: var(--line);
   transition: transform var(--t-fast), border-color var(--t-fast);
 }
@@ -162,7 +170,13 @@
 .tech-state-orb--doing { background: var(--c-ember); }
 .tech-state-orb--ready { background: var(--c-gold); }
 .tech-state-orb--poor { background: var(--c-crimson-hi); }
-.tech-node-effect { min-height: calc(var(--f-sm) * 2.9); font-size: var(--f-sm); color: var(--c-ink); line-height: 1.45; }
+.tech-node-focus {
+  color: var(--tech-branch);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.tech-node-effect { min-height: calc(var(--f-sm) * 2.5); font-size: var(--f-sm); color: var(--c-ink); line-height: 1.45; }
 .tech-node-outcome {
   display: flex; align-items: flex-start; gap: var(--s-1);
   padding: var(--s-2); border-radius: var(--r-sm);
@@ -177,13 +191,33 @@
 .tech-requires em { font-style: normal; padding: 1px var(--s-1); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .tech-node-action { display: flex; align-items: center; min-height: 32px; margin-top: auto; padding-top: var(--s-1); }
 
-/* 科技页先交代当前研究和下一步，再展开完整树。 */
+/* 科技页只保留当前研究与完整树两个决策区域。 */
 .tech-command-desk { display: flex; flex-direction: column; gap: var(--s-5); }
-.tech-next-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); }
-.tech-next-grid .tech-node { height: 100%; }
 .tech-full-tree { display: flex; flex-direction: column; gap: var(--s-3); padding-top: var(--s-4); border-top: 1px solid var(--line); }
-@media (max-width: 960px) { .tech-next-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .tech-next-grid { grid-template-columns: minmax(0, 1fr); } .tech-command-desk { gap: var(--s-4); } }
+@media (max-width: 960px) {
+  .tech-tree-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tech-column-arrow { display: none; }
+}
+@media (max-width: 720px) {
+  .tech-command-desk { gap: var(--s-4); }
+  .tech-tree-board { padding: var(--s-3); }
+  .tech-tree-columns { grid-template-columns: minmax(0, 1fr); gap: var(--s-4); }
+  .tech-tree-column { padding-bottom: var(--s-3); }
+  .tech-tree-column:not(:last-child)::after {
+    content: '↓';
+    position: absolute;
+    bottom: calc(var(--s-4) * -1);
+    left: 50%;
+    color: var(--tech-branch);
+    font-family: var(--ff-num);
+    font-size: var(--f-xl);
+    text-shadow: 0 0 var(--s-2) var(--tech-branch);
+    transform: translateX(-50%);
+  }
+  .tech-tree-legend { justify-content: flex-start; }
+  .tech-branch-btn { min-height: 40px; }
+  .tech-node-action .btn { min-height: 40px; }
+}
 
 /* ---------- 学院弹窗 ---------- */
 .acad-rp { display: flex; align-items: baseline; gap: var(--s-2); justify-content: center; margin-bottom: var(--s-3); }
@@ -201,14 +235,5 @@
 
 @media (max-width: 720px) {
   .rp-num .num, .acad-rp .num { font-size: var(--f-2xl); }
-  .tech-branch-btn { min-height: 40px; }
-  .tech-path { padding: var(--s-3); }
-  .tech-path::before { left: var(--s-4); }
-  .tech-path-legend { justify-content: flex-start; }
-  .tech-tier-label { justify-content: flex-start; padding-left: var(--s-5); }
-  .tech-tier-label small { display: none; }
-  .tech-stage-nodes { grid-template-columns: minmax(0, 1fr); }
-  .tech-path-link { justify-content: flex-start; padding-left: calc(var(--s-4) - 1px); }
   .tech-node-effect { min-height: 0; }
-  .tech-node-action .btn { min-height: 40px; }
 }
