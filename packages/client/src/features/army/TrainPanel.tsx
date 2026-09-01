@@ -12,6 +12,7 @@ import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
+import { unitCardBaseStats } from './unit-card-stats.js';
 import {
   IconPlate, Tag, Btn, CostRow, TimerBar, StatGrid, Stat, Empty, confirmDanger,
 } from '../../ui/index.js';
@@ -203,6 +204,7 @@ function TrainUnitRow({ unit, qty, onQtyChange, buildingId, buildingBusy }: Trai
   const disabledReason = unlocked ? getDisabledReason(unit, qty, totalCost, totalPop, buildingBusy) : null;
   const canTrain = unlocked && !disabledReason;
   const maxCount = unlocked ? calcMaxAffordable(unit, popCost) : 0;
+  const cardStats = unitCardBaseStats(unit);
 
   async function doTrain() {
     if (!canTrain) return;
@@ -231,9 +233,9 @@ function TrainUnitRow({ unit, qty, onQtyChange, buildingId, buildingBusy }: Trai
           </div>
           <div class="train-unit-row__stats">
             <StatGrid>
-              <Stat icon="ui_icon_atk" label="攻" value={Math.round(unit.form === 'ranged' ? unit.rangedAtk : unit.meleeAtk)} />
-              <Stat icon="ui_icon_def" label="防" value={Math.round(unit.form === 'ranged' ? unit.rangedDef : unit.meleeDef)} />
-              <Stat icon="ui_icon_speed" label="速" value={Math.round(unit.speed)} />
+              <Stat icon="ui_icon_atk" label="攻" value={cardStats.attack} />
+              <Stat icon="ui_icon_def" label="防" value={cardStats.defense} />
+              <Stat icon="ui_icon_speed" label="速" value={cardStats.speed} />
               {popCost > 0 && <Stat icon="ui_icon_pop" label="人口" value={popCost} />}
             </StatGrid>
           </div>

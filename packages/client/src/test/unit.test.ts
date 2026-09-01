@@ -27,6 +27,22 @@ import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkben
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
+import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
+
+describe('兵种训练卡基础属性', () => {
+  it('有宝物或科技最终加成时仍显示 CSV 基础攻防与速度', () => {
+    assert.deepEqual(unitCardBaseStats({
+      form: 'melee', meleeAtk: 221, meleeDef: 104, speed: 10,
+      baseStats: { meleeAtk: 170, meleeDef: 80, speed: 10 },
+    }), { attack: 170, defense: 80, speed: 10 });
+  });
+
+  it('兼容尚未下发 baseStats 的旧服务端响应', () => {
+    assert.deepEqual(unitCardBaseStats({
+      form: 'ranged', rangedAtk: 75, rangedDef: 42, speed: 6,
+    }), { attack: 75, defense: 42, speed: 6 });
+  });
+});
 
 describe('阶段化战斗模拟器的科技与宝物多选', () => {
   it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
