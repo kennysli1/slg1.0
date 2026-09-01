@@ -58,6 +58,17 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'battle-simulator',
+    publicActions: {
+      GetCatalog: { command: 'battleSimulator.GetCatalog', needAuth: false, schema: {} },
+      Simulate: {
+        command: 'battleSimulator.Simulate', needAuth: false,
+        // 模拟器请求是一个独立 JSON 场景，不允许 Gateway 注入玩家/村庄状态。
+        schema: { scenario: { type: 'json', optional: true } },
+      },
+    },
+    },
+  {
     moduleName: 'diplomacy',
     publicActions: {
       GetRelation: {

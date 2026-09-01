@@ -13,7 +13,7 @@
 /** 单个字段的校验规则。 */
 export interface FieldSchema {
   /** 期望的基础类型。 */
-  type: 'string' | 'integer' | 'number' | 'boolean' | 'enum' | 'record_int' | 'string_array';
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'enum' | 'record_int' | 'string_array' | 'json';
   /** true=字段可缺失；false/未填=必填。 */
   optional?: boolean;
   /** number / integer：下界（含）。 */
@@ -148,6 +148,13 @@ export function validatePayload(
           out.push(item);
         }
         cleaned[key] = out;
+        break;
+      }
+      case 'json': {
+        if (typeof val !== 'object' || val === null) {
+          return { ok: false, code: 'bad_type', msg: `字段 ${key} 应为 JSON 对象或数组` };
+        }
+        cleaned[key] = val;
         break;
       }
     }

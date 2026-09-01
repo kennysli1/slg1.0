@@ -42,6 +42,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `reputation.ts` | 玩家声望、声望效果与跨模块调整 |
 | `kingdom.ts` | 玩家封地归属、循环王国任务与议会厅服务订单 |
 | `combat.ts` + `combat/` | 进行中的逐 tick 战斗；准入、纯引擎、战利品规划与可恢复结算均归 combat owner |
+| `battle-simulator.ts` | 无持久状态；独立阶段化战斗模拟器，只读取 CSV 派生的 GameConfig，不写入主游戏战斗/玩家/存档状态 |
 | `mercenary.ts` | 雇佣兵营地、候选与刷新任务 |
 | `trade.ts` | NPC/玩家订单、贸易中心与路线占用 |
 | `treasures.ts` | 宝物库存、随军宝物和待领取宝物 |

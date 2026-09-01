@@ -27,9 +27,11 @@ const requiredTables = [
   'dialogues.csv',
   'game_constants.csv',
   'mercenaries.csv',
+  'pve_defenders.csv',
   'research.csv',
   'trade_center.csv',
   'treasures.csv',
+  'unit_traits.csv',
   'units.csv',
 ];
 
