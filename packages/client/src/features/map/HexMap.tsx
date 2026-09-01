@@ -80,8 +80,20 @@ export function mapEntityRingKind(kind: string, isSelf: boolean, relation?: unkn
     if (relation === 'hostile') return 'hostile';
     return 'neutral';
   }
-  if (kind === 'pve') return 'pve';
+  // PvE 是可交互目标，不是即时威胁；常驻红框会让整张地图一直处于报警态。
+  // 任务营地另有金色标记，普通 PvE 保留据点图标即可。
   return '';
+}
+
+/**
+ * 外军底座的颜色只表达“当前是否构成动态威胁”。
+ * attack/raid 返程后会被服务端改写为 return，因此不会继续显示红色。
+ */
+export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' | 'neutral' {
+  return (type === 'attack' || type === 'raid')
+    && (status === 'marching' || status === 'paused')
+    ? 'threat'
+    : 'neutral';
 }
 
 export function normalizeMapVillageRelation(value: unknown): MapVillageRelation {
@@ -822,6 +834,7 @@ export function HexMap() {
       const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
+      const tone = foreignArmyMarkerTone(m.type, m.status);
 
       // 朝向箭头：heading 指向下一格，计算像素方向后绘制小三角
       let arrowEl: preact.VNode | null = null;
@@ -848,12 +861,12 @@ export function HexMap() {
           key={`fmk-${m.id}`}
           id={`foreign-mk-${m.id}`}
           data-move-id={m.id}
-          class={`enemy-march-mk enemy-march-mk--${t}`}
+          class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
           <title>敌方军队 · {m.type ?? 'return'}</title>
-          <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
-          <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
+          <circle class={`march-marker-base march-marker-base--foreign march-marker-base--foreign-${tone}`} cx="-3" cy="-9" r="12.5" />
+          <circle class="march-marker-base-ring march-marker-base-ring--foreign" cx="-3" cy="-9" r="9.2" />
           <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
@@ -1474,6 +1487,7 @@ export function HexMap() {
                   {/* Entity ring */}
                   {/* 王都/封地使用合并轮廓；不再绘制中心格的单格 PvE 红环。 */}
                   {rk && !c.landmark && <polygon class={`hex-ring hex-ring--${rk}`} points={HEX_CORNER_STR} />}
+                  {c.isSelected && !c.landmark && <polygon class="hex-ring hex-ring--selected" points={HEX_CORNER_STR} />}
                   {/* 实体图标（村庄/野怪）：占满六边形内切圆，缩略图下也认得出是什么 */}
                   {c.icon && !c.landmark && (
                     <image
@@ -1632,12 +1646,13 @@ export function HexMap() {
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--neutral" />中立玩家</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--allied" />盟军玩家</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--hostile" />敌对玩家</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--pve" />野怪(可掠夺)</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--pve" />野怪（常驻目标）</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--attack" />进攻 / 来袭</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--raid" />掠夺</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--return" />返程</div>
           <div class="map-legend-row"><span class="map-legend-line map-legend-line--transport" />运输</div>
-          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />敌方军队</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />外军（非红色=非即时威胁）</div>
+          <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--threat" />动态威胁：进攻 / 掠夺 / 来袭</div>
           <div class="map-legend-row"><span>🎯</span>任务营地</div>
         </div>
       </div>

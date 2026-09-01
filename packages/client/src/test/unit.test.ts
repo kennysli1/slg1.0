@@ -20,7 +20,7 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
@@ -743,6 +743,15 @@ describe('玩家村庄地图外观', () => {
     assert.equal(mapEntityRingKind('own_village', true, 'hostile'), 'self');
     assert.equal(mapEntityRingKind('own_village', false, 'hostile'), 'own');
     assert.equal(normalizeMapVillageRelation('unexpected'), 'neutral');
+  });
+
+  it('普通 PvE 不常驻红框，红色外军标记只保留给在途进攻/掠夺', () => {
+    assert.equal(mapEntityRingKind('pve', false), '');
+    assert.equal(foreignArmyMarkerTone('attack', 'marching'), 'threat');
+    assert.equal(foreignArmyMarkerTone('raid', 'paused'), 'threat');
+    assert.equal(foreignArmyMarkerTone('return', 'marching'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('garrison', 'stationed'), 'neutral');
+    assert.equal(foreignArmyMarkerTone('attack', 'stationed'), 'neutral');
   });
 
   it('四级玩家村庄图标与其他正式美术统一读取 WebP', () => {
