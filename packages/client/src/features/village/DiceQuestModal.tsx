@@ -24,6 +24,12 @@ type Snapshot = {
   round?: { outcome?: 'player' | 'npc'; ready?: boolean; failureReady?: boolean } | null;
 };
 
+const DICE_EVENT_INTERVAL_MS = 1_050;
+const BUST_EVENT_INTERVAL_MS = DICE_EVENT_INTERVAL_MS + 500;
+const BUST_ALERT_DELAY_MS = 900;
+const EVENT_CLEAR_DELAY_MS = 750;
+const BUST_CLEAR_DELAY_MS = EVENT_CLEAR_DELAY_MS + 500;
+
 function dieFace(value: number): JSX.Element {
   const positions: Record<number, number[]> = {
     1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8],
@@ -41,6 +47,8 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const [shownEventIndex, setShownEventIndex] = useState(-1);
   const [busy, setBusy] = useState(true);
   const [npcScoreHold, setNpcScoreHold] = useState<{ score: number; wins: number } | null>(null);
+  const [playerTurnHold, setPlayerTurnHold] = useState<{ score: number; breakdown: { label: string; score: number }[] } | null>(null);
+  const [bustAlertVisible, setBustAlertVisible] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const timers = useRef<number[]>([]);
   const closed = useRef(false);
@@ -51,18 +59,34 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
 
   const playEvents = (events: DiceEvent[]) => {
     clearTimers();
-    if (!events.length) { setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); return; }
+    setBustAlertVisible(false);
+    if (!events.length) {
+      setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); setPlayerTurnHold(null); setSelected([]);
+      return;
+    }
+    let delay = 0;
     events.forEach((event, index) => {
+      const eventDelay = delay;
       const timer = window.setTimeout(() => {
-        if (!closed.current) { setShownEvent(event); setShownEventIndex(index); }
+        if (!closed.current) {
+          setShownEvent(event); setShownEventIndex(index); setBustAlertVisible(false);
+          if (event.kind === 'bust') {
+            const alert = window.setTimeout(() => { if (!closed.current) setBustAlertVisible(true); }, BUST_ALERT_DELAY_MS);
+            timers.current.push(alert);
+          }
+        }
         if (index === events.length - 1) {
           const clear = window.setTimeout(() => {
-            if (!closed.current) { setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); }
-          }, 750);
+            if (!closed.current) {
+              setShownEvent(null); setShownEventIndex(-1); setNpcScoreHold(null); setPlayerTurnHold(null); setBustAlertVisible(false); setSelected([]);
+            }
+          }, event.kind === 'bust' ? BUST_CLEAR_DELAY_MS : EVENT_CLEAR_DELAY_MS);
           timers.current.push(clear);
         }
-      }, index * 1050);
+      }, eventDelay);
       timers.current.push(timer);
+      // 爆骰揭示阶段额外停留 0.5 秒；其余动作保持原有节奏。
+      delay += event.kind === 'bust' ? BUST_EVENT_INTERVAL_MS : DICE_EVENT_INTERVAL_MS;
     });
   };
 
@@ -73,6 +97,8 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
       if (!result.ok) { showToast('无法开始骰子对局', 'bad'); close(); return; }
       setSnapshot(result.payload as Snapshot);
       setNpcScoreHold(null);
+      setPlayerTurnHold(null);
+      setBustAlertVisible(false);
       setShowHistory(false);
       setBusy(false);
     }).catch(() => { if (alive) { showToast('骰子对局连接失败', 'bad'); close(); } });
@@ -81,7 +107,8 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
 
   const state = snapshot?.state;
   const boardDice = shownEvent?.dice ?? state?.dice ?? [];
-  const isBust = shownEvent?.kind === 'bust';
+  const isBustEvent = shownEvent?.kind === 'bust';
+  const isBust = isBustEvent && bustAlertVisible;
   const activeSide = shownEvent?.side ?? 'player';
   const playbackEvents = shownEventIndex >= 0 ? snapshot?.events.slice(0, shownEventIndex + 1) ?? [] : [];
   const aiBoundary = (() => {
@@ -102,11 +129,13 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
     .filter((event) => event.side === 'ai' && event.kind === 'keep' && event.option);
   const aiStageScore = aiStageEvents.reduce((sum, event) => sum + Number(event.option?.score ?? event.points ?? 0), 0);
   const turnBreakdown = activeSide === 'ai' && shownEvent
-    ? aiStageEvents.map((event) => ({ label: event.option!.label, score: event.option!.score }))
-    : state?.turnBreakdown ?? [];
-  const turnScore = activeSide === 'ai' && shownEvent ? aiStageScore : state?.turnScore ?? 0;
+    ? (isBust ? [] : aiStageEvents.map((event) => ({ label: event.option!.label, score: event.option!.score })))
+    : playerTurnHold && !isBust ? playerTurnHold.breakdown : state?.turnBreakdown ?? [];
+  const turnScore = activeSide === 'ai' && shownEvent
+    ? (isBust ? 0 : aiStageScore)
+    : playerTurnHold && !isBust ? playerTurnHold.score : state?.turnScore ?? 0;
   const selectedOption = useMemo(() => snapshot?.selectableOptions.find((option) => option.dieIds.length === selected.length && option.dieIds.every((id) => selected.includes(id))), [snapshot, selected]);
-  const replaying = shownEventIndex >= 0 || npcScoreHold !== null;
+  const replaying = shownEventIndex >= 0 || npcScoreHold !== null || playerTurnHold !== null;
   const displayedNpcScore = npcScoreHold?.score ?? state?.aiScore ?? 0;
   const displayedNpcWins = npcScoreHold?.wins ?? snapshot?.match.npcWins ?? 0;
 
@@ -116,14 +145,21 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
       showToast('请选择完整的计分组合', 'bad');
       return;
     }
-    setBusy(true); setSelected([]);
+    const actionSelection = [...selected];
+    setBusy(true);
+    if (type !== 'bank') setSelected([]);
     try {
-      const result = await req('dice.Action', { sessionId: snapshot.sessionId, type, ...(selected.length ? { selectedDieIds: selected } : {}) });
+      const result = await req('dice.Action', { sessionId: snapshot.sessionId, type, ...(actionSelection.length ? { selectedDieIds: actionSelection } : {}) });
       if (!result.ok) { showToast(result.error?.code ?? '骰子动作失败', 'bad'); setBusy(false); return; }
       const next = result.payload as Snapshot;
       const npcOperation = (next.events ?? []).some((event) => event.side === 'ai');
       const npcScoreChanged = next.state.aiScore !== snapshot.state.aiScore || next.match.npcWins !== snapshot.match.npcWins;
       setNpcScoreHold(npcOperation && npcScoreChanged ? { score: snapshot.state.aiScore, wins: snapshot.match.npcWins } : null);
+      const playerBust = (next.events ?? []).some((event) => event.side === 'player' && event.kind === 'bust');
+      setPlayerTurnHold(playerBust ? {
+        score: snapshot.state.turnScore,
+        breakdown: snapshot.state.turnBreakdown.map((item) => ({ ...item })),
+      } : null);
       setSnapshot(next); playEvents(next.events ?? []); setBusy(false);
     } catch { showToast('骰子对局连接失败', 'bad'); setBusy(false); }
   };
@@ -142,7 +178,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
     close();
   };
   const toggleDie = (id: string) => {
-    if (busy || !state || state.phase !== 'player' || !state.dice.length) return;
+    if (busy || replaying || !state || state.phase !== 'player' || !state.dice.length) return;
     setSelected((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
   };
 
@@ -151,14 +187,17 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const playerWon = snapshot.round?.outcome === 'player' || state.winner === 'player';
   const visibleWinner = replaying ? undefined : state.winner;
   const breakdownTotal = turnBreakdown.reduce((sum, item) => sum + item.score, 0);
+  const playerEventOption = shownEvent?.side === 'player' && shownEvent.kind === 'keep' ? shownEvent.option : undefined;
   const currentSelection = activeSide === 'ai' && shownEvent
     ? shownEvent.option
       ? `+${shownEvent.option.score.toLocaleString()}`
-      : shownEvent.kind === 'bust' ? '爆骰' : '—'
-    : selectedOption ? `+${selectedOption.score.toLocaleString()}` : '请选择完整计分组合';
+      : shownEvent.kind === 'bust' ? (isBust ? '爆骰' : '—') : '—'
+    : playerEventOption
+      ? `+${playerEventOption.score.toLocaleString()}`
+      : selectedOption ? `+${selectedOption.score.toLocaleString()}` : '请选择完整计分组合';
   const currentSelectionDetail = activeSide === 'ai' && shownEvent
-    ? shownEvent.option ? `骰子：${shownEvent.option.label}` : shownEvent.message
-    : selectedOption ? `骰子：${selectedOption.label}` : undefined;
+    ? shownEvent.option ? `骰子：${shownEvent.option.label}` : (isBust ? shownEvent.message : undefined)
+    : playerEventOption ? `骰子：${playerEventOption.label}` : selectedOption ? `骰子：${selectedOption.label}` : undefined;
   return (
     <Modal title={`骰子王 · ${taskName}`} sub={task.code === 's7' ? '三局两胜 · 简单 NPC · 目标 2000 分' : '单局 · 简单 NPC · 目标 2000 分'} onClose={finished ? exit : quit} wide>
       <div class="dice-quest-shell">
@@ -178,7 +217,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
             {boardDice.map((die) => {
               const active = selected.includes(die.id);
               const npcKept = activeSide === 'ai' && shownEvent?.kind === 'keep' && shownEvent.option?.dieIds.includes(die.id);
-              return <button type="button" key={die.id} class={`dice-quest-die${active || npcKept ? ' is-selected' : ''}`} onClick={() => toggleDie(die.id)} disabled={activeSide !== 'player' || busy || finished}>{dieFace(die.value)}<span>{active ? '已选' : npcKept ? '保留' : ''}</span></button>;
+              return <button type="button" key={die.id} class={`dice-quest-die${active || npcKept ? ' is-selected' : ''}`} onClick={() => toggleDie(die.id)} disabled={activeSide !== 'player' || busy || replaying || finished}>{dieFace(die.value)}<span>{active ? '已选' : npcKept ? '保留' : ''}</span></button>;
             })}
           </div>
           <div class={`dice-quest-selection-readout${activeSide === 'ai' ? ' is-ai' : ''}`}>
