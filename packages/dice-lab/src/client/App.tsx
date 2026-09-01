@@ -13,6 +13,7 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; description: strin
 ];
 
 const BUST_TABLE_DISPLAY_MS = 3_200;
+const BUST_REVEAL_DELAY_MS = 900;
 const AI_ACTION_PAUSE_MS = 1_350;
 
 type AiPlayback = {
@@ -51,6 +52,7 @@ export function DiceLabApp() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [bustDisplay, setBustDisplay] = useState<GameEvent | null>(null);
+  const [bustPhase, setBustPhase] = useState<'reveal' | 'alert'>('reveal');
   const [pendingAiEvents, setPendingAiEvents] = useState<GameEvent[] | null>(null);
   const [aiPlayback, setAiPlayback] = useState<AiPlayback | null>(null);
   const [notice, setNotice] = useState('输入访问码后开始一局实验对局。刷新页面会开启新对局。');
@@ -59,6 +61,12 @@ export function DiceLabApp() {
   const selection = useMemo<ScoreOption | null>(() => (
     state ? scoreOption(state.dice, [...selected]) : null
   ), [state, selected]);
+
+  useEffect(() => {
+    if (!bustDisplay) return;
+    const timer = window.setTimeout(() => setBustPhase('alert'), BUST_REVEAL_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [bustDisplay]);
 
   useEffect(() => {
     if (!bustDisplay) return;
@@ -85,6 +93,7 @@ export function DiceLabApp() {
   async function start() {
     setBusy(true); setNotice('正在创建实验对局…'); setSelected(new Set());
     setBustDisplay(null);
+    setBustPhase('reveal');
     setPendingAiEvents(null);
     setAiPlayback(null);
     try {
@@ -102,6 +111,7 @@ export function DiceLabApp() {
       setSession(nextSession);
       setSelected(new Set());
       if (nextSession.playerBust) {
+        setBustPhase('reveal');
         setBustDisplay(nextSession.playerBust);
         setPendingAiEvents(nextSession.aiEvents);
         setAiPlayback(null);
@@ -170,16 +180,16 @@ export function DiceLabApp() {
               <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{aiPlayback ? 'NPC掷骰阶段' : state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{(aiProgress?.turnScore ?? state.turnScore).toLocaleString()}</b></span></div>
               {!bustDisplay && <TurnBreakdown entries={aiProgress?.entries ?? state.turnBreakdown} />}
               {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
-              {!aiPlayback && <div class={`dice-tray${bustDisplay ? ' is-bust-table' : ''}`} aria-label={bustDisplay ? '爆骰结果牌面' : '当前骰子'}>
+              {!aiPlayback && <div class={`dice-tray${bustDisplay ? (bustPhase === 'alert' ? ' is-bust-table' : ' is-bust-reveal') : ''}`} aria-label={bustDisplay ? (bustPhase === 'alert' ? '爆骰结果牌面' : '爆骰待确认牌面') : '当前骰子'}>
                 {bustDisplay ? <>
-                  <div class="bust-table-heading"><strong>爆骰</strong><span>本轮未收下的分数已丢失</span></div>
+                  <div class={`bust-table-heading${bustPhase === 'alert' ? ' is-alert' : ''}`}><strong>{bustPhase === 'alert' ? '爆骰' : '新摇出的牌面'}</strong><span>{bustPhase === 'alert' ? '本轮未收下的分数已丢失' : '结果确认中，请稍候'}</span></div>
                   <div class="bust-table-dice">{(bustDisplay.dice ?? []).map((die) => <div key={die.id} class="die-button die-static bust-table-die" aria-label={`${die.value}点爆骰结果`}><DieFace value={die.value} /></div>)}</div>
                 </> : <>
                   {state.dice.length === 0 && <p class="empty-dice">点击下方按钮掷出六枚骰子</p>}
                   {state.dice.map((die) => state.phase === 'finished' ? <div key={die.id} class="die-button die-static" aria-label={`${die.value}点最终骰子`}><DieFace value={die.value} /></div> : <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
                 </>}
               </div>}
-              {aiPlayback && aiFrame ? <div class={`selection-readout ai-action-readout${aiFrame.kind === 'bust' ? ' is-bust' : ''}`}><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : bustDisplay ? <div class="selection-readout bust-action-readout"><span>回合状态</span><strong>爆骰</strong><small>{bustDisplay.message} · {pendingAiEvents?.length ? '结果展示结束后进入 NPC 回合' : '结果展示结束后继续游戏'}</small></div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
+              {aiPlayback && aiFrame ? <div class={`selection-readout ai-action-readout${aiFrame.kind === 'bust' ? ' is-bust' : ''}`}><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : bustDisplay ? <div class={`selection-readout bust-action-readout${bustPhase === 'alert' ? ' is-alert' : ''}`}><span>回合状态</span><strong>{bustPhase === 'alert' ? '爆骰' : '结果展示'}</strong><small>{bustPhase === 'alert' ? `${bustDisplay.message} · ${pendingAiEvents?.length ? '结果展示结束后进入 NPC 回合' : '结果展示结束后继续游戏'}` : '新摇出的骰子将在短暂停留后确认爆骰结果'}</small></div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
               <div class="action-row">
                 <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
                 <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || !selection}>收下本轮分数</button>
