@@ -3,6 +3,7 @@ import {
   copyFileSync,
   existsSync,
   lstatSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -11,6 +12,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseCsvStructured, serializeCsv, type CsvRow } from './csv.js';
 import {
@@ -39,6 +41,38 @@ export interface ConfigRevision {
   files: Record<string, string>;
 }
 
+export type ConfigSyncState = 'idle' | 'pending' | 'checking' | 'conflict' | 'ready' | 'merged' | 'error';
+
+export interface ConfigCheckStatus {
+  name: string;
+  status: string | null;
+  conclusion: string | null;
+  url: string | null;
+}
+
+export interface ConfigPullRequestStatus {
+  number: number;
+  url: string;
+  state: string;
+  draft: boolean;
+  mergeable: boolean | null;
+  mergeStateStatus: string | null;
+  baseSha: string | null;
+  headSha: string | null;
+  changedFiles: string[];
+  conflictFiles: string[];
+  checks: ConfigCheckStatus[];
+  checkedAt: string;
+}
+
+export interface ConfigConflictFile {
+  file: string;
+  status: string;
+  authority: string;
+  main: string;
+  branch: string;
+}
+
 export interface ConfigSyncStatus {
   revision: number;
   updatedAt: string | null;
@@ -47,7 +81,11 @@ export interface ConfigSyncStatus {
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
   lastError: string | null;
+  lastStatusError: string | null;
   pullRequestUrl: string | null;
+  pullRequest: ConfigPullRequestStatus | null;
+  syncState: ConfigSyncState;
+  blockedReason: string | null;
   enabled: boolean;
 }
 
@@ -58,7 +96,66 @@ interface Outbox {
   lastAttemptAt?: string;
   lastSuccessAt?: string;
   lastError?: string;
+  lastStatusError?: string;
   pullRequestUrl?: string;
+  pullRequest?: ConfigPullRequestStatus;
+  syncState?: ConfigSyncState;
+  blockedReason?: string;
+}
+
+interface GithubRefResponse { object: { sha: string }; }
+interface GithubCommitResponse { sha: string; tree: { sha: string }; }
+interface GithubPullResponse {
+  number: number;
+  html_url: string;
+  state: string;
+  draft: boolean;
+  mergeable: boolean | null;
+  mergeable_state: string | null;
+  base: { sha: string };
+  head: { sha: string };
+}
+interface GithubPullFileResponse {
+  filename: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+}
+interface GithubCheckRunsResponse {
+  check_runs?: Array<{ name?: string; status?: string; conclusion?: string | null; html_url?: string | null }>;
+}
+interface GithubContentResponse {
+  type?: string;
+  encoding?: string;
+  content?: string;
+}
+
+function configFileName(path: string): string | null {
+  if (!/^config\/[A-Za-z0-9_.-]+\.csv$/.test(path)) return null;
+  return path.slice('config/'.length);
+}
+
+function isConflictState(pr: ConfigPullRequestStatus | null): boolean {
+  return Boolean(pr && pr.state.toLowerCase() === 'open'
+    && (pr.mergeable === false || ['dirty', 'blocked'].includes(pr.mergeStateStatus ?? '')));
+}
+
+function deriveSyncState(
+  outbox: Outbox | null,
+  pullRequest: ConfigPullRequestStatus | null,
+  lastError: string | null,
+): ConfigSyncState {
+  if (lastError) return 'error';
+  if (outbox) return 'pending';
+  if (!pullRequest) return 'idle';
+  if (pullRequest.state.toUpperCase() === 'MERGED') return 'merged';
+  if (isConflictState(pullRequest)) return 'conflict';
+  if (pullRequest.mergeable === true) {
+    const completed = pullRequest.checks.length > 0
+      && pullRequest.checks.every((check) => ['success', 'skipped', 'neutral'].includes((check.conclusion ?? '').toLowerCase()));
+    return completed ? 'ready' : 'checking';
+  }
+  return 'checking';
 }
 
 export interface ConfigAuthorityOptions {
@@ -341,6 +438,10 @@ export class ConfigAuthority {
     return this.syncStatusPath ? readJson<Outbox>(this.syncStatusPath) : null;
   }
 
+  private writeSyncStatus(status: Outbox): void {
+    if (this.syncStatusPath) atomicWrite(this.syncStatusPath, JSON.stringify(status, null, 2) + '\n');
+  }
+
   private writeOutbox(outbox: Outbox | null): void {
     if (!this.outboxPath) return;
     if (!outbox) {
@@ -404,6 +505,8 @@ export class ConfigAuthority {
     const revision = this.readRevision();
     const outbox = this.readOutbox();
     const syncStatus = outbox ?? this.readSyncStatus();
+    const pullRequest = syncStatus?.pullRequest ?? null;
+    const lastError = syncStatus?.lastError ?? null;
     return {
       revision: revision?.revision ?? 0,
       updatedAt: revision?.updatedAt ?? null,
@@ -411,8 +514,12 @@ export class ConfigAuthority {
       pending: outbox ? { revision: outbox.revision, files: outbox.files, enqueuedAt: outbox.enqueuedAt } : null,
       lastAttemptAt: syncStatus?.lastAttemptAt ?? null,
       lastSuccessAt: syncStatus?.lastSuccessAt ?? null,
-      lastError: syncStatus?.lastError ?? null,
+      lastError,
+      lastStatusError: syncStatus?.lastStatusError ?? null,
       pullRequestUrl: syncStatus?.pullRequestUrl ?? null,
+      pullRequest,
+      syncState: syncStatus?.syncState ?? deriveSyncState(outbox, pullRequest, lastError),
+      blockedReason: syncStatus?.blockedReason ?? null,
       enabled: Boolean(this.githubToken),
     };
   }
@@ -433,6 +540,183 @@ export class ConfigAuthority {
     const payload = body ? JSON.parse(body) as T & { message?: string } : {} as T;
     if (!response.ok) throw new Error(`GitHub API ${response.status}: ${(payload as { message?: string }).message ?? body}`);
     return payload;
+  }
+
+  private pullRequestNumber(url: string | null): number | null {
+    const match = url?.match(/\/pull\/(\d+)(?:[/?#]|$)/);
+    return match ? Number(match[1]) : null;
+  }
+
+  private async fetchGithubContent(path: string, ref: string): Promise<string> {
+    const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
+    const content = await this.github<GithubContentResponse>(
+      `/repos/${this.githubRepo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+    );
+    if (content.type !== 'file' || content.encoding !== 'base64' || typeof content.content !== 'string') {
+      throw new Error(`GitHub 文件不是可读取的 CSV：${path}`);
+    }
+    return Buffer.from(content.content.replace(/\s/g, ''), 'base64').toString('utf8');
+  }
+
+  private async fetchPullRequestStatus(url: string | null): Promise<ConfigPullRequestStatus | null> {
+    if (!this.githubToken) return null;
+    const [owner] = this.githubRepo.split('/');
+    let number = this.pullRequestNumber(url);
+    if (!number) {
+      const open = await this.github<Array<{ number: number; html_url: string }>>(
+        `/repos/${this.githubRepo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${CONFIG_SYNC_BRANCH}`)}&base=main`,
+      );
+      number = open[0]?.number ?? null;
+      if (!number) return null;
+    }
+    const pr = await this.github<GithubPullResponse>(`/repos/${this.githubRepo}/pulls/${number}`);
+    const changed = await this.github<GithubPullFileResponse[]>(`/repos/${this.githubRepo}/pulls/${number}/files?per_page=100`);
+    let checks: ConfigCheckStatus[] = [];
+    try {
+      const checkRuns = await this.github<GithubCheckRunsResponse>(
+        `/repos/${this.githubRepo}/commits/${pr.head.sha}/check-runs?per_page=100`,
+      );
+      checks = (checkRuns.check_runs ?? []).map((check) => ({
+        name: check.name ?? '未命名检查',
+        status: check.status ?? null,
+        conclusion: check.conclusion ?? null,
+        url: check.html_url ?? null,
+      }));
+    } catch {
+      // 检查权限不足不应把 PR 状态误报成配置上传失败；页面会显示“检查不可见”。
+    }
+    const changedFiles = changed
+      .map((entry) => configFileName(entry.filename))
+      .filter((file): file is string => Boolean(file));
+    const result: ConfigPullRequestStatus = {
+      number,
+      url: pr.html_url,
+      state: pr.state,
+      draft: Boolean(pr.draft),
+      mergeable: pr.mergeable,
+      mergeStateStatus: pr.mergeable_state,
+      baseSha: pr.base?.sha ?? null,
+      headSha: pr.head?.sha ?? null,
+      changedFiles,
+      conflictFiles: pr.state.toLowerCase() === 'open'
+        && (pr.mergeable === false || ['dirty', 'blocked'].includes(pr.mergeable_state ?? '')) ? changedFiles : [],
+      checks,
+      checkedAt: new Date(this.now()).toISOString(),
+    };
+    return result;
+  }
+
+  private persistPullRequestStatus(pullRequest: ConfigPullRequestStatus | null, statusError?: string | null): void {
+    const current = this.readSyncStatus() ?? {} as Outbox;
+    const next: Outbox = {
+      ...current,
+      ...(pullRequest ? { pullRequest, pullRequestUrl: pullRequest.url } : {}),
+      ...(statusError !== undefined ? { lastStatusError: statusError ?? undefined } : {}),
+      syncState: deriveSyncState(this.readOutbox(), pullRequest, current.lastError ?? null),
+      blockedReason: isConflictState(pullRequest)
+        ? `PR #${pullRequest?.number ?? '?'} 存在冲突，请在配置中心确认并解决：${pullRequest?.conflictFiles.join('、') || '未识别文件'}`
+        : undefined,
+    };
+    this.writeSyncStatus(next);
+  }
+
+  /** 读取并刷新 GitHub PR 状态；上传成功不等于 PR 可合并。 */
+  async inspectStatus(): Promise<ConfigSyncStatus> {
+    const local = this.status();
+    if (!this.githubToken) return local;
+    try {
+      const pullRequest = await this.fetchPullRequestStatus(local.pullRequestUrl);
+      if (pullRequest) this.persistPullRequestStatus(pullRequest, null);
+      return this.status();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const current = this.readSyncStatus() ?? {} as Outbox;
+      this.writeSyncStatus({ ...current, lastStatusError: message });
+      return this.status();
+    }
+  }
+
+  /** 返回冲突文件的配置中心、main 和 PR 当前版本，供人工逐文件确认。 */
+  async conflictDetails(): Promise<{ pullRequest: ConfigPullRequestStatus; files: ConfigConflictFile[] }> {
+    const status = await this.inspectStatus();
+    const pullRequest = status.pullRequest;
+    if (!pullRequest || !isConflictState(pullRequest)) throw new Error('当前没有可处理的配置 PR 冲突');
+    const files: ConfigConflictFile[] = [];
+    for (const file of pullRequest.conflictFiles) {
+      const authorityPath = join(this.persistentConfigDir ?? this.configDir, file);
+      const authority = existsSync(authorityPath) ? readFileSync(authorityPath, 'utf8') : '';
+      const main = pullRequest.baseSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.baseSha) : '';
+      const branch = pullRequest.headSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.headSha) : '';
+      files.push({ file, status: 'conflict', authority, main, branch });
+    }
+    return { pullRequest, files };
+  }
+
+  private validateResolvedConfig(files: ReadonlyMap<string, string>): void {
+    const tmp = mkdtempSync(join(tmpdir(), 'kow-config-conflict-'));
+    try {
+      for (const file of csvFiles(this.configDir)) copyFileSync(join(this.configDir, file), join(tmp, file));
+      for (const [file, content] of files) {
+        if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名：${file}`);
+        parseCsvStructured(content);
+        writeFileSync(join(tmp, file), content, 'utf8');
+      }
+      loadGameConfig(tmp);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * 提交人工确认后的合并树。以最新 main 为基底，并以最终文本覆盖冲突 CSV，
+   * 通过双父提交把 main 纳入 config-sync/live，避免 force push 和重复冲突。
+   */
+  async resolveConflicts(input: { expectedHeadSha?: string; files: Array<{ file: string; content: string }> }): Promise<ConfigSyncStatus> {
+    if (!this.githubToken) throw new Error('未配置 GITHUB_CONFIG_SYNC_TOKEN');
+    const details = await this.conflictDetails();
+    const expected = new Set(details.files.map((entry) => entry.file));
+    const resolutions = new Map<string, string>();
+    for (const entry of input.files ?? []) {
+      if (!expected.has(entry.file)) throw new Error(`不是当前 PR 的冲突文件：${entry.file}`);
+      if (typeof entry.content !== 'string' || entry.content.length > 5_000_000) throw new Error(`冲突文件内容无效：${entry.file}`);
+      if (resolutions.has(entry.file)) throw new Error(`重复提交冲突文件：${entry.file}`);
+      resolutions.set(entry.file, entry.content);
+    }
+    const missing = [...expected].filter((file) => !resolutions.has(file));
+    if (missing.length > 0) throw new Error(`仍有冲突文件未确认：${missing.join('、')}`);
+    this.validateResolvedConfig(resolutions);
+
+    const mainRef = await this.github<GithubRefResponse>(`/repos/${this.githubRepo}/git/ref/heads/main`);
+    const branchRef = await this.github<GithubRefResponse>(`/repos/${this.githubRepo}/git/ref/heads/${CONFIG_SYNC_BRANCH}`);
+    if (input.expectedHeadSha && input.expectedHeadSha !== branchRef.object.sha) {
+      throw new Error('配置 PR 在确认期间已更新，请刷新冲突内容后再提交');
+    }
+    const mainCommit = await this.github<GithubCommitResponse>(`/repos/${this.githubRepo}/git/commits/${mainRef.object.sha}`);
+    const tree: Array<{ path: string; mode: string; type: string; sha: string }> = [];
+    for (const [file, content] of resolutions) {
+      const blob = await this.github<{ sha: string }>(`/repos/${this.githubRepo}/git/blobs`, {
+        method: 'POST',
+        body: JSON.stringify({ content: Buffer.from(content, 'utf8').toString('base64'), encoding: 'base64' }),
+      });
+      tree.push({ path: `config/${file}`, mode: '100644', type: 'blob', sha: blob.sha });
+    }
+    const mergedTree = await this.github<{ sha: string }>(`/repos/${this.githubRepo}/git/trees`, {
+      method: 'POST',
+      body: JSON.stringify({ base_tree: mainCommit.tree.sha, tree }),
+    });
+    const commit = await this.github<GithubCommitResponse>(`/repos/${this.githubRepo}/git/commits`, {
+      method: 'POST',
+      body: JSON.stringify({
+        message: `config: resolve conflicts revision ${this.status().revision}`,
+        tree: mergedTree.sha,
+        parents: [branchRef.object.sha, mainRef.object.sha],
+      }),
+    });
+    await this.github(`/repos/${this.githubRepo}/git/refs/heads/${CONFIG_SYNC_BRANCH}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sha: commit.sha, force: false }),
+    });
+    return this.inspectStatus();
   }
 
   private async pushToGithub(outbox: Outbox): Promise<string | null> {
@@ -473,7 +757,19 @@ export class ConfigAuthority {
       outbox.lastSuccessAt = new Date(this.now()).toISOString();
       outbox.lastError = undefined;
       outbox.pullRequestUrl = pullRequestUrl ?? outbox.pullRequestUrl;
-      if (this.syncStatusPath) atomicWrite(this.syncStatusPath, JSON.stringify(outbox, null, 2) + '\n');
+      if (pullRequestUrl && this.githubToken) {
+        try {
+          outbox.pullRequest = await this.fetchPullRequestStatus(pullRequestUrl) ?? undefined;
+          outbox.syncState = deriveSyncState(null, outbox.pullRequest ?? null, null);
+          outbox.blockedReason = isConflictState(outbox.pullRequest ?? null)
+            ? `PR 存在冲突，请在配置中心确认：${outbox.pullRequest?.conflictFiles.join('、') || '未识别文件'}`
+            : undefined;
+          outbox.lastStatusError = undefined;
+        } catch (err) {
+          outbox.lastStatusError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      this.writeSyncStatus(outbox);
       this.writeOutbox(null);
       // 最近一次成功信息保留在版本文件中，队列文件删除后 status 仍可读 revision。
       return this.status();

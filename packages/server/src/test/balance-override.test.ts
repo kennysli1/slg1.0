@@ -1,6 +1,7 @@
 /** 配置中心权威、旧覆盖迁移和 revision/outbox 回归测试。 */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -303,6 +304,99 @@ test('配置同步 outbox：只合并未发送的差异，不重复上传上次�
     assert.ok(third.lastSuccessAt, '新批次仍应保留最近一次成功时间');
     next.close();
   } finally {
+    cfg.cleanup();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决提交', async () => {
+  const cfg = seedConfig();
+  const state = tempDir('kow-config-conflict-state-');
+  const localUnits = readFileSync(join(cfg.dir, 'units.csv'), 'utf8');
+  const mainUnits = localUnits.replace('4000', '4001');
+  const branchUnits = localUnits.replace('4000', '40');
+  let branchSha = 'branch-sha';
+  let mergeable = false;
+  let mergeState = 'dirty';
+  let commitParents: string[] = [];
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const path = url.pathname;
+    const send = (status: number, body: unknown) => {
+      res.statusCode = status;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(body));
+    };
+    if (req.method === 'GET' && path === '/repos/owner/repo/pulls/7') {
+      return send(200, {
+        number: 7,
+        html_url: 'https://github.com/owner/repo/pull/7',
+        state: 'open',
+        draft: false,
+        mergeable,
+        mergeable_state: mergeState,
+        base: { sha: 'main-sha' },
+        head: { sha: branchSha },
+      });
+    }
+    if (req.method === 'GET' && path === '/repos/owner/repo/pulls/7/files') {
+      return send(200, [{ filename: 'config/units.csv', status: 'modified', additions: 1, deletions: 1 }]);
+    }
+    if (req.method === 'GET' && path === `/repos/owner/repo/commits/${branchSha}/check-runs`) {
+      return send(200, { check_runs: [] });
+    }
+    if (req.method === 'GET' && path === '/repos/owner/repo/contents/config/units.csv') {
+      const text = url.searchParams.get('ref') === 'main-sha' ? mainUnits : branchUnits;
+      return send(200, { type: 'file', encoding: 'base64', content: Buffer.from(text, 'utf8').toString('base64') });
+    }
+    if (req.method === 'GET' && path === '/repos/owner/repo/git/ref/heads/main') return send(200, { object: { sha: 'main-sha' } });
+    if (req.method === 'GET' && path === '/repos/owner/repo/git/ref/heads/config-sync/live') return send(200, { object: { sha: branchSha } });
+    if (req.method === 'GET' && path === '/repos/owner/repo/git/commits/main-sha') return send(200, { sha: 'main-sha', tree: { sha: 'main-tree' } });
+    if (req.method === 'POST' && path === '/repos/owner/repo/git/blobs') return send(201, { sha: 'resolved-blob' });
+    if (req.method === 'POST' && path === '/repos/owner/repo/git/trees') return send(201, { sha: 'resolved-tree' });
+    if (req.method === 'POST' && path === '/repos/owner/repo/git/commits') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { parents?: string[] };
+      commitParents = body.parents ?? [];
+      return send(201, { sha: 'resolved-sha', tree: { sha: 'resolved-tree' } });
+    }
+    if (req.method === 'PATCH' && path === '/repos/owner/repo/git/refs/heads/config-sync/live') {
+      branchSha = 'resolved-sha';
+      mergeable = true;
+      mergeState = 'clean';
+      return send(200, {});
+    }
+    return send(404, { message: `unhandled ${req.method} ${path}` });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  try {
+    writeFileSync(join(state, 'config_revision.json'), JSON.stringify({ revision: 53, updatedAt: new Date().toISOString(), files: { 'units.csv': 'hash' } }));
+    writeFileSync(join(state, 'config_sync_status.json'), JSON.stringify({ revision: 53, pullRequestUrl: 'https://github.com/owner/repo/pull/7' }));
+    const authority = new ConfigAuthority({
+      configDir: cfg.dir,
+      stateDir: state,
+      persistentConfigDir: cfg.dir,
+      githubToken: 'test-token',
+      githubRepo: 'owner/repo',
+      githubApiBase: `http://127.0.0.1:${address.port}`,
+      syncDelayMs: 60_000,
+    });
+    const details = await authority.conflictDetails();
+    assert.equal(details.pullRequest.mergeable, false);
+    assert.deepEqual(details.pullRequest.conflictFiles, ['units.csv']);
+    assert.equal(details.files[0]?.authority, localUnits);
+    assert.equal(details.files[0]?.main, mainUnits);
+    assert.equal(details.files[0]?.branch, branchUnits);
+    const resolved = await authority.resolveConflicts({ expectedHeadSha: 'branch-sha', files: [{ file: 'units.csv', content: localUnits }] });
+    assert.equal(resolved.pullRequest?.headSha, 'resolved-sha');
+    assert.equal(resolved.syncState, 'checking');
+    assert.deepEqual(commitParents, ['branch-sha', 'main-sha']);
+    authority.close();
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     cfg.cleanup();
     rmSync(state, { recursive: true, force: true });
   }
