@@ -78,6 +78,24 @@ test('骰子王：刷新/掉线后重新 StartMatch 会丢弃旧内存 session �
   await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: (second.payload as any).sessionId });
 });
 
+test('骰子王：牌桌动作按开桌身份归属，切换当前村后仍能记录放弃局', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-switch');
+  await activate(app, villageId, 's7');
+  const playerId = 'dice-switch-player';
+  const started = await send(app, 'diceQuest.StartMatch', { villageId, playerId, taskCode: 's7' });
+  assert.equal(started.ok, true, started.reason);
+  const sessionId = (started.payload as any).sessionId;
+  const lost = await send(app, 'diceQuest.Action', {
+    villageId: 'another-current-village', playerId, sessionId, type: 'forfeit',
+  });
+  assert.equal(lost.ok, true, lost.reason);
+  assert.equal((lost.payload as any).round.npcWins, 1);
+  const state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(state.active.find((item: any) => item.code === 's7')?.diceNpcWins, 1);
+});
+
 test('骰子王：s7 支付入场费并累计两场胜利后可领取', async () => {
   const app = createGameApp({ manualScheduler: true, rng: () => 0 });
   app.setupWorld();

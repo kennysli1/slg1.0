@@ -13,6 +13,8 @@ export type DiceEvent = {
   dice?: Die[];
   option?: ScoreOption;
   points?: number;
+  /** NPC 回合在该动作结束后的阶段累计；用于客户端按事件精确回放。 */
+  turnScore?: number;
   message: string;
 };
 export type DiceState = {
@@ -137,16 +139,16 @@ function runAiTurn(state: DiceState, rng: () => number, delta: DiceEvent[]): voi
   while (true) {
     const options = legalOptions(dice);
     if (!options.length) {
-      append(state, { kind: 'bust', side: 'ai', dice, points: turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` }, delta);
+      append(state, { kind: 'bust', side: 'ai', dice, points: turnScore, turnScore, message: `NPC爆骰，丢失本轮 ${turnScore} 分` }, delta);
       break;
     }
     const decision = chooseAiDecision(state, dice, turnScore, rng);
     turnScore += decision.option.score;
-    append(state, { kind: 'keep', side: 'ai', dice: dice.slice(), option: decision.option, points: decision.option.score, message: `NPC保留 ${decision.option.label}，获得 ${decision.option.score} 分` }, delta);
+    append(state, { kind: 'keep', side: 'ai', dice: dice.slice(), option: decision.option, points: decision.option.score, turnScore, message: `NPC保留 ${decision.option.label}，获得 ${decision.option.score} 分` }, delta);
     const rest = remainingDice(dice, decision.option);
     if (decision.bank) {
       state.aiScore += turnScore;
-      append(state, { kind: 'bank', side: 'ai', dice: dice.slice(), option: decision.option, points: turnScore, message: `NPC收下本轮 ${turnScore} 分` }, delta);
+      append(state, { kind: 'bank', side: 'ai', dice: dice.slice(), option: decision.option, points: turnScore, turnScore, message: `NPC收下本轮 ${turnScore} 分` }, delta);
       if (finishIfReached(state, 'ai', { kind: decision.option.kind, label: decision.option.label, points: turnScore, dice }, delta)) state.dice = dice.slice();
       break;
     }
