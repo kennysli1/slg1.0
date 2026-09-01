@@ -20,6 +20,29 @@ type AiPlayback = {
   index: number;
 };
 
+type AiTurnProgress = {
+  score: number;
+  turnScore: number;
+  entries: Array<{ label: string; score: number }>;
+};
+
+function getAiTurnProgress(events: GameEvent[], index: number, finalScore: number): AiTurnProgress {
+  const visibleEvents = events.slice(0, index + 1);
+  const entries = visibleEvents
+    .filter((event) => event.side === 'ai' && event.kind === 'keep' && event.option)
+    .map((event) => ({ label: event.option!.label, score: event.option!.score }));
+  const turnScore = entries.reduce((sum, entry) => sum + entry.score, 0);
+  const bankEvent = events.find((event) => event.side === 'ai' && event.kind === 'bank');
+  const bankShown = Boolean(bankEvent && visibleEvents.includes(bankEvent));
+  const committedPoints = bankEvent?.points ?? 0;
+
+  return {
+    score: Math.max(0, finalScore - (bankShown ? 0 : committedPoints)),
+    turnScore: bankShown ? 0 : turnScore,
+    entries,
+  };
+}
+
 export function DiceLabApp() {
   const [token, setToken] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
@@ -106,6 +129,7 @@ export function DiceLabApp() {
 
   const currentDifficulty = DIFFICULTIES.find((item) => item.value === difficulty)!;
   const aiFrame = aiPlayback && aiPlayback.index < aiPlayback.events.length ? aiPlayback.events[aiPlayback.index] : null;
+  const aiProgress = aiPlayback ? getAiTurnProgress(aiPlayback.events, aiPlayback.index, state?.aiScore ?? 0) : null;
   return (
     <main class="dice-lab">
       <header class="lab-header">
@@ -138,13 +162,13 @@ export function DiceLabApp() {
           <section class="scoreboard panel-card" aria-label="计分板">
             <div class={`score-side player-side${state.winner === 'player' ? ' is-winner' : ''}`}><span class="side-label">你</span><strong>{state.playerScore.toLocaleString()}</strong>{state.winner === 'player' && <span class="goal-badge">✓ 已达标</span>}</div>
             <div class="target-score"><span>目标</span><strong>{state.targetScore.toLocaleString()}</strong></div>
-            <div class={`score-side ai-side${state.winner === 'ai' ? ' is-winner' : ''}`}><span class="side-label">{currentDifficulty.label}</span><strong>{state.aiScore.toLocaleString()}</strong>{state.winner === 'ai' && <span class="goal-badge">✓ 已达标</span>}</div>
+            <div class={`score-side ai-side${state.winner === 'ai' ? ' is-winner' : ''}`}><span class="side-label">{currentDifficulty.label}</span><strong>{(aiProgress?.score ?? state.aiScore).toLocaleString()}</strong>{state.winner === 'ai' && <span class="goal-badge">✓ 已达标</span>}</div>
           </section>
 
           <section class="play-layout">
             <div class="play-card panel-card">
-              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : aiPlayback ? 'NPC掷骰阶段' : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{state.turnScore.toLocaleString()}</b></span></div>
-              {!aiPlayback && <TurnBreakdown entries={state.turnBreakdown} />}
+              <div class="turn-heading"><div><span class="eyebrow">当前回合</span><h2>{aiPlayback ? 'NPC掷骰阶段' : state.phase === 'finished' ? (state.winner === 'player' ? '你赢了' : 'NPC获胜') : '你的掷骰阶段'}</h2></div><span class="turn-points">本轮累计 <b>{(aiProgress?.turnScore ?? state.turnScore).toLocaleString()}</b></span></div>
+              {!bustDisplay && <TurnBreakdown entries={aiProgress?.entries ?? state.turnBreakdown} />}
               {aiPlayback && aiFrame && <AiTurnBoard event={aiFrame} />}
               {!aiPlayback && <div class={`dice-tray${bustDisplay ? ' is-bust-table' : ''}`} aria-label={bustDisplay ? '爆骰结果牌面' : '当前骰子'}>
                 {bustDisplay ? <>
@@ -155,7 +179,7 @@ export function DiceLabApp() {
                   {state.dice.map((die) => state.phase === 'finished' ? <div key={die.id} class="die-button die-static" aria-label={`${die.value}点最终骰子`}><DieFace value={die.value} /></div> : <button key={die.id} type="button" class={`die-button${selected.has(die.id) ? ' is-selected' : ''}`} onClick={() => toggleDie(die)} aria-label={`${die.value}点骰子${selected.has(die.id) ? '，已选中' : ''}`}><DieFace value={die.value} /></button>)}
                 </>}
               </div>}
-              {aiPlayback && aiFrame ? <div class="selection-readout ai-action-readout"><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : bustDisplay ? <div class="selection-readout bust-action-readout"><span>回合状态</span><strong>爆骰</strong><small>{bustDisplay.message} · {pendingAiEvents?.length ? '结果展示结束后进入 NPC 回合' : '结果展示结束后继续游戏'}</small></div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
+              {aiPlayback && aiFrame ? <div class={`selection-readout ai-action-readout${aiFrame.kind === 'bust' ? ' is-bust' : ''}`}><span>NPC动作</span><strong>{describeAiAction(aiFrame)}</strong>{aiFrame.option && <small>牌型：{aiFrame.option.kind}（{aiFrame.option.label}）</small>}</div> : bustDisplay ? <div class="selection-readout bust-action-readout"><span>回合状态</span><strong>爆骰</strong><small>{bustDisplay.message} · {pendingAiEvents?.length ? '结果展示结束后进入 NPC 回合' : '结果展示结束后继续游戏'}</small></div> : <div class="selection-readout"><span>本次选择</span><strong>{selection ? `+${selection.score.toLocaleString()}` : '请选择完整计分组合'}</strong>{selection && <small>骰子：{selection.label}</small>}</div>}
               <div class="action-row">
                 <button class="primary-button" type="button" onClick={() => void act({ type: 'roll', selectedDieIds: state.dice.length ? [...selected] : undefined })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || (state.dice.length > 0 && !selection)}>{state.dice.length ? '保留并继续' : '掷骰'}</button>
                 <button class="gold-button" type="button" onClick={() => void act({ type: 'bank', selectedDieIds: [...selected] })} disabled={busy || Boolean(bustDisplay) || Boolean(aiPlayback) || state.phase === 'finished' || !selection}>收下本轮分数</button>
@@ -190,10 +214,10 @@ function TurnBreakdown({ entries }: { entries: Array<{ label: string; score: num
 function AiTurnBoard({ event }: { event: GameEvent }) {
   const selectedIds = new Set(event.option?.dieIds ?? []);
   return (
-    <section class="ai-turn-board" aria-label="NPC回合动作">
+    <section class={`ai-turn-board${event.kind === 'bust' ? ' is-bust' : ''}`} aria-label="NPC回合动作">
       <div class="ai-turn-heading"><span>NPC当前牌面</span><small>动作会短暂停留，便于查看</small></div>
       <div class="ai-dice-tray">
-        {(event.dice ?? []).map((die) => <div key={die.id} class="ai-die-wrap"><div class={`die-button die-static${selectedIds.has(die.id) ? ' is-selected' : ''}`} aria-label={`NPC的${die.value}点骰子${selectedIds.has(die.id) ? '，已保留' : '，可用'}`}><DieFace value={die.value} /></div><span class="ai-die-badge">{selectedIds.has(die.id) ? '保留' : '可用'}</span></div>)}
+        {(event.dice ?? []).map((die) => <div key={die.id} class="ai-die-wrap"><div class={`die-button die-static${selectedIds.has(die.id) ? ' is-selected' : ''}`} aria-label={`NPC的${die.value}点骰子${selectedIds.has(die.id) ? '，已保留' : ''}`}><DieFace value={die.value} /></div>{selectedIds.has(die.id) && <span class="ai-die-badge">保留</span>}</div>)}
       </div>
     </section>
   );
