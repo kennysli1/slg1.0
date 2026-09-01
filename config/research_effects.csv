@@ -41,3 +41,6 @@ exploration_charter,1,building_unlock,explorers_guild,1,1
 frontier_charter,1,unit_unlock,settler,1,1
 frontier_charter,2,unit_unlock,gaulsettler,1,1
 frontier_charter,3,unit_unlock,teusettler,1,1
+advanced_arms,1,unit_unlock,roman_veteran_cohort,1,1
+advanced_arms,2,unit_unlock,gaul_warboar_rider,1,1
+advanced_arms,3,unit_unlock,teuton_blacksteel_guard,1,1

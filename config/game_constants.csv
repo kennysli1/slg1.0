@@ -35,7 +35,7 @@ hills_march_speed_multiplier,0.6666666667,number,军队位于丘陵时行军速�
 march_size_reference_pop,20,number,军队规模减速的免惩罚人口基准
 march_size_penalty,0.0015,number,军队规模减速系数
 march_size_min_multiplier,0.45,number,军队规模减速后的最低速度比例
-cavalry_unit_codes,equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight,string,骑兵兵种代码（以|分隔；用于猎马人任务和绞马索效果）
+cavalry_unit_codes,equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|gaul_warboar_rider|paladin|teutonknight|merc_cavalry|merc_knight,string,骑兵兵种代码（以|分隔；用于猎马人任务和绞马索效果）
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
 pve_loot_variance,0.2,number,PvE战利品随机浮动幅度(0.2=±20%

@@ -476,6 +476,32 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     },
     },
   {
+    moduleName: 'diceQuest',
+    publicActions: {
+      // 主游戏骰子任务使用独立的临时 session，不访问骰子实验场 HTTP 服务。
+      'dice.StartMatch': {
+        command: 'diceQuest.StartMatch', ownVillage: true, needAuth: true,
+        schema: { taskCode: { type: 'enum', values: ['s6', 's7'] } },
+      },
+      'dice.GetMatch': {
+        command: 'diceQuest.GetMatch', ownVillage: true, needAuth: true,
+        schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
+      },
+      'dice.Action': {
+        command: 'diceQuest.Action', ownVillage: true, needAuth: true,
+        schema: {
+          sessionId: { type: 'string', minLen: 1, maxLen: 160 },
+          type: { type: 'enum', values: ['roll', 'bank', 'forfeit'] },
+          selectedDieIds: { type: 'string_array', optional: true, maxItems: 6, minLen: 1, maxLen: 64 },
+        },
+      },
+      'dice.ExitMatch': {
+        command: 'diceQuest.ExitMatch', ownVillage: true, needAuth: true,
+        schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
+      },
+    },
+    },
+  {
     moduleName: 'trade',
     publicActions: {
       GetTradeCenter: { command: 'trade.GetCenter', ownVillage: true, needAuth: true, schema: {} },

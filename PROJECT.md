@@ -50,6 +50,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `research.ts` | 科研点、研发任务和已完成科技 |
 | `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9/M13 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
+| `dice-quest.ts` + `dice-quest/` | 骰子王任务的临时对局、普通骰子规则与 NPC 回合；不落盘对局，不依赖骰子实验场 |
 | `notifications.ts` | 通知和战报历史 |
 | `meta.ts` | 无持久状态；下发客户端渲染所需配置 |
 | `packages/dice-lab` | 独立小游戏服务；内存会话、筛色子规则与 NPC，不属于主游戏领域 owner |
