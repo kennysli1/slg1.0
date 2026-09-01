@@ -20,6 +20,17 @@ interface Catalog {
 interface Row { code: string; count: string }
 interface SideForm { rows: Row[]; research: string[]; treasures: string[]; meleeAtkPct: string; rangedAtkPct: string; meleeDefPct: string; rangedDefPct: string; hpPct: string; wallLevel: string; wallBonusPct: string }
 
+/**
+ * Toggle one entry in a multi-selection without relying on the browser's
+ * Ctrl/Cmd modifier behavior.  The simulator uses this for techs and
+ * treasures so each click is reversible and several entries can be selected
+ * independently.
+ */
+export function toggleMultiSelection(selected: string[], code: string, checked: boolean): string[] {
+  if (checked) return selected.includes(code) ? selected : [...selected, code];
+  return selected.filter((item) => item !== code);
+}
+
 const modeLabels: Record<Mode, string> = { ambush: '伏击战', raid: '掠夺战', field: '野外遭遇战', siege: '攻城战' };
 
 const emptySide = (first?: CatalogUnit): SideForm => ({
@@ -126,11 +137,61 @@ function SideEditor(props: { side: SideName; title: string; value: SideForm; cat
   return <section class="battle-sim-side"><h2>{title}</h2><h3>部队</h3>
     {value.rows.map((row, index) => { const unit = unitByCode.get(row.code); return <div class="battle-sim-row" key={`${index}-${row.code}`}><select value={row.code} onChange={(event) => onRowUpdate(side, index, { code: (event.currentTarget as HTMLSelectElement).value })}>{catalog.units.map((item) => <option value={item.code} key={item.code}>{item.name}（{item.code}）</option>)}</select><input aria-label={`${unit?.name ?? row.code}数量`} type="number" min="0" max="100000" value={row.count} onInput={(event) => onRowUpdate(side, index, { count: (event.currentTarget as HTMLInputElement).value })} /><span class="battle-sim-unit-hint">HP {unit?.hp ?? '-'} · {unit?.traits.map((trait) => trait.name).join('、') || '无特性'}</span><button type="button" onClick={() => onRemove(side, index)}>删除</button></div>; })}
     <button type="button" onClick={() => onAdd(side)}>＋添加兵种</button>
-    <h3>科技（research.csv）</h3><select class="battle-sim-multi" multiple value={value.research as any} onChange={(event) => onUpdate(side, { research: Array.from((event.currentTarget as HTMLSelectElement).selectedOptions).map((option) => option.value) })}>{catalog.research.map((tech) => <option value={tech.code} key={tech.code}>{tech.name}（{tech.code}）</option>)}</select>
-    <h3>宝物</h3><select class="battle-sim-multi" multiple value={value.treasures as any} onChange={(event) => onUpdate(side, { treasures: Array.from((event.currentTarget as HTMLSelectElement).selectedOptions).map((option) => option.value) })}>{catalog.treasures.map((treasure) => <option value={treasure.code} key={treasure.code}>{treasure.name}（{treasure.effectType} {treasure.effectValue}）</option>)}</select>
+    <h3>科技（research.csv）</h3>
+    <MultiChoiceList
+      label="科技"
+      items={catalog.research}
+      selected={value.research}
+      onChange={(research) => onUpdate(side, { research })}
+      renderItem={(tech) => `${tech.name}（${tech.code}）`}
+    />
+    <h3>宝物</h3>
+    <MultiChoiceList
+      label="宝物"
+      items={catalog.treasures}
+      selected={value.treasures}
+      onChange={(treasures) => onUpdate(side, { treasures })}
+      renderItem={(treasure) => `${treasure.name}（${treasure.effectType} ${treasure.effectValue}）`}
+    />
     <h3>手工加成</h3><div class="battle-sim-mods">{input('meleeAtkPct', '近战攻击')}{input('rangedAtkPct', '远程攻击')}{input('meleeDefPct', '近战防御')}{input('rangedDefPct', '远程防御')}{input('hpPct', '生命池')}</div>
     <h3>城墙</h3><div class="battle-sim-mods">{input('wallLevel', '城墙等级', '级')}{input('wallBonusPct', '额外防御')}</div>
   </section>;
+}
+
+function MultiChoiceList<T extends { code: string }>({
+  label,
+  items,
+  selected,
+  onChange,
+  renderItem,
+}: {
+  label: string;
+  items: T[];
+  selected: string[];
+  onChange: (selected: string[]) => void;
+  renderItem: (item: T) => string;
+}) {
+  return <div class="battle-sim-choice-group" role="group" aria-label={`${label}多选`}>
+    <div class="battle-sim-choice-toolbar">
+      <span>{selected.length ? `已选 ${selected.length} 项` : '未选择'}</span>
+      <button type="button" class="battle-sim-clear" onClick={() => onChange([])} disabled={selected.length === 0}>清空</button>
+    </div>
+    <div class="battle-sim-choice-list">
+      {items.map((item) => {
+        const checked = selected.includes(item.code);
+        return <label class={`battle-sim-choice${checked ? ' is-selected' : ''}`} key={item.code}>
+          <input
+            type="checkbox"
+            value={item.code}
+            checked={checked}
+            onChange={(event) => onChange(toggleMultiSelection(selected, item.code, (event.currentTarget as HTMLInputElement).checked))}
+          />
+          <span>{renderItem(item)}</span>
+        </label>;
+      })}
+      {items.length === 0 && <span class="battle-sim-choice-empty">暂无可选项</span>}
+    </div>
+  </div>;
 }
 
 function ReportView({ report, unitByCode }: { report: any; unitByCode: Map<string, CatalogUnit> }) {
