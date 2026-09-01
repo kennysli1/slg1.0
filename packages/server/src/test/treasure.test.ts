@@ -70,17 +70,23 @@ test('宝物：旧版 locked 桶中的勇士之证迁入城镇中心，可正常
 test('宝物：atkMult 被动提升军事攻防快照 (+5%)', async () => {
   const app = await freshApp();
   const a0 = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
-  const baseAtk = a0.trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  const unit0 = a0.trainable.find((u: any) => u.key === 'legionnaire');
+  const baseAtk = unit0.meleeAtk;
   assert.ok(baseAtk > 0, 'legionnaire 应有基础攻');
+  assert.equal(unit0.baseStats.meleeAtk, app.config.units.legionnaire.meleeAtk,
+    '训练卡基础快照应直接来自 units.csv');
 
   const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
   assert.equal(g.ok, true, `授予 war_flag 应成功: ${g.reason ?? ''}`);
 
   const a1 = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
-  const newAtk = a1.trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  const unit1 = a1.trainable.find((u: any) => u.key === 'legionnaire');
+  const newAtk = unit1.meleeAtk;
   // 铁匠0级→bonus=1；war_flag atkMult=5 → ×1.05
   assert.ok(Math.abs(newAtk - baseAtk * 1.05) < 1e-6,
     `攻防应 ×1.05: base=${baseAtk} new=${newAtk}`);
+  assert.deepEqual(unit1.baseStats, unit0.baseStats,
+    '宝物只改变最终战斗属性，不能污染训练卡的 CSV 基础快照');
 });
 
 test('宝物：popGrowth 被动提升人口增长 (+40%)', async () => {
