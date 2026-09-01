@@ -31,3 +31,9 @@ id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,u
 29,teuchief,teutons,首领,unit_teuchief,melee,40,0,60,40,4,0,4,3550,2660,2500,2720,60,1,,10,2,200,
 30,teusettler,teutons,拓荒者,unit_teusettler,melee,10,0,80,80,5,3000,1,580,440,460,520,40,1,,,,100,
 31,adventurer,all,冒险者,unit_adventurer,melee,0,0,4,4,100,0,1,20,20,10,15,4,24,,1,3,80,
+32,roman_sagittarii,romans,罗马弩阵,unit_merc_archer,ranged,10,58,22,36,6,20,1,18,15,24,6,4.2,4,17,1,2,95,
+33,gaul_javelinmen,gauls,高卢投枪手,unit_merc_slinger,ranged,18,50,28,42,8,25,1,18,17,20,7,4.1,4,21,1,2,100,
+34,teuton_crossbowmen,teutons,条顿弩手,unit_merc_crossbow,ranged,12,68,26,48,5,25,1,19,16,27,8,4.6,4,17,1,2,105,
+35,roman_veteran_cohort,romans,不屈军团,unit_praetorian,melee,135,0,105,100,6,55,2,28,24,32,10,7,4,1|9,2,2,210,14
+36,gaul_warboar_rider,gauls,战獠王骑,unit_haeduan,melee,285,0,115,145,13,85,4,78,82,74,20,12,5,5|7,3,3,250,16|15
+37,teuton_blacksteel_guard,teutons,黑钢卫队,unit_teutonknight,melee,150,0,110,100,6,55,2,30,26,36,10,7.2,4,7|10,2,2,210,
