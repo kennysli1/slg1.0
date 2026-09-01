@@ -67,6 +67,23 @@ test('建筑门控：议会厅/联盟大厅需要二级主基地且每村限建�
   assert.equal(options.options.find((item: any) => item.kind === 'alliance_hall')?.maxCount, 1);
 });
 
+test('建筑门控：科技可解锁探险家协会', async () => {
+  const app = freshApp();
+  await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999 } });
+  const locked = await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'explorers_guild' });
+  assert.equal(locked.ok, false, '未完成探索特许时不应建造探险家协会');
+  assert.equal(locked.reason, 'requires_not_met');
+
+  const optionsBefore = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'outer' })).payload as any;
+  const guildBefore = optionsBefore.options.find((item: any) => item.kind === 'explorers_guild');
+  assert.equal(guildBefore.unlocked, false);
+  assert.equal(guildBefore.lockReason, '需完成科技解锁');
+
+  await send(app, 'building.SetTechUnlockedBuildings', { villageId: 'v1', unlocks: ['explorers_guild'] });
+  const unlocked = await send(app, 'building.Build', { villageId: 'v1', zone: 'outer', kind: 'explorers_guild' });
+  assert.equal(unlocked.ok, true, '科技解锁后应可建造探险家协会');
+});
+
 test('点空槽建造：城内建仓库 → 占槽 → 完成落成', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });

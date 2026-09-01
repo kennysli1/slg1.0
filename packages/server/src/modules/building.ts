@@ -54,6 +54,8 @@ interface BuildingState {
   mainBaseMigrationVersion?: 1;
   /** 任务或其他系统授予的建筑解锁；旧存档默认为空。 */
   unlockedBuildings?: string[];
+  /** 科技授予的建筑解锁；由 research 模块重算后覆盖。 */
+  techUnlockedBuildings?: string[];
 }
 
 const COLLECTION = 'building';
@@ -104,6 +106,7 @@ export class BuildingModule {
     this.commands.register('building.GetBuildingLevel', (c) => this.getBuildingLevel(c));
     this.commands.register('building.GetLaborContext', (c) => this.getLaborContext(c));
     this.commands.register('building.UnlockBuildings', (c) => this.unlockBuildings(c));
+    this.commands.register('building.SetTechUnlockedBuildings', (c) => this.setTechUnlockedBuildings(c));
     this.commands.register('building.GetPopCap', (c) => this.getPopCap(c));
     this.commands.register('building.SetBuildSpeedMult', (c) => this.setBuildSpeedMult(c));
     this.commands.register('building.SetStorageTechMult', (c) => this.setStorageTechMult(c));
@@ -364,6 +367,7 @@ export class BuildingModule {
 
   private meetsBuildRequirement(s: BuildingState, def: BuildingDef): boolean {
     if (this.tcLevel(s) < def.mainBaseLevel || !this.meetsRequires(s, def.requires)) return false;
+    if (this.needsTechUnlock(def.kind) && !s.techUnlockedBuildings?.includes(def.kind)) return false;
     // 联盟大厅/议会厅由 M11 奖励解锁。已存在的旧存档建筑视为兼容性解锁，避免升级被锁死。
     if ((def.kind === 'alliance_hall' || def.kind === 'council')
       && !s.unlockedBuildings?.includes(def.kind)
@@ -380,6 +384,7 @@ export class BuildingModule {
 
   private buildLockReason(s: BuildingState, def: BuildingDef): string | undefined {
     if (this.tcLevel(s) < def.mainBaseLevel) return `需主基地 ${def.mainBaseLevel} 级`;
+    if (this.needsTechUnlock(def.kind) && !s.techUnlockedBuildings?.includes(def.kind)) return '需完成科技解锁';
     if ((def.kind === 'alliance_hall' || def.kind === 'council')
       && !s.unlockedBuildings?.includes(def.kind)
       && !s.placed.some((p) => p.kind === def.kind)) return '需完成任务解锁';
@@ -400,6 +405,20 @@ export class BuildingModule {
     }
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { unlocked: [...s.unlockedBuildings], added } };
+  }
+
+  private setTechUnlockedBuildings(cmd: Command): CommandResult {
+    const { villageId, unlocks } = cmd.payload as { villageId: string; unlocks?: string[] };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techUnlockedBuildings = Array.isArray(unlocks) ? [...new Set(unlocks)] : [];
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { unlocks: [...s.techUnlockedBuildings] } };
+  }
+
+  private needsTechUnlock(kind: string): boolean {
+    return Object.values(this.config.research).some((tech) =>
+      tech.effects.some((effect) => effect.effectType === 'building_unlock' && effect.effectKey === kind));
   }
 
   /** 城镇中心降低建造时间；再乘人口劳动力建造加速（time_mult_pop）。 */

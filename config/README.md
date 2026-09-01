@@ -383,7 +383,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | id / code | 数字主键 / 稳定英文代码（前置引用用 code） |
 | name / desc / icon | 显示名 / 说明 / 图标基名 |
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
-| tier | 层级，1 为最底层；界面按层分组显示 |
+| tier | 层级，1 为顶层；界面按层从上到下分组显示 |
 | mainBaseLevel | 研发所需主基地最低等级；默认 1，配置中心可调 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
@@ -393,9 +393,9 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | techCode / order | 所属科技 code / 同科技内展示与应用顺序 |
-| effectType | 效果类型；必须是服务端白名单中的真实已接线效果 |
-| effectKey | 作用目标，如资源 code、`all`、`form:melee` |
-| effectValue | 效果值；倍率类填小数，`0.15` 表示 +15% |
+| effectType | 效果类型；必须是服务端白名单中的真实已接线效果，含 `unit_unlock` 兵种解锁与 `building_unlock` 建筑解锁 |
+| effectKey | 作用目标，如资源 code、`all`、`form:melee` 或建筑/兵种 code |
+| effectValue | 效果值；倍率类填小数，`0.15` 表示 +15%；解锁类填 `1` |
 | cap | 该叠加组最终上限 |
 
 ## academy.csv — 学院逐级出点参数
