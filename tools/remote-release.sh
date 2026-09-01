@@ -121,6 +121,10 @@ prune_old_releases() {
     [[ "$name" =~ ^[0-9a-f]{40}$ ]] || continue
     [[ -f "$real/.release-commit" ]] || continue
     if [[ -n "$current_real" && "$real" == "$current_real" ]]; then
+      # The active release counts toward the retention limit.
+      if (( remaining > 0 )); then
+        remaining=$((remaining - 1))
+      fi
       continue
     fi
     if (( remaining > 0 )); then
