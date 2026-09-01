@@ -32,3 +32,4 @@ id,code,name,branch,tier,mainBaseLevel,requires,desc,scope,durationSec,rpCost,ic
 30,workshop_organization,兵工组织,production,3,1,advanced_storage,解锁兵工厂，允许建造攻城器械,village,7200,12,tech_workshop
 31,exploration_charter,探索特许,social,3,1,code_of_laws,解锁探险家协会，允许训练冒险者,player,7200,12,tech_exploration
 32,frontier_charter,拓荒章程,social,4,1,imperial_authority|exploration_charter,解锁拓荒者，允许组建建村远征队,player,10800,18,tech_frontier
+33,advanced_arms,复合兵装,military,4,1,melee_attack_iii|ranged_attack_iii,解锁三族高阶专精兵种,village,21600,20,tech_infantry
