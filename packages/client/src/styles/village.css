@@ -1756,7 +1756,7 @@
 .empire-workspace-expanded-panel { min-width: 0; }
 .empire-workspace-content { display: grid; min-width: 0; gap: var(--s-4); }
 .empire-workspace-content .kingdom-army-management { margin-top: 0; }
-.village-management-overview { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: start; gap: var(--s-4); }
+.village-management-overview { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--s-4); }
 .village-management-overview > * { min-width: 0; }
 .village-management-population { display: flex; min-width: 0; flex-direction: column; }
 .village-management-population > .panel { flex: 1 1 auto; }
