@@ -35,7 +35,7 @@ input, select { color: #f1eadc; background: #111b21; border: 1px solid #5e7180; 
 .is-bust-table .bust-table-die { border-color: rgba(185,86,79,.82); box-shadow: 0 0 0 3px rgba(185,86,79,.16), 0 8px 16px rgba(0,0,0,.4); }
 .bust-action-readout.is-alert { border-left-color: #b9564f; background: rgba(185,86,79,.1); }
 .bust-action-readout.is-alert strong { color: #f1b0a6; }
-@media (max-width: 760px) { .dice-lab { padding: 20px 14px 40px; } .lab-header { align-items: flex-start; } .lab-header-actions { flex-direction: column; align-items: flex-end; gap: 9px; } .setup-grid, .play-layout { grid-template-columns: 1fr; } .scoreboard { grid-template-columns: 1fr 120px 1fr; } .score-side strong { font-size: 27px; } .play-card, .log-card, .setup-card { padding: 17px; } .dice-tray { min-height: 178px; gap: 10px; } .die-button { width: 61px; height: 61px; border-radius: 10px; } .die-art { padding: 10px; } .pip { width: 10px; height: 10px; } .action-row > button { flex: 1 1 145px; } .selection-readout { align-items: flex-start; flex-wrap: wrap; } .selection-readout small { width: 100%; margin-left: 0; } }
+@media (max-width: 760px) { .dice-lab { padding: 20px 14px 40px; } .lab-header { align-items: flex-start; } .lab-header-actions { flex-direction: column; align-items: flex-end; gap: 9px; } .setup-grid, .play-layout { grid-template-columns: 1fr; } .scoreboard { grid-template-columns: 1fr 120px 1fr; } .score-side strong { font-size: 27px; } .play-card, .log-card, .setup-card { padding: 17px; } .dice-tray, .ai-turn-board { min-height: 178px; } .dice-tray { gap: 10px; } .ai-turn-board { margin: 22px 0 12px; } .die-button { width: 61px; height: 61px; border-radius: 10px; } .die-art { padding: 10px; } .pip { width: 10px; height: 10px; } .action-row > button { flex: 1 1 145px; } .selection-readout { align-items: flex-start; flex-wrap: wrap; } .selection-readout small { width: 100%; margin-left: 0; } }
 .ai-die-wrap .die-button { padding: 0; }
 @media (max-width: 760px) {
   .ai-die-wrap { width: 61px; height: 71px; }
@@ -51,7 +51,7 @@ input, select { color: #f1eadc; background: #111b21; border: 1px solid #5e7180; 
 .score-side.ai-side.is-winner { color: var(--blue-hi); text-shadow: 0 0 16px rgba(121,185,229,.64); }
 .score-side.is-winner strong { animation: score-pulse 1.2s ease-in-out infinite; }
 .goal-badge { display: inline-flex; align-self: center; margin-top: 4px; padding: 3px 9px; color: #182127; background: var(--gold-hi); border-radius: 999px; font-size: 12px; font-weight: 700; box-shadow: 0 0 0 3px rgba(246,224,170,.16), 0 0 20px rgba(246,224,170,.36); }
-.ai-turn-board { margin: 18px 0 12px; padding: 14px; border: 1px solid rgba(82,157,211,.58); border-radius: 8px; background: rgba(43,112,164,.14); }
+.ai-turn-board { min-height: 210px; margin: 22px 0 12px; padding: 14px; border: 1px solid rgba(82,157,211,.58); border-radius: 8px; background: rgba(43,112,164,.14); }
 .ai-turn-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--blue-hi); font-weight: 700; }
 .ai-turn-heading small { color: var(--muted); font-weight: 400; }
 .ai-dice-tray { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; min-height: 112px; margin-top: 12px; padding: 12px 10px; }
