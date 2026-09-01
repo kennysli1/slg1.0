@@ -112,3 +112,26 @@ test('骰子王：入场券使用后解锁 s7，且普通骰子的一和五可�
   const dice = [1, 5, 2, 2, 2].map((value, index) => ({ id: String(index), value }));
   assert.ok(legalOptions(dice).some((option) => option.score === 350 && option.dieIds.length === 5));
 });
+
+test('骰子王：使用入场券按 t2/use 触发已配置对话', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'ticket-dlg');
+  const dialogueDef = app.config.dialogues['dice_tournament_ticket_use:1'];
+  assert.ok(dialogueDef, '入场券使用对话模板必须存在');
+  assert.equal(dialogueDef.taskCode, 't2');
+  assert.equal(dialogueDef.trigger, 'use');
+  // 默认模板允许在配置中心留空；这里填入内容验证“有内容时”端到端返回 session。
+  dialogueDef.npcName = '骰子裁判';
+  dialogueDef.npcText = '入场券已生效。';
+
+  const granted = await send(app, 'treasure.Grant', { villageId, code: 'dice_tournament_ticket' });
+  assert.equal(granted.ok, true, granted.reason);
+  const used = await send(app, 'treasure.Use', { villageId, code: 'dice_tournament_ticket', location: 'town' });
+  assert.equal(used.ok, true, used.reason);
+  const dialogue = (used.payload as any).dialogue;
+  assert.equal(dialogue.code, 'dice_tournament_ticket_use');
+  assert.equal(dialogue.taskCode, 't2');
+  assert.equal(dialogue.trigger, 'use');
+  assert.equal(dialogue.npcText, '入场券已生效。');
+});

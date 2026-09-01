@@ -810,7 +810,7 @@ test('酒馆刷新会替换未接取任务且保留已接取任务', async () =>
   assert.ok(!state.offered.includes('s1'), '定时刷新也应替换未接取任务');
 });
 
-test('猎马人：累计击杀骑兵人口，跨战斗累加并在 50 人时就绪', async () => {
+test('猎马人：按配置门槛累计击杀骑兵人口，跨战斗累加并就绪', async () => {
   const app = freshApp();
   const regRes = await reg(app, '猎马人累计击杀');
   const va = (regRes.payload as any).player.villageId;
@@ -823,21 +823,21 @@ test('猎马人：累计击杀骑兵人口，跨战斗累加并在 50 人时就�
 
   await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {
     villageId: va, side: 'attacker', targetKind: 'field', targetId: 'movement-defender', attackerWins: false,
-    defenderLosses: { equlegati: 10, equimperatoris: 5, legionnaire: 10 },
+    defenderLosses: { equlegati: 2, equimperatoris: 1, legionnaire: 10 },
   } } as any);
   let current = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   let hunter = current.active.find((item: any) => item.code === 's5');
-  assert.equal(hunter.progress, 35, '第一场应按骑兵 popCost 累计 35 人口');
+  assert.equal(hunter.progress, 7, '第一场应按骑兵 popCost 累计 7 人口');
   assert.equal(hunter.ready, false);
 
   await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {
     villageId: va, side: 'attacker', targetKind: 'field', targetId: 'movement-defender-2', attackerWins: true,
-    defenderLossesAttributed: { equimperatoris: 5 },
+    defenderLossesAttributed: { equimperatoris: 1 },
   } } as any);
   current = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   hunter = current.active.find((item: any) => item.code === 's5');
-  assert.equal(hunter.progress, 50, '第二场应继续累加到 50 人');
-  assert.equal(hunter.ready, true, '达到 50 人后应可领取绞马索');
+  assert.equal(hunter.progress, 8, '第二场应继续累加并按配置门槛截断到 8 人');
+  assert.equal(hunter.ready, true, '达到配置门槛后应可领取绞马索');
 });
 
 test('日常任务可反复：完成后刷新可再次刷出', async () => {
