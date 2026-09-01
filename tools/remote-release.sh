@@ -93,6 +93,50 @@ restore_previous() {
   fi
 }
 
+# Keep a small rollback window so immutable release directories cannot fill the
+# production disk indefinitely.  Only validated, non-current release directories
+# are removed; shared data/logs/config and the active release are never touched.
+prune_old_releases() {
+  local keep_count="${KOW_DEPLOY_KEEP_RELEASES:-5}"
+  [[ "$keep_count" =~ ^[1-9][0-9]*$ ]] || keep_count=5
+  local current_real=""
+  if [[ -L "$CURRENT" ]]; then
+    current_real="$(readlink -f "$CURRENT" 2>/dev/null || true)"
+  fi
+
+  local -a ordered=()
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ordered+=("${line#* }")
+  done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr)
+
+  local remaining="$keep_count" removed=0 target real name
+  for target in "${ordered[@]}"; do
+    real="$(readlink -f "$target" 2>/dev/null || true)"
+    name="$(basename "$real")"
+    # Resolve the target and require a release-shaped directory directly below
+    # $RELEASES before any recursive removal.
+    [[ "$(dirname "$real")" == "$RELEASES" ]] || continue
+    [[ "$name" =~ ^[0-9a-f]{40}$ ]] || continue
+    [[ -f "$real/.release-commit" ]] || continue
+    if [[ -n "$current_real" && "$real" == "$current_real" ]]; then
+      # The active release counts toward the retention limit.
+      if (( remaining > 0 )); then
+        remaining=$((remaining - 1))
+      fi
+      continue
+    fi
+    if (( remaining > 0 )); then
+      remaining=$((remaining - 1))
+      continue
+    fi
+    rm -rf -- "$real"
+    removed=$((removed + 1))
+  done
+  echo "    release retention: 保留最多 $keep_count 个（含当前），清理旧 release $removed 个"
+}
+
 if [[ "$ACTION" == rollback ]]; then
   echo "==> 切回上一个生产版本" >&2
   trap 'rm -rf "$LOCK"' EXIT
@@ -109,6 +153,7 @@ if [[ "$ACTION" == finalize ]]; then
     echo "    旧 .git 已归档到 $legacy_git"
   fi
   "$PM2_BIN" save >/dev/null
+  prune_old_releases
   rm -rf "$LOCK"
   exit 0
 fi

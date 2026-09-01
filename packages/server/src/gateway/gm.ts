@@ -634,13 +634,21 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   units: {
     file: 'units.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    text: ['simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
+  },
+  unit_traits: {
+    file: 'unit_traits.csv', key: 'id',
+    numeric: ['value1', 'value2', 'value3', 'value4', 'value5'],
+    text: ['effect1', 'effect2', 'effect3', 'effect4', 'effect5'],
+    labels: ['id', 'code', 'name'],
   },
   // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
   mercenaries: {
     file: 'mercenaries.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'speed', 'carry', 'goldCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'carry', 'goldCost'],
+    text: ['traits', 'simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
   // 雇佣兵营地刷新参数（merc_camp.csv）：level → {refreshSec, mercCount, maxStoredRefreshes}
@@ -667,7 +675,8 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   pve_defenders: {
     file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'],
-    numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'carry'],
+    numeric: ['count', 'meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'carry'],
+    text: ['traits'],
     labels: ['targetId', 'unitCode', 'name', 'form'],
   },
   // 宝物目录（treasures.csv）：id → {effectValue, reputationValue, priceGold, dropRate} 可编辑；其余为展示标签
@@ -804,8 +813,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -839,8 +848,8 @@ function sectionGeneric(table){
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
     rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
-  var fields = meta.numericByType ? ['value'] : meta.numeric;
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -856,7 +865,8 @@ function sectionGeneric(table){
     for (var b=0;b<fields.length;b++){
       var f = fields[b];
       var val = row[f]==null?'':row[f];
-      h += '<td><input type="number" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
+      var isText = (meta.text || []).indexOf(f) >= 0;
+      h += '<td><input type="'+(isText ? 'text' : 'number')+'" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
     }
     h += '</tr>';
   }

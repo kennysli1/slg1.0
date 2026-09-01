@@ -26,6 +26,18 @@ import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } fro
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
+import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
+
+describe('阶段化战斗模拟器的科技与宝物多选', () => {
+  it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
+    let selected = toggleMultiSelection([], 'tech-a', true);
+    selected = toggleMultiSelection(selected, 'tech-b', true);
+    assert.deepEqual(selected, ['tech-a', 'tech-b']);
+    selected = toggleMultiSelection(selected, 'tech-a', false);
+    assert.deepEqual(selected, ['tech-b']);
+    assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+  });
+});
 
 describe('任务接取与奖励领取对话状态机', () => {
   it('Accept 关闭不推进；离开关闭；只有首次接受任务才请求接取', () => {
