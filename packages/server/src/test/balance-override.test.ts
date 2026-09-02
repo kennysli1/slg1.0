@@ -287,7 +287,7 @@ test('配置同步 outbox：只合并未发送的差异，不重复上传上次�
     authority.recordChange(['buildings.csv']);
     const first = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[] };
     assert.deepEqual(first.files, ['buildings.csv']);
-    authority.recordServerChange(['units.csv']);
+    authority.recordChange(['units.csv']);
     const second = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[] };
     assert.deepEqual(second.files, ['buildings.csv', 'units.csv']);
     authority.close();
@@ -306,30 +306,6 @@ test('配置同步 outbox：只合并未发送的差异，不重复上传上次�
   } finally {
     cfg.cleanup();
     rmSync(state, { recursive: true, force: true });
-  }
-});
-
-test('配置权威拆分：units.csv 只能由服务器来源写入，服务器值会覆盖旧共享镜像', () => {
-  const cfg = seedConfig();
-  const state = tempDir('kow-config-authority-split-');
-  const shared = tempDir('kow-config-authority-shared-');
-  try {
-    const authority = new ConfigAuthority({ configDir: cfg.dir, stateDir: state, persistentConfigDir: shared, syncDelayMs: 60_000 });
-    assert.throws(() => authority.recordChange(['units.csv']), /权威来源不是配置中心/);
-
-    const source = readFileSync(join(cfg.dir, 'units.csv'), 'utf8');
-    writeFileSync(join(shared, 'units.csv'), source.replace(/\n/g, '\r\n').replace('legionnaire', 'legionnaire-old'), 'utf8');
-    const changed = authority.reconcileServerAuthority(['units.csv']);
-    assert.deepEqual(changed, ['units.csv']);
-    assert.equal(readFileSync(join(shared, 'units.csv'), 'utf8'), source);
-    const outbox = JSON.parse(readFileSync(join(state, 'config_sync_outbox.json'), 'utf8')) as { files: string[] };
-    assert.deepEqual(outbox.files, ['units.csv']);
-
-    authority.close();
-  } finally {
-    cfg.cleanup();
-    rmSync(state, { recursive: true, force: true });
-    rmSync(shared, { recursive: true, force: true });
   }
 });
 
