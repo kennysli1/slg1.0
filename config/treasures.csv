@@ -29,3 +29,4 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 27,black_badge,黑色徽章,trs_black_badge,military,epic,blackBadge,15,0,0,passive,military,blackBadge,100,1,
 28,horse_rope,绞马索,trs_horse_rope,military,epic,enemyCavalryDef,30,0,0,passive,military,enemyCavalryDef,100,1,
 29,dice_tournament_ticket,投骰子竞标赛入场券,trs_ticket,special,epic,dialogue,0,0,0,instant,special,dice_tournament_ticket,0,1,
+30,dice_trophy,骰子奖杯,trs_dice_trophy,social,epic,reputation,0,600,0,passive,social,dice_trophy,0,1,10

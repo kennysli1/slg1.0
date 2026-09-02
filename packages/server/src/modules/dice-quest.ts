@@ -15,7 +15,7 @@ interface Session {
   /** 牌桌创建者；后续动作不能因切换当前村庄而丢失牌桌。 */
   playerId?: string;
   villageId: string;
-  taskCode: 's6' | 's7';
+  taskCode: 's6' | 's7' | 's8';
   winsRequired: number;
   playerWins: number;
   npcWins: number;
@@ -44,7 +44,7 @@ export class DiceQuestModule {
 
   private async startMatch(cmd: Command): Promise<CommandResult> {
     const { villageId, taskCode, playerId } = cmd.payload as { villageId?: string; taskCode?: string; playerId?: string };
-    if (!villageId || (taskCode !== 's6' && taskCode !== 's7')) return { ok: false, payload: {}, reason: 'invalid_dice_task' };
+    if (!villageId || (taskCode !== 's6' && taskCode !== 's7' && taskCode !== 's8')) return { ok: false, payload: {}, reason: 'invalid_dice_task' };
     // 对局不做断线续接：刷新页面或重新建立连接时，新的 StartMatch 直接
     // 丢弃旧的内存 session，从当前任务胜场快照重新开桌。这样不会因旧
     // session 留在服务端而把玩家永久挡在“已有对局”错误上。

@@ -555,12 +555,12 @@ export class TasksModule {
     if (!('q' in check)) return check;
     const { q, storageVillageId, s } = check;
 
-    // S7 接取时一次性支付入场费。StartAccept 只读预览，因此费用不会因
+    // 接取费用由 quests.csv 的 acceptCost 配置。StartAccept 只读预览，因此费用不会因
     // 打开对话或关闭对话而扣除；只有玩家明确点击“接受任务”才结算。
-    if (code === 's7') {
+    if (q.acceptCost && Object.keys(q.acceptCost).length > 0) {
       const paid = await this.commands.send({
         name: 'economy.TrySpend', from: TasksModule.NAME,
-        payload: { villageId, cost: { gold: 100 } },
+        payload: { villageId, cost: q.acceptCost },
       });
       if (!paid.ok) return paid;
     }
@@ -3007,7 +3007,7 @@ export class TasksModule {
     return { ok: true, payload: { reset: true } };
   }
 
-  /** 骰子一局结束后原子推进 s6/s7，所有“待领取/失败”状态仍由 task owner 决定。 */
+  /** 骰子一局结束后原子推进 s6/s7/s8，所有“待领取/失败”状态仍由 task owner 决定。 */
   private async recordDiceRound(cmd: Command): Promise<CommandResult> {
     const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
     if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
@@ -3030,7 +3030,7 @@ export class TasksModule {
       await this.markReady(villageId, code);
     } else if (inst.diceNpcWins >= needed) {
       outcome = 'npc';
-      if (code === 's7') {
+      if (code === 's7' || code === 's8') {
         inst.outcome = 'failure';
         inst.failureReady = true;
         inst.readyToDeliver = false;
@@ -3224,6 +3224,7 @@ export class TasksModule {
       type: q.type,
       scope: q.scope,
       objective: this.serializeObjective(q),
+      acceptCost: q.acceptCost ?? null,
       rewards: this.serializeRewards(q),
       trigger: q.trigger ?? null,
     };
@@ -3268,6 +3269,7 @@ export class TasksModule {
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',
       objective,
+      acceptCost: q?.acceptCost ?? null,
       rewards: q ? this.serializeRewards(q) : null,
       submitted: { ...inst.submitted },
       repairedBuildings: [...(inst.repairedBuildings ?? [])],
