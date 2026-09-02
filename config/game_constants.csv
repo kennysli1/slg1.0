@@ -233,3 +233,4 @@ alliance_war_speed_mult,0.15,number,战争专家所有村军队移速加成
 alliance_war_combat_mult,0.1,number,战争专家所有村军队攻防加成
 alliance_tech_probability_bonus,0.1,number,首席科技官科技点获得概率加成
 alliance_ambassador_reputation_bonus,1,number,形象大使每次获得声望额外加成
+alliance_project_duration_sec,10,number,联盟建筑建造与联盟科技研发耗时（秒）

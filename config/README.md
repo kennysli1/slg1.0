@@ -572,6 +572,9 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 | effectType / effectValue | 科技提供的成员加成类型与数值（由运行时效果适配器使用） |
 | description | 玩家可见说明 |
 
+联盟建筑和联盟科技在资源/科技点满足后才开始执行，默认建造/研发耗时由 `game_constants.csv` 的
+`alliance_project_duration_sec`（默认 10 秒）控制；配置中心“联盟”板块可直接修改，修改只影响新开始的项目。
+
 ---
 
 ## 改了之后怎么生效

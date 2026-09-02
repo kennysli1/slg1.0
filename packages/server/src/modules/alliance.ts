@@ -37,6 +37,26 @@ interface PendingResourceDelivery {
   arriveAt: number;
 }
 
+type AllianceBuildPlan = {
+  code: string;
+  targetLevel: number;
+  required: Resources;
+  /** planned 等待筹资；in_progress 已扣款并进入计时建造。 */
+  state?: 'planned' | 'in_progress';
+  startedAt?: number;
+  completeAt?: number;
+};
+
+type AllianceTechPlan = {
+  code: string;
+  targetLevel: number;
+  required: number;
+  /** planned 等待科技点；in_progress 已扣点并进入计时研发。 */
+  state?: 'planned' | 'in_progress';
+  startedAt?: number;
+  completeAt?: number;
+};
+
 interface AllianceState {
   id: string;
   name: string;
@@ -56,9 +76,9 @@ interface AllianceState {
   techPointStock: number;
   techContributions: Record<string, number>;
   buildings: Record<string, number>;
-  researchingBuilding?: { code: string; targetLevel: number; required: Resources } | null;
+  researchingBuilding?: AllianceBuildPlan | null;
   technologies: Record<string, number>;
-  researchingTech?: { code: string; targetLevel: number; required: number } | null;
+  researchingTech?: AllianceTechPlan | null;
   warPlans: Record<string, WarPlan>;
 }
 
@@ -145,9 +165,17 @@ export class AllianceModule {
       const a = this.normalize(raw);
       this.store.set(COLLECTION, a.id, a);
       for (const memberId of a.memberIds) this.store.set(PLAYER_INDEX, memberId, a.id);
-      void this.refreshConnectivity(a);
-      for (const playerId of a.memberIds) void this.syncPlayerModifiers(playerId);
-      for (const plan of Object.values(a.warPlans)) this.schedulePlan(a, plan);
+      // Connectivity refresh may clear plans when the alliance hall is gone.
+      // Await it before restoring project timers so a stale in-progress plan
+      // cannot be scheduled after a disconnected alliance has been normalized.
+      await this.refreshConnectivity(a);
+      const current = this.load(a.id) ?? a;
+      for (const playerId of current.memberIds) void this.syncPlayerModifiers(playerId);
+      for (const plan of Object.values(current.warPlans)) this.schedulePlan(current, plan);
+      if (current.researchingBuilding?.state === 'in_progress') this.scheduleBuilding(current);
+      else if (current.researchingBuilding) void this.maybeStartBuilding(current);
+      if (current.researchingTech?.state === 'in_progress') this.scheduleTech(current);
+      else if (current.researchingTech) void this.maybeStartTech(current);
     }
   }
 
@@ -167,6 +195,30 @@ export class AllianceModule {
 
   private normalize(raw: AllianceState): AllianceState {
     const level = Math.max(1, Math.floor(Number(raw.level) || 1));
+    const normalizeBuildPlan = (plan?: AllianceBuildPlan | null): AllianceBuildPlan | null => {
+      if (!plan || !plan.code) return null;
+      const completeAt = Number(plan.completeAt);
+      const startedAt = Number(plan.startedAt);
+      const state = plan.state === 'in_progress' || (Number.isFinite(completeAt) && completeAt > 0) ? 'in_progress' : 'planned';
+      return {
+        code: String(plan.code), targetLevel: Math.max(1, Math.floor(Number(plan.targetLevel) || 1)),
+        required: cloneResources(plan.required), state,
+        ...(Number.isFinite(startedAt) && startedAt > 0 ? { startedAt } : {}),
+        ...(state === 'in_progress' && Number.isFinite(completeAt) && completeAt > 0 ? { completeAt } : {}),
+      };
+    };
+    const normalizeTechPlan = (plan?: AllianceTechPlan | null): AllianceTechPlan | null => {
+      if (!plan || !plan.code) return null;
+      const completeAt = Number(plan.completeAt);
+      const startedAt = Number(plan.startedAt);
+      const state = plan.state === 'in_progress' || (Number.isFinite(completeAt) && completeAt > 0) ? 'in_progress' : 'planned';
+      return {
+        code: String(plan.code), targetLevel: Math.max(1, Math.floor(Number(plan.targetLevel) || 1)),
+        required: positiveInt(plan.required), state,
+        ...(Number.isFinite(startedAt) && startedAt > 0 ? { startedAt } : {}),
+        ...(state === 'in_progress' && Number.isFinite(completeAt) && completeAt > 0 ? { completeAt } : {}),
+      };
+    };
     return {
       ...raw,
       memberIds: [...new Set([raw.leaderId, ...(Array.isArray(raw.memberIds) ? raw.memberIds : [])].filter(Boolean))],
@@ -178,7 +230,9 @@ export class AllianceModule {
       techPointStock: positiveInt(raw.techPointStock),
       techContributions: raw.techContributions ?? {},
       buildings: raw.buildings ?? {},
+      researchingBuilding: normalizeBuildPlan(raw.researchingBuilding),
       technologies: raw.technologies ?? {},
+      researchingTech: normalizeTechPlan(raw.researchingTech),
       warPlans: raw.warPlans ?? {},
       level,
       disconnected: raw.disconnected === true,
@@ -203,6 +257,17 @@ export class AllianceModule {
     return a.leaderId === playerId || (a.roles[playerId] ?? []).includes(role);
   }
 
+  /** 成员名单使用的四个职位目录；数值从当前配置实时派生，避免前端复制一份平衡参数。 */
+  private roleCatalog(a: AllianceState): Array<{ code: AllianceRole; name: string; requiredAllianceLevel: number; unlocked: boolean; effect: string; effectValue: number | string }> {
+    const percent = (value: number) => `${Math.round(value * 100)}%`;
+    return [
+      { code: 'logistics', name: '后勤主管', requiredAllianceLevel: ROLE_LEVEL.logistics, unlocked: this.roleUnlocked(a, 'logistics'), effect: `所有村庄资源产量 +${percent(this.config.constants.allianceLogisticsResourceMult)}`, effectValue: this.config.constants.allianceLogisticsResourceMult },
+      { code: 'war', name: '战争专家', requiredAllianceLevel: ROLE_LEVEL.war, unlocked: this.roleUnlocked(a, 'war'), effect: `所有村庄军队移速 +${percent(this.config.constants.allianceWarSpeedMult)}，攻防 +${percent(this.config.constants.allianceWarCombatMult)}`, effectValue: this.config.constants.allianceWarCombatMult },
+      { code: 'tech', name: '首席科技官', requiredAllianceLevel: ROLE_LEVEL.tech, unlocked: this.roleUnlocked(a, 'tech'), effect: `所有村庄科技点获得概率 +${percent(this.config.constants.allianceTechProbabilityBonus)}`, effectValue: this.config.constants.allianceTechProbabilityBonus },
+      { code: 'ambassador', name: '形象大使', requiredAllianceLevel: ROLE_LEVEL.ambassador, unlocked: this.roleUnlocked(a, 'ambassador'), effect: `每次获得声望额外 +${this.config.constants.allianceAmbassadorReputationBonus}`, effectValue: this.config.constants.allianceAmbassadorReputationBonus },
+    ];
+  }
+
   private async ownedVillage(playerId: string, villageId: string): Promise<boolean> {
     const res = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
     return !!res.ok && ((res.payload as any)?.player?.villages ?? []).some((v: any) => v.id === villageId);
@@ -224,6 +289,8 @@ export class AllianceModule {
       a.buildings = Object.fromEntries(Object.keys(a.buildings ?? {}).map((code) => [code, 0]));
       a.researchingBuilding = null;
       a.researchingTech = null;
+      this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
+      this.scheduler.cancelByOwner(`alliance-tech:${a.id}`);
       for (const plan of Object.values(a.warPlans)) for (const participant of Object.values(plan.participants)) this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
       a.warPlans = {};
     } else {
@@ -367,7 +434,7 @@ export class AllianceModule {
     const a = this.load(id); if (!a) return { ok: true, payload: { alliance: null } };
     await this.refreshConnectivity(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
-    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
+    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
   }
 
   private async create(cmd: Command): Promise<CommandResult> {
@@ -447,10 +514,23 @@ export class AllianceModule {
 
   private buildingCost(def: AllianceBuildingDef, level: number): Resources { return { wood: Math.ceil(def.baseCost.wood * level), clay: Math.ceil(def.baseCost.clay * level), iron: Math.ceil(def.baseCost.iron * level), crop: Math.ceil(def.baseCost.crop * level) }; }
 
+  private projectDurationMs(): number {
+    return Math.max(1, Math.floor(this.config.constants.allianceProjectDurationSec)) * 1000;
+  }
+
+  private buildingInProgress(plan?: AllianceBuildPlan | null): boolean {
+    return plan?.state === 'in_progress';
+  }
+
+  private techInProgress(plan?: AllianceTechPlan | null): boolean {
+    return plan?.state === 'in_progress';
+  }
+
   private async depositResources(cmd: Command): Promise<CommandResult> {
     const { playerId, sourceVillageId, amount } = cmd.payload as { playerId: string; sourceVillageId: string; amount: Partial<Resources> };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    if (this.buildingInProgress(a.researchingBuilding)) return { ok: false, payload: {}, reason: 'building_in_progress' };
     if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'village_not_owned' };
     const clean = cloneResources(amount); if (!RESOURCE_KEYS.some((k) => clean[k] > 0)) return { ok: false, payload: {}, reason: 'empty_deposit' };
     if (!a.hallVillageId) return { ok: false, payload: {}, reason: 'alliance_hall_required' };
@@ -496,7 +576,7 @@ export class AllianceModule {
     a.resourceContributions[pending.playerId] = addResources(a.resourceContributions[pending.playerId] ?? zeroResources(), pending.amount);
     delete a.pendingResourceDeliveries![String(movementId)];
     this.store.set(COLLECTION, a.id, a);
-    await this.maybeCompleteBuilding(a);
+    await this.maybeStartBuilding(a);
     await this.syncAllModifiers(a);
     await this.push(a);
     return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
@@ -506,42 +586,106 @@ export class AllianceModule {
     const { playerId, code } = cmd.payload as { playerId: string; code: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!a || !this.hasRole(a, playerId, 'logistics')) return { ok: false, payload: {}, reason: 'logistics_or_leader_required' };
-    if (a.researchingBuilding) return { ok: false, payload: {}, reason: 'building_already_planned' };
+    if (this.buildingInProgress(a.researchingBuilding)) return { ok: false, payload: {}, reason: 'building_in_progress' };
     const def = this.config.allianceBuildings[code]; if (!def) return { ok: false, payload: {}, reason: 'unknown_alliance_building' };
     if (a.level < def.requiredAllianceLevel) return { ok: false, payload: {}, reason: 'alliance_level_too_low' };
     const targetLevel = (a.buildings[code] ?? 0) + 1; if (targetLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'building_max_level' };
-    a.researchingBuilding = { code, targetLevel, required: this.buildingCost(def, targetLevel) }; this.store.set(COLLECTION, a.id, a); await this.maybeCompleteBuilding(a); await this.syncAllModifiers(a); await this.push(a); return { ok: true, payload: { plan: a.researchingBuilding, warehouse: a.warehouse } };
+    // 尚未开工的规划可以随时改选；如果仓库已经满足新规划，则立即扣款并进入计时建造。
+    a.researchingBuilding = { code, targetLevel, required: this.buildingCost(def, targetLevel), state: 'planned' };
+    this.store.set(COLLECTION, a.id, a);
+    await this.maybeStartBuilding(a);
+    await this.syncAllModifiers(a); await this.push(a);
+    return { ok: true, payload: { plan: a.researchingBuilding, warehouse: a.warehouse } };
   }
 
-  private async maybeCompleteBuilding(a: AllianceState): Promise<void> {
-    const plan = a.researchingBuilding; if (!plan || !enough(a.warehouse, plan.required)) return;
-    a.warehouse = subtract(a.warehouse, plan.required); a.buildings[plan.code] = plan.targetLevel; a.researchingBuilding = null; this.store.set(COLLECTION, a.id, a);
+  private scheduleBuilding(a: AllianceState): void {
+    const plan = a.researchingBuilding;
+    if (!plan || !this.buildingInProgress(plan)) return;
+    const completeAt = Number(plan.completeAt);
+    const at = Number.isFinite(completeAt) && completeAt > 0 ? completeAt : this.now() + this.projectDurationMs();
+    if (!plan.startedAt || !plan.completeAt) {
+      plan.startedAt = this.now(); plan.completeAt = at;
+      this.store.set(COLLECTION, a.id, a);
+    }
+    this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
+    this.scheduler.scheduleAt(at, () => void this.completeBuilding(a.id), `alliance-building:${a.id}`);
+  }
+
+  private async maybeStartBuilding(a: AllianceState): Promise<void> {
+    const plan = a.researchingBuilding;
+    if (!plan || this.buildingInProgress(plan) || !enough(a.warehouse, plan.required)) return;
+    a.warehouse = subtract(a.warehouse, plan.required);
+    plan.state = 'in_progress'; plan.startedAt = this.now(); plan.completeAt = this.now() + this.projectDurationMs();
+    this.store.set(COLLECTION, a.id, a);
+    this.scheduleBuilding(a);
+  }
+
+  private async completeBuilding(allianceId: string): Promise<void> {
+    const a = this.load(allianceId); const plan = a?.researchingBuilding;
+    if (!a || a.disconnected || !plan || !this.buildingInProgress(plan)) return;
+    if (Number(plan.completeAt) > this.now()) { this.scheduleBuilding(a); return; }
+    a.buildings[plan.code] = plan.targetLevel;
+    a.researchingBuilding = null;
+    this.store.set(COLLECTION, a.id, a);
+    await this.syncAllModifiers(a); await this.push(a);
   }
 
   private async startTech(cmd: Command): Promise<CommandResult> {
     const { playerId, code } = cmd.payload as { playerId: string; code: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!a || !this.hasRole(a, playerId, 'tech')) return { ok: false, payload: {}, reason: 'tech_or_leader_required' };
-    if (a.researchingTech) return { ok: false, payload: {}, reason: 'tech_already_planned' };
+    if (this.techInProgress(a.researchingTech)) return { ok: false, payload: {}, reason: 'tech_in_progress' };
     const def: AllianceTechDef | undefined = this.config.allianceTech[code]; if (!def) return { ok: false, payload: {}, reason: 'unknown_alliance_tech' };
     if (a.level < def.requiredAllianceLevel) return { ok: false, payload: {}, reason: 'alliance_level_too_low' };
     const targetLevel = (a.technologies[code] ?? 0) + 1; if (targetLevel > def.maxLevel) return { ok: false, payload: {}, reason: 'tech_max_level' };
-    a.researchingTech = { code, targetLevel, required: def.techPointCost * targetLevel }; this.store.set(COLLECTION, a.id, a); await this.maybeCompleteTech(a); await this.syncAllModifiers(a); await this.push(a); return { ok: true, payload: { plan: a.researchingTech, techPointStock: a.techPointStock } };
+    a.researchingTech = { code, targetLevel, required: def.techPointCost * targetLevel, state: 'planned' };
+    this.store.set(COLLECTION, a.id, a);
+    await this.maybeStartTech(a);
+    await this.syncAllModifiers(a); await this.push(a);
+    return { ok: true, payload: { plan: a.researchingTech, techPointStock: a.techPointStock } };
   }
 
-  private async maybeCompleteTech(a: AllianceState): Promise<void> {
-    const plan = a.researchingTech; if (!plan || a.techPointStock < plan.required) return;
-    a.techPointStock -= plan.required; a.technologies[plan.code] = plan.targetLevel; a.researchingTech = null; this.store.set(COLLECTION, a.id, a);
+  private scheduleTech(a: AllianceState): void {
+    const plan = a.researchingTech;
+    if (!plan || !this.techInProgress(plan)) return;
+    const completeAt = Number(plan.completeAt);
+    const at = Number.isFinite(completeAt) && completeAt > 0 ? completeAt : this.now() + this.projectDurationMs();
+    if (!plan.startedAt || !plan.completeAt) {
+      plan.startedAt = this.now(); plan.completeAt = at;
+      this.store.set(COLLECTION, a.id, a);
+    }
+    this.scheduler.cancelByOwner(`alliance-tech:${a.id}`);
+    this.scheduler.scheduleAt(at, () => void this.completeTech(a.id), `alliance-tech:${a.id}`);
+  }
+
+  private async maybeStartTech(a: AllianceState): Promise<void> {
+    const plan = a.researchingTech;
+    if (!plan || this.techInProgress(plan) || a.techPointStock < plan.required) return;
+    a.techPointStock -= plan.required;
+    plan.state = 'in_progress'; plan.startedAt = this.now(); plan.completeAt = this.now() + this.projectDurationMs();
+    this.store.set(COLLECTION, a.id, a);
+    this.scheduleTech(a);
+  }
+
+  private async completeTech(allianceId: string): Promise<void> {
+    const a = this.load(allianceId); const plan = a?.researchingTech;
+    if (!a || a.disconnected || !plan || !this.techInProgress(plan)) return;
+    if (Number(plan.completeAt) > this.now()) { this.scheduleTech(a); return; }
+    a.technologies[plan.code] = plan.targetLevel;
+    a.researchingTech = null;
+    this.store.set(COLLECTION, a.id, a);
+    await this.syncAllModifiers(a); await this.push(a);
   }
 
   private async contributeTech(cmd: Command): Promise<CommandResult> {
     const { playerId, sourceVillageId, amount } = cmd.payload as { playerId: string; sourceVillageId: string; amount: number };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; const n = positiveInt(amount);
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    if (this.techInProgress(a.researchingTech)) return { ok: false, payload: {}, reason: 'tech_in_progress' };
     if (!this.isMember(a, playerId) || !n || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'invalid_contribution' };
     const spend = await this.commands.send({ name: 'research.SpendPoints', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, amount: n } });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_tech_points' };
-    a.techPointStock += n; a.techContributions[playerId] = positiveInt(a.techContributions[playerId]) + n; this.store.set(COLLECTION, a.id, a); await this.maybeCompleteTech(a); await this.syncAllModifiers(a); await this.push(a); return { ok: true, payload: { techPointStock: a.techPointStock } };
+    a.techPointStock += n; a.techContributions[playerId] = positiveInt(a.techContributions[playerId]) + n; this.store.set(COLLECTION, a.id, a); await this.maybeStartTech(a); await this.syncAllModifiers(a); await this.push(a); return { ok: true, payload: { techPointStock: a.techPointStock } };
   }
 
   private async createWarPlan(cmd: Command): Promise<CommandResult> {
