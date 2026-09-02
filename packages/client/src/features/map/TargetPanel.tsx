@@ -36,6 +36,11 @@ interface TargetMeta {
   cityStateTier?: 1 | 2 | 3;
   cityStateTribe?: 'romans' | 'gauls' | 'teutons';
   taskInfo?: TaskCampInfo;
+  playerName?: string;
+  reputation?: number;
+  population?: number;
+  mainBaseLevel?: number;
+  mainBaseName?: string;
 }
 
 type ModeOption = { mode: DispatchMode; label: string; requiresDeclaration?: boolean };
@@ -231,6 +236,7 @@ function TargetAssessment({
   return (
     <div class="target-body expedition-body">
       {meta.taskInfo && <TaskCampInfoCard taskInfo={meta.taskInfo} />}
+      {meta.targetKind === 'village' && <PlayerVillageInfoCard meta={meta} />}
       <section class="expedition-assessment">
         <div class="expedition-kicker">目标评估</div>
         <div class="expedition-assessment-title">{targetAssessmentTitle(meta)}</div>
@@ -253,6 +259,23 @@ function TargetAssessment({
         ) : <p class="expedition-empty">当前目标没有可用的行军模式。</p>}
       </section>
     </div>
+  );
+}
+
+/** 选中其他玩家村庄时显示的公开资料；数值由地图 GetArea 的服务端快照提供。 */
+function PlayerVillageInfoCard({ meta }: { meta: TargetMeta }) {
+  const baseName = meta.mainBaseName
+    || (meta.mainBaseLevel ? `主基地 ${meta.mainBaseLevel} 级` : '未知');
+  return (
+    <section class="player-village-info" aria-label="玩家村庄信息">
+      <div class="expedition-kicker">村庄信息</div>
+      <dl class="player-village-info-grid">
+        <div><dt>玩家</dt><dd>{meta.playerName || '未知玩家'}</dd></div>
+        <div><dt>声望</dt><dd>{meta.reputation !== undefined ? meta.reputation : '—'}</dd></div>
+        <div><dt>人口</dt><dd>{meta.population !== undefined ? meta.population : '—'}</dd></div>
+        <div><dt>主基地</dt><dd>{baseName}</dd></div>
+      </dl>
+    </section>
   );
 }
 
@@ -934,6 +957,11 @@ export function TargetPanel() {
     isOwn,
     targetKind: sel.kind,
     taskInfo: sel.taskInfo,
+    playerName: sel.playerName,
+    reputation: sel.reputation,
+    population: sel.population,
+    mainBaseLevel: sel.mainBaseLevel,
+    mainBaseName: sel.mainBaseName,
   };
 
   return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />;

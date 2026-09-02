@@ -151,7 +151,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -183,7 +183,7 @@ export interface QuestObjective {
   /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
   taskVillageCode?: string;
   /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
-  /** reputation_at_most：玩家声望值达到 threshold 或更低。 */
+  /** reputation_at_most/reputation_at_least：玩家声望值达到 threshold 的下限或上限。 */
   threshold?: number;
   /** kill_units：累计击杀指定类别的敌方兵力（人口数）；当前支持 cavalry。 */
   unitCategory?: string;
@@ -210,7 +210,7 @@ export interface QuestRewards {
   researchPoints?: number;
   /** 按交付时的正声望兑换无期限佣兵；兑换后声望归零。 */
   reputationMercenaryExchange?: { unitCode: string; perPoint: number };
-  /** 实际结算返回的任务佣兵（不属于静态配置）。 */
+  /** 任务交付时直接加入军队的无期限佣兵（不创建雇佣合同）。 */
   mercenaries?: Record<string, number>;
 }
 
@@ -1748,7 +1748,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
-    if (row.kind === 'reputation_at_most') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
+    if (row.kind === 'reputation_at_most' || row.kind === 'reputation_at_least') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
     if (row.kind === 'dice_match') {
       const [difficulty, targetScore, winsRequired] = row.params.split(':');
       const normalized = difficulty === 'normal' || difficulty === 'hard' ? difficulty : 'easy';
@@ -1768,6 +1768,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (!unitCode || !Number.isFinite(perPoint) || perPoint <= 0) return null;
     return { unitCode, perPoint };
   };
+  const parseMercenaryGrant = (s: string): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const part of (s ?? '').split('|')) {
+      const [unitCode, rawCount] = part.split(':').map((value) => value.trim());
+      const count = Math.floor(num(rawCount, 0));
+      if (!unitCode || count <= 0) continue;
+      out[unitCode] = (out[unitCode] ?? 0) + count;
+    }
+    return out;
+  };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
     const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
     const treasures = rows.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
@@ -1786,6 +1796,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const reputationMercenaryExchange = rows
       .map((x) => x.kind === 'grant_mercenaries_by_positive_reputation' ? parseReputationMercenaryExchange(x.params) : null)
       .find((value): value is { unitCode: string; perPoint: number } => !!value);
+    const mercenaries = rows
+      .filter((x) => x.kind === 'grant_mercenaries')
+      .reduce((merged, x) => {
+        for (const [unitCode, count] of Object.entries(parseMercenaryGrant(x.params))) {
+          merged[unitCode] = (merged[unitCode] ?? 0) + count;
+        }
+        return merged;
+      }, {} as Record<string, number>);
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
@@ -1796,6 +1814,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (resourceGrowth) out.resourceGrowth = resourceGrowth;
     if (buildingUnlocks.length) out.buildingUnlocks = [...new Set(buildingUnlocks)];
     if (reputationMercenaryExchange) out.reputationMercenaryExchange = reputationMercenaryExchange;
+    if (Object.keys(mercenaries).length) out.mercenaries = mercenaries;
     return out;
   };
   const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
@@ -2285,7 +2304,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2343,8 +2362,8 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'investigate_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
-    } else if (q.objective.kind === 'reputation_at_most') {
-      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] reputation_at_most 必须指定数值阈值`);
+    } else if (q.objective.kind === 'reputation_at_most' || q.objective.kind === 'reputation_at_least') {
+      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 必须指定数值阈值`);
     } else if (q.objective.kind === 'dice_match') {
       if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
       if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
@@ -2408,6 +2427,17 @@ export function validateGameConfig(config: GameConfig): void {
       const unit = config.units[unitCode];
       if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 兑换兵种 ${unitCode} 必须是 merc 雇佣兵`);
       if (!Number.isFinite(perPoint) || perPoint <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries_by_positive_reputation 的每点数量必须>0`);
+    }
+    if (row.kind === 'grant_mercenaries') {
+      const parts = row.params.split('|').map((value) => value.trim()).filter(Boolean);
+      if (!parts.length) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries 必须指定兵种与数量`);
+      for (const part of parts) {
+        const [unitCode, rawCount] = part.split(':').map((value) => value.trim());
+        const count = Math.floor(num(rawCount, 0));
+        const unit = config.units[unitCode];
+        if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 奖励兵种 ${unitCode} 必须是 merc 雇佣兵`);
+        if (!Number.isFinite(count) || count <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries 数量必须是正整数`);
+      }
     }
     if (row.kind === 'unlock_buildings') {
       for (const kind of row.params.split('|').map((value) => value.trim()).filter(Boolean)) {

@@ -99,6 +99,40 @@ test('玩家村庄地图图标按主基地 1–4 本逐级切换', async () => {
   }
 });
 
+test('地图选中其他玩家村庄时下发公开详情：玩家名、声望、人口与主基地名称', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const first = await app.commands.send({
+    name: 'player.Register', from: 'test', payload: { name: 'map-public-a', password: 'pass1234', tribe: 'romans' },
+  });
+  const second = await app.commands.send({
+    name: 'player.Register', from: 'test', payload: { name: 'map-public-b', password: 'pass1234', tribe: 'gauls' },
+  });
+  assert.equal(first.ok, true, first.reason);
+  assert.equal(second.ok, true, second.reason);
+  const observer = (first.payload as any).player;
+  const target = (second.payload as any).player;
+
+  // 以探索记录模拟“知道村庄位置但当前不在城市视野”的地图状态；
+  // 公开资料仍只会附在 explored/visible 村庄上，不会泄露到 unexplored 格。
+  await app.commands.send({
+    name: 'vision.Reveal', from: 'test',
+    payload: { playerId: observer.id, q: target.q, r: target.r, radius: 0 },
+  });
+  const area = await app.commands.send({
+    name: 'world.GetArea', from: 'test',
+    payload: { playerId: observer.id, cq: observer.q, cr: observer.r, full: true, r: 0 },
+  });
+  assert.equal(area.ok, true, area.reason);
+  const tile = (area.payload as any).tiles.find((item: any) => item.refId === target.villageId);
+  assert.ok(tile?.visibility === 'visible' || tile?.visibility === 'explored');
+  assert.equal(tile?.playerName, 'map-public-b');
+  assert.equal(tile?.reputation, 0);
+  assert.ok(Number.isInteger(tile?.population) && tile.population >= 0);
+  assert.equal(tile?.mainBaseLevel, 1);
+  assert.equal(tile?.mainBaseName, '村落集市');
+});
+
 test('旧世界补生成 PvE 遇到村庄占位时使用后备点，不产生 orphan', async () => {
   const app = createGameApp({ manualScheduler: true });
   const plan = app.world.setup(41, 41);
