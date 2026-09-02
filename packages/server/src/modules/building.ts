@@ -645,7 +645,12 @@ export class BuildingModule {
     const options = Object.values(this.config.buildings)
       .filter((def) => def.zone === zone)
       // 达到单村建造上限后直接从列表移除；-1 表示不限数量。
-      .filter((def) => def.maxCount < 0 || s.placed.filter((p) => p.kind === def.kind).length < def.maxCount)
+      .filter((def) => {
+        // 失联联盟的大厅会保留 0 级受损空壳；对盟主来说这是“可重建”而不是
+        // 已占用的一座大厅，因此不能把它从建造清单中隐藏。
+        const count = s.placed.filter((p) => p.kind === def.kind && !(def.kind === 'alliance_hall' && p.level <= 0)).length;
+        return def.maxCount < 0 || count < def.maxCount;
+      })
       .map((def) => ({
         kind: def.kind,
         name: def.name,
@@ -656,7 +661,7 @@ export class BuildingModule {
         requires: def.requires,
         mainBaseLevel: def.mainBaseLevel,
         maxCount: def.maxCount,
-        builtCount: s.placed.filter((p) => p.kind === def.kind).length,
+        builtCount: s.placed.filter((p) => p.kind === def.kind && !(def.kind === 'alliance_hall' && p.level <= 0)).length,
         lockReason: this.buildLockReason(s, def),
         producing: def.resource ? { resource: def.resource, ratePerHour: Math.round(this.fieldRate(def, 1)) } : undefined,
       }));
