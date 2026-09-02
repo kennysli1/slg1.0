@@ -61,7 +61,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   closeRef.current = close;
   const taskName = task?.name ?? task?.code ?? '骰子对局';
   const diceObjective = task?.objective ?? {};
-  const diceDifficulty = diceObjective.diceDifficulty === 'hard' ? '困难 NPC' : diceObjective.diceDifficulty === 'normal' ? '普通 NPC' : '普通 NPC';
+  const diceDifficulty = diceObjective.diceDifficulty === 'hard' ? '困难 NPC' : diceObjective.diceDifficulty === 'normal' ? '普通 NPC' : '简单 NPC';
   const diceTargetScore = Math.max(1, Number(diceObjective.diceTargetScore) || 2000);
   const diceWinsRequired = Math.max(1, Number(diceObjective.diceWinsRequired) || (task?.code === 's6' ? 1 : 2));
   const diceFormat = diceWinsRequired > 1 ? `三局两胜 · ${diceDifficulty} · 目标 ${diceTargetScore} 分` : `单局 · ${diceDifficulty} · 目标 ${diceTargetScore} 分`;

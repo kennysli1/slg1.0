@@ -3007,7 +3007,7 @@ export class TasksModule {
     return { ok: true, payload: { reset: true } };
   }
 
-  /** 骰子一局结束后原子推进 s6/s7/s8，所有“待领取/失败”状态仍由 task owner 决定。 */
+  /** 骰子一局结束后原子推进 s6/s7/s8/s9，所有“待领取/失败”状态仍由 task owner 决定。 */
   private async recordDiceRound(cmd: Command): Promise<CommandResult> {
     const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
     if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
@@ -3030,7 +3030,7 @@ export class TasksModule {
       await this.markReady(villageId, code);
     } else if (inst.diceNpcWins >= needed) {
       outcome = 'npc';
-      if (code === 's7' || code === 's8') {
+      if (code === 's7' || code === 's8' || code === 's9') {
         inst.outcome = 'failure';
         inst.failureReady = true;
         inst.readyToDeliver = false;
