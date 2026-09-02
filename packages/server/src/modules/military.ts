@@ -342,10 +342,12 @@ export class MilitaryModule {
     const def = this.config.units[unit];
     return {
       form: def.form,
+      popCost: def.popCost,
       meleeAtk: def.meleeAtk * atkMult,
       rangedAtk: def.rangedAtk * atkMult,
       meleeDef: def.meleeDef * defMult,
       rangedDef: def.rangedDef * defMult,
+      hp: def.hp,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,

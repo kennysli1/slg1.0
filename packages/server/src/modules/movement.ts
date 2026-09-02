@@ -3878,9 +3878,10 @@ export class MovementModule {
       const def = this.config.units[u];
       if (!def || n <= 0) continue;
       snap[u] = {
-        count: n, form: def.form,
+        count: n, form: def.form, popCost: def.popCost,
         meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk,
         meleeDef: def.meleeDef, rangedDef: def.rangedDef,
+        hp: def.hp,
         carry: def.carry,
         isCavalry: this.config.constants.cavalryUnitCodes.includes(u),
         traits: def.traits.flatMap((tc) => {

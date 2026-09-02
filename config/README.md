@@ -284,6 +284,12 @@
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
 | battle_sim_melee_rounds | 6 | 模拟器第三阶段全军近战互殴轮数 |
+| combat_influence_reference_value | 200 | 基础战斗价值/人口的有效战斗人口参考点 |
+| combat_influence_quality_exponent | 1.15 | 有效战斗人口质量指数，放大高质量兵种差异 |
+| combat_influence_min_quality / combat_influence_max_quality | 0.65 / 1.55 | 有效战斗人口质量上下限 |
+| combat_value_melee_attack_weight / ranged_attack_weight | 1 / 1.1 | 基础战斗价值中的近战/远程攻击权重 |
+| combat_value_melee_defense_weight / ranged_defense_weight | 0.85 / 0.75 | 基础战斗价值中的近战/远程防御权重 |
+| combat_value_hp_weight | 0.65 | 基础战斗价值中的生命值权重 |
 | combat_phase_cavalry_vs_cavalry_coeff | 1 | 模拟器骑兵对冲伤害系数 |
 | combat_phase_cavalry_vs_melee_coeff | 1 | 模拟器骑兵冲击近战步兵伤害系数 |
 | combat_phase_cavalry_vs_ranged_coeff | 1 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |

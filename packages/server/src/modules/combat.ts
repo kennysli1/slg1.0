@@ -471,6 +471,17 @@ export class CombatModule {
       defenderWallMultiplier: wallMult,
       attackerCavalryDefMultiplier: attackerCavalryDefMult,
       defenderCavalryDefMultiplier: defenderCavalryDefMult,
+      combatInfluence: {
+        referenceValue: this.config.constants.combatInfluenceReferenceValue,
+        qualityExponent: this.config.constants.combatInfluenceQualityExponent,
+        minQuality: this.config.constants.combatInfluenceMinQuality,
+        maxQuality: this.config.constants.combatInfluenceMaxQuality,
+        meleeAttackWeight: this.config.constants.combatValueMeleeAttackWeight,
+        rangedAttackWeight: this.config.constants.combatValueRangedAttackWeight,
+        meleeDefenseWeight: this.config.constants.combatValueMeleeDefenseWeight,
+        rangedDefenseWeight: this.config.constants.combatValueRangedDefenseWeight,
+        hpWeight: this.config.constants.combatValueHpWeight,
+      },
     });
     b.attacker = result.attacker;
     b.defender = result.defender;
@@ -953,7 +964,7 @@ function mergeCounts(target: Record<string, number>, source: Record<string, numb
 function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
   return Object.entries(snap).map(([key, u]) => ({
     code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,
-    count: u.count, form: u.form,
+    count: u.count, form: u.form, popCost: u.popCost,
     meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
     meleeDef: u.meleeDef, rangedDef: u.rangedDef,
     carry: u.carry,

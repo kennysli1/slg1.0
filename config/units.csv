@@ -21,8 +21,8 @@ id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,u
 19,gaulchief,gauls,首领,unit_gaulchief,melee,40,0,50,50,5,0,4,3075,4540,3100,3750,60,1,,10,2,200,
 20,gaulsettler,gauls,拓荒者,unit_gaulsettler,melee,0,0,80,80,5,3000,1,550,700,550,490,40,1,,5,1,100,
 21,clubswinger,teutons,掠袭棍兵,unit_clubswinger,melee,72,0,28,16,7,60,1,9.5,7.5,4,4,1.8,4,4|20,1,2,120,
-22,spearman,teutons,拒马长矛,unit_spearman,melee,22,0,48,82,7,40,1,14.5,7,8.5,4,2.4,4,6,1,2,120,13
-23,axeman,teutons,破阵斧手,unit_axeman,melee,88,0,36,28,6,50,1,13,12,17,7,3,4,7,1,2,110,15
+22,spearman,teutons,拒马长矛,unit_spearman,melee,30,0,48,82,7,40,1,14.5,7,8.5,4,2.4,4,6,1,2,120,13
+23,axeman,teutons,破阵斧手,unit_axeman,melee,96,0,36,28,6,50,1,13,12,17,7,3,4,7,1,2,110,15
 24,teuscout,teutons,侦察兵,unit_teuscout,melee,0,0,10,5,9,0,1,16,10,5,5,2.8,5,,1,5,60,
 25,paladin,teutons,铁誓骑士,unit_paladin,melee,85,0,150,80,10,110,2,37,27,29,7.5,5.5,5,10,2,3,210,
 26,teutonknight,teutons,黑钢骑士,unit_teutonknight,melee,470,0,105,130,9,80,3,45,51.5,48,8,7.7,5,3|7,4,3,250,16

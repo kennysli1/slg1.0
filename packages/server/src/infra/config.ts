@@ -484,6 +484,17 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 基础战斗价值/人口的参考点；用于映射有效战斗人口。 */
+  combatInfluenceReferenceValue: number;
+  /** 战斗质量指数；>1 放大高质量兵种、压低低质量兵种。 */
+  combatInfluenceQualityExponent: number;
+  combatInfluenceMinQuality: number;
+  combatInfluenceMaxQuality: number;
+  combatValueMeleeAttackWeight: number;
+  combatValueRangedAttackWeight: number;
+  combatValueMeleeDefenseWeight: number;
+  combatValueRangedDefenseWeight: number;
+  combatValueHpWeight: number;
   /** 阶段化战斗模拟器：第三阶段全军近战互殴轮数。 */
   battleSimulatorMeleeRounds: number;
   /** 阶段化战斗模拟器各步骤伤害系数。默认均为 1，便于数值测试时独立调节。 */
@@ -1323,6 +1334,15 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    combatInfluenceReferenceValue: Math.max(1, cn('combat_influence_reference_value', 200)),
+    combatInfluenceQualityExponent: Math.max(1, cn('combat_influence_quality_exponent', 1.15)),
+    combatInfluenceMinQuality: Math.max(0, cn('combat_influence_min_quality', 0.65)),
+    combatInfluenceMaxQuality: Math.max(0.01, cn('combat_influence_max_quality', 1.55)),
+    combatValueMeleeAttackWeight: Math.max(0, cn('combat_value_melee_attack_weight', 1)),
+    combatValueRangedAttackWeight: Math.max(0, cn('combat_value_ranged_attack_weight', 1.1)),
+    combatValueMeleeDefenseWeight: Math.max(0, cn('combat_value_melee_defense_weight', 0.85)),
+    combatValueRangedDefenseWeight: Math.max(0, cn('combat_value_ranged_defense_weight', 0.75)),
+    combatValueHpWeight: Math.max(0, cn('combat_value_hp_weight', 0.65)),
     battleSimulatorMeleeRounds: Math.max(1, Math.floor(cn('battle_sim_melee_rounds', 6))),
     battlePhaseCavalryVsCavalryCoeff: Math.max(0, cn('combat_phase_cavalry_vs_cavalry_coeff', 1)),
     battlePhaseCavalryVsMeleeCoeff: Math.max(0, cn('combat_phase_cavalry_vs_melee_coeff', 1)),
@@ -2112,6 +2132,17 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.combatInfluenceReferenceValue <= 0) errors.push(`game_constants.csv combat_influence_reference_value 必须>0`);
+  if (c.combatInfluenceQualityExponent < 1) errors.push(`game_constants.csv combat_influence_quality_exponent 必须≥1`);
+  if (c.combatInfluenceMinQuality < 0) errors.push(`game_constants.csv combat_influence_min_quality 必须≥0`);
+  if (c.combatInfluenceMaxQuality < c.combatInfluenceMinQuality) errors.push(`game_constants.csv combat_influence_max_quality 必须≥min_quality`);
+  for (const [key, value] of [
+    ['combat_value_melee_attack_weight', c.combatValueMeleeAttackWeight],
+    ['combat_value_ranged_attack_weight', c.combatValueRangedAttackWeight],
+    ['combat_value_melee_defense_weight', c.combatValueMeleeDefenseWeight],
+    ['combat_value_ranged_defense_weight', c.combatValueRangedDefenseWeight],
+    ['combat_value_hp_weight', c.combatValueHpWeight],
+  ] as const) if (value < 0) errors.push(`game_constants.csv ${key} 必须≥0`);
   if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.forestVisionPenalty < 0) errors.push(`game_constants.csv forest_vision_penalty 必须≥0`);
