@@ -63,7 +63,7 @@ function objText(task: any): string {
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
   if (o.kind === 'dice_match') {
-    const difficulty = o.diceDifficulty === 'hard' ? '困难 NPC' : '普通 NPC';
+    const difficulty = o.diceDifficulty === 'hard' ? '困难 NPC' : o.diceDifficulty === 'normal' ? '普通 NPC' : '简单 NPC';
     return o.diceWinsRequired > 1
       ? `三局两胜骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`
       : `骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`;
