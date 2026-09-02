@@ -1826,7 +1826,10 @@ export class MovementModule {
       } else if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
       else {
         targetPlayerId = owner;
-        const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
+        const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
+        const rel = allianceRel.ok && (allianceRel.payload as any).relation === 'allied'
+          ? allianceRel
+          : await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
         relation = rel.ok ? (rel.payload as any).relation : 'neutral';
         if (relation === 'allied') modes.push({ mode: 'reinforce', label: '增援' });
         else if (relation === 'neutral') {
@@ -1966,8 +1969,8 @@ export class MovementModule {
       if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
       const fromOwner = await this.ownerOf(villageId), targetOwner = await this.ownerOf(targetVillage!);
       if (!fromOwner || !targetOwner || fromOwner === targetOwner) return { ok: false, payload: {}, reason: 'not_enemy_village' };
-      const relation = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: targetOwner } });
-      if (relation.ok && (relation.payload as any)?.relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
+      const allianceRelation = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: targetOwner } });
+      if (allianceRelation.ok && (allianceRelation.payload as any)?.relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
       const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
       if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
     }
@@ -2072,6 +2075,8 @@ export class MovementModule {
   private async validatePvPRelation(villageId: string, targetVillage: string, declareWar: boolean): Promise<CommandResult> {
     const from = await this.ownerOf(villageId), target = await this.ownerOf(targetVillage);
     if (!from || !target || from === target) return { ok: false, payload: {}, reason: 'not_enemy_village' };
+    const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
+    if (allianceRel.ok && (allianceRel.payload as any).relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
     const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
     const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
     if (relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
@@ -2109,7 +2114,8 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'not_own_village' };
     }
     if (isReinforce && fromOwner !== toOwner) {
-      const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
+      const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
+      const rel = allianceRel.ok && (allianceRel.payload as any).relation === 'allied' ? allianceRel : await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
       const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
       if (relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }

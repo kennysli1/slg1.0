@@ -58,6 +58,10 @@ interface MilitaryState {
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
   techDefMult?: number;
+  /** 联盟战争专家加成（由 alliance 模块按职位注入）。 */
+  allianceSpeedMult?: number;
+  allianceAtkMult?: number;
+  allianceDefMult?: number;
   techCombatByUnit?: Record<string, { atk: number; def: number }>;
   techUnlockedUnits?: string[];
   techTrainSpeed?: number;
@@ -146,6 +150,17 @@ export class MilitaryModule {
     return { ok: true, payload: {} };
   }
 
+  private setAllianceModifiers(cmd: Command): CommandResult {
+    const { villageId, speedMult, atkMult, defMult } = cmd.payload as { villageId: string; speedMult?: number; atkMult?: number; defMult?: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.allianceSpeedMult = Math.max(0, Number(speedMult) || 0);
+    s.allianceAtkMult = Math.max(0, Number(atkMult) || 0);
+    s.allianceDefMult = Math.max(0, Number(defMult) || 0);
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { speedMult: s.allianceSpeedMult, atkMult: s.allianceAtkMult, defMult: s.allianceDefMult } };
+  }
+
   /** 行军模块只可取得已聚合的最终最慢速度快照，不能读取军事状态。 */
   private getMarchSpeedSnapshot(cmd: Command): CommandResult {
     const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
@@ -153,7 +168,7 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const units = Object.keys(troops ?? {}).filter((unit) => (troops[unit] ?? 0) > 0 && this.config.units[unit]);
     if (units.length === 0) return { ok: false, payload: {}, reason: 'empty_troops' };
-    const bonus = 1 + (s.techMarchSpeed ?? 0);
+    const bonus = 1 + (s.techMarchSpeed ?? 0) + (s.allianceSpeedMult ?? 0);
     const slowest = Math.min(...units.map((unit) => this.config.units[unit].speed * bonus));
     return { ok: true, payload: { slowestSpeed: slowest } };
   }
@@ -183,6 +198,7 @@ export class MilitaryModule {
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
     this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
     this.commands.register('military.SetTechEffects', (c) => this.setTechEffects(c));
+    this.commands.register('military.SetAllianceModifiers', (c) => this.setAllianceModifiers(c));
     this.commands.register('military.GetMarchSpeedSnapshot', (c) => this.getMarchSpeedSnapshot(c));
     // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
     this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
@@ -1031,10 +1047,10 @@ export class MilitaryModule {
       if (!this.config.units[unit] || available <= 0) continue;
       // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
       const stats = purpose === 'raid'
-        ? this.finalStats(unit, reputationAtk, reputationDef)
+        ? this.finalStats(unit, reputationAtk * (1 + (s.allianceAtkMult ?? 0)), reputationDef * (1 + (s.allianceDefMult ?? 0)))
         : (() => {
           const tm = this.techCombatMult(s, unit);
-          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk, (s.treasureDefMult ?? 1) * tm.def * reputationDef);
+          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk * (1 + (s.allianceAtkMult ?? 0)), (s.treasureDefMult ?? 1) * tm.def * reputationDef * (1 + (s.allianceDefMult ?? 0)));
         })();
       snapshot[unit] = { count: available, ...stats };
     }

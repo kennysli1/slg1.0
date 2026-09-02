@@ -670,10 +670,20 @@ export class BuildingModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const def = this.config.buildings[kind];
     if (!def) return { ok: false, payload: {}, reason: `unknown_building:${kind}` };
+    let rebuildingAllianceHall = false;
+    if (kind === 'alliance_hall') {
+      const gate = await this.commands.send({ name: 'alliance.CanBuildHall', from: BuildingModule.NAME, payload: { villageId } });
+      if (!gate.ok || !(gate.payload as any)?.allowed) return { ok: false, payload: {}, reason: gate.reason ?? 'alliance_hall_reserved' };
+      rebuildingAllianceHall = true;
+    }
     if (zone !== 'inner' && zone !== 'outer') return { ok: false, payload: {}, reason: 'bad_zone' };
     if (def.zone !== zone) return { ok: false, payload: {}, reason: 'zone_mismatch' };
-    if (def.maxCount >= 0 && s.placed.filter((p) => p.kind === def.kind).length >= def.maxCount) return { ok: false, payload: {}, reason: 'max_count' };
-    if (this.freeSlots(s, zone) <= 0) return { ok: false, payload: {}, reason: 'no_free_slot' };
+    const deadAllianceHallCount = rebuildingAllianceHall
+      ? s.placed.filter((p) => p.kind === 'alliance_hall' && p.level <= 0 && p.zone === zone).length
+      : 0;
+    const existingCount = s.placed.filter((p) => p.kind === def.kind && !(rebuildingAllianceHall && p.level <= 0)).length;
+    if (def.maxCount >= 0 && existingCount >= def.maxCount) return { ok: false, payload: {}, reason: 'max_count' };
+    if (this.freeSlots(s, zone) + deadAllianceHallCount <= 0) return { ok: false, payload: {}, reason: 'no_free_slot' };
     if (!this.meetsBuildRequirement(s, def)) return { ok: false, payload: {}, reason: 'requires_not_met' };
     if (s.queue.length >= this.queueCapacity(s)) return { ok: false, payload: {}, reason: 'queue_full' };
 
@@ -684,6 +694,9 @@ export class BuildingModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'spend_failed' };
 
+    // Only remove the destroyed hall after all validations and the resource spend
+    // succeed; a failed rebuild must not mutate the village's building state.
+    if (rebuildingAllianceHall) s.placed = s.placed.filter((p) => p.kind !== 'alliance_hall' || p.level > 0);
     const slotId = this.allocSlot(s, zone);
     s.placed.push({ slotId, zone, kind, level: 0 }); // level 0 = 建造中占位
     const durSec = await this.buildTime(s, def.timeSec(1));

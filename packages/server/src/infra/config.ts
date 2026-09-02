@@ -732,6 +732,18 @@ export interface GameConstants {
   m8TaskVillageResourceAmount: number;
   /** m8：任务村初始金币。 */
   m8TaskVillageGold: number;
+  /** 联盟创建成本（从创建者选定村庄扣除）。 */
+  allianceCreateWood: number;
+  allianceCreateClay: number;
+  allianceCreateIron: number;
+  allianceCreateCrop: number;
+  allianceCreateGold: number;
+  /** 联盟职位加成。 */
+  allianceLogisticsResourceMult: number;
+  allianceWarSpeedMult: number;
+  allianceWarCombatMult: number;
+  allianceTechProbabilityBonus: number;
+  allianceAmbassadorReputationBonus: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -831,6 +843,38 @@ export interface AcademyDef {
   popFactor: number;
 }
 
+/** 联盟大厅等级与联盟容量（来自 alliance_levels.csv）。 */
+export interface AllianceLevelDef {
+  level: number;
+  hallLevel: number;
+  memberCap: number;
+  description: string;
+}
+
+/** 联盟建筑目录（来自 alliance_buildings.csv）。资源成本按目标等级乘以 baseCost。 */
+export interface AllianceBuildingDef {
+  code: string;
+  name: string;
+  maxLevel: number;
+  requiredAllianceLevel: number;
+  baseCost: Record<string, number>;
+  effectType: string;
+  effectValue: number;
+  description: string;
+}
+
+/** 联盟科技目录（来自 alliance_tech.csv）。 */
+export interface AllianceTechDef {
+  code: string;
+  name: string;
+  maxLevel: number;
+  requiredAllianceLevel: number;
+  techPointCost: number;
+  effectType: string;
+  effectValue: number;
+  description: string;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -855,6 +899,10 @@ export interface GameConfig {
   research: Record<string, ResearchDef>;
   /** 学院 RP 生产参数（academy.csv）：level → AcademyDef。 */
   academy: Record<number, AcademyDef>;
+  /** 联盟大厅/建筑/科技配置。 */
+  allianceLevels: Record<number, AllianceLevelDef>;
+  allianceBuildings: Record<string, AllianceBuildingDef>;
+  allianceTech: Record<string, AllianceTechDef>;
   /** 任务目录（quests.csv）：code → QuestDef。 */
   quests: Record<string, QuestDef>;
   /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
@@ -1512,6 +1560,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     m8TaskVillageSpawnRadius: Math.max(1, cn('m8_task_village_spawn_radius', 8)),
     m8TaskVillageResourceAmount: Math.max(0, cn('m8_task_village_resource_amount', 500)),
     m8TaskVillageGold: Math.max(0, cn('m8_task_village_gold', 500)),
+    allianceCreateWood: Math.max(0, cn('alliance_create_wood', 300)),
+    allianceCreateClay: Math.max(0, cn('alliance_create_clay', 300)),
+    allianceCreateIron: Math.max(0, cn('alliance_create_iron', 300)),
+    allianceCreateCrop: Math.max(0, cn('alliance_create_crop', 300)),
+    allianceCreateGold: Math.max(0, cn('alliance_create_gold', 600)),
+    allianceLogisticsResourceMult: Math.max(0, cn('alliance_logistics_resource_mult', 0.2)),
+    allianceWarSpeedMult: Math.max(0, cn('alliance_war_speed_mult', 0.15)),
+    allianceWarCombatMult: Math.max(0, cn('alliance_war_combat_mult', 0.1)),
+    allianceTechProbabilityBonus: Math.max(0, cn('alliance_tech_probability_bonus', 0.1)),
+    allianceAmbassadorReputationBonus: Math.max(0, cn('alliance_ambassador_reputation_bonus', 1)),
     raw,
   };
 
@@ -1657,6 +1715,55 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       if (mercCamp[lv]) last = mercCamp[lv];
       else mercCamp[lv] = { ...last };
     }
+  }
+
+  // 联盟配置：联盟大厅等级、联盟建筑和联盟科技均为独立 CSV，配置中心可直接编辑。
+  const allianceLevels: Record<number, AllianceLevelDef> = {};
+  const allianceLevelRows = loadCsv(p('alliance_levels.csv'));
+  for (const r of allianceLevelRows) {
+    const level = Math.max(1, Math.floor(num(r.level)));
+    if (!level) continue;
+    allianceLevels[level] = {
+      level,
+      hallLevel: Math.max(1, Math.floor(num(r.hallLevel, level))),
+      memberCap: Math.max(1, Math.floor(num(r.memberCap, 10 + (level - 1) * 5))),
+      description: r.description ?? '',
+    };
+  }
+  if (!allianceLevels[1]) allianceLevels[1] = { level: 1, hallLevel: 1, memberCap: 10, description: '' };
+
+  const allianceBuildings: Record<string, AllianceBuildingDef> = {};
+  const allianceBuildingRows = loadCsv(p('alliance_buildings.csv'));
+  for (const r of allianceBuildingRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    allianceBuildings[code] = {
+      code,
+      name: r.name ?? code,
+      maxLevel: Math.max(1, Math.floor(num(r.maxLevel, 5))),
+      requiredAllianceLevel: Math.max(1, Math.floor(num(r.requiredAllianceLevel, 1))),
+      baseCost: { wood: Math.max(0, num(r.costWood)), clay: Math.max(0, num(r.costClay)), iron: Math.max(0, num(r.costIron)), crop: Math.max(0, num(r.costCrop)) },
+      effectType: r.effectType ?? '',
+      effectValue: num(r.effectValue, 0),
+      description: r.description ?? '',
+    };
+  }
+
+  const allianceTech: Record<string, AllianceTechDef> = {};
+  const allianceTechRows = loadCsv(p('alliance_tech.csv'));
+  for (const r of allianceTechRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    allianceTech[code] = {
+      code,
+      name: r.name ?? code,
+      maxLevel: Math.max(1, Math.floor(num(r.maxLevel, 5))),
+      requiredAllianceLevel: Math.max(1, Math.floor(num(r.requiredAllianceLevel, 1))),
+      techPointCost: Math.max(1, Math.floor(num(r.techPointCost, 100))),
+      effectType: r.effectType ?? '',
+      effectValue: num(r.effectValue, 0),
+      description: r.description ?? '',
+    };
   }
 
   // tradeCenter 缺级回退：从已解析的最高有效级向下复制，保证任意贸易中心等级都能取到参数。
@@ -1914,7 +2021,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, quests, questGraph, dialogues, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, quests, questGraph, dialogues, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;

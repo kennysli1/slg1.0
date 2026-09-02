@@ -223,3 +223,13 @@ kingdom_pve_retaliation_raid_threshold,-10,number,声望小于等于此值时领
 kingdom_pve_retaliation_siege_threshold,-20,number,声望小于等于此值时领主封地攻城主城
 kingdom_fief_mercenary_min_ratio,0.4,number,封地报复雇佣军占守军总兵力比例最小值
 kingdom_fief_mercenary_max_ratio,0.7,number,封地报复雇佣军占守军总兵力比例最大值
+alliance_create_wood,300,number,创建联盟所需木材
+alliance_create_clay,300,number,创建联盟所需泥土
+alliance_create_iron,300,number,创建联盟所需铁矿
+alliance_create_crop,300,number,创建联盟所需粮食
+alliance_create_gold,600,number,创建联盟所需金币
+alliance_logistics_resource_mult,0.2,number,后勤主管所有村资源产量加成
+alliance_war_speed_mult,0.15,number,战争专家所有村军队移速加成
+alliance_war_combat_mult,0.1,number,战争专家所有村军队攻防加成
+alliance_tech_probability_bonus,0.1,number,首席科技官科技点获得概率加成
+alliance_ambassador_reputation_bonus,1,number,形象大使每次获得声望额外加成
