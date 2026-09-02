@@ -533,6 +533,9 @@ test('/gm/tasks 使用任务 code 而不是 active 数组下标', async () => {
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '任务管理脚本必须是合法 JavaScript');
+    assert.match(page.body, /retrigger-main-accept/, '已完成主线应提供直接接受操作');
+    assert.match(page.body, /reopen-accept/, '已完成支线应提供直接接受操作');
+    assert.match(page.body, /untrigger-side/, '已放弃支线应提供返回未触发操作');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
