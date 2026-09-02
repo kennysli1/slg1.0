@@ -15,7 +15,7 @@ import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
-import { populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
+import { breakdownTooltip, populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
@@ -754,6 +754,18 @@ describe('村庄资源栏受限状态', () => {
     assert.equal(rate.label, '+90/时');
   });
 
+  it('资源悬浮明细显示基础产值、来源加成和剩余时间', () => {
+    const text = breakdownTooltip('木材', [
+      { kind: 'base', source: 'building:woodcutter:a', label: '资源田基础产值 · 伐木场 Lv2', ratePerHour: 100 },
+      { kind: 'modifier', source: 'tech:forestry', label: '科技：林业', ratePerHour: 20, percent: 20 },
+      { kind: 'timed', source: 'task:m1', label: '任务：临时鼓舞', ratePerHour: 10, percent: 10, expiresAt: Date.now() + 60_000 },
+    ], 130, 130);
+    assert.match(text, /资源田基础产值/);
+    assert.match(text, /科技：林业：\+20\.0\/时（\+20\.0%） · 永久/);
+    assert.match(text, /任务：临时鼓舞：\+10\.0\/时（\+10\.0%） · 剩余/);
+    assert.match(text, /理论总产出：\+130\.0\/时/);
+  });
+
   it('人口达到上限后显示潜在增长率而不是零', () => {
     const state = {
       hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
@@ -774,6 +786,23 @@ describe('村庄资源栏受限状态', () => {
     assert.match(text, /劳动人口 120/);
     assert.match(text, /军队人口 80/);
     assert.match(text, /训练中 10/);
+  });
+
+  it('人口悬浮说明同时显示人口增长和金币税收来源', () => {
+    const text = populationTooltip({
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 6, potentialGrowthPerHour: 6, cropDeficitRate: 0,
+    }, 210, 120, 6, [
+      { source: 'main', label: '主基地基础人口增长（Lv2）', ratePerHour: 5 },
+      { source: 'technology', label: '科技：人口法典', ratePerHour: 1, percent: 20 },
+    ], [
+      { source: 'gold_tax', label: '劳动人口基础税收', ratePerHour: 60 },
+      { source: 'treasure', label: '宝物：金袋', ratePerHour: 12, percent: 20 },
+    ]);
+    assert.match(text, /主基地基础人口增长/);
+    assert.match(text, /科技：人口法典/);
+    assert.match(text, /劳动人口基础税收/);
+    assert.match(text, /宝物：金袋/);
   });
 
   it('仓储溢出时说明人口增长扣减比例', () => {

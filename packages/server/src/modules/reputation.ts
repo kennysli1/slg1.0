@@ -297,9 +297,11 @@ export class ReputationModule {
     const p = await this.commands.send({ name: 'player.Get', from: ReputationModule.NAME, payload: { playerId } });
     if (!p.ok) return;
     const mult = this.effects(value).populationGrowthMult;
+    const goldMult = this.effects(value).goldTaxMult;
+    const label = `声望修正（当前 ${value >= 0 ? '+' : ''}${value}）`;
     for (const village of ((p.payload as any)?.player?.villages ?? [])) {
-      await this.commands.send({ name: 'population.SetReputationGrowthMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult } });
-      await this.commands.send({ name: 'population.SetReputationGoldTaxMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult: this.effects(value).goldTaxMult } });
+      await this.commands.send({ name: 'population.SetReputationGrowthMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult, sources: [{ label, delta: mult - 1 }] } });
+      await this.commands.send({ name: 'population.SetReputationGoldTaxMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult: goldMult, sources: [{ label, delta: goldMult - 1 }] } });
     }
   }
 }

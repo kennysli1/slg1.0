@@ -259,6 +259,7 @@ export class AllianceModule {
 
   private modifiers(a: AllianceState, playerId: string) {
     const roles = a.roles[playerId] ?? [];
+    const resourceDetails: { source: string; label: string; mult: Record<string, number> }[] = [];
     const out = {
       resourceRateMult: roles.includes('logistics') ? this.config.constants.allianceLogisticsResourceMult : 0,
       warSpeedMult: roles.includes('war') ? this.config.constants.allianceWarSpeedMult : 0,
@@ -266,10 +267,16 @@ export class AllianceModule {
       techProbabilityBonus: roles.includes('tech') ? this.config.constants.allianceTechProbabilityBonus : 0,
       ambassadorReputationBonus: roles.includes('ambassador') ? this.config.constants.allianceAmbassadorReputationBonus : 0,
     };
+    if (roles.includes('logistics') && out.resourceRateMult) {
+      resourceDetails.push({ source: 'alliance:role:logistics', label: '联盟职位：后勤主管', mult: { wood: out.resourceRateMult, clay: out.resourceRateMult, iron: out.resourceRateMult, crop: out.resourceRateMult } });
+    }
     // 联盟建筑/科技按已完成等级叠加；所有成员共享，不把未完成计划提前计入。
-    const apply = (effectType: string, value: number): void => {
+    const apply = (effectType: string, value: number, label: string, source: string): void => {
       const v = Number.isFinite(value) ? value : 0;
-      if (effectType === 'resource_rate') out.resourceRateMult += v;
+      if (effectType === 'resource_rate') {
+        out.resourceRateMult += v;
+        resourceDetails.push({ source, label, mult: { wood: v, clay: v, iron: v, crop: v } });
+      }
       else if (effectType === 'combat_def' || effectType === 'combat_atk') out.warCombatMult += v;
       else if (effectType === 'march_speed') out.warSpeedMult += v;
       else if (effectType === 'tech_probability') out.techProbabilityBonus += v;
@@ -277,25 +284,25 @@ export class AllianceModule {
     };
     for (const [code, level] of Object.entries(a.buildings)) {
       const def = this.config.allianceBuildings[code];
-      if (def) apply(def.effectType, def.effectValue * positiveInt(level));
+      if (def) apply(def.effectType, def.effectValue * positiveInt(level), `联盟建筑：${def.name}`, `alliance:building:${code}`);
     }
     for (const [code, level] of Object.entries(a.technologies)) {
       const def = this.config.allianceTech[code];
-      if (def) apply(def.effectType, def.effectValue * positiveInt(level));
+      if (def) apply(def.effectType, def.effectValue * positiveInt(level), `联盟科技：${def.name}`, `alliance:tech:${code}`);
     }
-    return out;
+    return { ...out, resourceDetails };
   }
 
   private async syncPlayerModifiers(playerId: string): Promise<void> {
     if (!playerId) return;
     const allianceId = this.idForPlayer(playerId);
     const a = allianceId ? this.load(allianceId) : undefined;
-    const mods = a && !a.disconnected ? this.modifiers(a, playerId) : { resourceRateMult: 0, warSpeedMult: 0, warCombatMult: 0, techProbabilityBonus: 0, ambassadorReputationBonus: 0 };
+    const mods = a && !a.disconnected ? this.modifiers(a, playerId) : { resourceRateMult: 0, warSpeedMult: 0, warCombatMult: 0, techProbabilityBonus: 0, ambassadorReputationBonus: 0, resourceDetails: [] };
     const p = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
     if (!p.ok) return;
     for (const v of ((p.payload as any)?.player?.villages ?? [])) {
       const villageId = String(v.id);
-      await this.commands.send({ name: 'economy.SetRateModifier', from: AllianceModule.NAME, payload: { villageId, source: 'alliance', mult: { wood: mods.resourceRateMult, clay: mods.resourceRateMult, iron: mods.resourceRateMult, crop: mods.resourceRateMult } } });
+      await this.commands.send({ name: 'economy.SetRateModifier', from: AllianceModule.NAME, payload: { villageId, source: 'alliance', mult: { wood: mods.resourceRateMult, clay: mods.resourceRateMult, iron: mods.resourceRateMult, crop: mods.resourceRateMult }, details: mods.resourceDetails } });
       await this.commands.send({ name: 'military.SetAllianceModifiers', from: AllianceModule.NAME, payload: { villageId, speedMult: mods.warSpeedMult, atkMult: mods.warCombatMult, defMult: mods.warCombatMult } });
       await this.commands.send({ name: 'research.SetAllianceTechBonus', from: AllianceModule.NAME, payload: { villageId, bonus: mods.techProbabilityBonus } });
       await this.commands.send({ name: 'reputation.SetAllianceBonus', from: AllianceModule.NAME, payload: { playerId, bonus: mods.ambassadorReputationBonus } });

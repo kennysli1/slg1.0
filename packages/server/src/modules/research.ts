@@ -123,7 +123,11 @@ export class ResearchModule {
 
     // 注册首批默认机制
     registerMechanism('imperial_pop_boost', (ctx) => {
-      void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, mult: ctx.tech.effectValue } });
+      void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: {
+        villageId: ctx.villageId,
+        mult: ctx.tech.effectValue,
+        sources: [{ label: `科技：${ctx.tech.code}`, delta: ctx.tech.effectValue }],
+      } });
     });
     registerMechanism('storage_overflow', (ctx) => {
       void ctx.commands.send({ name: 'economy.SetOverflowCap', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, cap: ctx.tech.effectValue } });
@@ -316,13 +320,18 @@ export class ResearchModule {
     const key = effect.effectKey;
     switch (effect.effectType) {
       case 'resource_rate':
-        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: { villageId, source: `tech:${tech.code}:${effect.order}`, mult: { [key]: Math.min(effect.cap, v) } } });
+        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: {
+          villageId,
+          source: `tech:${tech.code}:${effect.order}`,
+          mult: { [key]: Math.min(effect.cap, v) },
+          details: [{ source: `tech:${tech.code}`, label: `科技：${tech.name}`, mult: { [key]: Math.min(effect.cap, v) } }],
+        } });
         break;
       case 'storage_cap':
         void this.commands.send({ name: 'building.SetStorageTechMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
         break;
       case 'pop_growth':
-        void this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
+        // 在 recomputeTechEffects 中统一汇总，避免多个科技效果异步下发时互相覆盖。
         break;
       case 'mechanism':
         if (MechanismRegistry[key]) {
@@ -353,6 +362,8 @@ export class ResearchModule {
     const buildingUnlocks = new Set<string>();
     let trainSpeed = 0;
     let marchSpeed = 0;
+    const populationGrowthSources: { label: string; delta: number }[] = [];
+    let populationGrowthDelta = 0;
     for (const code of completed) {
       const tech = this.config.research[code];
       if (!tech) continue;
@@ -365,12 +376,21 @@ export class ResearchModule {
           else combat[key].def = Math.min(e.cap, combat[key].def + value);
         } else if (e.effectType === 'unit_unlock') unlocks.add(e.effectKey);
         else if (e.effectType === 'building_unlock') buildingUnlocks.add(e.effectKey);
-        else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
+        else if (e.effectType === 'pop_growth') {
+          populationGrowthDelta += value;
+          populationGrowthSources.push({ label: `科技：${tech.name}`, delta: value });
+        } else if (e.effectType === 'mechanism' && e.effectKey === 'imperial_pop_boost') {
+          // 该历史机制实际提供人口增长倍率；纳入统一汇总，避免其异步
+          // SetTechGrowthMult 覆盖其他科技来源，也让悬浮明细能显示来源。
+          populationGrowthDelta += value;
+          populationGrowthSources.push({ label: `科技：${tech.name}`, delta: value });
+        } else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
         else if (e.effectType === 'march_speed') marchSpeed = Math.min(e.cap, marchSpeed + value);
         else this.applyEffect(villageId, tech, e);
       }
     }
     await this.commands.send({ name: 'building.SetTechUnlockedBuildings', from: ResearchModule.NAME, payload: { villageId, unlocks: [...buildingUnlocks] } });
+    await this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: populationGrowthDelta, sources: populationGrowthSources } });
     await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed, marchSpeed } });
   }
 
