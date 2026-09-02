@@ -13,6 +13,16 @@ function addAllianceHall(app: ReturnType<typeof createGameApp>, villageId: strin
   app.store.set('economy', villageId, economy);
 }
 
+function addTradeCenter(app: ReturnType<typeof createGameApp>, villageId: string): void {
+  const building = app.store.get<any>('building', villageId)!;
+  building.placed.push({ slotId: 'outer-trade-test', zone: 'outer', kind: 'tradecenter', level: 1 });
+  app.store.set('building', villageId, building);
+  app.store.set('trade', villageId, {
+    villageId, level: 1, npcOrderPool: [], storedRefreshes: 0, nextRefreshAt: Date.now() + 3_600_000,
+    tradeRoutesUsed: 0, createdOrders: [], npcDeliveryOrders: [],
+  });
+}
+
 test('联盟：建造大厅后可创建、申请加入并建立盟友关系', async () => {
   const app = createGameApp({ manualScheduler: true });
   const leader = (await send(app, 'player.Register', { name: '联盟盟主', password: 'pass1', tribe: 'romans' })).payload as any;
@@ -85,4 +95,58 @@ test('联盟：受损大厅空壳仍出现在建造清单中供盟主重建', as
   const allianceHall = (options.payload as any).options.find((x: any) => x.kind === 'alliance_hall');
   assert.ok(allianceHall, '受损大厅应保留重建入口');
   assert.equal(allianceHall.builtCount, 0);
+});
+
+test('联盟资源贡献：必须有贸易中心、空闲路线和足够资源，且抵达大厅后才入库', async () => {
+  let clock = 1_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  const leader = (await send(app, 'player.Register', { name: '运输盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const villageId = leader.player.villageId as string;
+  addAllianceHall(app, villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: villageId, name: '运输测试联盟' });
+  assert.equal(created.ok, true, created.reason);
+  // 没有贸易中心时明确拒绝，且不会从村庄扣资源。
+  const noCenter = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
+  assert.equal(noCenter.ok, false);
+  assert.equal(noCenter.reason, 'no_center');
+
+  addTradeCenter(app, villageId);
+  const allianceId = (created.payload as any).allianceId as string;
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.researchingBuilding = { code: 'alliance_warehouse', targetLevel: 1, required: { wood: 99999, clay: 0, iron: 0, crop: 0 } };
+  app.store.set('alliance', allianceId, alliance);
+  // 两条路线均占用时拒绝。
+  const trade = app.store.get<any>('trade', villageId)!;
+  trade.tradeRoutesUsed = 2;
+  app.store.set('trade', villageId, trade);
+  const noRoutes = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
+  assert.equal(noRoutes.ok, false);
+  assert.equal(noRoutes.reason, 'insufficient_routes');
+  trade.tradeRoutesUsed = 0;
+  app.store.set('trade', villageId, trade);
+
+  // 资源不足时同样在发车前拒绝，不产生待运输记录。
+  const economy = app.store.get<any>('economy', villageId)!;
+  economy.resources = { ...economy.resources, wood: 50 };
+  app.store.set('economy', villageId, economy);
+  const noResources = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
+  assert.equal(noResources.ok, false);
+  assert.match(String(noResources.reason), /^insufficient/);
+  economy.resources = { ...economy.resources, wood: 1000 };
+  app.store.set('economy', villageId, economy);
+  const before = (await send(app, 'economy.GetResources', { villageId })).payload as any;
+
+  const sent = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
+  assert.equal(sent.ok, true, sent.reason);
+  const afterSend = (await send(app, 'alliance.Get', { playerId: leader.player.id })).payload as any;
+  assert.equal(afterSend.alliance.warehouse.wood, 0, '商队抵达前联盟仓库不能瞬间增加');
+  assert.equal(afterSend.alliance.pendingResourceDeliveries.length, 1);
+  const afterSpend = (await send(app, 'economy.GetResources', { villageId })).payload as any;
+  assert.equal(afterSpend.resources.wood, before.resources.wood - 100, '发车时应锁定来源村资源');
+
+  await app.scheduler.advanceTo((sent.payload as any).arriveAt + 1, (t) => { clock = t; });
+  const afterArrival = (await send(app, 'alliance.Get', { playerId: leader.player.id })).payload as any;
+  assert.equal(afterArrival.alliance.warehouse.wood, 100, '商队抵达大厅后才入库');
+  assert.equal(afterArrival.alliance.pendingResourceDeliveries.length, 0);
+  assert.equal(afterArrival.alliance.resourceContributions[leader.player.id].wood, 100);
 });
