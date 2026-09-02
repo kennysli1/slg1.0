@@ -342,10 +342,12 @@ export class MilitaryModule {
     const def = this.config.units[unit];
     return {
       form: def.form,
+      popCost: def.popCost,
       meleeAtk: def.meleeAtk * atkMult,
       rangedAtk: def.rangedAtk * atkMult,
       meleeDef: def.meleeDef * defMult,
       rangedDef: def.rangedDef * defMult,
+      hp: def.hp,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
@@ -641,7 +643,8 @@ export class MilitaryModule {
     const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe || u.tribe === 'all');
     const { slots, kindLevels } = await this.resolveLayout(s.villageId);
 
-    // 本族可训练兵种列表（前端据此显示）；攻防走派生管线只给最终值快照（含该村铁匠加成）。
+    // 本族可训练兵种列表（前端据此显示）：通用攻防字段保持最终值快照，供驻军汇总与详情使用；
+    // baseStats 明确下发 CSV 基础值，仅供训练卡展示，避免把玩家科技/宝物加成误认为配置基础值。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
       const tm = this.techCombatMult(s, u.key);
@@ -664,6 +667,11 @@ export class MilitaryModule {
         meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
         meleeDef: st.meleeDef, rangedDef: st.rangedDef,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
+        baseStats: {
+          meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
+          meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+          speed: u.speed, carry: u.carry, upkeep: u.upkeep,
+        },
         // 每兵每小时口粮（含精神食粮减免）
         cropPerHourEach: this.foodPerSoldier(u.key, s, this.config.constants.popCropPerLabor),
         unlocked,

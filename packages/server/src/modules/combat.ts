@@ -51,7 +51,6 @@ const log = makeLogger('combat');
  */
 
 const COLLECTION = 'battle';
-const MAX_TICKS = 20000; // 安全阀：极端情况下(双方都0攻)兜底结束，避免无限循环
 
 export class CombatModule {
   static readonly NAME = 'combat';
@@ -471,6 +470,17 @@ export class CombatModule {
       defenderWallMultiplier: wallMult,
       attackerCavalryDefMultiplier: attackerCavalryDefMult,
       defenderCavalryDefMultiplier: defenderCavalryDefMult,
+      combatInfluence: {
+        referenceValue: this.config.constants.combatInfluenceReferenceValue,
+        qualityExponent: this.config.constants.combatInfluenceQualityExponent,
+        minQuality: this.config.constants.combatInfluenceMinQuality,
+        maxQuality: this.config.constants.combatInfluenceMaxQuality,
+        meleeAttackWeight: this.config.constants.combatValueMeleeAttackWeight,
+        rangedAttackWeight: this.config.constants.combatValueRangedAttackWeight,
+        meleeDefenseWeight: this.config.constants.combatValueMeleeDefenseWeight,
+        rangedDefenseWeight: this.config.constants.combatValueRangedDefenseWeight,
+        hpWeight: this.config.constants.combatValueHpWeight,
+      },
     });
     b.attacker = result.attacker;
     b.defender = result.defender;
@@ -495,7 +505,7 @@ export class CombatModule {
       log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(result.killsToDefender * 100) / 100, killsToAtk: Math.round(result.killsToAttacker * 100) / 100 });
     }
 
-    if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= MAX_TICKS) {
+    if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= this.config.constants.combatMaxTicks) {
       await this.beginResolution(b);
       return;
     }
@@ -953,7 +963,7 @@ function mergeCounts(target: Record<string, number>, source: Record<string, numb
 function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
   return Object.entries(snap).map(([key, u]) => ({
     code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,
-    count: u.count, form: u.form,
+    count: u.count, form: u.form, popCost: u.popCost,
     meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
     meleeDef: u.meleeDef, rangedDef: u.rangedDef,
     carry: u.carry,

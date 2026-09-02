@@ -28,6 +28,10 @@ e-m13-reward,m13,deliver,grant_treasure,black_badge,1
 e-m14-reputation-mercenaries,m14,deliver,grant_mercenaries_by_positive_reputation,merc_sword:2,1
 e-m15-research,m15,deliver,grant_research_points,10,1
 e-m15-crop-growth,m15,deliver,grant_resource_growth,crop:25:86400,2
+e-m16-mercenaries,m16,deliver,grant_mercenaries,merc_archer:10,1
 e-s5-rope,s5,deliver,grant_treasure,horse_rope,1
 e-s6-ticket,s6,deliver,grant_treasure,dice_tournament_ticket,1
 e-s7-gold,s7,deliver,grant_resources,gold:200,1
+e-s8-gold,s8,deliver,grant_resources,gold:300,1
+e-s9-gold,s9,deliver,grant_resources,gold:400,1
+e-s9-trophy,s9,deliver,grant_treasure,dice_trophy,2

@@ -5,8 +5,8 @@ import { buildSettlementPlan } from '../modules/combat/resolution.js';
 import type { Battle } from '../modules/combat/types.js';
 import { createGameApp, type GameApp } from '../app.js';
 
-function melee(count: number, attack: number, defense: number, carry = 0) {
-  return { count, form: 'melee' as const, meleeAtk: attack, rangedAtk: 0, meleeDef: defense, rangedDef: defense, carry };
+function melee(count: number, attack: number, defense: number, carry = 0, popCost = 1) {
+  return { count, form: 'melee' as const, meleeAtk: attack, rangedAtk: 0, meleeDef: defense, rangedDef: defense, carry, popCost };
 }
 
 test('combat engine：逐 tick 计算是纯函数，不修改输入快照', () => {
@@ -28,6 +28,21 @@ test('combat engine：逐 tick 计算是纯函数，不修改输入快照', () =
   assert.equal(result.defender.club.count, 2);
   assert.ok(result.attackerPending > 0);
   assert.ok(result.defenderPending > 0);
+});
+
+test('combat engine：攻击低于防御时仍会累积伤害', () => {
+  const result = simulateCombatTick({
+    attacker: { legionnaire: melee(1, 1, 1) },
+    defender: { club: melee(1, 1, 100) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 1,
+    defenderWallMultiplier: 1,
+  });
+
+  assert.ok(result.killsToDefender > 0, '低于防御时也必须产生正的减员速率');
+  assert.ok(result.defenderPending > 0, '小额伤害应通过 pending 跨 tick 累积');
 });
 
 test('combat engine：兰开斯特平方律会放大人数优势', () => {
@@ -53,6 +68,31 @@ test('combat engine：兰开斯特平方律会放大人数优势', () => {
   assert.ok(oneAgainstOne.defender.club, '势均力敌时双方都应有幸存者');
   assert.equal(twoAgainstOne.defender.club, undefined, '两倍兵力的一方应在相同时间内清空单个敌人');
   assert.equal(twoAgainstOne.attacker.legionnaire.count, 2, '人数优势方应保留幸存兵力');
+});
+
+test('combat engine：高人口兵种按有效人口参战，等人口同比面板与低人口兵种等价', () => {
+  const one = simulateCombatTick({
+    attacker: { legionnaire: melee(100, 50, 50) },
+    defender: { club: melee(100, 40, 60) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 1,
+    defenderWallMultiplier: 1,
+  });
+  const two = simulateCombatTick({
+    attacker: { legionnaire: melee(50, 100, 100, 0, 2) },
+    defender: { club: melee(100, 40, 60) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 1,
+    defenderWallMultiplier: 1,
+  });
+  assert.ok(Math.abs(one.killsToDefender - two.killsToDefender) < 0.0001);
+  assert.ok(Math.abs(one.killsToAttacker - two.killsToAttacker) < 0.0001);
+  assert.equal(one.attackerPending, two.attackerPending);
+  assert.equal(one.defenderPending, two.defenderPending);
 });
 
 test('settlement plan：按来源拆分伤亡，并计算幸存者运力', () => {

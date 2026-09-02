@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most（声望值达到阈值或更低）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most/reputation_at_least（声望值上下限）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
@@ -139,6 +139,7 @@ export class TasksModule {
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
     this.commands.register('task.GmResetAll', (c: Command) => this.gmResetAll(c));
     this.commands.register('task.GmRetriggerAbandoned', (c: Command) => this.gmRetriggerAbandoned(c));
+    this.commands.register('task.GmUntriggerSide', (c: Command) => this.gmUntriggerSide(c));
 
     // 酒馆建造/升级/拆除 → 重排随机刷新节奏 + 接取上限
     const onTavern = (evt: DomainEvent) => {
@@ -554,12 +555,12 @@ export class TasksModule {
     if (!('q' in check)) return check;
     const { q, storageVillageId, s } = check;
 
-    // S7 接取时一次性支付入场费。StartAccept 只读预览，因此费用不会因
+    // 接取费用由 quests.csv 的 acceptCost 配置。StartAccept 只读预览，因此费用不会因
     // 打开对话或关闭对话而扣除；只有玩家明确点击“接受任务”才结算。
-    if (code === 's7') {
+    if (q.acceptCost && Object.keys(q.acceptCost).length > 0) {
       const paid = await this.commands.send({
         name: 'economy.TrySpend', from: TasksModule.NAME,
-        payload: { villageId, cost: { gold: 100 } },
+        payload: { villageId, cost: q.acceptCost },
       });
       if (!paid.ok) return paid;
     }
@@ -709,6 +710,7 @@ export class TasksModule {
     if (rewards.buildingUnlocks?.length) preview.buildingUnlocks = [...rewards.buildingUnlocks];
     if (rewards.reputation) preview.reputation = rewards.reputation;
     if (rewards.researchPoints) preview.researchPoints = rewards.researchPoints;
+    if (rewards.mercenaries && Object.keys(rewards.mercenaries).length) preview.mercenaries = { ...rewards.mercenaries };
 
     if (rewards.reputationMercenaryExchange) {
       const exchange = rewards.reputationMercenaryExchange;
@@ -722,7 +724,10 @@ export class TasksModule {
       if (before > 0) {
         preview.reputation = (preview.reputation ?? 0) - before;
         preview.reputationResetFrom = before;
-        preview.mercenaries = { [exchange.unitCode]: Math.max(0, Math.floor(before * exchange.perPoint)) };
+        preview.mercenaries = {
+          ...(preview.mercenaries ?? {}),
+          [exchange.unitCode]: (preview.mercenaries?.[exchange.unitCode] ?? 0) + Math.max(0, Math.floor(before * exchange.perPoint)),
+        };
       }
     }
 
@@ -1133,7 +1138,7 @@ export class TasksModule {
         const q = this.quest(code);
         if (!q || inst.readyToDeliver) continue;
         const kind = q.objective.kind;
-        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level' && kind !== 'reputation_at_most') continue;
+        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level' && kind !== 'reputation_at_most' && kind !== 'reputation_at_least') continue;
         const sourceVillageId = kind === 'main_base_level'
           ? villageId
           : (q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId);
@@ -1193,7 +1198,7 @@ export class TasksModule {
           current = hasAcademy
             ? (q.objective.researchCode ? (completed.has(q.objective.researchCode) ? 1 : 0) : completed.size)
             : 0;
-        } else if (kind === 'reputation_at_most') {
+        } else if (kind === 'reputation_at_most' || kind === 'reputation_at_least') {
           const reputation = await this.commands.send({ name: 'reputation.GetByVillage', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
           current = Number((reputation.payload as any)?.value);
           if (!Number.isFinite(current)) current = 0;
@@ -1214,6 +1219,8 @@ export class TasksModule {
         }
         const thresholdMet = kind === 'reputation_at_most'
           ? current <= (q.objective.threshold ?? 0)
+          : kind === 'reputation_at_least'
+            ? current >= (q.objective.threshold ?? 0)
           : nextProgress >= target;
         if (thresholdMet) {
           // 全局研究/探索可由任意己方村执行，完成时奖励应落到本次产生进度的村庄；
@@ -1619,6 +1626,14 @@ export class TasksModule {
       });
       granted.reputation = rewardsDef.reputation;
     }
+    // 固定任务佣兵直接加入军队，不创建雇佣合同，因此没有期限、人口占用或后续到期解散。
+    if (rewardsDef.mercenaries && Object.keys(rewardsDef.mercenaries).length) {
+      const added = await this.commands.send({
+        name: 'military.AddMercenaries', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, units: { ...rewardsDef.mercenaries } },
+      });
+      if (added.ok) granted.mercenaries = { ...rewardsDef.mercenaries };
+    }
     // M14：交付时读取当前总声望；若为正数则归零，每减少 1 点发放配置数量的
     // 无期限佣兵。任务奖励直接写入 military.troops，不创建 mercenary contract，
     // 因而既不占人口/粮耗，也不会被雇佣兵营地的合同到期逻辑移除。
@@ -1640,7 +1655,10 @@ export class TasksModule {
           if (reset.ok) {
             granted.reputation = (granted.reputation ?? 0) - before;
             granted.reputationResetFrom = before;
-            granted.mercenaries = { [exchange.unitCode]: count };
+            granted.mercenaries = {
+              ...(granted.mercenaries ?? {}),
+              [exchange.unitCode]: (granted.mercenaries?.[exchange.unitCode] ?? 0) + count,
+            };
           }
         }
       }
@@ -1716,7 +1734,7 @@ export class TasksModule {
 
   /** 把已完成的一次性支线恢复为未完成，并要求再次满足触发条件才可接取。 */
   private async gmReopenCompleted(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -1730,6 +1748,10 @@ export class TasksModule {
     // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
     if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
+    if (directAccept === true) {
+      await this.activateQuest(villageId, code);
+      return { ok: true, payload: await this.snapshotForVillage(villageId) };
+    }
     await this.pushList(villageId);
     await this.pushMap(villageId);
     // 没有触发条件的支线可立刻重新出现；有触发条件的由下一次领域事件解锁。
@@ -1739,7 +1761,7 @@ export class TasksModule {
 
   /** ③ 把已放弃的支线任务恢复为可接取：移出 abandonedSide 并清空触发/冷却，重新进入可接取列表。 */
   private async gmRetriggerAbandoned(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -1747,13 +1769,38 @@ export class TasksModule {
     const s = this.stateForQuest(villageId, code);
     if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
     s.abandonedSide = s.abandonedSide.filter((c) => c !== code);
-    // 重新触发：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
+    // 普通“重新触发”：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
     // （与 gmReopenCompleted 相反：那里是已完成→需世界事件重新触发，故移除触发标记；
     //   这里是已放弃→GM 强制重新出现，故补回触发标记。）
-    if (q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
+    if (directAccept !== true && q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
     if (s.cooldownUntil) delete s.cooldownUntil[code];
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
+    if (directAccept === true) {
+      await this.activateQuest(villageId, code);
+      return { ok: true, payload: await this.snapshotForVillage(villageId) };
+    }
     await this.unlockSideQuests(villageId);
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
+  }
+
+  /** 已放弃支线回到未触发：清理可接取项与触发标记，等待真实事件再次触发。 */
+  private async gmUntriggerSide(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_side_supported' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
+    if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
+    s.abandonedSide = s.abandonedSide.filter((item) => item !== code);
+    s.offered = s.offered.filter((item) => item !== code);
+    s.offeredSide = s.offeredSide.filter((item) => item !== code);
+    if (q.trigger) s.firedTriggers = s.firedTriggers.filter((item) => item !== q.trigger);
+    if (s.cooldownUntil) delete s.cooldownUntil[code];
+    this.store.set(COLLECTION, storageVillageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
     return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
@@ -2489,7 +2536,7 @@ export class TasksModule {
 
   /** 已完成主线重新置为可接取；M1 遵循其自动激活规则。 */
   private async gmRetriggerCompletedMain(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -2510,6 +2557,8 @@ export class TasksModule {
     s.offeredMain = s.offeredMain.filter((item) => item !== code);
     this.store.set(COLLECTION, storageVillageId, s);
     if (code === 'm1') {
+      await this.activateQuest(villageId, code);
+    } else if (directAccept === true) {
       await this.activateQuest(villageId, code);
     } else {
       s.offeredMain.push(code);
@@ -2975,7 +3024,7 @@ export class TasksModule {
     return { ok: true, payload: { reset: true } };
   }
 
-  /** 骰子一局结束后原子推进 s6/s7，所有“待领取/失败”状态仍由 task owner 决定。 */
+  /** 骰子一局结束后原子推进 s6/s7/s8/s9，所有“待领取/失败”状态仍由 task owner 决定。 */
   private async recordDiceRound(cmd: Command): Promise<CommandResult> {
     const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
     if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
@@ -2998,7 +3047,7 @@ export class TasksModule {
       await this.markReady(villageId, code);
     } else if (inst.diceNpcWins >= needed) {
       outcome = 'npc';
-      if (code === 's7') {
+      if (code === 's7' || code === 's8' || code === 's9') {
         inst.outcome = 'failure';
         inst.failureReady = true;
         inst.readyToDeliver = false;
@@ -3192,6 +3241,7 @@ export class TasksModule {
       type: q.type,
       scope: q.scope,
       objective: this.serializeObjective(q),
+      acceptCost: q.acceptCost ?? null,
       rewards: this.serializeRewards(q),
       trigger: q.trigger ?? null,
     };
@@ -3236,6 +3286,7 @@ export class TasksModule {
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',
       objective,
+      acceptCost: q?.acceptCost ?? null,
       rewards: q ? this.serializeRewards(q) : null,
       submitted: { ...inst.submitted },
       repairedBuildings: [...(inst.repairedBuildings ?? [])],

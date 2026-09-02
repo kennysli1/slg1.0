@@ -477,6 +477,11 @@ export function HexMap() {
     isSelf: boolean;
     landmark: 'capital' | 'fief' | null;
     landmarkCenter: boolean;
+    playerName?: string;
+    reputation?: number;
+    population?: number;
+    mainBaseLevel?: number;
+    mainBaseName?: string;
   }
 
   type LandmarkGroup = {
@@ -574,6 +579,11 @@ export function HexMap() {
             const visibility = (t?.visibility ?? 'visible') as Visibility;
             const landmark = landmarkKindFromRefId(t?.refId);
             const landmarkCenter = landmarkCenterFromTile(t?.refId, t?.landmarkCenter);
+            const playerName = t?.kind === 'village' && typeof t?.playerName === 'string' ? t.playerName : undefined;
+            const reputation = t?.kind === 'village' && Number.isFinite(Number(t?.reputation)) ? Math.trunc(Number(t.reputation)) : undefined;
+            const population = t?.kind === 'village' && Number.isFinite(Number(t?.population)) ? Math.max(0, Math.trunc(Number(t.population))) : undefined;
+            const mainBaseLevel = t?.kind === 'village' && Number.isFinite(Number(t?.mainBaseLevel)) ? Math.max(1, Math.trunc(Number(t.mainBaseLevel))) : undefined;
+            const mainBaseName = t?.kind === 'village' && typeof t?.mainBaseName === 'string' ? t.mainBaseName : undefined;
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined
@@ -612,6 +622,11 @@ export function HexMap() {
               q, r, camX, camY, kind, refId, name, icon, relation, terrain, visibility,
               isSelf, landmark, landmarkCenter,
               isSelected: !!(sel && sel.q === q && sel.r === r),
+              ...(playerName ? { playerName } : {}),
+              ...(reputation !== undefined ? { reputation } : {}),
+              ...(population !== undefined ? { population } : {}),
+              ...(mainBaseLevel !== undefined ? { mainBaseLevel } : {}),
+              ...(mainBaseName ? { mainBaseName } : {}),
             });
           }
         }
@@ -1129,11 +1144,17 @@ export function HexMap() {
     const name = cell.getAttribute('data-name') ?? '空地';
     const icon = cell.getAttribute('data-icon') ?? undefined;
     const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
+    const tile = tileAt(q, r);
     const taskCamp = findTaskCampMarker(refId, q, r);
     selected.value = {
       refId, kind, q, r, name,
       ...(icon ? { icon } : {}),
       ...(visibility ? { visibility } : {}),
+      ...(kind === 'village' && typeof tile?.playerName === 'string' ? { playerName: tile.playerName } : {}),
+      ...(kind === 'village' && Number.isFinite(Number(tile?.reputation)) ? { reputation: Math.trunc(Number(tile.reputation)) } : {}),
+      ...(kind === 'village' && Number.isFinite(Number(tile?.population)) ? { population: Math.max(0, Math.trunc(Number(tile.population))) } : {}),
+      ...(kind === 'village' && Number.isFinite(Number(tile?.mainBaseLevel)) ? { mainBaseLevel: Math.max(1, Math.trunc(Number(tile.mainBaseLevel))) } : {}),
+      ...(kind === 'village' && typeof tile?.mainBaseName === 'string' ? { mainBaseName: tile.mainBaseName } : {}),
       ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
     };
     // 己方村庄先进入观察态；只有目标卡的明确确认按钮才会切换操作上下文。

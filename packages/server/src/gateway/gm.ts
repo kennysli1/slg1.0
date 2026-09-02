@@ -63,18 +63,18 @@ function compareDialogueCode(a: string, b: string): number {
   return partsA.length - partsB.length;
 }
 
-/** 对话编辑器的确定性顺序：先按 code，再按 taskCode、段落号和 id。 */
+/** 对话编辑器的确定性顺序：先按 taskCode，再按 code、段落号和 id。 */
 function sortDialogueRows(rows: CsvRow[]): CsvRow[] {
   return [...rows].sort((a, b) => {
-    const codeA = String(a.code ?? '');
-    const codeB = String(b.code ?? '');
-    const codeOrder = compareDialogueCode(codeA, codeB);
-    if (codeOrder !== 0) return codeOrder;
-
     const taskCodeA = String(a.taskCode ?? '');
     const taskCodeB = String(b.taskCode ?? '');
     const taskCodeOrder = compareNatural(taskCodeA, taskCodeB);
     if (taskCodeOrder !== 0) return taskCodeOrder;
+
+    const codeA = String(a.code ?? '');
+    const codeB = String(b.code ?? '');
+    const codeOrder = compareDialogueCode(codeA, codeB);
+    if (codeOrder !== 0) return codeOrder;
 
     const segmentA = Number(a.segment);
     const segmentB = Number(b.segment);
@@ -648,7 +648,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   units: {
     file: 'units.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
     text: ['simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
@@ -1222,7 +1222,7 @@ function sectionReputation(){
   h += reputationCsvTable('kingdom_services', '议会厅服务声望价格（kingdom_services.csv）', DATA.kingdom_services, ['id','code','name','category'], [['reputationCost','声望价格']], null, 'number');
   h += reputationCsvTable('treasures', '宝物被动声望（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['reputationValue','主宝物栏声望修正']], null, 'number');
   h += reputationCsvTable('treasures', '直接声望宝物效果（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['effectValue','声望效果值']], function(row){ return row.effectType === 'reputation'; }, 'number');
-  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most'; }, 'number');
+  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most' || row.kind === 'reputation_at_least'; }, 'number');
   h += reputationCsvTable('quest_effects', '任务声望调整（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','声望变化值']], function(row){ return row.kind === 'adjust_reputation'; }, 'number');
   h += reputationCsvTable('quest_effects', '正声望兑换佣兵（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','兑换参数（兵种:每点数量）']], function(row){ return row.kind === 'grant_mercenaries_by_positive_reputation'; }, 'text');
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
@@ -1777,10 +1777,11 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.post('/gm/ops/task/abandon', (req, reply) => taskOp(req, reply, 'task.Abandon', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/submit', (req, reply) => taskOp(req, reply, 'task.SubmitResources', (b) => ({ villageId: b.villageId, code: b.code, resources: b.resources ?? {} })));
   fastify.post('/gm/ops/task/complete', (req, reply) => taskOp(req, reply, 'task.GmComplete', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/reopen-completed', (req, reply) => taskOp(req, reply, 'task.GmReopenCompleted', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/retrigger-completed-main', (req, reply) => taskOp(req, reply, 'task.GmRetriggerCompletedMain', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/reopen-completed', (req, reply) => taskOp(req, reply, 'task.GmReopenCompleted', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
+  fastify.post('/gm/ops/task/retrigger-completed-main', (req, reply) => taskOp(req, reply, 'task.GmRetriggerCompletedMain', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
   fastify.post('/gm/ops/task/untrigger-main', (req, reply) => taskOp(req, reply, 'task.GmUntriggerMain', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
+  fastify.post('/gm/ops/task/untrigger-side', (req, reply) => taskOp(req, reply, 'task.GmUntriggerSide', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/refresh', (req, reply) => taskOp(req, reply, 'task.GmRefreshRandom', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset', (req, reply) => taskOp(req, reply, 'task.GmReset', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset-all', (req, reply) => taskOp(req, reply, 'task.GmResetAll', () => ({})));
@@ -2169,18 +2170,18 @@ function render(s){
   }
   h+='<h2>已完成主线</h2>';
   for(var cm=0;cm<(s.completedMain||[]).length;cm++){var mc=s.completedMain[cm];
-    h+='<div class="card">'+esc(mc)+' <button class="act" data-act="retrigger-main" data-code="'+esc(mc)+'">重新触发</button></div>';
+    h+='<div class="card">'+esc(mc)+' <button class="act" data-act="retrigger-main" data-code="'+esc(mc)+'">返回未触发</button><button class="act" data-act="retrigger-main-accept" data-code="'+esc(mc)+'">直接接受</button></div>';
   }
   if(!(s.completedMain||[]).length)h+='<div class="card">无</div>';
   h+='<h2>已完成支线</h2>';
   for(var k=0;k<(s.completedSide||[]).length;k++){var sc=s.completedSide[k];
-    h+='<div class="card">'+esc(sc)+' <button class="act" data-act="reopen" data-code="'+esc(sc)+'">标记未完成（重新触发）</button></div>';
+    h+='<div class="card">'+esc(sc)+' <button class="act" data-act="reopen" data-code="'+esc(sc)+'">返回未触发</button><button class="act" data-act="reopen-accept" data-code="'+esc(sc)+'">直接接受</button></div>';
   }
   if(!(s.completedSide||[]).length)h+='<div class="card">无</div>';
   h+='<h2>已放弃支线</h2>';
   if((s.abandonedSide||[]).length){
     for(var m=0;m<(s.abandonedSide||[]).length;m++){var ab=s.abandonedSide[m];
-      h+='<div class="card">'+esc(ab)+' <button class="act" data-act="retrigger" data-code="'+esc(ab)+'">重新触发</button></div>';
+      h+='<div class="card">'+esc(ab)+' <button class="act" data-act="untrigger-side" data-code="'+esc(ab)+'">返回未触发</button><button class="act" data-act="retrigger-accept" data-code="'+esc(ab)+'">直接接受</button></div>';
     }
   } else { h+='<div class="card">无</div>'; }
   document.getElementById('content').innerHTML=h;
@@ -2193,16 +2194,21 @@ document.addEventListener('click',function(e){
   else if(act==='accept')doAccept(code);
   else if(act==='submit')doSubmit(code);
   else if(act==='reopen')doReopen(code);
+  else if(act==='reopen-accept')doReopen(code,true);
   else if(act==='retrigger')doRetrigger(code);
+  else if(act==='retrigger-accept')doRetrigger(code,true);
+  else if(act==='untrigger-side')doUntriggerSide(code);
   else if(act==='retrigger-main')doRetriggerMain(code);
+  else if(act==='retrigger-main-accept')doRetriggerMain(code,true);
   else if(act==='untrigger-main')doUntriggerMain(code);
 });
 async function doComplete(code){var r=await api('POST','/ops/task/complete',{villageId:vid(),code:code});after(r,'完成');}
 async function doAbandon(code){var r=await api('POST','/ops/task/abandon',{villageId:vid(),code:code});after(r,'放弃');}
 async function doAccept(code){var r=await api('POST','/ops/task/accept',{villageId:vid(),code:code});after(r,'接取');}
-async function doReopen(code){if(!confirm('标记 '+code+' 为未完成后，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/reopen-completed',{villageId:vid(),code:code});after(r,'标记未完成');}
-async function doRetrigger(code){if(!confirm('重新触发 '+code+'？该支线将从「已放弃」移出并重新进入可接取列表。'))return;var r=await api('POST','/ops/task/retrigger-abandoned',{villageId:vid(),code:code});after(r,'重新触发');}
-async function doRetriggerMain(code){if(!confirm('重新触发主线 '+code+'？'))return;var r=await api('POST','/ops/task/retrigger-completed-main',{villageId:vid(),code:code});after(r,'重新触发主线');}
+async function doReopen(code,direct){if(!confirm(direct?'直接接受 '+code+' 并开始任务？':'将 '+code+' 返回未触发状态，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/reopen-completed',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受':'返回未触发');}
+async function doRetrigger(code,direct){if(!confirm(direct?'直接接受 '+code+' 并开始任务？':'将 '+code+' 重新放回可接取列表？'))return;var r=await api('POST','/ops/task/retrigger-abandoned',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受':'返回可接取');}
+async function doRetriggerMain(code,direct){if(!confirm(direct?'直接接受主线 '+code+' 并开始任务？':'将主线 '+code+' 返回未触发状态？'))return;var r=await api('POST','/ops/task/retrigger-completed-main',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受主线':'返回未触发');}
+async function doUntriggerSide(code){if(!confirm('将 '+code+' 返回未触发状态，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/untrigger-side',{villageId:vid(),code:code});after(r,'返回未触发');}
 async function doUntriggerMain(code){if(!confirm('将进行中的主线 '+code+' 回退为未触发并清理其任务实体？'))return;var r=await api('POST','/ops/task/untrigger-main',{villageId:vid(),code:code});after(r,'回退主线');}
 async function doSubmit(code){var raw=document.querySelector('input.res[data-code="'+code+'"]').value.trim();var res={};raw.split(',').forEach(function(p){var kv=p.split(':');if(kv.length===2)res[kv[0].trim()]=Number(kv[1].trim());});var r=await api('POST','/ops/task/submit',{villageId:vid(),code:code,resources:res});after(r,'上交');}
 async function refreshRandom(){var r=await api('POST','/ops/task/refresh',{villageId:vid()});after(r,'刷新随机');}
@@ -2228,9 +2234,9 @@ async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},toke
  const editable=new Set(['npcName','npcText','replies']);
  function compareNatural(a,b){let aa=String(a??'').match(/\\d+|\\D+/g)||[''],bb=String(b??'').match(/\\d+|\\D+/g)||[''];let n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let x=aa[i],y=bb[i],nx=/^\\d+$/.test(x),ny=/^\\d+$/.test(y);if(nx&&ny){let ux=x.replace(/^0+(?=\\d)/,''),uy=y.replace(/^0+(?=\\d)/,'');if(ux.length!==uy.length)return ux.length-uy.length;if(ux!==uy)return ux<uy?-1:1;if(x.length!==y.length)return x.length-y.length;continue}if(x!==y)return x<y?-1:1}return aa.length-bb.length}
 function compareDialogueCode(a,b){let aa=String(a??'').split('_'),bb=String(b??'').split('_'),n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let order=compareNatural(aa[i],bb[i]);if(order!==0)return order}return aa.length-bb.length}
-function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??''),codeOrder=compareDialogueCode(codeA,codeB);if(codeOrder!==0)return codeOrder;let taskCodeA=String(a.taskCode??''),taskCodeB=String(b.taskCode??''),taskCodeOrder=compareNatural(taskCodeA,taskCodeB);if(taskCodeOrder!==0)return taskCodeOrder;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
+function rowCompare(a,b){let taskCodeA=String(a.taskCode??''),taskCodeB=String(b.taskCode??''),taskCodeOrder=compareNatural(taskCodeA,taskCodeB);if(taskCodeOrder!==0)return taskCodeOrder;let codeA=String(a.code??''),codeB=String(b.code??''),codeOrder=compareDialogueCode(codeA,codeB);if(codeOrder!==0)return codeOrder;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
 function sortRows(){rows.sort(rowCompare)}
-function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code（下划线优先、数字感知）、taskCode 排序，加载 '+rows.length+' 段'}
+function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 taskCode、code（下划线优先、数字感知）、段落号排序，加载 '+rows.length+' 段'}
 function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
 function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';if(r.trigger==='deliver')r.replies='take:收下';rows.push(r);render()}
 function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);if(r.trigger==='deliver')r.replies='take:收下';rows.splice(i+1,0,r);render()}

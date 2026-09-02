@@ -56,7 +56,7 @@ test('绞马索：携带后敌方骑兵防御降低 30%', async () => {
     await send(app, 'combat.Engage', {
       targetKind: 'pve', targetId: 'pve-0', targetXY: { q: 0, r: 0 },
       movementId: withRope ? 'rope-attack' : 'plain-attack', fromVillage: 'v1', fromXY: { q: 0, r: 0 },
-      troops: { legionnaire: 10 }, attackerSnapshot: { legionnaire: melee(10, 40, 35) },
+      troops: { legionnaire: 10 }, attackerSnapshot: { legionnaire: melee(10, 65, 35) },
       treasures: withRope ? ['horse_rope'] : [],
     });
     await drain(app);
@@ -147,7 +147,7 @@ test('PvE 掠夺：金币优先，余下运力平均带回四种资源', async (
     loot: { wood: 100, clay: 100, iron: 100, crop: 100, gold: 3 },
   });
   assert.equal(spawned.ok, true, '测试营地应生成成功');
-  const ended = await engagePve(app, targetId, { legionnaire: melee(2, 40, 35) }, { legionnaire: 2 });
+  const ended = await engagePve(app, targetId, { legionnaire: melee(2, 80, 100) }, { legionnaire: 2 });
   assert.equal(ended.attackerWins, true, '应清空测试营地');
   assert.deepEqual(
     ended.looted,
@@ -164,7 +164,7 @@ test('PvE 失败战斗：幸存守军不能因快照引用被结算重复扣除'
     id: targetId, type: 'tianwang_village', q: 6, r: 6, task: true, ownerVillageId: 'v1',
   });
   assert.equal(spawned.ok, true);
-  // 10 个军团兵对 13 个条顿棍棒兵时，战斗失败但应留下 3 个守军。
+  // 10 个盾墙军团对 13 个掠袭棍兵时，战斗失败但应留下大部分守军。
   const targetState = app.store.get<any>('pve', targetId)!;
   targetState.defender.clubswinger.count = 13;
   app.store.set('pve', targetId, targetState);
@@ -177,15 +177,15 @@ test('PvE 失败战斗：幸存守军不能因快照引用被结算重复扣除'
     targetKind: 'pve', targetId, targetXY: { q: 6, r: 6 },
     movementId: 'pve-defender-snapshot-attack', fromVillage: 'v1', fromXY: { q: 5, r: 6 },
     troops: { legionnaire: 10 },
-    attackerSnapshot: { legionnaire: melee(10, 40.4, 35.35) },
+    attackerSnapshot: { legionnaire: melee(10, 50, 35.35) },
   });
   await drain(app);
 
   assert.equal(ended?.attackerWins, false, '该配置应由守方获胜');
-  assert.deepEqual(ended?.defenderLosses, { clubswinger: 10 }, '战报应记录实际守军损失');
+  assert.deepEqual(ended?.defenderLosses, { clubswinger: 1 }, '战报应记录实际守军损失');
   const after = (await send(app, 'pve.GetTarget', { id: targetId })).payload as any;
   assert.equal(after.cleared, false, '失败战斗不应清空任务村');
-  assert.equal(after.defender.clubswinger.count, 3, '失败战斗后 3 个幸存守军必须保留');
+  assert.equal(after.defender.clubswinger.count, 12, '失败战斗后幸存守军必须保留，不能被重复扣除');
 });
 
 test('战斗：势均力敌打得久、一边倒打得快（tick 数对比）', async () => {

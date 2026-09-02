@@ -62,7 +62,13 @@ function objText(task: any): string {
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
-  if (o.kind === 'dice_match') return o.diceWinsRequired > 1 ? `投骰子三局两胜（目标 ${o.diceTargetScore} 分）` : `投骰子战胜对手（目标 ${o.diceTargetScore} 分）`;
+  if (o.kind === 'reputation_at_least') return `声望值达到 ${o.threshold} 或更高`;
+  if (o.kind === 'dice_match') {
+    const difficulty = o.diceDifficulty === 'hard' ? '困难 NPC' : o.diceDifficulty === 'normal' ? '普通 NPC' : '简单 NPC';
+    return o.diceWinsRequired > 1
+      ? `三局两胜骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`
+      : `骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`;
+  }
   return o.kind;
 }
 
@@ -570,6 +576,16 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           </div>
         </div>
       )}
+      {o.kind === 'reputation_at_least' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${Number(task.progress) >= Number(o.threshold) ? ' done' : ''}`}>
+              当前声望 {fmt(Number(task.progress) || 0)} / 目标 ≥{fmt(Number(o.threshold) || 0)}
+            </span>
+            <span class="task-prog-hint">声望达到目标后即可领取</span>
+          </div>
+        </div>
+      )}
       {o.kind === 'research_completed' && (
         <div class="task-card-obj"><div class="task-card-prog"><span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>已研发 {fmt(Math.min(task.progress ?? 0, o.count ?? 1))}/{fmt(o.count ?? 1)} 项科技</span><span class="task-prog-hint">需要先建造学院</span></div></div>
       )}
@@ -658,7 +674,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'dice_match' && <Btn size="sm" variant="primary" onClick={onDiceStart}>
               {task.code === 's6' && task.diceLastOutcome === 'npc'
                 ? '重新尝试'
-                : task.code === 's7' && ((task.dicePlayerWins ?? 0) + (task.diceNpcWins ?? 0) > 0)
+                : task.code !== 's6' && ((task.dicePlayerWins ?? 0) + (task.diceNpcWins ?? 0) > 0)
                   ? '继续对局'
                   : '开始对局'}
             </Btn>}
@@ -674,6 +690,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
 
 // ── 可接取任务（支线 + 酒馆日常委托）─────────────────────────────────────────
 function OfferCard({ q, onAccept, hideHeader = false }: { q: any; onAccept: (q: any) => void; hideHeader?: boolean }) {
+  const acceptCost: Record<string, number> = q.acceptCost ?? {};
   return (
     <div class="task-offer" key={q.code}>
       <div class="task-offer-info">
@@ -685,6 +702,9 @@ function OfferCard({ q, onAccept, hideHeader = false }: { q: any; onAccept: (q: 
         )}
         <span class="task-offer-desc">{q.desc}</span>
         <span class="task-offer-obj">{objText({ objective: q.objective })}</span>
+        {Object.keys(acceptCost).length > 0 && (
+          <span class="task-offer-obj">接取费用：{Object.entries(acceptCost).map(([key, amount]) => `${resInfo(key).name} ×${fmt(amount)}`).join('、')}</span>
+        )}
         <OutcomeRows rewards={q.rewards} />
       </div>
       <Btn size="sm" variant="primary" onClick={() => onAccept(q)}>接取</Btn>

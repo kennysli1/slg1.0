@@ -131,9 +131,17 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m11.objective.count, 200);
   assert.deepEqual(cfg.quests.m11.rewards.buildingUnlocks, ['alliance_hall', 'council']);
   assert.ok(cfg.questGraph.lines.world_exploration, 'M11 应位于开眼看世界任务线');
+  assert.equal(cfg.questGraph.lines.other_story.entryQuest, 'm13', '另一边的故事入口应为 M13');
   assert.equal(cfg.quests.m12.lineCode, 'world_exploration', 'M12 前置 M11，应归入开眼看世界任务线');
-  assert.equal(cfg.quests.m14.lineCode, 'world_exploration', 'M14 前置 M13，应归入开眼看世界任务线');
-  assert.equal(cfg.quests.m15.lineCode, 'world_exploration', 'M15 前置 M14，应归入开眼看世界任务线');
+  assert.equal(cfg.quests.m13.lineCode, 'other_story', 'M13 应作为另一边的故事入口');
+  assert.equal(cfg.quests.m14.lineCode, 'other_story', 'M14 应归入另一边的故事任务线');
+  assert.equal(cfg.quests.m15.lineCode, 'other_story', 'M15 应归入另一边的故事任务线');
+  assert.equal(cfg.quests.m16.lineCode, 'world_exploration', 'M16 应归入开眼看世界任务线');
+  assert.deepEqual(cfg.quests.m16.requires, ['m12'], 'M16 前置应为 M12');
+  assert.equal(cfg.quests.m16.objective.kind, 'reputation_at_least');
+  assert.equal(cfg.quests.m16.objective.threshold, 10);
+  assert.deepEqual(cfg.quests.m16.rewards.mercenaries, { merc_archer: 10 });
+  assert.ok(cfg.questGraph.edges.some((edge) => edge.fromQuest === 'm12' && edge.toQuest === 'm16' && edge.relation === 'requires'));
   assert.deepEqual(cfg.quests.m14.objective.resources, { crop: 500 });
   assert.deepEqual(cfg.quests.m14.rewards.reputationMercenaryExchange, { unitCode: 'merc_sword', perPoint: 2 });
   assert.equal(cfg.quests.m15.objective.threshold, -5);
@@ -157,6 +165,24 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
   assert.equal(cfg.quests.s1.trigger, 'tavern_refresh', 'S1 应由酒馆任务槽刷新触发');
+  assert.equal(cfg.quests.s7.name, '这下来真的了');
+  assert.deepEqual(cfg.quests.s7.objective, { kind: 'dice_match', count: 2, diceDifficulty: 'easy', diceTargetScore: 2000, diceWinsRequired: 2 });
+  assert.deepEqual(cfg.quests.s7.acceptCost, { gold: 100 });
+  assert.deepEqual(cfg.quests.s7.rewards.resources, { gold: 200 });
+  assert.equal(cfg.quests.s8.name, '有高手');
+  assert.deepEqual(cfg.quests.s8.objective, { kind: 'dice_match', count: 2, diceDifficulty: 'normal', diceTargetScore: 4000, diceWinsRequired: 2 });
+  assert.deepEqual(cfg.quests.s8.acceptCost, { gold: 150 });
+  assert.deepEqual(cfg.quests.s8.rewards.resources, { gold: 300 });
+  assert.ok(cfg.quests.s8.requires.includes('s7'));
+  assert.equal(cfg.quests.s9.name, '巅峰对决');
+  assert.deepEqual(cfg.quests.s9.objective, { kind: 'dice_match', count: 2, diceDifficulty: 'hard', diceTargetScore: 6000, diceWinsRequired: 2 });
+  assert.deepEqual(cfg.quests.s9.acceptCost, { gold: 200 });
+  assert.deepEqual(cfg.quests.s9.rewards.resources, { gold: 400 });
+  assert.deepEqual(cfg.quests.s9.rewards.treasures, ['dice_trophy']);
+  assert.ok(cfg.quests.s9.requires.includes('s8'));
+  assert.equal(cfg.treasures.dice_trophy.reputationValue, 10);
+  assert.equal(cfg.treasures.dice_trophy.priceGold, 600);
+  assert.ok(cfg.questGraph.conditions.some((row) => row.questCode === 's7' && row.kind === 'treasure_used' && row.value === 'dice_tournament_ticket'), 's7 应要求使用骰子入场券');
   for (const code of ['s1', 's2', 's3', 's4']) {
     assert.ok(cfg.dialogues[`${code}_accept:1`], `${code} 应有默认接取对话模板`);
     assert.ok(cfg.dialogues[`${code}_deliver:1`], `${code} 应有默认交付对话模板`);
@@ -305,14 +331,14 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 40);
-  assert.equal(leg.meleeDef, 35);
-  assert.equal(leg.rangedDef, 50);
+  assert.equal(leg.meleeAtk, 80);
+  assert.equal(leg.meleeDef, 45);
+  assert.equal(leg.rangedDef, 40);
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 多特性解析（| 分隔）：禁卫兵引用当前权威 CSV 中的盾牌与重甲特性
-  assert.deepEqual(cfg.units['praetorian'].traits, ['shield', 'heavy_armor']);
+  // 多特性解析（| 分隔）：禁卫兵引用 trait 2(heavy_armor)+9(disciplined)，两个都应生效
+  assert.deepEqual(cfg.units['praetorian'].traits, ['heavy_armor', 'disciplined']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
   assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });

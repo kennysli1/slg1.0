@@ -151,7 +151,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -183,7 +183,7 @@ export interface QuestObjective {
   /** raid_task_village：任务绑定的 PvE 任务村代码（运行时绑定目标实体）。 */
   taskVillageCode?: string;
   /** investigate_task_village：到达并调查任务营地（不发生战斗）。 */
-  /** reputation_at_most：玩家声望值达到 threshold 或更低。 */
+  /** reputation_at_most/reputation_at_least：玩家声望值达到 threshold 的下限或上限。 */
   threshold?: number;
   /** kill_units：累计击杀指定类别的敌方兵力（人口数）；当前支持 cavalry。 */
   unitCategory?: string;
@@ -210,7 +210,7 @@ export interface QuestRewards {
   researchPoints?: number;
   /** 按交付时的正声望兑换无期限佣兵；兑换后声望归零。 */
   reputationMercenaryExchange?: { unitCode: string; perPoint: number };
-  /** 实际结算返回的任务佣兵（不属于静态配置）。 */
+  /** 任务交付时直接加入军队的无期限佣兵（不创建雇佣合同）。 */
   mercenaries?: Record<string, number>;
 }
 
@@ -246,6 +246,8 @@ export interface QuestDef {
   scope: QuestScope;
   /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
   requires: string[];
+  /** 接取任务时一次性支付的资源；为空表示免费。 */
+  acceptCost?: Record<string, number>;
   /** 目标（v1 单目标）。 */
   objective: QuestObjective;
   /** 奖励：资源(含金币)与/或任务专属宝物(强制 locked，不可出售/遗弃/丢失/超时)。 */
@@ -290,6 +292,8 @@ export interface QuestGraphQuestDef {
   desc: string;
   type: QuestType;
   scope: QuestScope;
+  /** 接取任务时一次性支付的资源；来自 quests.csv 的 acceptCost 列。 */
+  acceptCost?: Record<string, number>;
   weight: number;
   repeatable: boolean;
   cooldownSec: number;
@@ -393,6 +397,8 @@ export interface UnitDef {
   simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
+  /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
+  techTier: number;
   /** units.csv 是否显式提供 popCost；缺列/空值时行军按1人口回退并记录警告。 */
   popCostConfigured?: boolean;
   /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买；营地购买的服役期限由 contractSec 管理，任务奖励可直接授予无期限兵力。 */
@@ -480,6 +486,19 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 线上战斗安全上限；达到后按守方守住战场结算，避免极端防御阵容无限运行。 */
+  combatMaxTicks: number;
+  /** 基础战斗价值/人口的参考点；用于映射有效战斗人口。 */
+  combatInfluenceReferenceValue: number;
+  /** 战斗质量指数；>1 放大高质量兵种、压低低质量兵种。 */
+  combatInfluenceQualityExponent: number;
+  combatInfluenceMinQuality: number;
+  combatInfluenceMaxQuality: number;
+  combatValueMeleeAttackWeight: number;
+  combatValueRangedAttackWeight: number;
+  combatValueMeleeDefenseWeight: number;
+  combatValueRangedDefenseWeight: number;
+  combatValueHpWeight: number;
   /** 阶段化战斗模拟器：第三阶段全军近战互殴轮数。 */
   battleSimulatorMeleeRounds: number;
   /** 阶段化战斗模拟器各步骤伤害系数。默认均为 1，便于数值测试时独立调节。 */
@@ -488,6 +507,10 @@ export interface GameConstants {
   battlePhaseCavalryVsRangedCoeff: number;
   battlePhaseRangedStrikeCoeff: number;
   battlePhaseMeleeRoundCoeff: number;
+  /** 阶段化伤害中攻击高于防御时的优势放大系数。 */
+  battlePhaseAdvantageAmplifier: number;
+  /** 阶段模拟器战术窗口结束后，优势方有效战力达到该倍数才判定胜负。 */
+  battlePhaseDecisionRatio: number;
   /** 攻城最终阶段比较浮点数时的相等容差。 */
   battlePhaseCompareEpsilon: number;
   /** 攻城最终阶段胜方至少保留的单位数。 */
@@ -1112,7 +1135,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       // GM 平衡表按 units.csv 的数字 id 保存覆盖；这里必须使用同一主键，
       // 否则覆盖文件存在但重启/删档后会静默回退到 CSV 默认值。
       file: 'units.csv', key: 'id',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost','techTier'],
     }, overrides.units);
   }
   const units: Record<string, UnitDef> = {};
@@ -1130,6 +1153,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
+      techTier: Math.max(1, num(r.techTier, 1)),
     };
   }
 
@@ -1165,6 +1189,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       commandCost: Math.max(1, num(r.commandCost, 1)),
       contractSec: Math.max(1, num(r.contractSec, 259200)),
       mercTier: Math.max(1, num(r.tier, 1)),
+      techTier: Math.max(1, num(r.tier, 1)),
     };
   }
 
@@ -1319,12 +1344,24 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    combatMaxTicks: Math.max(1, Math.floor(cn('combat_max_ticks', 180))),
+    combatInfluenceReferenceValue: Math.max(1, cn('combat_influence_reference_value', 200)),
+    combatInfluenceQualityExponent: Math.max(1, cn('combat_influence_quality_exponent', 1.15)),
+    combatInfluenceMinQuality: Math.max(0, cn('combat_influence_min_quality', 0.65)),
+    combatInfluenceMaxQuality: Math.max(0.01, cn('combat_influence_max_quality', 1.55)),
+    combatValueMeleeAttackWeight: Math.max(0, cn('combat_value_melee_attack_weight', 1)),
+    combatValueRangedAttackWeight: Math.max(0, cn('combat_value_ranged_attack_weight', 1.1)),
+    combatValueMeleeDefenseWeight: Math.max(0, cn('combat_value_melee_defense_weight', 0.85)),
+    combatValueRangedDefenseWeight: Math.max(0, cn('combat_value_ranged_defense_weight', 0.75)),
+    combatValueHpWeight: Math.max(0, cn('combat_value_hp_weight', 0.65)),
     battleSimulatorMeleeRounds: Math.max(1, Math.floor(cn('battle_sim_melee_rounds', 6))),
     battlePhaseCavalryVsCavalryCoeff: Math.max(0, cn('combat_phase_cavalry_vs_cavalry_coeff', 1)),
     battlePhaseCavalryVsMeleeCoeff: Math.max(0, cn('combat_phase_cavalry_vs_melee_coeff', 1)),
     battlePhaseCavalryVsRangedCoeff: Math.max(0, cn('combat_phase_cavalry_vs_ranged_coeff', 1)),
     battlePhaseRangedStrikeCoeff: Math.max(0, cn('combat_phase_ranged_strike_coeff', 1)),
     battlePhaseMeleeRoundCoeff: Math.max(0, cn('combat_phase_melee_round_coeff', 1)),
+    battlePhaseAdvantageAmplifier: Math.max(0, cn('combat_phase_advantage_amplifier', 1.5)),
+    battlePhaseDecisionRatio: Math.max(1, cn('combat_phase_decision_ratio', 1.15)),
     battlePhaseCompareEpsilon: Math.max(0, cn('combat_phase_compare_epsilon', 0.0001)),
     battlePhaseMinSurvivorUnits: Math.max(1, Math.floor(cn('combat_phase_min_survivor_units', 1))),
     ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
@@ -1667,6 +1704,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       id: num(r.id), code, lineCode: r.lineCode?.trim() || '', name: r.name ?? code, desc: r.desc ?? '',
       type: (r.type as QuestType) || 'side',
       scope: ((r.scope?.trim() || ((r.type as QuestType) === 'main' ? 'global' : 'village')) as QuestScope),
+      acceptCost: parseResourceList(r.acceptCost) ?? undefined,
       weight: Math.max(0, num(r.weight, 0)),
       repeatable: num(r.repeatable, 0) === 1, cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
       abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
@@ -1710,7 +1748,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (row.kind === 'raid_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'defend_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'tianwang_village', count: 1 };
     if (row.kind === 'investigate_task_village') return { kind: row.kind, taskVillageCode: row.params.trim() || 'secret_camp', count: 1 };
-    if (row.kind === 'reputation_at_most') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
+    if (row.kind === 'reputation_at_most' || row.kind === 'reputation_at_least') return { kind: row.kind, threshold: num(row.params, 0), count: 1 };
     if (row.kind === 'dice_match') {
       const [difficulty, targetScore, winsRequired] = row.params.split(':');
       const normalized = difficulty === 'normal' || difficulty === 'hard' ? difficulty : 'easy';
@@ -1730,6 +1768,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (!unitCode || !Number.isFinite(perPoint) || perPoint <= 0) return null;
     return { unitCode, perPoint };
   };
+  const parseMercenaryGrant = (s: string): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const part of (s ?? '').split('|')) {
+      const [unitCode, rawCount] = part.split(':').map((value) => value.trim());
+      const count = Math.floor(num(rawCount, 0));
+      if (!unitCode || count <= 0) continue;
+      out[unitCode] = (out[unitCode] ?? 0) + count;
+    }
+    return out;
+  };
   const rewardsOf = (rows: QuestEffectDef[]): QuestRewards => {
     const resourceEffects = rows.filter((x) => x.kind === 'grant_resources').flatMap((x) => Object.entries(parseResourceList(x.params) ?? {}));
     const treasures = rows.filter((x) => x.kind === 'grant_treasure').flatMap((x) => x.params.split('|').map((v) => v.trim()).filter(Boolean));
@@ -1748,6 +1796,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     const reputationMercenaryExchange = rows
       .map((x) => x.kind === 'grant_mercenaries_by_positive_reputation' ? parseReputationMercenaryExchange(x.params) : null)
       .find((value): value is { unitCode: string; perPoint: number } => !!value);
+    const mercenaries = rows
+      .filter((x) => x.kind === 'grant_mercenaries')
+      .reduce((merged, x) => {
+        for (const [unitCode, count] of Object.entries(parseMercenaryGrant(x.params))) {
+          merged[unitCode] = (merged[unitCode] ?? 0) + count;
+        }
+        return merged;
+      }, {} as Record<string, number>);
     const out: QuestRewards = {};
     if (resourceEffects.length) out.resources = Object.fromEntries(resourceEffects);
     if (treasures.length) out.treasures = treasures;
@@ -1758,6 +1814,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     if (resourceGrowth) out.resourceGrowth = resourceGrowth;
     if (buildingUnlocks.length) out.buildingUnlocks = [...new Set(buildingUnlocks)];
     if (reputationMercenaryExchange) out.reputationMercenaryExchange = reputationMercenaryExchange;
+    if (Object.keys(mercenaries).length) out.mercenaries = mercenaries;
     return out;
   };
   const conditionalRewardsOf = (rows: QuestEffectDef[]): QuestConditionalRewards | undefined => {
@@ -1821,6 +1878,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       : undefined;
     quests[def.code] = {
       id: def.id, code: def.code, lineCode: def.lineCode, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
+      acceptCost: def.acceptCost,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       conditionalRewards,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
@@ -2106,6 +2164,18 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.combatMaxTicks <= 0) errors.push(`game_constants.csv combat_max_ticks 必须>0`);
+  if (c.combatInfluenceReferenceValue <= 0) errors.push(`game_constants.csv combat_influence_reference_value 必须>0`);
+  if (c.combatInfluenceQualityExponent < 1) errors.push(`game_constants.csv combat_influence_quality_exponent 必须≥1`);
+  if (c.combatInfluenceMinQuality < 0) errors.push(`game_constants.csv combat_influence_min_quality 必须≥0`);
+  if (c.combatInfluenceMaxQuality < c.combatInfluenceMinQuality) errors.push(`game_constants.csv combat_influence_max_quality 必须≥min_quality`);
+  for (const [key, value] of [
+    ['combat_value_melee_attack_weight', c.combatValueMeleeAttackWeight],
+    ['combat_value_ranged_attack_weight', c.combatValueRangedAttackWeight],
+    ['combat_value_melee_defense_weight', c.combatValueMeleeDefenseWeight],
+    ['combat_value_ranged_defense_weight', c.combatValueRangedDefenseWeight],
+    ['combat_value_hp_weight', c.combatValueHpWeight],
+  ] as const) if (value < 0) errors.push(`game_constants.csv ${key} 必须≥0`);
   if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.forestVisionPenalty < 0) errors.push(`game_constants.csv forest_vision_penalty 必须≥0`);
@@ -2234,7 +2304,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2243,6 +2313,10 @@ export function validateGameConfig(config: GameConfig): void {
     if (q.scope !== 'global' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] scope 必须是 global/village`);
     if (q.type === 'main' && q.scope !== 'global') errors.push(`quests.csv[${q.code}] 主线任务必须是 global`);
     if (q.type === 'daily' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] 日常任务必须是 village`);
+    for (const [resource, amount] of Object.entries(q.acceptCost ?? {})) {
+      if (!resourceKeys.has(resource)) errors.push(`quests.csv[${q.code}] 接取费用资源 ${resource} 不在 resources.csv`);
+      if (!Number.isFinite(amount) || amount < 0) errors.push(`quests.csv[${q.code}] 接取费用 ${resource} 必须≥0`);
+    }
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {
@@ -2288,8 +2362,8 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] defend_task_village 必须指定任务村代码`);
     } else if (q.objective.kind === 'investigate_task_village') {
       if (!q.objective.taskVillageCode) errors.push(`quests.csv[${q.code}] investigate_task_village 必须指定任务村代码`);
-    } else if (q.objective.kind === 'reputation_at_most') {
-      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] reputation_at_most 必须指定数值阈值`);
+    } else if (q.objective.kind === 'reputation_at_most' || q.objective.kind === 'reputation_at_least') {
+      if (!Number.isFinite(q.objective.threshold)) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 必须指定数值阈值`);
     } else if (q.objective.kind === 'dice_match') {
       if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
       if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
@@ -2353,6 +2427,17 @@ export function validateGameConfig(config: GameConfig): void {
       const unit = config.units[unitCode];
       if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 兑换兵种 ${unitCode} 必须是 merc 雇佣兵`);
       if (!Number.isFinite(perPoint) || perPoint <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries_by_positive_reputation 的每点数量必须>0`);
+    }
+    if (row.kind === 'grant_mercenaries') {
+      const parts = row.params.split('|').map((value) => value.trim()).filter(Boolean);
+      if (!parts.length) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries 必须指定兵种与数量`);
+      for (const part of parts) {
+        const [unitCode, rawCount] = part.split(':').map((value) => value.trim());
+        const count = Math.floor(num(rawCount, 0));
+        const unit = config.units[unitCode];
+        if (!unit || !unit.isMercenary) errors.push(`quest_effects.csv[${row.id}] 奖励兵种 ${unitCode} 必须是 merc 雇佣兵`);
+        if (!Number.isFinite(count) || count <= 0) errors.push(`quest_effects.csv[${row.id}] grant_mercenaries 数量必须是正整数`);
+      }
     }
     if (row.kind === 'unlock_buildings') {
       for (const kind of row.params.split('|').map((value) => value.trim()).filter(Boolean)) {

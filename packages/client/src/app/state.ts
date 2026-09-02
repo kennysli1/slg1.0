@@ -7,6 +7,12 @@ import type { ListMovementsPayload, MarchStepPush, Movement } from '@slg/shared'
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
+  /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
+  playerName?: string;
+  reputation?: number;
+  population?: number;
+  mainBaseLevel?: number;
+  mainBaseName?: string;
 }
 
 /** 待领取宝物视图（只有普通 PvE 随机掉落含确认倒计时，任务/送达宝物无期限）。 */

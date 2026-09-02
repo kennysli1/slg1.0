@@ -61,7 +61,7 @@
 | 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
 | 表25 | `dialogues.csv` | **NPC 对话 session 目录** | 调任务触发点、NPC 名称/文本和玩家回复选项 |
 
-`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:2`），用于骰子王任务的独立对局目标。
+`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
@@ -167,6 +167,7 @@
 | traits | 线上战斗特性ID列表（竖线分隔，引用 **unit_traits.csv 的数字 id**，可空） |
 | hp | 阶段化战斗模拟器的单兵生命值伤亡池（只读 CSV 的实验规则） |
 | simTraits | 阶段化战斗模拟器专用特性ID列表；与 `traits` 分开，避免影响线上旧战斗 |
+| techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
 > 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
 
@@ -283,12 +284,22 @@
 | key | 默认 | 作用 |
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
-| battle_sim_melee_rounds | 6 | 模拟器第三阶段全军近战互殴轮数 |
-| combat_phase_cavalry_vs_cavalry_coeff | 1 | 模拟器骑兵对冲伤害系数 |
-| combat_phase_cavalry_vs_melee_coeff | 1 | 模拟器骑兵冲击近战步兵伤害系数 |
-| combat_phase_cavalry_vs_ranged_coeff | 1 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
-| combat_phase_ranged_strike_coeff | 1 | 模拟器远程打击伤害系数（目标用远程防御） |
-| combat_phase_melee_round_coeff | 1 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_strength | 0.15 | 线上每秒战斗强度；配合 200ms tick 将常规镜像战斗控制在约 30 秒 |
+| combat_max_ticks | 180 | 线上战斗安全上限（36 秒）；达到后按守方守住战场 |
+| battle_sim_melee_rounds | 8 | 模拟器第三阶段全军近战互殴战术窗口 |
+| combat_influence_reference_value | 200 | 基础战斗价值/人口的有效战斗人口参考点 |
+| combat_influence_quality_exponent | 1.15 | 有效战斗人口质量指数，放大高质量兵种差异 |
+| combat_influence_min_quality / combat_influence_max_quality | 0.65 / 1.55 | 有效战斗人口质量上下限 |
+| combat_phase_decision_ratio | 1.15 | 战术窗口结束后，优势方有效战力达到 1.15 倍才判定胜负 |
+| combat_value_melee_attack_weight / ranged_attack_weight | 1 / 1.1 | 基础战斗价值中的近战/远程攻击权重 |
+| combat_value_melee_defense_weight / ranged_defense_weight | 0.85 / 0.75 | 基础战斗价值中的近战/远程防御权重 |
+| combat_value_hp_weight | 0.65 | 基础战斗价值中的生命值权重 |
+| combat_phase_cavalry_vs_cavalry_coeff | 0.18 | 模拟器骑兵对冲伤害系数 |
+| combat_phase_cavalry_vs_melee_coeff | 0.25 | 模拟器骑兵冲击近战步兵伤害系数 |
+| combat_phase_cavalry_vs_ranged_coeff | 0.40 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
+| combat_phase_ranged_strike_coeff | 0.25 | 模拟器远程打击伤害系数（目标用远程防御） |
+| combat_phase_melee_round_coeff | 0.30 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_phase_advantage_amplifier | 1.50 | 攻击高于防御时的优势放大系数；攻击低于防御时不额外放大 |
 | combat_phase_compare_epsilon | 0.0001 | 模拟器攻城最终阶段判断数值相等的容差 |
 | combat_phase_min_survivor_units | 1 | 模拟器攻城最终阶段胜方至少保留单位数 |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
@@ -456,6 +467,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | scope | `global` 或 `village`；主线必须为 `global`，日常必须为 `village`，支线按任务设计配置 |
 | weight | 日常任务在酒馆槽中的加权抽取权重；主线/支线填 0（酒馆支线由每槽概率先决定是否进入支线池） |
 | repeatable / cooldownSec / abandonCooldownSec | 可重复、交付后冷却和放弃后冷却 |
+| acceptCost | 接取时支付的资源，格式为 `resource:数量`，多项用 `\|` 分隔；只在点击“接受任务”时扣除，打开或关闭对话不会扣除 |
 
 ### quest_conditions.csv — 条件
 | 列 | 含义 |
@@ -470,8 +482,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_most`（声望达到阈值或更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
-| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，其他格式按 `任务模块.md` 说明 |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果
@@ -481,7 +493,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / questCode | 稳定效果 ID / 所属任务 |
 | phase | `accept` / `success` / `failure` / `deliver`；可把奖励与分支放在各自阶段 |
-| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；`grant_resource_growth` 使用 `percent:durationSec` 作用于四种资源，或 `resource:percent:durationSec` 指定单一资源（如 `crop:25:86400`）；`grant_mercenaries_by_positive_reputation` 使用 `merc_sword:2`，交付时将正声望归零并按每点发放无期限佣兵；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
+| kind / params | 效果类型与参数，例如 `grant_resources` / `gold:100`、`grant_treasure` / `warrior_token`；`grant_population` 使用正整数人口（如 `5`）；`grant_population_growth` 使用 `percent:durationSec`（如 `10:86400`，表示人口增长速率 +10% 持续24小时）；`grant_resource_growth` 使用 `percent:durationSec` 作用于四种资源，或 `resource:percent:durationSec` 指定单一资源（如 `crop:25:86400`）；`grant_mercenaries` 使用 `merc_archer:10|merc_sword:5`，交付时直接加入无期限佣兵；`grant_mercenaries_by_positive_reputation` 使用 `merc_sword:2`，交付时将正声望归零并按每点发放无期限佣兵；M9 可用 `grant_population_m8_success` 与 `grant_treasure_m8_failure` 按 M8 结局选择奖励 |
 | order | 同阶段的执行顺序 |
 
 ### quest_edges.csv — 关系边

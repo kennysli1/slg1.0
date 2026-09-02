@@ -235,7 +235,7 @@ test('M8 旧任务村的过量初始库存在重启恢复时迁移到 CSV 默认
   const migrated = app.store.get<any>('pve', targetId)!;
   assert.deepEqual(migrated.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
   assert.equal(migrated.defender.clubswinger.count, 15, '旧 club 守军应迁移为条顿 clubswinger');
-  assert.equal(migrated.defender.clubswinger.meleeAtk, 45, '迁移后的守军应使用条顿棍棒兵攻击力');
+  assert.equal(migrated.defender.clubswinger.meleeAtk, 90, '迁移后的守军应使用新版条顿棍棒兵攻击力');
   assert.equal(migrated.defender.club, undefined, '存档不应继续保留旧 club 标签');
   assert.equal(migrated.taskVillageLootInitialized, true);
 });
@@ -344,6 +344,44 @@ test('GM 可重新触发已完成主线，或将进行中主线回退为未触�
   const after = untrigger.payload as any;
   assert.equal(after.active.find((item: any) => item.code === 'm2'), undefined);
   assert.ok(!after.offeredMain.some((item: any) => item.code === 'm2'));
+});
+
+test('GM 重新触发可选择直接接受并跳过可接取列表', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-direct-accept');
+  app.store.set('task', va, baseState(va, {}));
+  const state = app.store.get<any>('task', va)!;
+  state.completedMain = ['m2'];
+  app.store.set('task', va, state);
+
+  const retrigger = await send(app, 'task.GmRetriggerCompletedMain', { villageId: va, code: 'm2', directAccept: true });
+  assert.equal(retrigger.ok, true, `直接接受应成功: ${retrigger.reason ?? ''}`);
+  const after = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(after.active.some((item: any) => item.code === 'm2'), '直接接受后任务应在进行中');
+  assert.ok(!after.offeredMain.some((item: any) => item.code === 'm2'), '直接接受后不应停留在可接取列表');
+});
+
+test('GM 可将已放弃支线返回未触发，或直接接受', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-side-state');
+  app.store.set('task', va, baseState(va, {}));
+  const state = app.store.get<any>('task', va)!;
+  state.abandonedSide = ['s4'];
+  state.firedTriggers = ['secret_note_used'];
+  app.store.set('task', va, state);
+
+  const reset = await send(app, 'task.GmUntriggerSide', { villageId: va, code: 's4' });
+  assert.equal(reset.ok, true, `支线返回未触发应成功: ${reset.reason ?? ''}`);
+  const resetState = app.store.get<any>('task', va)!;
+  assert.deepEqual(resetState.abandonedSide, []);
+  assert.ok(!resetState.firedTriggers.includes('secret_note_used'));
+
+  resetState.completedSide = ['s4'];
+  app.store.set('task', va, resetState);
+  const accepted = await send(app, 'task.GmReopenCompleted', { villageId: va, code: 's4', directAccept: true });
+  assert.equal(accepted.ok, true, `支线直接接受应成功: ${accepted.reason ?? ''}`);
+  const after = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(after.active.some((item: any) => item.code === 's4'), '直接接受后支线应在进行中');
 });
 
 test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与库存', async () => {
