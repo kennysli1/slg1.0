@@ -71,3 +71,18 @@ test('联盟：大厅修复完成后通过 Repaired 事件自动重连', async (
   assert.equal((snapshot.payload as any).alliance.level, 1);
   assert.equal((snapshot.payload as any).alliance.buildings.alliance_warehouse, 2, '已建建筑目录应保留，供成员按等级重新修复');
 });
+
+test('联盟：受损大厅空壳仍出现在建造清单中供盟主重建', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  const leader = (await send(app, 'player.Register', { name: '重建入口盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const building = app.store.get<any>('building', leader.player.villageId)!;
+  const hall = building.placed.find((p: any) => p.kind === 'alliance_hall');
+  hall.level = 0;
+  hall.repairTargetLevel = 1;
+  app.store.set('building', leader.player.villageId, building);
+  const options = await send(app, 'building.GetBuildOptions', { villageId: leader.player.villageId, zone: 'inner' });
+  const allianceHall = (options.payload as any).options.find((x: any) => x.kind === 'alliance_hall');
+  assert.ok(allianceHall, '受损大厅应保留重建入口');
+  assert.equal(allianceHall.builtCount, 0);
+});
