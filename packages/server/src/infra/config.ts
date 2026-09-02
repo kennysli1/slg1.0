@@ -744,6 +744,8 @@ export interface GameConstants {
   allianceWarCombatMult: number;
   allianceTechProbabilityBonus: number;
   allianceAmbassadorReputationBonus: number;
+  /** 联盟建筑建造与联盟科技研发的默认耗时（秒）。 */
+  allianceProjectDurationSec: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -1570,6 +1572,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     allianceWarCombatMult: Math.max(0, cn('alliance_war_combat_mult', 0.1)),
     allianceTechProbabilityBonus: Math.max(0, cn('alliance_tech_probability_bonus', 0.1)),
     allianceAmbassadorReputationBonus: Math.max(0, cn('alliance_ambassador_reputation_bonus', 1)),
+    allianceProjectDurationSec: Math.max(1, Math.floor(cn('alliance_project_duration_sec', 10))),
     raw,
   };
 

@@ -921,6 +921,7 @@ var ALLIANCE_ROWS = [
   ['alliance_war_combat_mult','战争专家军队攻防加成','战争专家所有村庄军队的攻防倍率'],
   ['alliance_tech_probability_bonus','首席科技官科技点概率加成','首席科技官所有村庄的科技点获得概率'],
   ['alliance_ambassador_reputation_bonus','形象大使声望额外加成','形象大使每次获得声望时额外增加的点数'],
+  ['alliance_project_duration_sec','联盟建筑/科技耗时','联盟建筑建造与联盟科技研发耗时（秒）'],
 ];
 
 function sectionAlliance(){

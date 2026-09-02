@@ -231,6 +231,7 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /联盟参数/, 'GM 页面应提供联盟专用参数板块');
     assert.match(res.body, /alliance_create_wood/, 'GM 页面应提供联盟创建成本参数');
     assert.match(res.body, /alliance_logistics_resource_mult/, 'GM 页面应提供联盟职位加成参数');
+    assert.match(res.body, /alliance_project_duration_sec/, 'GM 页面应提供联盟建筑/科技耗时参数');
     assert.match(res.body, /联盟等级与成员上限/, 'GM 页面应靠前显示联盟等级目录');
     assert.match(res.body, /联盟建筑目录/, 'GM 页面应靠前显示联盟建筑目录');
     assert.match(res.body, /联盟科技目录/, 'GM 页面应靠前显示联盟科技目录');
