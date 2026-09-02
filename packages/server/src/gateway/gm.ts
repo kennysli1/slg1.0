@@ -456,7 +456,7 @@ function renderStatus(d){latest=d;let state=d.syncState||'idle';let labels={idle
 async function loadStatus(){try{renderStatus(await request('/config/status'))}catch(e){document.getElementById('state').textContent='状态读取失败：'+e.message;document.getElementById('state').className='sync-state bad'}}
 async function syncNow(){try{renderStatus(await request('/config/sync',{method:'POST'}));}catch(e){document.getElementById('state').textContent='同步失败：'+e.message;document.getElementById('state').className='sync-state bad';loadStatus()}}
 function setResolution(file,source){let card=document.querySelector('[data-file="'+CSS.escape(file)+'"]');if(!card||!conflictData)return;let entry=conflictData.files.find(x=>x.file===file);let area=card.querySelector('textarea');area.value=source==='authority'?entry.authority:source==='main'?entry.main:entry.branch;area.dataset.source=source}
-function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select onchange="setResolution(\''+esc(entry.file).replace(/'/g,"\\'")+'\',this.value)"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');document.getElementById('conflicts').classList.remove('hidden')}
+function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
 async function loadConflicts(){try{renderConflicts(await request('/config/sync/conflicts'))}catch(e){document.getElementById('resolve-status').textContent='冲突读取失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}}
 async function resolveConflicts(){if(!conflictData||!latest?.pullRequest)return;let button=document.getElementById('resolve');button.disabled=true;document.getElementById('resolve-status').textContent='提交并校验中…';try{let files=[...document.querySelectorAll('.conflict')].map(function(card){return {file:card.dataset.file,content:card.querySelector('textarea').value}});let d=await request('/config/sync/resolve',{method:'POST',body:JSON.stringify({expectedHeadSha:latest.pullRequest.headSha,files})});renderStatus(d);document.getElementById('resolve-status').textContent=d.syncState==='conflict'?'仍需处理冲突':'已提交解决版本，等待 PR 检查';}catch(e){document.getElementById('resolve-status').textContent='提交失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}finally{button.disabled=false}}
 loadStatus();
@@ -1777,10 +1777,11 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.post('/gm/ops/task/abandon', (req, reply) => taskOp(req, reply, 'task.Abandon', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/submit', (req, reply) => taskOp(req, reply, 'task.SubmitResources', (b) => ({ villageId: b.villageId, code: b.code, resources: b.resources ?? {} })));
   fastify.post('/gm/ops/task/complete', (req, reply) => taskOp(req, reply, 'task.GmComplete', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/reopen-completed', (req, reply) => taskOp(req, reply, 'task.GmReopenCompleted', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/retrigger-completed-main', (req, reply) => taskOp(req, reply, 'task.GmRetriggerCompletedMain', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/reopen-completed', (req, reply) => taskOp(req, reply, 'task.GmReopenCompleted', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
+  fastify.post('/gm/ops/task/retrigger-completed-main', (req, reply) => taskOp(req, reply, 'task.GmRetriggerCompletedMain', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
   fastify.post('/gm/ops/task/untrigger-main', (req, reply) => taskOp(req, reply, 'task.GmUntriggerMain', (b) => ({ villageId: b.villageId, code: b.code })));
-  fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code })));
+  fastify.post('/gm/ops/task/retrigger-abandoned', (req, reply) => taskOp(req, reply, 'task.GmRetriggerAbandoned', (b) => ({ villageId: b.villageId, code: b.code, directAccept: b.directAccept === true })));
+  fastify.post('/gm/ops/task/untrigger-side', (req, reply) => taskOp(req, reply, 'task.GmUntriggerSide', (b) => ({ villageId: b.villageId, code: b.code })));
   fastify.post('/gm/ops/task/refresh', (req, reply) => taskOp(req, reply, 'task.GmRefreshRandom', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset', (req, reply) => taskOp(req, reply, 'task.GmReset', (b) => ({ villageId: b.villageId })));
   fastify.post('/gm/ops/task/reset-all', (req, reply) => taskOp(req, reply, 'task.GmResetAll', () => ({})));
@@ -2169,18 +2170,18 @@ function render(s){
   }
   h+='<h2>已完成主线</h2>';
   for(var cm=0;cm<(s.completedMain||[]).length;cm++){var mc=s.completedMain[cm];
-    h+='<div class="card">'+esc(mc)+' <button class="act" data-act="retrigger-main" data-code="'+esc(mc)+'">重新触发</button></div>';
+    h+='<div class="card">'+esc(mc)+' <button class="act" data-act="retrigger-main" data-code="'+esc(mc)+'">返回未触发</button><button class="act" data-act="retrigger-main-accept" data-code="'+esc(mc)+'">直接接受</button></div>';
   }
   if(!(s.completedMain||[]).length)h+='<div class="card">无</div>';
   h+='<h2>已完成支线</h2>';
   for(var k=0;k<(s.completedSide||[]).length;k++){var sc=s.completedSide[k];
-    h+='<div class="card">'+esc(sc)+' <button class="act" data-act="reopen" data-code="'+esc(sc)+'">标记未完成（重新触发）</button></div>';
+    h+='<div class="card">'+esc(sc)+' <button class="act" data-act="reopen" data-code="'+esc(sc)+'">返回未触发</button><button class="act" data-act="reopen-accept" data-code="'+esc(sc)+'">直接接受</button></div>';
   }
   if(!(s.completedSide||[]).length)h+='<div class="card">无</div>';
   h+='<h2>已放弃支线</h2>';
   if((s.abandonedSide||[]).length){
     for(var m=0;m<(s.abandonedSide||[]).length;m++){var ab=s.abandonedSide[m];
-      h+='<div class="card">'+esc(ab)+' <button class="act" data-act="retrigger" data-code="'+esc(ab)+'">重新触发</button></div>';
+      h+='<div class="card">'+esc(ab)+' <button class="act" data-act="untrigger-side" data-code="'+esc(ab)+'">返回未触发</button><button class="act" data-act="retrigger-accept" data-code="'+esc(ab)+'">直接接受</button></div>';
     }
   } else { h+='<div class="card">无</div>'; }
   document.getElementById('content').innerHTML=h;
@@ -2193,16 +2194,21 @@ document.addEventListener('click',function(e){
   else if(act==='accept')doAccept(code);
   else if(act==='submit')doSubmit(code);
   else if(act==='reopen')doReopen(code);
+  else if(act==='reopen-accept')doReopen(code,true);
   else if(act==='retrigger')doRetrigger(code);
+  else if(act==='retrigger-accept')doRetrigger(code,true);
+  else if(act==='untrigger-side')doUntriggerSide(code);
   else if(act==='retrigger-main')doRetriggerMain(code);
+  else if(act==='retrigger-main-accept')doRetriggerMain(code,true);
   else if(act==='untrigger-main')doUntriggerMain(code);
 });
 async function doComplete(code){var r=await api('POST','/ops/task/complete',{villageId:vid(),code:code});after(r,'完成');}
 async function doAbandon(code){var r=await api('POST','/ops/task/abandon',{villageId:vid(),code:code});after(r,'放弃');}
 async function doAccept(code){var r=await api('POST','/ops/task/accept',{villageId:vid(),code:code});after(r,'接取');}
-async function doReopen(code){if(!confirm('标记 '+code+' 为未完成后，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/reopen-completed',{villageId:vid(),code:code});after(r,'标记未完成');}
-async function doRetrigger(code){if(!confirm('重新触发 '+code+'？该支线将从「已放弃」移出并重新进入可接取列表。'))return;var r=await api('POST','/ops/task/retrigger-abandoned',{villageId:vid(),code:code});after(r,'重新触发');}
-async function doRetriggerMain(code){if(!confirm('重新触发主线 '+code+'？'))return;var r=await api('POST','/ops/task/retrigger-completed-main',{villageId:vid(),code:code});after(r,'重新触发主线');}
+async function doReopen(code,direct){if(!confirm(direct?'直接接受 '+code+' 并开始任务？':'将 '+code+' 返回未触发状态，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/reopen-completed',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受':'返回未触发');}
+async function doRetrigger(code,direct){if(!confirm(direct?'直接接受 '+code+' 并开始任务？':'将 '+code+' 重新放回可接取列表？'))return;var r=await api('POST','/ops/task/retrigger-abandoned',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受':'返回可接取');}
+async function doRetriggerMain(code,direct){if(!confirm(direct?'直接接受主线 '+code+' 并开始任务？':'将主线 '+code+' 返回未触发状态？'))return;var r=await api('POST','/ops/task/retrigger-completed-main',{villageId:vid(),code:code,directAccept:direct===true});after(r,direct?'直接接受主线':'返回未触发');}
+async function doUntriggerSide(code){if(!confirm('将 '+code+' 返回未触发状态，必须再次满足触发条件才能接取。继续？'))return;var r=await api('POST','/ops/task/untrigger-side',{villageId:vid(),code:code});after(r,'返回未触发');}
 async function doUntriggerMain(code){if(!confirm('将进行中的主线 '+code+' 回退为未触发并清理其任务实体？'))return;var r=await api('POST','/ops/task/untrigger-main',{villageId:vid(),code:code});after(r,'回退主线');}
 async function doSubmit(code){var raw=document.querySelector('input.res[data-code="'+code+'"]').value.trim();var res={};raw.split(',').forEach(function(p){var kv=p.split(':');if(kv.length===2)res[kv[0].trim()]=Number(kv[1].trim());});var r=await api('POST','/ops/task/submit',{villageId:vid(),code:code,resources:res});after(r,'上交');}
 async function refreshRandom(){var r=await api('POST','/ops/task/refresh',{villageId:vid()});after(r,'刷新随机');}

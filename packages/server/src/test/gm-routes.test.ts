@@ -280,6 +280,9 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     assert.match(center.body, /需要确认的配置冲突/);
     assert.match(center.body, /\/config\/sync\/conflicts/);
     assert.match(center.body, /确认全部文件并更新 PR/);
+    const centerScript = center.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(centerScript, '配置中心首页应包含初始化脚本');
+    assert.doesNotThrow(() => new Function(centerScript), '配置中心首页脚本必须是合法 JavaScript');
     const page = await fastify.inject({ method: 'GET', url: '/config/quest-modules' });
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /\/config\/quest-modules\/data/);
@@ -530,6 +533,9 @@ test('/gm/tasks 使用任务 code 而不是 active 数组下标', async () => {
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Function(script), '任务管理脚本必须是合法 JavaScript');
+    assert.match(page.body, /retrigger-main-accept/, '已完成主线应提供直接接受操作');
+    assert.match(page.body, /reopen-accept/, '已完成支线应提供直接接受操作');
+    assert.match(page.body, /untrigger-side/, '已放弃支线应提供返回未触发操作');
     await fastify.close();
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;

@@ -346,6 +346,44 @@ test('GM 可重新触发已完成主线，或将进行中主线回退为未触�
   assert.ok(!after.offeredMain.some((item: any) => item.code === 'm2'));
 });
 
+test('GM 重新触发可选择直接接受并跳过可接取列表', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-direct-accept');
+  app.store.set('task', va, baseState(va, {}));
+  const state = app.store.get<any>('task', va)!;
+  state.completedMain = ['m2'];
+  app.store.set('task', va, state);
+
+  const retrigger = await send(app, 'task.GmRetriggerCompletedMain', { villageId: va, code: 'm2', directAccept: true });
+  assert.equal(retrigger.ok, true, `直接接受应成功: ${retrigger.reason ?? ''}`);
+  const after = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(after.active.some((item: any) => item.code === 'm2'), '直接接受后任务应在进行中');
+  assert.ok(!after.offeredMain.some((item: any) => item.code === 'm2'), '直接接受后不应停留在可接取列表');
+});
+
+test('GM 可将已放弃支线返回未触发，或直接接受', async () => {
+  const app = freshApp();
+  const va = await reg(app, 'gm-side-state');
+  app.store.set('task', va, baseState(va, {}));
+  const state = app.store.get<any>('task', va)!;
+  state.abandonedSide = ['s4'];
+  state.firedTriggers = ['secret_note_used'];
+  app.store.set('task', va, state);
+
+  const reset = await send(app, 'task.GmUntriggerSide', { villageId: va, code: 's4' });
+  assert.equal(reset.ok, true, `支线返回未触发应成功: ${reset.reason ?? ''}`);
+  const resetState = app.store.get<any>('task', va)!;
+  assert.deepEqual(resetState.abandonedSide, []);
+  assert.ok(!resetState.firedTriggers.includes('secret_note_used'));
+
+  resetState.completedSide = ['s4'];
+  app.store.set('task', va, resetState);
+  const accepted = await send(app, 'task.GmReopenCompleted', { villageId: va, code: 's4', directAccept: true });
+  assert.equal(accepted.ok, true, `支线直接接受应成功: ${accepted.reason ?? ''}`);
+  const after = (await send(app, 'task.GetState', { villageId: va })).payload as any;
+  assert.ok(after.active.some((item: any) => item.code === 's4'), '直接接受后支线应在进行中');
+});
+
 test('GM 重新触发 M8 会清理上一轮任务村并按模板重建守军与库存', async () => {
   const app = freshApp();
   const va = await reg(app, 'gm-m8-retrigger');

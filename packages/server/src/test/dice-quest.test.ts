@@ -12,16 +12,19 @@ async function register(app: GameApp, name: string): Promise<string> {
   return (result.payload as any).player.villageId as string;
 }
 
-async function activate(app: GameApp, villageId: string, code: 's6' | 's7'): Promise<void> {
+type DiceTaskCode = 's6' | 's7' | 's8';
+
+async function activate(app: GameApp, villageId: string, code: DiceTaskCode): Promise<void> {
   const state = app.store.get<any>('task', villageId)!;
   if (code === 's6') state.offeredSide = ['s6'];
-  else { state.completedSide = ['s6']; state.offeredSide = ['s7']; }
+  else if (code === 's7') { state.completedSide = ['s6']; state.offeredSide = ['s7']; }
+  else { state.completedSide = ['s6', 's7']; state.offeredSide = ['s8']; }
   app.store.set('task', villageId, state);
   const accepted = await send(app, 'task.Accept', { villageId, code });
   assert.equal(accepted.ok, true, accepted.reason);
 }
 
-async function winOneRound(app: GameApp, villageId: string, code: 's6' | 's7'): Promise<any> {
+async function winOneRound(app: GameApp, villageId: string, code: DiceTaskCode): Promise<any> {
   const started = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: code });
   assert.equal(started.ok, true, started.reason);
   const sessionId = (started.payload as any).sessionId;
@@ -33,6 +36,11 @@ async function winOneRound(app: GameApp, villageId: string, code: 's6' | 's7'): 
   const exited = await send(app, 'diceQuest.ExitMatch', { villageId, sessionId });
   assert.equal(exited.ok, true, exited.reason);
   return banked.payload;
+}
+
+async function fundGold(app: GameApp, villageId: string, amount = 1000): Promise<void> {
+  const granted = await send(app, 'economy.Grant', { villageId, gain: { gold: amount } });
+  assert.equal(granted.ok, true, granted.reason);
 }
 
 test('骰子王：s6 胜利后任务待领取，失败记录后可再次开始', async () => {
@@ -78,10 +86,30 @@ test('骰子王：刷新/掉线后重新 StartMatch 会丢弃旧内存 session �
   await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: (second.payload as any).sessionId });
 });
 
+test('骰子王：牌桌动作按开桌身份归属，切换当前村后仍能记录放弃局', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-switch');
+  await fundGold(app, villageId);
+  await activate(app, villageId, 's7');
+  const playerId = 'dice-switch-player';
+  const started = await send(app, 'diceQuest.StartMatch', { villageId, playerId, taskCode: 's7' });
+  assert.equal(started.ok, true, started.reason);
+  const sessionId = (started.payload as any).sessionId;
+  const lost = await send(app, 'diceQuest.Action', {
+    villageId: 'another-current-village', playerId, sessionId, type: 'forfeit',
+  });
+  assert.equal(lost.ok, true, lost.reason);
+  assert.equal((lost.payload as any).round.npcWins, 1);
+  const state = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(state.active.find((item: any) => item.code === 's7')?.diceNpcWins, 1);
+});
+
 test('骰子王：s7 支付入场费并累计两场胜利后可领取', async () => {
   const app = createGameApp({ manualScheduler: true, rng: () => 0 });
   app.setupWorld();
   const villageId = await register(app, 'dice-s7');
+  await fundGold(app, villageId);
   const resourcesBefore = (await send(app, 'economy.GetResources', { villageId })).payload as any;
   await activate(app, villageId, 's7');
   const first = await winOneRound(app, villageId, 's7');
@@ -89,9 +117,110 @@ test('骰子王：s7 支付入场费并累计两场胜利后可领取', async ()
   const second = await winOneRound(app, villageId, 's7');
   assert.deepEqual(second.match, { playerWins: 2, npcWins: 0, winsRequired: 2 });
   const resourcesAfter = (await send(app, 'economy.GetResources', { villageId })).payload as any;
-  assert.equal(Number(resourcesBefore.resources.gold) - Number(resourcesAfter.resources.gold), 100);
+  assert.equal(Number(resourcesBefore.resources.gold) - Number(resourcesAfter.resources.gold), 150);
   const state = (await send(app, 'task.GetState', { villageId })).payload as any;
   assert.equal(state.active.find((item: any) => item.code === 's7')?.ready, true);
+});
+
+test('骰子王：s7 放弃局数持久化，第二次放弃后任务直接失败', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-s7-forfeit');
+  await fundGold(app, villageId);
+  await activate(app, villageId, 's7');
+
+  const first = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's7' });
+  assert.equal(first.ok, true, first.reason);
+  const firstSessionId = (first.payload as any).sessionId;
+  const firstLost = await send(app, 'diceQuest.Action', { villageId, sessionId: firstSessionId, type: 'forfeit' });
+  assert.equal(firstLost.ok, true, firstLost.reason);
+  assert.deepEqual((firstLost.payload as any).round, {
+    code: 's7', winner: 'npc', playerWins: 0, npcWins: 1, winsRequired: 2,
+    outcome: null, ready: false, failureReady: false,
+  });
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: firstSessionId })).ok, true);
+
+  const resumed = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's7' });
+  assert.equal(resumed.ok, true, resumed.reason);
+  assert.deepEqual((resumed.payload as any).match, { playerWins: 0, npcWins: 1, winsRequired: 2 });
+  const secondSessionId = (resumed.payload as any).sessionId;
+  const secondLost = await send(app, 'diceQuest.Action', { villageId, sessionId: secondSessionId, type: 'forfeit' });
+  assert.equal(secondLost.ok, true, secondLost.reason);
+  assert.deepEqual((secondLost.payload as any).round, {
+    code: 's7', winner: 'npc', playerWins: 0, npcWins: 2, winsRequired: 2,
+    outcome: 'npc', ready: false, failureReady: true,
+  });
+  const task = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(task.active.find((item: any) => item.code === 's7')?.failureReady, true);
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: secondSessionId })).ok, true);
+});
+
+test('骰子王：s8 使用困难 NPC/6000 分规则，胜利发放400金币和骰子奖杯', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-s8');
+  await fundGold(app, villageId);
+  const before = (await send(app, 'economy.GetResources', { villageId })).payload as any;
+  await activate(app, villageId, 's8');
+  const started = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's8' });
+  assert.equal(started.ok, true, started.reason);
+  assert.equal((started.payload as any).state.targetScore, 6000);
+  assert.deepEqual((started.payload as any).match, { playerWins: 0, npcWins: 0, winsRequired: 2 });
+  await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: (started.payload as any).sessionId });
+  await winOneRound(app, villageId, 's8');
+  const second = await winOneRound(app, villageId, 's8');
+  assert.deepEqual(second.match, { playerWins: 2, npcWins: 0, winsRequired: 2 });
+  const ready = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(ready.active.find((item: any) => item.code === 's8')?.ready, true);
+  const delivered = await send(app, 'task.Deliver', { villageId, code: 's8' });
+  assert.equal(delivered.ok, true, delivered.reason);
+  assert.deepEqual((delivered.payload as any).rewards.resources, { gold: 400 });
+  assert.deepEqual((delivered.payload as any).rewards.treasures, ['dice_trophy']);
+  const after = (await send(app, 'economy.GetResources', { villageId })).payload as any;
+  assert.equal(Number(after.resources.gold) - Number(before.resources.gold), 200, '净金币应为奖励400减接取费200');
+  const treasures = (await send(app, 'treasure.List', { villageId })).payload as any;
+  assert.ok((treasures.codes ?? []).includes('dice_trophy'), '交付后应将骰子奖杯放入宝物栏');
+});
+
+test('骰子王：s8 连续放弃两局后进入失败确认且不发失败奖励', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-s8-forfeit');
+  await fundGold(app, villageId);
+  await activate(app, villageId, 's8');
+  for (let i = 0; i < 2; i++) {
+    const started = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's8' });
+    assert.equal(started.ok, true, started.reason);
+    const lost = await send(app, 'diceQuest.Action', { villageId, sessionId: (started.payload as any).sessionId, type: 'forfeit' });
+    assert.equal(lost.ok, true, lost.reason);
+    await send(app, 'diceQuest.ExitMatch', { villageId, sessionId: (started.payload as any).sessionId });
+  }
+  const failed = (await send(app, 'task.GetState', { villageId })).payload as any;
+  const task = failed.active.find((item: any) => item.code === 's8');
+  assert.equal(task.failureReady, true);
+  assert.equal(task.rewards.failure?.resources, null, 's8 没有失败资源奖励');
+  assert.deepEqual(task.rewards.failure?.treasures, [], 's8 没有失败宝物奖励');
+  const confirmed = await send(app, 'task.Fail', { villageId, code: 's8' });
+  assert.equal(confirmed.ok, true, confirmed.reason);
+  assert.equal((confirmed.payload as any).dialogue?.code, 's8_deliver_failure', '失败确认应返回失败对话');
+  const failureRewards = (confirmed.payload as any).rewards;
+  assert.equal(failureRewards.resources, null);
+  assert.deepEqual(failureRewards.treasures, []);
+  assert.equal(failureRewards.gold, undefined);
+  assert.equal((await send(app, 'task.GetState', { villageId })).payload.active.some((item: any) => item.code === 's8'), false);
+});
+
+test('骰子王：重复退出已清理牌桌视为成功', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'dice-exit');
+  await activate(app, villageId, 's6');
+  const started = await send(app, 'diceQuest.StartMatch', { villageId, taskCode: 's6' });
+  const sessionId = (started.payload as any).sessionId;
+  assert.equal((await send(app, 'diceQuest.ExitMatch', { villageId, sessionId })).ok, true);
+  const repeated = await send(app, 'diceQuest.ExitMatch', { villageId, sessionId });
+  assert.equal(repeated.ok, true, repeated.reason);
+  assert.equal((repeated.payload as any).alreadyClosed, true);
 });
 
 test('骰子王：入场券使用后解锁 s7，且普通骰子的一和五可与同点数组合叠加', async () => {
@@ -111,4 +240,27 @@ test('骰子王：入场券使用后解锁 s7，且普通骰子的一和五可�
   const { legalOptions } = await import('../infra/dice-quest-engine.js');
   const dice = [1, 5, 2, 2, 2].map((value, index) => ({ id: String(index), value }));
   assert.ok(legalOptions(dice).some((option) => option.score === 350 && option.dieIds.length === 5));
+});
+
+test('骰子王：使用入场券按 t2/use 触发已配置对话', async () => {
+  const app = createGameApp({ manualScheduler: true, rng: () => 0 });
+  app.setupWorld();
+  const villageId = await register(app, 'ticket-dlg');
+  const dialogueDef = app.config.dialogues['dice_tournament_ticket_use:1'];
+  assert.ok(dialogueDef, '入场券使用对话模板必须存在');
+  assert.equal(dialogueDef.taskCode, 't2');
+  assert.equal(dialogueDef.trigger, 'use');
+  // 默认模板允许在配置中心留空；这里填入内容验证“有内容时”端到端返回 session。
+  dialogueDef.npcName = '骰子裁判';
+  dialogueDef.npcText = '入场券已生效。';
+
+  const granted = await send(app, 'treasure.Grant', { villageId, code: 'dice_tournament_ticket' });
+  assert.equal(granted.ok, true, granted.reason);
+  const used = await send(app, 'treasure.Use', { villageId, code: 'dice_tournament_ticket', location: 'town' });
+  assert.equal(used.ok, true, used.reason);
+  const dialogue = (used.payload as any).dialogue;
+  assert.equal(dialogue.code, 'dice_tournament_ticket_use');
+  assert.equal(dialogue.taskCode, 't2');
+  assert.equal(dialogue.trigger, 'use');
+  assert.equal(dialogue.npcText, '入场券已生效。');
 });

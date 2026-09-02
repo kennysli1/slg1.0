@@ -1174,5 +1174,13 @@
     "mode": "panel",
     "size": 1600,
     "subject": "a wide blank antique-gold and dark iron scoreboard plaque with a dark slate center, symmetrical ornamental frame, subtle fantasy medieval metalwork, transparent background, no text, no symbols"
+  },
+  {
+    "base": "trs_dice_trophy",
+    "zh": "骰子奖杯",
+    "category": "treasure",
+    "mode": "icon",
+    "size": 256,
+    "subject": "an ornate antique-gold trophy cup for a medieval dice champion, two curved handles, a small ivory six-sided die emblem on the bowl, dark bronze base, three-quarter top-down game UI icon, transparent background, no text, no numbers"
   }
 ]

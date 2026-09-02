@@ -16,9 +16,15 @@
 .dice-quest-round-label { color: var(--c-gold); font-size: var(--f-lg); font-weight: 700; }
 .dice-quest-turn-score { position: absolute; right: var(--s-5); top: var(--s-5); color: var(--c-ink-soft); }
 .dice-quest-turn-score b { color: var(--c-gold); font: 700 var(--f-xl) var(--ff-num); }
-.dice-quest-reserved { min-height: 26px; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.dice-quest-breakdown { min-height: 104px; padding: var(--s-3); border: 1px solid rgba(216,177,104,.24); border-radius: var(--r-sm); background: rgba(216,177,104,.06); }
+.dice-quest-breakdown-heading { display: flex; justify-content: space-between; gap: var(--s-3); color: var(--c-ink-soft); font-size: var(--f-sm); }
+.dice-quest-breakdown-heading strong { color: var(--c-gold); }
+.dice-quest-breakdown small { display: block; margin-top: var(--s-2); color: var(--c-ink-soft); }
+.dice-quest-breakdown ul { display: flex; flex-wrap: wrap; gap: var(--s-2); list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.dice-quest-breakdown li { display: inline-flex; align-items: center; gap: var(--s-2); padding: 5px 8px; color: var(--c-ink); background: rgba(7,20,25,.42); border: 1px solid rgba(109,133,143,.32); border-radius: var(--r-sm); font-size: var(--f-sm); }
+.dice-quest-breakdown li b { color: var(--c-gold); }
 .dice-quest-dice { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--s-3); min-height: 180px; padding: var(--s-4); border-radius: var(--r-md); background: rgba(7,20,25,.46); }
-.dice-quest-die { position: relative; width: 76px; height: 76px; padding: 0; border: 2px solid #e0c276; border-radius: 12px; color: #30271c; background: #cda967 url('/art/ui_dice_quest_die.webp') center / cover no-repeat; box-shadow: 0 4px 12px rgba(0,0,0,.22); cursor: pointer; }
+.dice-quest-die { position: relative; width: 76px; height: 76px; padding: 0; border: 2px solid #e0c276; border-radius: 12px; color: #30271c; background: #cda967 url('/art/ui_dice_quest_die.webp') center / cover no-repeat; box-shadow: 0 4px 12px rgba(0,0,0,.22); cursor: pointer; animation: dice-quest-settle .18s ease-out; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .dice-quest-die:hover:not(:disabled), .dice-quest-die.is-selected { transform: translateY(-4px); border-color: #fff1a9; box-shadow: 0 0 0 3px rgba(226,184,82,.35), 0 7px 14px rgba(0,0,0,.25); }
 .dice-quest-die:disabled { cursor: default; opacity: .96; }
 .dice-quest-die span:not(.dice-quest-die-art) { position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%); min-width: 30px; color: var(--c-gold); font-size: 10px; white-space: nowrap; }
@@ -27,13 +33,31 @@
 .dice-quest-pip-0 { grid-area: 1 / 1; } .dice-quest-pip-1 { grid-area: 1 / 2; } .dice-quest-pip-2 { grid-area: 1 / 3; }
 .dice-quest-pip-3 { grid-area: 2 / 1; } .dice-quest-pip-4 { grid-area: 2 / 2; } .dice-quest-pip-5 { grid-area: 2 / 3; }
 .dice-quest-pip-6 { grid-area: 3 / 1; } .dice-quest-pip-7 { grid-area: 3 / 2; } .dice-quest-pip-8 { grid-area: 3 / 3; }
+.dice-quest-selection-readout { display: flex; align-items: center; gap: var(--s-3); min-height: 48px; padding: var(--s-3); border-left: 3px solid var(--c-gold); background: rgba(216,177,104,.08); }
+.dice-quest-selection-readout span { color: var(--c-ink-soft); font-size: var(--f-sm); }
+.dice-quest-selection-readout strong { color: var(--c-gold-hi); }
+.dice-quest-selection-readout small { margin-left: auto; color: var(--c-ink-soft); }
+.dice-quest-selection-readout.is-ai { border-left-color: #4e9bd2; background: rgba(43,112,164,.12); }
+.dice-quest-selection-readout.is-ai strong { color: #9cd2ff; }
 .dice-quest-bust-text, .dice-quest-result { padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); text-align: center; font-weight: 700; }
 .dice-quest-result { display: flex; flex-direction: column; gap: 3px; }
 .dice-quest-bust-text { color: #ffd1d1; background: rgba(154,45,45,.6); }
 .dice-quest-result.is-win { color: #ffe6a6; background: rgba(95,122,56,.65); }
 .dice-quest-result.is-loss { color: #ffd1d1; background: rgba(154,45,45,.65); }
 .dice-quest-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--s-3); }
+.dice-quest-history-actions { display: flex; justify-content: flex-end; }
+.dice-quest-history { max-height: 260px; overflow-y: auto; padding: var(--s-3); border: 1px solid var(--c-line); border-radius: var(--r-md); background: rgba(7,20,25,.42); }
+.dice-quest-history-heading { display: flex; justify-content: space-between; gap: var(--s-3); color: var(--c-gold); font-size: var(--f-sm); }
+.dice-quest-history-heading span { color: var(--c-ink-soft); }
+.dice-quest-history ol { display: flex; flex-direction: column; gap: 6px; list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.dice-quest-history li { display: flex; gap: var(--s-2); padding: 7px 8px; color: var(--c-ink-soft); font-size: var(--f-sm); line-height: 1.4; border-left: 2px solid var(--c-line); background: rgba(8,15,19,.35); }
+.dice-quest-history li b { min-width: 30px; color: var(--c-gold); }
+.dice-quest-history li.is-ai { border-left-color: #4e9bd2; }
+.dice-quest-history li.is-ai b { color: #9cd2ff; }
+.dice-quest-rules-foot { padding-top: var(--s-2); color: var(--c-ink-soft); text-align: center; font-size: var(--f-xs); line-height: 1.6; }
 .dice-quest-loading { min-width: 360px; padding: var(--s-6); color: var(--c-ink-soft); text-align: center; }
+@keyframes dice-quest-settle { from { opacity: .72; transform: translateY(-3px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .dice-quest-die { animation: none; transition: none; } }
 @media (max-width: 720px) {
   .dice-quest-shell { min-width: 0; }
   .dice-quest-table { min-height: 320px; padding: var(--s-3); }
@@ -41,4 +65,6 @@
   .dice-quest-die-art { padding: 10px; }
   .dice-quest-pip { width: 10px; height: 10px; }
   .dice-quest-turn-score { position: static; }
+  .dice-quest-selection-readout { align-items: flex-start; flex-wrap: wrap; }
+  .dice-quest-selection-readout small { width: 100%; margin-left: 0; }
 }

@@ -139,6 +139,7 @@ export class TasksModule {
     this.commands.register('task.GmReset', (c: Command) => this.gmReset(c));
     this.commands.register('task.GmResetAll', (c: Command) => this.gmResetAll(c));
     this.commands.register('task.GmRetriggerAbandoned', (c: Command) => this.gmRetriggerAbandoned(c));
+    this.commands.register('task.GmUntriggerSide', (c: Command) => this.gmUntriggerSide(c));
 
     // 酒馆建造/升级/拆除 → 重排随机刷新节奏 + 接取上限
     const onTavern = (evt: DomainEvent) => {
@@ -554,12 +555,12 @@ export class TasksModule {
     if (!('q' in check)) return check;
     const { q, storageVillageId, s } = check;
 
-    // S7 接取时一次性支付入场费。StartAccept 只读预览，因此费用不会因
+    // 接取费用由 quests.csv 的 acceptCost 配置。StartAccept 只读预览，因此费用不会因
     // 打开对话或关闭对话而扣除；只有玩家明确点击“接受任务”才结算。
-    if (code === 's7') {
+    if (q.acceptCost && Object.keys(q.acceptCost).length > 0) {
       const paid = await this.commands.send({
         name: 'economy.TrySpend', from: TasksModule.NAME,
-        payload: { villageId, cost: { gold: 100 } },
+        payload: { villageId, cost: q.acceptCost },
       });
       if (!paid.ok) return paid;
     }
@@ -1716,7 +1717,7 @@ export class TasksModule {
 
   /** 把已完成的一次性支线恢复为未完成，并要求再次满足触发条件才可接取。 */
   private async gmReopenCompleted(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -1730,6 +1731,10 @@ export class TasksModule {
     // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
     if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
+    if (directAccept === true) {
+      await this.activateQuest(villageId, code);
+      return { ok: true, payload: await this.snapshotForVillage(villageId) };
+    }
     await this.pushList(villageId);
     await this.pushMap(villageId);
     // 没有触发条件的支线可立刻重新出现；有触发条件的由下一次领域事件解锁。
@@ -1739,7 +1744,7 @@ export class TasksModule {
 
   /** ③ 把已放弃的支线任务恢复为可接取：移出 abandonedSide 并清空触发/冷却，重新进入可接取列表。 */
   private async gmRetriggerAbandoned(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -1747,13 +1752,38 @@ export class TasksModule {
     const s = this.stateForQuest(villageId, code);
     if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
     s.abandonedSide = s.abandonedSide.filter((c) => c !== code);
-    // 重新触发：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
+    // 普通“重新触发”：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
     // （与 gmReopenCompleted 相反：那里是已完成→需世界事件重新触发，故移除触发标记；
     //   这里是已放弃→GM 强制重新出现，故补回触发标记。）
-    if (q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
+    if (directAccept !== true && q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
     if (s.cooldownUntil) delete s.cooldownUntil[code];
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
+    if (directAccept === true) {
+      await this.activateQuest(villageId, code);
+      return { ok: true, payload: await this.snapshotForVillage(villageId) };
+    }
     await this.unlockSideQuests(villageId);
+    return { ok: true, payload: await this.snapshotForVillage(villageId) };
+  }
+
+  /** 已放弃支线回到未触发：清理可接取项与触发标记，等待真实事件再次触发。 */
+  private async gmUntriggerSide(cmd: Command): Promise<CommandResult> {
+    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const q = this.quest(code);
+    if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
+    if (q.type !== 'side') return { ok: false, payload: {}, reason: 'only_side_supported' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const s = this.ensureState(storageVillageId);
+    if (!s.abandonedSide.includes(code)) return { ok: false, payload: {}, reason: 'not_abandoned' };
+    s.abandonedSide = s.abandonedSide.filter((item) => item !== code);
+    s.offered = s.offered.filter((item) => item !== code);
+    s.offeredSide = s.offeredSide.filter((item) => item !== code);
+    if (q.trigger) s.firedTriggers = s.firedTriggers.filter((item) => item !== q.trigger);
+    if (s.cooldownUntil) delete s.cooldownUntil[code];
+    this.store.set(COLLECTION, storageVillageId, s);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
     return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
@@ -2489,7 +2519,7 @@ export class TasksModule {
 
   /** 已完成主线重新置为可接取；M1 遵循其自动激活规则。 */
   private async gmRetriggerCompletedMain(cmd: Command): Promise<CommandResult> {
-    const { villageId, code } = cmd.payload as { villageId: string; code: string };
+    const { villageId, code, directAccept } = cmd.payload as { villageId: string; code: string; directAccept?: boolean };
     if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
     const q = this.quest(code);
     if (!q) return { ok: false, payload: {}, reason: 'unknown_quest' };
@@ -2510,6 +2540,8 @@ export class TasksModule {
     s.offeredMain = s.offeredMain.filter((item) => item !== code);
     this.store.set(COLLECTION, storageVillageId, s);
     if (code === 'm1') {
+      await this.activateQuest(villageId, code);
+    } else if (directAccept === true) {
       await this.activateQuest(villageId, code);
     } else {
       s.offeredMain.push(code);
@@ -2975,7 +3007,7 @@ export class TasksModule {
     return { ok: true, payload: { reset: true } };
   }
 
-  /** 骰子一局结束后原子推进 s6/s7，所有“待领取/失败”状态仍由 task owner 决定。 */
+  /** 骰子一局结束后原子推进 s6/s7/s8，所有“待领取/失败”状态仍由 task owner 决定。 */
   private async recordDiceRound(cmd: Command): Promise<CommandResult> {
     const { villageId, code, winner } = cmd.payload as { villageId?: string; code?: string; winner?: 'player' | 'npc' };
     if (!villageId || !code || (winner !== 'player' && winner !== 'npc')) return { ok: false, payload: {}, reason: 'invalid_dice_round' };
@@ -2998,7 +3030,7 @@ export class TasksModule {
       await this.markReady(villageId, code);
     } else if (inst.diceNpcWins >= needed) {
       outcome = 'npc';
-      if (code === 's7') {
+      if (code === 's7' || code === 's8') {
         inst.outcome = 'failure';
         inst.failureReady = true;
         inst.readyToDeliver = false;
@@ -3192,6 +3224,7 @@ export class TasksModule {
       type: q.type,
       scope: q.scope,
       objective: this.serializeObjective(q),
+      acceptCost: q.acceptCost ?? null,
       rewards: this.serializeRewards(q),
       trigger: q.trigger ?? null,
     };
@@ -3236,6 +3269,7 @@ export class TasksModule {
       name: q?.name ?? inst.code,
       desc: q?.desc ?? '',
       objective,
+      acceptCost: q?.acceptCost ?? null,
       rewards: q ? this.serializeRewards(q) : null,
       submitted: { ...inst.submitted },
       repairedBuildings: [...(inst.repairedBuildings ?? [])],

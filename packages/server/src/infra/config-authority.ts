@@ -109,6 +109,8 @@ interface GithubPullResponse {
   number: number;
   html_url: string;
   state: string;
+  /** GitHub returns `state: closed` for both merged and closed PRs. */
+  merged_at?: string | null;
   draft: boolean;
   mergeable: boolean | null;
   mergeable_state: string | null;
@@ -591,7 +593,11 @@ export class ConfigAuthority {
     const result: ConfigPullRequestStatus = {
       number,
       url: pr.html_url,
-      state: pr.state,
+      // The pulls API reports a merged PR as `closed` and exposes the actual
+      // outcome through `merged_at`. Preserve our public MERGED state so the
+      // config center does not leave successfully merged syncs stuck at
+      // “PR 检查中”.
+      state: pr.merged_at ? 'MERGED' : pr.state,
       draft: Boolean(pr.draft),
       mergeable: pr.mergeable,
       mergeStateStatus: pr.mergeable_state,

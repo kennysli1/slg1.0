@@ -12,8 +12,10 @@ import { applyDiceAction, createDiceState, legalOptions, type DiceAction, type D
 
 interface Session {
   id: string;
+  /** 牌桌创建者；后续动作不能因切换当前村庄而丢失牌桌。 */
+  playerId?: string;
   villageId: string;
-  taskCode: 's6' | 's7';
+  taskCode: 's6' | 's7' | 's8';
   winsRequired: number;
   playerWins: number;
   npcWins: number;
@@ -41,8 +43,8 @@ export class DiceQuestModule {
   }
 
   private async startMatch(cmd: Command): Promise<CommandResult> {
-    const { villageId, taskCode } = cmd.payload as { villageId?: string; taskCode?: string };
-    if (!villageId || (taskCode !== 's6' && taskCode !== 's7')) return { ok: false, payload: {}, reason: 'invalid_dice_task' };
+    const { villageId, taskCode, playerId } = cmd.payload as { villageId?: string; taskCode?: string; playerId?: string };
+    if (!villageId || (taskCode !== 's6' && taskCode !== 's7' && taskCode !== 's8')) return { ok: false, payload: {}, reason: 'invalid_dice_task' };
     // 对局不做断线续接：刷新页面或重新建立连接时，新的 StartMatch 直接
     // 丢弃旧的内存 session，从当前任务胜场快照重新开桌。这样不会因旧
     // session 留在服务端而把玩家永久挡在“已有对局”错误上。
@@ -62,6 +64,7 @@ export class DiceQuestModule {
     }
     const session: Session = {
       id: `dice-task-${taskCode}-${Math.floor(this.now())}-${++this.nextSessionId}`,
+      playerId,
       villageId,
       taskCode,
       winsRequired: Math.max(1, Number(p.winsRequired) || 1),
@@ -75,16 +78,18 @@ export class DiceQuestModule {
   }
 
   private getMatch(cmd: Command): CommandResult {
-    const { villageId, sessionId } = cmd.payload as { villageId?: string; sessionId?: string };
+    const { villageId, sessionId, playerId } = cmd.payload as { villageId?: string; sessionId?: string; playerId?: string };
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
-    if (!session || session.villageId !== villageId) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
+    // Gateway 会继续注入当前操作村来保持请求串行，但牌桌归属是开桌时的村庄。
+    // 已鉴权的 playerId 是更可靠的身份；切村后读取同一牌桌不应被当前村覆盖。
+    if (!session || (playerId && session.playerId !== playerId) || (!playerId && villageId && session.villageId !== villageId)) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
     return { ok: true, payload: this.snapshot(session) };
   }
 
   private async action(cmd: Command): Promise<CommandResult> {
-    const { villageId, sessionId, type, selectedDieIds } = cmd.payload as { villageId?: string; sessionId?: string; type?: string; selectedDieIds?: string[] };
+    const { villageId, sessionId, playerId, type, selectedDieIds } = cmd.payload as { villageId?: string; sessionId?: string; playerId?: string; type?: string; selectedDieIds?: string[] };
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
-    if (!session || session.villageId !== villageId) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
+    if (!session || (playerId && session.playerId !== playerId) || (!playerId && villageId && session.villageId !== villageId)) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
     if (type !== 'roll' && type !== 'bank' && type !== 'forfeit') return { ok: false, payload: {}, reason: 'invalid_dice_action' };
     const action: DiceAction = { type, selectedDieIds } as DiceAction;
     const result = applyDiceAction(session.state, action, this.rng);
@@ -93,7 +98,9 @@ export class DiceQuestModule {
     if (session.state.phase === 'finished' && session.state.winner) {
       const recorded = await this.commands.send({
         name: 'task.RecordDiceRound', from: DiceQuestModule.NAME,
-        payload: { villageId, code: session.taskCode, winner: session.state.winner === 'player' ? 'player' : 'npc' },
+        // 进度始终写回开桌时的任务村；玩家在牌桌期间切换当前操作村
+        // 不应改变骰子任务的归属。
+        payload: { villageId: session.villageId, code: session.taskCode, winner: session.state.winner === 'player' ? 'player' : 'npc' },
       });
       if (!recorded.ok) return recorded;
       round = recorded.payload;
@@ -104,9 +111,13 @@ export class DiceQuestModule {
   }
 
   private exitMatch(cmd: Command): CommandResult {
-    const { villageId, sessionId } = cmd.payload as { villageId?: string; sessionId?: string };
+    const { villageId, sessionId, playerId } = cmd.payload as { villageId?: string; sessionId?: string; playerId?: string };
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
-    if (!session || session.villageId !== villageId) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
+    // 退出是幂等清理：用户关闭弹窗、刷新页面或旧弹窗在重新开桌后
+    // 可能重复发送同一个 sessionId。此时牌桌已经不存在，仍视为退出成功，
+    // 避免把正常的关闭动作显示成 dice_session_not_found。
+    if (!session) return { ok: true, payload: { sessionId, alreadyClosed: true } };
+    if ((playerId && session.playerId !== playerId) || (!playerId && villageId && session.villageId !== villageId)) return { ok: false, payload: {}, reason: 'dice_session_not_found' };
     this.sessions.delete(session.id);
     return { ok: true, payload: { sessionId: session.id } };
   }

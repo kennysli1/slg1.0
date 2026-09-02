@@ -32,7 +32,7 @@ test('猎马人支线与绞马索宝物配置已接入任务图', () => {
   assert.ok(hunter, '应存在猎马人支线');
   assert.equal(hunter?.type, 'side');
   assert.equal(hunter?.trigger, 'tavern_refresh');
-  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 50 });
+  assert.deepEqual(hunter?.objective, { kind: 'kill_units', unitCategory: 'cavalry', count: 8 });
   assert.deepEqual(hunter?.rewards.treasures, ['horse_rope']);
   assert.equal(cfg.treasures.horse_rope.effectType, 'enemyCavalryDef');
   assert.equal(cfg.treasures.horse_rope.effectValue, 30);
@@ -157,6 +157,19 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.deepEqual(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'store')?.rewards.treasures, ['captured_natalies']);
   assert.equal(cfg.quests.s4.choiceRewards?.find((x) => x.key === 'release')?.rewards.reputation, 2);
   assert.equal(cfg.quests.s1.trigger, 'tavern_refresh', 'S1 应由酒馆任务槽刷新触发');
+  assert.equal(cfg.quests.s7.name, '有高手');
+  assert.deepEqual(cfg.quests.s7.objective, { kind: 'dice_match', count: 2, diceDifficulty: 'normal', diceTargetScore: 4000, diceWinsRequired: 2 });
+  assert.deepEqual(cfg.quests.s7.acceptCost, { gold: 150 });
+  assert.deepEqual(cfg.quests.s7.rewards.resources, { gold: 300 });
+  assert.equal(cfg.quests.s8.name, '巅峰对决');
+  assert.deepEqual(cfg.quests.s8.objective, { kind: 'dice_match', count: 2, diceDifficulty: 'hard', diceTargetScore: 6000, diceWinsRequired: 2 });
+  assert.deepEqual(cfg.quests.s8.acceptCost, { gold: 200 });
+  assert.deepEqual(cfg.quests.s8.rewards.resources, { gold: 400 });
+  assert.deepEqual(cfg.quests.s8.rewards.treasures, ['dice_trophy']);
+  assert.ok(cfg.quests.s8.requires.includes('s7'));
+  assert.equal(cfg.treasures.dice_trophy.reputationValue, 10);
+  assert.equal(cfg.treasures.dice_trophy.priceGold, 600);
+  assert.equal(cfg.questGraph.conditions.some((row) => row.questCode === 's7' && row.kind === 'treasure_used'), false, 's7 应仅以前置 s6 解锁');
   for (const code of ['s1', 's2', 's3', 's4']) {
     assert.ok(cfg.dialogues[`${code}_accept:1`], `${code} 应有默认接取对话模板`);
     assert.ok(cfg.dialogues[`${code}_deliver:1`], `${code} 应有默认交付对话模板`);

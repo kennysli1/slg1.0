@@ -480,15 +480,15 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
     publicActions: {
       // 主游戏骰子任务使用独立的临时 session，不访问骰子实验场 HTTP 服务。
       'dice.StartMatch': {
-        command: 'diceQuest.StartMatch', ownVillage: true, needAuth: true,
-        schema: { taskCode: { type: 'enum', values: ['s6', 's7'] } },
+        command: 'diceQuest.StartMatch', ownVillage: true, injectPlayerId: true, needAuth: true,
+        schema: { taskCode: { type: 'enum', values: ['s6', 's7', 's8'] } },
       },
       'dice.GetMatch': {
-        command: 'diceQuest.GetMatch', ownVillage: true, needAuth: true,
+        command: 'diceQuest.GetMatch', ownVillage: true, injectPlayerId: true, needAuth: true,
         schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
       },
       'dice.Action': {
-        command: 'diceQuest.Action', ownVillage: true, needAuth: true,
+        command: 'diceQuest.Action', ownVillage: true, injectPlayerId: true, needAuth: true,
         schema: {
           sessionId: { type: 'string', minLen: 1, maxLen: 160 },
           type: { type: 'enum', values: ['roll', 'bank', 'forfeit'] },
@@ -496,7 +496,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         },
       },
       'dice.ExitMatch': {
-        command: 'diceQuest.ExitMatch', ownVillage: true, needAuth: true,
+        command: 'diceQuest.ExitMatch', ownVillage: true, injectPlayerId: true, needAuth: true,
         schema: { sessionId: { type: 'string', minLen: 1, maxLen: 160 } },
       },
     },

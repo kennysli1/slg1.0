@@ -318,6 +318,8 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
   let branchSha = 'branch-sha';
   let mergeable = false;
   let mergeState = 'dirty';
+  let pullState = 'open';
+  let mergedAt: string | null = null;
   let commitParents: string[] = [];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -331,7 +333,8 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
       return send(200, {
         number: 7,
         html_url: 'https://github.com/owner/repo/pull/7',
-        state: 'open',
+        state: pullState,
+        merged_at: mergedAt,
         draft: false,
         mergeable,
         mergeable_state: mergeState,
@@ -394,6 +397,15 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
     assert.equal(resolved.pullRequest?.headSha, 'resolved-sha');
     assert.equal(resolved.syncState, 'checking');
     assert.deepEqual(commitParents, ['branch-sha', 'main-sha']);
+
+    // GitHub's pulls API reports merged PRs as `closed` and uses `merged_at`
+    // to distinguish them from an ordinary closed PR.  The config center
+    // must expose the merged state instead of showing “PR 检查中” forever.
+    pullState = 'closed';
+    mergedAt = new Date().toISOString();
+    const merged = await authority.inspectStatus();
+    assert.equal(merged.pullRequest?.state, 'MERGED');
+    assert.equal(merged.syncState, 'merged');
     authority.close();
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
