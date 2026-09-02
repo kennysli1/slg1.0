@@ -30,6 +30,19 @@ import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScree
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 
+describe('军队面板折叠区顺序', () => {
+  it('防御掠夺位于训练下方、解散上方，并使用与解散相同的折叠控件', () => {
+    const source = readFileSync(new URL('../features/army/ArmyScreen.tsx', import.meta.url), 'utf8');
+    const training = source.indexOf('<TrainingCenterSection />');
+    const raidDefense = source.indexOf('<RaidDefenseSection army={army} />');
+    const disband = source.indexOf('<DisbandSection army={army} />');
+    assert.ok(training >= 0 && raidDefense > training && disband > raidDefense);
+    assert.match(source, /<details class="army-collapsible-details raid-defense-details">/);
+    assert.match(source, /<details class="army-collapsible-details disband-details">/);
+    assert.match(source, /<summary class="section-head section-head--toggle">[\s\S]*?防御掠夺/);
+  });
+});
+
 describe('骰子任务逐帧回放', () => {
   const base = (): DiceQuestReplayBase => ({
     playerScore: 200,
