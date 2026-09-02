@@ -167,6 +167,7 @@
 | traits | 线上战斗特性ID列表（竖线分隔，引用 **unit_traits.csv 的数字 id**，可空） |
 | hp | 阶段化战斗模拟器的单兵生命值伤亡池（只读 CSV 的实验规则） |
 | simTraits | 阶段化战斗模拟器专用特性ID列表；与 `traits` 分开，避免影响线上旧战斗 |
+| techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
 > 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
 
@@ -283,10 +284,13 @@
 | key | 默认 | 作用 |
 |-----|------|------|
 | wall_bonus_per_level | 0.03 | 城墙每级防御加成（+3%/级） |
-| battle_sim_melee_rounds | 6 | 模拟器第三阶段全军近战互殴轮数 |
+| combat_strength | 0.15 | 线上每秒战斗强度；配合 200ms tick 将常规镜像战斗控制在约 30 秒 |
+| combat_max_ticks | 180 | 线上战斗安全上限（36 秒）；达到后按守方守住战场 |
+| battle_sim_melee_rounds | 8 | 模拟器第三阶段全军近战互殴战术窗口 |
 | combat_influence_reference_value | 200 | 基础战斗价值/人口的有效战斗人口参考点 |
 | combat_influence_quality_exponent | 1.15 | 有效战斗人口质量指数，放大高质量兵种差异 |
 | combat_influence_min_quality / combat_influence_max_quality | 0.65 / 1.55 | 有效战斗人口质量上下限 |
+| combat_phase_decision_ratio | 1.15 | 战术窗口结束后，优势方有效战力达到 1.15 倍才判定胜负 |
 | combat_value_melee_attack_weight / ranged_attack_weight | 1 / 1.1 | 基础战斗价值中的近战/远程攻击权重 |
 | combat_value_melee_defense_weight / ranged_defense_weight | 0.85 / 0.75 | 基础战斗价值中的近战/远程防御权重 |
 | combat_value_hp_weight | 0.65 | 基础战斗价值中的生命值权重 |

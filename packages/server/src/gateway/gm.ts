@@ -648,7 +648,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   units: {
     file: 'units.csv', key: 'id',
-    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost'],
+    numeric: ['meleeAtk', 'rangedAtk', 'meleeDef', 'rangedDef', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
     text: ['simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },

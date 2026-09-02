@@ -84,6 +84,8 @@ interface SideState {
   input: SimulatorSideInput;
   tech: Required<SimulatorTechModifiers>;
   treasure: TreasureModifiers;
+  /** 阶段伤亡的未满一人部分，跨步骤累积，避免每轮向上取整放大战斗时长。 */
+  pendingLosses: number;
   /** 伏击模式的进攻方全攻击倍率；其它模式为 0。 */
   modeAttackPct: number;
 }
@@ -142,7 +144,8 @@ export interface BattleSimulationReport {
     meleeRounds: number;
     damageCoefficients: { cavalryVsCavalry: number; cavalryVsMelee: number; cavalryVsRanged: number; rangedStrike: number; meleeRound: number };
     traitStacking: 'additive';
-    lossRounding: 'ceil';
+    lossRounding: 'accumulate';
+    decisionRatio: number;
     minSurvivorUnits: number;
     wallBonusPerLevel: number;
   };
@@ -159,6 +162,7 @@ interface CatalogUnit {
   rangedDef: number;
   hp: number;
   popCost: number;
+  techTier: number;
   traits: { code: string; name: string; effects: { effect: TraitEffect; value: number }[] }[];
   isCavalry: boolean;
   isScout: boolean;
@@ -183,6 +187,10 @@ function cloneCounts(side: SideState): Record<string, number> {
 
 function totalCount(side: SideState): number {
   return side.stacks.reduce((sum, stack) => sum + Math.max(0, stack.count), 0);
+}
+
+function effectiveInfluence(side: SideState): number {
+  return side.stacks.reduce((sum, stack) => sum + Math.max(0, stack.count) * stack.influencePerUnit, 0);
 }
 
 function hasForm(side: SideState, form: UnitForm, includeCavalry = true): boolean {
@@ -279,6 +287,7 @@ function unitCatalog(config: GameConfig): CatalogUnit[] {
       meleeAtk: unit.meleeAtk, rangedAtk: unit.rangedAtk, meleeDef: unit.meleeDef, rangedDef: unit.rangedDef,
       hp: Math.max(1, unit.hp),
       popCost: Math.max(0, unit.popCost),
+      techTier: Math.max(1, unit.techTier),
       traits: [...unit.traits, ...(unit.simTraits ?? [])].map((code) => config.unitTraits[code]).filter(Boolean).map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
       isCavalry: config.constants.cavalryUnitCodes.includes(unit.key), isScout: isScoutCode(unit.key), source: unit.isMercenary ? 'merc' : 'unit',
     });
@@ -294,6 +303,7 @@ function unitCatalog(config: GameConfig): CatalogUnit[] {
         meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef,
         hp: Math.max(1, def.hp ?? 100),
         popCost: Math.max(0, config.units[code]?.popCost ?? 1),
+        techTier: Math.max(1, config.units[code]?.techTier ?? 1),
         traits: (def.traitCodes ?? []).map((traitCode) => config.unitTraits[traitCode]).filter(Boolean).map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
         isCavalry: config.constants.cavalryUnitCodes.includes(code), isScout: isScoutCode(code), source: 'npc',
       });
@@ -318,7 +328,7 @@ function makeSide(config: GameConfig, input: SimulatorSideInput, catalog: Map<st
       traits: unit.traits.map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
     });
   }
-  return { stacks, input, tech: buildTechModifiers(config, input), treasure: buildTreasureModifiers(config, input.treasures), modeAttackPct: 0 };
+  return { stacks, input, tech: buildTechModifiers(config, input), treasure: buildTreasureModifiers(config, input.treasures), pendingLosses: 0, modeAttackPct: 0 };
 }
 
 function traitAssignments(source: SideState, target: SideState, sourceSide: 'attacker' | 'defender', targetSide: 'attacker' | 'defender', rng: () => number): TraitAssignment[] {
@@ -439,11 +449,19 @@ function effectiveHealth(stacks: SimStack[], stats: Map<string, StatSet>, predic
   }, 0);
 }
 
-function distributeLosses(stacks: SimStack[], lossRatio: number, rng: () => number, predicate: (stack: SimStack) => boolean): number {
+interface LossDistribution {
+  assigned: number;
+  pending: number;
+}
+
+function distributeLosses(stacks: SimStack[], lossRatio: number, rng: () => number, predicate: (stack: SimStack) => boolean, pending = 0): LossDistribution {
   const targets = stacks.filter((stack) => stack.count > 0 && predicate(stack));
   const total = targets.reduce((sum, stack) => sum + stack.count, 0);
-  if (total <= 0 || lossRatio <= 0) return 0;
-  const wanted = Math.min(total, Math.ceil(total * Math.min(1, lossRatio)));
+  if (total <= 0 || lossRatio <= 0) return { assigned: 0, pending: 0 };
+  const exactWanted = total * Math.min(1, lossRatio) + Math.max(0, pending);
+  const wanted = Math.min(total, Math.floor(exactWanted + 1e-9));
+  const nextPending = wanted >= total ? 0 : Math.max(0, exactWanted - wanted);
+  if (wanted <= 0) return { assigned: 0, pending: nextPending };
   const losses = new Map<SimStack, number>();
   let assigned = 0;
   const remainders: { stack: SimStack; remainder: number }[] = [];
@@ -459,7 +477,7 @@ function distributeLosses(stacks: SimStack[], lossRatio: number, rng: () => numb
     if (current < row.stack.count) { losses.set(row.stack, current + 1); assigned += 1; }
   }
   for (const stack of targets) stack.count = Math.max(0, stack.count - (losses.get(stack) ?? 0));
-  return assigned;
+  return { assigned, pending: nextPending };
 }
 
 /**
@@ -521,9 +539,11 @@ function resolveExchange(opts: {
   const damageToA = aHp > 0 ? divisionDamage(dAttack, aDefense, coefficient) : 0;
   const ratioD = dHp > 0 ? Math.min(1, damageToD / dHp) : 0;
   const ratioA = aHp > 0 ? Math.min(1, damageToA / aHp) : 0;
-  const lossesD = distributeLosses(opts.defender.stacks, ratioD, opts.rng, opts.targetDefenderPredicate);
-  const lossesA = distributeLosses(opts.attacker.stacks, ratioA, opts.rng, opts.targetAttackerPredicate);
-  const step = snapshotStep(opts.name, opts.description, opts.attacker, opts.defender, aStats, dStats, assignments, damageToA, damageToD, ratioA, ratioD, lossesA, lossesD, [], {
+  const lossesD = distributeLosses(opts.defender.stacks, ratioD, opts.rng, opts.targetDefenderPredicate, opts.defender.pendingLosses);
+  const lossesA = distributeLosses(opts.attacker.stacks, ratioA, opts.rng, opts.targetAttackerPredicate, opts.attacker.pendingLosses);
+  opts.defender.pendingLosses = lossesD.pending;
+  opts.attacker.pendingLosses = lossesA.pending;
+  const step = snapshotStep(opts.name, opts.description, opts.attacker, opts.defender, aStats, dStats, assignments, damageToA, damageToD, ratioA, ratioD, lossesA.assigned, lossesD.assigned, [], {
     attackPower: { attacker: aAttack, defender: dAttack },
     defensePower: { attacker: aDefense, defender: dDefense },
     healthPool: { attacker: aHp, defender: dHp },
@@ -576,7 +596,10 @@ function finalSiege(attacker: SideState, defender: SideState, rng: () => number,
       stack.count = retained;
       keep -= retained;
     }
-  } else distributeLosses(winnerSide.stacks, ratio, rng, () => true);
+  } else {
+    const losses = distributeLosses(winnerSide.stacks, ratio, rng, () => true, winnerSide.pendingLosses);
+    winnerSide.pendingLosses = losses.pending;
+  }
   if (totalCount(winnerSide) <= 0) {
     const fallback = winnerSide.stacks.find((stack) => stack.count > 0) ?? winnerSide.stacks[0];
     if (fallback) fallback.count = 1;
@@ -659,7 +682,16 @@ export function simulateBattle(config: GameConfig, rawInput: BattleSimulationInp
     const final = finalSiege(attacker, defender, rng, wallD, finalAssignments, config.constants.battlePhaseMinSurvivorUnits, config.constants.battlePhaseCompareEpsilon);
     stages.push(makeStage('siege_final', [final]));
     winner = totalCount(attacker) > 0 ? 'attacker' : 'defender';
-  } else if (input.mode === 'field') winner = 'draw';
+  } else if (input.mode === 'field') {
+    // 战术窗口结束后不再无限延长战斗：只有有效战力达到决胜比才判定胜负，
+    // 否则视为双方都保有继续作战能力的撤离/僵持。
+    const aInfluence = effectiveInfluence(attacker);
+    const dInfluence = effectiveInfluence(defender);
+    const decisionRatio = Math.max(1, config.constants.battlePhaseDecisionRatio);
+    winner = aInfluence >= dInfluence * decisionRatio
+      ? 'attacker'
+      : dInfluence >= aInfluence * decisionRatio ? 'defender' : 'draw';
+  }
   else winner = 'defender';
 
   return {
@@ -679,7 +711,8 @@ export function simulateBattle(config: GameConfig, rawInput: BattleSimulationInp
         rangedStrike: config.constants.battlePhaseRangedStrikeCoeff,
         meleeRound: config.constants.battlePhaseMeleeRoundCoeff,
       },
-      traitStacking: 'additive', lossRounding: 'ceil', minSurvivorUnits: config.constants.battlePhaseMinSurvivorUnits,
+      traitStacking: 'additive', lossRounding: 'accumulate', decisionRatio: config.constants.battlePhaseDecisionRatio,
+      minSurvivorUnits: config.constants.battlePhaseMinSurvivorUnits,
       wallBonusPerLevel: config.constants.wallBonusPerLevel,
     },
   };
@@ -702,6 +735,7 @@ export class BattleSimulatorModule {
       populationInfluence: 'effectivePopulation=count×popCost×quality',
       qualityExponent: this.config.constants.combatInfluenceQualityExponent,
       referenceValue: this.config.constants.combatInfluenceReferenceValue,
+      decisionRatio: this.config.constants.battlePhaseDecisionRatio,
       wallBonusPerLevel: this.config.constants.wallBonusPerLevel,
       meleeRounds: this.config.constants.battleSimulatorMeleeRounds,
       cavalryVsCavalryCoeff: this.config.constants.battlePhaseCavalryVsCavalryCoeff,

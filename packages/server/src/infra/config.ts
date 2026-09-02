@@ -397,6 +397,8 @@ export interface UnitDef {
   simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
+  /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
+  techTier: number;
   /** units.csv 是否显式提供 popCost；缺列/空值时行军按1人口回退并记录警告。 */
   popCostConfigured?: boolean;
   /** 是否雇佣兵（tribe=merc）：不耗粮、不占人口、金币购买；营地购买的服役期限由 contractSec 管理，任务奖励可直接授予无期限兵力。 */
@@ -484,6 +486,8 @@ export interface GameConstants {
   combatTickMs: number;
   /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
   combatStrength: number;
+  /** 线上战斗安全上限；达到后按守方守住战场结算，避免极端防御阵容无限运行。 */
+  combatMaxTicks: number;
   /** 基础战斗价值/人口的参考点；用于映射有效战斗人口。 */
   combatInfluenceReferenceValue: number;
   /** 战斗质量指数；>1 放大高质量兵种、压低低质量兵种。 */
@@ -503,6 +507,8 @@ export interface GameConstants {
   battlePhaseCavalryVsRangedCoeff: number;
   battlePhaseRangedStrikeCoeff: number;
   battlePhaseMeleeRoundCoeff: number;
+  /** 阶段模拟器战术窗口结束后，优势方有效战力达到该倍数才判定胜负。 */
+  battlePhaseDecisionRatio: number;
   /** 攻城最终阶段比较浮点数时的相等容差。 */
   battlePhaseCompareEpsilon: number;
   /** 攻城最终阶段胜方至少保留的单位数。 */
@@ -1127,7 +1133,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       // GM 平衡表按 units.csv 的数字 id 保存覆盖；这里必须使用同一主键，
       // 否则覆盖文件存在但重启/删档后会静默回退到 CSV 默认值。
       file: 'units.csv', key: 'id',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost','techTier'],
     }, overrides.units);
   }
   const units: Record<string, UnitDef> = {};
@@ -1145,6 +1151,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
+      techTier: Math.max(1, num(r.techTier, 1)),
     };
   }
 
@@ -1180,6 +1187,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       commandCost: Math.max(1, num(r.commandCost, 1)),
       contractSec: Math.max(1, num(r.contractSec, 259200)),
       mercTier: Math.max(1, num(r.tier, 1)),
+      techTier: Math.max(1, num(r.tier, 1)),
     };
   }
 
@@ -1334,6 +1342,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
     combatStrength: cn('combat_strength', 1),
+    combatMaxTicks: Math.max(1, Math.floor(cn('combat_max_ticks', 180))),
     combatInfluenceReferenceValue: Math.max(1, cn('combat_influence_reference_value', 200)),
     combatInfluenceQualityExponent: Math.max(1, cn('combat_influence_quality_exponent', 1.15)),
     combatInfluenceMinQuality: Math.max(0, cn('combat_influence_min_quality', 0.65)),
@@ -1349,6 +1358,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     battlePhaseCavalryVsRangedCoeff: Math.max(0, cn('combat_phase_cavalry_vs_ranged_coeff', 1)),
     battlePhaseRangedStrikeCoeff: Math.max(0, cn('combat_phase_ranged_strike_coeff', 1)),
     battlePhaseMeleeRoundCoeff: Math.max(0, cn('combat_phase_melee_round_coeff', 1)),
+    battlePhaseDecisionRatio: Math.max(1, cn('combat_phase_decision_ratio', 1.15)),
     battlePhaseCompareEpsilon: Math.max(0, cn('combat_phase_compare_epsilon', 0.0001)),
     battlePhaseMinSurvivorUnits: Math.max(1, Math.floor(cn('combat_phase_min_survivor_units', 1))),
     ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
@@ -2132,6 +2142,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
   if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
+  if (c.combatMaxTicks <= 0) errors.push(`game_constants.csv combat_max_ticks 必须>0`);
   if (c.combatInfluenceReferenceValue <= 0) errors.push(`game_constants.csv combat_influence_reference_value 必须>0`);
   if (c.combatInfluenceQualityExponent < 1) errors.push(`game_constants.csv combat_influence_quality_exponent 必须≥1`);
   if (c.combatInfluenceMinQuality < 0) errors.push(`game_constants.csv combat_influence_min_quality 必须≥0`);

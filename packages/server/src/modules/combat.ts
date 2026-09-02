@@ -51,7 +51,6 @@ const log = makeLogger('combat');
  */
 
 const COLLECTION = 'battle';
-const MAX_TICKS = 20000; // 安全阀：极端情况下(双方都0攻)兜底结束，避免无限循环
 
 export class CombatModule {
   static readonly NAME = 'combat';
@@ -506,7 +505,7 @@ export class CombatModule {
       log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(result.killsToDefender * 100) / 100, killsToAtk: Math.round(result.killsToAttacker * 100) / 100 });
     }
 
-    if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= MAX_TICKS) {
+    if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= this.config.constants.combatMaxTicks) {
       await this.beginResolution(b);
       return;
     }
