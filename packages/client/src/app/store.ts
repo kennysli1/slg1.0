@@ -97,6 +97,12 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
   taskInfo?: TaskCampInfo;
+  /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
+  playerName?: string;
+  reputation?: number;
+  population?: number;
+  mainBaseLevel?: number;
+  mainBaseName?: string;
 }
 export const selected = signal<SelectedTarget | null>(null);
 
