@@ -45,6 +45,8 @@ export interface ResearchState {
   academy: AcademyState;
   /** 宝物（正直的心）带来的科技点判定间隔倍率（默认 1；<1 表示更快）。由 treasure 模块经 SetTreasureTechInterval 下发。 */
   treasureTechIntervalMult?: number;
+  /** 联盟首席科技官带来的科研点获得概率加成。 */
+  allianceTechProbabilityBonus?: number;
 }
 
 export interface AcademyState {
@@ -98,6 +100,8 @@ export class ResearchModule {
     // 宝物（正直的心）下发科技点判定间隔倍率
     this.commands.register('research.SetTreasureTechInterval', (c: Command) => this.setTreasureTechInterval(c));
     this.commands.register('research.GrantPoints', (c: Command) => this.grantPoints(c));
+    this.commands.register('research.SpendPoints', (c: Command) => this.spendPoints(c));
+    this.commands.register('research.SetAllianceTechBonus', (c: Command) => this.setAllianceTechBonus(c));
 
     // 学院建造/升级/拆除 → 刷新 academy 参数并重调度 RP
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -199,6 +203,21 @@ export class ResearchModule {
     this.store.set(COLLECTION, villageId, s);
     void this.pushRp(villageId, s.rp);
     return { ok: true, payload: { amount: n, rp: s.rp } };
+  }
+
+  private spendPoints(cmd: Command): CommandResult {
+    const { villageId, amount } = cmd.payload as { villageId?: string; amount?: number };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const n = Math.floor(Number(amount) || 0); if (n <= 0) return { ok: false, payload: {}, reason: 'bad_amount' };
+    const s = this.ensureState(villageId); if (s.rp < n) return { ok: false, payload: { rp: s.rp }, reason: 'insufficient_rp' };
+    s.rp -= n; this.store.set(COLLECTION, villageId, s); void this.pushRp(villageId, s.rp);
+    return { ok: true, payload: { amount: n, rp: s.rp } };
+  }
+
+  private setAllianceTechBonus(cmd: Command): CommandResult {
+    const { villageId, bonus } = cmd.payload as { villageId: string; bonus?: number };
+    const s = this.ensureState(villageId); s.allianceTechProbabilityBonus = Math.max(0, Math.min(1, Number(bonus) || 0)); this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { bonus: s.allianceTechProbabilityBonus } };
   }
 
   private async getTechTree(cmd: Command): Promise<CommandResult> {
@@ -419,7 +438,7 @@ export class ResearchModule {
 
     while (lastCheck + intervalMs <= now) {
       lastCheck += intervalMs;
-      const prob = Math.min(params.maxProbability, (params.baseProbability + failStreak * params.probabilityGainPerFail) * popMult);
+      const prob = Math.min(params.maxProbability, (params.baseProbability + failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
       if (Math.random() < prob) {
         s.rp += 1;
         failStreak = 0;
@@ -459,7 +478,7 @@ export class ResearchModule {
     if (!params) return;
 
     const popMult = await this.getPopFactor(villageId);
-    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult);
+    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
     if (Math.random() < prob) {
       s.rp += 1;
       s.academy.failStreak = 0;

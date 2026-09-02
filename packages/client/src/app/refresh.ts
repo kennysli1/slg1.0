@@ -424,6 +424,7 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
   if (event === 'KingdomUpdated') { void reloadKingdom(); return; }
+  if (event === 'AllianceUpdated') { void refreshAll({ includeArea: false, waitForTasks: false }); return; }
 
   // 来袭预警是当前视野的实时派生状态：只重拉行军，不写入战报。
   if (event === 'IncomingWarningChanged') {

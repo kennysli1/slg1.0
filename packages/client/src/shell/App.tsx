@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
-import { tab, tick, sessionVersion, villageSwitching } from '../app/store.js';
+import { tab, tick, sessionVersion, villageSwitching, allianceTargetPicker, allianceWarTarget, selected, showToast } from '../app/store.js';
 import { refreshAll, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
@@ -16,6 +16,7 @@ import { ReportsScreen } from '../features/reports/ReportsScreen.js';
 import { TasksScreen } from '../features/village/TaskBar.js';
 import { TaskDialogueHost } from '../features/village/TaskDialogueHost.js';
 import { BattleSimulatorScreen } from '../features/simulator/BattleSimulatorScreen.js';
+import { AllianceScreen } from '../features/alliance/AllianceScreen.js';
 
 type Phase = 'boot' | 'login' | 'game' | 'simulator';
 
@@ -89,9 +90,24 @@ export function App() {
       <VillageSwitchOverlay />
       <TaskDialogueHost />
       <ModalHost />
+      <AllianceTargetCapture />
       <ToastHost />
     </>
   );
+}
+
+function AllianceTargetCapture() {
+  const picking = allianceTargetPicker.value;
+  const target = selected.value;
+  useEffect(() => {
+    if (!picking || !target || !['village', 'pve'].includes(target.kind)) return;
+    allianceWarTarget.value = target;
+    allianceTargetPicker.value = false;
+    selected.value = null;
+    tab.value = 'alliance';
+    showToast(`已选择联盟目标：${target.name}`);
+  }, [picking, target]);
+  return null;
 }
 
 function VillageSwitchOverlay() {
@@ -123,6 +139,7 @@ function Page() {
       {currentTab === 'tech' && <TechTreeScreen />}
       {currentTab === 'tasks' && <TasksScreen />}
       {currentTab === 'reports' && <ReportsScreen />}
+      {currentTab === 'alliance' && <AllianceScreen />}
     </main>
   );
 }

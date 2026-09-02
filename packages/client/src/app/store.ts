@@ -23,7 +23,7 @@ export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 
 /** 当前页签。 */
-export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports';
+export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports' | 'alliance';
 export const tab = signal<TabKey>('village');
 
 /** 登录态版本号（登录/切村后自增，驱动整壳重渲）。 */
@@ -105,6 +105,10 @@ export interface SelectedTarget {
   mainBaseName?: string;
 }
 export const selected = signal<SelectedTarget | null>(null);
+
+/** 联盟战事创建时的地图选点状态；选中 PvE/玩家村后由 App 自动带回联盟页。 */
+export const allianceTargetPicker = signal(false);
+export const allianceWarTarget = signal<SelectedTarget | null>(null);
 
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
 export const garrisonContinue = signal<{ movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate' } | null>(null);

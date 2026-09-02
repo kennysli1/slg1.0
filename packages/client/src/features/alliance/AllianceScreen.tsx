@@ -1,0 +1,98 @@
+import { useEffect, useState } from 'preact/hooks';
+import { me, req } from '../../api.js';
+import { allianceTargetPicker, allianceWarTarget, dataVersion, sessionVersion, showToast, tab } from '../../app/store.js';
+import { Btn, Empty, Panel, SectionHead, Tag } from '../../ui/index.js';
+import '../../styles/alliance.css';
+
+type Pane = 'members' | 'buildings' | 'tech' | 'war' | 'control';
+const ROLE_NAMES: Record<string, string> = { logistics: '后勤主管', war: '战争专家', tech: '首席科技官', ambassador: '形象大使', leader: '盟主' };
+
+export function AllianceScreen() {
+  sessionVersion.value; dataVersion.value;
+  const [alliance, setAlliance] = useState<any>(null);
+  const [alliances, setAlliances] = useState<any[]>([]);
+  const [query, setQuery] = useState('');
+  const [pane, setPane] = useState<Pane>('members');
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState('');
+  const [sourceVillageId, setSourceVillageId] = useState(me?.villageId ?? '');
+  const villages = me?.villages ?? [];
+
+  async function load() {
+    const own = await req('GetAlliance');
+    const a = own.ok ? (own.payload as any)?.alliance : null;
+    setAlliance(a);
+    if (!a) {
+      const list = await req('ListAlliances', query ? { query } : {});
+      if (list.ok) setAlliances((list.payload as any)?.alliances ?? []);
+    }
+  }
+  useEffect(() => { void load(); }, [query, me?.id]);
+
+  async function action(actionName: string, payload: Record<string, unknown>) {
+    setBusy(true);
+    try {
+      const result = await req(actionName, payload);
+      if (!result.ok) { showToast((result as any).error?.message ?? (result as any).error?.code ?? '操作失败', 'bad'); return; }
+      showToast('操作成功', 'ok'); await load();
+    } finally { setBusy(false); }
+  }
+
+  if (!alliance) return <NoAlliance alliances={alliances} query={query} setQuery={setQuery} busy={busy} name={name} setName={setName} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} villages={villages} onCreate={() => action('CreateAlliance', { name, sourceVillageId })} onApply={(id: string) => action('ApplyAlliance', { allianceId: id })} />;
+
+  const isLeader = alliance.leaderId === me?.id;
+  const roles: string[] = isLeader ? ['leader', ...(alliance.roles?.[me?.id ?? ''] ?? [])] : (alliance.roles?.[me?.id ?? ''] ?? []);
+  return (
+    <div class="alliance-page">
+      <header class="alliance-header">
+        <div><h1>{alliance.name}</h1><p>Lv.{alliance.level} · {alliance.members?.length ?? 0}/{alliance.memberCap} 名 · 盟主：{alliance.leaderName}</p></div>
+        <div class="alliance-header-actions">
+          {alliance.disconnected && <Tag kind="crimson">联盟失联 · 请盟主重建联盟大厅</Tag>}
+          {!isLeader && <Btn variant="danger" size="sm" disabled={busy} onClick={() => { if (window.confirm('确定退出该联盟吗？')) void action('LeaveAlliance', {}); }}>退出联盟</Btn>}
+        </div>
+      </header>
+      <nav class="alliance-tabs" aria-label="联盟板块">
+        {([['members', '成员'], ['buildings', '联盟建筑'], ['tech', '联盟科技'], ['war', '联盟战事'], ...(isLeader ? [['control', '联盟控制']] : [])] as [Pane, string][]).map(([key, label]) => <button class={pane === key ? 'active' : ''} onClick={() => setPane(key)} type="button">{label}</button>)}
+      </nav>
+      {pane === 'members' && <MemberPane alliance={alliance} />}
+      {pane === 'buildings' && <BuildingPane alliance={alliance} isLeader={isLeader} busy={busy} onAction={action} villages={villages} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} />}
+      {pane === 'tech' && <TechPane alliance={alliance} isLeader={isLeader} roles={roles} busy={busy} onAction={action} villages={villages} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} />}
+      {pane === 'war' && <WarPane alliance={alliance} isLeader={isLeader} roles={roles} busy={busy} onAction={action} villages={villages} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} />}
+      {pane === 'control' && <ControlPane alliance={alliance} busy={busy} onAction={action} />}
+    </div>
+  );
+}
+
+function VillageSelect({ villages, value, onChange }: { villages: any[]; value: string; onChange: (value: string) => void }) {
+  return <select value={value} onChange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}>{villages.map((v) => <option value={v.id}>{v.name}</option>)}</select>;
+}
+
+function NoAlliance(props: any) {
+  return <div class="alliance-page"><SectionHead>王国联盟</SectionHead><div class="alliance-create"><h2>建立联盟</h2><p>需要联盟大厅；创建时支付木材、泥土、铁矿、粮食各 300 与 600 金币。</p><input placeholder="联盟名称" value={props.name} onInput={(e) => props.setName((e.currentTarget as HTMLInputElement).value)} /><VillageSelect villages={props.villages} value={props.sourceVillageId} onChange={props.setSourceVillageId} /><Btn disabled={props.busy || !props.name.trim()} onClick={props.onCreate}>建立联盟</Btn></div><div class="alliance-list"><div class="alliance-search"><input placeholder="搜索联盟或盟主" value={props.query} onInput={(e) => props.setQuery((e.currentTarget as HTMLInputElement).value)} /></div>{props.alliances.length === 0 ? <Empty title="暂无联盟" /> : props.alliances.map((a: any) => <div class="alliance-row"><div><strong>{a.name}</strong><span>盟主 {a.leaderName}</span></div><span>{a.memberCount}/{a.memberCap}</span>{!a.full && <Btn onClick={() => props.onApply(a.id)}>申请加入</Btn>}</div>)}</div></div>;
+}
+
+function MemberPane({ alliance }: { alliance: any }) { return <Panel><SectionHead>成员名单</SectionHead><div class="member-table"><div class="member-head"><span>成员</span><span>村庄/人口</span><span>声望</span><span>贡献</span><span>职位</span></div>{(alliance.members ?? []).map((m: any) => <div class="member-row"><span><b>{m.name}</b><small>{m.id}</small></span><span>{m.villages} / {m.population}</span><span>{m.reputation}</span><span>资源 {Object.values(m.resourceContribution ?? {}).reduce((x: number, y: any) => x + Number(y || 0), 0)}<br />科技 {m.techContribution ?? 0}<br />军队人口 {m.militaryPopulation ?? 0}</span><span>{(m.roles ?? []).map((r: string) => ROLE_NAMES[r] ?? r).join('、') || '成员'}</span></div>)}</div></Panel>; }
+
+function BuildingPane({ alliance, isLeader, busy, onAction, villages, sourceVillageId, setSourceVillageId }: any) {
+  const plan = alliance.researchingBuilding;
+  const canPlan = isLeader || (alliance.roles?.[me?.id ?? ''] ?? []).includes('logistics');
+  return <Panel><SectionHead>联盟建筑</SectionHead><p>联盟仓库：木 {Math.floor(alliance.warehouse?.wood ?? 0)} · 泥 {Math.floor(alliance.warehouse?.clay ?? 0)} · 铁 {Math.floor(alliance.warehouse?.iron ?? 0)} · 粮 {Math.floor(alliance.warehouse?.crop ?? 0)}</p>{plan && <p class="alliance-notice">正在筹建：{plan.code} Lv.{plan.targetLevel}（需要木{plan.required.wood} 泥{plan.required.clay} 铁{plan.required.iron} 粮{plan.required.crop}），成员可从任意村运送资源。</p>}<div class="alliance-catalog">{(alliance.buildingCatalog ?? []).map((b: any) => <div class="alliance-catalog-row"><span><b>{b.name}</b><small>{b.code} · {b.description}</small></span><span>Lv.{alliance.buildings?.[b.code] ?? 0}/{b.maxLevel}</span>{canPlan && <Btn size="sm" disabled={busy || !!plan} onClick={() => onAction('StartAllianceBuilding', { code: b.code })}>规划</Btn>}</div>)}</div><div class="alliance-contribute"><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><input type="number" min="0" placeholder="木" id="alliance-wood" /><input type="number" min="0" placeholder="泥" id="alliance-clay" /><input type="number" min="0" placeholder="铁" id="alliance-iron" /><input type="number" min="0" placeholder="粮" id="alliance-crop" /><Btn disabled={busy || !plan} onClick={() => onAction('DepositAllianceResources', { sourceVillageId, amount: { wood: Number((document.getElementById('alliance-wood') as HTMLInputElement)?.value), clay: Number((document.getElementById('alliance-clay') as HTMLInputElement)?.value), iron: Number((document.getElementById('alliance-iron') as HTMLInputElement)?.value), crop: Number((document.getElementById('alliance-crop') as HTMLInputElement)?.value) } })}>贡献资源</Btn></div></Panel>;
+}
+
+function TechPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVillageId, setSourceVillageId }: any) {
+  const canPlan = isLeader || roles.includes('tech');
+  const plan = alliance.researchingTech;
+  return <Panel><SectionHead>联盟科技</SectionHead><p>联盟科技点：{alliance.techPointStock ?? 0}</p>{plan && <p class="alliance-notice">正在研发：{plan.code} Lv.{plan.targetLevel}（需要 {plan.required} 点）</p>}<div class="alliance-catalog">{(alliance.techCatalog ?? []).map((t: any) => <div class="alliance-catalog-row"><span><b>{t.name}</b><small>{t.code} · {t.description}</small></span><span>Lv.{alliance.technologies?.[t.code] ?? 0}/{t.maxLevel}</span>{canPlan && <Btn size="sm" disabled={busy || !!plan} onClick={() => onAction('StartAllianceTech', { code: t.code })}>规划</Btn>}</div>)}</div><div class="alliance-contribute"><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><input type="number" min="1" defaultValue="1" id="alliance-tech-amount" /><Btn disabled={busy || !plan} onClick={() => onAction('ContributeAllianceTech', { sourceVillageId, amount: Number((document.getElementById('alliance-tech-amount') as HTMLInputElement)?.value) })}>贡献科技点</Btn></div></Panel>;
+}
+
+function WarPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVillageId, setSourceVillageId }: any) {
+  const canPlan = isLeader || roles.includes('war');
+  const picked = allianceWarTarget.value;
+  const [mode, setMode] = useState<'raid' | 'attack' | 'reinforce'>('raid');
+  const [deadline, setDeadline] = useState('');
+  const targetKind = picked?.kind === 'village' ? 'village' : 'pve';
+  const targetId = picked?.refId ?? '';
+  return <Panel><SectionHead>联盟战事</SectionHead>{canPlan && <div class="war-plan-form"><select value={mode} onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as any)}><option value="raid">掠夺</option><option value="attack">攻城</option><option value="reinforce">增援</option></select><Btn variant="ghost" onClick={() => { allianceTargetPicker.value = true; tab.value = 'map'; }}>从地图选择目标</Btn><span class="war-target-picked">{picked ? `${picked.name} (${picked.q},${picked.r})` : '尚未选择目标'}</span><input type="datetime-local" value={deadline} onInput={(e) => setDeadline((e.currentTarget as HTMLInputElement).value)} /><Btn disabled={busy || !picked || !deadline || (mode === 'reinforce' && targetKind !== 'village')} onClick={() => onAction('CreateAllianceWarPlan', { mode, targetKind, targetId: targetKind === 'pve' ? targetId : undefined, targetVillage: targetKind === 'village' ? targetId : undefined, q: picked?.q ?? 0, r: picked?.r ?? 0, deadlineAt: new Date(deadline).getTime() })}>创建目标</Btn></div>}<div class="war-plan-list">{(alliance.warPlans ?? []).map((p: any) => <div class="war-plan"><b>{p.mode} · {p.targetId ?? p.targetVillage}</b><span>截止 {new Date(p.deadlineAt).toLocaleString()} · {Object.keys(p.participants ?? {}).length} 人参加</span><div><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><input placeholder="兵种:数量 JSON" id={`war-troops-${p.id}`} /><Btn disabled={busy} onClick={() => { let troops: any = {}; try { troops = JSON.parse((document.getElementById(`war-troops-${p.id}`) as HTMLInputElement)?.value || '{}'); } catch { troops = {}; } onAction('JoinAllianceWarPlan', { planId: p.id, sourceVillageId, troops }); }}>加入</Btn></div></div>)}</div></Panel>;
+}
+
+function ControlPane({ alliance, busy, onAction }: any) { const [role, setRole] = useState('logistics'); return <Panel><SectionHead>联盟控制</SectionHead><div class="request-list">{Object.keys(alliance.joinRequests ?? {}).map((id: string) => <div><span>{id}</span><Btn disabled={busy} onClick={() => onAction('ReviewAllianceRequest', { applicantId: id, approve: true })}>批准</Btn><Btn disabled={busy} onClick={() => onAction('ReviewAllianceRequest', { applicantId: id, approve: false })}>拒绝</Btn></div>)}</div><div class="role-list">{(alliance.members ?? []).map((m: any) => <div><span>{m.name}{m.id === alliance.leaderId ? '（盟主）' : ''}</span><select value={role} onChange={(e) => setRole((e.currentTarget as HTMLSelectElement).value)}><option value="logistics">后勤主管</option><option value="war">战争专家</option><option value="tech">首席科技官</option><option value="ambassador">形象大使</option></select><Btn disabled={busy} onClick={() => onAction('SetAllianceRole', { targetPlayerId: m.id, role })}>任命</Btn><Btn disabled={busy} onClick={() => onAction('SetAllianceRole', { targetPlayerId: m.id, role: '' })}>罢免全部职位</Btn>{m.id !== alliance.leaderId && <Btn variant="danger" disabled={busy} onClick={() => onAction('RemoveAllianceMember', { targetPlayerId: m.id })}>移除</Btn>}</div>)}</div></Panel>; }

@@ -60,6 +60,9 @@
 | 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 | 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
 | 表25 | `dialogues.csv` | **NPC 对话 session 目录** | 调任务触发点、NPC 名称/文本和玩家回复选项 |
+| 表26 | `alliance_levels.csv` | **联盟等级与成员容量** | 调联盟大厅等级对应的联盟等级、成员上限与说明 |
+| 表27 | `alliance_buildings.csv` | **联盟建筑目录** | 调联盟建筑最高等级、解锁等级、资源成本与成员加成 |
+| 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
 
 `quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
@@ -537,6 +540,37 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 | treasureCode | 宝物服务发放的 `treasures.csv` 代码 |
 | delaySec | 代打服务购买后出发延迟；即时服务填 0 |
 | desc | 玩家可见说明 |
+
+## alliance_levels.csv — 联盟等级与成员容量
+
+| 列 | 含义 |
+|----|------|
+| level | 联盟等级（由联盟大厅等级映射） |
+| hallLevel | 对应的联盟大厅等级 |
+| memberCap | 联盟成员上限 |
+| description | 管理页面显示的等级说明 |
+
+## alliance_buildings.csv — 联盟建筑目录
+
+| 列 | 含义 |
+|----|------|
+| code / name | 稳定代码 / 显示名称 |
+| maxLevel | 该联盟建筑最高等级 |
+| requiredAllianceLevel | 解锁所需联盟等级 |
+| costWood/costClay/costIron/costCrop | 建造 1 级的资源基准成本；后续等级按目标等级倍增 |
+| effectType / effectValue | 建筑提供的成员加成类型与数值（由运行时效果适配器使用） |
+| description | 玩家可见说明 |
+
+## alliance_tech.csv — 联盟科技目录
+
+| 列 | 含义 |
+|----|------|
+| code / name | 稳定代码 / 显示名称 |
+| maxLevel | 该联盟科技最高等级 |
+| requiredAllianceLevel | 研发所需联盟等级 |
+| techPointCost | 研发 1 级所需科技点；后续等级按目标等级倍增 |
+| effectType / effectValue | 科技提供的成员加成类型与数值（由运行时效果适配器使用） |
+| description | 玩家可见说明 |
 
 ---
 
