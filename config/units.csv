@@ -22,7 +22,7 @@ id,code,tribe,name,icon,form,meleeAtk,rangedAtk,meleeDef,rangedDef,speed,carry,u
 20,gaulsettler,gauls,拓荒者,unit_gaulsettler,melee,0,0,80,80,5,3000,1,550,700,550,490,40,1,,5,1,100,
 21,clubswinger,teutons,棍棒兵,unit_clubswinger,melee,45,0,20,5,7,60,1,9.5,7.5,4,4,1.8,4,3|4,1,2,100,
 22,spearman,teutons,长矛兵,unit_spearman,melee,10,0,35,60,7,40,1,14.5,7,8.5,4,2.4,4,6,1,2,100,13
-23,axeman,teutons,斧兵,unit_axeman,melee,70,0,30,30,6,50,1,13,12,17,7,3,4,7|8,1,2,100,15
+23,axeman,teutons,斧兵,unit_axeman,melee,90,0,30,30,6,50,1,13,12,17,7,3,4,7|8,1,2,100,15
 24,teuscout,teutons,侦察兵,unit_teuscout,melee,0,0,10,5,9,0,1,16,10,5,5,2.8,5,,1,5,60,
 25,paladin,teutons,圣骑士,unit_paladin,melee,55,0,100,40,10,110,2,37,27,29,7.5,5.5,5,10,2,3,130,16
 26,teutonknight,teutons,条顿骑士,unit_teutonknight,melee,150,0,50,75,9,80,3,45,51.5,48,8,7.7,5,5|9,4,3,150,16
