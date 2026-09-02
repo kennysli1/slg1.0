@@ -18,6 +18,15 @@ world_height,96,number,新世界环绕平行四边形高度(旧世界优先使�
 world_seed,kow-world-v1,string,确定性地貌与出生槽位生成种子
 combat_tick_ms,200,number,战斗每tick间隔(ms
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短
+combat_influence_reference_value,200,number,基础战斗价值/人口的有效战斗人口参考点
+combat_influence_quality_exponent,1.15,number,有效战斗人口质量指数(>1放大高质量兵种差异)
+combat_influence_min_quality,0.65,number,有效战斗人口质量下限
+combat_influence_max_quality,1.55,number,有效战斗人口质量上限
+combat_value_melee_attack_weight,1,number,基础战斗价值中的近战攻击权重
+combat_value_ranged_attack_weight,1.1,number,基础战斗价值中的远程攻击权重
+combat_value_melee_defense_weight,0.85,number,基础战斗价值中的近战防御权重
+combat_value_ranged_defense_weight,0.75,number,基础战斗价值中的远程防御权重
+combat_value_hp_weight,0.65,number,基础战斗价值中的生命值权重
 battle_sim_melee_rounds,6,number,阶段化战斗模拟器第三阶段全军近战互殴轮数
 combat_phase_cavalry_vs_cavalry_coeff,0.18,number,阶段化战斗模拟器骑兵对冲伤害系数（rawDamage=系数×A²/(A+D)）
 combat_phase_cavalry_vs_melee_coeff,0.2,number,阶段化战斗模拟器骑兵冲击近战伤害系数（rawDamage=系数×A²/(A+D)）

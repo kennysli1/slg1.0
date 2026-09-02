@@ -1,6 +1,7 @@
 import type { Command, CommandResult } from '@slg/shared';
-import type { GameConfig, UnitDef } from '../infra/config.js';
+import type { GameConfig } from '../infra/config.js';
 import type { TraitEffect, UnitForm } from '../infra/combat-types.js';
+import { combatValue } from '../infra/combat-balance.js';
 import type { CommandBus } from '../infra/command-bus.js';
 
 /**
@@ -55,6 +56,11 @@ interface SimStack {
   isCavalry: boolean;
   isScout: boolean;
   stats: UnitDefLike;
+  /** 基于兵种基础面板的非线性战斗质量；特性不计入此值。 */
+  combatQuality: number;
+  attackQuality: number;
+  defenseQuality: number;
+  influencePerUnit: number;
   traits: TraitSource[];
 }
 
@@ -64,6 +70,7 @@ interface UnitDefLike {
   meleeDef: number;
   rangedDef: number;
   hp: number;
+  popCost: number;
 }
 
 interface TraitSource {
@@ -129,6 +136,9 @@ export interface BattleSimulationReport {
   totals: { attacker: number; defender: number };
   rules: {
     damageFormula: 'A²/(A+D)';
+    populationInfluence: 'effectivePopulation=count×popCost×quality';
+    qualityExponent: number;
+    referenceValue: number;
     meleeRounds: number;
     damageCoefficients: { cavalryVsCavalry: number; cavalryVsMelee: number; cavalryVsRanged: number; rangedStrike: number; meleeRound: number };
     traitStacking: 'additive';
@@ -148,6 +158,7 @@ interface CatalogUnit {
   meleeDef: number;
   rangedDef: number;
   hp: number;
+  popCost: number;
   traits: { code: string; name: string; effects: { effect: TraitEffect; value: number }[] }[];
   isCavalry: boolean;
   isScout: boolean;
@@ -221,6 +232,20 @@ function buildTreasureModifiers(config: GameConfig, codes: string[] | undefined)
   return out;
 }
 
+function combatInfluenceConfig(config: GameConfig) {
+  return {
+    referenceValue: config.constants.combatInfluenceReferenceValue,
+    qualityExponent: config.constants.combatInfluenceQualityExponent,
+    minQuality: config.constants.combatInfluenceMinQuality,
+    maxQuality: config.constants.combatInfluenceMaxQuality,
+    meleeAttackWeight: config.constants.combatValueMeleeAttackWeight,
+    rangedAttackWeight: config.constants.combatValueRangedAttackWeight,
+    meleeDefenseWeight: config.constants.combatValueMeleeDefenseWeight,
+    rangedDefenseWeight: config.constants.combatValueRangedDefenseWeight,
+    hpWeight: config.constants.combatValueHpWeight,
+  };
+}
+
 function buildTechModifiers(config: GameConfig, side: SimulatorSideInput): Required<SimulatorTechModifiers> {
   const tech: Required<SimulatorTechModifiers> = {
     meleeAtkPct: clampPct(side.tech?.meleeAtkPct), rangedAtkPct: clampPct(side.tech?.rangedAtkPct),
@@ -253,6 +278,7 @@ function unitCatalog(config: GameConfig): CatalogUnit[] {
       code: unit.key, name: unit.name, tribe: unit.tribe, form: unit.form,
       meleeAtk: unit.meleeAtk, rangedAtk: unit.rangedAtk, meleeDef: unit.meleeDef, rangedDef: unit.rangedDef,
       hp: Math.max(1, unit.hp),
+      popCost: Math.max(0, unit.popCost),
       traits: [...unit.traits, ...(unit.simTraits ?? [])].map((code) => config.unitTraits[code]).filter(Boolean).map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
       isCavalry: config.constants.cavalryUnitCodes.includes(unit.key), isScout: isScoutCode(unit.key), source: unit.isMercenary ? 'merc' : 'unit',
     });
@@ -267,6 +293,7 @@ function unitCatalog(config: GameConfig): CatalogUnit[] {
         code: catalogCode, name: `${template.name} · ${code}`, tribe: `npc:${template.type}`, form: def.form,
         meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef,
         hp: Math.max(1, def.hp ?? 100),
+        popCost: Math.max(0, config.units[code]?.popCost ?? 1),
         traits: (def.traitCodes ?? []).map((traitCode) => config.unitTraits[traitCode]).filter(Boolean).map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
         isCavalry: config.constants.cavalryUnitCodes.includes(code), isScout: isScoutCode(code), source: 'npc',
       });
@@ -282,10 +309,13 @@ function makeSide(config: GameConfig, input: SimulatorSideInput, catalog: Map<st
     const unit = catalog.get(code);
     const count = Math.min(100_000, positiveInt(rawCount));
     if (!unit || count <= 0) continue;
+    const influence = combatValue(unit, combatInfluenceConfig(config));
     stacks.push({
       code, name: unit.name, form: unit.form, count, hp: unit.hp,
       isCavalry: unit.isCavalry, isScout: unit.isScout,
-      stats: unit, traits: unit.traits.map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
+      stats: unit, combatQuality: influence.quality, attackQuality: influence.attackQuality,
+      defenseQuality: influence.defenseQuality, influencePerUnit: influence.influencePerUnit,
+      traits: unit.traits.map((trait) => ({ code: trait.code, name: trait.name, effects: trait.effects })),
     });
   }
   return { stacks, input, tech: buildTechModifiers(config, input), treasure: buildTreasureModifiers(config, input.treasures), modeAttackPct: 0 };
@@ -380,11 +410,11 @@ function effectiveStats(side: SideState, sideName: 'attacker' | 'defender', assi
 }
 
 function power(stacks: SimStack[], stats: Map<string, StatSet>, type: 'meleeAtk' | 'rangedAtk', predicate: (stack: SimStack) => boolean): number {
-  return stacks.filter((stack) => stack.count > 0 && predicate(stack)).reduce((sum, stack) => sum + stack.count * (stats.get(stack.code)?.[type] ?? 0), 0);
+  return stacks.filter((stack) => stack.count > 0 && predicate(stack)).reduce((sum, stack) => sum + stack.count * stack.attackQuality * (stats.get(stack.code)?.[type] ?? 0), 0);
 }
 
 function defense(stacks: SimStack[], stats: Map<string, StatSet>, type: 'meleeDef' | 'rangedDef', predicate: (stack: SimStack) => boolean): number {
-  return stacks.filter((stack) => stack.count > 0 && predicate(stack)).reduce((sum, stack) => sum + stack.count * (stats.get(stack.code)?.[type] ?? 0), 0);
+  return stacks.filter((stack) => stack.count > 0 && predicate(stack)).reduce((sum, stack) => sum + stack.count * stack.defenseQuality * (stats.get(stack.code)?.[type] ?? 0), 0);
 }
 
 function health(stacks: SimStack[], stats: Map<string, StatSet>, predicate: (stack: SimStack) => boolean): number {
@@ -638,6 +668,9 @@ export function simulateBattle(config: GameConfig, rawInput: BattleSimulationInp
     totals: { attacker: totalCount(attacker), defender: totalCount(defender) },
     rules: {
       damageFormula: 'A²/(A+D)',
+      populationInfluence: 'effectivePopulation=count×popCost×quality',
+      qualityExponent: config.constants.combatInfluenceQualityExponent,
+      referenceValue: config.constants.combatInfluenceReferenceValue,
       meleeRounds: rounds,
       damageCoefficients: {
         cavalryVsCavalry: config.constants.battlePhaseCavalryVsCavalryCoeff,
@@ -661,11 +694,14 @@ export class BattleSimulatorModule {
     this.commands.register('battleSimulator.Simulate', (command) => this.simulate(command));
   }
   private async getCatalog(): Promise<CommandResult> {
-    const units = unitCatalog(this.config).map((unit) => ({ ...unit }));
+    const units = unitCatalog(this.config).map((unit) => ({ ...unit, combatValue: combatValue(unit, combatInfluenceConfig(this.config)) }));
     const treasures = Object.values(this.config.treasures).map((treasure) => ({ code: treasure.code, name: treasure.name, effectType: treasure.effectType, effectValue: treasure.effectValue }));
     const research = Object.values(this.config.research).map((tech) => ({ code: tech.code, name: tech.name, effectType: tech.effectType, effectValue: tech.effectValue, effects: tech.effects }));
     return { ok: true, payload: { units, treasures, research, modes: ['ambush', 'raid', 'field', 'siege'], constants: {
       damageFormula: 'A²/(A+D)',
+      populationInfluence: 'effectivePopulation=count×popCost×quality',
+      qualityExponent: this.config.constants.combatInfluenceQualityExponent,
+      referenceValue: this.config.constants.combatInfluenceReferenceValue,
       wallBonusPerLevel: this.config.constants.wallBonusPerLevel,
       meleeRounds: this.config.constants.battleSimulatorMeleeRounds,
       cavalryVsCavalryCoeff: this.config.constants.battlePhaseCavalryVsCavalryCoeff,

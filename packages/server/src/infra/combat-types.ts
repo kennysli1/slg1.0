@@ -54,6 +54,8 @@ export interface UnitTraitDef {
  */
 export interface CombatUnit {
   count: number;
+  /** 经济人口占用；战斗引擎另用它计算非线性有效战斗人口。佣兵为0时按1个战斗人口参与。 */
+  popCost?: number;
   form: UnitForm;
   meleeAtk: number;
   rangedAtk: number;

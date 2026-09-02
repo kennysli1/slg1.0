@@ -1,4 +1,5 @@
 import type { CombatUnit, Snapshot, TraitEffect } from '../../infra/combat-types.js';
+import { combatInfluence, combatValue, type CombatInfluenceConfig } from '../../infra/combat-balance.js';
 
 export const MAX_REPLAY_ROUNDS = 120;
 
@@ -14,6 +15,8 @@ export interface CombatTickInput {
   attackerCavalryDefMultiplier?: number;
   /** 防守方携带的敌方骑兵防御削弱倍率（野战/行军防守方）。 */
   defenderCavalryDefMultiplier?: number;
+  /** 战斗影响力参数；缺省时使用公共默认值，兼容旧快照与纯引擎测试。 */
+  combatInfluence?: CombatInfluenceConfig;
 }
 
 export interface CombatTickResult {
@@ -42,11 +45,12 @@ export function simulateCombatTick(input: CombatTickInput): CombatTickResult {
   const defender = cloneSnapshot(input.defender);
   const attackerBefore = aggregateCounts(attacker);
   const defenderBefore = aggregateCounts(defender);
-  const attackerRate = computeKillRate(attacker, defender, input.combatStrength, input.defenderWallMultiplier, input.attackerCavalryDefMultiplier ?? 1);
-  const defenderRate = computeKillRate(defender, attacker, input.combatStrength, 1, input.defenderCavalryDefMultiplier ?? 1);
+  const influenceConfig = input.combatInfluence;
+  const attackerRate = computeKillRate(attacker, defender, input.combatStrength, input.defenderWallMultiplier, input.attackerCavalryDefMultiplier ?? 1, influenceConfig);
+  const defenderRate = computeKillRate(defender, attacker, input.combatStrength, 1, input.defenderCavalryDefMultiplier ?? 1, influenceConfig);
   const { killsToAttacker, killsToDefender } = solveLanchesterTick(attackerRate, defenderRate, input.dt);
-  const defenderPending = applyKills(defender, killsToDefender + input.defenderPending);
-  const attackerPending = applyKills(attacker, killsToAttacker + input.attackerPending);
+  const defenderPending = applyKills(defender, killsToDefender + input.defenderPending, influenceConfig);
+  const attackerPending = applyKills(attacker, killsToAttacker + input.attackerPending, influenceConfig);
   return {
     attacker,
     defender,
@@ -146,45 +150,51 @@ export function countDelta(before: Record<string, number>, after: Record<string,
 }
 
 interface CombatRate {
-  /** 该方当前可开火的有效人数。 */
+  /** 该方当前可开火的有效战斗人口，已按 popCost 与兵种质量映射。 */
   forceCount: number;
   /** 按每秒计算的对敌减员速率。 */
   killsPerSecond: number;
 }
 
-function computeKillRate(A: Snapshot, B: Snapshot, k: number, defenderWallMultiplier: number, cavalryDefMultiplier = 1): CombatRate {
+function computeKillRate(A: Snapshot, B: Snapshot, k: number, defenderWallMultiplier: number, cavalryDefMultiplier = 1, influenceConfig?: CombatInfluenceConfig): CombatRate {
+  const config = influenceConfig;
   const attackerHasMelee = hasAliveForm(A, 'melee');
   const defenderHasMelee = hasAliveForm(B, 'melee');
   let meleeDamage = 0;
   let rangedDamage = 0;
   for (const unit of Object.values(A)) {
     if (unit.count <= 0) continue;
+    const quality = combatValue(unit, config).attackQuality;
     if (unit.form === 'melee') {
-      meleeDamage += unit.count * unit.meleeAtk * traitMult(unit, 'atk_melee');
+      meleeDamage += unit.count * quality * unit.meleeAtk * traitMult(unit, 'atk_melee');
     } else if (attackerHasMelee || !defenderHasMelee) {
-      rangedDamage += unit.count * unit.rangedAtk * traitMult(unit, 'atk_ranged');
+      rangedDamage += unit.count * quality * unit.rangedAtk * traitMult(unit, 'atk_ranged');
     } else {
-      meleeDamage += unit.count * unit.meleeAtk * traitMult(unit, 'atk_melee');
+      meleeDamage += unit.count * quality * unit.meleeAtk * traitMult(unit, 'atk_melee');
     }
   }
-  const effectiveAttackerCount = Object.values(A).reduce((total, unit) => total + (unit.count > 0 ? unit.count : 0), 0);
+  const effectiveAttackerCount = Object.values(A).reduce((total, unit) => total + (unit.count > 0 ? unit.count * combatInfluence(unit, config) : 0), 0);
   if (meleeDamage <= 0 && rangedDamage <= 0) return { forceCount: effectiveAttackerCount, killsPerSecond: 0 };
 
   const targetForm: 'melee' | 'ranged' = defenderHasMelee ? 'melee' : 'ranged';
   const priority = Object.values(B).some((unit) => unit.ambushPriority && unit.count > 0);
   let rowCount = 0;
+  let effectiveRowPopulation = 0;
   let effectiveMeleeHp = 0;
   let effectiveRangedHp = 0;
   for (const unit of Object.values(B)) {
     if (unit.form !== targetForm || unit.count <= 0 || (priority && !unit.ambushPriority)) continue;
     rowCount += unit.count;
+    effectiveRowPopulation += unit.count * combatInfluence(unit, config);
     const unitDefMultiplier = unit.isCavalry ? Math.max(0, cavalryDefMultiplier) : 1;
-    effectiveMeleeHp += unit.count * unit.meleeDef * unitDefMultiplier * traitMult(unit, 'def_melee') / Math.max(0.05, traitMult(unit, 'dmg_taken_melee'));
-    effectiveRangedHp += unit.count * unit.rangedDef * unitDefMultiplier * traitMult(unit, 'def_ranged') / Math.max(0.05, traitMult(unit, 'dmg_taken_ranged'));
+    const meleeQuality = combatValue(unit, config).defenseQuality;
+    const rangedQuality = meleeQuality;
+    effectiveMeleeHp += unit.count * meleeQuality * unit.meleeDef * unitDefMultiplier * traitMult(unit, 'def_melee') / Math.max(0.05, traitMult(unit, 'dmg_taken_melee'));
+    effectiveRangedHp += unit.count * rangedQuality * unit.rangedDef * unitDefMultiplier * traitMult(unit, 'def_ranged') / Math.max(0.05, traitMult(unit, 'dmg_taken_ranged'));
   }
-  if (rowCount <= 0) return { forceCount: effectiveAttackerCount, killsPerSecond: 0 };
-  const meleeDefenseAverage = Math.max(0.5, (effectiveMeleeHp / rowCount) * defenderWallMultiplier);
-  const rangedDefenseAverage = Math.max(0.5, (effectiveRangedHp / rowCount) * defenderWallMultiplier);
+  if (rowCount <= 0 || effectiveRowPopulation <= 0) return { forceCount: effectiveAttackerCount, killsPerSecond: 0 };
+  const meleeDefenseAverage = Math.max(0.5, (effectiveMeleeHp / effectiveRowPopulation) * defenderWallMultiplier);
+  const rangedDefenseAverage = Math.max(0.5, (effectiveRangedHp / effectiveRowPopulation) * defenderWallMultiplier);
   return {
     forceCount: effectiveAttackerCount,
     killsPerSecond: k * (meleeDamage / meleeDefenseAverage + rangedDamage / rangedDefenseAverage),
@@ -244,20 +254,23 @@ function solveLanchesterTick(attacker: CombatRate, defender: CombatRate, dt: num
   };
 }
 
-function applyKills(snap: Snapshot, killsFloat: number): number {
-  const kills = Math.floor(killsFloat);
-  const fraction = killsFloat - kills;
-  if (kills <= 0) return killsFloat;
+function applyKills(snap: Snapshot, killsFloat: number, influenceConfig?: CombatInfluenceConfig): number {
+  if (killsFloat <= 0) return Math.max(0, killsFloat);
   const targetForm: 'melee' | 'ranged' = hasAliveForm(snap, 'melee') ? 'melee' : 'ranged';
   const priority = Object.values(snap).some((unit) => unit.ambushPriority && unit.count > 0);
   const row = Object.entries(snap).filter(([, unit]) => unit.form === targetForm && unit.count > 0 && (!priority || unit.ambushPriority));
   const rowCount = row.reduce((total, [, unit]) => total + unit.count, 0);
-  if (rowCount <= 0) return fraction;
-  if (kills >= rowCount) {
+  const effectiveRowPopulation = row.reduce((total, [, unit]) => total + unit.count * combatInfluence(unit, influenceConfig), 0);
+  if (rowCount <= 0 || effectiveRowPopulation <= 0) return 0;
+  if (killsFloat >= effectiveRowPopulation) {
     for (const [, unit] of row) unit.count = 0;
     pruneZero(snap);
-    return fraction;
+    return 0;
   }
+  const averageInfluence = effectiveRowPopulation / rowCount;
+  const kills = Math.min(rowCount, Math.floor(killsFloat / Math.max(0.0001, averageInfluence)));
+  const fraction = killsFloat - kills * averageInfluence;
+  if (kills <= 0) return killsFloat;
 
   const allocations = row.map(([key, unit]) => {
     const exact = (kills * unit.count) / rowCount;

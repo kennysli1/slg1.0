@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadGameConfig, type GameConfig, type UnitDef } from '../infra/config.js';
 import { simulateBattle } from '../modules/battle-simulator.js';
+import { combatInfluence } from '../infra/combat-balance.js';
 import { BALANCE_TABLES } from '../gateway/gm.js';
 import { MODULE_MANIFESTS } from '../gateway/routes.js';
 
@@ -34,6 +35,7 @@ test('阶段化模拟器配置：兵种生命值与模拟器特性来自 CSV，�
   assert.deepEqual(cfg.units.axeman.simTraits, ['axe_linebreaker']);
   assert.deepEqual(cfg.units.equimperatoris.simTraits, ['cavalry_charge']);
   assert.equal(cfg.units.merc_slinger.hp, 80);
+  assert.equal(cfg.units.praetorian.popCost, 2);
   assert.deepEqual(cfg.units.merc_slinger.simTraits, []);
   assert.ok(Object.values(cfg.pveTemplates).some((template) => Object.values(template.defender).some((unit) => unit.hp !== undefined)), 'PvE 守军应有生命池字段');
 });
@@ -134,9 +136,62 @@ test('阶段化模拟器：生命伤亡池按总人口向上取整', () => {
   const step = report.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
   assert.ok(step);
   assert.equal(step.healthPool.defender, 100);
-  assert.equal(step.damageToDefender, 2);
+  assert.ok(step.damageToDefender > 0, '有效战斗质量折算后仍应保留正伤害');
   assert.equal(step.lossesToDefender, 1, '正伤害转换为阶段伤亡时应向上取整为1个单位');
   assert.equal(step.after.defender.sim_defender, 9);
+});
+
+test('阶段化模拟器：人口影响力按质量非线性映射，等人口同构兵种保持同等战力', () => {
+  const cfg = config();
+  addTestUnit(cfg, 'pop_one', { form: 'melee', popCost: 1, meleeAtk: 50, rangedAtk: 0, meleeDef: 50, rangedDef: 50, hp: 100 });
+  addTestUnit(cfg, 'pop_two', { form: 'melee', popCost: 2, meleeAtk: 100, rangedAtk: 0, meleeDef: 100, rangedDef: 100, hp: 200 });
+  addTestUnit(cfg, 'target', { form: 'melee', popCost: 1, meleeAtk: 40, rangedAtk: 0, meleeDef: 60, rangedDef: 60, hp: 120 });
+  const one = simulateBattle(cfg, { mode: 'field', seed: 31, attacker: { troops: { pop_one: 100 } }, defender: { troops: { target: 100 } } });
+  const two = simulateBattle(cfg, { mode: 'field', seed: 31, attacker: { troops: { pop_two: 50 } }, defender: { troops: { target: 100 } } });
+  const oneStep = one.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
+  const twoStep = two.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
+  assert.ok(oneStep && twoStep);
+  assert.ok(Math.abs(oneStep.attackPower.attacker - twoStep.attackPower.attacker) < 0.0001, '相同人口、按比例缩放的兵种应有相同有效攻击池');
+  assert.ok(Math.abs(oneStep.defensePower.attacker - twoStep.defensePower.attacker) < 0.0001, '相同人口、按比例缩放的兵种应有相同有效防御池');
+  assert.equal(oneStep.lossesToDefender, twoStep.lossesToDefender);
+  assert.equal(one.rules.populationInfluence, 'effectivePopulation=count×popCost×quality');
+});
+
+test('阶段化模拟器：同人口克制与混搭能改变战果，高科技保持溢价但不能无损碾压', () => {
+  const cfg = config();
+  // 本测试只验证基础数值的策略性，特性价值在后面的对照模拟中单独观察。
+  for (const unit of Object.values(cfg.units)) {
+    unit.traits = [];
+    unit.simTraits = [];
+  }
+  const counter = simulateBattle(cfg, {
+    mode: 'field', seed: 17,
+    attacker: { troops: { spearman: 50, axeman: 50 } },
+    defender: { troops: { equimperatoris: 33 } },
+  });
+  const influenceConfig = {
+    referenceValue: cfg.constants.combatInfluenceReferenceValue,
+    qualityExponent: cfg.constants.combatInfluenceQualityExponent,
+    minQuality: cfg.constants.combatInfluenceMinQuality,
+    maxQuality: cfg.constants.combatInfluenceMaxQuality,
+    meleeAttackWeight: cfg.constants.combatValueMeleeAttackWeight,
+    rangedAttackWeight: cfg.constants.combatValueRangedAttackWeight,
+    meleeDefenseWeight: cfg.constants.combatValueMeleeDefenseWeight,
+    rangedDefenseWeight: cfg.constants.combatValueRangedDefenseWeight,
+    hpWeight: cfg.constants.combatValueHpWeight,
+  };
+  const finalInfluence = (rows: Record<string, number>) => Object.entries(rows)
+    .reduce((sum, [code, count]) => sum + count * combatInfluence(cfg.units[code]!, influenceConfig), 0);
+  assert.ok(finalInfluence(counter.final.attacker) > finalInfluence(counter.final.defender) * 1.1, '矛阵+斧兵混搭应能以有效战斗人口压制同人口冲角骑兵');
+
+  const tech = simulateBattle(cfg, {
+    mode: 'field', seed: 17,
+    attacker: { troops: { gaul_warboar_rider: 33 } },
+    defender: { troops: { legionnaire: 100 } },
+  });
+  assert.ok((tech.final.attacker.gaul_warboar_rider ?? 0) > 0);
+  assert.ok(finalInfluence(tech.final.attacker) > finalInfluence(tech.final.defender), '高科技骑兵应在有效战斗人口上保持优势');
+  assert.ok((tech.final.defender.legionnaire ?? 0) > 0, '高科技骑兵应有优势，但不应把同人口基础步兵直接清空');
 });
 
 test('阶段化模拟器：攻击低于防御时仍会产生可累积伤害', () => {
