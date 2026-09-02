@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most（声望值达到阈值或更低）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most/reputation_at_least（声望值上下限）、clear_camp（清理地图上真实生成的任务营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
@@ -710,6 +710,7 @@ export class TasksModule {
     if (rewards.buildingUnlocks?.length) preview.buildingUnlocks = [...rewards.buildingUnlocks];
     if (rewards.reputation) preview.reputation = rewards.reputation;
     if (rewards.researchPoints) preview.researchPoints = rewards.researchPoints;
+    if (rewards.mercenaries && Object.keys(rewards.mercenaries).length) preview.mercenaries = { ...rewards.mercenaries };
 
     if (rewards.reputationMercenaryExchange) {
       const exchange = rewards.reputationMercenaryExchange;
@@ -723,7 +724,10 @@ export class TasksModule {
       if (before > 0) {
         preview.reputation = (preview.reputation ?? 0) - before;
         preview.reputationResetFrom = before;
-        preview.mercenaries = { [exchange.unitCode]: Math.max(0, Math.floor(before * exchange.perPoint)) };
+        preview.mercenaries = {
+          ...(preview.mercenaries ?? {}),
+          [exchange.unitCode]: (preview.mercenaries?.[exchange.unitCode] ?? 0) + Math.max(0, Math.floor(before * exchange.perPoint)),
+        };
       }
     }
 
@@ -1134,7 +1138,7 @@ export class TasksModule {
         const q = this.quest(code);
         if (!q || inst.readyToDeliver) continue;
         const kind = q.objective.kind;
-        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level' && kind !== 'reputation_at_most') continue;
+        if (kind !== 'build_buildings' && kind !== 'population_reached' && kind !== 'resource_owned' && kind !== 'explore_tiles' && kind !== 'research_completed' && kind !== 'main_base_level' && kind !== 'reputation_at_most' && kind !== 'reputation_at_least') continue;
         const sourceVillageId = kind === 'main_base_level'
           ? villageId
           : (q.scope === 'global' ? this.anchorVillage(villageId) : storageVillageId);
@@ -1194,7 +1198,7 @@ export class TasksModule {
           current = hasAcademy
             ? (q.objective.researchCode ? (completed.has(q.objective.researchCode) ? 1 : 0) : completed.size)
             : 0;
-        } else if (kind === 'reputation_at_most') {
+        } else if (kind === 'reputation_at_most' || kind === 'reputation_at_least') {
           const reputation = await this.commands.send({ name: 'reputation.GetByVillage', from: TasksModule.NAME, payload: { villageId: sourceVillageId } });
           current = Number((reputation.payload as any)?.value);
           if (!Number.isFinite(current)) current = 0;
@@ -1215,6 +1219,8 @@ export class TasksModule {
         }
         const thresholdMet = kind === 'reputation_at_most'
           ? current <= (q.objective.threshold ?? 0)
+          : kind === 'reputation_at_least'
+            ? current >= (q.objective.threshold ?? 0)
           : nextProgress >= target;
         if (thresholdMet) {
           // 全局研究/探索可由任意己方村执行，完成时奖励应落到本次产生进度的村庄；
@@ -1620,6 +1626,14 @@ export class TasksModule {
       });
       granted.reputation = rewardsDef.reputation;
     }
+    // 固定任务佣兵直接加入军队，不创建雇佣合同，因此没有期限、人口占用或后续到期解散。
+    if (rewardsDef.mercenaries && Object.keys(rewardsDef.mercenaries).length) {
+      const added = await this.commands.send({
+        name: 'military.AddMercenaries', from: TasksModule.NAME,
+        payload: { villageId: rewardVillageId, units: { ...rewardsDef.mercenaries } },
+      });
+      if (added.ok) granted.mercenaries = { ...rewardsDef.mercenaries };
+    }
     // M14：交付时读取当前总声望；若为正数则归零，每减少 1 点发放配置数量的
     // 无期限佣兵。任务奖励直接写入 military.troops，不创建 mercenary contract，
     // 因而既不占人口/粮耗，也不会被雇佣兵营地的合同到期逻辑移除。
@@ -1641,7 +1655,10 @@ export class TasksModule {
           if (reset.ok) {
             granted.reputation = (granted.reputation ?? 0) - before;
             granted.reputationResetFrom = before;
-            granted.mercenaries = { [exchange.unitCode]: count };
+            granted.mercenaries = {
+              ...(granted.mercenaries ?? {}),
+              [exchange.unitCode]: (granted.mercenaries?.[exchange.unitCode] ?? 0) + count,
+            };
           }
         }
       }
