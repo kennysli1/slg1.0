@@ -34,7 +34,6 @@ printf 'legacy-log' > "$BASE/logs/out.log"
 printf 'legacy-config' > "$BASE/ecosystem.config.cjs"
 printf "module.exports = { apps: [{ name: 'kow' }, { name: 'kow-test-01' }] };\n" > "$FIXTURE/ecosystem.config.cjs"
 printf 'id,code\n1,main\n2,git-only\n' > "$FIXTURE/config/buildings.csv"
-printf 'id,code\n1,git-unit\n' > "$FIXTURE/config/units.csv"
 # 发布布局测试不需要重复加载完整游戏配置；这里提供一个最小迁移入口，
 # 真实迁移逻辑由 server 的 config-authority 单测覆盖。测试仍会验证发布器
 # 在启动前强制要求并调用这个编译产物，避免漏打包导致半套发布。
@@ -71,10 +70,6 @@ grep -Fq "start $BASE/current/ecosystem.config.cjs --only kow --update-env" "$PM
 grep -Fq "start $BASE/current/ecosystem.config.cjs --only kow-test-01 --update-env" "$PM2_LOG"
 
 run_helper finalize "$BASE" "$STATE1"
-
-# 模拟运维直接修改当前线上 release 的服务器权威兵种；下一次发布必须
-# 先捕获这份修改，再把它套到新 release，不能回退到归档包里的 git-unit。
-printf 'id,code\n1,server-unit\n' > "$BASE/releases/$SHA1/config/units.csv"
 [[ ! -d "$BASE/.git" ]]
 find "$BASE/backups" -maxdepth 1 -type d -name 'legacy-git-*' | grep -q .
 
@@ -84,8 +79,6 @@ printf 'legacy-balance-v2' > "$BASE/data/balance_overrides.json"
 run_helper deploy "$BASE" "$STATE2" "$ARCHIVE" "$SHA2"
 [[ "$(readlink "$BASE/current")" == "$BASE/releases/$SHA2" ]]
 grep -Fxq '1,gm-main' "$BASE/releases/$SHA2/config/buildings.csv"
-grep -Fxq '1,server-unit' "$BASE/releases/$SHA2/config/units.csv"
-grep -Fxq '1,server-unit' "$BASE/shared/config/units.csv"
 [[ "$(<"$BASE/shared/data/balance_overrides.json")" == legacy-balance-v2 ]]
 run_helper finalize "$BASE" "$STATE2"
 

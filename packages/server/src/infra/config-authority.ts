@@ -35,21 +35,6 @@ export const CONFIG_SYNC_OUTBOX_FILE = 'config_sync_outbox.json';
 export const CONFIG_SYNC_STATUS_FILE = 'config_sync_status.json';
 export const CONFIG_SYNC_BRANCH = 'config-sync/live';
 
-/**
- * 每张配置表的最终事实源。未列出的表仍由配置中心维护；units.csv 是
- * 例外：服务器上的实际兵种表可以由运维直接更新，配置中心只能查看/同步，
- * 不能把旧的配置值反向覆盖回服务器。
- */
-export const CONFIG_FILE_AUTHORITIES = {
-  'dialogues.csv': 'config-center',
-  'units.csv': 'server',
-} as const;
-export type ConfigFileAuthority = 'config-center' | 'server';
-
-export function configFileAuthority(file: string): ConfigFileAuthority {
-  return CONFIG_FILE_AUTHORITIES[file as keyof typeof CONFIG_FILE_AUTHORITIES] ?? 'config-center';
-}
-
 export interface ConfigRevision {
   revision: number;
   updatedAt: string;
@@ -83,7 +68,6 @@ export interface ConfigPullRequestStatus {
 export interface ConfigConflictFile {
   file: string;
   status: string;
-  authoritySource: ConfigFileAuthority;
   authority: string;
   main: string;
   branch: string;
@@ -103,7 +87,6 @@ export interface ConfigSyncStatus {
   syncState: ConfigSyncState;
   blockedReason: string | null;
   enabled: boolean;
-  authorities: Record<string, ConfigFileAuthority>;
 }
 
 interface Outbox {
@@ -476,14 +459,10 @@ export class ConfigAuthority {
     return { revision, updatedAt: new Date(this.now()).toISOString(), files: hashes };
   }
 
-  private recordChangeInternal(files: readonly string[], source: ConfigFileAuthority): ConfigRevision | null {
+  /** 记录一次配置提交；本地 CSV/共享镜像完成后才进入此方法。 */
+  recordChange(files: readonly string[]): ConfigRevision | null {
     const valid = [...new Set(files)].filter((file) => /^[A-Za-z0-9_.-]+\.csv$/.test(file));
     if (valid.length === 0) return null;
-    const mismatched = valid.filter((file) => configFileAuthority(file) !== source);
-    if (mismatched.length > 0) {
-      const expected = source === 'server' ? '服务器' : '配置中心';
-      throw new Error(`${mismatched.join('、')} 的权威来源不是${expected}`);
-    }
     if (this.persistentConfigDir) {
       mkdirSync(this.persistentConfigDir, { recursive: true });
       for (const file of valid) {
@@ -515,44 +494,6 @@ export class ConfigAuthority {
     return revision;
   }
 
-  /** 配置中心保存入口；服务器权威表不能从这里进入覆盖队列。 */
-  recordChange(files: readonly string[]): ConfigRevision | null {
-    return this.recordChangeInternal(files, 'config-center');
-  }
-
-  /** 服务器直接更新权威表后的同步入口。 */
-  recordServerChange(files: readonly string[]): ConfigRevision | null {
-    return this.recordChangeInternal(files, 'server');
-  }
-
-  /**
-   * 将当前服务器 release 中的服务器权威表镜像到 shared/config，并进入
-   * 同一个 revision/outbox 流程。比较时忽略 CRLF/LF，避免 Windows 工作树
-   * 仅因换行符差异反复产生“新配置”。
-   */
-  reconcileServerAuthority(files: readonly string[] = ['units.csv']): string[] {
-    if (!this.persistentConfigDir) return [];
-    const changed: string[] = [];
-    mkdirSync(this.persistentConfigDir, { recursive: true });
-    for (const file of [...new Set(files)]) {
-      if (configFileAuthority(file) !== 'server') continue;
-      if (!/^[A-Za-z0-9_.-]+\.csv$/.test(file)) throw new Error(`非法配置文件名：${file}`);
-      const source = join(this.configDir, file);
-      if (!existsSync(source)) continue;
-      const target = join(this.persistentConfigDir, file);
-      const normalize = (value: string) => value.replace(/\r\n?/g, '\n');
-      const sourceText = readFileSync(source, 'utf8');
-      const targetText = existsSync(target) ? readFileSync(target, 'utf8') : null;
-      if (targetText !== null && normalize(targetText) === normalize(sourceText)) continue;
-      const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
-      writeFileSync(temp, sourceText, 'utf8');
-      renameSync(temp, target);
-      changed.push(file);
-    }
-    if (changed.length > 0) this.recordServerChange(changed);
-    return changed;
-  }
-
   private scheduleFlush(): void {
     if (this.timer || !this.readOutbox()) return;
     this.timer = setTimeout(() => {
@@ -582,7 +523,6 @@ export class ConfigAuthority {
       syncState: syncStatus?.syncState ?? deriveSyncState(outbox, pullRequest, lastError),
       blockedReason: syncStatus?.blockedReason ?? null,
       enabled: Boolean(this.githubToken),
-      authorities: Object.fromEntries(csvFiles(this.configDir).map((file) => [file, configFileAuthority(file)])),
     };
   }
 
@@ -688,9 +628,6 @@ export class ConfigAuthority {
 
   /** 读取并刷新 GitHub PR 状态；上传成功不等于 PR 可合并。 */
   async inspectStatus(): Promise<ConfigSyncStatus> {
-    // 允许运维直接改 server release 后，仅刷新配置中心页面就完成镜像，
-    // 不必先重启进程或手工复制 units.csv。
-    this.reconcileServerAuthority();
     const local = this.status();
     if (!this.githubToken) return local;
     try {
@@ -716,7 +653,7 @@ export class ConfigAuthority {
       const authority = existsSync(authorityPath) ? readFileSync(authorityPath, 'utf8') : '';
       const main = pullRequest.baseSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.baseSha) : '';
       const branch = pullRequest.headSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.headSha) : '';
-      files.push({ file, status: 'conflict', authoritySource: configFileAuthority(file), authority, main, branch });
+      files.push({ file, status: 'conflict', authority, main, branch });
     }
     return { pullRequest, files };
   }
@@ -852,7 +789,6 @@ export class ConfigAuthority {
 
   /** 手动重试与定时 flush 共用互斥 promise，避免同一批配置创建重复提交。 */
   async flush(): Promise<ConfigSyncStatus> {
-    this.reconcileServerAuthority();
     if (this.flushPromise) return this.flushPromise;
     this.flushPromise = this.flushOnce();
     try {

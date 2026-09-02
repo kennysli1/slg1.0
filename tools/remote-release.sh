@@ -182,30 +182,6 @@ if [[ -d "$BASE/logs" && -z "$(find "$SHARED/logs" -mindepth 1 -maxdepth 1 -prin
   cp -a "$BASE/logs/." "$SHARED/logs/"
 fi
 
-# units.csv 的事实源是服务器当前 release，而不是配置中心或 Git 默认值。
-# 运维若直接修改了线上 current，在创建新 release 前先把该版本原子镜像到
-# shared/config；后续 apply_persisted_config 才不会用旧 CSV 把它覆盖掉。
-sync_server_authoritative_units() {
-  local current_real=""
-  [[ -L "$CURRENT" ]] || return 0
-  current_real="$(readlink -f "$CURRENT" 2>/dev/null || true)"
-  [[ -f "$current_real/config/units.csv" ]] || return 0
-  if [[ -f "$SHARED/config/units.csv" ]] && cmp -s "$current_real/config/units.csv" "$SHARED/config/units.csv"; then
-    return 0
-  fi
-  cp -p "$current_real/config/units.csv" "$SHARED/config/units.csv"
-  local manifest="$SHARED/data/balance_csv_files.list"
-  local tmp_manifest="$manifest.tmp-$$"
-  {
-    [[ -f "$manifest" ]] && cat "$manifest"
-    printf '%s\n' units.csv
-  } | sed '/^[[:space:]]*$/d' | sort -u > "$tmp_manifest"
-  mv "$tmp_manifest" "$manifest"
-  echo "    同步服务器权威 units.csv：$current_real → $SHARED/config/units.csv"
-}
-
-sync_server_authoritative_units
-
 # GM 面板保存的配置 CSV 位于 shared/config，并由 manifest 精确列出。每次发布
 # 都把共享 CSV 按主键合并到 Git 的默认 CSV：配置中心已有单元格（包括空值）
 # 和自建行保持权威，Git 只补新增列/行；编辑器明确删除的行由共享删除记录移除。

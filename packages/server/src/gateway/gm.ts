@@ -26,7 +26,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { loadCsv, parseCsvStructured, serializeCsv, type CsvRow } from '../infra/csv.js';
 import { loadGameConfig } from '../infra/config.js';
-import { configFileAuthority } from '../infra/config-authority.js';
 
 /** 数字感知的稳定字符串排序：m2 应排在 m10 前面。 */
 function compareNatural(a: string, b: string): number {
@@ -445,9 +444,9 @@ const CONFIG_CENTER_HTML = `<!DOCTYPE html>
 <div class="card"><div class="grid">
 <a href="/config/balance">平衡参数与常量</a><a href="/config/quest-modules">任务定义模块</a><a href="/config/quests">任务目录</a><a href="/config/quest-graph">任务关系图（只读审查）</a><a href="/config/dialogues">任务/NPC 对话</a>
 </div></div>
-<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。<b>dialogues.csv 以配置中心为权威；units.csv 以服务器当前文件为权威（本页只读）。</b>保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR。下方会显示 PR 检查与冲突状态；冲突时按文件标注的权威来源确认最终内容。</div>
+<div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR。下方会显示 PR 检查与冲突状态；冲突时可逐文件确认最终内容，配置中心值默认作为权威版本。</div>
 <div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><div id="state" class="sync-state">加载中…</div><span id="pr"></span><pre id="status">加载中…</pre></div>
-<div id="conflicts" class="card hidden"><h2>需要确认的配置冲突</h2><div class="meta">每个文件都可以查看 main、PR 当前版本和权威来源版本，编辑“最终提交内容”后一次性提交。提交前会执行整套 CSV 校验。</div><div id="conflict-list"></div><div class="resolve-bar"><button id="resolve" onclick="resolveConflicts()">确认全部文件并更新 PR</button><span id="resolve-status" class="meta"></span></div></div>
+<div id="conflicts" class="card hidden"><h2>需要确认的配置冲突</h2><div class="meta">配置中心内容是运行时权威。每个文件都可以查看 main、PR 当前版本和配置中心版本，编辑“最终提交内容”后一次性提交。提交前会执行整套 CSV 校验。</div><div id="conflict-list"></div><div class="resolve-bar"><button id="resolve" onclick="resolveConflicts()">确认全部文件并更新 PR</button><span id="resolve-status" class="meta"></span></div></div>
 <script>
 let token=sessionStorage.getItem('gmToken')??'';let latest=null;let conflictData=null;
 function headers(){let h={};if(token)h['X-GM-Token']=token;return h}
@@ -457,7 +456,7 @@ function renderStatus(d){latest=d;let state=d.syncState||'idle';let labels={idle
 async function loadStatus(){try{renderStatus(await request('/config/status'))}catch(e){document.getElementById('state').textContent='状态读取失败：'+e.message;document.getElementById('state').className='sync-state bad'}}
 async function syncNow(){try{renderStatus(await request('/config/sync',{method:'POST'}));}catch(e){document.getElementById('state').textContent='同步失败：'+e.message;document.getElementById('state').className='sync-state bad';loadStatus()}}
 function setResolution(file,source){let card=document.querySelector('[data-file="'+CSS.escape(file)+'"]');if(!card||!conflictData)return;let entry=conflictData.files.find(x=>x.file===file);let area=card.querySelector('textarea');area.value=source==='authority'?entry.authority:source==='main'?entry.main:entry.branch;area.dataset.source=source}
-function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){let label=entry.authoritySource==='server'?'服务器（权威）':'配置中心（权威）';return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+' · '+esc(label)+'</h3><div class="source-grid"><section><h4>'+esc(label)+'</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">'+esc(label)+'</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
+function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
 async function loadConflicts(){try{renderConflicts(await request('/config/sync/conflicts'))}catch(e){document.getElementById('resolve-status').textContent='冲突读取失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}}
 async function resolveConflicts(){if(!conflictData||!latest?.pullRequest)return;let button=document.getElementById('resolve');button.disabled=true;document.getElementById('resolve-status').textContent='提交并校验中…';try{let files=[...document.querySelectorAll('.conflict')].map(function(card){return {file:card.dataset.file,content:card.querySelector('textarea').value}});let d=await request('/config/sync/resolve',{method:'POST',body:JSON.stringify({expectedHeadSha:latest.pullRequest.headSha,files})});renderStatus(d);document.getElementById('resolve-status').textContent=d.syncState==='conflict'?'仍需处理冲突':'已提交解决版本，等待 PR 检查';}catch(e){document.getElementById('resolve-status').textContent='提交失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}finally{button.disabled=false}}
 loadStatus();
@@ -848,7 +847,6 @@ async function load(){
 function sectionGeneric(table){
   var meta = DATA.meta[table];
   var rows = DATA[table] || [];
-  var serverOwned = table === 'units';
   if (table === 'constants' && typeof REP_ROWS !== 'undefined') {
     var repKeys = {}; for (var ri=0;ri<REP_ROWS.length;ri++) repKeys[REP_ROWS[ri][0]] = true;
     var foundingKeys = {}; for (var fi=0;fi<FOUND_ROWS.length;fi++) foundingKeys[FOUND_ROWS[fi][0]] = true;
@@ -868,7 +866,7 @@ function sectionGeneric(table){
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
-  var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · ' + (serverOwned ? '服务器权威，只读；修改服务器文件后点击配置同步' : '可编辑字段: ' + esc(fields.join(', '))) + '</div>';
+  var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
   h += '<table class="bt"><thead><tr>';
   for (var i=0;i<meta.labels.length;i++) h += '<th>'+esc(meta.labels[i])+'</th>';
   for (var j=0;j<fields.length;j++) h += '<th>'+esc(fields[j])+'</th>';
@@ -882,7 +880,7 @@ function sectionGeneric(table){
       var f = fields[b];
       var val = row[f]==null?'':row[f];
       var isText = (meta.text || []).indexOf(f) >= 0;
-      h += '<td><input type="'+(isText ? 'text' : 'number')+'" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" '+(serverOwned ? 'disabled title="服务器权威"' : 'oninput="onEdit(this)"')+'></td>';
+      h += '<td><input type="'+(isText ? 'text' : 'number')+'" step="any" value="'+esc(val)+'" data-t="'+esc(table)+'" data-k="'+esc(key)+'" data-f="'+esc(f)+'" oninput="onEdit(this)"></td>';
     }
     h += '</tr>';
   }
@@ -1440,7 +1438,6 @@ function render(){
 
 function onEdit(el){
   var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
-  if (t === 'units') { status('units.csv 由服务器权威维护，请在服务器端更新后同步', true); return; }
   if (!CHANGES[t][k]) CHANGES[t][k] = {};
   if (v==='') delete CHANGES[t][k][f];
   else CHANGES[t][k][f] = v;
@@ -2028,16 +2025,6 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
     if (edits.length === 0) {
       void reply.code(400).send({ ok: false, reason: '没有可保存的改动' });
-      return;
-    }
-    const serverOwned = edits
-      .map(([, table]) => table.file)
-      .filter((file) => configFileAuthority(file) === 'server');
-    if (serverOwned.length > 0) {
-      void reply.code(409).send({
-        ok: false,
-        reason: `${serverOwned.join('、')} 由服务器权威维护；配置中心只能查看，修改服务器文件后点击“立即同步 / 重试”`,
-      });
       return;
     }
     try {
