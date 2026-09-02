@@ -354,7 +354,7 @@ test('/config/dialogues 保存空回复和删除段落，并拒绝未知任务�
     assert.match(page.body, /function compareNatural\(a,b\)/, '对话编辑器应使用数字感知排序');
     assert.match(page.body, /match\(\/\\d\+\|\\D\+\/g\)/, '对话编辑器自然排序必须保留数字匹配正则');
     assert.match(page.body, /function compareDialogueCode\(a,b\)/, '对话编辑器应按下划线分段比较 code');
-    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 code、taskCode 排序');
+    assert.match(page.body, /function sortRows\(\)/, '对话编辑器应在渲染前按 taskCode、code 排序');
     assert.match(page.body, /r\.trigger==='deliver'.*take:收下/, '新增 deliver 对话段落应默认提供收下回复');
     assert.match(page.body, /\{villageName\}/, '对话编辑器应说明村庄变量');
     assert.match(page.body, /\{fiefName\}/, '对话编辑器应说明封地变量');
@@ -369,6 +369,8 @@ test('/config/dialogues 保存空回复和删除段落，并拒绝未知任务�
       const [codeA, taskCodeA, segmentA] = a.split(':');
       const [codeB, taskCodeB, segmentB] = b.split(':');
       const natural = (left: string, right: string) => left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
+      const taskCodeOrder = natural(taskCodeA, taskCodeB);
+      if (taskCodeOrder !== 0) return taskCodeOrder;
       const codePartsA = codeA.split('_');
       const codePartsB = codeB.split('_');
       const codeParts = Math.min(codePartsA.length, codePartsB.length);
@@ -379,12 +381,15 @@ test('/config/dialogues 保存空回复和删除段落，并拒绝未知任务�
       }
       if (codeOrder === 0) codeOrder = codePartsA.length - codePartsB.length;
       if (codeOrder !== 0) return codeOrder;
-      const taskCodeOrder = natural(taskCodeA, taskCodeB);
-      return taskCodeOrder !== 0 ? taskCodeOrder : Number(segmentA) - Number(segmentB);
-    }), '对话编辑器数据应按数字感知的 code、taskCode、段落号排序');
+      return Number(segmentA) - Number(segmentB);
+    }), '对话编辑器数据应按 taskCode、数字感知的 code、段落号排序');
     const m9Index = parsed.rows.findIndex((row) => row.code === 'm9_accept');
     const m10Index = parsed.rows.findIndex((row) => row.code === 'm10_accept');
     assert.ok(m9Index >= 0 && m10Index > m9Index, 'm10 对话必须排在 m9 对话之后');
+    const ticketUseIndex = parsed.rows.findIndex((row) => row.code === 'dice_tournament_ticket_use');
+    const effortUseIndex = parsed.rows.findIndex((row) => row.code === 'my_effort_use');
+    assert.ok(ticketUseIndex > m10Index && effortUseIndex > m10Index, 't1/t2 使用对话应按 taskCode 排在任务对话之后');
+    assert.ok(effortUseIndex < ticketUseIndex, 'taskCode=t1 应排在 taskCode=t2 之前');
     const firstS3 = parsed.rows.find((row) => row.code === 's3_accept' && row.segment === '1');
     assert.equal(firstS3?.taskCode, 's3');
     assert.match(firstS3?.npcText ?? '', /感谢你清除了附近的威胁/);
