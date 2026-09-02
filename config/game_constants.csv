@@ -19,11 +19,11 @@ world_seed,kow-world-v1,string,确定性地貌与出生槽位生成种子
 combat_tick_ms,200,number,战斗每tick间隔(ms
 combat_strength,0.1,number,战斗全局强度系数k(越大减员越快战斗越短
 battle_sim_melee_rounds,6,number,阶段化战斗模拟器第三阶段全军近战互殴轮数
-combat_phase_cavalry_vs_cavalry_coeff,1,number,阶段化战斗模拟器骑兵对冲伤害系数
-combat_phase_cavalry_vs_melee_coeff,1,number,阶段化战斗模拟器骑兵冲击近战伤害系数
-combat_phase_cavalry_vs_ranged_coeff,1,number,阶段化战斗模拟器骑兵冲击远程伤害系数
-combat_phase_ranged_strike_coeff,1,number,阶段化战斗模拟器远程打击伤害系数
-combat_phase_melee_round_coeff,1,number,阶段化战斗模拟器近战互殴每轮伤害系数
+combat_phase_cavalry_vs_cavalry_coeff,0.18,number,阶段化战斗模拟器骑兵对冲伤害系数（rawDamage=系数×A²/(A+D)）
+combat_phase_cavalry_vs_melee_coeff,0.2,number,阶段化战斗模拟器骑兵冲击近战伤害系数（rawDamage=系数×A²/(A+D)）
+combat_phase_cavalry_vs_ranged_coeff,0.25,number,阶段化战斗模拟器骑兵冲击远程伤害系数（rawDamage=系数×A²/(A+D)）
+combat_phase_ranged_strike_coeff,0.3,number,阶段化战斗模拟器远程打击伤害系数（rawDamage=系数×A²/(A+D)）
+combat_phase_melee_round_coeff,0.2,number,阶段化战斗模拟器近战互殴每轮伤害系数（rawDamage=系数×A²/(A+D)）
 combat_phase_compare_epsilon,0.0001,number,阶段化战斗模拟器攻防生命值相等比较容差
 combat_phase_min_survivor_units,1,number,阶段化战斗模拟器攻城最终阶段胜方至少保留单位数
 ambush_attack_bonus,0.2,number,伏击方攻击加成(0.5=+50%;仅伏击战生效;可由GM调整)

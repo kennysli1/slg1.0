@@ -128,6 +128,7 @@ export interface BattleSimulationReport {
   final: { attacker: Record<string, number>; defender: Record<string, number> };
   totals: { attacker: number; defender: number };
   rules: {
+    damageFormula: 'A²/(A+D)';
     meleeRounds: number;
     damageCoefficients: { cavalryVsCavalry: number; cavalryVsMelee: number; cavalryVsRanged: number; rangedStrike: number; meleeRound: number };
     traitStacking: 'additive';
@@ -431,6 +432,18 @@ function distributeLosses(stacks: SimStack[], lossRatio: number, rng: () => numb
   return assigned;
 }
 
+/**
+ * 平滑除法伤害：攻击低于防御时仍有伤害，攻击优势则收益递减。
+ * 阶段系数负责表达冲锋、齐射和近战轮次的战术权重。
+ */
+function divisionDamage(attackPower: number, defensePower: number, phaseCoefficient: number): number {
+  const attack = Math.max(0, attackPower);
+  const defense = Math.max(0, defensePower);
+  const coefficient = Math.max(0, phaseCoefficient);
+  if (attack <= 0 || coefficient <= 0) return 0;
+  return coefficient * attack * attack / Math.max(0.0001, attack + defense);
+}
+
 function snapshotStep(name: string, description: string, attacker: SideState, defenderSide: SideState, attackerStats: Map<string, StatSet>, defenderStats: Map<string, StatSet>, assignments: TraitAssignment[], damageToAttacker: number, damageToDefender: number, lossRatioToAttacker: number, lossRatioToDefender: number, lossesToAttacker: number, lossesToDefender: number, notes: string[], metrics?: { attackPower: { attacker: number; defender: number }; defensePower: { attacker: number; defender: number }; healthPool: { attacker: number; defender: number } }): StepResult {
   const flatten = (stats: Map<string, StatSet>) => Object.fromEntries([...stats.entries()].map(([code, row]) => [code, {
     meleeAtk: Number(row.meleeAtk.toFixed(4)), rangedAtk: Number(row.rangedAtk.toFixed(4)),
@@ -474,8 +487,8 @@ function resolveExchange(opts: {
   const aHp = effectiveHealth(opts.attacker.stacks, aStats, opts.targetAttackerPredicate, damageKind);
   // 没有目标的冲锋反击侧（例如骑兵冲击步兵时骑兵不受伤）不产生伤害，
   // 即使该侧仍有未参与本步骤的其它兵种。
-  const damageToD = dHp > 0 ? Math.max(0, aAttack - dDefense) * coefficient : 0;
-  const damageToA = aHp > 0 ? Math.max(0, dAttack - aDefense) * coefficient : 0;
+  const damageToD = dHp > 0 ? divisionDamage(aAttack, dDefense, coefficient) : 0;
+  const damageToA = aHp > 0 ? divisionDamage(dAttack, aDefense, coefficient) : 0;
   const ratioD = dHp > 0 ? Math.min(1, damageToD / dHp) : 0;
   const ratioA = aHp > 0 ? Math.min(1, damageToA / aHp) : 0;
   const lossesD = distributeLosses(opts.defender.stacks, ratioD, opts.rng, opts.targetDefenderPredicate);
@@ -624,6 +637,7 @@ export function simulateBattle(config: GameConfig, rawInput: BattleSimulationInp
     final: { attacker: cloneCounts(attacker), defender: cloneCounts(defender) },
     totals: { attacker: totalCount(attacker), defender: totalCount(defender) },
     rules: {
+      damageFormula: 'A²/(A+D)',
       meleeRounds: rounds,
       damageCoefficients: {
         cavalryVsCavalry: config.constants.battlePhaseCavalryVsCavalryCoeff,
@@ -651,6 +665,7 @@ export class BattleSimulatorModule {
     const treasures = Object.values(this.config.treasures).map((treasure) => ({ code: treasure.code, name: treasure.name, effectType: treasure.effectType, effectValue: treasure.effectValue }));
     const research = Object.values(this.config.research).map((tech) => ({ code: tech.code, name: tech.name, effectType: tech.effectType, effectValue: tech.effectValue, effects: tech.effects }));
     return { ok: true, payload: { units, treasures, research, modes: ['ambush', 'raid', 'field', 'siege'], constants: {
+      damageFormula: 'A²/(A+D)',
       wallBonusPerLevel: this.config.constants.wallBonusPerLevel,
       meleeRounds: this.config.constants.battleSimulatorMeleeRounds,
       cavalryVsCavalryCoeff: this.config.constants.battlePhaseCavalryVsCavalryCoeff,
