@@ -23,10 +23,10 @@ test('dialogue：S3 接取前返回幸福村村民对话，且 StartAccept 不�
   const dialogue = (started.payload as any).dialogue;
   assert.equal(dialogue.npcName, '幸福村的村民');
   assert.match(dialogue.npcText, /感谢你清除了附近的威胁/);
-  assert.deepEqual(dialogue.replies, [
-    { key: 'accept', label: '接受任务' },
-    { key: 'leave', label: '离开' },
-  ]);
+  // 回复按钮属于配置中心权威内容；StartAccept 只能原样返回，不能
+  // 偷塞“离开”或其它默认按钮。
+  assert.deepEqual(dialogue.replies, app.config.dialogues['s3_accept:1']?.replies);
+  assert.ok(dialogue.replies.some((reply: any) => reply.key === 'accept' && reply.label === '接受任务'));
   assert.deepEqual((app.store.get<any>('task', villageId)!).offeredSide, ['s3']);
 
   const accepted = await send(app, 'task.Accept', { villageId, code: 's3' });
