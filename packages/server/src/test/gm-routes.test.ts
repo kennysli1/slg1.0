@@ -858,3 +858,35 @@ test('生产式 data 符号链接：GM CSV 镜像写入 shared/config 而不是 
     rmSync(tempConfig, { recursive: true, force: true });
   }
 });
+
+test('配置中心：units.csv 是服务器权威，拒绝通过平衡编辑器覆盖', async () => {
+  const prev = process.env.GM_TOKEN;
+  delete process.env.GM_TOKEN;
+  const dataDir = mkdtempSync(join(tmpdir(), 'kow-gm-units-authority-'));
+  const tempConfig = mkdtempSync(join(tmpdir(), 'kow-gm-units-config-'));
+  try {
+    const seed = createGameApp({ now: () => 1_000_000, manualScheduler: true });
+    cpSync(seed.configDir, tempConfig, { recursive: true });
+    const { fastify, app } = buildFastify(join(dataDir, 'game.json'), tempConfig);
+    await fastify.ready();
+    const before = readFileSync(join(app.configDir, 'units.csv'), 'utf8');
+    const response = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ units: { '1': { meleeAtk: '999999' } } }),
+    });
+    assert.equal(response.statusCode, 409);
+    assert.match(response.body, /服务器权威/);
+    assert.equal(readFileSync(join(app.configDir, 'units.csv'), 'utf8'), before);
+    const status = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/status' })).body) as { authorities?: Record<string, string> };
+    assert.equal(status.authorities?.['dialogues.csv'], 'config-center');
+    assert.equal(status.authorities?.['units.csv'], 'server');
+    await fastify.close();
+  } finally {
+    if (prev !== undefined) process.env.GM_TOKEN = prev;
+    else delete process.env.GM_TOKEN;
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(tempConfig, { recursive: true, force: true });
+  }
+});
