@@ -32,9 +32,10 @@ export interface CombatTickResult {
 /**
  * 纯战斗引擎：输入战斗快照，输出下一轮快照，不读写 Store、不发 Command/Event。
  * 双方使用 tick 开始时的快照同时计算伤害，先打前排，远程在己方近战
- * 消失且敌方近战仍存活时被迫使用近战攻击。伤亡采用兰开斯特平方律：
+ * 消失且敌方近战仍存活时被迫使用近战攻击。单类伤害采用平滑除法口径：
+ * damageRate = k × attack / defense，再用兰开斯特平方律：
  * dA/dt = -βB、dB/dt = -αA，并用该方程在一个 tick 内的解析解推进，
- * 让人数优势通过战斗全过程的平方律累积体现，而不是简单给伤害乘一个倍率。
+ * 让人数优势通过战斗全过程的平方律累积体现，同时避免攻击低于防御时完全不掉血。
  */
 export function simulateCombatTick(input: CombatTickInput): CombatTickResult {
   const attacker = cloneSnapshot(input.attacker);

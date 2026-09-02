@@ -30,6 +30,21 @@ test('combat engine：逐 tick 计算是纯函数，不修改输入快照', () =
   assert.ok(result.defenderPending > 0);
 });
 
+test('combat engine：攻击低于防御时仍会累积伤害', () => {
+  const result = simulateCombatTick({
+    attacker: { legionnaire: melee(1, 1, 1) },
+    defender: { club: melee(1, 1, 100) },
+    attackerPending: 0,
+    defenderPending: 0,
+    combatStrength: 0.1,
+    dt: 1,
+    defenderWallMultiplier: 1,
+  });
+
+  assert.ok(result.killsToDefender > 0, '低于防御时也必须产生正的减员速率');
+  assert.ok(result.defenderPending > 0, '小额伤害应通过 pending 跨 tick 累积');
+});
+
 test('combat engine：兰开斯特平方律会放大人数优势', () => {
   const oneAgainstOne = simulateCombatTick({
     attacker: { legionnaire: melee(1, 10, 10) },

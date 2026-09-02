@@ -318,7 +318,7 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 34);
+  assert.equal(leg.meleeAtk, 36);
   assert.equal(leg.meleeDef, 58);
   assert.equal(leg.rangedDef, 52);
   const cat = cfg.units['catapult'];

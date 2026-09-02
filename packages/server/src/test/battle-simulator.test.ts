@@ -28,7 +28,7 @@ function addTestUnit(target: GameConfig, code: string, overrides: Partial<UnitDe
 
 test('阶段化模拟器配置：兵种生命值与模拟器特性来自 CSV，雇佣兵/NPC 默认可为空', () => {
   const cfg = config();
-  assert.equal(cfg.units.praetorian.hp, 160);
+  assert.equal(cfg.units.praetorian.hp, 220);
   assert.deepEqual(cfg.units.praetorian.simTraits, ['cavalry_hunter']);
   assert.deepEqual(cfg.units.legionnaire.simTraits, ['legion_ranged_guard']);
   assert.deepEqual(cfg.units.axeman.simTraits, ['axe_linebreaker']);
@@ -134,9 +134,26 @@ test('阶段化模拟器：生命伤亡池按总人口向上取整', () => {
   const step = report.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
   assert.ok(step);
   assert.equal(step.healthPool.defender, 100);
-  assert.equal(step.damageToDefender, 10);
-  assert.equal(step.lossesToDefender, 1, '10% 伤亡池应向上取整为1个单位');
+  assert.equal(step.damageToDefender, 2);
+  assert.equal(step.lossesToDefender, 1, '正伤害转换为阶段伤亡时应向上取整为1个单位');
   assert.equal(step.after.defender.sim_defender, 9);
+});
+
+test('阶段化模拟器：攻击低于防御时仍会产生可累积伤害', () => {
+  const cfg = config();
+  addTestUnit(cfg, 'low_attack', { meleeAtk: 20, rangedAtk: 0, meleeDef: 0, rangedDef: 0, hp: 10, form: 'melee' });
+  addTestUnit(cfg, 'high_defense', { meleeAtk: 0, rangedAtk: 0, meleeDef: 100, rangedDef: 100, hp: 100, form: 'melee' });
+  const report = simulateBattle(cfg, {
+    mode: 'field', seed: 3,
+    attacker: { troops: { low_attack: 10 } },
+    defender: { troops: { high_defense: 10 } },
+  });
+  const step = report.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
+  assert.ok(step);
+  assert.ok(step.attackPower.attacker < step.defensePower.defender);
+  assert.ok(step.damageToDefender > 0, '低于防御时不能被硬截断为 0 伤害');
+  assert.ok(step.lossesToDefender > 0, '正伤害应能转化为至少 1 个单位的阶段伤亡');
+  assert.equal(report.rules.damageFormula, 'A²/(A+D)');
 });
 
 test('阶段化模拟器：攻城最终阶段按攻击/防御/生命值顺序比较，完全相等由防守方留1', () => {
