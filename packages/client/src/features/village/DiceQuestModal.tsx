@@ -6,6 +6,7 @@ import { reloadPlayerTasks } from '../../app/refresh.js';
 import { Btn, confirmDanger } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import {
+  isDiceMatchComplete,
   projectDiceQuestReplay,
   type DiceQuestDie as Die,
   type DiceQuestEvent as DiceEvent,
@@ -61,7 +62,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   closeRef.current = close;
   const taskName = task?.name ?? task?.code ?? '骰子对局';
   const diceObjective = task?.objective ?? {};
-  const diceDifficulty = diceObjective.diceDifficulty === 'hard' ? '困难 NPC' : diceObjective.diceDifficulty === 'normal' ? '普通 NPC' : '普通 NPC';
+  const diceDifficulty = diceObjective.diceDifficulty === 'hard' ? '困难 NPC' : diceObjective.diceDifficulty === 'normal' ? '普通 NPC' : '简单 NPC';
   const diceTargetScore = Math.max(1, Number(diceObjective.diceTargetScore) || 2000);
   const diceWinsRequired = Math.max(1, Number(diceObjective.diceWinsRequired) || (task?.code === 's6' ? 1 : 2));
   const diceFormat = diceWinsRequired > 1 ? `三局两胜 · ${diceDifficulty} · 目标 ${diceTargetScore} 分` : `单局 · ${diceDifficulty} · 目标 ${diceTargetScore} 分`;
@@ -136,6 +137,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const displayedPlayerScore = playbackView?.playerScore ?? state?.playerScore ?? 0;
   const displayedNpcScore = playbackView?.aiScore ?? state?.aiScore ?? 0;
   const displayedMatch = playbackView?.match ?? snapshot?.match ?? { playerWins: 0, npcWins: 0, winsRequired: 1 };
+  const matchComplete = isDiceMatchComplete(displayedMatch, snapshot?.round);
 
   const act = async (type: 'roll' | 'bank' | 'forfeit'): Promise<boolean> => {
     if (!snapshot || busy || replaying || actionPending.current) return false;
@@ -219,6 +221,30 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
     const sessionId = sessionIdRef.current;
     if (sessionId) await req('dice.ExitMatch', { sessionId }).catch(() => {});
     closeRef.current();
+  };
+  const nextRound = async () => {
+    if (!snapshot || busy || replaying || isDiceMatchComplete(snapshot.match, snapshot.round)) return;
+    actionPending.current = true;
+    setBusy(true);
+    try {
+      const result = await req('dice.StartMatch', { taskCode: task.code });
+      if (!result.ok) {
+        showToast(result.error?.code ?? '下一局无法开始', 'bad');
+        return;
+      }
+      const next = result.payload as Snapshot;
+      sessionIdRef.current = next.sessionId;
+      sessionClosed.current = false;
+      setSnapshot(next);
+      setPlayback(null);
+      setSelected([]);
+      setShowHistory(false);
+    } catch {
+      showToast('骰子对局连接失败', 'bad');
+    } finally {
+      actionPending.current = false;
+      setBusy(false);
+    }
   };
   const quit = async () => {
     if (!snapshot || busy || replaying) return;
@@ -308,7 +334,10 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
             </>}
             <Btn variant="danger" disabled={busy || replaying} onClick={() => void quit()}>放弃对局</Btn>
           </div>
-        ) : <div class="dice-quest-actions"><Btn variant="primary" onClick={() => void exit()}>退出对局</Btn></div>}
+        ) : <div class="dice-quest-actions">
+          {!matchComplete && <Btn variant="primary" disabled={busy} onClick={() => void nextRound()}>{busy ? '准备下一局…' : '下一局'}</Btn>}
+          <Btn variant={matchComplete ? 'primary' : 'ghost'} disabled={busy} onClick={() => void exit()}>退出对局</Btn>
+        </div>}
         <div class="dice-quest-rules-foot">1点=100 · 5点=50（可与顺子、同点数组合叠加） · 1-5顺=500 · 2-6顺=750 · 1-6顺=1500 · 三个相同点数起计分 · 爆骰丢失本轮未收下分数 · 六骰全计分触发热骰</div>
       </div>
     </Modal>
