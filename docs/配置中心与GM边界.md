@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-09-01
+updated: 2026-09-03
 owner: ops
 summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 ---
