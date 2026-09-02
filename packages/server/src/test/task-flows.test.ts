@@ -235,7 +235,7 @@ test('M8 旧任务村的过量初始库存在重启恢复时迁移到 CSV 默认
   const migrated = app.store.get<any>('pve', targetId)!;
   assert.deepEqual(migrated.loot, { wood: 500, clay: 500, iron: 500, crop: 500, gold: 500 });
   assert.equal(migrated.defender.clubswinger.count, 15, '旧 club 守军应迁移为条顿 clubswinger');
-  assert.equal(migrated.defender.clubswinger.meleeAtk, 72, '迁移后的守军应使用条顿棍棒兵攻击力');
+  assert.equal(migrated.defender.clubswinger.meleeAtk, 90, '迁移后的守军应使用新版条顿棍棒兵攻击力');
   assert.equal(migrated.defender.club, undefined, '存档不应继续保留旧 club 标签');
   assert.equal(migrated.taskVillageLootInitialized, true);
 });

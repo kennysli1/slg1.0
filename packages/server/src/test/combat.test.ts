@@ -56,7 +56,7 @@ test('绞马索：携带后敌方骑兵防御降低 30%', async () => {
     await send(app, 'combat.Engage', {
       targetKind: 'pve', targetId: 'pve-0', targetXY: { q: 0, r: 0 },
       movementId: withRope ? 'rope-attack' : 'plain-attack', fromVillage: 'v1', fromXY: { q: 0, r: 0 },
-      troops: { legionnaire: 10 }, attackerSnapshot: { legionnaire: melee(10, 40, 35) },
+      troops: { legionnaire: 10 }, attackerSnapshot: { legionnaire: melee(10, 65, 35) },
       treasures: withRope ? ['horse_rope'] : [],
     });
     await drain(app);
@@ -147,7 +147,7 @@ test('PvE 掠夺：金币优先，余下运力平均带回四种资源', async (
     loot: { wood: 100, clay: 100, iron: 100, crop: 100, gold: 3 },
   });
   assert.equal(spawned.ok, true, '测试营地应生成成功');
-  const ended = await engagePve(app, targetId, { legionnaire: melee(2, 40, 35) }, { legionnaire: 2 });
+  const ended = await engagePve(app, targetId, { legionnaire: melee(2, 80, 100) }, { legionnaire: 2 });
   assert.equal(ended.attackerWins, true, '应清空测试营地');
   assert.deepEqual(
     ended.looted,
@@ -177,7 +177,7 @@ test('PvE 失败战斗：幸存守军不能因快照引用被结算重复扣除'
     targetKind: 'pve', targetId, targetXY: { q: 6, r: 6 },
     movementId: 'pve-defender-snapshot-attack', fromVillage: 'v1', fromXY: { q: 5, r: 6 },
     troops: { legionnaire: 10 },
-    attackerSnapshot: { legionnaire: melee(10, 40.4, 35.35) },
+    attackerSnapshot: { legionnaire: melee(10, 50, 35.35) },
   });
   await drain(app);
 
