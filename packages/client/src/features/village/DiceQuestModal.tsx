@@ -60,6 +60,11 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
   const closeRef = useRef(close);
   closeRef.current = close;
   const taskName = task?.name ?? task?.code ?? '骰子对局';
+  const diceObjective = task?.objective ?? {};
+  const diceDifficulty = diceObjective.diceDifficulty === 'hard' ? '困难 NPC' : diceObjective.diceDifficulty === 'normal' ? '普通 NPC' : '普通 NPC';
+  const diceTargetScore = Math.max(1, Number(diceObjective.diceTargetScore) || 2000);
+  const diceWinsRequired = Math.max(1, Number(diceObjective.diceWinsRequired) || (task?.code === 's6' ? 1 : 2));
+  const diceFormat = diceWinsRequired > 1 ? `三局两胜 · ${diceDifficulty} · 目标 ${diceTargetScore} 分` : `单局 · ${diceDifficulty} · 目标 ${diceTargetScore} 分`;
 
   const clearTimers = () => { for (const id of timers.current) window.clearTimeout(id); timers.current = []; };
   useEffect(() => () => { closed.current = true; clearTimers(); }, []);
@@ -221,7 +226,7 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
     if (!ok) return;
     const forfeited = await act('forfeit');
     if (!forfeited) return;
-    // 放弃会写入 s6/s7 的胜场进度；先只刷新任务栏，再幂等关闭临时牌桌。
+    // 放弃会写入骰子任务的胜场进度；先只刷新任务栏，再幂等关闭临时牌桌。
     await reloadPlayerTasks();
     await exit();
   };
@@ -258,12 +263,12 @@ export function DiceQuestModal({ task, close }: { task: any; close: () => void }
         ? '正在结算放弃结果…'
         : null;
   return (
-    <Modal title={`骰子王 · ${taskName}`} sub={task.code === 's7' ? '三局两胜 · 简单 NPC · 目标 2000 分' : '单局 · 简单 NPC · 目标 2000 分'} onClose={finished ? exit : quit} wide>
+    <Modal title={`骰子王 · ${taskName}`} sub={diceFormat} onClose={finished ? exit : quit} wide>
       <div class="dice-quest-shell">
         <div class="dice-quest-scoreboard">
           <div class={visibleWinner === 'player' ? 'dice-quest-scoreboard__winner' : ''}><span>你</span><strong>{displayedPlayerScore}</strong>{visibleWinner === 'player' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedMatch.playerWins}/{displayedMatch.winsRequired} 局</small></div>
           <div class="dice-quest-target"><span>目标</span><strong>{state.targetScore}</strong><small>先达目标得分</small></div>
-          <div class={`dice-quest-scoreboard__npc${visibleWinner === 'ai' ? ' dice-quest-scoreboard__winner' : ''}`}><span>普通 NPC</span><strong>{displayedNpcScore}</strong>{visibleWinner === 'ai' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedMatch.npcWins}/{displayedMatch.winsRequired} 局</small></div>
+          <div class={`dice-quest-scoreboard__npc${visibleWinner === 'ai' ? ' dice-quest-scoreboard__winner' : ''}`}><span>{diceDifficulty}</span><strong>{displayedNpcScore}</strong>{visibleWinner === 'ai' && <em class="dice-quest-win-mark">本局胜者</em>}<small>本场 {displayedMatch.npcWins}/{displayedMatch.winsRequired} 局</small></div>
         </div>
         <div class={`dice-quest-table dice-quest-table--${activeSide}${isBust ? ' dice-quest-table--bust' : ''}`}>
           <div class="dice-quest-round-label">{finished ? '本局结算' : activeSide === 'ai' ? 'NPC掷骰阶段' : '你的掷骰阶段'}</div>

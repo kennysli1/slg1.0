@@ -246,6 +246,8 @@ export interface QuestDef {
   scope: QuestScope;
   /** 主线前置：必须完成这些 code 才能解锁（科技树式）。随机任务为空。 */
   requires: string[];
+  /** 接取任务时一次性支付的资源；为空表示免费。 */
+  acceptCost?: Record<string, number>;
   /** 目标（v1 单目标）。 */
   objective: QuestObjective;
   /** 奖励：资源(含金币)与/或任务专属宝物(强制 locked，不可出售/遗弃/丢失/超时)。 */
@@ -290,6 +292,8 @@ export interface QuestGraphQuestDef {
   desc: string;
   type: QuestType;
   scope: QuestScope;
+  /** 接取任务时一次性支付的资源；来自 quests.csv 的 acceptCost 列。 */
+  acceptCost?: Record<string, number>;
   weight: number;
   repeatable: boolean;
   cooldownSec: number;
@@ -1667,6 +1671,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       id: num(r.id), code, lineCode: r.lineCode?.trim() || '', name: r.name ?? code, desc: r.desc ?? '',
       type: (r.type as QuestType) || 'side',
       scope: ((r.scope?.trim() || ((r.type as QuestType) === 'main' ? 'global' : 'village')) as QuestScope),
+      acceptCost: parseResourceList(r.acceptCost) ?? undefined,
       weight: Math.max(0, num(r.weight, 0)),
       repeatable: num(r.repeatable, 0) === 1, cooldownSec: Math.max(0, num(r.cooldownSec, 0)),
       abandonCooldownSec: Math.max(0, num(r.abandonCooldownSec, 0)),
@@ -1821,6 +1826,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       : undefined;
     quests[def.code] = {
       id: def.id, code: def.code, lineCode: def.lineCode, name: def.name, desc: def.desc, type: def.type, scope: def.scope, requires,
+      acceptCost: def.acceptCost,
       objective: objectiveOf(objectives[0]), rewards, failureRewards, choiceRewards: choiceRewards.length ? choiceRewards : undefined,
       conditionalRewards,
       weight: def.weight, trigger, repeatable: def.repeatable, cooldownSec: def.cooldownSec,
@@ -2243,6 +2249,10 @@ export function validateGameConfig(config: GameConfig): void {
     if (q.scope !== 'global' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] scope 必须是 global/village`);
     if (q.type === 'main' && q.scope !== 'global') errors.push(`quests.csv[${q.code}] 主线任务必须是 global`);
     if (q.type === 'daily' && q.scope !== 'village') errors.push(`quests.csv[${q.code}] 日常任务必须是 village`);
+    for (const [resource, amount] of Object.entries(q.acceptCost ?? {})) {
+      if (!resourceKeys.has(resource)) errors.push(`quests.csv[${q.code}] 接取费用资源 ${resource} 不在 resources.csv`);
+      if (!Number.isFinite(amount) || amount < 0) errors.push(`quests.csv[${q.code}] 接取费用 ${resource} 必须≥0`);
+    }
     if (!QUEST_OBJECTIVE_KINDS.has(q.objective.kind)) {
       errors.push(`quests.csv[${q.code}] 未知目标类型 ${q.objective.kind}`);
     } else if (q.objective.kind === 'submit_resources') {

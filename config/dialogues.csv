@@ -55,4 +55,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 50,s6_deliver,s6,deliver,1,,s6_deliver,take:收下
 51,s7_accept,s7,accept,1,,s7_accept,accept:接受任务
 52,s7_deliver,s7,deliver,1,,s7_deliver,take:收下
-53,s7_deliver_failure,s7,deliver_failure,1,,s7_deliver_failure,
+53,s7_deliver_failure,s7,deliver_failure,1,骰子裁判,对手已赢得两局，这场对决你输了。本任务没有失败奖励。,s7_deliver_failure,
+54,s8_accept,s8,accept,1,,s8_accept,accept:接受任务
+55,s8_deliver,s8,deliver,1,,s8_deliver,take:收下
+56,s8_deliver_failure,s8,deliver_failure,1,骰子裁判,困难对手已赢得两局，巅峰对决以失败告终。本任务没有失败奖励。,s8_deliver_failure,
