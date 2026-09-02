@@ -1601,6 +1601,7 @@ export class TasksModule {
         payload: {
           villageId: rewardVillageId,
           source: `task:${code}:resource_growth`,
+          label: `任务：${this.config.quests[code]?.name ?? code}`,
           mult,
           durationSec: rewardsDef.resourceGrowth.durationSec,
         },

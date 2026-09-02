@@ -60,6 +60,7 @@ describe('modifier 覆盖率', () => {
     store.set('building', vid, raw);
     building.reReportProduction(vid);
     military.createVillage(vid, 'romans');
+    await population.createVillage(vid, 'romans');
     treasure.createVillage(vid);
 
     // 直接注入所有真实存在的 modifier 到 state（不含任何虚构命令）
@@ -98,6 +99,38 @@ describe('modifier 覆盖率', () => {
     assert.ok(typeof a.netRate.crop === 'number', 'netRate.crop');
     // 速率修正叠加后 crop 净产率应提升
     assert.ok(a.netRate.crop > b.netRate.crop, `crop netRate 应随修正提升: before=${b.netRate.crop} after=${a.netRate.crop}`);
+  });
+
+  it('economy.GetResources: 返回资源田与科技来源明细', async () => {
+    await commands.send({ name: 'economy.SetBaseRate', from: 'test', payload: {
+      villageId: vid, resource: 'wood', ratePerHour: 100,
+      components: [{ source: 'building:woodcutter:test', label: '资源田基础产值 · 伐木场 Lv2', ratePerHour: 100 }],
+    }});
+    await commands.send({ name: 'economy.SetRateModifier', from: 'test', payload: {
+      villageId: vid, source: 'tech:forestry', mult: { wood: 0.2 },
+      details: [{ source: 'tech:forestry', label: '科技：林业', mult: { wood: 0.2 } }],
+    }});
+    const res = await commands.send({ name: 'economy.GetResources', from: 'test', payload: { villageId: vid } });
+    assert.ok(res.ok);
+    const entries = ((res.payload as any).resourceBreakdown?.wood ?? []) as any[];
+    assert.ok(entries.some((entry) => entry.label.includes('资源田基础产值')));
+    assert.ok(entries.some((entry) => entry.label === '科技：林业' && entry.percent === 20));
+  });
+
+  it('population.GetSnapshot: 返回人口增长与金币税收来源明细', async () => {
+    if (!store.get('population', vid)) await population.createVillage(vid, 'romans');
+    await commands.send({ name: 'population.SetTechGrowthMult', from: 'test', payload: {
+      villageId: vid, mult: 0.2, sources: [{ label: '科技：人口法典', delta: 0.2 }],
+    }});
+    await commands.send({ name: 'population.SetTreasureGrowthMult', from: 'test', payload: {
+      villageId: vid, mult: 1, goldMult: 1.25,
+      goldSources: [{ label: '宝物：金袋', delta: 0.25 }],
+    }});
+    const res = await commands.send({ name: 'population.GetSnapshot', from: 'test', payload: { villageId: vid } });
+    assert.ok(res.ok);
+    const payload = res.payload as any;
+    assert.ok(payload.growthBreakdown.some((entry: any) => entry.label === '科技：人口法典'));
+    assert.ok(payload.goldBreakdown.some((entry: any) => entry.label === '宝物：金袋'));
   });
 
   it.skip('population.GetSnapshot: conscriptionBonus 反映到 mobilizeCap', async () => {

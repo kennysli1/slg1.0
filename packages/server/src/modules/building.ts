@@ -974,15 +974,23 @@ export class BuildingModule {
   /** 全村某类资源的资源田总产率(每小时)上报 Economy。 */
   private reportFieldRate(s: BuildingState, resource: string): void {
     let ratePerHour = 0;
+    const components: { source: string; label: string; ratePerHour: number }[] = [];
     for (const p of s.placed) {
       const def = this.config.buildings[p.kind];
-      if (!def || def.resource !== resource) continue;
-      ratePerHour += this.fieldRate(def, p.level);
+      if (!def || def.resource !== resource || p.demolishing) continue;
+      const fieldRate = this.fieldRate(def, p.level);
+      if (fieldRate === 0) continue;
+      ratePerHour += fieldRate;
+      components.push({
+        source: `building:${p.kind}:${p.slotId}`,
+        label: `资源田基础产值 · ${def.name} Lv${p.level}`,
+        ratePerHour: fieldRate,
+      });
     }
     void this.commands.send({
       name: 'economy.SetBaseRate',
       from: BuildingModule.NAME,
-      payload: { villageId: s.villageId, resource, ratePerHour },
+      payload: { villageId: s.villageId, resource, ratePerHour, components },
     });
   }
 
