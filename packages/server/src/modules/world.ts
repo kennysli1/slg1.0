@@ -37,6 +37,12 @@ export interface Tile {
   /** 王都/封地多格地标的视觉与占地标记；中心格仍是唯一可交互目标坐标。 */
   landmark?: 'capital' | 'fief';
   landmarkCenter?: boolean;
+  /** 当前可见玩家村庄的公开详情；不写回 world_tile，只在地图响应中动态补齐。 */
+  playerName?: string;
+  reputation?: number;
+  population?: number;
+  mainBaseLevel?: number;
+  mainBaseName?: string;
 }
 
 const PLAYER_VILLAGE_MAP_ICONS = [
@@ -307,7 +313,46 @@ export class WorldModule {
     const completeTiles = [...byKey.values()];
     if (!playerId) return { ok: true, payload: { tiles: completeTiles } };
     const masked = await this.commands.send({ name: 'vision.FilterArea', from: WorldModule.NAME, payload: { playerId, tiles: completeTiles } });
-    return masked.ok ? masked : { ok: false, payload: {}, reason: masked.reason };
+    if (!masked.ok) return { ok: false, payload: {}, reason: masked.reason };
+    const maskedPayload = masked.payload as { tiles?: Tile[] };
+    const visibleTiles = Array.isArray(maskedPayload?.tiles) ? maskedPayload.tiles : [];
+    // 公开村庄详情只在地图响应中动态补齐，绝不复制进 world_tile/存档。
+    // Vision 已先完成战争迷雾过滤，因此这里只会为玩家当前能看到的村庄补资料。
+    const decorated = await this.decoratePublicVillageDetails(visibleTiles);
+    return { ok: true, payload: { ...maskedPayload, tiles: decorated } };
+  }
+
+  /**
+   * 地图详情栏需要的玩家村庄公开资料。人口、声望和主基地等级分别由其 owner
+   * 模块提供；World 只在响应边界聚合，不持有这些状态，也不把它们写回地图存档。
+   */
+  private async decoratePublicVillageDetails(tiles: Tile[]): Promise<Tile[]> {
+    const villages = tiles.filter((tile) => tile.kind === 'village' && tile.refId);
+    await Promise.all(villages.map(async (tile) => {
+      const villageId = tile.refId!;
+      const owner = await this.commands.send({
+        name: 'player.GetByVillage', from: WorldModule.NAME, payload: { villageId },
+      });
+      if (!owner.ok) return;
+      const player = (owner.payload as any)?.player;
+      const [reputation, population, layout] = await Promise.all([
+        this.commands.send({ name: 'reputation.GetByVillage', from: WorldModule.NAME, payload: { villageId } }),
+        this.commands.send({ name: 'population.GetSnapshot', from: WorldModule.NAME, payload: { villageId } }),
+        this.commands.send({ name: 'building.GetLayout', from: WorldModule.NAME, payload: { villageId } }),
+      ]);
+      const repValue = Number((reputation.payload as any)?.value);
+      const populationValue = Number((population.payload as any)?.totalPop);
+      const townCenter = (layout.payload as any)?.townCenter;
+      const level = Number(townCenter?.level);
+      if (typeof player?.name === 'string' && player.name) tile.playerName = player.name;
+      if (Number.isFinite(repValue)) tile.reputation = Math.trunc(repValue);
+      if (Number.isFinite(populationValue)) tile.population = Math.max(0, Math.trunc(populationValue));
+      if (Number.isFinite(level)) {
+        tile.mainBaseLevel = Math.max(1, Math.trunc(level));
+        if (typeof townCenter?.name === 'string' && townCenter.name) tile.mainBaseName = townCenter.name;
+      }
+    }));
+    return tiles;
   }
 
   /** 六边形距离（格）。行军时间由 Movement 用它和速度算。 */
