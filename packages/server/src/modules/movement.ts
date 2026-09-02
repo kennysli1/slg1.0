@@ -132,6 +132,8 @@ interface MovementRecord {
   routesFreed?: number;
   /** 商队（贸易）：true=正在返程（到家即回收路线）；false=去程（到目标村交付货物后启动返程）。 */
   returning?: boolean;
+  /** 联盟资源贡献商队；抵达时交给 alliance owner，不进入大厅村庄的个人资源。 */
+  allianceId?: string;
 }
 
 const COLLECTION = 'movement';
@@ -2225,7 +2227,7 @@ export class MovementModule {
    */
   private launchCaravan(opts: {
     id: string; fromVillage: string; fromXY: Hex; toXY: Hex; cargo: Record<string, number>;
-    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string;
+    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string; allianceId?: string;
   }): MovementRecord {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
@@ -2241,6 +2243,7 @@ export class MovementModule {
       path, stepIndex: 0, pos: path[0], perStepMs, nextStepAt: this.now() + perStepMs,
       arriveAt: this.now() + perStepMs * steps, status: 'marching', stepToken: 1,
       homeVillage: opts.homeVillage, routesFreed: opts.routesFreed, returning: opts.returning ?? false,
+      allianceId: opts.allianceId,
     };
     this.save(full);
     const token = full.stepToken;
@@ -2254,11 +2257,13 @@ export class MovementModule {
    * 由 trade 模块回收该村的贸易路线。
    */
   private async sendCaravan(cmd: Command): Promise<CommandResult> {
-    const { fromVillage, targetVillage, cargo, homeVillage, routesFreed, returning } = cmd.payload as {
+    const { fromVillage, targetVillage, cargo, homeVillage, routesFreed, returning, allianceId } = cmd.payload as {
       fromVillage: string; targetVillage: string; cargo?: Record<string, number>;
-      homeVillage?: string; routesFreed?: number; returning?: boolean;
+      homeVillage?: string; routesFreed?: number; returning?: boolean; allianceId?: string;
     };
-    if (targetVillage === fromVillage) return { ok: false, payload: {}, reason: 'same_village' };
+    // 联盟大厅可能就在贡献者本村：仍占用贸易线路并走一段最短商队时间，
+    // 但不影响普通资源转移禁止运往本村的既有规则。
+    if (targetVillage === fromVillage && !allianceId) return { ok: false, payload: {}, reason: 'same_village' };
     const cleaned = this.cleanCargo(cargo);
     if (cleaned.total <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
     const fromXY = await this.villageXY(fromVillage);
@@ -2267,7 +2272,7 @@ export class MovementModule {
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
     const mv = this.launchCaravan({
       id: this.nextId(), fromVillage, fromXY, toXY, cargo: cleaned.clean,
-      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage,
+      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage, allianceId,
     });
     log('出征(caravan)', { id: mv.id, from: fromVillage, to: targetVillage, cargo: cleaned.clean, returning: !!returning });
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
@@ -2371,35 +2376,46 @@ export class MovementModule {
       this.remove(mv.id);
       return;
     }
-    // 去程：把货物交给目标村；目标不是玩家村庄（如幸福村这类 NPC 村庄）则发到达事件由任务模块处理
+    // 去程：联盟贡献由联盟 owner 入库；普通商队仍把货物交给目标村或 NPC。
+    let allianceDelivered = false;
     if (mv.cargo && Object.keys(mv.cargo).length > 0) {
-      const tgt = await this.commands.send({
-        name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
-      });
-      if (tgt.ok) {
-        await this.commands.send({
-          name: 'economy.Grant', from: MovementModule.NAME,
-          payload: { villageId: mv.targetVillage, gain: mv.cargo },
+      if (mv.allianceId) {
+        const delivered = await this.commands.send({
+          name: 'alliance.ReceiveResourceCaravan', from: MovementModule.NAME,
+          payload: { allianceId: mv.allianceId, movementId: mv.id, targetVillageId: mv.targetVillage, cargo: mv.cargo },
         });
+        allianceDelivered = delivered.ok;
       } else {
-        // 目标非玩家村庄：可能是 NPC 村庄（幸福村），由 tasks 模块据此推进 deliver_to_npc 目标
-        const tile = await this.commands.send({
-          name: 'world.GetTileByRef', from: MovementModule.NAME, payload: { refId: mv.targetVillage },
+        const tgt = await this.commands.send({
+          name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
         });
-        const kind = (tile.payload as any)?.tile?.kind;
-        if (tile.ok && (kind === 'pve' || kind === 'taskcamp')) {
-          void this.bus.emit({
-            name: 'movement.CaravanArrivedNpc', source: MovementModule.NAME, ts: this.now(),
-            payload: { villageId: mv.fromVillage, npcId: mv.targetVillage, cargo: mv.cargo, toXY: mv.toXY },
-          } as DomainEvent);
+        if (tgt.ok) {
+          await this.commands.send({
+            name: 'economy.Grant', from: MovementModule.NAME,
+            payload: { villageId: mv.targetVillage, gain: mv.cargo },
+          });
+        } else {
+          // 目标非玩家村庄：可能是 NPC 村庄（幸福村），由 tasks 模块据此推进 deliver_to_npc 目标
+          const tile = await this.commands.send({
+            name: 'world.GetTileByRef', from: MovementModule.NAME, payload: { refId: mv.targetVillage },
+          });
+          const kind = (tile.payload as any)?.tile?.kind;
+          if (tile.ok && (kind === 'pve' || kind === 'taskcamp')) {
+            void this.bus.emit({
+              name: 'movement.CaravanArrivedNpc', source: MovementModule.NAME, ts: this.now(),
+              payload: { villageId: mv.fromVillage, npcId: mv.targetVillage, cargo: mv.cargo, toXY: mv.toXY },
+            } as DomainEvent);
+          }
         }
       }
     }
     const home = mv.homeVillage ?? mv.fromVillage;
     const homeXY = await this.villageXY(home);
     if (!homeXY) { this.remove(mv.id); return; }
+    // 联盟大厅失联/记录过期时，联盟 owner 会拒绝交付；此时把货物带回来源村，避免资源凭空消失。
+    const returnCargo = mv.allianceId && !allianceDelivered ? (mv.cargo ?? {}) : {};
     this.launchCaravan({
-      id: this.nextId(), fromVillage: home, fromXY: mv.toXY, toXY: homeXY, cargo: {},
+      id: this.nextId(), fromVillage: home, fromXY: mv.toXY, toXY: homeXY, cargo: returnCargo,
       homeVillage: home, routesFreed: mv.routesFreed ?? 0, returning: true, targetVillage: home,
     });
     this.remove(mv.id);

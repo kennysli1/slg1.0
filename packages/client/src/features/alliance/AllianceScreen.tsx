@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { me, req } from '../../api.js';
 import { allianceTargetPicker, allianceWarTarget, dataVersion, sessionVersion, showToast, tab } from '../../app/store.js';
 import { Btn, Empty, Panel, SectionHead, Tag } from '../../ui/index.js';
+import { errText } from '../../shared/ui/text.js';
 import '../../styles/alliance.css';
 
 type Pane = 'members' | 'buildings' | 'tech' | 'war' | 'control';
@@ -33,7 +34,7 @@ export function AllianceScreen() {
     setBusy(true);
     try {
       const result = await req(actionName, payload);
-      if (!result.ok) { showToast((result as any).error?.message ?? (result as any).error?.code ?? '操作失败', 'bad'); return; }
+      if (!result.ok) { const error = (result as any).error; showToast(error?.message ?? errText(error?.code ?? (result as any).reason), 'bad'); return; }
       showToast('操作成功', 'ok'); await load();
     } finally { setBusy(false); }
   }
@@ -76,7 +77,8 @@ function MemberPane({ alliance }: { alliance: any }) { return <Panel><SectionHea
 function BuildingPane({ alliance, isLeader, busy, onAction, villages, sourceVillageId, setSourceVillageId }: any) {
   const plan = alliance.researchingBuilding;
   const canPlan = isLeader || (alliance.roles?.[me?.id ?? ''] ?? []).includes('logistics');
-  return <Panel><SectionHead>联盟建筑</SectionHead><p>联盟仓库：木 {Math.floor(alliance.warehouse?.wood ?? 0)} · 泥 {Math.floor(alliance.warehouse?.clay ?? 0)} · 铁 {Math.floor(alliance.warehouse?.iron ?? 0)} · 粮 {Math.floor(alliance.warehouse?.crop ?? 0)}</p>{plan && <p class="alliance-notice">正在筹建：{plan.code} Lv.{plan.targetLevel}（需要木{plan.required.wood} 泥{plan.required.clay} 铁{plan.required.iron} 粮{plan.required.crop}），成员可从任意村运送资源。</p>}<div class="alliance-catalog">{(alliance.buildingCatalog ?? []).map((b: any) => <div class="alliance-catalog-row"><span><b>{b.name}</b><small>{b.code} · {b.description}</small></span><span>Lv.{alliance.buildings?.[b.code] ?? 0}/{b.maxLevel}</span>{canPlan && <Btn size="sm" disabled={busy || !!plan} onClick={() => onAction('StartAllianceBuilding', { code: b.code })}>规划</Btn>}</div>)}</div><div class="alliance-contribute"><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><input type="number" min="0" placeholder="木" id="alliance-wood" /><input type="number" min="0" placeholder="泥" id="alliance-clay" /><input type="number" min="0" placeholder="铁" id="alliance-iron" /><input type="number" min="0" placeholder="粮" id="alliance-crop" /><Btn disabled={busy || !plan} onClick={() => onAction('DepositAllianceResources', { sourceVillageId, amount: { wood: Number((document.getElementById('alliance-wood') as HTMLInputElement)?.value), clay: Number((document.getElementById('alliance-clay') as HTMLInputElement)?.value), iron: Number((document.getElementById('alliance-iron') as HTMLInputElement)?.value), crop: Number((document.getElementById('alliance-crop') as HTMLInputElement)?.value) } })}>贡献资源</Btn></div></Panel>;
+  const pending = alliance.pendingResourceDeliveries ?? [];
+  return <Panel><SectionHead>联盟建筑</SectionHead><p>联盟仓库：木 {Math.floor(alliance.warehouse?.wood ?? 0)} · 泥 {Math.floor(alliance.warehouse?.clay ?? 0)} · 铁 {Math.floor(alliance.warehouse?.iron ?? 0)} · 粮 {Math.floor(alliance.warehouse?.crop ?? 0)}</p>{plan && <p class="alliance-notice">正在筹建：{plan.code} Lv.{plan.targetLevel}（需要木{plan.required.wood} 泥{plan.required.clay} 铁{plan.required.iron} 粮{plan.required.crop}）。来源村需要贸易中心和空闲贸易路线，资源将由商队运抵大厅后入库。</p>}{pending.length > 0 && <p class="alliance-notice">运输中：{pending.map((d: any) => `${Object.entries(d.amount ?? {}).map(([k, v]) => `${k}${v}`).join('、')}（预计 ${new Date(d.arriveAt).toLocaleTimeString()}）`).join('；')}</p>}<div class="alliance-catalog">{(alliance.buildingCatalog ?? []).map((b: any) => <div class="alliance-catalog-row"><span><b>{b.name}</b><small>{b.code} · {b.description}</small></span><span>Lv.{alliance.buildings?.[b.code] ?? 0}/{b.maxLevel}</span>{canPlan && <Btn size="sm" disabled={busy || !!plan} onClick={() => onAction('StartAllianceBuilding', { code: b.code })}>规划</Btn>}</div>)}</div><div class="alliance-contribute"><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><input type="number" min="0" placeholder="木" id="alliance-wood" /><input type="number" min="0" placeholder="泥" id="alliance-clay" /><input type="number" min="0" placeholder="铁" id="alliance-iron" /><input type="number" min="0" placeholder="粮" id="alliance-crop" /><Btn disabled={busy || !plan} onClick={() => onAction('DepositAllianceResources', { sourceVillageId, amount: { wood: Number((document.getElementById('alliance-wood') as HTMLInputElement)?.value), clay: Number((document.getElementById('alliance-clay') as HTMLInputElement)?.value), iron: Number((document.getElementById('alliance-iron') as HTMLInputElement)?.value), crop: Number((document.getElementById('alliance-crop') as HTMLInputElement)?.value) } })}>贡献资源</Btn></div></Panel>;
 }
 
 function TechPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVillageId, setSourceVillageId }: any) {

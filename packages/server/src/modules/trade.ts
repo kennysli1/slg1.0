@@ -182,6 +182,8 @@ export class TradeModule {
     this.commands.register('trade.AcceptNpcDelivery', (c) => this.acceptNpcDelivery(c));
     // 己方/盟友村之间资源转移：由贸易中心派商队并消耗贸易路线。
     this.commands.register('trade.TransferResources', (c) => this.transferResources(c));
+    // 联盟资源贡献：来源村仍由贸易中心负责扣款、占线和派出商队，抵达后由 alliance owner 入库。
+    this.commands.register('trade.SendAllianceResources', (c) => this.sendAllianceResources(c));
 
     // 中心建成/升级 → 确保中心状态存在并刷新参数。
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -563,6 +565,48 @@ export class TradeModule {
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
     return { ok: true, payload: { targetVillage, cargo: clean, routesNeeded, arriveAt: (caravan.payload as any)?.arriveAt, travelSec: (caravan.payload as any)?.travelSec } };
+  }
+
+  /**
+   * 联盟大厅资源贡献的运输入口（仅供 alliance.DepositResources 调用）。
+   * 与普通村间转移不同，目标大厅不要求有贸易中心，也不要求目标村属于来源玩家；
+   * 来源村必须有贸易中心、足够空闲路线和资源，资源在商队抵达前不会进入联盟仓库。
+   */
+  private async sendAllianceResources(cmd: Command): Promise<CommandResult> {
+    const { allianceId, sourceVillageId, targetVillageId, amount } = cmd.payload as {
+      allianceId: string; sourceVillageId: string; targetVillageId: string; amount?: Record<string, number>;
+    };
+    const s = this.load(sourceVillageId);
+    const level = await this.getCenterLevel(sourceVillageId);
+    if (!s || level <= 0) return { ok: false, payload: {}, reason: 'no_center' };
+    if (!allianceId || !targetVillageId) return { ok: false, payload: {}, reason: 'alliance_hall_required' };
+    const clean: Record<string, number> = {};
+    for (const key of TRADE_RES) {
+      const n = Math.floor(Number(amount?.[key]) || 0);
+      if (n > 0) clean[key] = n;
+    }
+    if (Object.keys(clean).length === 0) return { ok: false, payload: {}, reason: 'empty_payload' };
+    if (Object.entries(amount ?? {}).some(([key, value]) => !TRADE_RES.includes(key) && Number(value) > 0)) {
+      return { ok: false, payload: {}, reason: 'invalid_transfer_resource' };
+    }
+    const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
+    const routesNeeded = Math.ceil(this.sumUnits(clean) / this.routeCapacity());
+    const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
+    if (routesNeeded > available) return { ok: false, payload: { routesNeeded, available }, reason: 'insufficient_routes' };
+    const spend = await this.commands.send({ name: 'economy.TrySpend', from: TradeModule.NAME, payload: { villageId: sourceVillageId, cost: clean } });
+    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_resources' };
+    const caravan = await this.commands.send({
+      name: 'movement.SendCaravan', from: TradeModule.NAME,
+      payload: { fromVillage: sourceVillageId, targetVillage: targetVillageId, cargo: clean, homeVillage: sourceVillageId, routesFreed: routesNeeded, allianceId },
+    });
+    if (!caravan.ok) {
+      await this.commands.send({ name: 'economy.Grant', from: TradeModule.NAME, payload: { villageId: sourceVillageId, gain: clean } });
+      return { ok: false, payload: {}, reason: caravan.reason ?? 'caravan_failed' };
+    }
+    s.tradeRoutesUsed += routesNeeded;
+    this.store.set(COLLECTION, sourceVillageId, s);
+    await this.emitUpdated(sourceVillageId);
+    return { ok: true, payload: { id: (caravan.payload as any)?.id, targetVillage: targetVillageId, cargo: clean, routesNeeded, arriveAt: (caravan.payload as any)?.arriveAt, travelSec: (caravan.payload as any)?.travelSec } };
   }
 
   private async refresh(cmd: Command): Promise<CommandResult> {

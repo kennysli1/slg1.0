@@ -29,6 +29,14 @@ interface WarPlan {
   participants: Record<string, WarParticipant>;
 }
 
+interface PendingResourceDelivery {
+  playerId: string;
+  sourceVillageId: string;
+  amount: Resources;
+  sentAt: number;
+  arriveAt: number;
+}
+
 interface AllianceState {
   id: string;
   name: string;
@@ -43,6 +51,8 @@ interface AllianceState {
   joinRequests: Record<string, number>;
   warehouse: Resources;
   resourceContributions: Record<string, Resources>;
+  /** 已扣除来源村资源、正在运往联盟大厅的贡献商队。以商队 movement id 去重。 */
+  pendingResourceDeliveries?: Record<string, PendingResourceDelivery>;
   techPointStock: number;
   techContributions: Record<string, number>;
   buildings: Record<string, number>;
@@ -105,6 +115,8 @@ export class AllianceModule {
     this.commands.register('alliance.SetRole', (c) => this.setRole(c));
     this.commands.register('alliance.RemoveMember', (c) => this.removeMember(c));
     this.commands.register('alliance.DepositResources', (c) => this.depositResources(c));
+    // 商队抵达联盟大厅后的内部结算；由 movement owner 调用，贡献不会在发车时瞬间入库。
+    this.commands.register('alliance.ReceiveResourceCaravan', (c) => this.receiveResourceCaravan(c));
     this.commands.register('alliance.StartBuilding', (c) => this.startBuilding(c));
     this.commands.register('alliance.StartTech', (c) => this.startTech(c));
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
@@ -162,6 +174,7 @@ export class AllianceModule {
       joinRequests: raw.joinRequests ?? {},
       warehouse: cloneResources(raw.warehouse),
       resourceContributions: raw.resourceContributions ?? {},
+      pendingResourceDeliveries: raw.pendingResourceDeliveries ?? {},
       techPointStock: positiveInt(raw.techPointStock),
       techContributions: raw.techContributions ?? {},
       buildings: raw.buildings ?? {},
@@ -354,7 +367,7 @@ export class AllianceModule {
     const a = this.load(id); if (!a) return { ok: true, payload: { alliance: null } };
     await this.refreshConnectivity(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
-    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
+    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
   }
 
   private async create(cmd: Command): Promise<CommandResult> {
@@ -373,7 +386,7 @@ export class AllianceModule {
     const player = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
     const leaderName = String((player.payload as any)?.player?.name ?? playerId);
     const id = this.nextId();
-    const a: AllianceState = { id, name: clean, leaderId: playerId, leaderName, memberIds: [playerId], roles: { [playerId]: [] }, hallVillageId: sourceVillageId, level: this.levelDef(hallLevel).level, disconnected: false, joinRequests: {}, warehouse: zeroResources(), resourceContributions: {}, techPointStock: 0, techContributions: {}, buildings: {}, technologies: {}, warPlans: {} };
+    const a: AllianceState = { id, name: clean, leaderId: playerId, leaderName, memberIds: [playerId], roles: { [playerId]: [] }, hallVillageId: sourceVillageId, level: this.levelDef(hallLevel).level, disconnected: false, joinRequests: {}, warehouse: zeroResources(), resourceContributions: {}, pendingResourceDeliveries: {}, techPointStock: 0, techContributions: {}, buildings: {}, technologies: {}, warPlans: {} };
     this.store.set(COLLECTION, id, a); this.store.set(PLAYER_INDEX, playerId, id);
     await this.syncPlayerModifiers(playerId); await this.push(a);
     return { ok: true, payload: { allianceId: id, alliance: a } };
@@ -440,10 +453,53 @@ export class AllianceModule {
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'village_not_owned' };
     const clean = cloneResources(amount); if (!RESOURCE_KEYS.some((k) => clean[k] > 0)) return { ok: false, payload: {}, reason: 'empty_deposit' };
-    const spend = await this.commands.send({ name: 'economy.TrySpend', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, cost: clean } });
-    if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_resources' };
-    a.warehouse = addResources(a.warehouse, clean); a.resourceContributions[playerId] = addResources(a.resourceContributions[playerId] ?? zeroResources(), clean); this.store.set(COLLECTION, a.id, a);
-    await this.maybeCompleteBuilding(a); await this.syncAllModifiers(a); await this.push(a); return { ok: true, payload: { warehouse: a.warehouse } };
+    if (!a.hallVillageId) return { ok: false, payload: {}, reason: 'alliance_hall_required' };
+    const sent = await this.commands.send({
+      name: 'trade.SendAllianceResources', from: AllianceModule.NAME,
+      payload: { playerId, allianceId: a.id, sourceVillageId, targetVillageId: a.hallVillageId, amount: clean },
+    });
+    if (!sent.ok) return { ok: false, payload: sent.payload ?? {}, reason: sent.reason ?? 'caravan_failed' };
+    const deliveryId = String((sent.payload as any)?.id ?? '');
+    if (!deliveryId) return { ok: false, payload: {}, reason: 'caravan_failed' };
+    a.pendingResourceDeliveries ??= {};
+    a.pendingResourceDeliveries[deliveryId] = {
+      playerId, sourceVillageId, amount: clean,
+      sentAt: this.now(), arriveAt: Number((sent.payload as any)?.arriveAt) || this.now(),
+    };
+    this.store.set(COLLECTION, a.id, a);
+    await this.push(a);
+    return { ok: true, payload: { warehouse: a.warehouse, deliveryId, arriveAt: (sent.payload as any)?.arriveAt, travelSec: (sent.payload as any)?.travelSec, routesNeeded: (sent.payload as any)?.routesNeeded } };
+  }
+
+  /** 商队抵达大厅后的最终入库；重复到达按 movement id 幂等处理。 */
+  private async receiveResourceCaravan(cmd: Command): Promise<CommandResult> {
+    const { allianceId, movementId, targetVillageId, cargo } = cmd.payload as { allianceId: string; movementId: string; targetVillageId?: string; cargo?: Partial<Resources> };
+    const a = this.load(String(allianceId ?? ''));
+    if (!a) return { ok: false, payload: {}, reason: 'alliance_not_found' };
+    const pending = a.pendingResourceDeliveries?.[String(movementId ?? '')];
+    if (!pending) return { ok: false, payload: {}, reason: 'alliance_delivery_not_found' };
+    if (a.disconnected || !a.hallVillageId || (targetVillageId && targetVillageId !== a.hallVillageId)) {
+      // 大厅失联时由 movement 带原货物返程；移除悬挂记录，避免旧商队日后重复入库。
+      delete a.pendingResourceDeliveries![String(movementId)];
+      this.store.set(COLLECTION, a.id, a);
+      await this.push(a);
+      return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    }
+    const received = cloneResources(cargo);
+    if (RESOURCE_KEYS.some((k) => received[k] !== pending.amount[k])) {
+      delete a.pendingResourceDeliveries![String(movementId)];
+      this.store.set(COLLECTION, a.id, a);
+      await this.push(a);
+      return { ok: false, payload: {}, reason: 'alliance_delivery_mismatch' };
+    }
+    a.warehouse = addResources(a.warehouse, pending.amount);
+    a.resourceContributions[pending.playerId] = addResources(a.resourceContributions[pending.playerId] ?? zeroResources(), pending.amount);
+    delete a.pendingResourceDeliveries![String(movementId)];
+    this.store.set(COLLECTION, a.id, a);
+    await this.maybeCompleteBuilding(a);
+    await this.syncAllModifiers(a);
+    await this.push(a);
+    return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
   }
 
   private async startBuilding(cmd: Command): Promise<CommandResult> {
