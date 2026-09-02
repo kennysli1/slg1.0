@@ -28,7 +28,7 @@ import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
-import { projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 
 describe('骰子任务逐帧回放', () => {
   const base = (): DiceQuestReplayBase => ({
@@ -98,6 +98,18 @@ describe('骰子任务逐帧回放', () => {
     const styles = readFileSync(new URL('../styles/dice-quest.css', import.meta.url), 'utf8');
     assert.match(source, /if \(type === 'forfeit'\)[\s\S]*?setPlayback\(null\)[\s\S]*?return true;/);
     assert.match(styles, /\.dice-quest-breakdown \{[^}]*min-height:/);
+  });
+
+  it('小局结束显示下一局，大局结束只允许退出', () => {
+    const match = { playerWins: 1, npcWins: 0, winsRequired: 2 };
+    assert.equal(isDiceMatchComplete(match), false, '尚未达到两胜时应可开始下一局');
+    assert.equal(isDiceMatchComplete({ ...match, playerWins: 2 }), true, '玩家两胜后整场结束');
+    assert.equal(isDiceMatchComplete({ ...match, npcWins: 2 }), true, 'NPC两胜后整场结束');
+    assert.equal(isDiceMatchComplete(match, { ready: true }), true, '服务端成功状态应视为整场结束');
+    assert.equal(isDiceMatchComplete(match, { failureReady: true }), true, '服务端失败状态应视为整场结束');
+    const source = readFileSync(new URL('../features/village/DiceQuestModal.tsx', import.meta.url), 'utf8');
+    assert.match(source, /const matchComplete = isDiceMatchComplete\(displayedMatch, snapshot\?\.round\)/);
+    assert.match(source, /'下一局'/);
   });
 });
 

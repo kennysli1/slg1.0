@@ -16,6 +16,16 @@ export type DiceQuestMatchScore = {
   winsRequired: number;
 };
 
+/** 判断当前三局两胜牌桌是否已经结束。 */
+export function isDiceMatchComplete(
+  match: DiceQuestMatchScore,
+  round?: { ready?: boolean; failureReady?: boolean } | null,
+): boolean {
+  return Boolean(round?.ready || round?.failureReady)
+    || match.playerWins >= match.winsRequired
+    || match.npcWins >= match.winsRequired;
+}
+
 export type DiceQuestReplayBase = {
   playerScore: number;
   aiScore: number;
