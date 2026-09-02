@@ -323,14 +323,14 @@ test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () =>
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
   assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 40);
-  assert.equal(leg.meleeDef, 35);
-  assert.equal(leg.rangedDef, 50);
+  assert.equal(leg.meleeAtk, 36);
+  assert.equal(leg.meleeDef, 58);
+  assert.equal(leg.rangedDef, 52);
   const cat = cfg.units['catapult'];
   assert.equal(cat.form, 'ranged', '投石机远程');
   assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 多特性解析（| 分隔）：禁卫兵引用当前权威 CSV 中的盾牌与重甲特性
-  assert.deepEqual(cfg.units['praetorian'].traits, ['shield', 'heavy_armor']);
+  // 多特性解析（| 分隔）：禁卫兵引用 trait 2(heavy_armor)+9(disciplined)，两个都应生效
+  assert.deepEqual(cfg.units['praetorian'].traits, ['heavy_armor', 'disciplined']);
   assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
   assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
 });
