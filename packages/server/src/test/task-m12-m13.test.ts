@@ -139,13 +139,19 @@ test('M13 流程：使用我的努力解锁并生成二近丘陵秘密营地，�
   assert.equal(state.active.find((task: any) => task.code === 'm13')?.ready, true, '调查抵达后 M13 应等待手动领取');
 });
 
-test('M12 归入开眼看世界；M14 正声望兑换无期限佣兵；M15 负声望阈值奖励', async () => {
+test('M12/ M16 与 M13–M15 任务线及声望奖励', async () => {
   const app = freshApp();
   const villageId = await register(app, 'm14-m15-flow');
 
   assert.equal(app.config.quests.m12.lineCode, 'world_exploration');
-  assert.equal(app.config.quests.m14.lineCode, 'world_exploration');
-  assert.equal(app.config.quests.m15.lineCode, 'world_exploration');
+  assert.equal(app.config.quests.m13.lineCode, 'other_story');
+  assert.equal(app.config.quests.m14.lineCode, 'other_story');
+  assert.equal(app.config.quests.m15.lineCode, 'other_story');
+  assert.equal(app.config.quests.m16.lineCode, 'world_exploration');
+  assert.deepEqual(app.config.quests.m16.requires, ['m12']);
+  assert.equal(app.config.quests.m16.objective.kind, 'reputation_at_least');
+  assert.equal(app.config.quests.m16.objective.threshold, 10);
+  assert.deepEqual(app.config.quests.m16.rewards.mercenaries, { merc_archer: 10 });
   assert.deepEqual(app.config.quests.m14.requires, ['m13']);
   assert.deepEqual(app.config.quests.m15.requires, ['m14']);
   assert.equal(app.config.quests.m14.objective.kind, 'submit_resources');
@@ -197,4 +203,34 @@ test('M12 归入开眼看世界；M14 正声望兑换无期限佣兵；M15 负�
   const economy = app.store.get<any>('economy', villageId);
   const cropBuff = (economy?.timedBuffs ?? []).find((buff: any) => buff.source === 'task:m15:resource_growth');
   assert.deepEqual(cropBuff?.mult, { crop: 0.25 }, 'M15 产量奖励只能作用于粮食');
+});
+
+test('M16 达到声望 10 后奖励无期限佣兵弓手', async () => {
+  const app = freshApp();
+  const villageId = await register(app, 'm16-flow');
+  const state = app.store.get<any>('task', villageId)!;
+  state.completedMain = [...new Set([...(state.completedMain ?? []), 'm12'])];
+  state.offeredMain = [...new Set([...(state.offeredMain ?? []), 'm16'])];
+  app.store.set('task', villageId, state);
+
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm16' })).ok, true);
+  await send(app, 'reputation.AdjustByVillage', { villageId, delta: 10 });
+  await tick();
+  const readyState = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.equal(readyState.active.find((item: any) => item.code === 'm16')?.ready, true, '声望达到 10 后 M16 应就绪');
+
+  const preview = await send(app, 'task.StartDeliver', { villageId, code: 'm16' });
+  assert.equal(preview.ok, true, preview.reason);
+  assert.deepEqual((preview.payload as any).previewRewards.mercenaries, { merc_archer: 10 });
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId }).then((result) => result.payload as any)).value, 10,
+    'M16 预览不能改变声望');
+
+  const delivered = await send(app, 'task.Deliver', { villageId, code: 'm16' });
+  assert.equal(delivered.ok, true, delivered.reason);
+  assert.deepEqual((delivered.payload as any).rewards.mercenaries, { merc_archer: 10 });
+  const army = await send(app, 'military.GetArmy', { villageId });
+  assert.equal((army.payload as any).troops.merc_archer, 10, 'M16 应直接加入 10 名佣兵弓手');
+  assert.equal((app.store.get<any>('merc', villageId)?.contracts ?? []).length, 0, 'M16 佣兵不应登记合同');
+  const after = (await send(app, 'task.GetState', { villageId })).payload as any;
+  assert.ok(after.completedMain.includes('m16'), 'M16 领取后应完成');
 });

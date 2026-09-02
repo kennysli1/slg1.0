@@ -62,3 +62,5 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 57,s9_accept,s9,accept,1,,s9_accept,accept:接受任务
 58,s9_deliver,s9,deliver,1,,s9_deliver,take:收下
 59,s9_deliver_failure,s9,deliver_failure,1,骰子裁判,困难对手已赢得两局，巅峰对决以失败告终。本任务没有失败奖励。,s9_deliver_failure,
+60,m16_accept,m16,accept,1,王国使者,声望是你在这片土地上立足的证明。请让你的声望达到十点，证明你值得更高的信任。,accept:接受任务
+61,m16_deliver,m16,deliver,1,王国使者,你的威望已经传遍四方。这支弓手队伍将为你效力。,take:收下

@@ -62,6 +62,7 @@ function objText(task: any): string {
   if (o.kind === 'defend_task_village') return '守住天王老子村的攻城';
   if (o.kind === 'raid_task_village') return '掠夺天王老子村';
   if (o.kind === 'reputation_at_most') return `声望值达到 ${o.threshold} 或更低`;
+  if (o.kind === 'reputation_at_least') return `声望值达到 ${o.threshold} 或更高`;
   if (o.kind === 'dice_match') {
     const difficulty = o.diceDifficulty === 'hard' ? '困难 NPC' : o.diceDifficulty === 'normal' ? '普通 NPC' : '简单 NPC';
     return o.diceWinsRequired > 1
@@ -570,6 +571,16 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
           <div class="task-card-prog">
             <span class={`task-prog-chip${Number(task.progress) <= Number(o.threshold) ? ' done' : ''}`}>
               当前声望 {fmt(Number(task.progress) || 0)} / 目标 ≤{fmt(Number(o.threshold) || 0)}
+            </span>
+            <span class="task-prog-hint">声望达到目标后即可领取</span>
+          </div>
+        </div>
+      )}
+      {o.kind === 'reputation_at_least' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${Number(task.progress) >= Number(o.threshold) ? ' done' : ''}`}>
+              当前声望 {fmt(Number(task.progress) || 0)} / 目标 ≥{fmt(Number(o.threshold) || 0)}
             </span>
             <span class="task-prog-hint">声望达到目标后即可领取</span>
           </div>

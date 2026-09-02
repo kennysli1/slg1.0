@@ -1222,7 +1222,7 @@ function sectionReputation(){
   h += reputationCsvTable('kingdom_services', '议会厅服务声望价格（kingdom_services.csv）', DATA.kingdom_services, ['id','code','name','category'], [['reputationCost','声望价格']], null, 'number');
   h += reputationCsvTable('treasures', '宝物被动声望（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['reputationValue','主宝物栏声望修正']], null, 'number');
   h += reputationCsvTable('treasures', '直接声望宝物效果（treasures.csv）', DATA.treasures, ['id','code','name','effectType','applyType'], [['effectValue','声望效果值']], function(row){ return row.effectType === 'reputation'; }, 'number');
-  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most'; }, 'number');
+  h += reputationCsvTable('quest_objectives', '任务声望目标（quest_objectives.csv）', DATA.quest_objectives, ['id','questCode','phase','kind','order'], [['params','声望阈值']], function(row){ return row.kind === 'reputation_at_most' || row.kind === 'reputation_at_least'; }, 'number');
   h += reputationCsvTable('quest_effects', '任务声望调整（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','声望变化值']], function(row){ return row.kind === 'adjust_reputation'; }, 'number');
   h += reputationCsvTable('quest_effects', '正声望兑换佣兵（quest_effects.csv）', DATA.quest_effects, ['id','questCode','phase','kind','order'], [['params','兑换参数（兵种:每点数量）']], function(row){ return row.kind === 'grant_mercenaries_by_positive_reputation'; }, 'text');
   return '<div class="sec"><h2>声望参数</h2>'+h+'</div>';
