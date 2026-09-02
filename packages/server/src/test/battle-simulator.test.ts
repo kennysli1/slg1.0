@@ -29,7 +29,7 @@ function addTestUnit(target: GameConfig, code: string, overrides: Partial<UnitDe
 
 test('阶段化模拟器配置：兵种生命值与模拟器特性来自 CSV，雇佣兵/NPC 默认可为空', () => {
   const cfg = config();
-  assert.equal(cfg.units.praetorian.hp, 270);
+  assert.equal(cfg.units.praetorian.hp, 300);
   assert.deepEqual(cfg.units.praetorian.simTraits, ['cavalry_hunter']);
   assert.deepEqual(cfg.units.legionnaire.simTraits, ['legion_ranged_guard']);
   assert.deepEqual(cfg.units.axeman.simTraits, ['axe_linebreaker']);
@@ -40,6 +40,21 @@ test('阶段化模拟器配置：兵种生命值与模拟器特性来自 CSV，�
   assert.equal(cfg.units.equcaesaris.techTier, 3);
   assert.deepEqual(cfg.units.merc_slinger.simTraits, []);
   assert.ok(Object.values(cfg.pveTemplates).some((template) => Object.values(template.defender).some((unit) => unit.hp !== undefined)), 'PvE 守军应有生命池字段');
+});
+
+test('阶段化模拟器：只读取 simTraits，不把线上 traits 重复计入', () => {
+  const cfg = config();
+  cfg.units.equimperatoris.traits = ['charge'];
+  cfg.units.equimperatoris.simTraits = [];
+  const report = simulateBattle(cfg, {
+    mode: 'field', seed: 17,
+    attacker: { troops: { equimperatoris: 10 } },
+    defender: { troops: { imperian: 100 } },
+  });
+  const charge = report.stages.find((stage) => stage.name === 'cavalry_charge')?.steps.find((step) => step.name === 'cavalry_charge_melee');
+  const melee = report.stages.find((stage) => stage.name === 'melee_pool')?.steps[0];
+  assert.ok(charge && melee);
+  assert.equal(charge.attackerStats.equimperatoris?.meleeAtk, melee.attackerStats.equimperatoris?.meleeAtk, '线上 charge 不应进入阶段模拟器');
 });
 
 test('配置中心与网关：生命值/特性可编辑，模拟器目录和执行动作已注册', () => {
@@ -123,7 +138,7 @@ test('阶段化模拟器：远程阶段有近战先射近战，否则射远程�
   });
   const noMeleeStep = noMelee.stages.find((stage) => stage.name === 'ranged_fire')?.steps[0];
   assert.ok(noMeleeStep);
-  assert.ok(noMeleeStep.after.defender.catapult < 10 || noMeleeStep.after.attacker.catapult < 10);
+  assert.ok(noMeleeStep.damageToDefender > 0 || noMeleeStep.damageToAttacker > 0, '双方都无近战时远程应互射并产生正伤害');
 });
 
 test('阶段化模拟器：生命伤亡池按总人口累计小数伤亡', () => {
@@ -194,7 +209,7 @@ test('阶段化模拟器：同人口克制与混搭能改变战果，高科技�
   });
   assert.ok((tech.final.attacker.gaul_warboar_rider ?? 0) > 0);
   assert.ok(finalInfluence(tech.final.attacker) > finalInfluence(tech.final.defender), '高科技骑兵应在有效战斗人口上保持优势');
-  assert.ok((tech.final.defender.legionnaire ?? 0) > 0, '高科技骑兵应有优势，但不应把同人口基础步兵直接清空');
+  assert.equal(tech.final.defender.legionnaire ?? 0, 0, '高科技骑兵在明显攻防优势下应能在战术窗口内速胜');
 });
 
 test('阶段化模拟器：基准、战术窗口和基础克制关系可复盘', () => {
@@ -208,10 +223,12 @@ test('阶段化模拟器：基准、战术窗口和基础克制关系可复盘',
   });
   const mirror = simulate({ legionnaire: 100 }, { legionnaire: 100 });
   assert.equal(mirror.winner, 'draw');
-  assert.ok((mirror.final.attacker.legionnaire ?? 0) >= 45 && (mirror.final.attacker.legionnaire ?? 0) <= 60, '100v100 镜像应在战术窗口内产生明显但非瞬间清空的伤亡');
+  assert.ok((mirror.final.attacker.legionnaire ?? 0) >= 25 && (mirror.final.attacker.legionnaire ?? 0) <= 45, '100v100 镜像应在战术窗口内产生明显伤亡，但不应首轮结束');
   const outnumbered = simulate({ legionnaire: 100 }, { legionnaire: 10 });
   assert.equal(outnumbered.winner, 'attacker');
   assert.ok((outnumbered.final.attacker.legionnaire ?? 0) >= 95, '10% 兵力应在一个交换内被平方律压制');
+  assert.equal(mirror.stages.find((stage) => stage.name === 'melee_pool')?.steps.length, 8, '镜像战斗应完整走完 8 轮战术窗口');
+  assert.equal(outnumbered.stages.find((stage) => stage.name === 'melee_pool')?.steps.length, 1, '10:1 兵力差应在第一轮结束');
   assert.equal(simulate({ roman_sagittarii: 100 }, { spearman: 100 }).winner, 'attacker', '远程兵应能压制低远防的长枪兵');
   assert.equal(simulate({ spearman: 100 }, { equimperatoris: 50 }).winner, 'attacker', '同人口长枪兵应明确克制冲角骑兵');
   assert.equal(simulate({ equimperatoris: 50 }, { roman_sagittarii: 100 }).winner, 'attacker', '同人口骑兵应通过冲击压制远程兵');
@@ -264,7 +281,8 @@ test('阶段化模拟器：攻击低于防御时仍会产生可累积伤害', ()
   assert.ok(step.attackPower.attacker < step.defensePower.defender);
   assert.ok(step.damageToDefender > 0, '低于防御时不能被硬截断为 0 伤害');
   assert.ok(report.stages.flatMap((stage) => stage.steps).some((item) => item.lossesToDefender > 0), '持续正伤害应能在累计后转化为至少 1 个单位的阶段伤亡');
-  assert.equal(report.rules.damageFormula, 'A²/(A+D)');
+  assert.equal(report.rules.damageFormula, 'k×A×A/(A+D)×(1+g×max(0,(A-D)/(A+D)))');
+  assert.equal(report.rules.damageCoefficients.advantageAmplifier, cfg.constants.battlePhaseAdvantageAmplifier);
 });
 
 test('阶段化模拟器：攻城最终阶段按攻击/防御/生命值顺序比较，完全相等由防守方留1', () => {

@@ -507,6 +507,8 @@ export interface GameConstants {
   battlePhaseCavalryVsRangedCoeff: number;
   battlePhaseRangedStrikeCoeff: number;
   battlePhaseMeleeRoundCoeff: number;
+  /** 阶段化伤害中攻击高于防御时的优势放大系数。 */
+  battlePhaseAdvantageAmplifier: number;
   /** 阶段模拟器战术窗口结束后，优势方有效战力达到该倍数才判定胜负。 */
   battlePhaseDecisionRatio: number;
   /** 攻城最终阶段比较浮点数时的相等容差。 */
@@ -1358,6 +1360,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     battlePhaseCavalryVsRangedCoeff: Math.max(0, cn('combat_phase_cavalry_vs_ranged_coeff', 1)),
     battlePhaseRangedStrikeCoeff: Math.max(0, cn('combat_phase_ranged_strike_coeff', 1)),
     battlePhaseMeleeRoundCoeff: Math.max(0, cn('combat_phase_melee_round_coeff', 1)),
+    battlePhaseAdvantageAmplifier: Math.max(0, cn('combat_phase_advantage_amplifier', 1.5)),
     battlePhaseDecisionRatio: Math.max(1, cn('combat_phase_decision_ratio', 1.15)),
     battlePhaseCompareEpsilon: Math.max(0, cn('combat_phase_compare_epsilon', 0.0001)),
     battlePhaseMinSurvivorUnits: Math.max(1, Math.floor(cn('combat_phase_min_survivor_units', 1))),

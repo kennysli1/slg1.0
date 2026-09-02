@@ -294,11 +294,12 @@
 | combat_value_melee_attack_weight / ranged_attack_weight | 1 / 1.1 | 基础战斗价值中的近战/远程攻击权重 |
 | combat_value_melee_defense_weight / ranged_defense_weight | 0.85 / 0.75 | 基础战斗价值中的近战/远程防御权重 |
 | combat_value_hp_weight | 0.65 | 基础战斗价值中的生命值权重 |
-| combat_phase_cavalry_vs_cavalry_coeff | 1 | 模拟器骑兵对冲伤害系数 |
-| combat_phase_cavalry_vs_melee_coeff | 1 | 模拟器骑兵冲击近战步兵伤害系数 |
-| combat_phase_cavalry_vs_ranged_coeff | 1 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
-| combat_phase_ranged_strike_coeff | 1 | 模拟器远程打击伤害系数（目标用远程防御） |
-| combat_phase_melee_round_coeff | 1 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_phase_cavalry_vs_cavalry_coeff | 0.18 | 模拟器骑兵对冲伤害系数 |
+| combat_phase_cavalry_vs_melee_coeff | 0.25 | 模拟器骑兵冲击近战步兵伤害系数 |
+| combat_phase_cavalry_vs_ranged_coeff | 0.40 | 模拟器骑兵冲击远程步兵伤害系数（目标用近战防御） |
+| combat_phase_ranged_strike_coeff | 0.25 | 模拟器远程打击伤害系数（目标用远程防御） |
+| combat_phase_melee_round_coeff | 0.30 | 模拟器第三阶段每轮近战伤害系数 |
+| combat_phase_advantage_amplifier | 1.50 | 攻击高于防御时的优势放大系数；攻击低于防御时不额外放大 |
 | combat_phase_compare_epsilon | 0.0001 | 模拟器攻城最终阶段判断数值相等的容差 |
 | combat_phase_min_survivor_units | 1 | 模拟器攻城最终阶段胜方至少保留单位数 |
 | main_build_speedup_per_level | 0.05 | 主基地每级建造提速（-5%耗时/级） |
