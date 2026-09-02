@@ -63,18 +63,18 @@ function compareDialogueCode(a: string, b: string): number {
   return partsA.length - partsB.length;
 }
 
-/** 对话编辑器的确定性顺序：先按 code，再按 taskCode、段落号和 id。 */
+/** 对话编辑器的确定性顺序：先按 taskCode，再按 code、段落号和 id。 */
 function sortDialogueRows(rows: CsvRow[]): CsvRow[] {
   return [...rows].sort((a, b) => {
-    const codeA = String(a.code ?? '');
-    const codeB = String(b.code ?? '');
-    const codeOrder = compareDialogueCode(codeA, codeB);
-    if (codeOrder !== 0) return codeOrder;
-
     const taskCodeA = String(a.taskCode ?? '');
     const taskCodeB = String(b.taskCode ?? '');
     const taskCodeOrder = compareNatural(taskCodeA, taskCodeB);
     if (taskCodeOrder !== 0) return taskCodeOrder;
+
+    const codeA = String(a.code ?? '');
+    const codeB = String(b.code ?? '');
+    const codeOrder = compareDialogueCode(codeA, codeB);
+    if (codeOrder !== 0) return codeOrder;
 
     const segmentA = Number(a.segment);
     const segmentB = Number(b.segment);
@@ -2234,9 +2234,9 @@ async function api(url,opt={}){opt.headers=Object.assign({},opt.headers||{},toke
  const editable=new Set(['npcName','npcText','replies']);
  function compareNatural(a,b){let aa=String(a??'').match(/\\d+|\\D+/g)||[''],bb=String(b??'').match(/\\d+|\\D+/g)||[''];let n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let x=aa[i],y=bb[i],nx=/^\\d+$/.test(x),ny=/^\\d+$/.test(y);if(nx&&ny){let ux=x.replace(/^0+(?=\\d)/,''),uy=y.replace(/^0+(?=\\d)/,'');if(ux.length!==uy.length)return ux.length-uy.length;if(ux!==uy)return ux<uy?-1:1;if(x.length!==y.length)return x.length-y.length;continue}if(x!==y)return x<y?-1:1}return aa.length-bb.length}
 function compareDialogueCode(a,b){let aa=String(a??'').split('_'),bb=String(b??'').split('_'),n=Math.min(aa.length,bb.length);for(let i=0;i<n;i++){let order=compareNatural(aa[i],bb[i]);if(order!==0)return order}return aa.length-bb.length}
-function rowCompare(a,b){let codeA=String(a.code??''),codeB=String(b.code??''),codeOrder=compareDialogueCode(codeA,codeB);if(codeOrder!==0)return codeOrder;let taskCodeA=String(a.taskCode??''),taskCodeB=String(b.taskCode??''),taskCodeOrder=compareNatural(taskCodeA,taskCodeB);if(taskCodeOrder!==0)return taskCodeOrder;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
+function rowCompare(a,b){let taskCodeA=String(a.taskCode??''),taskCodeB=String(b.taskCode??''),taskCodeOrder=compareNatural(taskCodeA,taskCodeB);if(taskCodeOrder!==0)return taskCodeOrder;let codeA=String(a.code??''),codeB=String(b.code??''),codeOrder=compareDialogueCode(codeA,codeB);if(codeOrder!==0)return codeOrder;let segA=Number(a.segment),segB=Number(b.segment);if(Number.isFinite(segA)&&Number.isFinite(segB)&&segA!==segB)return segA-segB;if(Number.isFinite(segA)!==Number.isFinite(segB))return Number.isFinite(segA)?-1:1;let idA=Number(a.id),idB=Number(b.id);if(Number.isFinite(idA)&&Number.isFinite(idB)&&idA!==idB)return idA-idB;return 0}
 function sortRows(){rows.sort(rowCompare)}
-function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 code（下划线优先、数字感知）、taskCode 排序，加载 '+rows.length+' 段'}
+function render(){sortRows();let h='<thead><tr>'+header.map(x=>'<th>'+esc(x)+'</th>').join('')+'<th>操作</th></tr></thead><tbody>';for(let i=0;i<rows.length;i++){h+='<tr>'+header.map(k=>{let v=rows[i][k]??'';let control='';if(!editable.has(k)){control='<span class="readonly">'+esc(v)+'</span>'}else if(k==='npcText'){control='<textarea data-i="'+i+'" data-k="'+esc(k)+'" oninput="edit(this)">'+esc(v)+'</textarea>'}else{control='<input data-i="'+i+'" data-k="'+esc(k)+'" value="'+esc(v)+'" oninput="edit(this)">'}return '<td>'+control+'</td>'}).join('')+'<td class="row-actions"><button onclick="addSegment('+i+')">+ 段落</button><button class="danger" onclick="removeRow('+i+')">删除</button></td></tr>'}document.getElementById('grid').innerHTML=h+'</tbody>';document.getElementById('status').textContent='已按 taskCode、code（下划线优先、数字感知）、段落号排序，加载 '+rows.length+' 段'}
 function edit(el){rows[Number(el.dataset.i)][el.dataset.k]=el.value}
 function addObject(){let id=prompt('对象 id（正整数）：');if(id===null)return;let code=prompt('稳定对话 code：');if(code===null)return;let taskCode=prompt('绑定任务 code：');if(taskCode===null)return;let trigger=prompt('触发点（如 accept）：','accept');if(trigger===null)return;let r={};for(let k of header)r[k]='';r.id=id.trim();r.code=code.trim();r.taskCode=taskCode.trim();r.trigger=trigger.trim()||'accept';r.segment='1';if(r.trigger==='deliver')r.replies='take:收下';rows.push(r);render()}
 function addSegment(i){let base=rows[i], group=rows.filter(x=>x.id===base.id&&x.code===base.code);let next=Math.max(...group.map(x=>Number(x.segment)||0),0)+1;let r={};for(let k of header)r[k]='';['id','code','taskCode','trigger'].forEach(k=>r[k]=base[k]??'');r.segment=String(next);if(r.trigger==='deliver')r.replies='take:收下';rows.splice(i+1,0,r);render()}
