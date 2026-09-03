@@ -164,10 +164,12 @@ describe('联盟目录与战事目标交互', () => {
   it('联盟战事按活跃优先、创建时间倒序，并让历史记录默认折叠', () => {
     const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
     assert.match(source, /const sortedPlans = \[\.\.\.\(alliance\.warPlans \?\? \[\]\)\]\.sort/);
-    assert.match(source, /if \(active\(a\) !== active\(b\)\) return active\(a\) \? -1 : 1/);
-    assert.match(source, /<details class=\{`war-plan\$\{active \? ' war-plan--active' : ' war-plan--history'\}`\} open=\{active \|\| expanded\}/);
+    assert.match(source, /if \(isActive\(a\) !== isActive\(b\)\) return isActive\(a\) \? -1 : 1/);
+    assert.match(source, /<details ref=\{detailsRef\} class=\{`war-plan\$\{active \? ' war-plan--active' : ' war-plan--history'\}`\} open=\{active \|\| expanded\}/);
     assert.match(source, /const \[expanded, setExpanded\] = useState\(active\)/);
     assert.match(source, /useEffect\(\(\) => \{ setExpanded\(active\); \}, \[active\]\)/);
+    assert.match(source, /deadline > now : plan\.status === 'open'/);
+    assert.match(source, /detailsRef\.current\.open = active \|\| expanded/);
   });
 
   it('地图选目标后回到联盟页，并限制任务营地、普通 PvE 与盟友模式', () => {
@@ -181,6 +183,7 @@ describe('联盟目录与战事目标交互', () => {
     assert.match(alliance, /允许最大行军时间/);
     assert.match(alliance, /PreviewAllianceWarParticipation/);
     assert.match(alliance, /当前兵力预计行军/);
+    assert.doesNotMatch(alliance, /若现在出发，预计/);
     assert.match(alliance, /withinLimit/);
     assert.match(alliance, /picked\?\.relation === 'allied' \? \['reinforce'\]/);
     assert.match(alliance, /picked\?\.cityState === true \? \['raid', 'attack'\] : \['raid'\]/);

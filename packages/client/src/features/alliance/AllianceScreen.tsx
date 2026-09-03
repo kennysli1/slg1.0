@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { me, req } from '../../api.js';
 import { allianceTargetPicker, allianceWarFocus, allianceWarTarget, dataVersion, sessionVersion, showToast, tab } from '../../app/store.js';
 import { unitInfo } from '../../app/config.js';
@@ -21,12 +21,6 @@ function formatWarDuration(seconds: number): string {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   return `${h}时 ${m}分 ${s}秒`;
-}
-
-function formatWarClock(timestamp: number): string {
-  const value = Number(timestamp);
-  if (!Number.isFinite(value) || value <= 0) return '—';
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function AllianceScreen() {
@@ -170,9 +164,14 @@ function WarPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVi
   };
   const setPart = (setter: any, key: 'h' | 'm' | 's', value: string) => setter((prev: any) => ({ ...prev, [key]: key === 'h' ? value.replace(/\D/g, '').slice(0, 6) || '0' : String(Math.min(59, Math.max(0, Number(value.replace(/\D/g, '')) || 0))) }));
   const timeFields = (label: string, parts: any, setter: any) => <label class="war-countdown-group"><span>{label}</span><span><input type="number" min="0" value={parts.h} onInput={(e) => setPart(setter, 'h', (e.currentTarget as HTMLInputElement).value)} />时</span><span><input type="number" min="0" max="59" value={parts.m} onInput={(e) => setPart(setter, 'm', (e.currentTarget as HTMLInputElement).value)} />分</span><span><input type="number" min="0" max="59" value={parts.s} onInput={(e) => setPart(setter, 's', (e.currentTarget as HTMLInputElement).value)} />秒</span></label>;
+  const isActive = (plan: any) => {
+    if (plan.status !== 'open' && plan.status !== 'dispatched') return false;
+    const deadline = Number(plan.deadlineAt);
+    // dispatched 计划在服务端会保留为历史记录；倒计时结束后不能再当作活跃战事展开。
+    return Number.isFinite(deadline) ? deadline > now : plan.status === 'open';
+  };
   const sortedPlans = [...(alliance.warPlans ?? [])].sort((a: any, b: any) => {
-    const active = (plan: any) => plan.status === 'open' || plan.status === 'dispatched';
-    if (active(a) !== active(b)) return active(a) ? -1 : 1;
+    if (isActive(a) !== isActive(b)) return isActive(a) ? -1 : 1;
     const created = Number(b.createdAt ?? b.deadlineAt ?? 0) - Number(a.createdAt ?? a.deadlineAt ?? 0);
     return created || String(b.id).localeCompare(String(a.id));
   });
@@ -180,11 +179,18 @@ function WarPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVi
 }
 
 function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageId, setSourceVillageId, available, catalog, troops, setTroops, memberNames, participantStatus, remainingSec, joinRemainingSec, legacyPlan, recallablePlan }: any) {
-  const active = p.status === 'open' || p.status === 'dispatched';
+  const active = (p.status === 'open' || p.status === 'dispatched')
+    && (Number.isFinite(Number(p.deadlineAt)) ? Number(p.deadlineAt) > now : p.status === 'open');
   const [expanded, setExpanded] = useState(active);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   // 活跃战事始终展开；战事结束后自动收起，避免历史记录占满页面。
   // 收起后仍允许玩家点击 summary 手动查看详情。
   useEffect(() => { setExpanded(active); }, [active]);
+  // Preact 对原生 details 的 open 布尔属性不会在所有浏览器事件顺序下可靠同步，
+  // 这里再同步一次 DOM property，确保倒计时结束时历史记录确实收起。
+  useEffect(() => {
+    if (detailsRef.current) detailsRef.current.open = active || expanded;
+  }, [active, expanded]);
   const remain = remainingSec(p);
   const joinRemain = joinRemainingSec(p);
   const participants = Object.values(p.participants ?? {}) as any[];
@@ -225,7 +231,7 @@ function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageI
   };
   const selectedCount = Object.keys(selectedTroops).length;
   const canSubmit = selectedCount > 0 && !travelPreviewBusy && travelPreview?.withinLimit === true;
-  return <details class={`war-plan${active ? ' war-plan--active' : ' war-plan--history'}`} open={active || expanded} onToggle={(event) => setExpanded((event.currentTarget as HTMLDetailsElement).open)}><summary><b>{p.mode === 'raid' ? '掠夺' : p.mode === 'attack' ? '攻城' : '增援'} · {p.targetId ?? p.targetVillage}</b><span>{p.status === 'open' ? '集结中' : p.status === 'dispatched' ? '已全部派出' : p.status === 'cancelled' ? '已取消' : p.status} · 目标剩余 {remain} 秒 · {p.status === 'open' ? `报名剩余 ${joinRemain} 秒 · ` : ''}{participants.length} 人参加</span></summary><div class="war-plan-body"><div class="war-participants"><strong>参战成员与派兵</strong>{participants.length ? participants.map((participant: any) => { const summary = troopSummary(participant.troops); return <div class="war-participant-row" key={`${p.id}-${participant.playerId}`}><span><b>{memberNames[participant.playerId] ?? participant.playerId}</b><small>{participant.sourceVillageId} · {participantStatus[participant.status] ?? participant.status}</small></span><span>{summary.text}（共 {summary.total} 名）</span></div>; }) : <small>暂无成员参加</small>}</div><div class="war-plan-actions">{mine?.status === 'joined' && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarParticipation', { planId: p.id })}>取消参加</Btn>}{cancelWindow && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarPlan', { planId: p.id })}>取消行动并撤回（{cancelRemain}秒）</Btn>}{canPlan && recallablePlan(p) && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('RecallAllianceWarPlan', { planId: p.id })}>全员撤回（{Math.max(0, 90 - Math.floor((now - Number(legacyPlan(p) ? p.allDispatchedAt : p.joinDeadlineAt)) / 1000))}秒）</Btn>}</div>{p.status === 'open' && joinRemain > 0 && !mine && <><div class="war-travel-limit">本次行动允许的最大行军时间：{formatWarDuration(Math.max(0, Number(p.countdownSec ?? 0) - Number(p.participationCountdownSec ?? 0)))}</div><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><div class="war-troop-picker">{availableCodes.length ? availableCodes.map((code) => { const max = Number(available[code]) || 0; const info = catalog.find((item: any) => item.code === code); return <label class="war-troop-row" key={code}><span>{info?.name ?? unitInfo(code).name} <small>可用 {max}</small></span><input type="number" min="0" max={max} value={troops[code] ?? 0} onInput={(e) => { const value = Math.max(0, Math.min(max, Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0))); setTroops((prev: any) => ({ ...prev, [code]: value })); }} /></label>; }) : <small>该村暂无可派出的驻军</small>}</div>{selectedCount > 0 && <div class={`war-travel-preview${travelPreview?.withinLimit === false ? ' war-travel-preview--bad' : travelPreview?.withinLimit === true ? ' war-travel-preview--ok' : ''}`}>{travelPreviewBusy ? '正在计算当前兵力的行军时间…' : travelPreview?.error ? travelPreview.error : travelPreview ? <><span>当前兵力预计行军：{formatWarDuration(travelPreview.travelSec)}；若现在出发，预计 {formatWarClock(travelPreview.arriveAtIfDepartNow)} 抵达。</span><span>规定最长行军：{formatWarDuration(travelPreview.maxTravelSec)} · {travelPreview.withinLimit ? '在规定时间内' : '超出规定时间，不能加入行动'}</span></> : '等待计算行军时间…'}</div>}<Btn disabled={busy || !canSubmit} onClick={() => onAction('JoinAllianceWarPlan', { planId: p.id, sourceVillageId, troops: selectedTroops })}>加入行动</Btn></>}{p.status === 'open' && joinRemain <= 0 && <small class="alliance-muted">报名已截止，等待已报名部队出发</small>}</div></details>;
+  return <details ref={detailsRef} class={`war-plan${active ? ' war-plan--active' : ' war-plan--history'}`} open={active || expanded} onToggle={(event) => { if (!active) setExpanded((event.currentTarget as HTMLDetailsElement).open); }}><summary><b>{p.mode === 'raid' ? '掠夺' : p.mode === 'attack' ? '攻城' : '增援'} · {p.targetId ?? p.targetVillage}</b><span>{p.status === 'open' ? '集结中' : p.status === 'dispatched' ? '已全部派出' : p.status === 'cancelled' ? '已取消' : p.status} · 目标剩余 {remain} 秒 · {p.status === 'open' ? `报名剩余 ${joinRemain} 秒 · ` : ''}{participants.length} 人参加</span></summary><div class="war-plan-body"><div class="war-participants"><strong>参战成员与派兵</strong>{participants.length ? participants.map((participant: any) => { const summary = troopSummary(participant.troops); return <div class="war-participant-row" key={`${p.id}-${participant.playerId}`}><span><b>{memberNames[participant.playerId] ?? participant.playerId}</b><small>{participant.sourceVillageId} · {participantStatus[participant.status] ?? participant.status}</small></span><span>{summary.text}（共 {summary.total} 名）</span></div>; }) : <small>暂无成员参加</small>}</div><div class="war-plan-actions">{mine?.status === 'joined' && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarParticipation', { planId: p.id })}>取消参加</Btn>}{cancelWindow && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarPlan', { planId: p.id })}>取消行动并撤回（{cancelRemain}秒）</Btn>}{canPlan && recallablePlan(p) && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('RecallAllianceWarPlan', { planId: p.id })}>全员撤回（{Math.max(0, 90 - Math.floor((now - Number(legacyPlan(p) ? p.allDispatchedAt : p.joinDeadlineAt)) / 1000))}秒）</Btn>}</div>{p.status === 'open' && joinRemain > 0 && !mine && <><div class="war-travel-limit">本次行动允许的最大行军时间：{formatWarDuration(Math.max(0, Number(p.countdownSec ?? 0) - Number(p.participationCountdownSec ?? 0)))}</div><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><div class="war-troop-picker">{availableCodes.length ? availableCodes.map((code) => { const max = Number(available[code]) || 0; const info = catalog.find((item: any) => item.code === code); return <label class="war-troop-row" key={code}><span>{info?.name ?? unitInfo(code).name} <small>可用 {max}</small></span><input type="number" min="0" max={max} value={troops[code] ?? 0} onInput={(e) => { const value = Math.max(0, Math.min(max, Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0))); setTroops((prev: any) => ({ ...prev, [code]: value })); }} /></label>; }) : <small>该村暂无可派出的驻军</small>}</div>{selectedCount > 0 && <div class={`war-travel-preview${travelPreview?.withinLimit === false ? ' war-travel-preview--bad' : travelPreview?.withinLimit === true ? ' war-travel-preview--ok' : ''}`}>{travelPreviewBusy ? '正在计算当前兵力的行军时间…' : travelPreview?.error ? travelPreview.error : travelPreview ? <><span>当前兵力预计行军：{formatWarDuration(travelPreview.travelSec)}</span><span>规定最长行军：{formatWarDuration(travelPreview.maxTravelSec)} · {travelPreview.withinLimit ? '在规定时间内' : '超出规定时间，不能加入行动'}</span></> : '等待计算行军时间…'}</div>}<Btn disabled={busy || !canSubmit} onClick={() => onAction('JoinAllianceWarPlan', { planId: p.id, sourceVillageId, troops: selectedTroops })}>加入行动</Btn></>}{p.status === 'open' && joinRemain <= 0 && <small class="alliance-muted">报名已截止，等待已报名部队出发</small>}</div></details>;
 }
 
 function ControlPane({ alliance, busy, onAction }: any) { const [role, setRole] = useState('logistics'); return <Panel><SectionHead>联盟控制</SectionHead><div class="request-list">{Object.keys(alliance.joinRequests ?? {}).map((id: string) => <div><span>{id}</span><Btn disabled={busy} onClick={() => onAction('ReviewAllianceRequest', { applicantId: id, approve: true })}>批准</Btn><Btn disabled={busy} onClick={() => onAction('ReviewAllianceRequest', { applicantId: id, approve: false })}>拒绝</Btn></div>)}</div><div class="role-list">{(alliance.members ?? []).map((m: any) => <div><span>{m.name}{m.id === alliance.leaderId ? '（盟主）' : ''}</span><select value={role} onChange={(e) => setRole((e.currentTarget as HTMLSelectElement).value)}><option value="logistics">后勤主管</option><option value="war">战争专家</option><option value="tech">首席科技官</option><option value="ambassador">形象大使</option></select><Btn disabled={busy} onClick={() => onAction('SetAllianceRole', { targetPlayerId: m.id, role })}>任命</Btn><Btn disabled={busy} onClick={() => onAction('SetAllianceRole', { targetPlayerId: m.id, role: '' })}>罢免全部职位</Btn>{m.id !== alliance.leaderId && <Btn variant="danger" disabled={busy} onClick={() => onAction('RemoveAllianceMember', { targetPlayerId: m.id })}>移除</Btn>}</div>)}</div></Panel>; }
