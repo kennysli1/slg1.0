@@ -1241,7 +1241,7 @@ export class AllianceModule {
     return { ok: true, payload: { plan } };
   }
 
-  /** 盟主/战争专家在倒计时结束前取消尚未完成的集结；已发出的部队尽量复用通用撤回命令。 */
+  /** 盟主/战争专家只能在报名截止后的 90 秒窗口取消集结；已发出的部队尽量复用通用撤回命令。 */
   private async cancelWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
@@ -1251,13 +1251,14 @@ export class AllianceModule {
     if (plan.status !== 'open' && plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_plan_closed' };
     const now = this.now();
     const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt);
-    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
-    // 集结中的计划由盟主/战争专家在目标截止前都可以取消；此前现代双倒计时
-    // 计划错误地要求等到报名截止，导致正在招兵时没有取消入口。
-    if (plan.status === 'open') {
-      if (now >= Number(plan.deadlineAt)) return { ok: false, payload: {}, reason: 'war_deadline_passed' };
-    } else if (legacyWindow ? now >= Number(plan.deadlineAt) : (now < joinDeadlineAt || now - joinDeadlineAt >= 90_000)) {
-      return { ok: false, payload: {}, reason: legacyWindow ? 'war_cancel_window_expired' : 'war_cancel_window_expired' };
+    // 取消窗口统一锚定报名截止时间，而不是战争目标截止时间或某支军队的
+    // 派出时间。这样最远的参战军队即使卡在报名截止时刻出发，报名截止
+    // 后 90 秒也会和其他部队一样失去被盟主一键撤回的资格。
+    if (!Number.isFinite(joinDeadlineAt) || now < joinDeadlineAt) {
+      return { ok: false, payload: {}, reason: 'war_cancel_window_not_started' };
+    }
+    if (now - joinDeadlineAt >= 90_000) {
+      return { ok: false, payload: {}, reason: 'war_cancel_window_expired' };
     }
     plan.status = 'cancelled'; plan.cancelledAt = now;
     for (const participant of Object.values(plan.participants)) {
@@ -1277,7 +1278,7 @@ export class AllianceModule {
     return { ok: true, payload: { plan, recalls } };
   }
 
-  /** 所有参与者已派出后 90 秒内，一键替成员撤回各自的军队。 */
+  /** 报名截止后 90 秒内，一键替成员撤回各自已经派出的军队。 */
   private async recallWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
@@ -1286,9 +1287,11 @@ export class AllianceModule {
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
     if (plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_not_dispatched' };
     const dispatchedAt = Number(plan.allDispatchedAt);
-    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? dispatchedAt);
-    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
-    if (!Number.isFinite(dispatchedAt) || (legacyWindow ? this.now() - dispatchedAt >= 90_000 : this.now() < joinDeadlineAt || this.now() - joinDeadlineAt >= 90_000)) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt ?? dispatchedAt);
+    const now = this.now();
+    // 全员撤回与取消行动使用同一个固定窗口：报名截止后 90 秒。不能
+    // 因为某支远程部队稍晚派出，就把窗口顺延到 allDispatchedAt。
+    if (!Number.isFinite(dispatchedAt) || !Number.isFinite(joinDeadlineAt) || now < joinDeadlineAt || now - joinDeadlineAt >= 90_000) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
     const recalls = [];
     for (const participant of Object.values(plan.participants)) {
       if (participant.status !== 'dispatched' || !participant.movementId) continue;

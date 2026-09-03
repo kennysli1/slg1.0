@@ -345,7 +345,7 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(created.ok, true, created.reason);
   const allianceId = (created.payload as any).allianceId as string;
   const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
-  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600 });
+  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600, participationCountdownSec: 60 });
   assert.equal(planResult.ok, true, planResult.reason);
   const planId = (planResult.payload as any).plan.id as string;
   assert.equal((planResult.payload as any).plan.countdownSec, 3600);
@@ -366,13 +366,20 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   const joinedSnapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
   const listedPlan = (joinedSnapshot.payload as any).alliance.warPlans.find((plan: any) => plan.id === planId);
   assert.deepEqual(listedPlan.participants[leader.player.id].troops, { legionnaire: 3, equlegati: 1 }, '联盟战事快照应向成员显示每位参与者的派兵明细');
-  const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(cancelled.ok, true, cancelled.reason);
+  const beforeJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(beforeJoinDeadline.ok, false);
+  assert.equal(beforeJoinDeadline.reason, 'war_cancel_window_not_started');
+  const planState = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
+  clock = planState.joinDeadlineAt;
+  const atJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(atJoinDeadline.ok, true, atJoinDeadline.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
   assert.equal(app.store.all<any>('movement').length, 0, '倒计时内取消不应派出军队');
 
   // 再建一个目标，推进到实际派出后验证 90 秒内的一键全员撤回。
-  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600 });
+  // pve-0 的当前预计行军约 126 秒；使用 60 秒参军窗口 + 240 秒总倒计时，
+  // 让派出时刻落在报名截止后的 90 秒内。
+  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
   const plan2Id = (plan2.payload as any).plan.id as string;
   const joined2 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan2Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
   assert.equal(joined2.ok, true, joined2.reason);
@@ -387,6 +394,24 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(recalled.ok, true, recalled.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].status, 'cancelled');
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id].status, 'recalled');
+
+  // 取消/撤回窗口从报名截止开始统一计算；报名截止后超过 90 秒不能再取消。
+  const plan3 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
+  const plan3Id = (plan3.payload as any).plan.id as string;
+  const joined3 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan3Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
+  assert.equal(joined3.ok, true, joined3.reason);
+  const plan3State = app.store.get<any>('alliance', allianceId)!.warPlans[plan3Id];
+  const dispatchAt3 = plan3State.deadlineAt - plan3State.participants[leader.player.id].travelSec * 1000;
+  await app.scheduler.advanceTo(dispatchAt3, (t) => { clock = t; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan3Id].participants[leader.player.id].status, 'dispatched');
+  clock = plan3State.joinDeadlineAt + 90_000;
+  const afterRecallWindow = await send(app, 'alliance.RecallWarPlan', { playerId: leader.player.id, planId: plan3Id });
+  assert.equal(afterRecallWindow.ok, false);
+  assert.equal(afterRecallWindow.reason, 'war_recall_window_expired');
+  const afterWindow = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId: plan3Id });
+  assert.equal(afterWindow.ok, false);
+  assert.equal(afterWindow.reason, 'war_cancel_window_expired');
 });
 
 test('联盟战事：报名预备队锁定兵力，成员可取消报名，报名截止后拒绝新成员', async () => {
@@ -436,7 +461,7 @@ test('联盟战事：报名预备队锁定兵力，成员可取消报名，报�
   assert.equal(tooLong.reason, 'war_travel_too_long');
 });
 
-test('联盟战事：招兵期间盟主可取消，参军可选择并校验随队宝物', async () => {
+test('联盟战事：报名期间不可取消，参军可选择并校验随队宝物', async () => {
   let clock = 7_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock });
   app.setupWorld();
@@ -474,9 +499,13 @@ test('联盟战事：招兵期间盟主可取消，参军可选择并校验随�
   const participant = app.store.get<any>('alliance', allianceId)!.warPlans[planId].participants[leader.player.id];
   assert.deepEqual(participant.treasures, ['horse_rope']);
 
-  // 仍在招兵阶段（参军倒计时尚未结束）也必须能由盟主直接取消。
+  // 招兵阶段不能取消；取消窗口从报名截止时刻开始。
   const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(cancelled.ok, true, cancelled.reason);
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.reason, 'war_cancel_window_not_started');
+  clock = app.store.get<any>('alliance', allianceId)!.warPlans[planId].joinDeadlineAt;
+  const cancelledAtCutoff = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(cancelledAtCutoff.ok, true, cancelledAtCutoff.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
   const released = await send(app, 'military.GetArmy', { villageId });
   assert.equal((released.payload as any).availableTroops.legionnaire, 200);

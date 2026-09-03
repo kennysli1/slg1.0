@@ -147,6 +147,7 @@ const ERR_MSG: Record<string, string> = {
   cannot_arrive_before_deadline: '倒计时太短，军队无法及时到达目标',
   war_join_deadline_passed: '参军倒计时已结束，不能再报名',
   war_travel_too_long: '军队预计行军时间过长，无法在战争倒计时内抵达',
+  war_cancel_window_not_started: '参战取消窗口尚未开始（报名截止后开放）',
   war_cancel_window_expired: '参战取消窗口已结束（报名截止后 90 秒）',
   war_participation_not_found: '你尚未参加该军事行动',
   war_participation_dispatched: '军队已经派出，不能取消报名',
