@@ -994,10 +994,19 @@ export class AllianceModule {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: AllianceModule.NAME, payload: { id: targetId } });
       if (!target.ok) return { ok: false, payload: {}, reason: 'war_target_not_found' };
       const targetData = (target.payload as any) ?? {};
-      // 任务营地只对任务所属玩家可见，不能被联盟战事当成公共目标；
+      // 只有绑定到个人村庄的任务营地不能作为公共联盟战事目标。主线任务
+      // 的任务村（例如天王老子村/秘密营地）虽然带有 task 标记，但任务
+      // scope=global，会同步给所有玩家，仍应允许作为公共 PvE 目标。
       // 普通 PvE 营地也没有城墙/城邦身份，攻城必须在模式选择阶段被排除，
       // 服务端再次校验，避免伪造 targetKind 绕过地图选项。
-      if (targetData.task === true || targetData.ownerVillageId) return { ok: false, payload: {}, reason: 'war_private_task_target' };
+      const publicTaskTypes = new Set(Object.values(this.config.quests)
+        .filter((quest) => quest.scope === 'global')
+        .map((quest) => quest.objective?.taskVillageCode)
+        .filter((type): type is string => typeof type === 'string' && type.length > 0));
+      const privateTaskTarget = targetData.task === true
+        ? !publicTaskTypes.has(String(targetData.type ?? ''))
+        : Boolean(targetData.ownerVillageId);
+      if (privateTaskTarget) return { ok: false, payload: {}, reason: 'war_private_task_target' };
       if (mode === 'attack' && targetData.cityState !== true) return { ok: false, payload: {}, reason: 'war_siege_target_invalid' };
       targetQ = Math.trunc(Number((target.payload as any)?.q));
       targetR = Math.trunc(Number((target.payload as any)?.r));
