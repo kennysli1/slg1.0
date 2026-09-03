@@ -285,7 +285,7 @@ function renderTargetPanel(): string {
         <p class="muted">当前已处于此村，没有可执行的转移或切换操作。</p>
       </div>`;
     }
-    const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
+    const myTroops = Object.entries(army?.availableTroops ?? army?.troops ?? {}).filter(([, n]: any) => n > 0);
     const inputs = myTroops.length
       ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="0" id="raid-${u}" /><small>/${n}</small></label>`).join('')
       : '<small class="muted">无可用兵力</small>';
@@ -309,7 +309,7 @@ function renderTargetPanel(): string {
     </div>`;
   }
 
-  const myTroops = Object.entries(army?.troops || {}).filter(([, n]: any) => n > 0);
+  const myTroops = Object.entries(army?.availableTroops ?? army?.troops ?? {}).filter(([, n]: any) => n > 0);
   const inputs = myTroops.length
     ? myTroops.map(([u, n]: any) => `<label class="raid-input">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="raid-name">${unitName(u)}</span><input type="number" min="0" max="${n}" value="${n}" id="raid-${u}" /><small>/${n}</small></label>`).join('')
     : '<small class="muted">无可用兵力，先去军队页训练</small>';
@@ -334,7 +334,7 @@ function renderTargetPanel(): string {
 
 function collectTroops(): Record<string, number> {
   const troops: Record<string, number> = {};
-  Object.keys(getCache().army?.troops || {}).forEach((u) => {
+  Object.keys(getCache().army?.availableTroops ?? getCache().army?.troops ?? {}).forEach((u) => {
     const el = document.getElementById(`raid-${u}`) as HTMLInputElement;
     if (el && Number(el.value) > 0) troops[u] = Number(el.value);
   });

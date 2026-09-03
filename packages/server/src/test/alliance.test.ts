@@ -461,6 +461,43 @@ test('联盟战事：报名预备队锁定兵力，成员可取消报名，报�
   assert.equal(tooLong.reason, 'war_travel_too_long');
 });
 
+test('联盟战事：同一玩家同一村可重复派兵并合并预备队锁', async () => {
+  let clock = 6_500_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '重复派兵盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const villageId = leader.player.villageId as string;
+  addAllianceHall(app, villageId);
+  await send(app, 'military.AdjustTroops', { villageId, delta: { legionnaire: 10 } });
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: villageId, name: '重复派兵联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  const plan = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600, participationCountdownSec: 60 });
+  const planId = (plan.payload as any).plan.id as string;
+  const first = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: villageId, troops: { legionnaire: 3 } });
+  assert.equal(first.ok, true, first.reason);
+  const second = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: villageId, troops: { legionnaire: 2 } });
+  assert.equal(second.ok, true, second.reason);
+  assert.notEqual((first.payload as any).participantId, (second.payload as any).participantId);
+  const saved = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
+  const entries = Object.values(saved.participants).filter((participant: any) => participant.playerId === leader.player.id);
+  assert.equal(entries.length, 2);
+  assert.equal(entries.reduce((sum: number, participant: any) => sum + participant.troops.legionnaire, 0), 5);
+  assert.ok(entries.every((participant: any) => participant.participantId), '每条报名记录应有唯一 participantId');
+  const army = await send(app, 'military.GetArmy', { villageId });
+  assert.equal((army.payload as any).availableTroops.legionnaire, 5);
+  assert.equal((army.payload as any).allianceReservedTroops.legionnaire, 5);
+  const snapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
+  const listed = (snapshot.payload as any).alliance.warPlans.find((item: any) => item.id === planId);
+  assert.equal(Object.values(listed.participants).length, 2);
+  assert.equal((snapshot.payload as any).alliance.members.find((member: any) => member.id === leader.player.id).militaryPopulation, 5);
+  const cancelled = await send(app, 'alliance.CancelWarParticipation', { playerId: leader.player.id, planId });
+  assert.equal(cancelled.ok, true, cancelled.reason);
+  const released = await send(app, 'military.GetArmy', { villageId });
+  assert.equal((released.payload as any).availableTroops.legionnaire, 10);
+});
+
 test('联盟战事：报名期间不可取消，参军可选择并校验随队宝物', async () => {
   let clock = 7_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock });

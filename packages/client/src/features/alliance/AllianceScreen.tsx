@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { me, req } from '../../api.js';
-import { allianceTargetPicker, allianceWarFocus, allianceWarTarget, dataVersion, sessionVersion, showToast, tab } from '../../app/store.js';
+import { allianceTargetPicker, allianceWarFocus, allianceWarTarget, allianceVersion, dataVersion, sessionVersion, showToast, tab } from '../../app/store.js';
 import { treasureCarryCap, treasureInfo, treasureRarityName, unitInfo } from '../../app/config.js';
 import { Btn, Empty, Panel, SectionHead, Tag } from '../../ui/index.js';
 import { errText } from '../../shared/ui/text.js';
@@ -25,6 +25,7 @@ function formatWarDuration(seconds: number): string {
 
 export function AllianceScreen() {
   sessionVersion.value; dataVersion.value;
+  const currentAllianceVersion = allianceVersion.value;
   const [alliance, setAlliance] = useState<any>(null);
   const [alliances, setAlliances] = useState<any[]>([]);
   const [query, setQuery] = useState('');
@@ -41,7 +42,7 @@ export function AllianceScreen() {
     const list = await req('ListAlliances', query ? { query } : {});
     if (list.ok) setAlliances((list.payload as any)?.alliances ?? []);
   }
-  useEffect(() => { void load(); }, [query, me?.id]);
+  useEffect(() => { void load(); }, [query, me?.id, currentAllianceVersion]);
 
   async function action(actionName: string, payload: Record<string, unknown>) {
     setBusy(true);
@@ -176,10 +177,84 @@ function WarPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVi
     const created = Number(b.createdAt ?? b.deadlineAt ?? 0) - Number(a.createdAt ?? a.deadlineAt ?? 0);
     return created || String(b.id).localeCompare(String(a.id));
   });
-  return <Panel><SectionHead>联盟战事</SectionHead>{canPlan && <div class="war-plan-form"><select value={mode} onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as any)}>{modeOptions.map((option) => <option value={option}>{option === 'raid' ? '掠夺' : option === 'attack' ? '攻城' : '增援'}</option>)}</select><Btn variant="ghost" onClick={() => { allianceTargetPicker.value = true; tab.value = 'map'; }}>从地图选择目标</Btn><span class="war-target-picked">{picked ? `${picked.name} (${picked.q},${picked.r})` : '尚未选择目标'}</span>{timeFields('战争倒计时', totalParts, setTotalParts)}{timeFields('参军倒计时', joinParts, setJoinParts)}<span class="war-travel-limit">允许最大行军时间：{formatWarDuration(Math.max(0, countdownSec - participationCountdownSec))}</span><Btn disabled={busy || !targetModeAllowed || countdownSec < 10 || participationCountdownSec <= 0 || participationCountdownSec >= countdownSec} onClick={() => onAction('CreateAllianceWarPlan', { mode, targetKind, targetId: targetKind === 'pve' ? targetId : undefined, targetVillage: targetKind === 'village' ? targetId : undefined, q: picked?.q ?? 0, r: picked?.r ?? 0, countdownSec, participationCountdownSec })}>创建目标</Btn></div>}<div class="war-plan-list">{sortedPlans.map((p: any) => <WarPlanCard key={p.id} p={p} now={now} canPlan={canPlan} busy={busy} onAction={onAction} villages={villages} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} available={available} availableTreasures={availableTreasures} catalog={catalog} troops={troops} setTroops={setTroops} memberNames={memberNames} participantStatus={participantStatus} remainingSec={remainingSec} joinRemainingSec={joinRemainingSec} legacyPlan={legacyPlan} recallablePlan={recallablePlan} />)}</div></Panel>;
+  return <Panel><SectionHead>联盟战事</SectionHead>{canPlan && <div class="war-plan-form"><select value={mode} onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as any)}>{modeOptions.map((option) => <option value={option}>{option === 'raid' ? '掠夺' : option === 'attack' ? '攻城' : '增援'}</option>)}</select><Btn variant="ghost" onClick={() => { allianceTargetPicker.value = true; tab.value = 'map'; }}>从地图选择目标</Btn><span class="war-target-picked">{picked ? `${picked.name} (${picked.q},${picked.r})` : '尚未选择目标'}</span>{timeFields('战争倒计时', totalParts, setTotalParts)}{timeFields('参军倒计时', joinParts, setJoinParts)}<span class="war-travel-limit">允许最大行军时间：{formatWarDuration(Math.max(0, countdownSec - participationCountdownSec))}</span><Btn disabled={busy || !targetModeAllowed || countdownSec < 10 || participationCountdownSec <= 0 || participationCountdownSec >= countdownSec} onClick={() => onAction('CreateAllianceWarPlan', { mode, targetKind, targetId: targetKind === 'pve' ? targetId : undefined, targetVillage: targetKind === 'village' ? targetId : undefined, q: picked?.q ?? 0, r: picked?.r ?? 0, countdownSec, participationCountdownSec })}>创建目标</Btn></div>}<div class="war-plan-list">{sortedPlans.map((p: any) => <WarPlanCardV2 key={p.id} p={p} now={now} canPlan={canPlan} busy={busy} onAction={onAction} villages={villages} sourceVillageId={sourceVillageId} setSourceVillageId={setSourceVillageId} available={available} availableTreasures={availableTreasures} catalog={catalog} troops={troops} setTroops={setTroops} memberNames={memberNames} participantStatus={participantStatus} remainingSec={remainingSec} joinRemainingSec={joinRemainingSec} legacyPlan={legacyPlan} recallablePlan={recallablePlan} />)}</div></Panel>;
 }
 
-function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageId, setSourceVillageId, available, availableTreasures, catalog, troops, setTroops, memberNames, participantStatus, remainingSec, joinRemainingSec, legacyPlan, recallablePlan }: any) {
+/**
+ * 战事卡片的展示层按“玩家 + 来源村”合并报名记录，避免同村多次派兵
+ * 在列表中被误认为重复成员；服务端仍保留每条报名记录用于独立锁定与调度。
+ */
+function WarPlanCardV2({ p, now, canPlan, busy, onAction, villages, sourceVillageId, setSourceVillageId, available, availableTreasures, catalog, troops, setTroops, memberNames, participantStatus, remainingSec, joinRemainingSec, legacyPlan, recallablePlan }: any) {
+  const active = (p.status === 'open' || p.status === 'dispatched') && (Number.isFinite(Number(p.deadlineAt)) ? Number(p.deadlineAt) > now : p.status === 'open');
+  const [expanded, setExpanded] = useState(active);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { setExpanded(active); }, [active]);
+  useEffect(() => { if (detailsRef.current) detailsRef.current.open = active || expanded; }, [active, expanded]);
+  const remain = remainingSec(p);
+  const joinRemain = joinRemainingSec(p);
+  const participants = Object.values(p.participants ?? {}) as any[];
+  const myJoined = participants.some((participant) => participant.playerId === me?.id && participant.status === 'joined');
+  const memberCount = new Set(participants.map((participant) => participant.playerId)).size;
+  const cancelAnchor = Number(p.joinDeadlineAt ?? p.deadlineAt);
+  const cancelWindow = canPlan && (p.status === 'open' || p.status === 'dispatched') && Number.isFinite(cancelAnchor) && now >= cancelAnchor && now - cancelAnchor < 90_000;
+  const cancelRemain = Number.isFinite(cancelAnchor) ? Math.max(0, Math.ceil((cancelAnchor + 90_000 - now) / 1000)) : 0;
+  const availableCodes = Object.keys(available).filter((code) => Number(available[code]) > 0).sort();
+  const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, count]) => Number(count) > 0));
+  const troopCount = (Object.values(selectedTroops) as unknown[]).reduce<number>((sum, count) => sum + Number(count), 0);
+  const treasureCodes = Array.from(new Set<string>((availableTreasures?.[sourceVillageId] ?? []).filter((code: unknown): code is string => typeof code === 'string' && code.length > 0)));
+  const treasureCap = treasureCarryCap(troopCount);
+  const [treasures, setTreasures] = useState<string[]>([]);
+  const selectedTreasures = treasures.filter((code) => treasureCodes.includes(code)).slice(0, treasureCap);
+  useEffect(() => { setTreasures([]); }, [p.id, sourceVillageId]);
+  useEffect(() => { if (treasures.length > treasureCap) setTreasures((prev) => prev.slice(0, treasureCap)); }, [treasureCap]);
+  const [travelPreview, setTravelPreview] = useState<any>(null);
+  const [travelPreviewBusy, setTravelPreviewBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    if (p.status !== 'open' || joinRemain <= 0 || !sourceVillageId || !Object.keys(selectedTroops).length) {
+      setTravelPreview(null); setTravelPreviewBusy(false);
+      return () => { live = false; };
+    }
+    setTravelPreview(null); setTravelPreviewBusy(true);
+    const timer = window.setTimeout(() => {
+      void req('PreviewAllianceWarParticipation', { planId: p.id, sourceVillageId, troops: selectedTroops, treasures: selectedTreasures }).then((result) => {
+        if (!live) return;
+        if (result.ok) setTravelPreview(result.payload);
+        else setTravelPreview({ error: (result as any).error?.msg ?? (result as any).reason ?? '无法计算行军时间' });
+      }).catch(() => { if (live) setTravelPreview({ error: '行军时间计算失败，请重试' }); }).finally(() => { if (live) setTravelPreviewBusy(false); });
+    }, 150);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [p.id, p.status, joinRemain, sourceVillageId, JSON.stringify(selectedTroops), JSON.stringify(selectedTreasures)]);
+  const troopSummary = (troopMap: Record<string, number>) => {
+    const entries = Object.entries(troopMap ?? {}).filter(([, count]) => Number(count) > 0);
+    const total = entries.reduce((sum, [, count]) => sum + Number(count), 0);
+    const text = entries.map(([code, count]) => `${catalog.find((item: any) => item.code === code)?.name ?? unitInfo(code).name} ×${count}`).join('、');
+    return { text: text || '未派出兵力', total };
+  };
+  const groups = new Map<string, any>();
+  for (const participant of participants) {
+    const key = `${participant.playerId}\u0000${participant.sourceVillageId}`;
+    const row = groups.get(key) ?? { key, playerId: participant.playerId, sourceVillageId: participant.sourceVillageId, sourceVillageName: participant.sourceVillageName, troops: {}, treasures: [], travelSecs: new Set<number>(), statuses: new Set<string>() };
+    for (const [code, count] of Object.entries(participant.troops ?? {})) row.troops[code] = (row.troops[code] ?? 0) + Number(count);
+    row.treasures.push(...(participant.treasures ?? [])); row.travelSecs.add(Number(participant.travelSec)); row.statuses.add(String(participant.status));
+    if (!row.sourceVillageName && participant.sourceVillageName) row.sourceVillageName = participant.sourceVillageName;
+    groups.set(key, row);
+  }
+  const participantRows = Array.from(groups.values()).map((row: any) => {
+    const summary = troopSummary(row.troops);
+    const status = (Array.from(row.statuses) as string[]).map((value) => participantStatus[value] ?? value).join('、');
+    const travel = (Array.from(row.travelSecs) as number[]).filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b).map((value) => formatWarDuration(value)).join('、') || '未知';
+    const village = row.sourceVillageName ? `${row.sourceVillageName}（${row.sourceVillageId}）` : row.sourceVillageId;
+    const counts = new Map<string, number>(); for (const code of row.treasures) counts.set(code, (counts.get(code) ?? 0) + 1);
+    const treasure = row.treasures.length ? Array.from(counts.entries()).map(([code, count]) => `${treasureInfo(code)?.name ?? code}${count > 1 ? ` ×${count}` : ''}`).join('、') : '未携带';
+    return <div class="war-participant-row" key={`${p.id}-${row.key}`}><span><b>{memberNames[row.playerId] ?? row.playerId}</b><small>{village} · {status}</small></span><span>{summary.text}（共 {summary.total} 名）<small> · 预计行军：{travel} · 宝物：{treasure}</small></span></div>;
+  });
+  const selectedCount = Object.keys(selectedTroops).length;
+  const canSubmit = selectedCount > 0 && !travelPreviewBusy && travelPreview?.withinLimit === true;
+  return <details ref={detailsRef} class={`war-plan${active ? ' war-plan--active' : ' war-plan--history'}`} open={active || expanded} onToggle={(event) => { if (!active) setExpanded((event.currentTarget as HTMLDetailsElement).open); }}><summary><b>{p.mode === 'raid' ? '掠夺' : p.mode === 'attack' ? '攻城' : '增援'} · {p.targetId ?? p.targetVillage}</b><span>{p.status === 'open' ? '集结中' : p.status === 'dispatched' ? '已全部派出' : p.status === 'cancelled' ? '已取消' : p.status} · 目标剩余 {remain} 秒 · {p.status === 'open' ? `报名剩余 ${joinRemain} 秒 · ` : ''}{memberCount} 人参加</span></summary><div class="war-plan-body"><div class="war-participants"><strong>参战成员与派兵</strong>{participantRows.length ? participantRows : <small>暂无成员参加</small>}</div><div class="war-plan-actions">{myJoined && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarParticipation', { planId: p.id })}>取消参加</Btn>}{cancelWindow && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarPlan', { planId: p.id })}>取消行动并撤回（{cancelRemain}秒）</Btn>}{canPlan && recallablePlan(p) && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('RecallAllianceWarPlan', { planId: p.id })}>全员撤回（{Math.max(0, 90 - Math.floor((now - Number(legacyPlan(p) ? p.allDispatchedAt : p.joinDeadlineAt)) / 1000))}秒</Btn>}</div>{p.status === 'open' && joinRemain > 0 && <><div class="war-travel-limit">本次行动允许的最大行军时间：{formatWarDuration(Math.max(0, Number(p.countdownSec ?? 0) - Number(p.participationCountdownSec ?? 0)))}</div><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><div class="war-troop-picker">{availableCodes.length ? availableCodes.map((code) => { const max = Number(available[code]) || 0; const info = catalog.find((item: any) => item.code === code); return <label class="war-troop-row" key={code}><span>{info?.name ?? unitInfo(code).name} <small>可用 {max}</small></span><input type="number" min="0" max={max} value={troops[code] ?? 0} onInput={(e) => { const value = Math.max(0, Math.min(max, Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0))); setTroops((prev: any) => ({ ...prev, [code]: value })); }} /></label>; }) : <small>该村暂无可派出的驻军</small>}</div><div class="war-treasure-picker"><div class="war-treasure-header"><strong>随队宝物</strong><span>{treasureCap > 0 ? `${selectedTreasures.length}/${treasureCap} 件` : '兵力不足，无法携带'}</span></div>{treasureCodes.length ? treasureCodes.map((code) => { const info = treasureInfo(code); const checked = selectedTreasures.includes(code); const disabled = !checked && (treasureCap <= 0 || selectedTreasures.length >= treasureCap); return <label class="war-treasure-row" key={code}><input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => { const checkedNow = (e.currentTarget as HTMLInputElement).checked; setTreasures((prev) => checkedNow ? (prev.includes(code) || prev.length >= treasureCap ? prev : [...prev, code]) : prev.filter((item) => item !== code)); }} /><span>{info?.name ?? code}<small>{info ? `${treasureRarityName(info.rarity)} · ${info.effectType} ${info.effectValue}` : code}</small></span></label>; }) : <small>该村没有可携带的宝物</small>}</div>{selectedCount > 0 && <div class={`war-travel-preview${travelPreview?.withinLimit === false ? ' war-travel-preview--bad' : travelPreview?.withinLimit === true ? ' war-travel-preview--ok' : ''}`}>{travelPreviewBusy ? '正在计算当前兵力的行军时间…' : travelPreview?.error ? travelPreview.error : travelPreview ? <><span>当前兵力预计行军：{formatWarDuration(travelPreview.travelSec)}</span><span>规定最长行军：{formatWarDuration(travelPreview.maxTravelSec)} · {travelPreview.withinLimit ? '在规定时间内' : '超出规定时间，不能加入行动'}</span></> : '等待计算行军时间…'}</div>}<Btn disabled={busy || !canSubmit} onClick={() => onAction('JoinAllianceWarPlan', { planId: p.id, sourceVillageId, troops: selectedTroops, treasures: selectedTreasures })}>加入行动</Btn></>}{p.status === 'open' && joinRemain <= 0 && <small class="alliance-muted">报名已截止，等待已报名部队出发</small>}</div></details>;
+}
+
+function _WarPlanCardLegacy({ p, now, canPlan, busy, onAction, villages, sourceVillageId, setSourceVillageId, available, availableTreasures, catalog, troops, setTroops, memberNames, participantStatus, remainingSec, joinRemainingSec, legacyPlan, recallablePlan }: any) {
   const active = (p.status === 'open' || p.status === 'dispatched')
     && (Number.isFinite(Number(p.deadlineAt)) ? Number(p.deadlineAt) > now : p.status === 'open');
   const [expanded, setExpanded] = useState(active);
@@ -195,7 +270,10 @@ function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageI
   const remain = remainingSec(p);
   const joinRemain = joinRemainingSec(p);
   const participants = Object.values(p.participants ?? {}) as any[];
-  const mine = p.participants?.[me?.id ?? ''];
+  const mine = participants.find((participant) => participant.playerId === me?.id);
+  const _myParticipants = participants.filter((participant) => participant.playerId === me?.id);
+  const _myJoined = _myParticipants.some((participant) => participant.status === 'joined');
+  const _memberCount = new Set(participants.map((participant) => participant.playerId)).size;
   const cancelAnchor = Number(p.joinDeadlineAt ?? p.deadlineAt);
   const cancelWindow = canPlan
     && (p.status === 'open' || p.status === 'dispatched')
@@ -220,7 +298,7 @@ function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageI
   const [travelPreviewBusy, setTravelPreviewBusy] = useState(false);
   useEffect(() => {
     let live = true;
-    if (p.status !== 'open' || joinRemain <= 0 || mine || !sourceVillageId || !Object.keys(selectedTroops).length) {
+    if (p.status !== 'open' || joinRemain <= 0 || !sourceVillageId || !Object.keys(selectedTroops).length) {
       setTravelPreview(null);
       setTravelPreviewBusy(false);
       return () => { live = false; };
@@ -245,6 +323,35 @@ function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageI
     const text = entries.map(([code, count]) => `${catalog.find((item: any) => item.code === code)?.name ?? unitInfo(code).name} ×${count}`).join('、');
     return { text: text || '未派出兵力', total };
   };
+  // 同一玩家从同一村多次报名时，在展示层合并；服务端仍保留独立记录，
+  // 因为每次报名都对应一份独立预备队锁和一个独立行军调度。
+  const groupedParticipants = Array.from(participants.reduce((groups, participant) => {
+    const key = `${participant.playerId}\u0000${participant.sourceVillageId}`;
+    const current = groups.get(key) ?? {
+      key, playerId: participant.playerId, sourceVillageId: participant.sourceVillageId,
+      sourceVillageName: participant.sourceVillageName, troops: {}, treasures: [], travelSecs: new Set<number>(), statuses: new Set<string>(),
+    };
+    for (const [code, count] of Object.entries(participant.troops ?? {})) current.troops[code] = (current.troops[code] ?? 0) + Number(count);
+    current.treasures.push(...(participant.treasures ?? []));
+    current.travelSecs.add(Number(participant.travelSec));
+    current.statuses.add(String(participant.status));
+    if (!current.sourceVillageName && participant.sourceVillageName) current.sourceVillageName = participant.sourceVillageName;
+    groups.set(key, current);
+    return groups;
+  }, new Map<string, any>()).values());
+  const treasureSummary = (codes: string[]) => {
+    const counts = new Map<string, number>();
+    for (const code of codes) counts.set(code, (counts.get(code) ?? 0) + 1);
+    return Array.from(counts.entries()).map(([code, count]) => `${treasureInfo(code)?.name ?? code}${count > 1 ? ` ×${count}` : ''}`).join('、');
+  };
+  const _participantRows = groupedParticipants.map((participant: any) => {
+    const summary = troopSummary(participant.troops);
+    const status = (Array.from(participant.statuses) as string[]).map((value) => participantStatus[value] ?? value).join('、');
+    const travel = (Array.from(participant.travelSecs) as number[]).filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b).map((value) => formatWarDuration(value)).join('、') || '未知';
+    const village = participant.sourceVillageName ? `${participant.sourceVillageName}（${participant.sourceVillageId}）` : participant.sourceVillageId;
+    const treasureText = participant.treasures.length ? `宝物：${treasureSummary(participant.treasures)}` : '宝物：未携带';
+    return <div class="war-participant-row" key={`${p.id}-${participant.key}`}><span><b>{memberNames[participant.playerId] ?? participant.playerId}</b><small>{village} · {status}</small></span><span>{summary.text}（共 {summary.total} 名）<small> · 预计行军：{travel} · {treasureText}</small></span></div>;
+  });
   const selectedCount = Object.keys(selectedTroops).length;
   const canSubmit = selectedCount > 0 && !travelPreviewBusy && travelPreview?.withinLimit === true;
   return <details ref={detailsRef} class={`war-plan${active ? ' war-plan--active' : ' war-plan--history'}`} open={active || expanded} onToggle={(event) => { if (!active) setExpanded((event.currentTarget as HTMLDetailsElement).open); }}><summary><b>{p.mode === 'raid' ? '掠夺' : p.mode === 'attack' ? '攻城' : '增援'} · {p.targetId ?? p.targetVillage}</b><span>{p.status === 'open' ? '集结中' : p.status === 'dispatched' ? '已全部派出' : p.status === 'cancelled' ? '已取消' : p.status} · 目标剩余 {remain} 秒 · {p.status === 'open' ? `报名剩余 ${joinRemain} 秒 · ` : ''}{participants.length} 人参加</span></summary><div class="war-plan-body"><div class="war-participants"><strong>参战成员与派兵</strong>{participants.length ? participants.map((participant: any) => { const summary = troopSummary(participant.troops); const carried = (participant.treasures ?? []).map((code: string) => treasureInfo(code)?.name ?? code); return <div class="war-participant-row" key={`${p.id}-${participant.playerId}`}><span><b>{memberNames[participant.playerId] ?? participant.playerId}</b><small>{participant.sourceVillageId} · {participantStatus[participant.status] ?? participant.status}</small></span><span>{summary.text}（共 {summary.total} 名）{carried.length > 0 && <small> · 宝物：{carried.join('、')}</small>}</span></div>; }) : <small>暂无成员参加</small>}</div><div class="war-plan-actions">{mine?.status === 'joined' && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarParticipation', { planId: p.id })}>取消参加</Btn>}{cancelWindow && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('CancelAllianceWarPlan', { planId: p.id })}>取消行动并撤回（{cancelRemain}秒）</Btn>}{canPlan && recallablePlan(p) && <Btn variant="danger" size="sm" disabled={busy} onClick={() => onAction('RecallAllianceWarPlan', { planId: p.id })}>全员撤回（{Math.max(0, 90 - Math.floor((now - Number(legacyPlan(p) ? p.allDispatchedAt : p.joinDeadlineAt)) / 1000))}秒）</Btn>}</div>{p.status === 'open' && joinRemain > 0 && !mine && <><div class="war-travel-limit">本次行动允许的最大行军时间：{formatWarDuration(Math.max(0, Number(p.countdownSec ?? 0) - Number(p.participationCountdownSec ?? 0)))}</div><VillageSelect villages={villages} value={sourceVillageId} onChange={setSourceVillageId} /><div class="war-troop-picker">{availableCodes.length ? availableCodes.map((code) => { const max = Number(available[code]) || 0; const info = catalog.find((item: any) => item.code === code); return <label class="war-troop-row" key={code}><span>{info?.name ?? unitInfo(code).name} <small>可用 {max}</small></span><input type="number" min="0" max={max} value={troops[code] ?? 0} onInput={(e) => { const value = Math.max(0, Math.min(max, Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0))); setTroops((prev: any) => ({ ...prev, [code]: value })); }} /></label>; }) : <small>该村暂无可派出的驻军</small>}</div><div class="war-treasure-picker"><div class="war-treasure-header"><strong>随队宝物</strong><span>{treasureCap > 0 ? `${selectedTreasures.length}/${treasureCap} 件` : '兵力不足，无法携带'}</span></div>{treasureCodes.length ? treasureCodes.map((code) => { const info = treasureInfo(code); const checked = selectedTreasures.includes(code); const disabled = !checked && (treasureCap <= 0 || selectedTreasures.length >= treasureCap); return <label class="war-treasure-row" key={code}><input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => { const checkedNow = (e.currentTarget as HTMLInputElement).checked; setTreasures((prev) => checkedNow ? (prev.includes(code) || prev.length >= treasureCap ? prev : [...prev, code]) : prev.filter((item) => item !== code)); }} /><span>{info?.name ?? code}<small>{info ? `${treasureRarityName(info.rarity)} · ${info.effectType} ${info.effectValue}` : code}</small></span></label>; }) : <small>该村没有可携带的宝物</small>}</div>{selectedCount > 0 && <div class={`war-travel-preview${travelPreview?.withinLimit === false ? ' war-travel-preview--bad' : travelPreview?.withinLimit === true ? ' war-travel-preview--ok' : ''}`}>{travelPreviewBusy ? '正在计算当前兵力的行军时间…' : travelPreview?.error ? travelPreview.error : travelPreview ? <><span>当前兵力预计行军：{formatWarDuration(travelPreview.travelSec)}</span><span>规定最长行军：{formatWarDuration(travelPreview.maxTravelSec)} · {travelPreview.withinLimit ? '在规定时间内' : '超出规定时间，不能加入行动'}</span></> : '等待计算行军时间…'}</div>}<Btn disabled={busy || !canSubmit} onClick={() => onAction('JoinAllianceWarPlan', { planId: p.id, sourceVillageId, troops: selectedTroops, treasures: selectedTreasures })}>加入行动</Btn></>}{p.status === 'open' && joinRemain <= 0 && <small class="alliance-muted">报名已截止，等待已报名部队出发</small>}</div></details>;

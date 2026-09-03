@@ -10,8 +10,12 @@ export type AllianceRole = 'logistics' | 'war' | 'tech' | 'ambassador';
 type Resources = { wood: number; clay: number; iron: number; crop: number };
 
 interface WarParticipant {
+  /** 计划内唯一报名记录键；旧存档缺失时使用 participants map key。 */
+  participantId?: string;
   playerId: string;
   sourceVillageId: string;
+  /** 来源村名称快照，仅用于联盟页面展示，ID 仍是权威引用。 */
+  sourceVillageName?: string;
   troops: Record<string, number>;
   /** 参军时选择、在实际派出时交给 movement 装载的宝物。 */
   treasures: string[];
@@ -304,8 +308,9 @@ export class AllianceModule {
           ? Math.floor(Number(plan.participationCountdownSec))
           : totalSec;
         const joinDeadlineAt = Number(plan.joinDeadlineAt) > 0 ? Number(plan.joinDeadlineAt) : (participationSec >= totalSec ? deadlineAt : createdAt + participationSec * 1000);
-        const participants = Object.fromEntries(Object.entries(plan.participants ?? {}).map(([playerId, participant]) => [playerId, {
+        const participants = Object.fromEntries(Object.entries(plan.participants ?? {}).map(([participantKey, participant]) => [participantKey, {
           ...(participant as WarParticipant),
+          participantId: String((participant as WarParticipant).participantId ?? participantKey),
           treasures: Array.isArray((participant as WarParticipant).treasures) ? [...(participant as WarParticipant).treasures] : [],
         }]));
         return [id, { ...plan, createdAt, countdownSec: totalSec, participationCountdownSec: participationSec, joinDeadlineAt, deadlineAt, participants }];
@@ -389,6 +394,12 @@ export class AllianceModule {
     return !!res.ok && ((res.payload as any)?.player?.villages ?? []).some((v: any) => v.id === villageId);
   }
 
+  private async villageName(villageId: string): Promise<string | undefined> {
+    const tile = await this.commands.send({ name: 'world.GetTileByRef', from: AllianceModule.NAME, payload: { refId: villageId, kind: 'village' } });
+    const name = tile.ok ? String((tile.payload as any)?.tile?.name ?? '').trim() : '';
+    return name || undefined;
+  }
+
   private async refreshConnectivity(a: AllianceState): Promise<void> {
     if (!a.hallVillageId) return;
     const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: AllianceModule.NAME, payload: { villageId: a.hallVillageId, kind: 'alliance_hall' } });
@@ -410,7 +421,7 @@ export class AllianceModule {
       a.researchingTech = null;
       this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
       this.scheduler.cancelByOwner(`alliance-tech:${a.id}`);
-      for (const plan of Object.values(a.warPlans)) for (const participant of Object.values(plan.participants)) this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+      for (const plan of Object.values(a.warPlans)) for (const participantKey of Object.keys(plan.participants)) this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participantKey}`);
       // 已经出发的军事行动继续；尚未出发的行动取消。行军回收由
       // movement.ReturnAllianceDeliveries 处理，不在这里直接改 Movement owner。
       for (const plan of Object.values(a.warPlans)) {
@@ -561,9 +572,8 @@ export class AllianceModule {
     const rep = await this.commands.send({ name: 'reputation.Get', from: AllianceModule.NAME, payload: { playerId } });
     const contribution = a.resourceContributions[playerId] ?? zeroResources();
     let militaryPop = 0;
-    for (const plan of Object.values(a.warPlans)) {
-      const part = plan.participants[playerId];
-      if (!part) continue;
+    for (const plan of Object.values(a.warPlans)) for (const part of Object.values(plan.participants ?? {})) {
+      if (part.playerId !== playerId) continue;
       for (const [code, count] of Object.entries(part.troops)) militaryPop += positiveInt(count) * Math.max(1, this.config.units[code]?.popCost ?? 1);
     }
     return {
@@ -609,6 +619,13 @@ export class AllianceModule {
     await this.refreshConnectivity(a);
     const allianceReputation = await this.allianceReputation(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
+    let participantNamesChanged = false;
+    for (const plan of Object.values(a.warPlans)) for (const participant of Object.values(plan.participants ?? {})) {
+      if (participant.sourceVillageName) continue;
+      const sourceVillageName = await this.villageName(participant.sourceVillageId);
+      if (sourceVillageName) { participant.sourceVillageName = sourceVillageName; participantNamesChanged = true; }
+    }
+    if (participantNamesChanged) this.store.set(COLLECTION, a.id, a);
     const availableTroopsByVillage = await this.availableTroopsByVillage(playerId);
     const availableTreasuresByVillage = await this.availableTreasuresByVillage(playerId);
     const unitCatalog = Object.values(this.config.units).map((u) => ({ code: u.key, name: u.name, form: u.form, icon: u.icon }));
@@ -697,11 +714,12 @@ export class AllianceModule {
   /** 离盟或被移除时，取消尚未出发的联盟战事报名，避免预备队锁永久占用兵力。 */
   private async releaseJoinedWarReservations(a: AllianceState, playerId: string): Promise<void> {
     for (const plan of Object.values(a.warPlans)) {
-      const participant = plan.participants?.[playerId];
-      if (!participant || participant.status !== 'joined') continue;
-      this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
-      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
-      delete plan.participants[playerId];
+      for (const [participantKey, participant] of Object.entries(plan.participants ?? {})) {
+        if (participant.playerId !== playerId || participant.status !== 'joined') continue;
+        this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participantKey}`);
+        await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+        delete plan.participants[participantKey];
+      }
     }
   }
 
@@ -793,7 +811,7 @@ export class AllianceModule {
           const player = (member.payload as any)?.player;
           reservations.push({
             allianceId: a.id, allianceName: a.name, planId: plan.id, playerId: participant.playerId,
-            playerName: player?.name ?? participant.playerId, mode: plan.mode, targetKind: plan.targetKind,
+            playerName: player?.name ?? participant.playerId, sourceVillageName: participant.sourceVillageName, participantId: participant.participantId, mode: plan.mode, targetKind: plan.targetKind,
             targetVillage: plan.targetVillage, targetId: plan.targetId, status: participant.status,
             troops: { ...participant.troops }, treasures: [...(participant.treasures ?? [])], travelSec: participant.travelSec,
             joinDeadlineAt: plan.joinDeadlineAt, deadlineAt: plan.deadlineAt,
@@ -1143,7 +1161,6 @@ export class AllianceModule {
     const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
     const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
     if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
-    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
     const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops, treasures);
     if (!prepared.ok) return { ok: false, payload: prepared.payload ?? {}, reason: prepared.reason };
     const { cleanTroops, cleanTreasures, travelMs, travelSec, maxTravelMs, withinLimit, arriveAtIfDepartNow } = prepared.preview;
@@ -1172,26 +1189,34 @@ export class AllianceModule {
     const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
     const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
     if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
-    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
     const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops, treasures);
     if (!prepared.ok) return { ok: false, payload: {}, reason: prepared.reason };
     const { cleanTroops, cleanTreasures, travelMs, travelSec, withinLimit } = prepared.preview;
     if (!withinLimit) return { ok: false, payload: { travelSec, travelMs, deadlineAt: plan.deadlineAt, joinDeadlineAt }, reason: 'war_travel_too_long' };
     const reserved = await this.commands.send({ name: 'military.ReserveTroops', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, troops: cleanTroops } });
     if (!reserved.ok) return { ok: false, payload: {}, reason: reserved.reason ?? 'insufficient_troops' };
-    plan.participants[playerId] = { playerId, sourceVillageId, troops: cleanTroops, treasures: cleanTreasures, travelSec, status: 'joined' }; this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[playerId]!); await this.push(a); return { ok: true, payload: { plan, travelSec, treasures: cleanTreasures } };
+    const participantKey = this.nextParticipantKey(plan, playerId);
+    plan.participants[participantKey] = { participantId: participantKey, playerId, sourceVillageId, sourceVillageName: await this.villageName(sourceVillageId), troops: cleanTroops, treasures: cleanTreasures, travelSec, status: 'joined' };
+    this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[participantKey]!, participantKey); await this.push(a); return { ok: true, payload: { plan, participantId: participantKey, travelSec, treasures: cleanTreasures } };
   }
 
-  private schedulePlan(a: AllianceState, plan: WarPlan): void { for (const p of Object.values(plan.participants)) if (p.status === 'joined') this.scheduleParticipant(a, plan, p); }
-  private scheduleParticipant(a: AllianceState, plan: WarPlan, p: WarParticipant): void {
-    this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${p.playerId}`);
-    const triggerAt = Math.max(this.now(), plan.deadlineAt - p.travelSec * 1000);
-    this.scheduler.scheduleAt(triggerAt, () => void this.dispatchParticipant(a.id, plan.id, p.playerId), `alliance-war:${plan.id}:${p.playerId}`);
+  private nextParticipantKey(plan: WarPlan, playerId: string): string {
+    if (!Object.prototype.hasOwnProperty.call(plan.participants, playerId)) return playerId;
+    let index = 2;
+    while (Object.prototype.hasOwnProperty.call(plan.participants, `${playerId}#${index}`)) index++;
+    return `${playerId}#${index}`;
   }
-  private async dispatchParticipant(allianceId: string, planId: string, playerId: string): Promise<void> {
-    const a = this.load(allianceId); const plan = a?.warPlans[planId]; const p = plan?.participants[playerId];
+
+  private schedulePlan(a: AllianceState, plan: WarPlan): void { for (const [participantKey, p] of Object.entries(plan.participants)) if (p.status === 'joined') this.scheduleParticipant(a, plan, p, participantKey); }
+  private scheduleParticipant(a: AllianceState, plan: WarPlan, p: WarParticipant, participantKey = p.participantId ?? p.playerId): void {
+    this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participantKey}`);
+    const triggerAt = Math.max(this.now(), plan.deadlineAt - p.travelSec * 1000);
+    this.scheduler.scheduleAt(triggerAt, () => void this.dispatchParticipant(a.id, plan.id, participantKey), `alliance-war:${plan.id}:${participantKey}`);
+  }
+  private async dispatchParticipant(allianceId: string, planId: string, participantKey: string): Promise<void> {
+    const a = this.load(allianceId); const plan = a?.warPlans[planId]; const p = plan?.participants[participantKey];
     if (!a || !plan || !p || plan.status !== 'open' || a.disconnected) return;
-    const payload: any = { villageId: p.sourceVillageId, troops: p.troops, treasures: p.treasures ?? [], allianceReservation: { allianceId, planId, playerId } };
+    const payload: any = { villageId: p.sourceVillageId, troops: p.troops, treasures: p.treasures ?? [], allianceReservation: { allianceId, planId, playerId: p.playerId, participantId: participantKey } };
     let action = '';
     if (plan.mode === 'reinforce') { action = 'movement.SendReinforce'; payload.targetVillage = plan.targetVillage; }
     else if (plan.targetKind === 'pve') { action = plan.mode === 'raid' ? 'movement.SendRaid' : 'movement.SendAttack'; payload.targetId = plan.targetId; }
@@ -1201,12 +1226,12 @@ export class AllianceModule {
     // CancelWarPlan may have won the race while the movement command was in
     // flight. Do not resurrect a cancelled plan; best-effort recall the
     // movement that was created before cancellation became visible.
-    if (plan.status !== 'open' || plan.participants[playerId] !== p) {
+    if (plan.status !== 'open' || plan.participants[participantKey] !== p) {
       if (movementId) {
         p.movementId = movementId; p.status = 'dispatched'; p.dispatchedAt = this.now();
         await this.recallParticipant(plan, p);
-        if (plan.participants[playerId] === p) this.store.set(COLLECTION, a.id, a);
-      } else if (plan.participants[playerId] === p && p.status === 'joined') {
+        if (plan.participants[participantKey] === p) this.store.set(COLLECTION, a.id, a);
+      } else if (plan.participants[participantKey] === p && p.status === 'joined') {
         await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: p.sourceVillageId, troops: p.troops } });
         p.status = 'recalled'; p.recalledAt = this.now(); this.store.set(COLLECTION, a.id, a);
       }
@@ -1231,12 +1256,15 @@ export class AllianceModule {
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
-    const participant = plan.participants[playerId];
-    if (!participant) return { ok: false, payload: {}, reason: 'war_participation_not_found' };
-    if (participant.status !== 'joined') return { ok: false, payload: {}, reason: 'war_participation_dispatched' };
-    this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
-    await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
-    delete plan.participants[playerId];
+    const entries = Object.entries(plan.participants).filter(([, participant]) => participant.playerId === playerId);
+    if (!entries.length) return { ok: false, payload: {}, reason: 'war_participation_not_found' };
+    const joined = entries.filter(([, participant]) => participant.status === 'joined');
+    if (!joined.length) return { ok: false, payload: {}, reason: 'war_participation_dispatched' };
+    for (const [participantKey, participant] of joined) {
+      this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participantKey}`);
+      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+      delete plan.participants[participantKey];
+    }
     this.store.set(COLLECTION, a.id, a); await this.push(a);
     return { ok: true, payload: { plan } };
   }
@@ -1261,9 +1289,9 @@ export class AllianceModule {
       return { ok: false, payload: {}, reason: 'war_cancel_window_expired' };
     }
     plan.status = 'cancelled'; plan.cancelledAt = now;
-    for (const participant of Object.values(plan.participants)) {
+    for (const [participantKey, participant] of Object.entries(plan.participants)) {
       if (participant.status === 'joined') {
-        this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+        this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participantKey}`);
         await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
         participant.status = 'recalled'; participant.recalledAt = now;
       }
