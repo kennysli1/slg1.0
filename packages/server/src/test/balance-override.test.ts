@@ -342,6 +342,9 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
         head: { sha: branchSha },
       });
     }
+    if (req.method === 'GET' && path === '/repos/owner/repo/pulls') {
+      return send(200, []);
+    }
     if (req.method === 'GET' && path === '/repos/owner/repo/pulls/7/files') {
       return send(200, [
         { filename: 'config/units.csv', status: 'modified', additions: 1, deletions: 1 },
@@ -416,6 +419,15 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
     const merged = await authority.inspectStatus();
     assert.equal(merged.pullRequest?.state, 'MERGED');
     assert.equal(merged.syncState, 'merged');
+
+    // An ordinary closed PR must not remain as a stale “ready” link.  The
+    // next status refresh returns to an idle state so a later config edit can
+    // create a fresh PR from the current branch baseline.
+    mergedAt = null;
+    const closed = await authority.inspectStatus();
+    assert.equal(closed.pullRequest, null);
+    assert.equal(closed.pullRequestUrl, null);
+    assert.equal(closed.syncState, 'idle');
     authority.close();
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
