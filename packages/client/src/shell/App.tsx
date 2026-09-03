@@ -101,6 +101,12 @@ function AllianceTargetCapture() {
   const target = selected.value;
   useEffect(() => {
     if (!picking || !target || !['village', 'pve'].includes(target.kind)) return;
+    if (target.taskInfo) {
+      // 任务营地只属于当前玩家的任务流程，不能把个人可见目标泄露给联盟集结。
+      selected.value = null;
+      showToast('个人任务营地不能作为联盟战事目标', 'bad');
+      return;
+    }
     allianceWarTarget.value = target;
     allianceTargetPicker.value = false;
     selected.value = null;

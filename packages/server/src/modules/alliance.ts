@@ -525,7 +525,9 @@ export class AllianceModule {
 
   private async list(cmd: Command): Promise<CommandResult> {
     const query = String((cmd.payload as any)?.query ?? '').trim().toLocaleLowerCase();
-    const alliances = this.store.all<AllianceState>(COLLECTION).map((raw) => this.normalize(raw)).filter((a) => !query || a.name.toLocaleLowerCase().includes(query) || a.leaderName.toLocaleLowerCase().includes(query));
+    // 失联联盟不会进入公开目录；联盟本身和申请记录仍保留在存档中，
+    // 盟主恢复大厅后可在联盟控制页统一处理此前收到的申请。
+    const alliances = this.store.all<AllianceState>(COLLECTION).map((raw) => this.normalize(raw)).filter((a) => !a.disconnected && (!query || a.name.toLocaleLowerCase().includes(query) || a.leaderName.toLocaleLowerCase().includes(query)));
     const rows = await Promise.all(alliances.map(async (a) => ({ id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, memberCount: a.memberIds.length, memberCap: this.cap(a), full: a.memberIds.length >= this.cap(a), level: a.level, reputation: await this.allianceReputation(a), disconnected: !!a.disconnected })));
     return { ok: true, payload: { alliances: rows } };
   }
@@ -606,7 +608,8 @@ export class AllianceModule {
     const { playerId, allianceId } = cmd.payload as { playerId: string; allianceId: string };
     if (this.idForPlayer(playerId)) return { ok: false, payload: {}, reason: 'already_in_alliance' };
     const a = this.load(allianceId); if (!a) return { ok: false, payload: {}, reason: 'alliance_not_found' };
-    if (a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    // 失联期间仍允许已持有链接/旧目录的申请写入 joinRequests；公开目录会
+    // 隐藏该联盟，申请不会自动加入，必须等大厅恢复后由盟主统一审核。
     if (a.memberIds.length >= this.cap(a)) return { ok: false, payload: {}, reason: 'alliance_full' };
     a.joinRequests[playerId] = this.now(); this.store.set(COLLECTION, a.id, a); await this.push(a);
     return { ok: true, payload: { allianceId, requested: true } };
@@ -616,6 +619,7 @@ export class AllianceModule {
     const { playerId, applicantId, approve } = cmd.payload as { playerId: string; applicantId: string; approve: boolean };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
+    if (a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!(applicantId in a.joinRequests)) return { ok: false, payload: {}, reason: 'request_not_found' };
     if (approve) {
       if (this.idForPlayer(applicantId)) return { ok: false, payload: {}, reason: 'applicant_in_alliance' };
@@ -989,6 +993,12 @@ export class AllianceModule {
     if (targetKind === 'pve' && targetId) {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: AllianceModule.NAME, payload: { id: targetId } });
       if (!target.ok) return { ok: false, payload: {}, reason: 'war_target_not_found' };
+      const targetData = (target.payload as any) ?? {};
+      // 任务营地只对任务所属玩家可见，不能被联盟战事当成公共目标；
+      // 普通 PvE 营地也没有城墙/城邦身份，攻城必须在模式选择阶段被排除，
+      // 服务端再次校验，避免伪造 targetKind 绕过地图选项。
+      if (targetData.task === true || targetData.ownerVillageId) return { ok: false, payload: {}, reason: 'war_private_task_target' };
+      if (mode === 'attack' && targetData.cityState !== true) return { ok: false, payload: {}, reason: 'war_siege_target_invalid' };
       targetQ = Math.trunc(Number((target.payload as any)?.q));
       targetR = Math.trunc(Number((target.payload as any)?.r));
       if (!Number.isFinite(targetQ) || !Number.isFinite(targetR)) return { ok: false, payload: {}, reason: 'war_target_not_found' };
@@ -996,10 +1006,18 @@ export class AllianceModule {
     if (targetKind === 'village' && targetVillage) {
       const targetOwner = await this.commands.send({ name: 'player.GetByVillage', from: AllianceModule.NAME, payload: { villageId: targetVillage } });
       if (!targetOwner.ok) return { ok: false, payload: {}, reason: 'war_target_not_found' };
-      if (targetOwner.ok && this.idForPlayer(String((targetOwner.payload as any)?.player?.id ?? '')) === a.id) return { ok: false, payload: {}, reason: 'allied_target' };
+      if (targetOwner.ok && (mode === 'raid' || mode === 'attack') && this.idForPlayer(String((targetOwner.payload as any)?.player?.id ?? '')) === a.id) return { ok: false, payload: {}, reason: 'allied_target' };
       const targetPlayer = (targetOwner.payload as any)?.player;
       const targetVillageView = (targetPlayer?.villages ?? []).find((v: any) => v.id === targetVillage);
       if (targetVillageView) { targetQ = Math.trunc(Number(targetVillageView.q)); targetR = Math.trunc(Number(targetVillageView.r)); }
+      const ownerId = String((targetOwner.payload as any)?.player?.id ?? '');
+      const allianceRelation = await this.commands.send({ name: 'alliance.GetRelation', from: AllianceModule.NAME, payload: { playerId, targetPlayerId: ownerId } });
+      const relationResult = allianceRelation.ok && (allianceRelation.payload as any)?.relation === 'allied'
+        ? allianceRelation
+        : await this.commands.send({ name: 'diplomacy.GetRelation', from: AllianceModule.NAME, payload: { playerId, targetPlayerId: ownerId } });
+      const relation = relationResult.ok ? String((relationResult.payload as any)?.relation ?? 'neutral') : 'neutral';
+      if ((mode === 'raid' || mode === 'attack') && relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
+      if (mode === 'reinforce' && relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }
     const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, participationCountdownSec: effectiveParticipationSec, joinDeadlineAt: hasParticipationWindow ? createdAt + effectiveParticipationSec * 1000 : deadline, createdAt, status: 'open', participants: {} };
     a.warPlans[plan.id] = plan; this.store.set(COLLECTION, a.id, a); await this.push(a); return { ok: true, payload: { plan } };

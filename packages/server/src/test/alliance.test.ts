@@ -47,6 +47,65 @@ test('联盟：建造大厅后可创建、申请加入并建立盟友关系', as
   assert.match((snapshot.payload as any).alliance.roleCatalog.find((r: any) => r.code === 'logistics').effect, /资源产量/);
 });
 
+test('联盟：失联联盟不出现在公开目录，申请保留并在恢复后才能审核', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  const leader = (await send(app, 'player.Register', { name: '失联盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const applicant = (await send(app, 'player.Register', { name: '待审核玩家', password: 'pass1', tribe: 'gauls' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '失联测试联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.disconnected = true;
+  app.store.set('alliance', allianceId, alliance);
+
+  const listed = await send(app, 'alliance.List', { query: '' });
+  assert.equal((listed.payload as any).alliances.some((row: any) => row.id === allianceId), false, '失联联盟不应进入公开联盟列表');
+  const applied = await send(app, 'alliance.Apply', { playerId: applicant.player.id, allianceId });
+  assert.equal(applied.ok, true, applied.reason);
+  assert.ok(app.store.get<any>('alliance', allianceId)!.joinRequests[applicant.player.id], '旧链接申请仍应写入联盟控制记录');
+  const blockedReview = await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: applicant.player.id, approve: true });
+  assert.equal(blockedReview.ok, false);
+  assert.equal(blockedReview.reason, 'alliance_disconnected');
+
+  alliance.disconnected = false;
+  app.store.set('alliance', allianceId, alliance);
+  const reviewed = await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: applicant.player.id, approve: true });
+  assert.equal(reviewed.ok, true, reviewed.reason);
+});
+
+test('联盟战事：普通 PvE/个人任务营地不可攻城，盟友只能增援', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '目标盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const member = (await send(app, 'player.Register', { name: '目标盟友', password: 'pass1', tribe: 'gauls' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '目标校验联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const applied = await send(app, 'alliance.Apply', { playerId: member.player.id, allianceId });
+  assert.equal(applied.ok, true, applied.reason);
+  assert.equal((await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: member.player.id, approve: true })).ok, true);
+
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  assert.equal(target.ok, true, target.reason);
+  const attackCamp = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'attack', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 60 });
+  assert.equal(attackCamp.ok, false);
+  assert.equal(attackCamp.reason, 'war_siege_target_invalid');
+
+  const pveState = app.store.get<any>('pve', 'pve-0')!;
+  app.store.set('pve', 'pve-0', { ...pveState, task: true, ownerVillageId: leader.player.villageId });
+  const privateCamp = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 60 });
+  assert.equal(privateCamp.ok, false);
+  assert.equal(privateCamp.reason, 'war_private_task_target');
+
+  const alliedAttack = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'attack', targetKind: 'village', targetVillage: member.player.villageId, q: member.player.q, r: member.player.r, countdownSec: 60 });
+  assert.equal(alliedAttack.ok, false);
+  assert.equal(alliedAttack.reason, 'allied_target');
+  const alliedReinforce = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'reinforce', targetKind: 'village', targetVillage: member.player.villageId, q: member.player.q, r: member.player.r, countdownSec: 60 });
+  assert.equal(alliedReinforce.ok, true, alliedReinforce.reason);
+});
+
 test('联盟：同盟玩家不能发起侦察或攻击，但允许增援选项', async () => {
   const app = createGameApp({ manualScheduler: true });
   const a = (await send(app, 'player.Register', { name: '盟友甲', password: 'pass1', tribe: 'romans' })).payload as any;
