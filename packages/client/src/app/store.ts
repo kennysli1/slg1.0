@@ -113,6 +113,8 @@ export const selected = signal<SelectedTarget | null>(null);
 /** 联盟战事创建时的地图选点状态；选中 PvE/玩家村后由 App 自动带回联盟页。 */
 export const allianceTargetPicker = signal(false);
 export const allianceWarTarget = signal<SelectedTarget | null>(null);
+/** 地图选点完成后让联盟页直接打开“联盟战事”板块，而不是默认成员页。 */
+export const allianceWarFocus = signal(false);
 
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
 export const garrisonContinue = signal<{ movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate' } | null>(null);

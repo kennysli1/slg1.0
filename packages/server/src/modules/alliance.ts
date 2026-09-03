@@ -379,15 +379,12 @@ export class AllianceModule {
       a.disconnected = true;
       // 大厅失联会撤销职位加成，并清空联盟大厅内尚未完成的项目。
       a.roles = Object.fromEntries(a.memberIds.map((id) => [id, []]));
-      // 大厅被拆除/摧毁时，联盟建筑、研发进度、仓库和累计贡献都不返还。
-      // 联盟本身与成员关系保留，重建大厅后从 0 级项目重新筹集。
-      a.buildings = {};
-      a.technologies = {};
+      // 历史贡献、已建成联盟建筑和已研发科技属于联盟永久记录，不能因
+      // 大厅失联而归零；只有大厅现场堆积的仓库资源、未投入的科技点和
+      // 正在进行的项目会丢失。重建后沿用既有等级与累计贡献。
       a.warehouse = zeroResources();
-      a.resourceContributions = {};
       a.pendingResourceDeliveries = {};
       a.techPointStock = 0;
-      a.techContributions = {};
       a.researchingBuilding = null;
       a.researchingTech = null;
       this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
