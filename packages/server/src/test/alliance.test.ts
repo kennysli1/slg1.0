@@ -171,7 +171,7 @@ test('联盟：受损大厅空壳仍出现在建造清单中供盟主重建', as
   assert.equal(allianceHall.builtCount, 0);
 });
 
-test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的贡献商队原地返程', async () => {
+test('联盟：大厅摧毁清空项目与仓库但保留历史贡献，并让前往大厅的贡献商队原地返程', async () => {
   const app = createGameApp({ manualScheduler: true, now: () => 5_000_000 });
   const leader = (await send(app, 'player.Register', { name: '大厅失联盟主', password: 'pass1', tribe: 'romans' })).payload as any;
   const villageId = leader.player.villageId as string;
@@ -185,6 +185,8 @@ test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的�
   alliance.technologies = { shared_logistics: 1 };
   alliance.warehouse = { wood: 900, clay: 800, iron: 700, crop: 600 };
   alliance.resourceContributions[leader.player.id] = { wood: 100, clay: 100, iron: 100, crop: 100 };
+  alliance.techPointStock = 75;
+  alliance.techContributions[leader.player.id] = 40;
   app.store.set('alliance', allianceId, alliance);
   const sent = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
   assert.equal(sent.ok, true, sent.reason);
@@ -195,11 +197,13 @@ test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的�
   await new Promise((resolve) => setTimeout(resolve, 0));
   const disconnected = app.store.get<any>('alliance', allianceId)!;
   assert.equal(disconnected.disconnected, true);
-  assert.deepEqual(disconnected.buildings, {});
-  assert.deepEqual(disconnected.technologies, {});
+  assert.deepEqual(disconnected.buildings, { alliance_warehouse: 2 }, '已建联盟建筑应保留');
+  assert.deepEqual(disconnected.technologies, { shared_logistics: 1 }, '已研发联盟科技应保留');
   assert.deepEqual(disconnected.warehouse, { wood: 0, clay: 0, iron: 0, crop: 0 });
-  assert.deepEqual(disconnected.resourceContributions, {});
+  assert.deepEqual(disconnected.resourceContributions[leader.player.id], { wood: 100, clay: 100, iron: 100, crop: 100 }, '成员历史资源贡献应保留');
   assert.deepEqual(disconnected.pendingResourceDeliveries, {});
+  assert.equal(disconnected.techPointStock, 0, '大厅内未投入科技点应清零');
+  assert.equal(disconnected.techContributions[leader.player.id], 40, '成员历史科技贡献应保留');
   const outbound = app.store.get<any>('movement', (sent.payload as any).deliveryId);
   assert.equal(outbound?.returning, true, '大厅摧毁后贡献商队应从当前位置转为返程');
 });

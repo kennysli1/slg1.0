@@ -173,7 +173,11 @@ describe('联盟目录与战事目标交互', () => {
     const app = readFileSync(new URL('../shell/App.tsx', import.meta.url), 'utf8');
     const alliance = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
     assert.match(app, /allianceTargetPicker\.value = false;[\s\S]*?tab\.value = 'alliance'/);
-    assert.match(app, /if \(target\.taskInfo\)[\s\S]*?个人任务营地不能作为联盟战事目标/);
+    assert.match(app, /if \(target\.taskInfo && target\.taskInfo\.scope !== 'global'\)[\s\S]*?个人任务营地不能作为联盟战事目标/);
+    assert.match(app, /allianceWarFocus\.value = true/);
+    assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
+    assert.match(alliance, /CancelAllianceWarParticipation/);
+    assert.match(alliance, /允许最大行军时间/);
     assert.match(alliance, /picked\?\.relation === 'allied' \? \['reinforce'\]/);
     assert.match(alliance, /picked\?\.cityState === true \? \['raid', 'attack'\] : \['raid'\]/);
     assert.match(alliance, /targetModeAllowed/);
