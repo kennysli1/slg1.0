@@ -18,6 +18,10 @@ export const tick = signal(0);
 export const dataVersion = signal(0);
 export function bumpData(): void { dataVersion.value++; }
 
+/** 联盟专用数据版本号；只在 AllianceUpdated 推送时递增，避免联盟页因地图/行军心跳重复请求。 */
+export const allianceVersion = signal(0);
+export function bumpAlliance(): void { allianceVersion.value++; }
+
 /** 战报列表版本号（战报数组原地更新，靠版本号触发重渲）。 */
 export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }

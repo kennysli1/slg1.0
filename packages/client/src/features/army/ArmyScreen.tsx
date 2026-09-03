@@ -94,11 +94,11 @@ function AllianceReserveSection({ army }: { army: any }) {
           <div class="alliance-reserve-total">
             {rows.length ? rows.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>) : <span>暂无锁定兵力</span>}
           </div>
-          {reservations.map((row) => {
+          {reservations.map((row, rowIndex) => {
             const troopEntries = Object.entries(row.troops ?? {}).filter(([, count]) => Number(count) > 0);
             const target = row.targetVillage ?? row.targetId ?? '目标地块';
             return (
-              <div class="alliance-reserve-row" key={`${row.allianceId}-${row.planId}-${row.playerId}`}>
+              <div class="alliance-reserve-row" key={`${row.allianceId}-${row.planId}-${row.participantId ?? `${row.playerId}-${rowIndex}`}`}>
                 <div class="alliance-reserve-row__head"><strong>{row.allianceName ?? '联盟'} · {modeName[row.mode] ?? row.mode}</strong><span>{row.playerName ?? row.playerId} · {target}</span></div>
                 <div class="alliance-reserve-row__troops">{troopEntries.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>)}</div>
               </div>
@@ -119,7 +119,7 @@ function AllianceReserveSection({ army }: { army: any }) {
  * 系统分别管理。使用 details 保留旧版“页面最底部、默认折叠”的交互。
  */
 function DisbandSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const entries = Object.entries(troops).filter(([, count]) => Number(count) > 0);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const snapshotKey = JSON.stringify(troops);
@@ -247,7 +247,7 @@ function ReinforcementSection({ army }: { army: any }) {
  * 这是村庄级配置：只影响「掠夺」而不影响攻城战，且兵力上限始终按当前驻军校验。
  */
 function RaidDefenseSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const raidDefense = army.raidDefense ?? { enabled: true, troops: troops };
   const [enabled, setEnabled] = useState(raidDefense.enabled !== false);
   const [selected, setSelected] = useState<Record<string, number>>({ ...(raidDefense.troops ?? troops) });
@@ -389,7 +389,7 @@ function RaidDefenseSection({ army }: { army: any }) {
 // ============================================================
 
 function GarrisonSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const trainable: any[] = army.trainable ?? [];
 
   const entries = Object.entries(troops).filter(([, n]) => (n as number) > 0);

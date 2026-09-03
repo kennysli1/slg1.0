@@ -300,7 +300,7 @@ function TroopPlanner({
   const army = getCache().army;
   // 冒险者可执行探索/侦察行军，但不参与侦察战，也不能发现其他侦察部队。
   const scoutCodes = new Set(['equlegati', 'pathfinder', 'teuscout', 'adventurer']);
-  const entries = Object.entries(army?.troops ?? {}).filter(([code, amount]) => Number(amount) > 0 && (!scoutOnly || scoutCodes.has(code)));
+  const entries = Object.entries(army?.availableTroops ?? army?.troops ?? {}).filter(([code, amount]) => Number(amount) > 0 && (!scoutOnly || scoutCodes.has(code)));
   if (!entries.length) return <p class="expedition-empty">无可用兵力，先去军队页训练。</p>;
 
   const maxTroops = Object.fromEntries(entries.map(([unitKey, raw]) => [
@@ -602,7 +602,7 @@ function EmptyTilePanel({ q, r, dist, visibility, onClose }: { q: number; r: num
             {allowExplore && <Btn variant="primary" block onClick={() => setGarrison(true)}>{visibility === 'unexplored' ? '探索' : '驻扎'}</Btn>}
             {allowAutoExplore && <Btn variant="ghost" block onClick={() => setAutoExplore(true)}>自动探索</Btn>}
             {visibility !== 'unexplored' && <Btn variant="ghost" block onClick={() => { setAmbush(true); setGarrison(true); }}>伏击</Btn>}
-            {visibility !== 'unexplored' && Number((getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}
+            {visibility !== 'unexplored' && Number((getCache().army?.availableTroops ?? getCache().army?.troops as any)?.settler ?? 0) > 0 && <Btn variant="ghost" block onClick={() => setFounding(true)}>拓荒</Btn>}
           </div>
           {!allowExplore && visibility === 'unexplored' && <p class="expedition-empty">当前没有可用的行军模式。</p>}
         </section>
