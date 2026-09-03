@@ -47,6 +47,77 @@ test('联盟：建造大厅后可创建、申请加入并建立盟友关系', as
   assert.match((snapshot.payload as any).alliance.roleCatalog.find((r: any) => r.code === 'logistics').effect, /资源产量/);
 });
 
+test('联盟：失联联盟不出现在公开目录，申请保留并在恢复后才能审核', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  const leader = (await send(app, 'player.Register', { name: '失联盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const applicant = (await send(app, 'player.Register', { name: '待审核玩家', password: 'pass1', tribe: 'gauls' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '失联测试联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.disconnected = true;
+  app.store.set('alliance', allianceId, alliance);
+
+  const listed = await send(app, 'alliance.List', { query: '' });
+  assert.equal((listed.payload as any).alliances.some((row: any) => row.id === allianceId), false, '失联联盟不应进入公开联盟列表');
+  const applied = await send(app, 'alliance.Apply', { playerId: applicant.player.id, allianceId });
+  assert.equal(applied.ok, true, applied.reason);
+  assert.ok(app.store.get<any>('alliance', allianceId)!.joinRequests[applicant.player.id], '旧链接申请仍应写入联盟控制记录');
+  const blockedReview = await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: applicant.player.id, approve: true });
+  assert.equal(blockedReview.ok, false);
+  assert.equal(blockedReview.reason, 'alliance_disconnected');
+
+  alliance.disconnected = false;
+  app.store.set('alliance', allianceId, alliance);
+  const reviewed = await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: applicant.player.id, approve: true });
+  assert.equal(reviewed.ok, true, reviewed.reason);
+});
+
+test('联盟战事：普通 PvE/个人任务营地不可攻城，盟友只能增援', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '目标盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const member = (await send(app, 'player.Register', { name: '目标盟友', password: 'pass1', tribe: 'gauls' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '目标校验联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const applied = await send(app, 'alliance.Apply', { playerId: member.player.id, allianceId });
+  assert.equal(applied.ok, true, applied.reason);
+  assert.equal((await send(app, 'alliance.ReviewRequest', { playerId: leader.player.id, applicantId: member.player.id, approve: true })).ok, true);
+
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  assert.equal(target.ok, true, target.reason);
+  const attackCamp = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'attack', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 60 });
+  assert.equal(attackCamp.ok, false);
+  assert.equal(attackCamp.reason, 'war_siege_target_invalid');
+
+  const pveState = app.store.get<any>('pve', 'pve-0')!;
+  app.store.set('pve', 'pve-0', { ...pveState, task: true, ownerVillageId: leader.player.villageId });
+  const privateCamp = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 60 });
+  assert.equal(privateCamp.ok, false);
+  assert.equal(privateCamp.reason, 'war_private_task_target');
+
+  const publicTaskSpawn = await send(app, 'pve.Spawn', {
+    id: 'alliance-public-task', type: 'tianwang_village', q: 18, r: 18,
+    task: true, ownerVillageId: leader.player.villageId,
+  });
+  assert.equal(publicTaskSpawn.ok, true, publicTaskSpawn.reason);
+  const publicTask = await send(app, 'pve.GetTarget', { id: 'alliance-public-task' });
+  const publicRaid = await send(app, 'alliance.CreateWarPlan', {
+    playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'alliance-public-task',
+    q: (publicTask.payload as any).q, r: (publicTask.payload as any).r, countdownSec: 60,
+  });
+  assert.equal(publicRaid.ok, true, publicRaid.reason);
+
+  const alliedAttack = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'attack', targetKind: 'village', targetVillage: member.player.villageId, q: member.player.q, r: member.player.r, countdownSec: 60 });
+  assert.equal(alliedAttack.ok, false);
+  assert.equal(alliedAttack.reason, 'allied_target');
+  const alliedReinforce = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'reinforce', targetKind: 'village', targetVillage: member.player.villageId, q: member.player.q, r: member.player.r, countdownSec: 60 });
+  assert.equal(alliedReinforce.ok, true, alliedReinforce.reason);
+});
+
 test('联盟：同盟玩家不能发起侦察或攻击，但允许增援选项', async () => {
   const app = createGameApp({ manualScheduler: true });
   const a = (await send(app, 'player.Register', { name: '盟友甲', password: 'pass1', tribe: 'romans' })).payload as any;
@@ -100,7 +171,7 @@ test('联盟：受损大厅空壳仍出现在建造清单中供盟主重建', as
   assert.equal(allianceHall.builtCount, 0);
 });
 
-test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的贡献商队原地返程', async () => {
+test('联盟：大厅摧毁清空项目与仓库但保留历史贡献，并让前往大厅的贡献商队原地返程', async () => {
   const app = createGameApp({ manualScheduler: true, now: () => 5_000_000 });
   const leader = (await send(app, 'player.Register', { name: '大厅失联盟主', password: 'pass1', tribe: 'romans' })).payload as any;
   const villageId = leader.player.villageId as string;
@@ -114,6 +185,8 @@ test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的�
   alliance.technologies = { shared_logistics: 1 };
   alliance.warehouse = { wood: 900, clay: 800, iron: 700, crop: 600 };
   alliance.resourceContributions[leader.player.id] = { wood: 100, clay: 100, iron: 100, crop: 100 };
+  alliance.techPointStock = 75;
+  alliance.techContributions[leader.player.id] = 40;
   app.store.set('alliance', allianceId, alliance);
   const sent = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
   assert.equal(sent.ok, true, sent.reason);
@@ -124,11 +197,13 @@ test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的�
   await new Promise((resolve) => setTimeout(resolve, 0));
   const disconnected = app.store.get<any>('alliance', allianceId)!;
   assert.equal(disconnected.disconnected, true);
-  assert.deepEqual(disconnected.buildings, {});
-  assert.deepEqual(disconnected.technologies, {});
+  assert.deepEqual(disconnected.buildings, { alliance_warehouse: 2 }, '已建联盟建筑应保留');
+  assert.deepEqual(disconnected.technologies, { shared_logistics: 1 }, '已研发联盟科技应保留');
   assert.deepEqual(disconnected.warehouse, { wood: 0, clay: 0, iron: 0, crop: 0 });
-  assert.deepEqual(disconnected.resourceContributions, {});
+  assert.deepEqual(disconnected.resourceContributions[leader.player.id], { wood: 100, clay: 100, iron: 100, crop: 100 }, '成员历史资源贡献应保留');
   assert.deepEqual(disconnected.pendingResourceDeliveries, {});
+  assert.equal(disconnected.techPointStock, 0, '大厅内未投入科技点应清零');
+  assert.equal(disconnected.techContributions[leader.player.id], 40, '成员历史科技贡献应保留');
   const outbound = app.store.get<any>('movement', (sent.payload as any).deliveryId);
   assert.equal(outbound?.returning, true, '大厅摧毁后贡献商队应从当前位置转为返程');
 });
@@ -270,13 +345,19 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(created.ok, true, created.reason);
   const allianceId = (created.payload as any).allianceId as string;
   const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
-  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600 });
+  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600, participationCountdownSec: 60 });
   assert.equal(planResult.ok, true, planResult.reason);
   const planId = (planResult.payload as any).plan.id as string;
   assert.equal((planResult.payload as any).plan.countdownSec, 3600);
   const snapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
   assert.equal((snapshot.payload as any).alliance.availableTroopsByVillage[leader.player.villageId].legionnaire, 8);
   assert.equal((snapshot.payload as any).alliance.availableTroopsByVillage[leader.player.villageId].equlegati, 2);
+
+  const preview = await send(app, 'alliance.PreviewWarParticipation', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 3, equlegati: 1 } });
+  assert.equal(preview.ok, true, preview.reason);
+  assert.equal((preview.payload as any).withinLimit, true);
+  assert.ok(Number((preview.payload as any).arriveAtIfDepartNow) > clock, '预览应返回当前兵力预计抵达时间');
+  assert.equal(app.store.all<any>('movement').length, 0, '行军预览不能创建行军');
 
   const joined = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 3, equlegati: 1 } });
   assert.equal(joined.ok, true, joined.reason);
@@ -285,13 +366,20 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   const joinedSnapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
   const listedPlan = (joinedSnapshot.payload as any).alliance.warPlans.find((plan: any) => plan.id === planId);
   assert.deepEqual(listedPlan.participants[leader.player.id].troops, { legionnaire: 3, equlegati: 1 }, '联盟战事快照应向成员显示每位参与者的派兵明细');
-  const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(cancelled.ok, true, cancelled.reason);
+  const beforeJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(beforeJoinDeadline.ok, false);
+  assert.equal(beforeJoinDeadline.reason, 'war_cancel_window_not_started');
+  const planState = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
+  clock = planState.joinDeadlineAt;
+  const atJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(atJoinDeadline.ok, true, atJoinDeadline.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
   assert.equal(app.store.all<any>('movement').length, 0, '倒计时内取消不应派出军队');
 
   // 再建一个目标，推进到实际派出后验证 90 秒内的一键全员撤回。
-  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600 });
+  // pve-0 的当前预计行军约 126 秒；使用 60 秒参军窗口 + 240 秒总倒计时，
+  // 让派出时刻落在报名截止后的 90 秒内。
+  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
   const plan2Id = (plan2.payload as any).plan.id as string;
   const joined2 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan2Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
   assert.equal(joined2.ok, true, joined2.reason);
@@ -306,6 +394,147 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(recalled.ok, true, recalled.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].status, 'cancelled');
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id].status, 'recalled');
+
+  // 取消/撤回窗口从报名截止开始统一计算；报名截止后超过 90 秒不能再取消。
+  const plan3 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
+  const plan3Id = (plan3.payload as any).plan.id as string;
+  const joined3 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan3Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
+  assert.equal(joined3.ok, true, joined3.reason);
+  const plan3State = app.store.get<any>('alliance', allianceId)!.warPlans[plan3Id];
+  const dispatchAt3 = plan3State.deadlineAt - plan3State.participants[leader.player.id].travelSec * 1000;
+  await app.scheduler.advanceTo(dispatchAt3, (t) => { clock = t; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan3Id].participants[leader.player.id].status, 'dispatched');
+  clock = plan3State.joinDeadlineAt + 90_000;
+  const afterRecallWindow = await send(app, 'alliance.RecallWarPlan', { playerId: leader.player.id, planId: plan3Id });
+  assert.equal(afterRecallWindow.ok, false);
+  assert.equal(afterRecallWindow.reason, 'war_recall_window_expired');
+  const afterWindow = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId: plan3Id });
+  assert.equal(afterWindow.ok, false);
+  assert.equal(afterWindow.reason, 'war_cancel_window_expired');
+});
+
+test('联盟战事：报名预备队锁定兵力，成员可取消报名，报名截止后拒绝新成员', async () => {
+  let clock = 6_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '预备队盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  await send(app, 'military.AdjustTroops', { villageId: leader.player.villageId, delta: { legionnaire: 10 } });
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '预备队测试联盟' });
+  const allianceId = (created.payload as any).allianceId as string;
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600, participationCountdownSec: 60 });
+  assert.equal(planResult.ok, true, planResult.reason);
+  const planId = (planResult.payload as any).plan.id as string;
+  const joined = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 6 } });
+  assert.equal(joined.ok, true, joined.reason);
+  const army = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((army.payload as any).availableTroops.legionnaire, 4);
+  assert.equal((army.payload as any).allianceReservedTroops.legionnaire, 6);
+  const blocked = await send(app, 'military.AdjustTroops', { villageId: leader.player.villageId, delta: { legionnaire: -5 } });
+  assert.equal(blocked.ok, false);
+  const cancelled = await send(app, 'alliance.CancelWarParticipation', { playerId: leader.player.id, planId });
+  assert.equal(cancelled.ok, true, cancelled.reason);
+  const released = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((released.payload as any).availableTroops.legionnaire, 10);
+  const plan = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
+  clock = plan.createdAt + 1_000;
+  const joinedAgain = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 6 } });
+  assert.equal(joinedAgain.ok, true, joinedAgain.reason);
+  clock = plan.joinDeadlineAt + 1;
+  const cancelledAfterCutoff = await send(app, 'alliance.CancelWarParticipation', { playerId: leader.player.id, planId });
+  assert.equal(cancelledAfterCutoff.ok, true, cancelledAfterCutoff.reason);
+  const releasedAfterCutoff = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((releasedAfterCutoff.payload as any).availableTroops.legionnaire, 10);
+  const late = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(late.ok, false);
+  assert.equal(late.reason, 'war_join_deadline_passed');
+
+  const shortPlan = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 10, participationCountdownSec: 9 });
+  assert.equal(shortPlan.ok, true, shortPlan.reason);
+  const tooLongPreview = await send(app, 'alliance.PreviewWarParticipation', { playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(tooLongPreview.ok, true, tooLongPreview.reason);
+  assert.equal((tooLongPreview.payload as any).withinLimit, false, '超出最长行军时间的预览应明确标记');
+  const tooLong = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(tooLong.ok, false);
+  assert.equal(tooLong.reason, 'war_travel_too_long');
+});
+
+test('联盟战事：报名期间不可取消，参军可选择并校验随队宝物', async () => {
+  let clock = 7_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '宝物战事盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const villageId = leader.player.villageId as string;
+  addAllianceHall(app, villageId);
+  await send(app, 'military.AdjustTroops', { villageId, delta: { legionnaire: 200 } });
+  const grant = await send(app, 'treasure.Grant', { villageId, code: 'horse_rope' });
+  assert.equal(grant.ok, true, grant.reason);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: villageId, name: '宝物战事联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  const planResult = await send(app, 'alliance.CreateWarPlan', {
+    playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0',
+    q: (target.payload as any).q, r: (target.payload as any).r,
+    countdownSec: 3600, participationCountdownSec: 30,
+  });
+  assert.equal(planResult.ok, true, planResult.reason);
+  const planId = (planResult.payload as any).plan.id as string;
+  const snapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
+  assert.deepEqual((snapshot.payload as any).alliance.availableTreasuresByVillage[villageId], ['horse_rope']);
+
+  const preview = await send(app, 'alliance.PreviewWarParticipation', {
+    playerId: leader.player.id, planId, sourceVillageId: villageId,
+    troops: { legionnaire: 200 }, treasures: ['horse_rope'],
+  });
+  assert.equal(preview.ok, true, preview.reason);
+  assert.deepEqual((preview.payload as any).selectedTreasures, ['horse_rope']);
+  const joined = await send(app, 'alliance.JoinWarPlan', {
+    playerId: leader.player.id, planId, sourceVillageId: villageId,
+    troops: { legionnaire: 200 }, treasures: ['horse_rope'],
+  });
+  assert.equal(joined.ok, true, joined.reason);
+  const participant = app.store.get<any>('alliance', allianceId)!.warPlans[planId].participants[leader.player.id];
+  assert.deepEqual(participant.treasures, ['horse_rope']);
+
+  // 招兵阶段不能取消；取消窗口从报名截止时刻开始。
+  const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.reason, 'war_cancel_window_not_started');
+  clock = app.store.get<any>('alliance', allianceId)!.warPlans[planId].joinDeadlineAt;
+  const cancelledAtCutoff = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
+  assert.equal(cancelledAtCutoff.ok, true, cancelledAtCutoff.reason);
+  assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
+  const released = await send(app, 'military.GetArmy', { villageId });
+  assert.equal((released.payload as any).availableTroops.legionnaire, 200);
+
+  // 少于一格兵力时服务端也必须拒绝带宝物，而不是等到派出时静默丢弃。
+  const shortPlan = await send(app, 'alliance.CreateWarPlan', {
+    playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0',
+    q: (target.payload as any).q, r: (target.payload as any).r,
+    countdownSec: 3600, participationCountdownSec: 30,
+  });
+  const rejected = await send(app, 'alliance.PreviewWarParticipation', {
+    playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id,
+    sourceVillageId: villageId, troops: { legionnaire: 1 }, treasures: ['horse_rope'],
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.reason, 'carry_cap_exceeded');
+
+  const dispatchPlanId = (shortPlan.payload as any).plan.id as string;
+  const dispatchJoin = await send(app, 'alliance.JoinWarPlan', {
+    playerId: leader.player.id, planId: dispatchPlanId, sourceVillageId: villageId,
+    troops: { legionnaire: 200 }, treasures: ['horse_rope'],
+  });
+  assert.equal(dispatchJoin.ok, true, dispatchJoin.reason);
+  const dispatchPlan = app.store.get<any>('alliance', allianceId)!.warPlans[dispatchPlanId];
+  const dispatchAt = dispatchPlan.deadlineAt - dispatchPlan.participants[leader.player.id].travelSec * 1000;
+  await app.scheduler.advanceTo(dispatchAt, (t) => { clock = t; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const dispatchedMovement = app.store.all<any>('movement').find((movement) => movement.fromVillage === villageId && movement.targetId === 'pve-0' && movement.treasures?.includes('horse_rope'));
+  assert.deepEqual(dispatchedMovement?.treasures, ['horse_rope'], '正式派出应把报名时选择的宝物交给通用行军流程');
 });
 
 test('联盟职位：四级按配置解锁，形象大使声望成为联盟声望并放大成员加成', async () => {

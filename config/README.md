@@ -322,6 +322,13 @@
 | march_size_reference_pop | 20 | 军队规模减速的免惩罚人口基准 |
 | march_size_penalty | 0.0015 | 超出基准人口后的规模减速系数 |
 | march_size_min_multiplier | 0.45 | 军队规模减速后的最低速度比例 |
+| trade_route_capacity | 500 | 每条贸易路线可运输的资源/金币单位数 |
+| trade_caravan_speed | 100 | 商队速度（格/小时，可在配置中心“贸易参数”板块修改） |
+| trade_caravan_min_duration_sec | 3 | 商队单程最低行进时长（秒，可在配置中心“贸易参数”板块修改） |
+| trade_npc_gold_per_resource | 0.5 | NPC订单中每个资源单位的金币基准价值 |
+| trade_npc_sell_margin | 0.8 | 玩家向 NPC 出售资源时的折价比例 |
+| trade_order_max_per_village | 5 | 每村同时可挂出的玩家贸易订单上限 |
+| trade_order_ttl_sec | 86400 | 玩家贸易订单有效期（秒） |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 | kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
@@ -363,7 +370,7 @@
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队固定速度不受影响，已在途行军不会因热重载改变原定到达时间。
+配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示；贸易路线、商队速度、最低时长和订单参数在“贸易参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队速度和最低时长独立于军队规模减速，已在途行军不会因热重载改变原定到达时间。
 
 M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
-import { tab, tick, sessionVersion, villageSwitching, allianceTargetPicker, allianceWarTarget, selected, showToast } from '../app/store.js';
+import { tab, tick, sessionVersion, villageSwitching, allianceTargetPicker, allianceWarTarget, allianceWarFocus, selected, showToast } from '../app/store.js';
 import { refreshAll, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
@@ -101,8 +101,15 @@ function AllianceTargetCapture() {
   const target = selected.value;
   useEffect(() => {
     if (!picking || !target || !['village', 'pve'].includes(target.kind)) return;
+    if (target.taskInfo && target.taskInfo.scope !== 'global') {
+      // 任务营地只属于当前玩家的任务流程，不能把个人可见目标泄露给联盟集结。
+      selected.value = null;
+      showToast('个人任务营地不能作为联盟战事目标', 'bad');
+      return;
+    }
     allianceWarTarget.value = target;
     allianceTargetPicker.value = false;
+    allianceWarFocus.value = true;
     selected.value = null;
     tab.value = 'alliance';
     showToast(`已选择联盟目标：${target.name}`);

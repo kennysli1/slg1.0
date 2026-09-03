@@ -215,6 +215,9 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /march_size_reference_pop/, 'GM 页面应提供规模免惩罚人口基准');
     assert.match(res.body, /march_size_penalty/, 'GM 页面应提供规模减速系数');
     assert.match(res.body, /march_size_min_multiplier/, 'GM 页面应提供规模减速最低速度比例');
+    assert.match(res.body, /贸易参数/, 'GM 页面应提供贸易专用参数板块');
+    assert.match(res.body, /trade_caravan_speed/, 'GM 页面应提供商队速度编辑项');
+    assert.match(res.body, /trade_caravan_min_duration_sec/, 'GM 页面应提供商队最低时长编辑项');
     assert.match(res.body, /王国城邦参数（三级\/三种族）/, 'GM 页面应提供三级三种族城邦参数板块');
     assert.match(res.body, /kingdom_city_state_tier1_unit_count/, 'GM 页面应提供一级城邦兵种数量参数');
     assert.match(res.body, /kingdom_city_state_unit_pool_gauls/, 'GM 页面应提供高卢城邦兵种池参数');
@@ -771,6 +774,26 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
       assert.equal(Number(row?.value), value, `balance/data 应返回修改后的 ${key}`);
     }
 
+    const tradeSpeedSave = await fastify.inject({
+      method: 'POST',
+      url: '/config/balance/save',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ constants: {
+        trade_caravan_speed: { value: '123' },
+        trade_caravan_min_duration_sec: { value: '7' },
+      } }),
+    });
+    assert.equal(tradeSpeedSave.statusCode, 200, `商队速度覆盖应成功：${tradeSpeedSave.body}`);
+    assert.equal(app.config.constants.tradeCaravanSpeed, 123, '商队速度应热重载为 123');
+    assert.equal(app.config.constants.tradeCaravanMinDurationSec, 7, '商队最低时长应热重载为 7 秒');
+    const tradeData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
+      constants?: Array<Record<string, unknown>>;
+    };
+    const tradeSpeedRow = (tradeData.constants ?? []).find((r) => r.key === 'trade_caravan_speed');
+    assert.equal(Number(tradeSpeedRow?.value), 123, 'balance/data 应返回修改后的商队速度');
+    const tradeMinDurationRow = (tradeData.constants ?? []).find((r) => r.key === 'trade_caravan_min_duration_sec');
+    assert.equal(Number(tradeMinDurationRow?.value), 7, 'balance/data 应返回修改后的商队最低时长');
+
     const reputationData = JSON.parse((await fastify.inject({ method: 'GET', url: '/config/balance/data' })).body) as {
       kingdom_services?: Array<Record<string, unknown>>;
       treasures?: Array<Record<string, unknown>>;
@@ -825,6 +848,8 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     assert.equal(restarted.config.constants.marchSizeReferencePop, 30, '重启后应读取规模免惩罚人口基准');
     assert.equal(restarted.config.constants.marchSizePenalty, 0.002, '重启后应读取规模减速系数');
     assert.equal(restarted.config.constants.marchSizeMinMultiplier, 0.5, '重启后应读取规模减速下限');
+    assert.equal(restarted.config.constants.tradeCaravanSpeed, 123, '重启后应读取商队速度');
+    assert.equal(restarted.config.constants.tradeCaravanMinDurationSec, 7, '重启后应读取商队最低时长');
   } finally {
     if (prev !== undefined) process.env.GM_TOKEN = prev;
     else delete process.env.GM_TOKEN;

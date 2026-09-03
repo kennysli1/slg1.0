@@ -879,14 +879,16 @@ function sectionGeneric(table){
     var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
     var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var tradeKeys = {}; for (var tri=0;tri<TRADE_ROWS.length;tri++) tradeKeys[TRADE_ROWS[tri][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
     var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
     var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var tradeKeysOnly = {}; for (var atk=0;atk<TRADE_ROWS.length;atk++) tradeKeysOnly[TRADE_ROWS[atk][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
@@ -1062,6 +1064,33 @@ function sectionMarchSize(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
+// ── 贸易专用视图：商队速度与贸易中心全局参数写入 game_constants.csv。 ──
+var TRADE_ROWS = [
+  ['trade_route_capacity','每条贸易路线运力','每条路线可运输的资源/金币单位数'],
+  ['trade_caravan_speed','商队速度','商队行进速度（格/小时），独立于军队行军速度和规模减速'],
+  ['trade_caravan_min_duration_sec','商队最低时长','商队单程最低行进时长（秒）；只防止零距离或极高速商队瞬间抵达'],
+  ['trade_npc_gold_per_resource','NPC资源计价','NPC订单中每个资源单位的金币基准价值'],
+  ['trade_npc_sell_margin','NPC出售折价','玩家出售资源给NPC时获得的基准价值比例'],
+  ['trade_order_max_per_village','每村玩家订单上限','每个村庄同时可挂出的玩家贸易订单数量'],
+  ['trade_order_ttl_sec','玩家订单有效期','玩家贸易订单未被接受时的存活时间（秒）'],
+];
+function sectionTrade(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">商队速度独立于军队行军速度、地形效果和军队规模减速。修改后只影响新派出的商队；已在途商队沿用出发时已确定的到达时间。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TRADE_ROWS.length;j++){
+    var item = TRADE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0] === 'trade_order_ttl_sec' ? '1' : item[0] === 'trade_caravan_speed' || item[0] === 'trade_caravan_min_duration_sec' ? '0.0001' : '0';
+    var step = item[0] === 'trade_caravan_speed' || item[0] === 'trade_npc_gold_per_resource' || item[0] === 'trade_npc_sell_margin' ? 'any' : '1';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="'+step+'" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>贸易参数</h2>'+h+'</div>';
 }
 
 // ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
@@ -1491,6 +1520,7 @@ function render(){
   html += sectionReputation();
   html += sectionTerrain();
   html += sectionMarchSize();
+  html += sectionTrade();
   html += sectionCavalry();
   html += sectionHorseHunter();
   html += sectionCityState();

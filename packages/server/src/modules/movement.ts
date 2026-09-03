@@ -547,6 +547,29 @@ export class MovementModule {
     return { ok: true, troops: cleaned };
   }
 
+  /** 联盟计划派出时消费预备队；普通公网行军仍走 AdjustTroops。 */
+  private allianceReservation(cmd: Command): { allianceId: string; planId: string; playerId: string } | undefined {
+    if (cmd.from !== 'alliance') return undefined;
+    const value = (cmd.payload as any)?.allianceReservation;
+    return value && typeof value === 'object' && value.planId ? value : undefined;
+  }
+
+  private async deductDepartureTroops(cmd: Command, villageId: string, troops: Record<string, number>): Promise<CommandResult> {
+    const reservation = this.allianceReservation(cmd);
+    if (reservation) return this.commands.send({ name: 'military.ConsumeReservedTroops', from: MovementModule.NAME, payload: { villageId, troops } });
+    const delta = Object.fromEntries(Object.entries(troops).map(([unit, count]) => [unit, -count]));
+    return this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+  }
+
+  private async refundDepartureTroops(cmd: Command, villageId: string, troops: Record<string, number>): Promise<void> {
+    const reservation = this.allianceReservation(cmd);
+    if (reservation) {
+      await this.commands.send({ name: 'military.RestoreConsumedTroops', from: MovementModule.NAME, payload: { villageId, troops, restoreReservation: true } });
+      return;
+    }
+    await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: troops } });
+  }
+
   private async villageTile(villageId: string): Promise<{ q: number; r: number; name?: string } | null> {
     const res = await this.commands.send({
       name: 'world.GetTileByRef',
@@ -1551,10 +1574,15 @@ export class MovementModule {
     return terrain === 'forest' || terrain === 'hills' ? terrain : 'plain';
   }
 
+  /** 商队最低行进时长（毫秒）；配置中心默认 3 秒，避免零距离商队瞬间完成。 */
+  private caravanMinDurationMs(): number {
+    return Math.max(1, Math.round((this.config.constants.tradeCaravanMinDurationSec ?? 3) * 1000));
+  }
+
   /** 计算行军的基础每格耗时。贸易商队不属于军队，不吃丘陵移速惩罚。 */
   private async baseStepMs(villageId: string, troops: Record<string, number>, type: MovementRecord['type']): Promise<number> {
     if (type === 'caravan') {
-      const speed = Math.max(0.0001, Number(this.config.constants.tradeCaravanSpeed) || 12);
+      const speed = Math.max(0.0001, Number(this.config.constants.tradeCaravanSpeed) || 100);
       return 3_600_000 / speed;
     }
     const speed = await this.commands.send({
@@ -1592,7 +1620,12 @@ export class MovementModule {
     type: MovementRecord['type'],
   ): Promise<PathTiming> {
     const steps = Math.max(0, path.length - 1);
-    if (steps === 0) return { totalMs: 3_000, segmentMs: [] };
+    if (steps === 0) {
+      return {
+        totalMs: type === 'caravan' ? this.caravanMinDurationMs() : 3_000,
+        segmentMs: [],
+      };
+    }
     const base = await this.baseStepMs(villageId, troops, type);
     const terrains = await Promise.all(path.slice(0, -1).map((point) => this.terrainAt(point)));
     const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
@@ -1603,9 +1636,9 @@ export class MovementModule {
     let segmentMs = type === 'caravan'
       ? existingSegmentMs
       : existingSegmentMs.map((ms) => Math.max(1, Math.ceil(ms / sizeMultiplier)));
-    const minimumMs = type === 'caravan' ? 3_000_000 : 3_000;
+    const minimumMs = type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
-    // 商队原有口径是全程统一分摊（且有 3000 秒最低时长），保持逐格调度与 arriveAt 一致。
+    // 商队全程统一分摊，保持逐格调度与 arriveAt 一致；最低时长由配置中心控制。
     if (type === 'caravan') segmentMs = Array.from({ length: steps }, () => Math.max(1, Math.round(totalMs / steps)));
     return { totalMs, segmentMs };
   }
@@ -1675,20 +1708,14 @@ export class MovementModule {
     const toXY: Hex = { q: tp.q, r: tp.r };
 
     // 从源村扣出兵力（负 delta）
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({
-      name: 'military.AdjustTroops',
-      from: MovementModule.NAME,
-      payload: { villageId, delta },
-    });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     // 装宝物上军队（失败则退还兵力）
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
@@ -1739,16 +1766,14 @@ export class MovementModule {
       if (!relation.ok) return relation;
     }
     // 从源村扣出兵力
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     // 装宝物上军队（失败则退还兵力）
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
@@ -1906,7 +1931,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'same_village' };
     }
     const army = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId } });
-    const availableTroops = army.ok ? ((army.payload as any).troops ?? {}) : {};
+    const availableTroops = army.ok ? ((army.payload as any).availableTroops ?? (army.payload as any).troops ?? {}) : {};
     const point = await this.marchPointState(villageId);
     let declarationRequired = false, relation = 'neutral';
     if (targetVillage && (mode === 'raid' || mode === 'attack')) {
@@ -1914,7 +1939,8 @@ export class MovementModule {
       const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: other } });
       relation = rel.ok ? (rel.payload as any).relation : 'neutral'; declarationRequired = relation === 'neutral';
     }
-    return { ok: true, payload: { travelSec: await this.travelSec(villageId, from, target, valid.troops), availableTroops, selectedTroops: valid.troops, marchPoints: point, rallyPointLevel: await this.getRallyLevel(villageId), relation, declarationRequired } };
+    const timing = await this.pathTiming(villageId, linePathWrapped(from, target, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41), valid.troops, 'raid');
+    return { ok: true, payload: { travelSec: Math.max(3, Math.round(timing.totalMs / 1000)), travelMs: timing.totalMs, availableTroops, selectedTroops: valid.troops, marchPoints: point, rallyPointLevel: await this.getRallyLevel(villageId), relation, declarationRequired } };
   }
 
   /** 向玩家村发起掠夺。与攻城共享战斗结算，但保留 raid 行军类型供地图/UI识别。 */
@@ -1931,12 +1957,11 @@ export class MovementModule {
     const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
     if (!relation.ok) return relation;
     const point = await this.ensureMarchPoint(villageId); if (point) return point;
-    const delta = Object.fromEntries(Object.entries(valid.troops).map(([u, n]) => [u, -n]));
-    const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
-    if (!carry.ok) { await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } }); return { ok: false, payload: {}, reason: carry.reason }; }
+    if (!carry.ok) { await this.refundDepartureTroops(cmd, villageId, valid.troops); return { ok: false, payload: {}, reason: carry.reason }; }
     const mv = await this.launch({ id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
@@ -2160,12 +2185,8 @@ export class MovementModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_resources' };
 
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({
-      name: 'military.AdjustTroops', from: MovementModule.NAME,
-      payload: { villageId, delta },
-    });
+    if (this.allianceReservation(cmd) && !isReinforce) return { ok: false, payload: {}, reason: 'alliance_reservation_requires_reinforce' };
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) {
       if (!isTransfer) await this.commands.send({
         name: 'economy.Grant', from: MovementModule.NAME,
@@ -2178,7 +2199,7 @@ export class MovementModule {
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       if (!isTransfer) await this.commands.send({ name: 'economy.Grant', from: MovementModule.NAME, payload: { villageId, gain: cleanedCargo } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
@@ -2238,9 +2259,9 @@ export class MovementModule {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
     const steps = Math.max(1, path.length - 1);
-    const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+    const mult = this.config.constants.tradeCaravanSpeed ?? 100;
     const dist = hexDistanceWrapped(opts.fromXY, opts.toXY, W, H);
-    const totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
+    const totalMs = Math.max(this.caravanMinDurationMs(), Math.round((dist / mult) * 3600) * 1000);
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
     const full: MovementRecord = {
       id: opts.id, type: 'caravan', fromVillage: opts.fromVillage, fromXY: opts.fromXY, toXY: opts.toXY,
@@ -3819,10 +3840,10 @@ export class MovementModule {
       ?? await this.pathTiming(mv.fromVillage, path, mv.troops, mv.type === 'caravan' ? 'caravan' : 'return');
     if (mv.type === 'caravan') {
       const dist = hexDistanceWrapped(cur, home, W, H);
-      const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+      const mult = this.config.constants.tradeCaravanSpeed ?? 100;
       totalMs = routeProgressMs && routeProgressMs > 0
         ? routeProgressMs
-        : (returnTiming.totalMs || (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000));
+        : (returnTiming.totalMs || Math.max(this.caravanMinDurationMs(), Math.round((dist / mult) * 3600) * 1000));
     } else {
       totalMs = routeProgressMs && routeProgressMs > 0 ? routeProgressMs : returnTiming.totalMs;
     }
@@ -3924,7 +3945,7 @@ export class MovementModule {
     const expected = mv.path.slice(0, index + 1).reverse();
     if (expected.length !== path.length || expected.some((point, i) => point.q !== path[i].q || point.r !== path[i].r)) return undefined;
     const segmentMs = timing.segmentMs.slice(0, index).reverse();
-    const minimumMs = mv.type === 'caravan' ? 3_000_000 : 3_000;
+    const minimumMs = mv.type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     return { totalMs: Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0)), segmentMs };
   }
 

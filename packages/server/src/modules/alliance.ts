@@ -13,6 +13,8 @@ interface WarParticipant {
   playerId: string;
   sourceVillageId: string;
   troops: Record<string, number>;
+  /** 参军时选择、在实际派出时交给 movement 装载的宝物。 */
+  treasures: string[];
   travelSec: number;
   status: 'joined' | 'dispatched' | 'failed' | 'recalled';
   /** 实际创建的行军 id；联盟撤回复用 Movement 的通用撤回命令。 */
@@ -32,12 +34,30 @@ interface WarPlan {
   deadlineAt: number;
   /** 创建时的倒计时秒数；deadlineAt 保留为服务端权威截止时刻。 */
   countdownSec?: number;
+  /** 从创建时起允许成员报名的时长。 */
+  participationCountdownSec?: number;
+  /** 报名截止的服务端绝对时间。 */
+  joinDeadlineAt?: number;
   createdAt?: number;
   status: 'open' | 'dispatched' | 'cancelled';
   allDispatchedAt?: number;
   cancelledAt?: number;
   participants: Record<string, WarParticipant>;
 }
+
+type WarParticipantPreview = {
+  cleanTroops: Record<string, number>;
+  cleanTreasures: string[];
+  travelMs: number;
+  travelSec: number;
+  maxTravelMs: number;
+  withinLimit: boolean;
+  arriveAtIfDepartNow: number;
+};
+
+type WarParticipantPreparation =
+  | { ok: true; preview: WarParticipantPreview }
+  | { ok: false; reason: string; payload?: Record<string, unknown> };
 
 interface PendingResourceDelivery {
   playerId: string;
@@ -170,9 +190,12 @@ export class AllianceModule {
     this.commands.register('alliance.StartTech', (c) => this.startTech(c));
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
     this.commands.register('alliance.CreateWarPlan', (c) => this.createWarPlan(c));
+    this.commands.register('alliance.PreviewWarParticipation', (c) => this.previewWarParticipation(c));
     this.commands.register('alliance.JoinWarPlan', (c) => this.joinWarPlan(c));
+    this.commands.register('alliance.CancelWarParticipation', (c) => this.cancelWarParticipation(c));
     this.commands.register('alliance.CancelWarPlan', (c) => this.cancelWarPlan(c));
     this.commands.register('alliance.RecallWarPlan', (c) => this.recallWarPlan(c));
+    this.commands.register('alliance.GetTroopReservations', (c) => this.getTroopReservations(c));
     this.commands.register('alliance.GetRelation', (c) => this.getRelation(c));
     // Movement/Building 等 owner 通过命令查询，不直接依赖联盟存储。
     this.commands.register('alliance.CanBuildHall', (c) => this.canBuildHall(c));
@@ -272,7 +295,21 @@ export class AllianceModule {
       researchingBuilding: normalizeBuildPlan(raw.researchingBuilding),
       technologies: raw.technologies ?? {},
       researchingTech: normalizeTechPlan(raw.researchingTech),
-      warPlans: raw.warPlans ?? {},
+      warPlans: Object.fromEntries(Object.entries(raw.warPlans ?? {}).map(([id, rawPlan]) => {
+        const plan = rawPlan as WarPlan;
+        const createdAt = Number(plan.createdAt) > 0 ? Number(plan.createdAt) : this.now();
+        const deadlineAt = Number(plan.deadlineAt);
+        const totalSec = Number(plan.countdownSec) > 0 ? Math.floor(Number(plan.countdownSec)) : Math.max(1, Math.ceil((deadlineAt - createdAt) / 1000));
+        const participationSec = Number(plan.participationCountdownSec) > 0
+          ? Math.floor(Number(plan.participationCountdownSec))
+          : totalSec;
+        const joinDeadlineAt = Number(plan.joinDeadlineAt) > 0 ? Number(plan.joinDeadlineAt) : (participationSec >= totalSec ? deadlineAt : createdAt + participationSec * 1000);
+        const participants = Object.fromEntries(Object.entries(plan.participants ?? {}).map(([playerId, participant]) => [playerId, {
+          ...(participant as WarParticipant),
+          treasures: Array.isArray((participant as WarParticipant).treasures) ? [...(participant as WarParticipant).treasures] : [],
+        }]));
+        return [id, { ...plan, createdAt, countdownSec: totalSec, participationCountdownSec: participationSec, joinDeadlineAt, deadlineAt, participants }];
+      })),
       serviceSeq: positiveInt(raw.serviceSeq),
       serviceOrders: Array.isArray(raw.serviceOrders) ? raw.serviceOrders.map((order) => ({ ...order, id: String(order.id ?? ''), serviceCode: String(order.serviceCode ?? ''), status: order.status === 'completed' || order.status === 'failed' ? order.status : 'pending' })) : [],
       level,
@@ -363,15 +400,12 @@ export class AllianceModule {
       a.disconnected = true;
       // 大厅失联会撤销职位加成，并清空联盟大厅内尚未完成的项目。
       a.roles = Object.fromEntries(a.memberIds.map((id) => [id, []]));
-      // 大厅被拆除/摧毁时，联盟建筑、研发进度、仓库和累计贡献都不返还。
-      // 联盟本身与成员关系保留，重建大厅后从 0 级项目重新筹集。
-      a.buildings = {};
-      a.technologies = {};
+      // 历史贡献、已建成联盟建筑和已研发科技属于联盟永久记录，不能因
+      // 大厅失联而归零；只有大厅现场堆积的仓库资源、未投入的科技点和
+      // 正在进行的项目会丢失。重建后沿用既有等级与累计贡献。
       a.warehouse = zeroResources();
-      a.resourceContributions = {};
       a.pendingResourceDeliveries = {};
       a.techPointStock = 0;
-      a.techContributions = {};
       a.researchingBuilding = null;
       a.researchingTech = null;
       this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
@@ -381,7 +415,10 @@ export class AllianceModule {
       // movement.ReturnAllianceDeliveries 处理，不在这里直接改 Movement owner。
       for (const plan of Object.values(a.warPlans)) {
         const dispatched = Object.values(plan.participants).some((p) => p.status === 'dispatched' && p.movementId);
-        for (const participant of Object.values(plan.participants)) if (participant.status === 'joined') participant.status = 'failed';
+        for (const participant of Object.values(plan.participants)) if (participant.status === 'joined') {
+          await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+          participant.status = 'failed';
+        }
         if (!dispatched) {
           plan.status = 'cancelled';
           plan.cancelledAt = this.now();
@@ -506,7 +543,9 @@ export class AllianceModule {
 
   private async list(cmd: Command): Promise<CommandResult> {
     const query = String((cmd.payload as any)?.query ?? '').trim().toLocaleLowerCase();
-    const alliances = this.store.all<AllianceState>(COLLECTION).map((raw) => this.normalize(raw)).filter((a) => !query || a.name.toLocaleLowerCase().includes(query) || a.leaderName.toLocaleLowerCase().includes(query));
+    // 失联联盟不会进入公开目录；联盟本身和申请记录仍保留在存档中，
+    // 盟主恢复大厅后可在联盟控制页统一处理此前收到的申请。
+    const alliances = this.store.all<AllianceState>(COLLECTION).map((raw) => this.normalize(raw)).filter((a) => !a.disconnected && (!query || a.name.toLocaleLowerCase().includes(query) || a.leaderName.toLocaleLowerCase().includes(query)));
     const rows = await Promise.all(alliances.map(async (a) => ({ id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, memberCount: a.memberIds.length, memberCap: this.cap(a), full: a.memberIds.length >= this.cap(a), level: a.level, reputation: await this.allianceReputation(a), disconnected: !!a.disconnected })));
     return { ok: true, payload: { alliances: rows } };
   }
@@ -543,7 +582,21 @@ export class AllianceModule {
     for (const village of villages) {
       const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: village.id } });
       if (!army.ok) continue;
-      result[String(village.id)] = Object.fromEntries(Object.entries((army.payload as any)?.troops ?? {}).map(([code, count]) => [code, positiveInt(count)]));
+      result[String(village.id)] = Object.fromEntries(Object.entries((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}).map(([code, count]) => [code, positiveInt(count)]));
+    }
+    return result;
+  }
+
+  /** 仅返回各村当前存放的宝物；在途宝物不能再次报名携带。 */
+  private async availableTreasuresByVillage(playerId: string): Promise<Record<string, string[]>> {
+    const result: Record<string, string[]> = {};
+    const p = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
+    const villages = (p.payload as any)?.player?.villages ?? [];
+    for (const village of villages) {
+      const treasures = await this.commands.send({ name: 'treasure.List', from: AllianceModule.NAME, payload: { villageId: village.id } });
+      if (!treasures.ok) continue;
+      const codes = (treasures.payload as any)?.codes;
+      if (Array.isArray(codes)) result[String(village.id)] = codes.filter((code: unknown): code is string => typeof code === 'string' && code.length > 0);
     }
     return result;
   }
@@ -557,8 +610,9 @@ export class AllianceModule {
     const allianceReputation = await this.allianceReputation(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
     const availableTroopsByVillage = await this.availableTroopsByVillage(playerId);
+    const availableTreasuresByVillage = await this.availableTreasuresByVillage(playerId);
     const unitCatalog = Object.values(this.config.units).map((u) => ({ code: u.key, name: u.name, form: u.form, icon: u.icon }));
-    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), allianceReputation, allianceModifierMultiplier: this.allianceModifierMultiplier(allianceReputation), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a, allianceReputation), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), allianceServices: Object.values(this.config.allianceServices).sort((x, y) => x.id - y.id), serviceOrders: a.serviceOrders ?? [], researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), availableTroopsByVillage, unitCatalog, joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
+    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), allianceReputation, allianceModifierMultiplier: this.allianceModifierMultiplier(allianceReputation), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a, allianceReputation), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), allianceServices: Object.values(this.config.allianceServices).sort((x, y) => x.id - y.id), serviceOrders: a.serviceOrders ?? [], researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), availableTroopsByVillage, availableTreasuresByVillage, unitCatalog, joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
   }
 
   private async create(cmd: Command): Promise<CommandResult> {
@@ -587,7 +641,8 @@ export class AllianceModule {
     const { playerId, allianceId } = cmd.payload as { playerId: string; allianceId: string };
     if (this.idForPlayer(playerId)) return { ok: false, payload: {}, reason: 'already_in_alliance' };
     const a = this.load(allianceId); if (!a) return { ok: false, payload: {}, reason: 'alliance_not_found' };
-    if (a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    // 失联期间仍允许已持有链接/旧目录的申请写入 joinRequests；公开目录会
+    // 隐藏该联盟，申请不会自动加入，必须等大厅恢复后由盟主统一审核。
     if (a.memberIds.length >= this.cap(a)) return { ok: false, payload: {}, reason: 'alliance_full' };
     a.joinRequests[playerId] = this.now(); this.store.set(COLLECTION, a.id, a); await this.push(a);
     return { ok: true, payload: { allianceId, requested: true } };
@@ -597,6 +652,7 @@ export class AllianceModule {
     const { playerId, applicantId, approve } = cmd.payload as { playerId: string; applicantId: string; approve: boolean };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
+    if (a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!(applicantId in a.joinRequests)) return { ok: false, payload: {}, reason: 'request_not_found' };
     if (approve) {
       if (this.idForPlayer(applicantId)) return { ok: false, payload: {}, reason: 'applicant_in_alliance' };
@@ -611,6 +667,7 @@ export class AllianceModule {
     const playerId = String((cmd.payload as any)?.playerId ?? ''); const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a) return { ok: false, payload: {}, reason: 'not_in_alliance' };
     if (a.leaderId === playerId) return { ok: false, payload: {}, reason: 'leader_must_transfer_first' };
+    await this.releaseJoinedWarReservations(a, playerId);
     a.memberIds = a.memberIds.filter((x) => x !== playerId); delete a.roles[playerId]; this.store.delete(PLAYER_INDEX, playerId); this.store.set(COLLECTION, a.id, a); await this.syncPlayerModifiers(playerId); await this.push(a); return { ok: true, payload: { left: true } };
   }
 
@@ -633,7 +690,19 @@ export class AllianceModule {
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
     if (targetPlayerId === a.leaderId || !this.isMember(a, targetPlayerId)) return { ok: false, payload: {}, reason: 'member_not_found' };
+    await this.releaseJoinedWarReservations(a, targetPlayerId);
     a.memberIds = a.memberIds.filter((x) => x !== targetPlayerId); delete a.roles[targetPlayerId]; this.store.delete(PLAYER_INDEX, targetPlayerId); this.store.set(COLLECTION, a.id, a); await this.syncPlayerModifiers(targetPlayerId); await this.push(a); return { ok: true, payload: { removed: targetPlayerId } };
+  }
+
+  /** 离盟或被移除时，取消尚未出发的联盟战事报名，避免预备队锁永久占用兵力。 */
+  private async releaseJoinedWarReservations(a: AllianceState, playerId: string): Promise<void> {
+    for (const plan of Object.values(a.warPlans)) {
+      const participant = plan.participants?.[playerId];
+      if (!participant || participant.status !== 'joined') continue;
+      this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
+      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+      delete plan.participants[playerId];
+    }
   }
 
   private buildingCost(def: AllianceBuildingDef, level: number): Resources { return { wood: Math.ceil(def.baseCost.wood * level), clay: Math.ceil(def.baseCost.clay * level), iron: Math.ceil(def.baseCost.iron * level), crop: Math.ceil(def.baseCost.crop * level) }; }
@@ -704,6 +773,37 @@ export class AllianceModule {
     await this.syncAllModifiers(a);
     await this.push(a);
     return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
+  }
+
+  /**
+   * 返回指定村庄被联盟战事预定的兵力明细。预定只包含尚未派出的参与者，
+   * 由 Alliance 作为计划状态的唯一所有者派生，Military 只保存数量锁。
+   */
+  private async getTroopReservations(cmd: Command): Promise<CommandResult> {
+    const villageId = String((cmd.payload as any)?.villageId ?? '');
+    if (!villageId) return { ok: true, payload: { reserved: {}, reservations: [] } };
+    const reservations: any[] = [];
+    for (const raw of this.store.all<AllianceState>(COLLECTION)) {
+      const a = this.normalize(raw);
+      if (a.disconnected) continue;
+      for (const plan of Object.values(a.warPlans)) {
+        for (const participant of Object.values(plan.participants ?? {})) {
+          if (participant.sourceVillageId !== villageId || participant.status !== 'joined') continue;
+          const member = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId: participant.playerId } });
+          const player = (member.payload as any)?.player;
+          reservations.push({
+            allianceId: a.id, allianceName: a.name, planId: plan.id, playerId: participant.playerId,
+            playerName: player?.name ?? participant.playerId, mode: plan.mode, targetKind: plan.targetKind,
+            targetVillage: plan.targetVillage, targetId: plan.targetId, status: participant.status,
+            troops: { ...participant.troops }, treasures: [...(participant.treasures ?? [])], travelSec: participant.travelSec,
+            joinDeadlineAt: plan.joinDeadlineAt, deadlineAt: plan.deadlineAt,
+          });
+        }
+      }
+    }
+    const reserved: Record<string, number> = {};
+    for (const row of reservations) for (const [code, count] of Object.entries(row.troops ?? {})) reserved[code] = (reserved[code] ?? 0) + positiveInt(count);
+    return { ok: true, payload: { reserved, reservations } };
   }
 
   /** 王国服务资源商队抵达后的结算；不计入成员贡献，服务订单只结算一次。 */
@@ -900,7 +1000,7 @@ export class AllianceModule {
   }
 
   private async createWarPlan(cmd: Command): Promise<CommandResult> {
-    const { playerId, mode, targetKind, targetVillage, targetId, q, r, countdownSec, deadlineAt: legacyDeadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; countdownSec?: number; deadlineAt?: number };
+    const { playerId, mode, targetKind, targetVillage, targetId, q, r, countdownSec, participationCountdownSec, deadlineAt: legacyDeadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; countdownSec?: number; participationCountdownSec?: number; deadlineAt?: number };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
     if (!['reinforce', 'raid', 'attack'].includes(mode) || !['village', 'pve'].includes(targetKind)) return { ok: false, payload: {}, reason: 'invalid_war_plan' };
@@ -914,11 +1014,33 @@ export class AllianceModule {
       : legacyDeadline;
     if (!Number.isFinite(deadline) || deadline < this.now() + 10_000) return { ok: false, payload: {}, reason: 'deadline_too_soon' };
     const normalizedCountdownSec = Math.max(1, Math.ceil((deadline - this.now()) / 1000));
+    const participationSec = Number(participationCountdownSec);
+    const hasParticipationWindow = Number.isInteger(participationSec);
+    if (hasParticipationWindow && (participationSec <= 0 || participationSec >= normalizedCountdownSec)) {
+      return { ok: false, payload: {}, reason: 'participation_window_invalid' };
+    }
+    const effectiveParticipationSec = hasParticipationWindow ? participationSec : normalizedCountdownSec;
+    const createdAt = this.now();
     let targetQ = Number.isFinite(Number(q)) ? Math.trunc(Number(q)) : 0;
     let targetR = Number.isFinite(Number(r)) ? Math.trunc(Number(r)) : 0;
     if (targetKind === 'pve' && targetId) {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: AllianceModule.NAME, payload: { id: targetId } });
       if (!target.ok) return { ok: false, payload: {}, reason: 'war_target_not_found' };
+      const targetData = (target.payload as any) ?? {};
+      // 只有绑定到个人村庄的任务营地不能作为公共联盟战事目标。主线任务
+      // 的任务村（例如天王老子村/秘密营地）虽然带有 task 标记，但任务
+      // scope=global，会同步给所有玩家，仍应允许作为公共 PvE 目标。
+      // 普通 PvE 营地也没有城墙/城邦身份，攻城必须在模式选择阶段被排除，
+      // 服务端再次校验，避免伪造 targetKind 绕过地图选项。
+      const publicTaskTypes = new Set(Object.values(this.config.quests)
+        .filter((quest) => quest.scope === 'global')
+        .map((quest) => quest.objective?.taskVillageCode)
+        .filter((type): type is string => typeof type === 'string' && type.length > 0));
+      const privateTaskTarget = targetData.task === true
+        ? !publicTaskTypes.has(String(targetData.type ?? ''))
+        : Boolean(targetData.ownerVillageId);
+      if (privateTaskTarget) return { ok: false, payload: {}, reason: 'war_private_task_target' };
+      if (mode === 'attack' && targetData.cityState !== true) return { ok: false, payload: {}, reason: 'war_siege_target_invalid' };
       targetQ = Math.trunc(Number((target.payload as any)?.q));
       targetR = Math.trunc(Number((target.payload as any)?.r));
       if (!Number.isFinite(targetQ) || !Number.isFinite(targetR)) return { ok: false, payload: {}, reason: 'war_target_not_found' };
@@ -926,35 +1048,138 @@ export class AllianceModule {
     if (targetKind === 'village' && targetVillage) {
       const targetOwner = await this.commands.send({ name: 'player.GetByVillage', from: AllianceModule.NAME, payload: { villageId: targetVillage } });
       if (!targetOwner.ok) return { ok: false, payload: {}, reason: 'war_target_not_found' };
-      if (targetOwner.ok && this.idForPlayer(String((targetOwner.payload as any)?.player?.id ?? '')) === a.id) return { ok: false, payload: {}, reason: 'allied_target' };
+      if (targetOwner.ok && (mode === 'raid' || mode === 'attack') && this.idForPlayer(String((targetOwner.payload as any)?.player?.id ?? '')) === a.id) return { ok: false, payload: {}, reason: 'allied_target' };
       const targetPlayer = (targetOwner.payload as any)?.player;
       const targetVillageView = (targetPlayer?.villages ?? []).find((v: any) => v.id === targetVillage);
       if (targetVillageView) { targetQ = Math.trunc(Number(targetVillageView.q)); targetR = Math.trunc(Number(targetVillageView.r)); }
+      const ownerId = String((targetOwner.payload as any)?.player?.id ?? '');
+      const allianceRelation = await this.commands.send({ name: 'alliance.GetRelation', from: AllianceModule.NAME, payload: { playerId, targetPlayerId: ownerId } });
+      const relationResult = allianceRelation.ok && (allianceRelation.payload as any)?.relation === 'allied'
+        ? allianceRelation
+        : await this.commands.send({ name: 'diplomacy.GetRelation', from: AllianceModule.NAME, payload: { playerId, targetPlayerId: ownerId } });
+      const relation = relationResult.ok ? String((relationResult.payload as any)?.relation ?? 'neutral') : 'neutral';
+      if ((mode === 'raid' || mode === 'attack') && relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
+      if (mode === 'reinforce' && relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }
-    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, createdAt: this.now(), status: 'open', participants: {} };
+    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, participationCountdownSec: effectiveParticipationSec, joinDeadlineAt: hasParticipationWindow ? createdAt + effectiveParticipationSec * 1000 : deadline, createdAt, status: 'open', participants: {} };
     a.warPlans[plan.id] = plan; this.store.set(COLLECTION, a.id, a); await this.push(a); return { ok: true, payload: { plan } };
   }
 
-  private async joinWarPlan(cmd: Command): Promise<CommandResult> {
-    const { playerId, planId, sourceVillageId, troops } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number> };
-    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
-    const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
-    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
-    if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'village_not_owned' };
+  /**
+   * 计算联盟报名的权威行军预览。这里和正式报名共用同一套校验与
+   * movement.PreviewMarch，避免客户端自行估算导致“界面显示可行、提交却失败”。
+   * 该方法只读，不预定兵力，也不创建行军。
+   */
+  private async prepareWarParticipant(
+    a: AllianceState,
+    plan: WarPlan,
+    playerId: string,
+    sourceVillageId: string,
+    troops: Record<string, number>,
+    treasures?: string[],
+  ): Promise<WarParticipantPreparation> {
+    if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) {
+      return { ok: false, reason: 'village_not_owned' };
+    }
     const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: sourceVillageId } });
-    const available = ((army.payload as any)?.troops ?? {}) as Record<string, number>;
+    const available = ((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}) as Record<string, number>;
     const cleanTroops: Record<string, number> = {};
     for (const [code, amount] of Object.entries(troops ?? {})) {
       const n = positiveInt(amount);
       if (!n) continue;
-      if (!this.config.units[code] || n > positiveInt(available[code])) return { ok: false, payload: {}, reason: `insufficient_troops:${code}` };
+      if (!this.config.units[code] || n > positiveInt(available[code])) return { ok: false, reason: `insufficient_troops:${code}` };
       cleanTroops[code] = n;
     }
-    if (!Object.keys(cleanTroops).length) return { ok: false, payload: {}, reason: 'empty_troops' };
+    if (!Object.keys(cleanTroops).length) return { ok: false, reason: 'empty_troops' };
+    const cleanTreasures = Array.isArray(treasures)
+      ? treasures.filter((code): code is string => typeof code === 'string' && code.length > 0)
+      : [];
+    for (const code of cleanTreasures) {
+      if (!this.config.treasures[code]) return { ok: false, reason: `unknown_treasure:${code}` };
+    }
+    const totalTroops = Object.values(cleanTroops).reduce((sum, count) => sum + positiveInt(count), 0);
+    const carryPerSlot = Math.max(1, positiveInt(this.config.constants.treasureCarryTroopsPerSlot));
+    const carryCap = Math.min(Math.max(0, positiveInt(this.config.constants.treasureCarryMaxSlots)), Math.floor(totalTroops / carryPerSlot));
+    if (cleanTreasures.length > carryCap) return { ok: false, reason: 'carry_cap_exceeded', payload: { cap: carryCap, requested: cleanTreasures.length } };
+    if (cleanTreasures.length > 0) {
+      const listed = await this.commands.send({ name: 'treasure.List', from: AllianceModule.NAME, payload: { villageId: sourceVillageId } });
+      const storedCodes = listed.ok && Array.isArray((listed.payload as any)?.codes) ? (listed.payload as any).codes as unknown[] : [];
+      const stored = new Map<string, number>();
+      for (const code of storedCodes) if (typeof code === 'string') stored.set(code, (stored.get(code) ?? 0) + 1);
+      const wanted = new Map<string, number>();
+      for (const code of cleanTreasures) wanted.set(code, (wanted.get(code) ?? 0) + 1);
+      for (const [code, count] of wanted) {
+        if ((stored.get(code) ?? 0) < count) return { ok: false, reason: 'treasure_not_held', payload: { code } };
+      }
+    }
     const preview = await this.commands.send({ name: 'movement.PreviewMarch', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, q: plan.q, r: plan.r, mode: plan.mode, targetVillage: plan.targetVillage, targetId: plan.targetId, troops: cleanTroops } });
-    if (!preview.ok) return { ok: false, payload: {}, reason: preview.reason ?? 'march_preview_failed' };
-    const travelSec = positiveInt((preview.payload as any)?.travelSec); if (this.now() + travelSec * 1000 > plan.deadlineAt) return { ok: false, payload: { travelSec, deadlineAt: plan.deadlineAt }, reason: 'cannot_arrive_before_deadline' };
-    plan.participants[playerId] = { playerId, sourceVillageId, troops: cleanTroops, travelSec, status: 'joined' }; this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[playerId]!); await this.push(a); return { ok: true, payload: { plan, travelSec } };
+    if (!preview.ok) return { ok: false, reason: preview.reason ?? 'march_preview_failed' };
+    const travelMsRaw = Number((preview.payload as any)?.travelMs);
+    const travelMs = Number.isFinite(travelMsRaw) && travelMsRaw > 0 ? travelMsRaw : positiveInt((preview.payload as any)?.travelSec) * 1000;
+    const travelSec = Math.max(3, Math.ceil(travelMs / 1000));
+    const now = this.now();
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? now) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
+    const maxTravelMs = legacyWindow ? Math.max(0, plan.deadlineAt - now) : Math.max(0, plan.deadlineAt - joinDeadlineAt);
+    // 现代“两段倒计时”规则与正式报名保持严格一致：必须小于最大时长。
+    const withinLimit = legacyWindow ? now + travelMs <= plan.deadlineAt : travelMs < maxTravelMs;
+    return {
+      ok: true,
+      preview: {
+        cleanTroops,
+        cleanTreasures,
+        travelMs,
+        travelSec,
+        maxTravelMs,
+        withinLimit,
+        arriveAtIfDepartNow: now + travelMs,
+      },
+    };
+  }
+
+  private async previewWarParticipation(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId, sourceVillageId, troops, treasures } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number>; treasures?: string[] };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
+    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
+    const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops, treasures);
+    if (!prepared.ok) return { ok: false, payload: prepared.payload ?? {}, reason: prepared.reason };
+    const { cleanTroops, cleanTreasures, travelMs, travelSec, maxTravelMs, withinLimit, arriveAtIfDepartNow } = prepared.preview;
+    return {
+      ok: true,
+      payload: {
+        planId,
+        selectedTroops: cleanTroops,
+        selectedTreasures: cleanTreasures,
+        travelMs,
+        travelSec,
+        maxTravelMs,
+        maxTravelSec: maxTravelMs / 1000,
+        withinLimit,
+        arriveAtIfDepartNow,
+        coordinatedArrivalAt: plan.deadlineAt,
+        joinDeadlineAt,
+        deadlineAt: plan.deadlineAt,
+      },
+    };
+  }
+
+  private async joinWarPlan(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId, sourceVillageId, troops, treasures } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number>; treasures?: string[] };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
+    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
+    const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops, treasures);
+    if (!prepared.ok) return { ok: false, payload: {}, reason: prepared.reason };
+    const { cleanTroops, cleanTreasures, travelMs, travelSec, withinLimit } = prepared.preview;
+    if (!withinLimit) return { ok: false, payload: { travelSec, travelMs, deadlineAt: plan.deadlineAt, joinDeadlineAt }, reason: 'war_travel_too_long' };
+    const reserved = await this.commands.send({ name: 'military.ReserveTroops', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, troops: cleanTroops } });
+    if (!reserved.ok) return { ok: false, payload: {}, reason: reserved.reason ?? 'insufficient_troops' };
+    plan.participants[playerId] = { playerId, sourceVillageId, troops: cleanTroops, treasures: cleanTreasures, travelSec, status: 'joined' }; this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[playerId]!); await this.push(a); return { ok: true, payload: { plan, travelSec, treasures: cleanTreasures } };
   }
 
   private schedulePlan(a: AllianceState, plan: WarPlan): void { for (const p of Object.values(plan.participants)) if (p.status === 'joined') this.scheduleParticipant(a, plan, p); }
@@ -966,7 +1191,7 @@ export class AllianceModule {
   private async dispatchParticipant(allianceId: string, planId: string, playerId: string): Promise<void> {
     const a = this.load(allianceId); const plan = a?.warPlans[planId]; const p = plan?.participants[playerId];
     if (!a || !plan || !p || plan.status !== 'open' || a.disconnected) return;
-    const payload: any = { villageId: p.sourceVillageId, troops: p.troops };
+    const payload: any = { villageId: p.sourceVillageId, troops: p.troops, treasures: p.treasures ?? [], allianceReservation: { allianceId, planId, playerId } };
     let action = '';
     if (plan.mode === 'reinforce') { action = 'movement.SendReinforce'; payload.targetVillage = plan.targetVillage; }
     else if (plan.targetKind === 'pve') { action = plan.mode === 'raid' ? 'movement.SendRaid' : 'movement.SendAttack'; payload.targetId = plan.targetId; }
@@ -976,15 +1201,21 @@ export class AllianceModule {
     // CancelWarPlan may have won the race while the movement command was in
     // flight. Do not resurrect a cancelled plan; best-effort recall the
     // movement that was created before cancellation became visible.
-    if (plan.status !== 'open') {
+    if (plan.status !== 'open' || plan.participants[playerId] !== p) {
       if (movementId) {
         p.movementId = movementId; p.status = 'dispatched'; p.dispatchedAt = this.now();
         await this.recallParticipant(plan, p);
-        this.store.set(COLLECTION, a.id, a);
+        if (plan.participants[playerId] === p) this.store.set(COLLECTION, a.id, a);
+      } else if (plan.participants[playerId] === p && p.status === 'joined') {
+        await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: p.sourceVillageId, troops: p.troops } });
+        p.status = 'recalled'; p.recalledAt = this.now(); this.store.set(COLLECTION, a.id, a);
       }
       return;
     }
     p.status = result.ok && movementId ? 'dispatched' : 'failed';
+    if (p.status === 'failed') {
+      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: p.sourceVillageId, troops: p.troops } });
+    }
     if (p.status === 'dispatched') { p.movementId = movementId; p.dispatchedAt = this.now(); }
     this.store.set(COLLECTION, a.id, a);
     if (Object.values(plan.participants).every((x) => x.status !== 'joined')) {
@@ -994,18 +1225,48 @@ export class AllianceModule {
     await this.push(a);
   }
 
-  /** 盟主/战争专家在倒计时结束前取消尚未完成的集结；已发出的部队尽量复用通用撤回命令。 */
+  /** 成员在报名截止前取消自己的参战报名，并立即释放服务端预备队锁。 */
+  private async cancelWarParticipation(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
+    if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
+    const participant = plan.participants[playerId];
+    if (!participant) return { ok: false, payload: {}, reason: 'war_participation_not_found' };
+    if (participant.status !== 'joined') return { ok: false, payload: {}, reason: 'war_participation_dispatched' };
+    this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
+    await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+    delete plan.participants[playerId];
+    this.store.set(COLLECTION, a.id, a); await this.push(a);
+    return { ok: true, payload: { plan } };
+  }
+
+  /** 盟主/战争专家只能在报名截止后的 90 秒窗口取消集结；已发出的部队尽量复用通用撤回命令。 */
   private async cancelWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
-    if (plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
-    if (this.now() >= plan.deadlineAt) return { ok: false, payload: {}, reason: 'war_deadline_passed' };
-    plan.status = 'cancelled'; plan.cancelledAt = this.now();
+    if (plan.status !== 'open' && plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const now = this.now();
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt);
+    // 取消窗口统一锚定报名截止时间，而不是战争目标截止时间或某支军队的
+    // 派出时间。这样最远的参战军队即使卡在报名截止时刻出发，报名截止
+    // 后 90 秒也会和其他部队一样失去被盟主一键撤回的资格。
+    if (!Number.isFinite(joinDeadlineAt) || now < joinDeadlineAt) {
+      return { ok: false, payload: {}, reason: 'war_cancel_window_not_started' };
+    }
+    if (now - joinDeadlineAt >= 90_000) {
+      return { ok: false, payload: {}, reason: 'war_cancel_window_expired' };
+    }
+    plan.status = 'cancelled'; plan.cancelledAt = now;
     for (const participant of Object.values(plan.participants)) {
-      if (participant.status === 'joined') this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+      if (participant.status === 'joined') {
+        this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+        await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+        participant.status = 'recalled'; participant.recalledAt = now;
+      }
     }
     this.store.set(COLLECTION, a.id, a);
     const recalls = [];
@@ -1017,7 +1278,7 @@ export class AllianceModule {
     return { ok: true, payload: { plan, recalls } };
   }
 
-  /** 所有参与者已派出后 90 秒内，一键替成员撤回各自的军队。 */
+  /** 报名截止后 90 秒内，一键替成员撤回各自已经派出的军队。 */
   private async recallWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
@@ -1026,7 +1287,11 @@ export class AllianceModule {
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
     if (plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_not_dispatched' };
     const dispatchedAt = Number(plan.allDispatchedAt);
-    if (!Number.isFinite(dispatchedAt) || this.now() - dispatchedAt >= 90_000) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt ?? dispatchedAt);
+    const now = this.now();
+    // 全员撤回与取消行动使用同一个固定窗口：报名截止后 90 秒。不能
+    // 因为某支远程部队稍晚派出，就把窗口顺延到 allDispatchedAt。
+    if (!Number.isFinite(dispatchedAt) || !Number.isFinite(joinDeadlineAt) || now < joinDeadlineAt || now - joinDeadlineAt >= 90_000) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
     const recalls = [];
     for (const participant of Object.values(plan.participants)) {
       if (participant.status !== 'dispatched' || !participant.movementId) continue;

@@ -152,6 +152,51 @@ describe('阶段化战斗模拟器的科技与宝物多选', () => {
   });
 });
 
+describe('联盟目录与战事目标交互', () => {
+  it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
+    const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /if \(alliance\.disconnected\) \{[\s\S]*?<DisconnectedAlliance/);
+    assert.match(source, /DisconnectedAlliance[\s\S]*?onLeave=\{\(\) => action\('LeaveAlliance'/);
+    assert.match(source, /pane === 'directory'[\s\S]*?canApply=\{false\}/);
+    assert.match(source, /canApply && !a\.full \? <Btn/);
+  });
+
+  it('联盟战事按活跃优先、创建时间倒序，并让历史记录默认折叠', () => {
+    const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /const sortedPlans = \[\.\.\.\(alliance\.warPlans \?\? \[\]\)\]\.sort/);
+    assert.match(source, /if \(isActive\(a\) !== isActive\(b\)\) return isActive\(a\) \? -1 : 1/);
+    assert.match(source, /<details ref=\{detailsRef\} class=\{`war-plan\$\{active \? ' war-plan--active' : ' war-plan--history'\}`\} open=\{active \|\| expanded\}/);
+    assert.match(source, /const \[expanded, setExpanded\] = useState\(active\)/);
+    assert.match(source, /useEffect\(\(\) => \{ setExpanded\(active\); \}, \[active\]\)/);
+    assert.match(source, /deadline > now : plan\.status === 'open'/);
+    assert.match(source, /detailsRef\.current\.open = active \|\| expanded/);
+  });
+
+  it('地图选目标后回到联盟页，并限制任务营地、普通 PvE 与盟友模式', () => {
+    const app = readFileSync(new URL('../shell/App.tsx', import.meta.url), 'utf8');
+    const alliance = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(app, /allianceTargetPicker\.value = false;[\s\S]*?tab\.value = 'alliance'/);
+    assert.match(app, /if \(target\.taskInfo && target\.taskInfo\.scope !== 'global'\)[\s\S]*?个人任务营地不能作为联盟战事目标/);
+    assert.match(app, /allianceWarFocus\.value = true/);
+    assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
+    assert.match(alliance, /CancelAllianceWarParticipation/);
+    assert.match(alliance, /const cancelAnchor = Number\(p\.joinDeadlineAt \?\? p\.deadlineAt\)/);
+    assert.match(alliance, /now >= cancelAnchor/);
+    assert.match(alliance, /now - cancelAnchor < 90_000/);
+    assert.match(alliance, /war-treasure-picker/);
+    assert.match(alliance, /treasureCarryCap\(troopCount\)/);
+    assert.match(alliance, /treasures: selectedTreasures/);
+    assert.match(alliance, /允许最大行军时间/);
+    assert.match(alliance, /PreviewAllianceWarParticipation/);
+    assert.match(alliance, /当前兵力预计行军/);
+    assert.doesNotMatch(alliance, /若现在出发，预计/);
+    assert.match(alliance, /withinLimit/);
+    assert.match(alliance, /picked\?\.relation === 'allied' \? \['reinforce'\]/);
+    assert.match(alliance, /picked\?\.cityState === true \? \['raid', 'attack'\] : \['raid'\]/);
+    assert.match(alliance, /targetModeAllowed/);
+  });
+});
+
 describe('任务接取与奖励领取对话状态机', () => {
   it('Accept 关闭不推进；离开关闭；只有首次接受任务才请求接取', () => {
     assert.equal(acceptReplyIntent('leave', false), 'close');
@@ -437,6 +482,12 @@ describe('errText', () => {
 
   it('unknown_building 前缀返回专用文案', () => {
     assert.equal(errText('unknown_building:forge'), '未知建筑');
+  });
+
+  it('联盟战事宝物校验错误返回明确文案', () => {
+    assert.equal(errText('carry_cap_exceeded'), '携带宝物超出兵力上限');
+    assert.equal(errText('treasure_not_held'), '所选宝物已不在该村庄，请刷新后重试');
+    assert.equal(errText('unknown_treasure:horse_rope'), '所选宝物不存在或配置已更新');
   });
 
   it('unknown_ 通用前缀返回"目标不存在"', () => {

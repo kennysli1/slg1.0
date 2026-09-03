@@ -48,8 +48,8 @@ interface ServerConfig {
     /** 军事建筑每级训练提速/降费（前端按建筑等级展示固定减幅，与兵种无关）。 */
     trainTimeReducePerLevel: number; trainTimeReduceCap: number;
     trainCostReducePerLevel: number; trainCostReduceCap: number;
-    /** 贸易中心：路线运力/商队速度/NPC 计价/挂单上限与存活时长 */
-    tradeRouteCapacity: number; tradeCaravanSpeed: number;
+    /** 贸易中心：路线运力/商队速度/最低时长/NPC 计价/挂单上限与存活时长 */
+    tradeRouteCapacity: number; tradeCaravanSpeed: number; tradeCaravanMinDurationSec: number;
     tradeNpcGoldPerResource: number; tradeNpcSellMargin: number;
     tradeOrderMaxPerVillage: number; tradeOrderTtlSec: number;
     /** 清理普通 PvE 营地时命中宝物掉落的基础概率（0–1）。 */
@@ -263,7 +263,11 @@ export function tradeRouteCapacity(): number {
 }
 /** 商人车队行进速度（格/小时，独立于行军倍率）。 */
 export function tradeCaravanSpeed(): number {
-  return cfg?.constants?.tradeCaravanSpeed ?? 12;
+  return cfg?.constants?.tradeCaravanSpeed ?? 100;
+}
+/** 商队单程最低行进时长（秒），用于避免零距离或极高速商队瞬间抵达。 */
+export function tradeCaravanMinDurationSec(): number {
+  return cfg?.constants?.tradeCaravanMinDurationSec ?? 3;
 }
 /** NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）。 */
 export function tradeNpcGoldPerResource(): number {

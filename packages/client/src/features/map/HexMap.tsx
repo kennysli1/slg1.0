@@ -471,6 +471,7 @@ export function HexMap() {
     name: string;
     icon: string | null;
     relation: MapVillageRelation | null;
+    cityState?: boolean;
     terrain: Terrain | null;
     visibility: Visibility;
     isSelected: boolean;
@@ -621,6 +622,7 @@ export function HexMap() {
             cells.push({
               q, r, camX, camY, kind, refId, name, icon, relation, terrain, visibility,
               isSelf, landmark, landmarkCenter,
+              ...(t?.cityState === true ? { cityState: true } : {}),
               isSelected: !!(sel && sel.q === q && sel.r === r),
               ...(playerName ? { playerName } : {}),
               ...(reputation !== undefined ? { reputation } : {}),
@@ -1143,12 +1145,17 @@ export function HexMap() {
     const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
     const name = cell.getAttribute('data-name') ?? '空地';
     const icon = cell.getAttribute('data-icon') ?? undefined;
+    const relation = kind === 'village'
+      ? normalizeMapVillageRelation(cell.getAttribute('data-relation'))
+      : undefined;
     const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
     const tile = tileAt(q, r);
     const taskCamp = findTaskCampMarker(refId, q, r);
     selected.value = {
       refId, kind, q, r, name,
       ...(icon ? { icon } : {}),
+      ...(relation ? { relation } : {}),
+      ...(kind === 'pve' && tile?.cityState === true ? { cityState: true } : {}),
       ...(visibility ? { visibility } : {}),
       ...(kind === 'village' && typeof tile?.playerName === 'string' ? { playerName: tile.playerName } : {}),
       ...(kind === 'village' && Number.isFinite(Number(tile?.reputation)) ? { reputation: Math.trunc(Number(tile.reputation)) } : {}),

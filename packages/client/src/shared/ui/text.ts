@@ -99,6 +99,8 @@ const ERR_MSG: Record<string, string> = {
   // 宝物相关
   army_not_returned: '军队尚未归村，无法领取',
   carry_cap_exceeded: '携带宝物超出兵力上限',
+  treasure_not_held: '所选宝物已不在该村庄，请刷新后重试',
+  unknown_treasure: '所选宝物不存在或配置已更新',
   pending_not_found: '该战报已不存在或已被处理',
   pending_expired: '该战报已超时遗弃',
   no_room: '宝物栏已满，无法替换入栏',
@@ -138,12 +140,22 @@ const ERR_MSG: Record<string, string> = {
   garrison_not_found: '这支驻扎军已不存在或不归你指挥',
   war_plan_not_found: '联盟军事目标不存在',
   war_plan_closed: '联盟军事目标已关闭',
+  war_private_task_target: '个人任务营地不能作为联盟战事目标',
+  war_siege_target_invalid: '该目标没有城墙，不能发起攻城',
+  participation_window_invalid: '参军倒计时必须大于 0 且小于战争倒计时',
   deadline_too_soon: '倒计时至少需要 10 秒',
   cannot_arrive_before_deadline: '倒计时太短，军队无法及时到达目标',
+  war_join_deadline_passed: '参军倒计时已结束，不能再报名',
+  war_travel_too_long: '军队预计行军时间过长，无法在战争倒计时内抵达',
+  war_cancel_window_not_started: '参战取消窗口尚未开始（报名截止后开放）',
+  war_cancel_window_expired: '参战取消窗口已结束（报名截止后 90 秒）',
+  war_participation_not_found: '你尚未参加该军事行动',
+  war_participation_dispatched: '军队已经派出，不能取消报名',
+  insufficient_reserved_troops: '联盟战事预备队兵力不足',
   war_or_leader_required: '只有盟主或战争专家可以操作联盟战事',
   war_deadline_passed: '倒计时已结束，不能再取消行动',
   war_not_dispatched: '全部兵力尚未派出，暂时不能执行全员撤回',
-  war_recall_window_expired: '全员撤回窗口已过（派出后 90 秒）',
+  war_recall_window_expired: '全员撤回窗口已过（参军截止后 90 秒）',
   garrison_player_target_forbidden: '驻扎军不能续行至玩家控制的格子',
   invalid_continuation_mode: '该目标不支持此行军模式，请重新选择',
   same_tile: '目标不能是部队当前所在格',
@@ -169,8 +181,10 @@ export function errText(code?: string): string {
   if (code.startsWith('bad_troops')) return '出征兵力不合法';
   if (code.startsWith('requires_building')) return '缺少训练所需建筑';
   if (code.startsWith('insufficient_troops')) return '兵力不足';
+  if (code.startsWith('insufficient_reserved_troops')) return '联盟战事预备队兵力不足';
   if (code.startsWith('unknown_unit')) return '未知兵种';
   if (code.startsWith('unknown_building')) return '未知建筑';
+  if (code.startsWith('unknown_treasure')) return '所选宝物不存在或配置已更新';
   if (code.startsWith('insufficient:')) {
     const r = code.split(':')[1];
     return `${resInfo(r).name ?? r}不足`;
