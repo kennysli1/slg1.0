@@ -282,6 +282,9 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(joined.ok, true, joined.reason);
   const joinedPlan = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
   assert.equal(joinedPlan.participants[leader.player.id].status, 'joined');
+  const joinedSnapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
+  const listedPlan = (joinedSnapshot.payload as any).alliance.warPlans.find((plan: any) => plan.id === planId);
+  assert.deepEqual(listedPlan.participants[leader.player.id].troops, { legionnaire: 3, equlegati: 1 }, '联盟战事快照应向成员显示每位参与者的派兵明细');
   const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
   assert.equal(cancelled.ok, true, cancelled.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
