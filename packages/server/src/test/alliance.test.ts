@@ -353,6 +353,12 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal((snapshot.payload as any).alliance.availableTroopsByVillage[leader.player.villageId].legionnaire, 8);
   assert.equal((snapshot.payload as any).alliance.availableTroopsByVillage[leader.player.villageId].equlegati, 2);
 
+  const preview = await send(app, 'alliance.PreviewWarParticipation', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 3, equlegati: 1 } });
+  assert.equal(preview.ok, true, preview.reason);
+  assert.equal((preview.payload as any).withinLimit, true);
+  assert.ok(Number((preview.payload as any).arriveAtIfDepartNow) > clock, '预览应返回当前兵力预计抵达时间');
+  assert.equal(app.store.all<any>('movement').length, 0, '行军预览不能创建行军');
+
   const joined = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 3, equlegati: 1 } });
   assert.equal(joined.ok, true, joined.reason);
   const joinedPlan = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
@@ -422,6 +428,9 @@ test('联盟战事：报名预备队锁定兵力，成员可取消报名，报�
 
   const shortPlan = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 10, participationCountdownSec: 9 });
   assert.equal(shortPlan.ok, true, shortPlan.reason);
+  const tooLongPreview = await send(app, 'alliance.PreviewWarParticipation', { playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(tooLongPreview.ok, true, tooLongPreview.reason);
+  assert.equal((tooLongPreview.payload as any).withinLimit, false, '超出最长行军时间的预览应明确标记');
   const tooLong = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
   assert.equal(tooLong.ok, false);
   assert.equal(tooLong.reason, 'war_travel_too_long');
