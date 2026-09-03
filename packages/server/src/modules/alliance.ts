@@ -43,6 +43,19 @@ interface WarPlan {
   participants: Record<string, WarParticipant>;
 }
 
+type WarParticipantPreview = {
+  cleanTroops: Record<string, number>;
+  travelMs: number;
+  travelSec: number;
+  maxTravelMs: number;
+  withinLimit: boolean;
+  arriveAtIfDepartNow: number;
+};
+
+type WarParticipantPreparation =
+  | { ok: true; preview: WarParticipantPreview }
+  | { ok: false; reason: string; payload?: Record<string, unknown> };
+
 interface PendingResourceDelivery {
   playerId: string;
   sourceVillageId: string;
@@ -174,6 +187,7 @@ export class AllianceModule {
     this.commands.register('alliance.StartTech', (c) => this.startTech(c));
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
     this.commands.register('alliance.CreateWarPlan', (c) => this.createWarPlan(c));
+    this.commands.register('alliance.PreviewWarParticipation', (c) => this.previewWarParticipation(c));
     this.commands.register('alliance.JoinWarPlan', (c) => this.joinWarPlan(c));
     this.commands.register('alliance.CancelWarParticipation', (c) => this.cancelWarParticipation(c));
     this.commands.register('alliance.CancelWarPlan', (c) => this.cancelWarPlan(c));
@@ -1029,6 +1043,83 @@ export class AllianceModule {
     a.warPlans[plan.id] = plan; this.store.set(COLLECTION, a.id, a); await this.push(a); return { ok: true, payload: { plan } };
   }
 
+  /**
+   * 计算联盟报名的权威行军预览。这里和正式报名共用同一套校验与
+   * movement.PreviewMarch，避免客户端自行估算导致“界面显示可行、提交却失败”。
+   * 该方法只读，不预定兵力，也不创建行军。
+   */
+  private async prepareWarParticipant(
+    a: AllianceState,
+    plan: WarPlan,
+    playerId: string,
+    sourceVillageId: string,
+    troops: Record<string, number>,
+  ): Promise<WarParticipantPreparation> {
+    if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) {
+      return { ok: false, reason: 'village_not_owned' };
+    }
+    const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: sourceVillageId } });
+    const available = ((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}) as Record<string, number>;
+    const cleanTroops: Record<string, number> = {};
+    for (const [code, amount] of Object.entries(troops ?? {})) {
+      const n = positiveInt(amount);
+      if (!n) continue;
+      if (!this.config.units[code] || n > positiveInt(available[code])) return { ok: false, reason: `insufficient_troops:${code}` };
+      cleanTroops[code] = n;
+    }
+    if (!Object.keys(cleanTroops).length) return { ok: false, reason: 'empty_troops' };
+    const preview = await this.commands.send({ name: 'movement.PreviewMarch', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, q: plan.q, r: plan.r, mode: plan.mode, targetVillage: plan.targetVillage, targetId: plan.targetId, troops: cleanTroops } });
+    if (!preview.ok) return { ok: false, reason: preview.reason ?? 'march_preview_failed' };
+    const travelMsRaw = Number((preview.payload as any)?.travelMs);
+    const travelMs = Number.isFinite(travelMsRaw) && travelMsRaw > 0 ? travelMsRaw : positiveInt((preview.payload as any)?.travelSec) * 1000;
+    const travelSec = Math.max(3, Math.ceil(travelMs / 1000));
+    const now = this.now();
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? now) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
+    const maxTravelMs = legacyWindow ? Math.max(0, plan.deadlineAt - now) : Math.max(0, plan.deadlineAt - joinDeadlineAt);
+    // 现代“两段倒计时”规则与正式报名保持严格一致：必须小于最大时长。
+    const withinLimit = legacyWindow ? now + travelMs <= plan.deadlineAt : travelMs < maxTravelMs;
+    return {
+      ok: true,
+      preview: {
+        cleanTroops,
+        travelMs,
+        travelSec,
+        maxTravelMs,
+        withinLimit,
+        arriveAtIfDepartNow: now + travelMs,
+      },
+    };
+  }
+
+  private async previewWarParticipation(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId, sourceVillageId, troops } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number> };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
+    if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
+    const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops);
+    if (!prepared.ok) return { ok: false, payload: prepared.payload ?? {}, reason: prepared.reason };
+    const { cleanTroops, travelMs, travelSec, maxTravelMs, withinLimit, arriveAtIfDepartNow } = prepared.preview;
+    return {
+      ok: true,
+      payload: {
+        planId,
+        selectedTroops: cleanTroops,
+        travelMs,
+        travelSec,
+        maxTravelMs,
+        maxTravelSec: maxTravelMs / 1000,
+        withinLimit,
+        arriveAtIfDepartNow,
+        coordinatedArrivalAt: plan.deadlineAt,
+        joinDeadlineAt,
+        deadlineAt: plan.deadlineAt,
+      },
+    };
+  }
+
   private async joinWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId, sourceVillageId, troops } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number> };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
@@ -1036,24 +1127,10 @@ export class AllianceModule {
     const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
     if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
     if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
-    if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'village_not_owned' };
-    const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: sourceVillageId } });
-    const available = ((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}) as Record<string, number>;
-    const cleanTroops: Record<string, number> = {};
-    for (const [code, amount] of Object.entries(troops ?? {})) {
-      const n = positiveInt(amount);
-      if (!n) continue;
-      if (!this.config.units[code] || n > positiveInt(available[code])) return { ok: false, payload: {}, reason: `insufficient_troops:${code}` };
-      cleanTroops[code] = n;
-    }
-    if (!Object.keys(cleanTroops).length) return { ok: false, payload: {}, reason: 'empty_troops' };
-    const preview = await this.commands.send({ name: 'movement.PreviewMarch', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, q: plan.q, r: plan.r, mode: plan.mode, targetVillage: plan.targetVillage, targetId: plan.targetId, troops: cleanTroops } });
-    if (!preview.ok) return { ok: false, payload: {}, reason: preview.reason ?? 'march_preview_failed' };
-    const travelMsRaw = Number((preview.payload as any)?.travelMs);
-    const travelMs = Number.isFinite(travelMsRaw) && travelMsRaw > 0 ? travelMsRaw : positiveInt((preview.payload as any)?.travelSec) * 1000;
-    const travelSec = Math.max(3, Math.ceil(travelMs / 1000));
-    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
-    if (legacyWindow ? this.now() + travelMs > plan.deadlineAt : travelMs >= Math.max(0, plan.deadlineAt - joinDeadlineAt)) return { ok: false, payload: { travelSec, travelMs, deadlineAt: plan.deadlineAt, joinDeadlineAt }, reason: 'war_travel_too_long' };
+    const prepared = await this.prepareWarParticipant(a, plan, playerId, sourceVillageId, troops);
+    if (!prepared.ok) return { ok: false, payload: {}, reason: prepared.reason };
+    const { cleanTroops, travelMs, travelSec, withinLimit } = prepared.preview;
+    if (!withinLimit) return { ok: false, payload: { travelSec, travelMs, deadlineAt: plan.deadlineAt, joinDeadlineAt }, reason: 'war_travel_too_long' };
     const reserved = await this.commands.send({ name: 'military.ReserveTroops', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, troops: cleanTroops } });
     if (!reserved.ok) return { ok: false, payload: {}, reason: reserved.reason ?? 'insufficient_troops' };
     plan.participants[playerId] = { playerId, sourceVillageId, troops: cleanTroops, travelSec, status: 'joined' }; this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[playerId]!); await this.push(a); return { ok: true, payload: { plan, travelSec } };
