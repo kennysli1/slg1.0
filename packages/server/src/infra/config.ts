@@ -744,6 +744,14 @@ export interface GameConstants {
   allianceWarCombatMult: number;
   allianceTechProbabilityBonus: number;
   allianceAmbassadorReputationBonus: number;
+  /** 联盟声望每点带来的联盟加成倍率增长，以及最终倍率上限。 */
+  allianceReputationBonusPerPoint: number;
+  allianceReputationBonusMaxMultiplier: number;
+  /** 四类联盟职位对应的最低联盟等级。 */
+  allianceLogisticsRoleLevel: number;
+  allianceWarRoleLevel: number;
+  allianceTechRoleLevel: number;
+  allianceAmbassadorRoleLevel: number;
   /** 联盟建筑建造与联盟科技研发的默认耗时（秒）。 */
   allianceProjectDurationSec: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
@@ -877,6 +885,22 @@ export interface AllianceTechDef {
   description: string;
 }
 
+export type AllianceServiceCategory = 'supplies' | 'reinforcement';
+
+/** 联盟形象大使可购买的王国服务目录（来自 alliance_services.csv）。 */
+export interface AllianceServiceDef {
+  id: number;
+  code: string;
+  name: string;
+  category: AllianceServiceCategory;
+  reputationCost: number;
+  unitCode?: string;
+  unitCount: number;
+  resources: Record<string, number>;
+  delaySec: number;
+  desc: string;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -905,6 +929,7 @@ export interface GameConfig {
   allianceLevels: Record<number, AllianceLevelDef>;
   allianceBuildings: Record<string, AllianceBuildingDef>;
   allianceTech: Record<string, AllianceTechDef>;
+  allianceServices: Record<string, AllianceServiceDef>;
   /** 任务目录（quests.csv）：code → QuestDef。 */
   quests: Record<string, QuestDef>;
   /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
@@ -1572,6 +1597,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     allianceWarCombatMult: Math.max(0, cn('alliance_war_combat_mult', 0.1)),
     allianceTechProbabilityBonus: Math.max(0, cn('alliance_tech_probability_bonus', 0.1)),
     allianceAmbassadorReputationBonus: Math.max(0, cn('alliance_ambassador_reputation_bonus', 1)),
+    allianceReputationBonusPerPoint: Math.max(0, cn('alliance_reputation_bonus_per_point', 0.01)),
+    allianceReputationBonusMaxMultiplier: Math.max(1, cn('alliance_reputation_bonus_max_multiplier', 2)),
+    allianceLogisticsRoleLevel: Math.max(1, Math.floor(cn('alliance_logistics_role_level', 1))),
+    allianceWarRoleLevel: Math.max(1, Math.floor(cn('alliance_war_role_level', 2))),
+    allianceTechRoleLevel: Math.max(1, Math.floor(cn('alliance_tech_role_level', 3))),
+    allianceAmbassadorRoleLevel: Math.max(1, Math.floor(cn('alliance_ambassador_role_level', 4))),
     allianceProjectDurationSec: Math.max(1, Math.floor(cn('alliance_project_duration_sec', 10))),
     raw,
   };
@@ -1766,6 +1797,24 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       effectType: r.effectType ?? '',
       effectValue: num(r.effectValue, 0),
       description: r.description ?? '',
+    };
+  }
+
+  const allianceServices: Record<string, AllianceServiceDef> = {};
+  const allianceServiceRows = existsSync(p('alliance_services.csv')) ? loadCsv(p('alliance_services.csv')) : [];
+  assertUniqueRows(allianceServiceRows, 'alliance_services.csv');
+  for (const r of allianceServiceRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    allianceServices[code] = {
+      id: num(r.id), code, name: r.name ?? code,
+      category: r.category as AllianceServiceCategory,
+      reputationCost: Math.max(0, num(r.reputationCost)),
+      unitCode: r.unitCode?.trim() || undefined,
+      unitCount: Math.max(0, Math.floor(num(r.unitCount))),
+      resources: { wood: Math.max(0, num(r.wood)), clay: Math.max(0, num(r.clay)), iron: Math.max(0, num(r.iron)), crop: Math.max(0, num(r.crop)) },
+      delaySec: Math.max(0, num(r.delaySec)),
+      desc: r.desc ?? '',
     };
   }
 
@@ -2024,7 +2073,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, quests, questGraph, dialogues, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, allianceServices, quests, questGraph, dialogues, pvpPowerCurve,
   };
   validateGameConfig(config);
   return config;
@@ -2060,6 +2109,21 @@ export function validateGameConfig(config: GameConfig): void {
     }
     if (service.category === 'treasure' && (!service.treasureCode || !config.treasures[service.treasureCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 宝物 ${service.treasureCode ?? '(空)'} 不在 treasures.csv`);
+    }
+  }
+
+  for (const service of Object.values(config.allianceServices)) {
+    if (!['supplies', 'reinforcement'].includes(service.category)) {
+      errors.push(`alliance_services.csv[${service.code}] category 非法：${service.category}`);
+    }
+    if (service.category === 'reinforcement' && (!service.unitCode || !config.units[service.unitCode])) {
+      errors.push(`alliance_services.csv[${service.code}] 兵种 ${service.unitCode ?? '(空)'} 不在 units.csv`);
+    }
+    if (service.category === 'reinforcement' && service.unitCount <= 0) {
+      errors.push(`alliance_services.csv[${service.code}] reinforcement unitCount 必须>0`);
+    }
+    if (service.category === 'supplies' && !Object.values(service.resources).some((value) => value > 0)) {
+      errors.push(`alliance_services.csv[${service.code}] supplies 至少需要一种资源`);
     }
   }
 

@@ -199,8 +199,17 @@ export class Scheduler {
    * 仅当 now 为可控假时钟时有意义。
    */
   async advanceTo(t: number, setClock: (t: number) => void): Promise<void> {
-    setClock(t);
-    await this.fireDue();
+    // 不能一次性把假时钟跳到终点再执行一批任务：任务回调可能会
+    // 根据当前时刻登记下一段（例如逐格行军），那样下一段会被排在
+    // 终点之后，导致快进只推进一格。按每个到期时刻依次推进，既让
+    // 回调看到真实的触发时间，也保证新登记的后续任务能在同一次
+    // advanceTo 中继续执行。
+    const target = Number.isFinite(t) ? t : this.now();
+    while (this.tasks.length > 0 && this.tasks[0]!.triggerAt <= target) {
+      setClock(this.tasks[0]!.triggerAt);
+      await this.fireDue();
+    }
+    setClock(target);
   }
 
   /** 当前待处理任务数（测试/监控用）。 */

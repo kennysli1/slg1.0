@@ -43,7 +43,7 @@ test('联盟：建造大厅后可创建、申请加入并建立盟友关系', as
   assert.equal((snapshot.payload as any).alliance.members.length, 2);
   assert.deepEqual((snapshot.payload as any).alliance.roles[leader.player.id], ['logistics']);
   assert.deepEqual((snapshot.payload as any).alliance.roleCatalog.map((r: any) => r.code), ['logistics', 'war', 'tech', 'ambassador']);
-  assert.equal((snapshot.payload as any).alliance.roleCatalog.find((r: any) => r.code === 'war').requiredAllianceLevel, 3);
+  assert.equal((snapshot.payload as any).alliance.roleCatalog.find((r: any) => r.code === 'war').requiredAllianceLevel, 2);
   assert.match((snapshot.payload as any).alliance.roleCatalog.find((r: any) => r.code === 'logistics').effect, /资源产量/);
 });
 
@@ -98,6 +98,39 @@ test('联盟：受损大厅空壳仍出现在建造清单中供盟主重建', as
   const allianceHall = (options.payload as any).options.find((x: any) => x.kind === 'alliance_hall');
   assert.ok(allianceHall, '受损大厅应保留重建入口');
   assert.equal(allianceHall.builtCount, 0);
+});
+
+test('联盟：大厅摧毁清空项目与累计仓库，并让前往大厅的贡献商队原地返程', async () => {
+  const app = createGameApp({ manualScheduler: true, now: () => 5_000_000 });
+  const leader = (await send(app, 'player.Register', { name: '大厅失联盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  const villageId = leader.player.villageId as string;
+  addAllianceHall(app, villageId);
+  addTradeCenter(app, villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: villageId, name: '大厅摧毁测试联盟' });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.buildings = { alliance_warehouse: 2 };
+  alliance.technologies = { shared_logistics: 1 };
+  alliance.warehouse = { wood: 900, clay: 800, iron: 700, crop: 600 };
+  alliance.resourceContributions[leader.player.id] = { wood: 100, clay: 100, iron: 100, crop: 100 };
+  app.store.set('alliance', allianceId, alliance);
+  const sent = await send(app, 'alliance.DepositResources', { playerId: leader.player.id, sourceVillageId: villageId, amount: { wood: 100 } });
+  assert.equal(sent.ok, true, sent.reason);
+  const building = app.store.get<any>('building', villageId)!;
+  building.placed.find((p: any) => p.kind === 'alliance_hall').level = 0;
+  app.store.set('building', villageId, building);
+  await app.bus.emit({ name: 'building.Demolished', source: 'test', ts: 0, payload: { villageId, kind: 'alliance_hall', level: 0 } } as any);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const disconnected = app.store.get<any>('alliance', allianceId)!;
+  assert.equal(disconnected.disconnected, true);
+  assert.deepEqual(disconnected.buildings, {});
+  assert.deepEqual(disconnected.technologies, {});
+  assert.deepEqual(disconnected.warehouse, { wood: 0, clay: 0, iron: 0, crop: 0 });
+  assert.deepEqual(disconnected.resourceContributions, {});
+  assert.deepEqual(disconnected.pendingResourceDeliveries, {});
+  const outbound = app.store.get<any>('movement', (sent.payload as any).deliveryId);
+  assert.equal(outbound?.returning, true, '大厅摧毁后贡献商队应从当前位置转为返程');
 });
 
 test('联盟资源贡献：必须有贸易中心、空闲路线和足够资源，且抵达大厅后才入库', async () => {
@@ -270,4 +303,61 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(recalled.ok, true, recalled.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].status, 'cancelled');
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id].status, 'recalled');
+});
+
+test('联盟职位：四级按配置解锁，形象大使声望成为联盟声望并放大成员加成', async () => {
+  const app = createGameApp({ manualScheduler: true });
+  const leader = (await send(app, 'player.Register', { name: '声望大使', password: 'pass1', tribe: 'romans' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '声望联盟' });
+  const allianceId = (created.payload as any).allianceId as string;
+  const hall = app.store.get<any>('building', leader.player.villageId)!;
+  hall.placed.find((p: any) => p.kind === 'alliance_hall').level = 4;
+  app.store.set('building', leader.player.villageId, hall);
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.level = 4;
+  alliance.roles[leader.player.id] = ['ambassador', 'logistics'];
+  app.store.set('alliance', allianceId, alliance);
+  await send(app, 'reputation.Adjust', { playerId: leader.player.id, delta: 20 });
+  const snapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
+  const view = (snapshot.payload as any).alliance;
+  assert.equal(view.allianceReputation, 20);
+  assert.equal(view.allianceModifierMultiplier, 1.2);
+  assert.deepEqual(view.roleCatalog.map((r: any) => r.requiredAllianceLevel), [1, 2, 3, 4]);
+  assert.ok(view.roleCatalog.find((r: any) => r.code === 'logistics').effect.includes('24%'));
+});
+
+test('联盟王国服务：只有形象大使可购买，资源抵达后入联盟仓库，增援抵达大厅', async () => {
+  let clock = 4_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  const leader = (await send(app, 'player.Register', { name: '服务盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '服务联盟' });
+  const allianceId = (created.payload as any).allianceId as string;
+  const alliance = app.store.get<any>('alliance', allianceId)!;
+  alliance.level = 4;
+  alliance.roles[leader.player.id] = ['ambassador'];
+  app.store.set('alliance', allianceId, alliance);
+  const hall = app.store.get<any>('building', leader.player.villageId)!;
+  hall.placed.find((p: any) => p.kind === 'alliance_hall').level = 4;
+  app.store.set('building', leader.player.villageId, hall);
+  await send(app, 'reputation.Adjust', { playerId: leader.player.id, delta: 30 });
+  const bought = await send(app, 'alliance.BuyService', { playerId: leader.player.id, serviceCode: 'alliance_supplies_small' });
+  assert.equal(bought.ok, true, bought.reason);
+  const order = (bought.payload as any).order;
+  assert.equal(order.status, 'pending');
+  assert.equal(app.store.get<any>('alliance', allianceId)!.warehouse.wood, 0);
+  await app.scheduler.advanceTo((bought.payload as any).movement.arriveAt + 1, (t) => { clock = t; });
+  assert.equal(app.store.get<any>('alliance', allianceId)!.warehouse.wood, 1000);
+  assert.equal(app.store.get<any>('alliance', allianceId)!.serviceOrders.find((x: any) => x.id === order.id).status, 'completed');
+  const reinforcement = await send(app, 'alliance.BuyService', { playerId: leader.player.id, serviceCode: 'alliance_reinforcement_guard' });
+  assert.equal(reinforcement.ok, true, reinforcement.reason);
+  await app.scheduler.advanceTo((reinforcement.payload as any).movement.arriveAt + 1, (t) => { clock = t; });
+  const stationed = app.store.all<any>('movement').find((m) => m.serviceOrderId === (reinforcement.payload as any).order.id);
+  assert.equal(stationed?.status, 'stationed');
+  const ordinary = (await send(app, 'player.Register', { name: '普通成员', password: 'pass1', tribe: 'gauls' })).payload as any;
+  app.store.set('alliance_by_player', ordinary.player.id, allianceId);
+  const denied = await send(app, 'alliance.BuyService', { playerId: ordinary.player.id, serviceCode: 'alliance_supplies_small' });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.reason, 'ambassador_required');
 });

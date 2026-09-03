@@ -3,7 +3,8 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
-import type { GameConfig, AllianceBuildingDef, AllianceTechDef } from '../infra/config.js';
+import type { GameConfig, AllianceBuildingDef, AllianceTechDef, AllianceServiceDef } from '../infra/config.js';
+import { kingdomLandmarkAnchors } from '../infra/world-generation.js';
 
 export type AllianceRole = 'logistics' | 'war' | 'tech' | 'ambassador';
 type Resources = { wood: number; clay: number; iron: number; crop: number };
@@ -44,6 +45,20 @@ interface PendingResourceDelivery {
   amount: Resources;
   sentAt: number;
   arriveAt: number;
+  serviceOrderId?: string;
+}
+
+interface AllianceServiceOrder {
+  id: string;
+  serviceCode: string;
+  serviceName: string;
+  category: 'supplies' | 'reinforcement';
+  reputationCost: number;
+  purchasedBy: string;
+  purchasedAt: number;
+  status: 'pending' | 'completed' | 'failed';
+  movementId?: string;
+  failureReason?: string;
 }
 
 type AllianceBuildPlan = {
@@ -89,13 +104,15 @@ interface AllianceState {
   technologies: Record<string, number>;
   researchingTech?: AllianceTechPlan | null;
   warPlans: Record<string, WarPlan>;
+  serviceSeq?: number;
+  serviceOrders?: AllianceServiceOrder[];
 }
 
 const COLLECTION = 'alliance';
 const PLAYER_INDEX = 'alliance_by_player';
 const SEQ = 'alliance_seq';
 const RESOURCE_KEYS = ['wood', 'clay', 'iron', 'crop'] as const;
-const ROLE_LEVEL: Record<AllianceRole, number> = { logistics: 1, war: 3, tech: 5, ambassador: 7 };
+const ROLE_LEVEL_FALLBACK: Record<AllianceRole, number> = { logistics: 1, war: 2, tech: 3, ambassador: 4 };
 
 function zeroResources(): Resources { return { wood: 0, clay: 0, iron: 0, crop: 0 }; }
 function positiveInt(v: unknown): number { return Math.max(0, Math.floor(Number(v) || 0)); }
@@ -113,6 +130,7 @@ function subtract(a: Resources, b: Resources): Resources {
 /** 联盟领域 owner：联盟成员、仓库、职位、建筑/科技计划及联盟军事集结。 */
 export class AllianceModule {
   static readonly NAME = 'alliance';
+  private servicePurchaseInFlight = new Set<string>();
 
   constructor(
     private store: Store,
@@ -146,6 +164,8 @@ export class AllianceModule {
     this.commands.register('alliance.DepositResources', (c) => this.depositResources(c));
     // 商队抵达联盟大厅后的内部结算；由 movement owner 调用，贡献不会在发车时瞬间入库。
     this.commands.register('alliance.ReceiveResourceCaravan', (c) => this.receiveResourceCaravan(c));
+    this.commands.register('alliance.ReceiveServiceResources', (c) => this.receiveServiceResources(c));
+    this.commands.register('alliance.BuyService', (c) => this.buyService(c));
     this.commands.register('alliance.StartBuilding', (c) => this.startBuilding(c));
     this.commands.register('alliance.StartTech', (c) => this.startTech(c));
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
@@ -172,6 +192,11 @@ export class AllianceModule {
     // 成员从地图主动撤回时，同步联盟战事参与状态，避免盟主看到过期的“已派出”。
     this.bus.on('movement.Recalled', (evt) => void this.onWarMovementRecalled(evt));
     this.bus.on('movement.GarrisonRecalled', (evt) => void this.onWarMovementRecalled(evt));
+    this.bus.on('movement.ReinforcementArrived', (evt) => void this.onServiceReinforcementArrived(evt));
+    this.bus.on('reputation.Changed', (evt) => {
+      const playerId = String((evt.payload as any)?.playerId ?? '');
+      if (playerId) void this.syncAllianceByMember(playerId);
+    });
   }
 
   async resume(): Promise<void> {
@@ -248,6 +273,8 @@ export class AllianceModule {
       technologies: raw.technologies ?? {},
       researchingTech: normalizeTechPlan(raw.researchingTech),
       warPlans: raw.warPlans ?? {},
+      serviceSeq: positiveInt(raw.serviceSeq),
+      serviceOrders: Array.isArray(raw.serviceOrders) ? raw.serviceOrders.map((order) => ({ ...order, id: String(order.id ?? ''), serviceCode: String(order.serviceCode ?? ''), status: order.status === 'completed' || order.status === 'failed' ? order.status : 'pending' })) : [],
       level,
       disconnected: raw.disconnected === true,
     };
@@ -265,20 +292,58 @@ export class AllianceModule {
     return entries.filter((x) => x.level <= level).at(-1) ?? entries[0] ?? { level: 1, hallLevel: 1, memberCap: 10, description: '' };
   }
   private cap(a: AllianceState): number { return this.levelDef(a.level).memberCap; }
-  private roleUnlocked(a: AllianceState, role: AllianceRole): boolean { return a.level >= ROLE_LEVEL[role]; }
+  private roleLevel(role: AllianceRole): number {
+    const c = this.config.constants;
+    const configured = role === 'logistics' ? c.allianceLogisticsRoleLevel
+      : role === 'war' ? c.allianceWarRoleLevel
+        : role === 'tech' ? c.allianceTechRoleLevel : c.allianceAmbassadorRoleLevel;
+    return Math.max(1, Math.floor(Number(configured) || ROLE_LEVEL_FALLBACK[role]));
+  }
+  private roleUnlocked(a: AllianceState, role: AllianceRole): boolean { return a.level >= this.roleLevel(role); }
   private isMember(a: AllianceState, playerId: string): boolean { return a.memberIds.includes(playerId); }
   private hasRole(a: AllianceState, playerId: string, role: AllianceRole): boolean {
     return a.leaderId === playerId || (a.roles[playerId] ?? []).includes(role);
   }
 
+  private roleHolder(a: AllianceState, role: AllianceRole): string | undefined {
+    if (!this.roleUnlocked(a, role)) return undefined;
+    return a.memberIds.find((id) => (a.roles[id] ?? []).includes(role));
+  }
+
+  private async allianceReputation(a: AllianceState): Promise<number> {
+    if (a.disconnected) return 0;
+    const holder = this.roleHolder(a, 'ambassador');
+    if (!holder) return 0;
+    const result = await this.commands.send({ name: 'reputation.Get', from: AllianceModule.NAME, payload: { playerId: holder } });
+    const value = Number((result.payload as any)?.value);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  private allianceModifierMultiplier(reputation: number): number {
+    const perPoint = Math.max(0, Number(this.config.constants.allianceReputationBonusPerPoint) || 0);
+    const cap = Math.max(1, Number(this.config.constants.allianceReputationBonusMaxMultiplier) || 1);
+    return Math.min(cap, 1 + Math.max(0, reputation) * perPoint);
+  }
+
+  private enforceRoleLocks(a: AllianceState): boolean {
+    let changed = false;
+    for (const memberId of a.memberIds) {
+      const roles = a.roles[memberId] ?? [];
+      const kept = roles.filter((role) => this.roleUnlocked(a, role));
+      if (kept.length !== roles.length) { a.roles[memberId] = kept; changed = true; }
+    }
+    return changed;
+  }
+
   /** 成员名单使用的四个职位目录；数值从当前配置实时派生，避免前端复制一份平衡参数。 */
-  private roleCatalog(a: AllianceState): Array<{ code: AllianceRole; name: string; requiredAllianceLevel: number; unlocked: boolean; effect: string; effectValue: number | string }> {
+  private roleCatalog(a: AllianceState, allianceReputation = 0): Array<{ code: AllianceRole; name: string; requiredAllianceLevel: number; unlocked: boolean; effect: string; effectValue: number | string }> {
+    const scale = this.allianceModifierMultiplier(allianceReputation);
     const percent = (value: number) => `${Math.round(value * 100)}%`;
     return [
-      { code: 'logistics', name: '后勤主管', requiredAllianceLevel: ROLE_LEVEL.logistics, unlocked: this.roleUnlocked(a, 'logistics'), effect: `所有村庄资源产量 +${percent(this.config.constants.allianceLogisticsResourceMult)}`, effectValue: this.config.constants.allianceLogisticsResourceMult },
-      { code: 'war', name: '战争专家', requiredAllianceLevel: ROLE_LEVEL.war, unlocked: this.roleUnlocked(a, 'war'), effect: `所有村庄军队移速 +${percent(this.config.constants.allianceWarSpeedMult)}，攻防 +${percent(this.config.constants.allianceWarCombatMult)}`, effectValue: this.config.constants.allianceWarCombatMult },
-      { code: 'tech', name: '首席科技官', requiredAllianceLevel: ROLE_LEVEL.tech, unlocked: this.roleUnlocked(a, 'tech'), effect: `所有村庄科技点获得概率 +${percent(this.config.constants.allianceTechProbabilityBonus)}`, effectValue: this.config.constants.allianceTechProbabilityBonus },
-      { code: 'ambassador', name: '形象大使', requiredAllianceLevel: ROLE_LEVEL.ambassador, unlocked: this.roleUnlocked(a, 'ambassador'), effect: `每次获得声望额外 +${this.config.constants.allianceAmbassadorReputationBonus}`, effectValue: this.config.constants.allianceAmbassadorReputationBonus },
+      { code: 'logistics', name: '后勤主管', requiredAllianceLevel: this.roleLevel('logistics'), unlocked: this.roleUnlocked(a, 'logistics'), effect: `所有村庄资源产量 +${percent(this.config.constants.allianceLogisticsResourceMult * scale)}`, effectValue: this.config.constants.allianceLogisticsResourceMult * scale },
+      { code: 'war', name: '战争专家', requiredAllianceLevel: this.roleLevel('war'), unlocked: this.roleUnlocked(a, 'war'), effect: `所有村庄军队移速 +${percent(this.config.constants.allianceWarSpeedMult * scale)}，攻防 +${percent(this.config.constants.allianceWarCombatMult * scale)}`, effectValue: this.config.constants.allianceWarCombatMult * scale },
+      { code: 'tech', name: '首席科技官', requiredAllianceLevel: this.roleLevel('tech'), unlocked: this.roleUnlocked(a, 'tech'), effect: `所有村庄科技点获得概率 +${percent(this.config.constants.allianceTechProbabilityBonus * scale)}`, effectValue: this.config.constants.allianceTechProbabilityBonus * scale },
+      { code: 'ambassador', name: '形象大使', requiredAllianceLevel: this.roleLevel('ambassador'), unlocked: this.roleUnlocked(a, 'ambassador'), effect: `每次获得声望额外 +${this.config.constants.allianceAmbassadorReputationBonus * scale}`, effectValue: this.config.constants.allianceAmbassadorReputationBonus * scale },
     ];
   }
 
@@ -296,20 +361,39 @@ export class AllianceModule {
     if (!connected && a.disconnected) return;
     if (!connected) {
       a.disconnected = true;
-      // 大厅失联会撤销职位加成、计划目标和未完成建设；已研发科技保留。
+      // 大厅失联会撤销职位加成，并清空联盟大厅内尚未完成的项目。
       a.roles = Object.fromEntries(a.memberIds.map((id) => [id, []]));
-      // 保留已建建筑的目录项但将等级降为 0，便于联盟页明确显示哪些建筑
-      // 已被摧毁；重连后需要重新筹资修复，而不是悄悄把它们从目录中抹掉。
-      a.buildings = Object.fromEntries(Object.keys(a.buildings ?? {}).map((code) => [code, 0]));
+      // 大厅被拆除/摧毁时，联盟建筑、研发进度、仓库和累计贡献都不返还。
+      // 联盟本身与成员关系保留，重建大厅后从 0 级项目重新筹集。
+      a.buildings = {};
+      a.technologies = {};
+      a.warehouse = zeroResources();
+      a.resourceContributions = {};
+      a.pendingResourceDeliveries = {};
+      a.techPointStock = 0;
+      a.techContributions = {};
       a.researchingBuilding = null;
       a.researchingTech = null;
       this.scheduler.cancelByOwner(`alliance-building:${a.id}`);
       this.scheduler.cancelByOwner(`alliance-tech:${a.id}`);
       for (const plan of Object.values(a.warPlans)) for (const participant of Object.values(plan.participants)) this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
-      a.warPlans = {};
+      // 已经出发的军事行动继续；尚未出发的行动取消。行军回收由
+      // movement.ReturnAllianceDeliveries 处理，不在这里直接改 Movement owner。
+      for (const plan of Object.values(a.warPlans)) {
+        const dispatched = Object.values(plan.participants).some((p) => p.status === 'dispatched' && p.movementId);
+        for (const participant of Object.values(plan.participants)) if (participant.status === 'joined') participant.status = 'failed';
+        if (!dispatched) {
+          plan.status = 'cancelled';
+          plan.cancelledAt = this.now();
+        }
+        this.scheduler.cancelByOwner(`alliance-war:${plan.id}`);
+      }
+      a.serviceOrders = (a.serviceOrders ?? []).map((order) => order.status === 'pending' ? { ...order, status: 'failed', failureReason: 'alliance_disconnected' } : order);
+      await this.commands.send({ name: 'movement.ReturnAllianceDeliveries', from: AllianceModule.NAME, payload: { allianceId: a.id, hallVillageId: a.hallVillageId } });
     } else {
       a.disconnected = false;
       a.level = this.levelDef(hallLevel).level;
+      this.enforceRoleLocks(a);
     }
     this.store.set(COLLECTION, a.id, a);
     for (const id of a.memberIds) void this.syncPlayerModifiers(id);
@@ -320,7 +404,7 @@ export class AllianceModule {
     const p = evt.payload as { villageId?: string; kind?: string; level?: number };
     if (p.kind !== 'alliance_hall' || !p.villageId) return;
     for (const a of this.store.all<AllianceState>(COLLECTION)) {
-      if (kind === 'demolished' && a.hallVillageId === p.villageId) await this.refreshConnectivity(a);
+      if (a.hallVillageId === p.villageId && (kind === 'demolished' || kind === 'upgraded' || kind === 'repaired')) await this.refreshConnectivity(a);
       const owner = await this.commands.send({ name: 'player.GetByVillage', from: AllianceModule.NAME, payload: { villageId: p.villageId } });
       const playerId = owner.ok ? String((owner.payload as any)?.player?.id ?? '') : '';
       if (!playerId || a.leaderId !== playerId) continue;
@@ -330,8 +414,7 @@ export class AllianceModule {
           a.level = this.levelDef(positiveInt(p.level) || 1).level;
           a.disconnected = false;
           this.store.set(COLLECTION, a.id, a);
-          for (const id of a.memberIds) void this.syncPlayerModifiers(id);
-          await this.push(a);
+          await this.refreshConnectivity(a);
         }
       }
     }
@@ -351,18 +434,19 @@ export class AllianceModule {
     }
   }
 
-  private modifiers(a: AllianceState, playerId: string) {
+  private modifiers(a: AllianceState, playerId: string, allianceReputation = 0) {
     const roles = a.roles[playerId] ?? [];
+    const scale = this.allianceModifierMultiplier(allianceReputation);
     const resourceDetails: { source: string; label: string; mult: Record<string, number> }[] = [];
     const out = {
-      resourceRateMult: roles.includes('logistics') ? this.config.constants.allianceLogisticsResourceMult : 0,
-      warSpeedMult: roles.includes('war') ? this.config.constants.allianceWarSpeedMult : 0,
-      warCombatMult: roles.includes('war') ? this.config.constants.allianceWarCombatMult : 0,
-      techProbabilityBonus: roles.includes('tech') ? this.config.constants.allianceTechProbabilityBonus : 0,
-      ambassadorReputationBonus: roles.includes('ambassador') ? this.config.constants.allianceAmbassadorReputationBonus : 0,
+      resourceRateMult: roles.includes('logistics') ? this.config.constants.allianceLogisticsResourceMult * scale : 0,
+      warSpeedMult: roles.includes('war') ? this.config.constants.allianceWarSpeedMult * scale : 0,
+      warCombatMult: roles.includes('war') ? this.config.constants.allianceWarCombatMult * scale : 0,
+      techProbabilityBonus: roles.includes('tech') ? this.config.constants.allianceTechProbabilityBonus * scale : 0,
+      ambassadorReputationBonus: roles.includes('ambassador') ? this.config.constants.allianceAmbassadorReputationBonus * scale : 0,
     };
     if (roles.includes('logistics') && out.resourceRateMult) {
-      resourceDetails.push({ source: 'alliance:role:logistics', label: '联盟职位：后勤主管', mult: { wood: out.resourceRateMult, clay: out.resourceRateMult, iron: out.resourceRateMult, crop: out.resourceRateMult } });
+        resourceDetails.push({ source: 'alliance:role:logistics', label: `联盟职位：后勤主管（声望倍率 ${scale.toFixed(2)}）`, mult: { wood: out.resourceRateMult, clay: out.resourceRateMult, iron: out.resourceRateMult, crop: out.resourceRateMult } });
     }
     // 联盟建筑/科技按已完成等级叠加；所有成员共享，不把未完成计划提前计入。
     const apply = (effectType: string, value: number, label: string, source: string): void => {
@@ -378,11 +462,11 @@ export class AllianceModule {
     };
     for (const [code, level] of Object.entries(a.buildings)) {
       const def = this.config.allianceBuildings[code];
-      if (def) apply(def.effectType, def.effectValue * positiveInt(level), `联盟建筑：${def.name}`, `alliance:building:${code}`);
+      if (def) apply(def.effectType, def.effectValue * positiveInt(level) * scale, `联盟建筑：${def.name}`, `alliance:building:${code}`);
     }
     for (const [code, level] of Object.entries(a.technologies)) {
       const def = this.config.allianceTech[code];
-      if (def) apply(def.effectType, def.effectValue * positiveInt(level), `联盟科技：${def.name}`, `alliance:tech:${code}`);
+      if (def) apply(def.effectType, def.effectValue * positiveInt(level) * scale, `联盟科技：${def.name}`, `alliance:tech:${code}`);
     }
     return { ...out, resourceDetails };
   }
@@ -391,7 +475,8 @@ export class AllianceModule {
     if (!playerId) return;
     const allianceId = this.idForPlayer(playerId);
     const a = allianceId ? this.load(allianceId) : undefined;
-    const mods = a && !a.disconnected ? this.modifiers(a, playerId) : { resourceRateMult: 0, warSpeedMult: 0, warCombatMult: 0, techProbabilityBonus: 0, ambassadorReputationBonus: 0, resourceDetails: [] };
+    const allianceReputation = a && !a.disconnected ? await this.allianceReputation(a) : 0;
+    const mods = a && !a.disconnected ? this.modifiers(a, playerId, allianceReputation) : { resourceRateMult: 0, warSpeedMult: 0, warCombatMult: 0, techProbabilityBonus: 0, ambassadorReputationBonus: 0, resourceDetails: [] };
     const p = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
     if (!p.ok) return;
     for (const v of ((p.payload as any)?.player?.villages ?? [])) {
@@ -407,6 +492,14 @@ export class AllianceModule {
     await Promise.all(a.memberIds.map((id) => this.syncPlayerModifiers(id)));
   }
 
+  private async syncAllianceByMember(playerId: string): Promise<void> {
+    const id = this.idForPlayer(playerId);
+    const a = id ? this.load(id) : undefined;
+    if (!a) return;
+    await this.syncAllModifiers(a);
+    await this.push(a);
+  }
+
   private async push(a: AllianceState): Promise<void> {
     await this.bus.emit({ name: 'alliance.Updated', source: AllianceModule.NAME, ts: this.now(), payload: { allianceId: a.id, playerIds: [...a.memberIds] } } as DomainEvent);
   }
@@ -414,7 +507,8 @@ export class AllianceModule {
   private async list(cmd: Command): Promise<CommandResult> {
     const query = String((cmd.payload as any)?.query ?? '').trim().toLocaleLowerCase();
     const alliances = this.store.all<AllianceState>(COLLECTION).map((raw) => this.normalize(raw)).filter((a) => !query || a.name.toLocaleLowerCase().includes(query) || a.leaderName.toLocaleLowerCase().includes(query));
-    return { ok: true, payload: { alliances: alliances.map((a) => ({ id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, memberCount: a.memberIds.length, memberCap: this.cap(a), full: a.memberIds.length >= this.cap(a), level: a.level, disconnected: !!a.disconnected })) } };
+    const rows = await Promise.all(alliances.map(async (a) => ({ id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, memberCount: a.memberIds.length, memberCap: this.cap(a), full: a.memberIds.length >= this.cap(a), level: a.level, reputation: await this.allianceReputation(a), disconnected: !!a.disconnected })));
+    return { ok: true, payload: { alliances: rows } };
   }
 
   private async memberView(a: AllianceState, playerId: string): Promise<any> {
@@ -460,10 +554,11 @@ export class AllianceModule {
     if (!id) return { ok: true, payload: { alliance: null } };
     const a = this.load(id); if (!a) return { ok: true, payload: { alliance: null } };
     await this.refreshConnectivity(a);
+    const allianceReputation = await this.allianceReputation(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
     const availableTroopsByVillage = await this.availableTroopsByVillage(playerId);
     const unitCatalog = Object.values(this.config.units).map((u) => ({ code: u.key, name: u.name, form: u.form, icon: u.icon }));
-    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), availableTroopsByVillage, unitCatalog, joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
+    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), allianceReputation, allianceModifierMultiplier: this.allianceModifierMultiplier(allianceReputation), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a, allianceReputation), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), allianceServices: Object.values(this.config.allianceServices).sort((x, y) => x.id - y.id), serviceOrders: a.serviceOrders ?? [], researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), availableTroopsByVillage, unitCatalog, joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
   }
 
   private async create(cmd: Command): Promise<CommandResult> {
@@ -526,7 +621,7 @@ export class AllianceModule {
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
     if (!this.isMember(a, targetPlayerId)) return { ok: false, payload: {}, reason: 'member_not_found' };
-    if (role !== null && !ROLE_LEVEL[role]) return { ok: false, payload: {}, reason: 'invalid_role' };
+    if (role !== null && !Object.prototype.hasOwnProperty.call(ROLE_LEVEL_FALLBACK, role)) return { ok: false, payload: {}, reason: 'invalid_role' };
     if (role && !this.roleUnlocked(a, role)) return { ok: false, payload: {}, reason: 'role_locked' };
     if (role) for (const memberId of a.memberIds) a.roles[memberId] = (a.roles[memberId] ?? []).filter((x) => x !== role);
     a.roles[targetPlayerId] = role ? [...new Set([...(a.roles[targetPlayerId] ?? []), role])] : [];
@@ -609,6 +704,93 @@ export class AllianceModule {
     await this.syncAllModifiers(a);
     await this.push(a);
     return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
+  }
+
+  /** 王国服务资源商队抵达后的结算；不计入成员贡献，服务订单只结算一次。 */
+  private async receiveServiceResources(cmd: Command): Promise<CommandResult> {
+    const { allianceId, serviceOrderId, cargo } = cmd.payload as { allianceId: string; serviceOrderId: string; cargo?: Partial<Resources> };
+    const a = this.load(String(allianceId ?? ''));
+    const order = a?.serviceOrders?.find((item) => item.id === serviceOrderId);
+    if (!a || !order) return { ok: false, payload: {}, reason: 'alliance_service_order_not_found' };
+    if (order.status === 'completed') return { ok: true, payload: { alreadyCompleted: true, warehouse: a.warehouse } };
+    if (order.status !== 'pending' || order.category !== 'supplies') return { ok: false, payload: {}, reason: 'alliance_service_order_invalid' };
+    if (a.disconnected) {
+      order.status = 'failed'; order.failureReason = 'alliance_disconnected';
+      this.store.set(COLLECTION, a.id, a); await this.push(a);
+      return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    }
+    const received = cloneResources(cargo);
+    const service = this.config.allianceServices[order.serviceCode];
+    if (!service || RESOURCE_KEYS.some((key) => received[key] !== service.resources[key])) {
+      order.status = 'failed'; order.failureReason = 'alliance_service_payload_mismatch';
+      this.store.set(COLLECTION, a.id, a); await this.push(a);
+      return { ok: false, payload: {}, reason: 'alliance_service_payload_mismatch' };
+    }
+    a.warehouse = addResources(a.warehouse, received);
+    order.status = 'completed';
+    this.store.set(COLLECTION, a.id, a);
+    await this.maybeStartBuilding(a);
+    await this.push(a);
+    return { ok: true, payload: { warehouse: a.warehouse, delivered: received } };
+  }
+
+  private async onServiceReinforcementArrived(evt: DomainEvent): Promise<void> {
+    const p = evt.payload as { id?: string; allianceId?: string; serviceOrderId?: string };
+    const allianceId = String(p.allianceId ?? '');
+    const serviceOrderId = String(p.serviceOrderId ?? '');
+    if (!allianceId || !serviceOrderId) return;
+    const a = this.load(allianceId);
+    const order = a?.serviceOrders?.find((item) => item.id === serviceOrderId);
+    if (!a || !order || order.status !== 'pending') return;
+    order.status = 'completed'; order.movementId = p.id ?? order.movementId;
+    this.store.set(COLLECTION, a.id, a);
+    await this.push(a);
+  }
+
+  /** 形象大使专属：消耗其当前声望购买王国资源或临时增援。 */
+  private async buyService(cmd: Command): Promise<CommandResult> {
+    const { playerId, serviceCode } = cmd.payload as { playerId: string; serviceCode: string };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
+    if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    if (!this.isMember(a, playerId) || !(a.roles[playerId] ?? []).includes('ambassador')) return { ok: false, payload: {}, reason: 'ambassador_required' };
+    const service: AllianceServiceDef | undefined = this.config.allianceServices[serviceCode];
+    if (!service) return { ok: false, payload: {}, reason: 'alliance_service_not_found' };
+    if (!a.hallVillageId) return { ok: false, payload: {}, reason: 'alliance_hall_required' };
+    if (this.servicePurchaseInFlight.has(a.id)) return { ok: false, payload: {}, reason: 'alliance_service_busy' };
+    this.servicePurchaseInFlight.add(a.id);
+    try {
+      const reputation = await this.allianceReputation(a);
+      if (reputation < service.reputationCost) return { ok: false, payload: {}, reason: 'insufficient_reputation' };
+      const spent = await this.commands.send({ name: 'reputation.TrySpend', from: AllianceModule.NAME, payload: { playerId, amount: service.reputationCost, reason: `alliance_service:${service.code}` } });
+      if (!spent.ok) return spent;
+      const sequence = (a.serviceSeq ?? 0) + 1;
+      a.serviceSeq = sequence;
+      const order: AllianceServiceOrder = {
+        id: `as-${a.id}-${sequence}`, serviceCode: service.code, serviceName: service.name,
+        category: service.category, reputationCost: service.reputationCost, purchasedBy: playerId,
+        purchasedAt: this.now(), status: 'pending',
+      };
+      a.serviceOrders = [...(a.serviceOrders ?? []).slice(-19), order];
+      this.store.set(COLLECTION, a.id, a);
+      const anchors = kingdomLandmarkAnchors(this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+      const origin = anchors.find((anchor) => anchor.id === 'kingdom-capital') ?? anchors[0]!;
+      const movement = service.category === 'supplies'
+        ? await this.commands.send({ name: 'movement.SendAllianceServiceResources', from: AllianceModule.NAME, payload: { allianceId: a.id, serviceOrderId: order.id, targetVillage: a.hallVillageId, fromXY: { q: origin.q, r: origin.r }, cargo: service.resources } })
+        : await this.commands.send({ name: 'movement.SendAllianceReinforcement', from: AllianceModule.NAME, payload: { allianceId: a.id, serviceOrderId: order.id, targetVillage: a.hallVillageId, fromXY: { q: origin.q, r: origin.r }, troops: { [service.unitCode!]: service.unitCount }, durationSec: Number(this.config.constants.raw.kingdom_reinforcement_duration_sec) || 3600 } });
+      if (!movement.ok) {
+        a.serviceOrders = a.serviceOrders.filter((item) => item.id !== order.id);
+        this.store.set(COLLECTION, a.id, a);
+        await this.commands.send({ name: 'reputation.Adjust', from: AllianceModule.NAME, payload: { playerId, delta: service.reputationCost, reason: 'alliance_service_refund' } });
+        await this.push(a);
+        return { ok: false, payload: {}, reason: movement.reason ?? 'alliance_service_failed' };
+      }
+      order.movementId = String((movement.payload as any)?.id ?? '');
+      this.store.set(COLLECTION, a.id, a);
+      await this.push(a);
+      return { ok: true, payload: { order, service, reputation: spent.payload, movement: movement.payload } };
+    } finally {
+      this.servicePurchaseInFlight.delete(a.id);
+    }
   }
 
   private async startBuilding(cmd: Command): Promise<CommandResult> {

@@ -233,4 +233,10 @@ alliance_war_speed_mult,0.15,number,战争专家所有村军队移速加成
 alliance_war_combat_mult,0.1,number,战争专家所有村军队攻防加成
 alliance_tech_probability_bonus,0.1,number,首席科技官科技点获得概率加成
 alliance_ambassador_reputation_bonus,1,number,形象大使每次获得声望额外加成
+alliance_reputation_bonus_per_point,0.01,number,联盟声望每点对联盟职位与联盟建筑科技加成的增幅
+alliance_reputation_bonus_max_multiplier,2,number,联盟声望加成的最高倍率
+alliance_logistics_role_level,1,number,后勤主管解锁所需联盟等级
+alliance_war_role_level,2,number,战争专家解锁所需联盟等级
+alliance_tech_role_level,3,number,首席科技官解锁所需联盟等级
+alliance_ambassador_role_level,4,number,形象大使解锁所需联盟等级
 alliance_project_duration_sec,10,number,联盟建筑建造与联盟科技研发耗时（秒）
