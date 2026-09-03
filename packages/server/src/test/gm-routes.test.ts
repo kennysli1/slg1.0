@@ -294,6 +294,8 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     assert.match(center.body, /配置中心（CSV）/);
     assert.match(center.body, /需要确认的配置冲突/);
     assert.match(center.body, /\/config\/sync\/conflicts/);
+    assert.match(center.body, /实际冲突位置/);
+    assert.match(center.body, /冲突位置：/);
     assert.match(center.body, /确认全部文件并更新 PR/);
     const centerScript = center.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(centerScript, '配置中心首页应包含初始化脚本');

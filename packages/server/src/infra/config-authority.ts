@@ -61,8 +61,18 @@ export interface ConfigPullRequestStatus {
   headSha: string | null;
   changedFiles: string[];
   conflictFiles: string[];
+  /** 逐文件列出真实发生三方内容冲突的主键/字段。 */
+  conflictLocations: Record<string, ConfigConflictLocation[]>;
+  /** 冲突定位是否成功；不可用时不能把全部 changedFiles 当成冲突。 */
+  conflictDetection: 'exact' | 'unavailable';
+  conflictDetectionError: string | null;
   checks: ConfigCheckStatus[];
   checkedAt: string;
+}
+
+export interface ConfigConflictLocation {
+  key: string;
+  columns: string[];
 }
 
 export interface ConfigConflictFile {
@@ -71,6 +81,7 @@ export interface ConfigConflictFile {
   authority: string;
   main: string;
   branch: string;
+  locations: ConfigConflictLocation[];
 }
 
 export interface ConfigSyncStatus {
@@ -123,6 +134,9 @@ interface GithubPullFileResponse {
   additions?: number;
   deletions?: number;
 }
+interface GithubCompareResponse {
+  merge_base_commit?: { sha?: string };
+}
 interface GithubCheckRunsResponse {
   check_runs?: Array<{ name?: string; status?: string; conclusion?: string | null; html_url?: string | null }>;
 }
@@ -135,6 +149,83 @@ interface GithubContentResponse {
 function configFileName(path: string): string | null {
   if (!/^config\/[A-Za-z0-9_.-]+\.csv$/.test(path)) return null;
   return path.slice('config/'.length);
+}
+
+/** 所有配置表的稳定行主键，用于在不依赖本地 git 的情况下做三方字段比较。 */
+const CONFIG_CONFLICT_KEY_COLUMNS: Record<string, string[]> = {
+  'academy.csv': ['level'],
+  'alliance_buildings.csv': ['code'],
+  'alliance_levels.csv': ['level'],
+  'alliance_services.csv': ['id'],
+  'building_levels.csv': ['code', 'level'],
+  'buildings.csv': ['id'],
+  'dialogues.csv': ['code', 'segment'],
+  'game_constants.csv': ['key'],
+  'kingdom_services.csv': ['id'],
+  'merc_camp.csv': ['level'],
+  'mercenaries.csv': ['id'],
+  'pve_defenders.csv': ['targetId', 'unitCode'],
+  'pve_spawns.csv': ['id'],
+  'pve_targets.csv': ['id'],
+  'pvp_power_curve.csv': ['maxRatio'],
+  'quest_conditions.csv': ['id'],
+  'quest_edges.csv': ['id'],
+  'quest_effects.csv': ['id'],
+  'quest_lines.csv': ['code'],
+  'quest_objectives.csv': ['id'],
+  'quests.csv': ['id'],
+  'research_effects.csv': ['techCode', 'order'],
+  'research.csv': ['id'],
+  'resources.csv': ['id'],
+  'town_center_slots.csv': ['tcLevel'],
+  'trade_center.csv': ['level'],
+  'treasures.csv': ['id'],
+  'unit_traits.csv': ['id'],
+  'units.csv': ['id'],
+  'village_templates.csv': ['tribe'],
+};
+
+function conflictRows(text: string | null, file: string): { header: string[]; rows: Map<string, CsvRow> } {
+  if (text === null) return { header: [], rows: new Map() };
+  const doc = parseCsvStructured(text);
+  const keyColumns = CONFIG_CONFLICT_KEY_COLUMNS[file] ?? (doc.header.length > 0 ? [doc.header[0]] : []);
+  if (keyColumns.length === 0 || keyColumns.some((column) => !doc.header.includes(column))) {
+    throw new Error(`${file} 缺少可用于冲突定位的主键列`);
+  }
+  const rows = new Map<string, CsvRow>();
+  for (const row of doc.rows) {
+    const key = keyColumns.map((column) => row[column] ?? '').join('|');
+    if (keyColumns.some((column) => !row[column])) throw new Error(`${file} 存在空主键行`);
+    if (rows.has(key)) throw new Error(`${file} 存在重复主键 ${key}`);
+    rows.set(key, row);
+  }
+  return { header: doc.header, rows };
+}
+
+/** 返回真正同时被 main 与 PR 改成不同内容的行/字段，而不是整张 changed file。 */
+function findConflictLocations(file: string, ancestor: string | null, main: string | null, branch: string | null): ConfigConflictLocation[] {
+  const base = conflictRows(ancestor, file);
+  const ours = conflictRows(main, file);
+  const theirs = conflictRows(branch, file);
+  const keyColumns = CONFIG_CONFLICT_KEY_COLUMNS[file] ?? (base.header.length > 0 ? [base.header[0]] : []);
+  const headers = [...new Set([...base.header, ...ours.header, ...theirs.header])];
+  const keys = new Set([...base.rows.keys(), ...ours.rows.keys(), ...theirs.rows.keys()]);
+  const locations: ConfigConflictLocation[] = [];
+  for (const key of keys) {
+    const baseRow = base.rows.get(key);
+    const mainRow = ours.rows.get(key);
+    const branchRow = theirs.rows.get(key);
+    const columns: string[] = [];
+    for (const column of headers) {
+      if (keyColumns.includes(column)) continue;
+      const before = baseRow?.[column] ?? '';
+      const mainValue = mainRow?.[column] ?? '';
+      const branchValue = branchRow?.[column] ?? '';
+      if (mainValue !== before && branchValue !== before && mainValue !== branchValue) columns.push(column);
+    }
+    if (columns.length > 0) locations.push({ key, columns });
+  }
+  return locations;
 }
 
 function isConflictState(pr: ConfigPullRequestStatus | null): boolean {
@@ -158,6 +249,21 @@ function deriveSyncState(
     return completed ? 'ready' : 'checking';
   }
   return 'checking';
+}
+
+function conflictBlockedReason(pullRequest: ConfigPullRequestStatus): string {
+  if (pullRequest.conflictDetection === 'unavailable') {
+    return `PR #${pullRequest.number} 无法定位配置冲突：${pullRequest.conflictDetectionError ?? '请刷新后重试'}`;
+  }
+  if (pullRequest.conflictFiles.length === 0) {
+    return `PR #${pullRequest.number} 被 GitHub 标记为不可合并，但当前配置 CSV 未检测到行级冲突；请检查 PR 检查项或刷新状态`;
+  }
+  const locations = pullRequest.conflictFiles.map((file) => {
+    const rows = pullRequest.conflictLocations[file] ?? [];
+    const summary = rows.map((row) => `${row.key}[${row.columns.join(',')}]`).join('、');
+    return summary ? `${file}: ${summary}` : file;
+  });
+  return `PR #${pullRequest.number} 存在冲突，请在配置中心确认并解决：${locations.join('；')}`;
 }
 
 export interface ConfigAuthorityOptions {
@@ -560,6 +666,41 @@ export class ConfigAuthority {
     return Buffer.from(content.content.replace(/\s/g, ''), 'base64').toString('utf8');
   }
 
+  private async fetchGithubContentOrNull(path: string, ref: string): Promise<string | null> {
+    try {
+      return await this.fetchGithubContent(path, ref);
+    } catch (err) {
+      // 新增/删除的 CSV 在三方比较中可能只存在于一侧；把 404 视为空文件，
+      // 其它错误继续抛出，避免把权限或 GitHub 限流误报成“没有冲突”。
+      if (err instanceof Error && err.message.startsWith('GitHub API 404:')) return null;
+      throw err;
+    }
+  }
+
+  private async detectConflictLocations(
+    changedFiles: readonly string[],
+    baseSha: string | null,
+    headSha: string | null,
+  ): Promise<{ files: string[]; locations: Record<string, ConfigConflictLocation[]> }> {
+    if (!baseSha || !headSha || changedFiles.length === 0) return { files: [], locations: {} };
+    const compare = await this.github<GithubCompareResponse>(
+      `/repos/${this.githubRepo}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(headSha)}`,
+    );
+    const mergeBaseSha = compare.merge_base_commit?.sha;
+    if (!mergeBaseSha) throw new Error('GitHub compare 未返回 merge base，无法定位配置冲突');
+    const detected = await Promise.all(changedFiles.map(async (file) => {
+      const [ancestor, main, branch] = await Promise.all([
+        this.fetchGithubContentOrNull(`config/${file}`, mergeBaseSha),
+        this.fetchGithubContentOrNull(`config/${file}`, baseSha),
+        this.fetchGithubContentOrNull(`config/${file}`, headSha),
+      ]);
+      const locations = findConflictLocations(file, ancestor, main, branch);
+      return { file, locations };
+    }));
+    const locations = Object.fromEntries(detected.filter((entry) => entry.locations.length > 0).map((entry) => [entry.file, entry.locations]));
+    return { files: Object.keys(locations).sort(), locations };
+  }
+
   private async fetchPullRequestStatus(url: string | null): Promise<ConfigPullRequestStatus | null> {
     if (!this.githubToken) return null;
     const [owner] = this.githubRepo.split('/');
@@ -590,6 +731,20 @@ export class ConfigAuthority {
     const changedFiles = changed
       .map((entry) => configFileName(entry.filename))
       .filter((file): file is string => Boolean(file));
+    let conflictFiles: string[] = [];
+    let conflictLocations: Record<string, ConfigConflictLocation[]> = {};
+    let conflictDetection: ConfigPullRequestStatus['conflictDetection'] = 'exact';
+    let conflictDetectionError: string | null = null;
+    if (pr.state.toLowerCase() === 'open' && (pr.mergeable === false || ['dirty', 'blocked'].includes(pr.mergeable_state ?? ''))) {
+      try {
+        const detected = await this.detectConflictLocations(changedFiles, pr.base?.sha ?? null, pr.head?.sha ?? null);
+        conflictFiles = detected.files;
+        conflictLocations = detected.locations;
+      } catch (err) {
+        conflictDetection = 'unavailable';
+        conflictDetectionError = err instanceof Error ? err.message : String(err);
+      }
+    }
     const result: ConfigPullRequestStatus = {
       number,
       url: pr.html_url,
@@ -604,8 +759,10 @@ export class ConfigAuthority {
       baseSha: pr.base?.sha ?? null,
       headSha: pr.head?.sha ?? null,
       changedFiles,
-      conflictFiles: pr.state.toLowerCase() === 'open'
-        && (pr.mergeable === false || ['dirty', 'blocked'].includes(pr.mergeable_state ?? '')) ? changedFiles : [],
+      conflictFiles,
+      conflictLocations,
+      conflictDetection,
+      conflictDetectionError,
       checks,
       checkedAt: new Date(this.now()).toISOString(),
     };
@@ -619,9 +776,7 @@ export class ConfigAuthority {
       ...(pullRequest ? { pullRequest, pullRequestUrl: pullRequest.url } : {}),
       ...(statusError !== undefined ? { lastStatusError: statusError ?? undefined } : {}),
       syncState: deriveSyncState(this.readOutbox(), pullRequest, current.lastError ?? null),
-      blockedReason: isConflictState(pullRequest)
-        ? `PR #${pullRequest?.number ?? '?'} 存在冲突，请在配置中心确认并解决：${pullRequest?.conflictFiles.join('、') || '未识别文件'}`
-        : undefined,
+      blockedReason: pullRequest && isConflictState(pullRequest) ? conflictBlockedReason(pullRequest) : undefined,
     };
     this.writeSyncStatus(next);
   }
@@ -647,13 +802,19 @@ export class ConfigAuthority {
     const status = await this.inspectStatus();
     const pullRequest = status.pullRequest;
     if (!pullRequest || !isConflictState(pullRequest)) throw new Error('当前没有可处理的配置 PR 冲突');
+    if (pullRequest.conflictDetection !== 'exact') {
+      throw new Error(pullRequest.conflictDetectionError ?? '无法定位配置冲突，请刷新后重试');
+    }
+    if (pullRequest.conflictFiles.length === 0) {
+      throw new Error('GitHub 报告 PR 不可合并，但未检测到配置 CSV 的行级冲突；请先检查 PR 状态与检查项');
+    }
     const files: ConfigConflictFile[] = [];
     for (const file of pullRequest.conflictFiles) {
       const authorityPath = join(this.persistentConfigDir ?? this.configDir, file);
       const authority = existsSync(authorityPath) ? readFileSync(authorityPath, 'utf8') : '';
       const main = pullRequest.baseSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.baseSha) : '';
       const branch = pullRequest.headSha ? await this.fetchGithubContent(`config/${file}`, pullRequest.headSha) : '';
-      files.push({ file, status: 'conflict', authority, main, branch });
+      files.push({ file, status: 'conflict', authority, main, branch, locations: pullRequest.conflictLocations[file] ?? [] });
     }
     return { pullRequest, files };
   }
