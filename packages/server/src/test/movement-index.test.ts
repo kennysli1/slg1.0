@@ -28,6 +28,15 @@ async function giveTroops(app: GameApp, villageId: string, troops: Record<string
   await send(app, 'military.AdjustTroops', { villageId, delta: troops });
 }
 
+function addAllianceHall(app: GameApp, villageId: string): void {
+  const building = app.store.get<any>('building', villageId)!;
+  building.placed.push({ slotId: 'inner-alliance-test', zone: 'inner', kind: 'alliance_hall', level: 1 });
+  app.store.set('building', villageId, building);
+  const economy = app.store.get<any>('economy', villageId)!;
+  economy.resources = { ...economy.resources, wood: 2000, clay: 2000, iron: 2000, crop: 2000, gold: 2000 };
+  app.store.set('economy', villageId, economy);
+}
+
 test('villageIndex：同村第二支出征军应占满 1 级集结点行军点', async () => {
   const app = freshApp();
   const p = await register(app, '索引甲');
@@ -222,4 +231,34 @@ test('王国 NPC 行军：不触发普通遭遇战或伏击战', async () => {
   (app.movement as any).save(npcAmbush);
   assert.equal(await (app.movement as any).findAmbush(playerMarch), undefined, '玩家军队不应被 NPC 伏击');
   assert.equal(await (app.movement as any).findAmbush(npcMarch), undefined, 'NPC 军队不应触发伏击检查');
+});
+
+test('联盟成员同格：不得触发普通遭遇战或伏击战', async () => {
+  const app = freshApp();
+  const leader = await register(app, '盟友遭遇甲');
+  const member = await register(app, '盟友遭遇乙');
+  addAllianceHall(app, leader.villageId);
+  const created = await send(app, 'alliance.Create', {
+    playerId: leader.id, sourceVillageId: leader.villageId, name: '友军免战测试联盟',
+  });
+  assert.equal(created.ok, true, created.reason);
+  const allianceId = (created.payload as any).allianceId as string;
+  assert.equal((await send(app, 'alliance.Apply', { playerId: member.id, allianceId })).ok, true);
+  assert.equal((await send(app, 'alliance.ReviewRequest', { playerId: leader.id, applicantId: member.id, approve: true })).ok, true);
+
+  const common = {
+    fromXY: { q: 10, r: 10 }, toXY: { q: 12, r: 10 }, path: [{ q: 10, r: 10 }, { q: 11, r: 10 }],
+    stepIndex: 1, pos: { q: 11, r: 10 }, troops: { legionnaire: 5 }, loot: {}, cargo: {}, treasures: [],
+    departAt: 5_000_000, arriveAt: 5_060_000, perStepMs: 1_000, nextStepAt: 5_001_000,
+    status: 'marching', stepToken: 1,
+  };
+  const leaderMarch = { ...common, id: 'allied-leader-march', type: 'attack', fromVillage: leader.villageId } as any;
+  const memberMarch = { ...common, id: 'allied-member-march', type: 'attack', fromVillage: member.villageId } as any;
+  (app.movement as any).save(leaderMarch);
+  (app.movement as any).save(memberMarch);
+  assert.equal(await (app.movement as any).findEncounter(leaderMarch), undefined, '盟友行军不得触发普通遭遇战');
+
+  const alliedAmbush = { ...common, id: 'allied-ambush', type: 'ambush', status: 'stationed', fromVillage: member.villageId } as any;
+  (app.movement as any).save(alliedAmbush);
+  assert.equal(await (app.movement as any).findAmbush(leaderMarch), undefined, '盟友伏击军不得拦截友军');
 });
