@@ -181,6 +181,8 @@ describe('联盟目录与战事目标交互', () => {
     assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
     assert.match(alliance, /CancelAllianceWarParticipation/);
     assert.match(alliance, /const cancelAnchor = Number\(p\.joinDeadlineAt \?\? p\.deadlineAt\)/);
+    assert.match(alliance, /const cancelBeforeCutoff = canPlan && p\.status === 'open'/);
+    assert.match(alliance, /const cancelWindow = cancelBeforeCutoff \|\| cancelAfterCutoff/);
     assert.match(alliance, /now >= cancelAnchor/);
     assert.match(alliance, /now - cancelAnchor < 90_000/);
     assert.match(alliance, /war-treasure-picker/);
@@ -191,6 +193,7 @@ describe('联盟目录与战事目标交互', () => {
     assert.match(alliance, /当前兵力预计行军/);
     assert.doesNotMatch(alliance, /若现在出发，预计/);
     assert.match(alliance, /withinLimit/);
+    assert.doesNotMatch(alliance, /\[p\.id, p\.status, joinRemain, sourceVillageId/);
     assert.match(alliance, /picked\?\.relation === 'allied' \? \['reinforce'\]/);
     assert.match(alliance, /picked\?\.cityState === true \? \['raid', 'attack'\] : \['raid'\]/);
     assert.match(alliance, /targetModeAllowed/);

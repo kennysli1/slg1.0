@@ -366,13 +366,9 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   const joinedSnapshot = await send(app, 'alliance.Get', { playerId: leader.player.id });
   const listedPlan = (joinedSnapshot.payload as any).alliance.warPlans.find((plan: any) => plan.id === planId);
   assert.deepEqual(listedPlan.participants[leader.player.id].troops, { legionnaire: 3, equlegati: 1 }, '联盟战事快照应向成员显示每位参与者的派兵明细');
+  // 报名期间盟主即可取消行动，并释放已经预定的兵力。
   const beforeJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(beforeJoinDeadline.ok, false);
-  assert.equal(beforeJoinDeadline.reason, 'war_cancel_window_not_started');
-  const planState = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
-  clock = planState.joinDeadlineAt;
-  const atJoinDeadline = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(atJoinDeadline.ok, true, atJoinDeadline.reason);
+  assert.equal(beforeJoinDeadline.ok, true, beforeJoinDeadline.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
   assert.equal(app.store.all<any>('movement').length, 0, '倒计时内取消不应派出军队');
 
@@ -498,7 +494,7 @@ test('联盟战事：同一玩家同一村可重复派兵并合并预备队锁',
   assert.equal((released.payload as any).availableTroops.legionnaire, 10);
 });
 
-test('联盟战事：报名期间不可取消，参军可选择并校验随队宝物', async () => {
+test('联盟战事：报名期间可取消，参军可选择并校验随队宝物', async () => {
   let clock = 7_000_000;
   const app = createGameApp({ manualScheduler: true, now: () => clock });
   app.setupWorld();
@@ -536,13 +532,9 @@ test('联盟战事：报名期间不可取消，参军可选择并校验随队�
   const participant = app.store.get<any>('alliance', allianceId)!.warPlans[planId].participants[leader.player.id];
   assert.deepEqual(participant.treasures, ['horse_rope']);
 
-  // 招兵阶段不能取消；取消窗口从报名截止时刻开始。
+  // 报名阶段即可取消；取消后预备队立即释放。
   const cancelled = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(cancelled.ok, false);
-  assert.equal(cancelled.reason, 'war_cancel_window_not_started');
-  clock = app.store.get<any>('alliance', allianceId)!.warPlans[planId].joinDeadlineAt;
-  const cancelledAtCutoff = await send(app, 'alliance.CancelWarPlan', { playerId: leader.player.id, planId });
-  assert.equal(cancelledAtCutoff.ok, true, cancelledAtCutoff.reason);
+  assert.equal(cancelled.ok, true, cancelled.reason);
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[planId].status, 'cancelled');
   const released = await send(app, 'military.GetArmy', { villageId });
   assert.equal((released.payload as any).availableTroops.legionnaire, 200);
