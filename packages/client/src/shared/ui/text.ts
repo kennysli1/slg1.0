@@ -138,6 +138,8 @@ const ERR_MSG: Record<string, string> = {
   garrison_not_found: '这支驻扎军已不存在或不归你指挥',
   war_plan_not_found: '联盟军事目标不存在',
   war_plan_closed: '联盟军事目标已关闭',
+  war_private_task_target: '个人任务营地不能作为联盟战事目标',
+  war_siege_target_invalid: '该目标没有城墙，不能发起攻城',
   participation_window_invalid: '参军倒计时必须大于 0 且小于战争倒计时',
   deadline_too_soon: '倒计时至少需要 10 秒',
   cannot_arrive_before_deadline: '倒计时太短，军队无法及时到达目标',

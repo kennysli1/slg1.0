@@ -96,6 +96,10 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
+  /** 玩家村庄外交关系；联盟战事选点时复用地图服务端快照。 */
+  relation?: 'allied' | 'neutral' | 'hostile';
+  /** 王国城邦标记；普通 PvE 没有攻城选项。 */
+  cityState?: boolean;
   taskInfo?: TaskCampInfo;
   /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
   playerName?: string;

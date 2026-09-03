@@ -17,6 +17,8 @@ export interface RateBreakdownEntry {
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
+  relation?: 'allied' | 'neutral' | 'hostile';
+  cityState?: boolean;
   /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
   playerName?: string;
   reputation?: number;
