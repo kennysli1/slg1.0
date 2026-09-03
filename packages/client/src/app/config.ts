@@ -263,7 +263,7 @@ export function tradeRouteCapacity(): number {
 }
 /** 商人车队行进速度（格/小时，独立于行军倍率）。 */
 export function tradeCaravanSpeed(): number {
-  return cfg?.constants?.tradeCaravanSpeed ?? 12;
+  return cfg?.constants?.tradeCaravanSpeed ?? 100;
 }
 /** NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）。 */
 export function tradeNpcGoldPerResource(): number {
