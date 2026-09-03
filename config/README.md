@@ -68,7 +68,7 @@
 `quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
 > **常见操作举例**
-> - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 meleeAtk。
+> - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 attack / defense / hp。
 > - 想让老鼠窝掉更多资源 → 表5 `pve_targets.csv`，改 rats 行的 lootWood 等。
 > - 想给老鼠窝加更多守军 → 表6 `pve_defenders.csv`，给 `targetId=1`(老鼠窝) 加一行新怪。
 > - 想在地图多放几个强盗营地 → 表7 `pve_spawns.csv`，加几行 `targetId=3`(强盗营地) 的坐标。
@@ -155,11 +155,10 @@
 | code | 英文代码（程序/存档用，勿改） |
 | tribe | 所属部族（语义串 romans/gauls/teutons；`all` 表示所有部族可训练） |
 | name / icon | 显示名 / 图标基名 |
-| form | 形态：`melee`(近战/前排) 或 `ranged`(远程/后排)。取代旧的 cat |
-| meleeAtk | 近战攻击力（近战兵永远用它；远程兵被迫肉搏时用它） |
-| rangedAtk | 远程攻击力（远程兵后排放输出时用它） |
-| meleeDef | 近战防御（被近战攻击时的承伤耐久） |
-| rangedDef | 远程防御（被远程攻击时的承伤耐久） |
+| form | 仅用于目录展示，不参与战斗计算 |
+| attack | 攻击：每名存活兵贡献到己方总攻击 |
+| defense | 防御：每名存活兵贡献到己方总防御 |
+| hp | 生命：分摊到该兵种的伤害累计达到此值时阵亡一名 |
 | speed | 速度（格/小时，决定行军快慢） |
 | vision | 视野（六边形格数；军队取数量最多兵种的视野，并列时取较大值） |
 | carry | 单兵载货（搬战利品） |
@@ -168,12 +167,10 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits | 线上战斗特性ID列表（竖线分隔，引用 **unit_traits.csv 的数字 id**，可空） |
-| hp | 阶段化战斗模拟器的单兵生命值伤亡池（只读 CSV 的实验规则） |
-| simTraits | 阶段化战斗模拟器专用特性ID列表；与 `traits` 分开，避免影响线上旧战斗 |
+| traits / simTraits | 历史展示列，不参与现行战斗 |
 | techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
-> 加新部族/兵种：直接加行即可（id 接着往后排）。战斗只区分近战/远程，靠攻防四列 + 特性表达。探险家协会训练 `adventurer`：攻击力为0，可探索/执行侦察，但不具备发现侦察部队的能力；被真实侦察兵发现时冒险者全部失去。
+> 现行战斗只有总攻击、总防御、生命三项：`伤害=A²/(A+D)`，双方用回合开始快照同时结算；伤害按参战人数比例分摊，再按各兵种自身生命累计阵亡。条顿 `clubswinger` 仅原始进攻方攻击 +7.40%，高卢 `phalanx` 仅原始防守方防御 +22.06%。
 
 ## mercenaries.csv — 雇佣兵目录
 | 列 | 含义 |
@@ -181,15 +178,12 @@
 | id / code | 数字主键 / 稳定英文代码 |
 | tribe | 固定为 `merc`，表示全种族可用 |
 | name / icon | 显示名 / 图标基名 |
-| form | `melee` 或 `ranged` |
-| meleeAtk/rangedAtk | 近战/远程攻击 |
-| meleeDef/rangedDef | 近战/远程防御 |
-| hp | 阶段化战斗模拟器的单兵生命值伤亡池 |
+| form | 仅用于目录展示 |
+| attack / defense / hp | 唯一战斗属性：攻击 / 防御 / 生命 |
 | speed / carry | 行军速度 / 单兵载货量 |
 | upkeep | 每小时耗粮；雇佣兵当前固定为 0 |
 | costWood/costClay/costIron/costCrop | 普通训练资源成本；雇佣兵固定为 0 |
-| trainSec / building / traits | 训练秒数 / 所需建筑 / 线上战斗特性；当前均留空或为 0 |
-| simTraits | 阶段化模拟器特性ID列表（竖线分隔；与线上 `traits` 隔离） |
+| trainSec / building / traits | 训练秒数 / 所需建筑 / 历史展示标签；当前均留空或为 0 |
 | popCost | 训练/在途/驻军占用的人口；所有兵种返程、解散都会按此值返还。拓荒者每名占用 5 人口，成功建城后由出发城永久转移，新城以 5 人口开局 |
 | goldCost | 在雇佣兵营地购买单个兵种的金币价格 |
 | commandCost | 单份合同占用的佣兵统御容量 |
@@ -205,7 +199,7 @@
 | maxStoredRefreshes | 最多可囤积的手动刷新次数 |
 | capacity | 该等级提供的佣兵统御容量 |
 
-## unit_traits.csv — 兵种特性（攻防之上的额外倍率修正）
+## unit_traits.csv — 历史特性目录
 | 列 | 含义 |
 |----|------|
 | id | 数字主键（units.csv 的 traits 列引用它） |
@@ -214,7 +208,7 @@
 | effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
 | value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
 
-> effect 枚举：`dmg_taken_ranged`(受远程伤害倍率) / `dmg_taken_melee`(受近战伤害倍率) / `atk_ranged` / `atk_melee`(自身攻击加成) / `def_ranged` / `def_melee`(自身防御加成) / `enemy_cavalry_atk`(敌骑兵攻击修正) / `ally_ranged_def`(己方另一兵种远程防御修正) / `enemy_ranged_melee_def`(敌远程兵近战防御修正) / `cavalry_charge_atk`(冲锋阶段骑兵攻击修正)。同一属性按加法叠加，减益最低到 0。
+> 此表不参与当前三属性战斗；当前仅 `clubswinger` 的进攻 +7.40% 和 `phalanx` 的防守 +22.06% 两项固定特性生效。
 
 阶段化战斗模拟器页面为 `/battle-simulator`。它通过 `battleSimulator.GetCatalog` / `battleSimulator.Simulate` 读取这些 CSV 配置，不读写主游戏存档。
 > 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
@@ -241,12 +235,10 @@
 | unitCode | 守军单位代码（仅此目标内部标签，不跨表引用，保留英文串） |
 | name | 显示名 |
 | count | 数量 |
-| form | 形态：`melee` / `ranged` |
-| meleeAtk/rangedAtk | 近战/远程攻击力 |
-| meleeDef/rangedDef | 近战/远程防御 |
-| hp | 阶段化模拟器的单兵生命值伤亡池 |
+| form | 仅用于目录展示 |
+| attack / defense / hp | 唯一战斗属性：攻击 / 防御 / 生命 |
 | carry | 载货（守军一般0） |
-| traits | 阶段化模拟器特性ID列表（竖线分隔；引用 `unit_traits.csv`，可空） |
+| traits | 历史展示标签，不参与现行战斗 |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
 

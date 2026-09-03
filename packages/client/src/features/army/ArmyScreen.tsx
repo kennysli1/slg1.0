@@ -3,16 +3,12 @@
  *
  * 分区设计：
  *  § 1  驻军（Garrison）
- *       - 按 form 分组：近战（melee）/ 远程（ranged）
  *       - 雇佣兵独立区块（金色高亮，无人口耗粮）
- *       - 汇总条：总兵数 / 总攻 / 总防 / 总耗粮 / 宝物携带上限
+ *       - 汇总条：总兵数 / 总攻击 / 总防御 / 总生命 / 总耗粮 / 宝物携带上限
  *  § 2  训练中心（服务端分配训练队列）
  *
- * 驻军分组选择理由：
- *  form（melee/ranged）是兵种唯一的战术分类字段。按 form 分组可以直观地
- *  看出近战与远程的兵力比例，这在攻守决策中最有实用价值。骑兵/攻城兵
- *  目前在 form 层面均归为 melee，与步兵共组，等未来有专属 category 字段
- *  时再细分。雇佣兵因无人口/耗粮消耗，单独成区并使用金色样式区分。
+ * 所有兵种统一使用攻击、防御、生命三项战斗属性。雇佣兵因无人口/耗粮消耗，
+ * 单独成区并使用金色样式区分。
  */
 import { useEffect, useState } from 'preact/hooks';
 import { dataVersion, showToast } from '../../app/store.js';
@@ -22,7 +18,7 @@ import { act, refreshAll } from '../../app/refresh.js';
 import {
   unitInfo, mercenaryInfo, treasureCarryCap, unitCropPerHour,
 } from '../../app/config.js';
-import { formName, tribeName } from '../../shared/ui/text.js';
+import { tribeName } from '../../shared/ui/text.js';
 import { fmt } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
 import { TrainPanel } from './TrainPanel.js';
@@ -396,30 +392,26 @@ function GarrisonSection({ army }: { army: any }) {
   const regEntries = entries.filter(([k]) => !unitInfo(k).isMercenary);
   const mercEntries = entries.filter(([k]) => unitInfo(k).isMercenary);
 
-  const meleeEntries = regEntries.filter(([k]) => unitInfo(k).form === 'melee');
-  const rangedEntries = regEntries.filter(([k]) => unitInfo(k).form === 'ranged');
-  const otherEntries = regEntries.filter(([k]) => {
-    const form = unitInfo(k).form;
-    return form !== 'melee' && form !== 'ranged';
-  });
-
   // 汇总数值
   const totalTroops = entries.reduce((s, [, n]) => s + (n as number), 0);
   const totalRegTroops = regEntries.reduce((s, [, n]) => s + (n as number), 0);
 
   let totalAtk = 0;
   let totalDef = 0;
+  let totalHp = 0;
   let totalCrop = 0;
   for (const [key, count] of entries) {
     const info = unitInfo(key);
     const t = trainable.find((u: any) => u.key === key);
     const merc = mercenaryInfo(key);
     if (t) {
-      totalAtk += (t.form === 'ranged' ? t.rangedAtk : t.meleeAtk) * (count as number);
-      totalDef += (t.form === 'ranged' ? t.rangedDef : t.meleeDef) * (count as number);
+      totalAtk += Number(t.attack ?? 0) * (count as number);
+      totalDef += Number(t.defense ?? 0) * (count as number);
+      totalHp += Number(t.hp ?? 0) * (count as number);
     } else if (merc) {
-      totalAtk += (merc.form === 'ranged' ? merc.rangedAtk : merc.meleeAtk) * (count as number);
-      totalDef += (merc.form === 'ranged' ? merc.rangedDef : merc.meleeDef) * (count as number);
+      totalAtk += merc.attack * (count as number);
+      totalDef += merc.defense * (count as number);
+      totalHp += merc.hp * (count as number);
     }
     if (!info.isMercenary) totalCrop += unitCropPerHour(key) * (count as number);
   }
@@ -436,6 +428,7 @@ function GarrisonSection({ army }: { army: any }) {
         <div class="army-summary">
           <Stat icon="ui_icon_atk" label="总攻击" value={fmt(Math.round(totalAtk))} />
           <Stat icon="ui_icon_def" label="总防御" value={fmt(Math.round(totalDef))} />
+          <Stat icon="ui_icon_pop" label="总生命" value={fmt(Math.round(totalHp))} />
           <Stat icon="ui_icon_pop" label="总兵数" value={fmt(totalTroops)} />
           <Stat icon="ui_icon_upkeep" label="总耗粮/时" value={fmt(Math.round(totalCrop))} />
           <Stat icon="trs_" label="宝物携带" value={`${carryCap} 格`}
@@ -443,42 +436,14 @@ function GarrisonSection({ army }: { army: any }) {
         </div>
       )}
 
-      {/* 近战区 */}
-      {meleeEntries.length > 0 && (
+      {/* 正规军 */}
+      {regEntries.length > 0 && (
         <>
           <div style="font-size: var(--f-xs); color: var(--c-ink-dim); padding: var(--s-2) 0 var(--s-1);">
-            近战部队
+            正规军
           </div>
           <div class="unit-grid">
-            {meleeEntries.map(([key, count]) => (
-              <UnitCard key={key} unitKey={key} count={count as number} trainable={trainable} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* 远程区 */}
-      {rangedEntries.length > 0 && (
-        <>
-          <div style="font-size: var(--f-xs); color: var(--c-ink-dim); padding: var(--s-2) 0 var(--s-1);">
-            远程部队
-          </div>
-          <div class="unit-grid">
-            {rangedEntries.map(([key, count]) => (
-              <UnitCard key={key} unitKey={key} count={count as number} trainable={trainable} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* 其他（form 既不是 melee 也不是 ranged） */}
-      {otherEntries.length > 0 && (
-        <>
-          <div style="font-size: var(--f-xs); color: var(--c-ink-dim); padding: var(--s-2) 0 var(--s-1);">
-            其他部队
-          </div>
-          <div class="unit-grid">
-            {otherEntries.map(([key, count]) => (
+            {regEntries.map(([key, count]) => (
               <UnitCard key={key} unitKey={key} count={count as number} trainable={trainable} />
             ))}
           </div>
@@ -516,10 +481,8 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
 }) {
   const info = unitInfo(unitKey);
   const t = trainable.find((u: any) => u.key === unitKey);
-  const merc = mercenaryInfo(unitKey);
   const name = t?.name ?? info.name;
   const cropPerHour = isMerc ? 0 : unitCropPerHour(unitKey);
-  const form = t?.form ?? merc?.form ?? info.form;
 
   return (
     <div
@@ -539,7 +502,6 @@ function UnitCard({ unitKey, count, trainable, isMerc = false }: {
       />
       <div class="unit-card__count">{fmt(count)}</div>
       <div class="unit-card__name">{name}</div>
-      <Tag kind={form === 'ranged' ? 'steel' : 'ember'}>{formName(form)}</Tag>
       <div class="unit-card__inspect" aria-hidden="true">查看兵种详情 ›</div>
       {cropPerHour > 0 && (
         <div class="unit-card__upkeep">{cropPerHour}/时·兵</div>

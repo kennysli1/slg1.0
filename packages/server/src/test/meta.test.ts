@@ -24,7 +24,7 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   assert.ok(p.resources[0].key && p.resources[0].name && p.resources[0].icon);
   // 兵种：下发数量 = config 兵种数量（新增 CSV 行会自动出现）
   assert.equal(p.units.length, Object.keys(app.config.units).length);
-  assert.ok(p.units.every((u: any) => u.key && u.tribe && u.name && u.icon && u.form));
+  assert.ok(p.units.every((u: any) => u.key && u.tribe && u.name && u.icon && Number.isFinite(u.attack) && Number.isFinite(u.defense) && Number.isFinite(u.hp)));
   // 建筑：下发数量 = config 建筑数量（含资源田，均带 zone）
   assert.equal(p.buildings.length, Object.keys(app.config.buildings).length);
   assert.ok(p.buildings.every((b: any) => b.kind && b.name && b.icon && b.zone));

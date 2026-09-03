@@ -63,16 +63,14 @@ export class MetaModule {
           } : {}),
         })),
         units: Object.values(c.units).map((u) => ({
-          key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, form: u.form,
+          key: u.key, tribe: u.tribe, name: u.name, icon: u.icon, attack: u.attack, defense: u.defense, hp: u.hp,
           popCost: u.popCost,
           upkeep: u.upkeep,
           isMercenary: !!u.isMercenary,
         })),
         // 雇佣兵单独下发（含完整战斗属性 + 金币单价），供招募店 UI 与军队详情展示
         mercenaries: Object.values(c.units).filter((u) => u.isMercenary).map((u) => ({
-          key: u.key, name: u.name, icon: u.icon, form: u.form,
-          meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
-          meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+          key: u.key, name: u.name, icon: u.icon, attack: u.attack, defense: u.defense, hp: u.hp,
           speed: u.speed, carry: u.carry, goldCost: u.goldCost ?? 0,
           commandCost: u.commandCost ?? 1,
           contractSec: u.contractSec ?? 259200,

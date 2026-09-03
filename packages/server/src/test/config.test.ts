@@ -239,12 +239,12 @@ test('M7-M9 与冒险者协会配置：任务村、倒计时、通用冒险者�
   assert.equal(cfg.buildings.explorers_guild.maxLevel, 1);
   assert.equal(cfg.units.adventurer.tribe, 'all');
   assert.equal(cfg.units.adventurer.building, 'explorers_guild');
-  assert.equal(cfg.units.adventurer.meleeAtk, 0);
-  assert.equal(cfg.units.adventurer.rangedAtk, 0);
+  assert.equal(cfg.units.adventurer.attack, 10);
+  assert.equal(cfg.units.adventurer.defense, 4);
   assert.equal(cfg.pveTemplates.tianwang_village.name, '天王老子村');
   assert.deepEqual(cfg.pveTemplates.tianwang_village.loot, { wood: 500, clay: 500, iron: 500, crop: 500 }, '天王老子村模板应标记四种资源各 500');
   assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.count, 15);
-  assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.meleeAtk, cfg.units.clubswinger.meleeAtk, '天王老子村应使用条顿棍棒兵战斗属性');
+  assert.equal(cfg.pveTemplates.tianwang_village.defender.clubswinger.attack, cfg.units.clubswinger.attack, '天王老子村应使用条顿棍棒兵战斗属性');
   assert.ok(cfg.dialogues['m8_deliver:1'], 'M8 成功交付对话应并入默认 deliver');
   assert.match(cfg.dialogues['m8_deliver:1']?.npcText ?? '', /英明的战略决策/);
   assert.ok(cfg.dialogues['m9_accept_m8_failure:1'], 'M9 失败分支对话代码应明确标注 M8 结局');
@@ -349,20 +349,16 @@ test('校验器：建筑 requires 循环依赖应抛错', () => {
   assert.throws(() => validateGameConfig(bad), /循环依赖/);
 });
 
-test('兵种：新战斗模型列被解析（form/近远攻防/特性）', () => {
+test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
-  assert.equal(leg.form, 'melee', '军团兵近战');
-  assert.equal(leg.meleeAtk, 80);
-  assert.equal(leg.meleeDef, 45);
-  assert.equal(leg.rangedDef, 40);
+  assert.equal(leg.attack, 59.04);
+  assert.equal(leg.defense, 45.11);
+  assert.equal(leg.hp, 280.14);
   const cat = cfg.units['catapult'];
-  assert.equal(cat.form, 'ranged', '投石机远程');
-  assert.ok(cat.rangedAtk > 0, '远程兵应有远攻');
-  // 多特性解析（| 分隔）：禁卫兵引用 trait 2(heavy_armor)+9(disciplined)，两个都应生效
-  assert.deepEqual(cfg.units['praetorian'].traits, ['heavy_armor', 'disciplined']);
-  assert.equal(cfg.unitTraits['shield'].effects[0].effect, 'dmg_taken_ranged');
-  assert.equal(cfg.unitTraits['shield'].effects[0].value, -0.25);
+  assert.ok(cat.attack > 0 && cat.defense > 0 && cat.hp > 0, '所有兵种只需三项战斗属性');
+  assert.equal(cfg.units.phalanx.defense, 47.39);
+  assert.equal(cfg.units.clubswinger.attack, 82.37);
 });
 
 test('校验器：兵种 form 非法应抛错', () => {

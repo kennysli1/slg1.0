@@ -1,7 +1,7 @@
 /** 军队页：驻军 + 训练 + 解散。 */
 import { art, unitArt, unitArtFallback, canAfford, costPreview, progressBar, escapeHtml, escapeAttr } from '../../shared/ui/widgets.js';
 import { showToast } from '../../shared/ui/toast.js';
-import { errText, formName, tribeName } from '../../shared/ui/text.js';
+import { errText, tribeName } from '../../shared/ui/text.js';
 import { unitInfo, resourceKeys } from '../../app/config.js';
 import { getCache, interpolatePop, getPopState } from '../../app/state.js';
 import { req } from '../../api.js';
@@ -23,11 +23,9 @@ function renderUnitDetailRows(u: any): string {
   const row = (label: string, value: string | number, hint = '') =>
     `<div class="ustat-row"><span class="ustat-label">${label}${hint ? `<small>${hint}</small>` : ''}</span><span class="ustat-val">${value}</span></div>`;
   return `<div class="ustat-list">
-    ${row('形态', formName(u.form), u.form === 'ranged' ? '后排远程' : '前排近战')}
-    ${row('近战攻击', r(u.meleeAtk))}
-    ${row('远程攻击', r(u.rangedAtk))}
-    ${row('近战防御', r(u.meleeDef), '挨近战时耐久')}
-    ${row('远程防御', r(u.rangedDef), '挨远程时耐久')}
+    ${row('攻击', r(u.attack))}
+    ${row('防御', r(u.defense))}
+    ${row('生命', r(u.hp))}
     ${row('移动速度', r(u.speed), '格/小时')}
     ${row('掠夺负重', r(u.carry))}
     ${row('每小时耗粮', r(u.upkeep))}
@@ -79,7 +77,7 @@ export function renderArmy(): string {
     return `<div class="card unit-card${unlocked ? '' : ' locked'}" data-unit-detail="${u.key}" title="点击查看 ${escapeAttr(u.name)} 详细属性">
       ${art(unitArt(u.key), u.name, 'md', unitArtFallback(u.key))}
       <div class="cardbody">
-        <div class="card-title">${escapeHtml(u.name)} <small class="tag">${formName(u.form)}</small>
+        <div class="card-title">${escapeHtml(u.name)}
           <small class="unit-detail-hint">详情 ›</small>
         </div>
         ${action}
@@ -213,7 +211,6 @@ function openUnitDetail(unitKey: string): void {
       <div class="drawer-head">
         ${art(unitArt(unitKey), name, 'sm', unitArtFallback(unitKey))}
         <span class="unit-drawer-name">${escapeHtml(name)}</span>
-        ${u ? `<small class="tag">${formName(u.form)}</small>` : ''}
         <button class="drawer-close" data-close-detail="1" aria-label="关闭">✕</button>
       </div>
       <div class="drawer-body">

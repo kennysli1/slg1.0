@@ -480,8 +480,6 @@ test('伏击军续行：伏击只能从城镇出发，抵达后不能再次执�
 
 test('伏击：驻扎后只在一格内触发，战斗结束双方幸存者均返城', async () => {
   const app = freshApp();
-  assert.equal(typeof app.config.constants.ambushAttackBonus, 'number', '伏击攻击加成应来自配置中心');
-  assert.ok(app.config.constants.ambushAttackBonus >= 0, '伏击攻击加成应为非负数');
   const ra = await send(app, 'player.Register', { name: '伏击甲', password: 'pass123', tribe: 'romans' });
   const rb = await send(app, 'player.Register', { name: '伏击乙', password: 'pass123', tribe: 'romans' });
   const A = (ra.payload as any).player;

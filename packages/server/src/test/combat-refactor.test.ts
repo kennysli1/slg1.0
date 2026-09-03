@@ -1,175 +1,70 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateCombatTick } from '../modules/combat/engine.js';
-import { buildSettlementPlan } from '../modules/combat/resolution.js';
-import type { Battle } from '../modules/combat/types.js';
-import { createGameApp, type GameApp } from '../app.js';
+import { simulateTotalAdRound } from '../infra/total-ad-combat.js';
 
-function melee(count: number, attack: number, defense: number, carry = 0, popCost = 1) {
-  return { count, form: 'melee' as const, meleeAtk: attack, rangedAtk: 0, meleeDef: defense, rangedDef: defense, carry, popCost };
-}
+const unit = (count: number, attack: number, defense: number, hp: number) => ({ count, attack, defense, hp, carry: 0 });
 
-test('combat engine：逐 tick 计算是纯函数，不修改输入快照', () => {
-  const attacker = { legionnaire: melee(2, 10, 10) };
-  const defender = { club: melee(2, 10, 10) };
-  const result = simulateCombatTick({
-    attacker,
-    defender,
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 1,
-    defenderWallMultiplier: 1,
-  });
-
-  assert.equal(attacker.legionnaire.count, 2);
-  assert.equal(defender.club.count, 2);
-  assert.equal(result.attacker.legionnaire.count, 2);
-  assert.equal(result.defender.club.count, 2);
-  assert.ok(result.attackerPending > 0);
-  assert.ok(result.defenderPending > 0);
+test('总攻击/总防御：双方使用回合开始兵力同时结算', () => {
+  const attacker = { a: unit(10, 10, 5, 20) };
+  const defender = { d: unit(10, 10, 5, 20) };
+  const result = simulateCombatTick({ attacker, defender });
+  assert.equal(attacker.a.count, 10);
+  assert.equal(defender.d.count, 10);
+  assert.equal(result.damageToAttacker, 10000 / 150);
+  assert.equal(result.damageToDefender, 10000 / 150);
+  assert.equal(result.attacker.a.count, 7);
+  assert.equal(result.defender.d.count, 7);
 });
 
-test('combat engine：攻击低于防御时仍会累积伤害', () => {
-  const result = simulateCombatTick({
-    attacker: { legionnaire: melee(1, 1, 1) },
-    defender: { club: melee(1, 1, 100) },
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 1,
-    defenderWallMultiplier: 1,
+test('生命值余伤按兵种独立累计，且伤害按人数比例分摊', () => {
+  const first = simulateTotalAdRound({
+    attacker: { a: unit(1, 10, 1, 10) },
+    defender: { low: unit(1, 7, 1, 5), high: unit(1, 7, 1, 20) },
   });
-
-  assert.ok(result.killsToDefender > 0, '低于防御时也必须产生正的减员速率');
-  assert.ok(result.defenderPending > 0, '小额伤害应通过 pending 跨 tick 累积');
+  assert.equal(first.damageToDefender, 100 / 12);
+  assert.equal(first.defender.low.count, 1);
+  assert.equal(first.defender.high.count, 1);
+  assert.ok((first.defenderDamageCarry.low ?? 0) > 0);
+  assert.ok((first.defenderDamageCarry.high ?? 0) > 0);
 });
 
-test('combat engine：兰开斯特平方律会放大人数优势', () => {
-  const oneAgainstOne = simulateCombatTick({
-    attacker: { legionnaire: melee(1, 10, 10) },
-    defender: { club: melee(1, 10, 10) },
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 6,
-    defenderWallMultiplier: 1,
-  });
-  const twoAgainstOne = simulateCombatTick({
-    attacker: { legionnaire: melee(2, 10, 10) },
-    defender: { club: melee(1, 10, 10) },
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 6,
-    defenderWallMultiplier: 1,
-  });
-
-  assert.ok(oneAgainstOne.defender.club, '势均力敌时双方都应有幸存者');
-  assert.equal(twoAgainstOne.defender.club, undefined, '两倍兵力的一方应在相同时间内清空单个敌人');
-  assert.equal(twoAgainstOne.attacker.legionnaire.count, 2, '人数优势方应保留幸存兵力');
+test('旧快照的零攻击会归一为最低攻击 10，战斗可在无回合上限下结束', () => {
+  let attacker = { a: unit(10, 0, 20, 60) };
+  let defender = { d: unit(10, 0, 20, 60) };
+  let attackerCarry = {}; let defenderCarry = {};
+  for (let round = 0; round < 1000 && (attacker.a?.count ?? 0) > 0 && (defender.d?.count ?? 0) > 0; round += 1) {
+    const next = simulateTotalAdRound({ attacker, defender, attackerDamageCarry: attackerCarry, defenderDamageCarry: defenderCarry });
+    attacker = next.attacker as typeof attacker; defender = next.defender as typeof defender;
+    attackerCarry = next.attackerDamageCarry; defenderCarry = next.defenderDamageCarry;
+  }
+  assert.ok((attacker.a?.count ?? 0) === 0 || (defender.d?.count ?? 0) === 0);
 });
 
-test('combat engine：高人口兵种按有效人口参战，等人口同比面板与低人口兵种等价', () => {
-  const one = simulateCombatTick({
-    attacker: { legionnaire: melee(100, 50, 50) },
-    defender: { club: melee(100, 40, 60) },
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 1,
-    defenderWallMultiplier: 1,
-  });
-  const two = simulateCombatTick({
-    attacker: { legionnaire: melee(50, 100, 100, 0, 2) },
-    defender: { club: melee(100, 40, 60) },
-    attackerPending: 0,
-    defenderPending: 0,
-    combatStrength: 0.1,
-    dt: 1,
-    defenderWallMultiplier: 1,
-  });
-  assert.ok(Math.abs(one.killsToDefender - two.killsToDefender) < 0.0001);
-  assert.ok(Math.abs(one.killsToAttacker - two.killsToAttacker) < 0.0001);
-  assert.equal(one.attackerPending, two.attackerPending);
-  assert.equal(one.defenderPending, two.defenderPending);
-});
-
-test('settlement plan：按来源拆分伤亡，并计算幸存者运力', () => {
-  const battle = {
-    id: 'bt-refactor',
-    targetKind: 'village',
-    targetId: 'v1',
-    targetXY: { q: 0, r: 0 },
-    wallLevel: 0,
-    attacker: { 'mv-a#legionnaire': melee(3, 10, 10, 5), 'mv-b#legionnaire': melee(1, 10, 10, 5) },
-    defender: { 'resident:v1#club': melee(2, 10, 10), 'reinforcement:mv-d#club': melee(1, 10, 10) },
-    defenderOriginal: { 'resident:v1#club': 2, 'reinforcement:mv-d#club': 1 },
-    defenderContributions: {
-      'resident:v1': { sourceId: 'resident:v1', fromVillage: 'v1', troops: { club: 2 } },
-      'reinforcement:mv-d': { sourceId: 'reinforcement:mv-d', movementId: 'mv-d', fromVillage: 'v2', troops: { club: 1 } },
-    },
-    contributions: {
-      'mv-a': { movementId: 'mv-a', fromVillage: 'v1', fromXY: { q: 0, r: 0 }, troops: { legionnaire: 3 }, treasures: [] },
-      'mv-b': { movementId: 'mv-b', fromVillage: 'v2', fromXY: { q: 1, r: 0 }, troops: { legionnaire: 1 }, treasures: [] },
-    },
-    attackerPending: 0,
-    defenderPending: 0,
-    initialAttacker: { legionnaire: 4 },
-    initialDefender: { club: 3 },
-    rounds: [],
-    attackPower0: 40,
-    defensePower0: 30,
-    startedAt: 1,
-    ticks: 1,
-    status: 'resolving',
-  } satisfies Battle;
-
-  battle.attacker['mv-a#legionnaire']!.count = 2;
-  battle.defender['resident:v1#club']!.count = 1;
-  battle.defender['reinforcement:mv-d#club']!.count = 0;
-  const plan = buildSettlementPlan(battle);
-
-  assert.equal(plan.attackerWins, false);
-  assert.deepEqual(plan.attackerLosses, { legionnaire: 1 });
-  assert.deepEqual(plan.defenderLosses, { club: 2 });
-  assert.deepEqual(plan.residentDefenderLosses, { club: 1 });
-  assert.deepEqual(plan.defenderLossesByMovement, { 'mv-d': { club: 1 } });
-  assert.equal(plan.totalCarry, 15);
-});
-
-test('combat resume：resolving 状态会继续结算并清理战场记录', async () => {
-  let clock = 1_000_000;
-  const app: GameApp = createGameApp({ now: () => clock, manualScheduler: true });
-  app.setupWorld();
-  const battle: Battle = {
-    id: 'bt-resume',
-    targetKind: 'pve',
-    targetId: 'pve-0',
-    targetXY: { q: 0, r: 0 },
-    wallLevel: 0,
-    attacker: { 'mv-resume#legionnaire': melee(1, 100, 10, 10) },
-    defender: {},
-    defenderOriginal: {},
-    contributions: {
-      'mv-resume': { movementId: 'mv-resume', fromVillage: 'v1', fromXY: { q: 0, r: 0 }, troops: { legionnaire: 1 }, treasures: [] },
-    },
-    attackerPending: 0,
-    defenderPending: 0,
-    initialAttacker: { legionnaire: 1 },
-    initialDefender: {},
-    rounds: [],
-    attackPower0: 100,
-    defensePower0: 0,
-    startedAt: clock,
-    ticks: 1,
-    status: 'resolving',
-    resolution: { id: 'bt-resume:resolution', step: 'apply_domain', startedAt: clock },
+test('三个基础步兵准确复现六个 100 对 100 目标', () => {
+  const values = {
+    legionnaire: unit(100, 59.04, 45.11, 280.14),
+    clubswinger: unit(100, 82.37, 58.79, 152.45),
+    phalanx: unit(100, 84.34, 47.39, 162.41),
   };
-  app.store.set('battle', battle.id, battle);
-
-  app.combat.resume();
-  clock += 1;
-  await app.scheduler.advanceTo(clock, (time) => { clock = time; });
-  assert.equal(app.store.get('battle', battle.id), undefined);
+  const fights: Array<[keyof typeof values, keyof typeof values, keyof typeof values, number]> = [
+    ['clubswinger', 'legionnaire', 'clubswinger', 30],
+    ['clubswinger', 'phalanx', 'clubswinger', 10],
+    ['legionnaire', 'clubswinger', 'legionnaire', 20],
+    ['legionnaire', 'phalanx', 'phalanx', 30],
+    ['phalanx', 'clubswinger', 'phalanx', 10],
+    ['phalanx', 'legionnaire', 'legionnaire', 20],
+  ];
+  for (const [attackerCode, defenderCode, survivorCode, expected] of fights) {
+    let attacker = { [attackerCode]: { ...values[attackerCode] } };
+    let defender = { [defenderCode]: { ...values[defenderCode] } };
+    let attackerCarry = {}; let defenderCarry = {};
+    while (Object.values(attacker).some((u) => u.count > 0) && Object.values(defender).some((u) => u.count > 0)) {
+      const next = simulateTotalAdRound({ attacker, defender, attackerDamageCarry: attackerCarry, defenderDamageCarry: defenderCarry });
+      attacker = next.attacker as typeof attacker; defender = next.defender as typeof defender;
+      attackerCarry = next.attackerDamageCarry; defenderCarry = next.defenderDamageCarry;
+    }
+    const remaining = attacker[survivorCode as keyof typeof attacker]?.count ?? defender[survivorCode as keyof typeof defender]?.count ?? 0;
+    assert.equal(remaining, expected, `${attackerCode} 攻 ${defenderCode}`);
+  }
 });

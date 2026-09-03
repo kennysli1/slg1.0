@@ -313,8 +313,9 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
   const cfg = seedConfig();
   const state = tempDir('kow-config-conflict-state-');
   const localUnits = readFileSync(join(cfg.dir, 'units.csv'), 'utf8');
-  const mainUnits = localUnits.replace('80,0,45,40,100,50', '81,0,45,40,100,50');
-  const branchUnits = localUnits.replace('80,0,45,40,100,50', '79,0,45,40,100,50');
+  // 使用当前三属性兵种表中稳定存在的军团攻击值，模拟同一行的并发改动。
+  const mainUnits = localUnits.replace('59.04', '59.05');
+  const branchUnits = localUnits.replace('59.04', '59.06');
   let branchSha = 'branch-sha';
   let mergeable = false;
   let mergeState = 'dirty';

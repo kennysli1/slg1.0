@@ -327,7 +327,7 @@ export class PveModule {
     const defender: Snapshot = {};
     for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;
-      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), form: def.form, popCost: def.popCost, meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk, meleeDef: def.meleeDef, rangedDef: def.rangedDef, hp: def.hp, carry: def.carry, isCavalry: c.cavalryUnitCodes.includes(code), traits: [] };
+      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), popCost: def.popCost, attack: def.attack, defense: def.defense, hp: def.hp, carry: def.carry };
     }
     const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
     const raidDefense: Snapshot = {};

@@ -5,7 +5,7 @@
 import { dataVersion } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
 import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour } from '../../app/config.js';
-import { formName, tribeName } from '../../shared/ui/text.js';
+import { tribeName } from '../../shared/ui/text.js';
 import { openModal } from '../../app/store.js';
 import {
   Modal, IconPlate, Tag, StatGrid, Stat, CostRow, Divider,
@@ -29,11 +29,9 @@ function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () =>
   // 优先用 trainable 的派生属性快照；雇佣兵用 mercenaryInfo 回退
   const stats = trainableEntry ?? (merc ? {
     key: unitKey,
-    form: merc.form,
-    meleeAtk: merc.meleeAtk,
-    rangedAtk: merc.rangedAtk,
-    meleeDef: merc.meleeDef,
-    rangedDef: merc.rangedDef,
+    attack: merc.attack,
+    defense: merc.defense,
+    hp: merc.hp,
     speed: merc.speed,
     carry: merc.carry,
     upkeep: 0,
@@ -52,7 +50,6 @@ function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () =>
   return (
     <Modal
       title={name}
-      sub={stats ? formName(stats.form) : undefined}
       icon={
         <IconPlate
           icon={info.icon ?? `unit_${unitKey}`}
@@ -66,13 +63,12 @@ function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () =>
     >
       <div class="unit-detail-body">
 
-        {/* 阵营 + 形态标签 */}
+        {/* 阵营标签 */}
         <div class="unit-detail-hero">
           <div class="unit-detail-hero__meta">
             <div class="unit-detail-hero__name">{name}</div>
             <div class="unit-detail-traits">
               {army?.tribe && <Tag kind="gold">{tribeName(army.tribe)}族</Tag>}
-              {stats && <Tag kind={stats.form === 'ranged' ? 'steel' : 'ember'}>{formName(stats.form)}</Tag>}
               {info.isMercenary && <Tag kind="gold">雇佣兵</Tag>}
               {isLocked && <Tag kind="crimson">未解锁</Tag>}
             </div>
@@ -90,14 +86,12 @@ function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () =>
             <div>
               <div class="unit-detail-sec">战斗属性</div>
               <StatGrid>
-                <Stat icon="ui_icon_atk" label="近战攻击" value={r(stats.meleeAtk)}
-                  title="与近战单位交战时的攻击值" />
-                <Stat icon="ui_icon_atk" label="远程攻击" value={r(stats.rangedAtk)}
-                  title="远程齐射的攻击值（近战兵种为 0）" />
-                <Stat icon="ui_icon_def" label="近战防御" value={r(stats.meleeDef)}
-                  title="承受近战攻击时的耐久" />
-                <Stat icon="ui_icon_def" label="远程防御" value={r(stats.rangedDef)}
-                  title="承受远程攻击时的耐久" />
+                <Stat icon="ui_icon_atk" label="攻击" value={r(stats.attack)}
+                  title="每名存活士兵贡献的攻击" />
+                <Stat icon="ui_icon_def" label="防御" value={r(stats.defense)}
+                  title="每名存活士兵贡献的防御" />
+                <Stat icon="ui_icon_pop" label="生命" value={r(stats.hp)}
+                  title="累计承受相当于生命值的伤害时阵亡一名士兵" />
                 <Stat icon="ui_icon_speed" label="移动速度" value={`${r(stats.speed)} 格/时`}
                   title="行军移动速度" />
                 <Stat icon="ui_icon_carry" label="单位运力" value={r(stats.carry)}
