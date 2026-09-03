@@ -283,6 +283,11 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
+  assert.deepEqual(
+    Object.values(cfg.buildings.alliance_hall.levels ?? {}).map((level) => level.timeSec),
+    Array.from({ length: 10 }, () => 10),
+    '联盟大厅 1-10 级默认建造时间应与配置中心全十秒版本一致',
+  );
   // 主基地固定四级；逐级人口上限增量由配置中心决定，不在测试中硬编码。
   const main = cfg.buildings['main'];
   assert.equal(main.name, '主基地', '主基地显示名应统一');
