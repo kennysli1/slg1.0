@@ -180,7 +180,9 @@ describe('联盟目录与战事目标交互', () => {
     assert.match(app, /allianceWarFocus\.value = true/);
     assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
     assert.match(alliance, /CancelAllianceWarParticipation/);
-    assert.match(alliance, /p\.status === 'open'\s*\? now < Number\(p\.deadlineAt\)/);
+    assert.match(alliance, /const cancelAnchor = Number\(p\.joinDeadlineAt \?\? p\.deadlineAt\)/);
+    assert.match(alliance, /now >= cancelAnchor/);
+    assert.match(alliance, /now - cancelAnchor < 90_000/);
     assert.match(alliance, /war-treasure-picker/);
     assert.match(alliance, /treasureCarryCap\(troopCount\)/);
     assert.match(alliance, /treasures: selectedTreasures/);

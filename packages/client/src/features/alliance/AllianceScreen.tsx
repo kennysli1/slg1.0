@@ -160,8 +160,8 @@ function WarPane({ alliance, isLeader, roles, busy, onAction, villages, sourceVi
   const legacyPlan = (plan: any) => Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
   const recallablePlan = (plan: any) => {
     if (plan.status !== 'dispatched' || !Number.isFinite(Number(plan.allDispatchedAt))) return false;
-    const anchor = legacyPlan(plan) ? Number(plan.allDispatchedAt) : Number(plan.joinDeadlineAt);
-    return Number.isFinite(anchor) && (legacyPlan(plan) ? now - anchor < 90_000 : now >= anchor && now - anchor < 90_000);
+    const anchor = Number(plan.joinDeadlineAt ?? plan.deadlineAt ?? plan.allDispatchedAt);
+    return Number.isFinite(anchor) && now >= anchor && now - anchor < 90_000;
   };
   const setPart = (setter: any, key: 'h' | 'm' | 's', value: string) => setter((prev: any) => ({ ...prev, [key]: key === 'h' ? value.replace(/\D/g, '').slice(0, 6) || '0' : String(Math.min(59, Math.max(0, Number(value.replace(/\D/g, '')) || 0))) }));
   const timeFields = (label: string, parts: any, setter: any) => <label class="war-countdown-group"><span>{label}</span><span><input type="number" min="0" value={parts.h} onInput={(e) => setPart(setter, 'h', (e.currentTarget as HTMLInputElement).value)} />时</span><span><input type="number" min="0" max="59" value={parts.m} onInput={(e) => setPart(setter, 'm', (e.currentTarget as HTMLInputElement).value)} />分</span><span><input type="number" min="0" max="59" value={parts.s} onInput={(e) => setPart(setter, 's', (e.currentTarget as HTMLInputElement).value)} />秒</span></label>;
@@ -196,12 +196,15 @@ function WarPlanCard({ p, now, canPlan, busy, onAction, villages, sourceVillageI
   const joinRemain = joinRemainingSec(p);
   const participants = Object.values(p.participants ?? {}) as any[];
   const mine = p.participants?.[me?.id ?? ''];
-  const cancelWindow = canPlan && (p.status === 'open'
-    ? now < Number(p.deadlineAt)
-    : p.status === 'dispatched' && (legacyPlan(p) ? now < Number(p.deadlineAt) : now >= Number(p.joinDeadlineAt ?? 0) && now - Number(p.joinDeadlineAt ?? 0) < 90_000));
-  const cancelRemain = p.status === 'open' || legacyPlan(p)
-    ? Math.max(0, Math.ceil((Number(p.deadlineAt) - now) / 1000))
-    : Math.max(0, 90 - Math.floor((now - Number(p.joinDeadlineAt)) / 1000));
+  const cancelAnchor = Number(p.joinDeadlineAt ?? p.deadlineAt);
+  const cancelWindow = canPlan
+    && (p.status === 'open' || p.status === 'dispatched')
+    && Number.isFinite(cancelAnchor)
+    && now >= cancelAnchor
+    && now - cancelAnchor < 90_000;
+  const cancelRemain = Number.isFinite(cancelAnchor)
+    ? Math.max(0, Math.ceil((cancelAnchor + 90_000 - now) / 1000))
+    : 0;
   const availableCodes = Object.keys(available).filter((code) => Number(available[code]) > 0).sort();
   const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, count]) => Number(count) > 0));
   const troopCount = (Object.values(selectedTroops) as unknown[]).reduce<number>((sum, count) => sum + Number(count), 0);
