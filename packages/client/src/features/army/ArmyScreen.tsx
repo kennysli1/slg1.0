@@ -63,11 +63,50 @@ export function VillageArmyManagement() {
         <small>驻军、训练、援军与防御都归属当前村庄</small>
       </div>
       <GarrisonSection army={army} />
+      <AllianceReserveSection army={army} />
       <ReinforcementSection army={army} />
       <TrainingCenterSection />
       <RaidDefenseSection army={army} />
       <DisbandSection army={army} />
     </section>
+  );
+}
+
+// ============================================================
+// § 1.1  联盟战事预备队（默认折叠）
+// ============================================================
+
+function AllianceReserveSection({ army }: { army: any }) {
+  const reservations: any[] = army.allianceWarReservations ?? [];
+  const reserved: Record<string, number> = army.allianceReservedTroops ?? {};
+  const rows = Object.entries(reserved).filter(([, count]) => Number(count) > 0);
+  if (reservations.length === 0 && rows.length === 0) return null;
+  const modeName: Record<string, string> = { raid: '掠夺', attack: '攻城', reinforce: '增援' };
+  return (
+    <Panel pad class="army-management-panel">
+      <details class="army-collapsible-details alliance-reserve-details">
+        <summary class="section-head section-head--toggle">
+          <span>联盟战事预备队</span>
+          <small>已报名锁定 · 不可用于其他行动</small>
+          <i aria-hidden="true">›</i>
+        </summary>
+        <div class="alliance-reserve-panel">
+          <div class="alliance-reserve-total">
+            {rows.length ? rows.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>) : <span>暂无锁定兵力</span>}
+          </div>
+          {reservations.map((row) => {
+            const troopEntries = Object.entries(row.troops ?? {}).filter(([, count]) => Number(count) > 0);
+            const target = row.targetVillage ?? row.targetId ?? '目标地块';
+            return (
+              <div class="alliance-reserve-row" key={`${row.allianceId}-${row.planId}-${row.playerId}`}>
+                <div class="alliance-reserve-row__head"><strong>{row.allianceName ?? '联盟'} · {modeName[row.mode] ?? row.mode}</strong><span>{row.playerName ?? row.playerId} · {target}</span></div>
+                <div class="alliance-reserve-row__troops">{troopEntries.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+    </Panel>
   );
 }
 
