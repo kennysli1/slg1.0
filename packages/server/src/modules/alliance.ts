@@ -13,7 +13,11 @@ interface WarParticipant {
   sourceVillageId: string;
   troops: Record<string, number>;
   travelSec: number;
-  status: 'joined' | 'dispatched' | 'failed';
+  status: 'joined' | 'dispatched' | 'failed' | 'recalled';
+  /** 实际创建的行军 id；联盟撤回复用 Movement 的通用撤回命令。 */
+  movementId?: string;
+  dispatchedAt?: number;
+  recalledAt?: number;
 }
 
 interface WarPlan {
@@ -25,7 +29,12 @@ interface WarPlan {
   q: number;
   r: number;
   deadlineAt: number;
+  /** 创建时的倒计时秒数；deadlineAt 保留为服务端权威截止时刻。 */
+  countdownSec?: number;
+  createdAt?: number;
   status: 'open' | 'dispatched' | 'cancelled';
+  allDispatchedAt?: number;
+  cancelledAt?: number;
   participants: Record<string, WarParticipant>;
 }
 
@@ -142,6 +151,8 @@ export class AllianceModule {
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
     this.commands.register('alliance.CreateWarPlan', (c) => this.createWarPlan(c));
     this.commands.register('alliance.JoinWarPlan', (c) => this.joinWarPlan(c));
+    this.commands.register('alliance.CancelWarPlan', (c) => this.cancelWarPlan(c));
+    this.commands.register('alliance.RecallWarPlan', (c) => this.recallWarPlan(c));
     this.commands.register('alliance.GetRelation', (c) => this.getRelation(c));
     // Movement/Building 等 owner 通过命令查询，不直接依赖联盟存储。
     this.commands.register('alliance.CanBuildHall', (c) => this.canBuildHall(c));
@@ -158,6 +169,9 @@ export class AllianceModule {
     // 事件；监听 World 的移除事件，保证大厅失联立即传播给联盟成员。
     this.bus.on('world.VillageRemoved', (evt) => void this.onVillageRemoved(evt));
     this.bus.on('player.VillageAttached', (evt) => void this.syncPlayerModifiers(String((evt.payload as any)?.playerId ?? '')));
+    // 成员从地图主动撤回时，同步联盟战事参与状态，避免盟主看到过期的“已派出”。
+    this.bus.on('movement.Recalled', (evt) => void this.onWarMovementRecalled(evt));
+    this.bus.on('movement.GarrisonRecalled', (evt) => void this.onWarMovementRecalled(evt));
   }
 
   async resume(): Promise<void> {
@@ -427,6 +441,19 @@ export class AllianceModule {
     };
   }
 
+  /** 仅给当前请求玩家下发其各村驻村可用兵力，供联盟战事表单逐兵种选择。 */
+  private async availableTroopsByVillage(playerId: string): Promise<Record<string, Record<string, number>>> {
+    const result: Record<string, Record<string, number>> = {};
+    const p = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId } });
+    const villages = (p.payload as any)?.player?.villages ?? [];
+    for (const village of villages) {
+      const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: village.id } });
+      if (!army.ok) continue;
+      result[String(village.id)] = Object.fromEntries(Object.entries((army.payload as any)?.troops ?? {}).map(([code, count]) => [code, positiveInt(count)]));
+    }
+    return result;
+  }
+
   private async get(cmd: Command): Promise<CommandResult> {
     const playerId = String((cmd.payload as any)?.playerId ?? '');
     const id = this.idForPlayer(playerId);
@@ -434,7 +461,9 @@ export class AllianceModule {
     const a = this.load(id); if (!a) return { ok: true, payload: { alliance: null } };
     await this.refreshConnectivity(a);
     const members = []; for (const memberId of a.memberIds) members.push(await this.memberView(a, memberId));
-    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
+    const availableTroopsByVillage = await this.availableTroopsByVillage(playerId);
+    const unitCatalog = Object.values(this.config.units).map((u) => ({ code: u.key, name: u.name, form: u.form, icon: u.icon }));
+    return { ok: true, payload: { alliance: { id: a.id, name: a.name, leaderId: a.leaderId, leaderName: a.leaderName, level: a.level, memberCap: this.cap(a), disconnected: !!a.disconnected, hallVillageId: a.hallVillageId, roles: a.roles, roleCatalog: this.roleCatalog(a), members, warehouse: a.warehouse, resourceContributions: a.resourceContributions, pendingResourceDeliveries: Object.entries(a.pendingResourceDeliveries ?? {}).map(([id, delivery]) => ({ id, ...delivery })), techPointStock: a.techPointStock, technologies: a.technologies, buildings: a.buildings, buildingCatalog: Object.values(this.config.allianceBuildings), techCatalog: Object.values(this.config.allianceTech), researchingBuilding: a.researchingBuilding ?? null, researchingTech: a.researchingTech ?? null, warPlans: Object.values(a.warPlans), availableTroopsByVillage, unitCatalog, joinRequests: a.leaderId === playerId ? a.joinRequests : {} } } };
   }
 
   private async create(cmd: Command): Promise<CommandResult> {
@@ -689,13 +718,20 @@ export class AllianceModule {
   }
 
   private async createWarPlan(cmd: Command): Promise<CommandResult> {
-    const { playerId, mode, targetKind, targetVillage, targetId, q, r, deadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; deadlineAt: number };
+    const { playerId, mode, targetKind, targetVillage, targetId, q, r, countdownSec, deadlineAt: legacyDeadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; countdownSec?: number; deadlineAt?: number };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
     if (!['reinforce', 'raid', 'attack'].includes(mode) || !['village', 'pve'].includes(targetKind)) return { ok: false, payload: {}, reason: 'invalid_war_plan' };
     if (mode === 'reinforce' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'reinforce_village_only' };
     if ((targetKind === 'village' && !targetVillage) || (targetKind === 'pve' && !targetId)) return { ok: false, payload: {}, reason: 'war_target_required' };
-    const deadline = Number(deadlineAt); if (!Number.isFinite(deadline) || deadline < this.now() + 10_000) return { ok: false, payload: {}, reason: 'deadline_too_soon' };
+    // 新客户端提交倒计时秒数；兼容旧客户端的绝对 deadlineAt，最终统一落为服务端时间点。
+    const rawCountdown = Number(countdownSec);
+    const legacyDeadline = Number(legacyDeadlineAt);
+    const deadline = Number.isInteger(rawCountdown) && rawCountdown > 0
+      ? this.now() + rawCountdown * 1000
+      : legacyDeadline;
+    if (!Number.isFinite(deadline) || deadline < this.now() + 10_000) return { ok: false, payload: {}, reason: 'deadline_too_soon' };
+    const normalizedCountdownSec = Math.max(1, Math.ceil((deadline - this.now()) / 1000));
     let targetQ = Number.isFinite(Number(q)) ? Math.trunc(Number(q)) : 0;
     let targetR = Number.isFinite(Number(r)) ? Math.trunc(Number(r)) : 0;
     if (targetKind === 'pve' && targetId) {
@@ -713,7 +749,7 @@ export class AllianceModule {
       const targetVillageView = (targetPlayer?.villages ?? []).find((v: any) => v.id === targetVillage);
       if (targetVillageView) { targetQ = Math.trunc(Number(targetVillageView.q)); targetR = Math.trunc(Number(targetVillageView.r)); }
     }
-    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, status: 'open', participants: {} };
+    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, createdAt: this.now(), status: 'open', participants: {} };
     a.warPlans[plan.id] = plan; this.store.set(COLLECTION, a.id, a); await this.push(a); return { ok: true, payload: { plan } };
   }
 
@@ -754,9 +790,92 @@ export class AllianceModule {
     else if (plan.targetKind === 'pve') { action = plan.mode === 'raid' ? 'movement.SendRaid' : 'movement.SendAttack'; payload.targetId = plan.targetId; }
     else { action = plan.mode === 'raid' ? 'movement.SendVillageRaid' : 'movement.SendAttack'; payload.targetVillage = plan.targetVillage; payload.declareWar = true; }
     const result = await this.commands.send({ name: action, from: AllianceModule.NAME, payload });
-    p.status = result.ok ? 'dispatched' : 'failed'; this.store.set(COLLECTION, a.id, a);
-    if (Object.values(plan.participants).every((x) => x.status !== 'joined')) plan.status = 'dispatched';
+    const movementId = result.ok ? String((result.payload as any)?.id ?? '') : '';
+    // CancelWarPlan may have won the race while the movement command was in
+    // flight. Do not resurrect a cancelled plan; best-effort recall the
+    // movement that was created before cancellation became visible.
+    if (plan.status !== 'open') {
+      if (movementId) {
+        p.movementId = movementId; p.status = 'dispatched'; p.dispatchedAt = this.now();
+        await this.recallParticipant(plan, p);
+        this.store.set(COLLECTION, a.id, a);
+      }
+      return;
+    }
+    p.status = result.ok && movementId ? 'dispatched' : 'failed';
+    if (p.status === 'dispatched') { p.movementId = movementId; p.dispatchedAt = this.now(); }
+    this.store.set(COLLECTION, a.id, a);
+    if (Object.values(plan.participants).every((x) => x.status !== 'joined')) {
+      plan.status = 'dispatched';
+      if (Object.values(plan.participants).some((x) => x.status === 'dispatched')) plan.allDispatchedAt = this.now();
+    }
     await this.push(a);
+  }
+
+  /** 盟主/战争专家在倒计时结束前取消尚未完成的集结；已发出的部队尽量复用通用撤回命令。 */
+  private async cancelWarPlan(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
+    if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
+    const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
+    if (plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    if (this.now() >= plan.deadlineAt) return { ok: false, payload: {}, reason: 'war_deadline_passed' };
+    plan.status = 'cancelled'; plan.cancelledAt = this.now();
+    for (const participant of Object.values(plan.participants)) {
+      if (participant.status === 'joined') this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+    }
+    this.store.set(COLLECTION, a.id, a);
+    const recalls = [];
+    for (const participant of Object.values(plan.participants)) {
+      if (participant.status !== 'dispatched' || !participant.movementId) continue;
+      recalls.push(await this.recallParticipant(plan, participant));
+    }
+    this.store.set(COLLECTION, a.id, a); await this.push(a);
+    return { ok: true, payload: { plan, recalls } };
+  }
+
+  /** 所有参与者已派出后 90 秒内，一键替成员撤回各自的军队。 */
+  private async recallWarPlan(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
+    if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
+    const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
+    if (plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_not_dispatched' };
+    const dispatchedAt = Number(plan.allDispatchedAt);
+    if (!Number.isFinite(dispatchedAt) || this.now() - dispatchedAt >= 90_000) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
+    const recalls = [];
+    for (const participant of Object.values(plan.participants)) {
+      if (participant.status !== 'dispatched' || !participant.movementId) continue;
+      recalls.push(await this.recallParticipant(plan, participant));
+    }
+    plan.status = 'cancelled'; plan.cancelledAt = this.now();
+    this.store.set(COLLECTION, a.id, a); await this.push(a);
+    return { ok: true, payload: { plan, recalls } };
+  }
+
+  private async recallParticipant(plan: WarPlan, participant: WarParticipant): Promise<{ playerId: string; movementId?: string; ok: boolean; reason?: string }> {
+    if (!participant.movementId) return { playerId: participant.playerId, ok: false, reason: 'movement_not_found' };
+    let result = await this.commands.send({ name: 'movement.RecallMarch', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, movementId: participant.movementId } });
+    // 增援抵达后已驻扎，必须使用驻军专用召回命令；两者都由 Movement owner 校验 90 秒/状态。
+    if (!result.ok && plan.mode === 'reinforce' && result.reason === 'use_recall_garrison') {
+      result = await this.commands.send({ name: 'movement.RecallGarrison', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, movementId: participant.movementId } });
+    }
+    if (result.ok) { participant.status = 'recalled'; participant.recalledAt = this.now(); }
+    return { playerId: participant.playerId, movementId: participant.movementId, ok: result.ok, ...(result.ok ? {} : { reason: result.reason ?? 'recall_failed' }) };
+  }
+
+  private async onWarMovementRecalled(evt: DomainEvent): Promise<void> {
+    const movementId = String((evt.payload as any)?.id ?? ''); if (!movementId) return;
+    for (const a of this.store.all<AllianceState>(COLLECTION)) {
+      let changed = false;
+      for (const plan of Object.values(a.warPlans)) for (const participant of Object.values(plan.participants)) {
+        if (participant.movementId !== movementId || participant.status !== 'dispatched') continue;
+        participant.status = 'recalled'; participant.recalledAt = this.now(); changed = true;
+      }
+      if (changed) { this.store.set(COLLECTION, a.id, a); await this.push(a); }
+    }
   }
 
   private getRelation(cmd: Command): CommandResult {
