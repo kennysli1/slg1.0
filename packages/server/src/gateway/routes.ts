@@ -6,6 +6,29 @@ import type { ModuleManifest } from './manifest.js';
  */
 export const MODULE_MANIFESTS: ModuleManifest[] = [
   {
+    moduleName: 'alliance',
+    publicActions: {
+      ListAlliances: { command: 'alliance.List', needAuth: true, injectPlayerId: true, schema: { query: { type: 'string', optional: true, maxLen: 64 } } },
+      GetAlliance: { command: 'alliance.Get', needAuth: true, injectPlayerId: true, schema: {} },
+      CreateAlliance: { command: 'alliance.Create', needAuth: true, injectPlayerId: true, schema: { sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, name: { type: 'string', minLen: 2, maxLen: 24 } } },
+      ApplyAlliance: { command: 'alliance.Apply', needAuth: true, injectPlayerId: true, schema: { allianceId: { type: 'string', minLen: 1, maxLen: 64 } } },
+      ReviewAllianceRequest: { command: 'alliance.ReviewRequest', needAuth: true, injectPlayerId: true, schema: { applicantId: { type: 'string', minLen: 1, maxLen: 64 }, approve: { type: 'boolean' } } },
+      LeaveAlliance: { command: 'alliance.Leave', needAuth: true, injectPlayerId: true, schema: {} },
+      SetAllianceRole: { command: 'alliance.SetRole', needAuth: true, injectPlayerId: true, schema: { targetPlayerId: { type: 'string', minLen: 1, maxLen: 64 }, role: { type: 'string', optional: true, maxLen: 32 } } },
+      RemoveAllianceMember: { command: 'alliance.RemoveMember', needAuth: true, injectPlayerId: true, schema: { targetPlayerId: { type: 'string', minLen: 1, maxLen: 64 } } },
+      DepositAllianceResources: { command: 'alliance.DepositResources', needAuth: true, injectPlayerId: true, schema: { sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, amount: { type: 'json' } } },
+      BuyAllianceService: { command: 'alliance.BuyService', needAuth: true, injectPlayerId: true, schema: { serviceCode: { type: 'string', minLen: 1, maxLen: 64 } } },
+      StartAllianceBuilding: { command: 'alliance.StartBuilding', needAuth: true, injectPlayerId: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      StartAllianceTech: { command: 'alliance.StartTech', needAuth: true, injectPlayerId: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
+      ContributeAllianceTech: { command: 'alliance.ContributeTech', needAuth: true, injectPlayerId: true, schema: { sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, amount: { type: 'integer', min: 1, max: 1000000 } } },
+      CreateAllianceWarPlan: { command: 'alliance.CreateWarPlan', needAuth: true, injectPlayerId: true, schema: { mode: { type: 'enum', values: ['reinforce', 'raid', 'attack'] }, targetKind: { type: 'enum', values: ['village', 'pve'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, countdownSec: { type: 'integer', optional: true, min: 10, max: 604800 }, deadlineAt: { type: 'integer', optional: true, min: 0 } } },
+      JoinAllianceWarPlan: { command: 'alliance.JoinWarPlan', needAuth: true, injectPlayerId: true, schema: { planId: { type: 'string', minLen: 1, maxLen: 128 }, sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } } },
+      CancelAllianceWarPlan: { command: 'alliance.CancelWarPlan', needAuth: true, injectPlayerId: true, schema: { planId: { type: 'string', minLen: 1, maxLen: 128 } } },
+      RecallAllianceWarPlan: { command: 'alliance.RecallWarPlan', needAuth: true, injectPlayerId: true, schema: { planId: { type: 'string', minLen: 1, maxLen: 128 } } },
+    },
+    eventPushMap: { 'alliance.Updated': 'AllianceUpdated' },
+  },
+  {
     moduleName: 'building',
     publicActions: {
       GetVillageLayout: { command: 'building.GetLayout', ownVillage: true, needAuth: true, schema: {} },

@@ -132,6 +132,11 @@ interface MovementRecord {
   routesFreed?: number;
   /** 商队（贸易）：true=正在返程（到家即回收路线）；false=去程（到目标村交付货物后启动返程）。 */
   returning?: boolean;
+  /** 联盟资源贡献商队；抵达时交给 alliance owner，不进入大厅村庄的个人资源。 */
+  allianceId?: string;
+  /** 联盟王国服务行军；抵达后由 alliance owner 结算，不产生玩家来源村。 */
+  allianceService?: boolean;
+  serviceOrderId?: string;
 }
 
 const COLLECTION = 'movement';
@@ -189,6 +194,9 @@ export class MovementModule {
     this.commands.register('movement.FoundVillage', (c) => this.foundVillage(c));
     this.commands.register('movement.SendTransport', (c) => this.sendTransport(c));
     this.commands.register('movement.SendKingdomReinforcement', (c) => this.sendKingdomReinforcement(c));
+    this.commands.register('movement.SendAllianceServiceResources', (c) => this.sendAllianceServiceResources(c));
+    this.commands.register('movement.SendAllianceReinforcement', (c) => this.sendAllianceReinforcement(c));
+    this.commands.register('movement.ReturnAllianceDeliveries', (c) => this.returnAllianceDeliveries(c));
     this.commands.register('movement.SendKingdomRetaliation', (c) => this.sendKingdomRetaliation(c));
     this.commands.register('movement.GetReinforcementSnapshot', (c) => this.getReinforcementSnapshot(c));
     this.commands.register('movement.ApplyReinforcementLosses', (c) => this.applyReinforcementLosses(c));
@@ -1605,7 +1613,7 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
@@ -1826,7 +1834,10 @@ export class MovementModule {
       } else if (owner === mine) modes.push({ mode: 'transfer', label: '转移' });
       else {
         targetPlayerId = owner;
-        const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
+        const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
+        const rel = allianceRel.ok && (allianceRel.payload as any).relation === 'allied'
+          ? allianceRel
+          : await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: owner } });
         relation = rel.ok ? (rel.payload as any).relation : 'neutral';
         if (relation === 'allied') modes.push({ mode: 'reinforce', label: '增援' });
         else if (relation === 'neutral') {
@@ -1966,8 +1977,8 @@ export class MovementModule {
       if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
       const fromOwner = await this.ownerOf(villageId), targetOwner = await this.ownerOf(targetVillage!);
       if (!fromOwner || !targetOwner || fromOwner === targetOwner) return { ok: false, payload: {}, reason: 'not_enemy_village' };
-      const relation = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: targetOwner } });
-      if (relation.ok && (relation.payload as any)?.relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
+      const allianceRelation = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: targetOwner } });
+      if (allianceRelation.ok && (allianceRelation.payload as any)?.relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
       const exists = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId: targetVillage } });
       if (!exists.ok) return { ok: false, payload: {}, reason: 'target_not_found' };
     }
@@ -2072,6 +2083,8 @@ export class MovementModule {
   private async validatePvPRelation(villageId: string, targetVillage: string, declareWar: boolean): Promise<CommandResult> {
     const from = await this.ownerOf(villageId), target = await this.ownerOf(targetVillage);
     if (!from || !target || from === target) return { ok: false, payload: {}, reason: 'not_enemy_village' };
+    const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
+    if (allianceRel.ok && (allianceRel.payload as any).relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
     const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: from, targetPlayerId: target } });
     const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
     if (relation === 'allied') return { ok: false, payload: {}, reason: 'allied_target' };
@@ -2109,7 +2122,8 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'not_own_village' };
     }
     if (isReinforce && fromOwner !== toOwner) {
-      const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
+      const allianceRel = await this.commands.send({ name: 'alliance.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
+      const rel = allianceRel.ok && (allianceRel.payload as any).relation === 'allied' ? allianceRel : await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: fromOwner, targetPlayerId: toOwner } });
       const relation = rel.ok ? (rel.payload as any).relation : 'neutral';
       if (relation === 'hostile') return { ok: false, payload: {}, reason: 'hostile_target' };
     }
@@ -2219,7 +2233,7 @@ export class MovementModule {
    */
   private launchCaravan(opts: {
     id: string; fromVillage: string; fromXY: Hex; toXY: Hex; cargo: Record<string, number>;
-    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string;
+    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string; allianceId?: string; allianceService?: boolean; serviceOrderId?: string;
   }): MovementRecord {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
@@ -2235,6 +2249,7 @@ export class MovementModule {
       path, stepIndex: 0, pos: path[0], perStepMs, nextStepAt: this.now() + perStepMs,
       arriveAt: this.now() + perStepMs * steps, status: 'marching', stepToken: 1,
       homeVillage: opts.homeVillage, routesFreed: opts.routesFreed, returning: opts.returning ?? false,
+      allianceId: opts.allianceId, allianceService: opts.allianceService, serviceOrderId: opts.serviceOrderId,
     };
     this.save(full);
     const token = full.stepToken;
@@ -2248,11 +2263,13 @@ export class MovementModule {
    * 由 trade 模块回收该村的贸易路线。
    */
   private async sendCaravan(cmd: Command): Promise<CommandResult> {
-    const { fromVillage, targetVillage, cargo, homeVillage, routesFreed, returning } = cmd.payload as {
+    const { fromVillage, targetVillage, cargo, homeVillage, routesFreed, returning, allianceId } = cmd.payload as {
       fromVillage: string; targetVillage: string; cargo?: Record<string, number>;
-      homeVillage?: string; routesFreed?: number; returning?: boolean;
+      homeVillage?: string; routesFreed?: number; returning?: boolean; allianceId?: string;
     };
-    if (targetVillage === fromVillage) return { ok: false, payload: {}, reason: 'same_village' };
+    // 联盟大厅可能就在贡献者本村：仍占用贸易线路并走一段最短商队时间，
+    // 但不影响普通资源转移禁止运往本村的既有规则。
+    if (targetVillage === fromVillage && !allianceId) return { ok: false, payload: {}, reason: 'same_village' };
     const cleaned = this.cleanCargo(cargo);
     if (cleaned.total <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
     const fromXY = await this.villageXY(fromVillage);
@@ -2261,7 +2278,7 @@ export class MovementModule {
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
     const mv = this.launchCaravan({
       id: this.nextId(), fromVillage, fromXY, toXY, cargo: cleaned.clean,
-      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage,
+      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage, allianceId,
     });
     log('出征(caravan)', { id: mv.id, from: fromVillage, to: targetVillage, cargo: cleaned.clean, returning: !!returning });
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
@@ -2320,6 +2337,47 @@ export class MovementModule {
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), reinforcementUntil: mv.reinforcementUntil } };
   }
 
+  /** 联盟王国服务资源：由王国锚点出发，抵达联盟大厅后交给 alliance owner。 */
+  private async sendAllianceServiceResources(cmd: Command): Promise<CommandResult> {
+    const { allianceId, serviceOrderId, targetVillage, fromXY, cargo } = cmd.payload as { allianceId: string; serviceOrderId: string; targetVillage: string; fromXY: Hex; cargo?: Record<string, number> };
+    if (!allianceId || !serviceOrderId || !targetVillage) return { ok: false, payload: {}, reason: 'alliance_service_invalid' };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const cleaned = this.cleanCargo(cargo);
+    if (cleaned.total <= 0) return { ok: false, payload: {}, reason: 'empty_cargo' };
+    const origin = { q: Number(fromXY?.q), r: Number(fromXY?.r) };
+    if (!Number.isFinite(origin.q) || !Number.isFinite(origin.r)) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const mv = this.launchCaravan({
+      id: this.nextId(), fromVillage: `alliance-service:${allianceId}`, fromXY: origin, toXY,
+      cargo: cleaned.clean, homeVillage: `alliance-service:${allianceId}`, routesFreed: 0,
+      targetVillage, allianceId, allianceService: true, serviceOrderId,
+    });
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'caravan', npcService: true, allianceId, allianceService: true, serviceOrderId, targetVillage, villageIds: [targetVillage], arriveAt: mv.arriveAt } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+  }
+
+  /** 联盟王国服务增援：抵达大厅后临时驻防，不并入成员村军队。 */
+  private async sendAllianceReinforcement(cmd: Command): Promise<CommandResult> {
+    const { allianceId, serviceOrderId, targetVillage, fromXY, troops, durationSec } = cmd.payload as { allianceId: string; serviceOrderId: string; targetVillage: string; fromXY: Hex; troops: Record<string, number>; durationSec?: number };
+    if (!allianceId || !serviceOrderId || !targetVillage) return { ok: false, payload: {}, reason: 'alliance_service_invalid' };
+    const valid = this.validateTroops(troops);
+    if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
+    const toXY = await this.villageXY(targetVillage);
+    if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const origin = { q: Number(fromXY?.q), r: Number(fromXY?.r) };
+    if (!Number.isFinite(origin.q) || !Number.isFinite(origin.r)) return { ok: false, payload: {}, reason: 'origin_not_found' };
+    const mv = await this.launch({
+      id: this.nextId(), type: 'transport', fromVillage: `alliance-service:${allianceId}`, fromXY: origin, toXY,
+      targetVillage, troops: valid.troops, cargo: {}, treasures: [], transportMode: 'reinforce',
+      npcService: true, allianceId, allianceService: true, serviceOrderId, departAt: this.now(),
+      reinforcementSnapshot: this.buildSnapshot(valid.troops),
+    });
+    mv.reinforcementUntil = mv.arriveAt + Math.max(1, Math.floor(Number(durationSec) || Number(this.config.constants.raw.kingdom_reinforcement_duration_sec) || 3600)) * 1000;
+    this.save(mv);
+    void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'transport', mode: 'reinforce', npcService: true, allianceId, allianceService: true, serviceOrderId, targetVillage, villageIds: [targetVillage], arriveAt: mv.arriveAt, reinforcementUntil: mv.reinforcementUntil } } as DomainEvent);
+    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000), reinforcementUntil: mv.reinforcementUntil } };
+  }
+
   /** 王国封地报复军：只创建 NPC 雇佣军行军，不扣封地原守军或玩家人口。 */
   private async sendKingdomRetaliation(cmd: Command): Promise<CommandResult> {
     const { sourcePveId, fromXY, targetVillage, troops, attackerSnapshot, battleType, retaliationId } = cmd.payload as {
@@ -2348,6 +2406,11 @@ export class MovementModule {
   /** 商队到达：去程→把货物交给目标村（目标村不存在则跳过交付）后启动返程；返程→到家回收贸易路线。 */
   private async arriveCaravan(mv: MovementRecord): Promise<void> {
     if (mv.returning) {
+      if (mv.allianceService) {
+        // 王国服务没有玩家来源村，服务失效时返程只用于保持地图轨迹，抵达后销毁。
+        this.remove(mv.id);
+        return;
+      }
       // 货物随商队返回发货村（目标丢失中途折返时仍携带原货物，须完整归还，不凭空消失）
       if (mv.cargo && Object.keys(mv.cargo).length > 0) {
         const home = mv.homeVillage ?? mv.fromVillage;
@@ -2365,35 +2428,52 @@ export class MovementModule {
       this.remove(mv.id);
       return;
     }
-    // 去程：把货物交给目标村；目标不是玩家村庄（如幸福村这类 NPC 村庄）则发到达事件由任务模块处理
+    // 去程：联盟贡献由联盟 owner 入库；普通商队仍把货物交给目标村或 NPC。
+    let allianceDelivered = false;
     if (mv.cargo && Object.keys(mv.cargo).length > 0) {
-      const tgt = await this.commands.send({
-        name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
-      });
-      if (tgt.ok) {
-        await this.commands.send({
-          name: 'economy.Grant', from: MovementModule.NAME,
-          payload: { villageId: mv.targetVillage, gain: mv.cargo },
+      if (mv.allianceId) {
+        const delivered = await this.commands.send({
+          name: mv.allianceService ? 'alliance.ReceiveServiceResources' : 'alliance.ReceiveResourceCaravan', from: MovementModule.NAME,
+          payload: mv.allianceService
+            ? { allianceId: mv.allianceId, serviceOrderId: mv.serviceOrderId, cargo: mv.cargo }
+            : { allianceId: mv.allianceId, movementId: mv.id, targetVillageId: mv.targetVillage, cargo: mv.cargo },
         });
+        allianceDelivered = delivered.ok;
       } else {
-        // 目标非玩家村庄：可能是 NPC 村庄（幸福村），由 tasks 模块据此推进 deliver_to_npc 目标
-        const tile = await this.commands.send({
-          name: 'world.GetTileByRef', from: MovementModule.NAME, payload: { refId: mv.targetVillage },
+        const tgt = await this.commands.send({
+          name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.targetVillage },
         });
-        const kind = (tile.payload as any)?.tile?.kind;
-        if (tile.ok && (kind === 'pve' || kind === 'taskcamp')) {
-          void this.bus.emit({
-            name: 'movement.CaravanArrivedNpc', source: MovementModule.NAME, ts: this.now(),
-            payload: { villageId: mv.fromVillage, npcId: mv.targetVillage, cargo: mv.cargo, toXY: mv.toXY },
-          } as DomainEvent);
+        if (tgt.ok) {
+          await this.commands.send({
+            name: 'economy.Grant', from: MovementModule.NAME,
+            payload: { villageId: mv.targetVillage, gain: mv.cargo },
+          });
+        } else {
+          // 目标非玩家村庄：可能是 NPC 村庄（幸福村），由 tasks 模块据此推进 deliver_to_npc 目标
+          const tile = await this.commands.send({
+            name: 'world.GetTileByRef', from: MovementModule.NAME, payload: { refId: mv.targetVillage },
+          });
+          const kind = (tile.payload as any)?.tile?.kind;
+          if (tile.ok && (kind === 'pve' || kind === 'taskcamp')) {
+            void this.bus.emit({
+              name: 'movement.CaravanArrivedNpc', source: MovementModule.NAME, ts: this.now(),
+              payload: { villageId: mv.fromVillage, npcId: mv.targetVillage, cargo: mv.cargo, toXY: mv.toXY },
+            } as DomainEvent);
+          }
         }
       }
+    }
+    if (mv.allianceService) {
+      this.remove(mv.id);
+      return;
     }
     const home = mv.homeVillage ?? mv.fromVillage;
     const homeXY = await this.villageXY(home);
     if (!homeXY) { this.remove(mv.id); return; }
+    // 联盟大厅失联/记录过期时，联盟 owner 会拒绝交付；此时把货物带回来源村，避免资源凭空消失。
+    const returnCargo = mv.allianceId && !allianceDelivered ? (mv.cargo ?? {}) : {};
     this.launchCaravan({
-      id: this.nextId(), fromVillage: home, fromXY: mv.toXY, toXY: homeXY, cargo: {},
+      id: this.nextId(), fromVillage: home, fromXY: mv.toXY, toXY: homeXY, cargo: returnCargo,
       homeVillage: home, routesFreed: mv.routesFreed ?? 0, returning: true, targetVillage: home,
     });
     this.remove(mv.id);
@@ -2478,7 +2558,7 @@ export class MovementModule {
     } as DomainEvent);
     void this.bus.emit({
       name: 'movement.ReinforcementArrived', source: MovementModule.NAME, ts: this.now(),
-      payload: { id: mv.id, villageId: mv.targetVillage, fromVillage: mv.fromVillage, until: mv.reinforcementUntil },
+      payload: { id: mv.id, villageId: mv.targetVillage, fromVillage: mv.fromVillage, until: mv.reinforcementUntil, allianceId: mv.allianceId, serviceOrderId: mv.serviceOrderId },
     } as DomainEvent);
   }
 
@@ -3595,6 +3675,9 @@ export class MovementModule {
     returnPveId?: string,
     npcService = false,
     taskCode?: string,
+    allianceId?: string,
+    allianceService = false,
+    serviceOrderId?: string,
   ): Promise<string | undefined> {
     const id = this.nextId();
     await this.launch({
@@ -3602,7 +3685,7 @@ export class MovementModule {
       originalFromXY: originalFromXY ?? toXY,
       troops, loot, treasures, departAt: this.now(), outwardId, autoExplore,
       scoutReturn: scoutReturn || undefined, kingdomMercenary: kingdomMercenary || undefined, returnPveId,
-      npcService: npcService || undefined, taskCode,
+      npcService: npcService || undefined, taskCode, allianceId, allianceService: allianceService || undefined, serviceOrderId,
     });
     return id;
   }
@@ -3629,12 +3712,46 @@ export class MovementModule {
       if (mv.targetVillage !== villageId) continue;
       if (mv.type !== 'attack' && mv.type !== 'raid' && mv.type !== 'scout' && mv.type !== 'caravan' && mv.type !== 'transport') continue;
       if (mv.transportMode === 'reinforce' && mv.npcService) {
-        // 王国 NPC 增援没有玩家来源村，目标消失时直接撤销，不能按普通返程写回伪造村庄。
-        this.remove(mv.id, 'returned');
+        if (mv.allianceId) {
+          // 联盟服务军队的来源是王国锚点，目标大厅消失时沿原路返回，
+          // 到达后由 allianceService 分支销毁，不向伪造村庄写兵。
+          if (mv.status === 'stationed') {
+            const from = mv.pos; const to = mv.originalFromXY ?? mv.fromXY;
+            this.remove(mv.id, 'returned');
+            await this.scheduleReturn(mv.fromVillage, from, to, mv.troops, {}, mv.treasures, mv.id, to, undefined, false, false, undefined, true, undefined, mv.allianceId, true, mv.serviceOrderId);
+          } else await this.startReturn(mv);
+        } else {
+          // 王国 NPC 增援没有玩家来源村，目标消失时直接撤销，不能按普通返程写回伪造村庄。
+          this.remove(mv.id, 'returned');
+        }
         continue;
       }
       await this.startReturn(mv);
     }
+  }
+
+  /** 联盟大厅失联时召回所有正在前往大厅的贡献商队/增援；已出发的联盟战事不在此范围内。 */
+  private async returnAllianceDeliveries(cmd: Command): Promise<CommandResult> {
+    const { allianceId, hallVillageId } = cmd.payload as { allianceId: string; hallVillageId?: string };
+    if (!allianceId || !hallVillageId) return { ok: false, payload: {}, reason: 'alliance_hall_required' };
+    const returned: string[] = [];
+    for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
+      if (mv.allianceId !== allianceId || mv.targetVillage !== hallVillageId) continue;
+      if (mv.type === 'return' || (mv.type === 'caravan' && mv.returning)) continue;
+      if (mv.status === 'marching') {
+        await this.startReturn(mv);
+        returned.push(mv.id);
+        continue;
+      }
+      if (mv.status === 'stationed' && mv.transportMode === 'reinforce') {
+        const from = mv.pos;
+        const to = mv.originalFromXY ?? mv.fromXY;
+        this.remove(mv.id, 'returned');
+        await this.scheduleReturn(mv.fromVillage, from, to, mv.troops, {}, mv.treasures, mv.id, to, undefined, false, false, undefined, mv.npcService, undefined, mv.allianceId, mv.allianceService, mv.serviceOrderId);
+        returned.push(mv.id);
+      }
+    }
+    return { ok: true, payload: { returned } };
   }
 
   /**
@@ -3825,6 +3942,11 @@ export class MovementModule {
       }
       this.remove(id, 'returned');
       void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, returnPveId: mv.returnPveId, troops: {}, loot: mv.loot, kingdomMercenary: true } } as DomainEvent);
+      return;
+    }
+    if (mv.allianceService) {
+      this.remove(id, 'returned');
+      void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, allianceId: mv.allianceId, serviceOrderId: mv.serviceOrderId, troops: {}, loot: mv.loot, allianceService: true } } as DomainEvent);
       return;
     }
     // 兵归队

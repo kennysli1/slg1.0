@@ -64,8 +64,8 @@ export function VillageArmyManagement() {
       </div>
       <GarrisonSection army={army} />
       <ReinforcementSection army={army} />
-      <RaidDefenseSection army={army} />
       <TrainingCenterSection />
+      <RaidDefenseSection army={army} />
       <DisbandSection army={army} />
     </section>
   );
@@ -113,7 +113,7 @@ function DisbandSection({ army }: { army: any }) {
 
   return (
     <Panel pad class="army-management-panel">
-      <details class="disband-details">
+      <details class="army-collapsible-details disband-details">
         <summary class="section-head section-head--toggle">
           <span>解散军队</span>
           <small>仅本村驻军 · 出征部队不能在此解散</small>
@@ -298,45 +298,49 @@ function RaidDefenseSection({ army }: { army: any }) {
   };
 
   return (
-    <Panel pad>
-      <SectionHead sub="仅用于玩家掠夺战；攻城战不受此配置影响">
-        防御掠夺
-      </SectionHead>
-      <div class="raid-defense-panel">
-        <div class="raid-defense-source-card">
-          <div class="raid-defense-source-head">
-            <strong>本村驻军</strong><span class="hint-sm">自己的部队</span>
-          </div>
-          <label class="raid-defense-toggle">
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
-            <span>投入掠夺防守</span>
-          </label>
-          <div class="hint-sm">关闭或将数量设为 0 后，本村部队不会参加掠夺防守。</div>
-          {entries.length === 0 ? <div class="hint-sm">暂无可配置驻军。</div> : renderRows(troops, selected, enabled, setSelected, 'own')}
-        </div>
-
-        {reinforcements.map((entry) => {
-          const draft = reinforcementDrafts[entry.id] ?? { enabled: entry.raidDefense?.enabled !== false, troops: entry.raidDefense?.troops ?? entry.troops ?? {} };
-          const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
-          const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
-          const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
-          return (
-            <div class="raid-defense-source-card" key={entry.id}>
-              <div class="raid-defense-source-head">
-                <strong>援军 · {sourceVillage}</strong><span class="hint-sm">来自 {sourcePlayer} · {status}</span>
-              </div>
-              <label class="raid-defense-toggle">
-                <input type="checkbox" checked={draft.enabled} onChange={(event) => updateReinforcement(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })} />
-                <span>投入掠夺防守</span>
-              </label>
-              <div class="hint-sm">该来源援军独立配置，不会与本村或其他援军同兵种合并。</div>
-              {renderRows(entry.troops ?? {}, draft.troops, draft.enabled, (next) => updateReinforcement(entry.id, { troops: next }), `reinforcement:${entry.id}`)}
+    <Panel pad class="army-management-panel">
+      <details class="army-collapsible-details raid-defense-details">
+        <summary class="section-head section-head--toggle">
+          <span>防御掠夺</span>
+          <small>仅用于玩家掠夺战 · 攻城战不受此配置影响</small>
+          <i aria-hidden="true">›</i>
+        </summary>
+        <div class="raid-defense-panel">
+          <div class="raid-defense-source-card">
+            <div class="raid-defense-source-head">
+              <strong>本村驻军</strong><span class="hint-sm">自己的部队</span>
             </div>
-          );
-        })}
+            <label class="raid-defense-toggle">
+              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
+              <span>投入掠夺防守</span>
+            </label>
+            <div class="hint-sm">关闭或将数量设为 0 后，本村部队不会参加掠夺防守。</div>
+            {entries.length === 0 ? <div class="hint-sm">暂无可配置驻军。</div> : renderRows(troops, selected, enabled, setSelected, 'own')}
+          </div>
 
-        <Btn variant="primary" block onClick={() => void save()}>保存全部防守配置</Btn>
-      </div>
+          {reinforcements.map((entry) => {
+            const draft = reinforcementDrafts[entry.id] ?? { enabled: entry.raidDefense?.enabled !== false, troops: entry.raidDefense?.troops ?? entry.troops ?? {} };
+            const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
+            const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
+            const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
+            return (
+              <div class="raid-defense-source-card" key={entry.id}>
+                <div class="raid-defense-source-head">
+                  <strong>援军 · {sourceVillage}</strong><span class="hint-sm">来自 {sourcePlayer} · {status}</span>
+                </div>
+                <label class="raid-defense-toggle">
+                  <input type="checkbox" checked={draft.enabled} onChange={(event) => updateReinforcement(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })} />
+                  <span>投入掠夺防守</span>
+                </label>
+                <div class="hint-sm">该来源援军独立配置，不会与本村或其他援军同兵种合并。</div>
+                {renderRows(entry.troops ?? {}, draft.troops, draft.enabled, (next) => updateReinforcement(entry.id, { troops: next }), `reinforcement:${entry.id}`)}
+              </div>
+            );
+          })}
+
+          <Btn variant="primary" block onClick={() => void save()}>保存全部防守配置</Btn>
+        </div>
+      </details>
     </Panel>
   );
 }

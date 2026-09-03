@@ -2,10 +2,10 @@
 import { dataVersion, tick } from '../../app/store.js';
 import {
   getCache, getPopState, interpolatePop, interpolateTotalPop, liveResource,
-  type PopSnapshot,
+  type PopSnapshot, type RateBreakdownEntry,
 } from '../../app/state.js';
 import { resInfo, resourceKeys } from '../../app/config.js';
-import { fmt } from '../../shared/utils/format.js';
+import { fmt, fmtDur } from '../../shared/utils/format.js';
 import { Bar, Icon, Panel, SectionHead } from '../../ui/index.js';
 
 interface VillageResourceLedgerProps {
@@ -22,6 +22,35 @@ type PopulationLedgerState = Pick<
 function signedRate(rate: number): string {
   const rounded = Math.round(Number.isFinite(rate) ? rate : 0);
   return `${rounded >= 0 ? '+' : ''}${rounded}/时`;
+}
+
+function signedExact(rate: number): string {
+  const value = Number.isFinite(rate) ? rate : 0;
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}/时`;
+}
+
+function durationLabel(expiresAt?: number): string {
+  if (!expiresAt) return '永久';
+  const remaining = expiresAt - Date.now();
+  return remaining <= 0 ? '即将结束' : `剩余${fmtDur(remaining)}`;
+}
+
+/** 资源、人口、金币共用的悬浮明细文案。 */
+export function breakdownTooltip(
+  name: string,
+  entries: RateBreakdownEntry[] | undefined,
+  totalRatePerHour: number,
+  netRatePerHour?: number,
+): string {
+  const lines = [`${name}增长明细`];
+  if (!entries?.length) lines.push('暂无来源明细');
+  else for (const entry of entries) {
+    const percent = entry.percent === undefined ? '' : `（${entry.percent >= 0 ? '+' : ''}${entry.percent.toFixed(1)}%）`;
+    lines.push(`${entry.label}：${signedExact(entry.ratePerHour)}${percent} · ${durationLabel(entry.expiresAt)}`);
+  }
+  lines.push(`理论总产出：${signedExact(totalRatePerHour)}`);
+  if (netRatePerHour !== undefined && Math.abs(netRatePerHour - totalRatePerHour) > 0.001) lines.push(`当前净变化：${signedExact(netRatePerHour)}`);
+  return lines.join('\n');
 }
 
 /**
@@ -66,6 +95,8 @@ export function populationTooltip(
   population: number,
   civilian: number,
   growth: number,
+  growthBreakdown?: RateBreakdownEntry[],
+  goldBreakdown?: RateBreakdownEntry[],
 ): string {
   const overflow = Math.max(0, Math.min(1, state.overflowRatio ?? 0));
   const reasons: string[] = [];
@@ -79,7 +110,10 @@ export function populationTooltip(
   if (state.trainingPop > 0) details.push(`训练中 ${fmt(state.trainingPop)}`);
   details.push(`${state.hardCap > 0 && population >= state.hardCap && !state.inFamine ? '潜在增长' : '人口变化'} ${signedRate(growth)}`);
   if (reasons.length) details.push(`告警：${reasons.join('；')}`);
-  return details.join('；');
+  const growthText = breakdownTooltip('人口', growthBreakdown, growth);
+  const goldRate = goldBreakdown?.reduce((sum, entry) => sum + Number(entry.ratePerHour || 0), 0);
+  const goldText = breakdownTooltip('金币', goldBreakdown, goldRate ?? 0);
+  return `${details.join('；')}\n${growthText}\n${goldText}`;
 }
 
 export function VillageResourceLedger({ embedded = false }: VillageResourceLedgerProps = {}) {
@@ -115,13 +149,13 @@ export function VillageResourceLedger({ embedded = false }: VillageResourceLedge
                   Number(resource.netRate?.[key] ?? 0),
                   Number(resource.rawRate?.[key] ?? 0),
                 );
+            const breakdown = (key === 'gold' ? population?.goldBreakdown : resource.resourceBreakdown?.[key] ?? []) as RateBreakdownEntry[];
+            const netRatePerHour = key === 'gold' ? rate.ratePerHour : Number(resource.netRate?.[key] ?? 0) * 3600;
             return (
               <div
                 class={`kingdom-resource-row${stopped ? ' is-stopped' : ''}`}
                 key={key}
-                title={stopped
-                  ? `${info.name}当前停产；恢复生产后预计 ${signedRate(rate.ratePerHour)}`
-                  : `${info.name}属于当前村庄；当前变化 ${signedRate(rate.ratePerHour)}`}
+                title={breakdownTooltip(info.name, breakdown, key === 'gold' ? rate.ratePerHour : Number(resource.rawRate?.[key] ?? 0), netRatePerHour)}
               >
                 <Icon icon={info.icon} label="" decorative size="sm" />
                 <div class="kingdom-resource-copy">
@@ -138,7 +172,7 @@ export function VillageResourceLedger({ embedded = false }: VillageResourceLedge
           {population && populationGrowth && (
             <div
               class={`kingdom-resource-row kingdom-resource-row--population${populationGrowth.atCap ? ' is-capped' : ''}${population.inFamine ? ' is-famine' : ''}`}
-              title={populationTooltip(population, totalPopulation, civilianPopulation, populationGrowth.growthPerHour)}
+              title={populationTooltip(population, totalPopulation, civilianPopulation, populationGrowth.growthPerHour, population.growthBreakdown, population.goldBreakdown)}
             >
               <Icon icon="ui_icon_pop" label="" decorative size="sm" />
               <div class="kingdom-resource-copy">

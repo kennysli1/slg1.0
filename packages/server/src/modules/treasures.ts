@@ -57,6 +57,13 @@ export interface TreasureEffects {
   enemyCavalryDefMult: number;
 }
 
+/** 资源/人口/金币明细使用的宝物来源；数值为加性倍率（0.05 = +5%）。 */
+interface TreasureRateDetail {
+  source: string;
+  label: string;
+  mult: Record<string, number>;
+}
+
 interface TreasureState {
   villageId: string;
   /** 城镇中心格子里的宝物（基础 1 格）。宝物在此即生效。 */
@@ -584,16 +591,35 @@ export class TreasureModule {
     // 经 ensureState 归一化：旧存档 town/treasury 可能缺失或非数组（扁平 codes 等），
     // 直接 this.load 再 spread 会抛 "is not iterable"，导致 resume 崩溃循环。
     const s = this.ensureState(villageId);
-    const eff = this.aggregate(this.activeCodes(s), s.victoryFlagBonus ?? 0);
+    const activeCodes = this.activeCodes(s);
+    const eff = this.aggregate(activeCodes, s.victoryFlagBonus ?? 0);
+    const resourceDetails: TreasureRateDetail[] = [];
+    const growthSources: { label: string; delta: number }[] = [];
+    const goldSources: { label: string; delta: number }[] = [];
+    for (const code of activeCodes) {
+      const t = this.config.treasures[code];
+      if (!t) continue;
+      const label = `宝物：${t.name}`;
+      const frac = Number(t.effectValue) / 100;
+      const mult: Record<string, number> = {};
+      if (t.effectType === 'woodRate') mult.wood = frac;
+      else if (t.effectType === 'clayRate') mult.clay = frac;
+      else if (t.effectType === 'ironRate') mult.iron = frac;
+      else if (t.effectType === 'cropRate') mult.crop = frac;
+      else if (t.effectType === 'allResRate') Object.assign(mult, { wood: frac, clay: frac, iron: frac, crop: frac });
+      if (Object.keys(mult).length) resourceDetails.push({ source: `treasure:${code}`, label, mult });
+      if (t.effectType === 'goldRate' || t.effectType === 'honestHeart') goldSources.push({ label, delta: frac });
+      if (t.effectType === 'popGrowth') growthSources.push({ label, delta: frac });
+    }
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
       name: 'economy.SetRateModifier', from: TreasureModule.NAME,
-      payload: { villageId, source: 'treasure', mult: eff.resMult },
+      payload: { villageId, source: 'treasure', mult: eff.resMult, details: resourceDetails },
     });
     // 人口增长倍率 + 金币税倍率
     await this.commands.send({
       name: 'population.SetTreasureGrowthMult', from: TreasureModule.NAME,
-      payload: { villageId, mult: eff.popGrowthMult, goldMult: eff.goldMult },
+      payload: { villageId, mult: eff.popGrowthMult, goldMult: eff.goldMult, growthSources, goldSources },
     });
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: TreasureModule.NAME, payload: { villageId } });
     const playerId = (owner.payload as any)?.player?.id;
@@ -1060,7 +1086,7 @@ export class TreasureModule {
       const mult = { wood: frac, clay: frac, iron: frac, crop: frac };
       await this.commands.send({
         name: 'economy.ApplyTimedBuff', from: TreasureModule.NAME,
-        payload: { villageId, source: 'ritual', mult, durationSec },
+        payload: { villageId, source: 'ritual', label: '宝物：祭祀台（仪式）', mult, durationSec },
       });
       await this.recomputeAndPush(villageId);
       await this.emitChanged(villageId);

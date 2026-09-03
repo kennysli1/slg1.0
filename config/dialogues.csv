@@ -28,7 +28,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 37,m10_deliver,m10,deliver,1,{villageName}的长老,我觉得现在我们的村庄，哦不，小镇是更合适的称呼，有更多的潜力了。随着更优秀的建筑家和科学家加入我们，我们能建造出种类更多的建筑和研发更先进的技术。一个崭新的时代在等待着我们。,take:收下
 38,m11_accept,m11,accept,1,{villageName}的长老,固步自封从来不是一个有远见的集体应该做的事情。请领主大人规划人手，看向更远的远方，接触共同生活在这片天空下的朋友和敌人。,accept:接受任务
 39,m11_deliver,m11,deliver,1,{villageName}的长老,地形会影响军事战略和决策。森林会遮掩视野而丘陵会增加视野但降低行军速度。请领主大人灵活运用地形扬长避短，获得战略优势。,take:收下
-39,m11_deliver,m11,deliver,2,{villageName}的长老,我听说王国的贵族有意与我们交流，我们应该建造一个议会厅让王国的使者来访时有一个落脚处。,take:收下
+39,m11_deliver,m11,deliver,2,{villageName}的长老,我听说王国的的贵族有意与我们交流，我们应该建造一个议会厅让王国的使者来访时有一个落脚处。,
 40,m12_accept,m12,accept,1,王国使者,尊敬的{villageName}的首领，贵镇发展迅速，令人咋舌。我们高高在上的{fiefName}的领主大人对你的领导才能甚是青睐，这是你至高无上的荣幸。为了检测你是否是位值得培养的全才，请替王国清理几处土匪窝藏点，也是替你自己保护你的民众了。,accept:接受任务
 41,m12_deliver,m12,deliver,1,王国使者,令人满意的行动。王国最近匪患频发，如果你能积极响应王国下达的任务的话，你将会获得等价的报酬和声望。当然，你并不是唯一的苗子，这片土地上值得栽培的苗子太多了，你只有积极地证明自己，才能爬上权力的阶梯，我点到为止。,take:收下
 42,m13_accept,m13,accept,1,,我应该去山里找找这个人，看看他到底有什么追求。这山应该离发现字条的营地不算太远。,accept:接受任务
@@ -42,7 +42,7 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 32,s1_deliver,s1,deliver,1,,s1_deliver,take:收下
 8,s2_accept,s2,accept,1,,s2_accept,accept:接受任务|leave:离开
 33,s2_deliver,s2,deliver,1,,s2_deliver,take:收下
-1,s3_accept,s3,accept,1,幸福村的村民,感谢你清除了附近的威胁。我是邻村幸福村的居民，这些强盗在附近为非作歹，我们的粮食都被他们抢去了。请问你能伸出援手，帮我们解决一下燃眉之急吗？我们只需要一些救急的粮食，让我们的妇女和儿童不再饿肚子。作为回报，我们可以送你一份礼物。,accept:接受任务|leave:离开
+1,s3_accept,s3,accept,1,幸福村的村民,感谢你清除了附近的威胁。我是邻村幸福村的居民，这些强盗在附近为非作歹，我们的粮食都被他们抢去了。请问你能伸出援手，帮我们解决一下燃眉之急吗？我们只需要一些救急的粮食，让我们的妇女和儿童不再饿肚子。作为回报，我们可以送你一份礼物。,accept:接受任务
 10,s3_after_accept,s3,after_accept,1,{villageName}的村民,领主大人，据我所知隔壁幸福村妇女权益比较低，他们不应该会打着妇女儿童的旗号索求援助啊？,
 34,s3_deliver,s3,deliver,1,,s3_deliver,take:收下
 31,s3_deliver_failure,s3,deliver_failure,1,,,
@@ -55,12 +55,12 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 50,s6_deliver,s6,deliver,1,,s6_deliver,take:收下
 51,s7_accept,s7,accept,1,,s7_accept,accept:接受任务
 52,s7_deliver,s7,deliver,1,,s7_deliver,take:收下
-53,s7_deliver_failure,s7,deliver_failure,1,骰子裁判,对手已赢得两局，这场简单对决你输了。本任务没有失败奖励。,s7_deliver_failure,
+53,s7_deliver_failure,s7,deliver_failure,1,,s7_deliver_failure,
 54,s8_accept,s8,accept,1,,s8_accept,accept:接受任务
 55,s8_deliver,s8,deliver,1,,s8_deliver,take:收下
-56,s8_deliver_failure,s8,deliver_failure,1,骰子裁判,对手已赢得两局，这场普通对决你输了。本任务没有失败奖励。,s8_deliver_failure,
+56,s8_deliver_failure,s8,deliver_failure,1,骰子裁判,对手已赢得两局，这场普通对决你输了。本任务没有失败奖励。,s8_deliver_failure
 57,s9_accept,s9,accept,1,,s9_accept,accept:接受任务
 58,s9_deliver,s9,deliver,1,,s9_deliver,take:收下
-59,s9_deliver_failure,s9,deliver_failure,1,骰子裁判,困难对手已赢得两局，巅峰对决以失败告终。本任务没有失败奖励。,s9_deliver_failure,
+59,s9_deliver_failure,s9,deliver_failure,1,骰子裁判,困难对手已赢得两局，巅峰对决以失败告终。本任务没有失败奖励。,s9_deliver_failure
 60,m16_accept,m16,accept,1,王国使者,声望是你在这片土地上立足的证明。请让你的声望达到十点，证明你值得更高的信任。,accept:接受任务
 61,m16_deliver,m16,deliver,1,王国使者,你的威望已经传遍四方。这支弓手队伍将为你效力。,take:收下

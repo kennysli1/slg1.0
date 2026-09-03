@@ -242,10 +242,16 @@ export class VisionModule {
 
     const relationByOwner = new Map<string, MapVillageRelation>([[playerId, 'allied']]);
     await Promise.all([...targetOwners].map(async (targetPlayerId) => {
-      const result = await this.commands.send({
-        name: 'diplomacy.GetRelation', from: VisionModule.NAME,
+      const alliance = await this.commands.send({
+        name: 'alliance.GetRelation', from: VisionModule.NAME,
         payload: { playerId, targetPlayerId },
       });
+      const result = alliance.ok && (alliance.payload as any)?.relation === 'allied'
+        ? alliance
+        : await this.commands.send({
+          name: 'diplomacy.GetRelation', from: VisionModule.NAME,
+          payload: { playerId, targetPlayerId },
+        });
       const relation = (result.payload as any)?.relation;
       relationByOwner.set(
         targetPlayerId,

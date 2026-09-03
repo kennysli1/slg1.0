@@ -22,6 +22,13 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
+  assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
+  assert.deepEqual(
+    [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
+    [1, 2, 3, 4],
+    '联盟职位应按 1/2/3/4 级解锁',
+  );
+  assert.equal(c.allianceReputationBonusMaxMultiplier, 2, '联盟声望加成倍率上限');
   assert.ok(c.cavalryUnitCodes.includes('equlegati'), '骑兵代码配置应包含罗马骑兵');
   assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
 });
@@ -79,6 +86,9 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
 test('校验器：合法配置不抛错', () => {
   const cfg = loadGameConfig(configDir);
   assert.doesNotThrow(() => validateGameConfig(cfg));
+  assert.deepEqual(Object.keys(cfg.allianceServices), ['alliance_supplies_small', 'alliance_reinforcement_guard']);
+  assert.equal(cfg.allianceServices.alliance_supplies_small.category, 'supplies');
+  assert.equal(cfg.allianceServices.alliance_reinforcement_guard.unitCode, 'legionnaire');
 });
 
 test('任务图：六表编译后保留任务线、目标、效果与关系', () => {
@@ -201,15 +211,20 @@ test('任务运行时目录：以任务图分组，并保持既有 QuestDef 兼�
   assert.ok(s4.edges.length >= 1, '任务关系不应在运行时目录中丢失');
 });
 
-test('交付对话：所有 deliver 段配置收下回复', () => {
+test('交付对话：配置中心可编辑回复，运行时保留有效按钮配置', () => {
   const cfg = loadGameConfig(configDir);
   const deliver = Object.values(cfg.dialogues).filter((dialogue) => dialogue.trigger === 'deliver');
   assert.ok(deliver.length > 0, '应存在 deliver 对话');
   for (const dialogue of deliver) {
-    assert.ok(
-      dialogue.replies.some((reply) => reply.key === 'take' && reply.label === '收下'),
-      `${dialogue.code}#${dialogue.segment} 应配置 take:收下`,
-    );
+    // 对话按钮由配置中心决定：空 replies 合法，不能用出厂默认按钮
+    // 反向覆盖管理员已经保存的对话。仍校验每个显式按钮的结构和唯一性。
+    assert.ok(Array.isArray(dialogue.replies), `${dialogue.code}#${dialogue.segment} replies 应为数组`);
+    const keys = new Set<string>();
+    for (const reply of dialogue.replies) {
+      assert.ok(reply.key && reply.label, `${dialogue.code}#${dialogue.segment} 存在空回复`);
+      assert.equal(keys.has(reply.key), false, `${dialogue.code}#${dialogue.segment} 回复 key 重复`);
+      keys.add(reply.key);
+    }
   }
 });
 

@@ -10,10 +10,12 @@
     "test": "tsx --test --test-force-exit src/test/all.test.ts"
   },
   "dependencies": {
+    "@fastify/ajv-compiler": "^4.0.6",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.2.0",
     "@slg/shared": "*",
-    "fastify": "^5.9.0"
+    "fast-uri": "3.1.7",
+    "fastify": "^5.12.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

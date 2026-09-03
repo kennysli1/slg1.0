@@ -1,0 +1,6 @@
+code,name,maxLevel,requiredAllianceLevel,costWood,costClay,costIron,costCrop,effectType,effectValue,description
+#联盟建筑占位目录；每级成本=基础成本×目标等级，可在配置中心调整
+alliance_warehouse,联盟仓库,5,1,2000,2000,2000,2000,resource_rate,0.03,提高成员资源产量
+alliance_barracks,联盟军械库,5,3,2500,2000,3000,1500,combat_def,0.02,提高成员军队攻防
+alliance_academy,联盟学院,5,5,3000,3000,2500,2500,tech_probability,0.05,提高成员科技点获得概率
+alliance_embassy,联盟使馆,5,7,3500,3500,3500,2500,reputation,1,提高成员声望收益

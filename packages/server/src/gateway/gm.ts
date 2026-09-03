@@ -726,6 +726,30 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'],
     labels: ['level'],
   },
+  alliance_levels: {
+    file: 'alliance_levels.csv', key: 'level',
+    numeric: ['hallLevel', 'memberCap'],
+    text: ['description'],
+    labels: ['level', 'description'],
+  },
+  alliance_buildings: {
+    file: 'alliance_buildings.csv', key: 'code',
+    numeric: ['maxLevel', 'requiredAllianceLevel', 'costWood', 'costClay', 'costIron', 'costCrop', 'effectValue'],
+    text: ['name', 'effectType', 'description'],
+    labels: ['code', 'name'],
+  },
+  alliance_tech: {
+    file: 'alliance_tech.csv', key: 'code',
+    numeric: ['maxLevel', 'requiredAllianceLevel', 'techPointCost', 'effectValue'],
+    text: ['name', 'effectType', 'description'],
+    labels: ['code', 'name'],
+  },
+  alliance_services: {
+    file: 'alliance_services.csv', key: 'code',
+    numeric: ['id', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'delaySec'],
+    text: ['name', 'category', 'unitCode', 'desc'],
+    labels: ['code', 'name', 'category'],
+  },
 };
 
 /**
@@ -827,8 +851,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -854,16 +878,18 @@ function sectionGeneric(table){
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
     var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
     var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -886,6 +912,43 @@ function sectionGeneric(table){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
+}
+
+// ── 联盟专用视图：创建成本与四类职位加成集中展示；建筑/科技目录紧随其后渲染。 ──
+// 这些行仍然写入 game_constants.csv，编辑后沿用配置中心的校验、热重载和同步流程。
+var ALLIANCE_ROWS = [
+  ['alliance_create_wood','创建联盟木材成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_clay','创建联盟泥土成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_iron','创建联盟铁矿成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_crop','创建联盟粮食成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_gold','创建联盟金币成本','建立联盟时从选定村庄扣除'],
+  ['alliance_logistics_resource_mult','后勤主管资源产量加成','后勤主管所有村庄的资源产量倍率'],
+  ['alliance_war_speed_mult','战争专家军队移速加成','战争专家所有村庄军队的移速倍率'],
+  ['alliance_war_combat_mult','战争专家军队攻防加成','战争专家所有村庄军队的攻防倍率'],
+  ['alliance_tech_probability_bonus','首席科技官科技点概率加成','首席科技官所有村庄的科技点获得概率'],
+  ['alliance_ambassador_reputation_bonus','形象大使声望额外加成','形象大使每次获得声望时额外增加的点数'],
+  ['alliance_reputation_bonus_per_point','联盟声望加成/点','联盟声望每点带来的职位、建筑和科技加成倍率增长'],
+  ['alliance_reputation_bonus_max_multiplier','联盟声望加成上限','联盟职位、建筑和科技加成的最终倍率上限'],
+  ['alliance_logistics_role_level','后勤主管解锁等级','达到此联盟等级解锁后勤主管'],
+  ['alliance_war_role_level','战争专家解锁等级','达到此联盟等级解锁战争专家'],
+  ['alliance_tech_role_level','首席科技官解锁等级','达到此联盟等级解锁首席科技官'],
+  ['alliance_ambassador_role_level','形象大使解锁等级','达到此联盟等级解锁形象大使'],
+  ['alliance_project_duration_sec','联盟建筑/科技耗时','联盟建筑建造与联盟科技研发耗时（秒）'],
+];
+
+function sectionAlliance(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">联盟创建成本、职位加成、声望放大、等级容量，以及联盟建筑、科技和形象大使服务目录都在此集中编辑。常量写入 game_constants.csv；等级、建筑、科技和服务的等级/成本/效果分别写入对应 CSV。保存后会校验、热重载并进入配置同步流程。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<ALLIANCE_ROWS.length;j++){
+    var item = ALLIANCE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>联盟参数</h2>'+h+'</div>';
 }
 
 // ── 声望专用视图：把行为、门槛和城镇/PvE效果集中展示，避免在庞大的全局常量表中遗漏。 ──
@@ -1416,6 +1479,12 @@ function toggleBl(code){
 
 function render(){
   var html = '';
+  // 联盟相关常量与三张联盟目录表靠前显示，避免埋在长列表底部。
+  html += sectionAlliance();
+  html += sectionGeneric('alliance_levels');
+  html += sectionGeneric('alliance_buildings');
+  html += sectionGeneric('alliance_tech');
+  html += sectionGeneric('alliance_services');
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
   html += sectionFounding();
@@ -1430,7 +1499,7 @@ function render(){
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects') continue; // 已在专用视图合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects' || t === 'alliance_levels' || t === 'alliance_buildings' || t === 'alliance_tech' || t === 'alliance_services') continue; // 已在专用视图合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;

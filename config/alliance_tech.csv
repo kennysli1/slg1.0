@@ -1,0 +1,7 @@
+code,name,maxLevel,requiredAllianceLevel,techPointCost,effectType,effectValue,description
+#联盟科技占位目录；效果数值由联盟科技模块按成员全村生效
+shared_logistics,共享后勤,5,1,100,resource_rate,0.02,提高所有成员资源产量
+defensive_doctrine,协同防御,5,3,150,combat_def,0.02,提高所有成员军队防御
+military_logistics,军需调度,5,3,150,march_speed,0.03,提高所有成员军队移速
+joint_research,联合研究,5,5,200,tech_probability,0.03,提高所有成员科技点获得概率
+kingdom_diplomacy,王国外交,5,7,250,reputation,0.05,提高所有成员声望收益

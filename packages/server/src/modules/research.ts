@@ -45,6 +45,8 @@ export interface ResearchState {
   academy: AcademyState;
   /** 宝物（正直的心）带来的科技点判定间隔倍率（默认 1；<1 表示更快）。由 treasure 模块经 SetTreasureTechInterval 下发。 */
   treasureTechIntervalMult?: number;
+  /** 联盟首席科技官带来的科研点获得概率加成。 */
+  allianceTechProbabilityBonus?: number;
 }
 
 export interface AcademyState {
@@ -98,6 +100,8 @@ export class ResearchModule {
     // 宝物（正直的心）下发科技点判定间隔倍率
     this.commands.register('research.SetTreasureTechInterval', (c: Command) => this.setTreasureTechInterval(c));
     this.commands.register('research.GrantPoints', (c: Command) => this.grantPoints(c));
+    this.commands.register('research.SpendPoints', (c: Command) => this.spendPoints(c));
+    this.commands.register('research.SetAllianceTechBonus', (c: Command) => this.setAllianceTechBonus(c));
 
     // 学院建造/升级/拆除 → 刷新 academy 参数并重调度 RP
     this.bus.on('building.Built', (evt: DomainEvent) => {
@@ -119,7 +123,11 @@ export class ResearchModule {
 
     // 注册首批默认机制
     registerMechanism('imperial_pop_boost', (ctx) => {
-      void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, mult: ctx.tech.effectValue } });
+      void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: {
+        villageId: ctx.villageId,
+        mult: ctx.tech.effectValue,
+        sources: [{ label: `科技：${ctx.tech.code}`, delta: ctx.tech.effectValue }],
+      } });
     });
     registerMechanism('storage_overflow', (ctx) => {
       void ctx.commands.send({ name: 'economy.SetOverflowCap', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, cap: ctx.tech.effectValue } });
@@ -199,6 +207,21 @@ export class ResearchModule {
     this.store.set(COLLECTION, villageId, s);
     void this.pushRp(villageId, s.rp);
     return { ok: true, payload: { amount: n, rp: s.rp } };
+  }
+
+  private spendPoints(cmd: Command): CommandResult {
+    const { villageId, amount } = cmd.payload as { villageId?: string; amount?: number };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const n = Math.floor(Number(amount) || 0); if (n <= 0) return { ok: false, payload: {}, reason: 'bad_amount' };
+    const s = this.ensureState(villageId); if (s.rp < n) return { ok: false, payload: { rp: s.rp }, reason: 'insufficient_rp' };
+    s.rp -= n; this.store.set(COLLECTION, villageId, s); void this.pushRp(villageId, s.rp);
+    return { ok: true, payload: { amount: n, rp: s.rp } };
+  }
+
+  private setAllianceTechBonus(cmd: Command): CommandResult {
+    const { villageId, bonus } = cmd.payload as { villageId: string; bonus?: number };
+    const s = this.ensureState(villageId); s.allianceTechProbabilityBonus = Math.max(0, Math.min(1, Number(bonus) || 0)); this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { bonus: s.allianceTechProbabilityBonus } };
   }
 
   private async getTechTree(cmd: Command): Promise<CommandResult> {
@@ -297,13 +320,18 @@ export class ResearchModule {
     const key = effect.effectKey;
     switch (effect.effectType) {
       case 'resource_rate':
-        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: { villageId, source: `tech:${tech.code}:${effect.order}`, mult: { [key]: Math.min(effect.cap, v) } } });
+        void this.commands.send({ name: 'economy.SetRateModifier', from: ResearchModule.NAME, payload: {
+          villageId,
+          source: `tech:${tech.code}:${effect.order}`,
+          mult: { [key]: Math.min(effect.cap, v) },
+          details: [{ source: `tech:${tech.code}`, label: `科技：${tech.name}`, mult: { [key]: Math.min(effect.cap, v) } }],
+        } });
         break;
       case 'storage_cap':
         void this.commands.send({ name: 'building.SetStorageTechMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
         break;
       case 'pop_growth':
-        void this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: Math.min(effect.cap, v) } });
+        // 在 recomputeTechEffects 中统一汇总，避免多个科技效果异步下发时互相覆盖。
         break;
       case 'mechanism':
         if (MechanismRegistry[key]) {
@@ -334,6 +362,8 @@ export class ResearchModule {
     const buildingUnlocks = new Set<string>();
     let trainSpeed = 0;
     let marchSpeed = 0;
+    const populationGrowthSources: { label: string; delta: number }[] = [];
+    let populationGrowthDelta = 0;
     for (const code of completed) {
       const tech = this.config.research[code];
       if (!tech) continue;
@@ -346,12 +376,21 @@ export class ResearchModule {
           else combat[key].def = Math.min(e.cap, combat[key].def + value);
         } else if (e.effectType === 'unit_unlock') unlocks.add(e.effectKey);
         else if (e.effectType === 'building_unlock') buildingUnlocks.add(e.effectKey);
-        else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
+        else if (e.effectType === 'pop_growth') {
+          populationGrowthDelta += value;
+          populationGrowthSources.push({ label: `科技：${tech.name}`, delta: value });
+        } else if (e.effectType === 'mechanism' && e.effectKey === 'imperial_pop_boost') {
+          // 该历史机制实际提供人口增长倍率；纳入统一汇总，避免其异步
+          // SetTechGrowthMult 覆盖其他科技来源，也让悬浮明细能显示来源。
+          populationGrowthDelta += value;
+          populationGrowthSources.push({ label: `科技：${tech.name}`, delta: value });
+        } else if (e.effectType === 'train_speed') trainSpeed = Math.min(e.cap, trainSpeed + value);
         else if (e.effectType === 'march_speed') marchSpeed = Math.min(e.cap, marchSpeed + value);
         else this.applyEffect(villageId, tech, e);
       }
     }
     await this.commands.send({ name: 'building.SetTechUnlockedBuildings', from: ResearchModule.NAME, payload: { villageId, unlocks: [...buildingUnlocks] } });
+    await this.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: { villageId, mult: populationGrowthDelta, sources: populationGrowthSources } });
     await this.commands.send({ name: 'military.SetTechEffects', from: ResearchModule.NAME, payload: { villageId, combat, unlocks: [...unlocks], trainSpeed, marchSpeed } });
   }
 
@@ -419,7 +458,7 @@ export class ResearchModule {
 
     while (lastCheck + intervalMs <= now) {
       lastCheck += intervalMs;
-      const prob = Math.min(params.maxProbability, (params.baseProbability + failStreak * params.probabilityGainPerFail) * popMult);
+      const prob = Math.min(params.maxProbability, (params.baseProbability + failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
       if (Math.random() < prob) {
         s.rp += 1;
         failStreak = 0;
@@ -459,7 +498,7 @@ export class ResearchModule {
     if (!params) return;
 
     const popMult = await this.getPopFactor(villageId);
-    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult);
+    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
     if (Math.random() < prob) {
       s.rp += 1;
       s.academy.failStreak = 0;

@@ -228,6 +228,18 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
     assert.match(res.body, /o-s5 \/ quest_objectives\.params/, '配置中心应提供猎马人目标人口编辑项');
     assert.match(res.body, /horse_rope \/ effectValue/, '配置中心应提供绞马索防御削弱编辑项');
     assert.match(res.body, /onHorseHunterTargetEdit/, '猎马人目标人口应按 cavalry:<数量> 写回任务目标参数');
+    assert.match(res.body, /联盟参数/, 'GM 页面应提供联盟专用参数板块');
+    assert.match(res.body, /alliance_create_wood/, 'GM 页面应提供联盟创建成本参数');
+    assert.match(res.body, /alliance_logistics_resource_mult/, 'GM 页面应提供联盟职位加成参数');
+    assert.match(res.body, /alliance_project_duration_sec/, 'GM 页面应提供联盟建筑/科技耗时参数');
+    assert.match(res.body, /联盟等级与成员上限/, 'GM 页面应靠前显示联盟等级目录');
+    assert.match(res.body, /联盟建筑目录/, 'GM 页面应靠前显示联盟建筑目录');
+    assert.match(res.body, /联盟科技目录/, 'GM 页面应靠前显示联盟科技目录');
+    const allianceRenderStart = res.body.indexOf('function render()');
+    const allianceSection = res.body.indexOf('html += sectionAlliance();', allianceRenderStart);
+    const allianceLevels = res.body.indexOf("html += sectionGeneric('alliance_levels');", allianceRenderStart);
+    const buildingsSection = res.body.indexOf('html += sectionBuildings();', allianceRenderStart);
+    assert.ok(allianceRenderStart >= 0 && allianceSection >= 0 && allianceLevels > allianceSection && buildingsSection > allianceLevels, '联盟配置应在通用建筑列表之前显示');
     const renderStart = res.body.indexOf('function render()');
     const reputationCall = res.body.indexOf('html += sectionReputation();', renderStart);
     const terrainCall = res.body.indexOf('html += sectionTerrain();', renderStart);

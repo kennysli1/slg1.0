@@ -58,6 +58,12 @@ interface PopulationState {
   taskGrowthMult?: number;
   /** 任务人口增长倍率到期时间（epoch ms）；空值表示没有临时任务加成。 */
   taskGrowthBuffExpiresAt?: number;
+  /** 人口/金币增长明细的来源；只存派生快照，不改变结算口径。 */
+  treasureGrowthSources?: GrowthSource[];
+  treasureGoldSources?: GrowthSource[];
+  techGrowthSources?: GrowthSource[];
+  reputationGrowthSources?: GrowthSource[];
+  reputationGoldSources?: GrowthSource[];
   /** 宝物金币税倍率（乘数，默认 1；goldRate 类宝物推送，无环）。 */
   treasureGoldMult?: number;
   /** 正负声望对金币税的最终倍率（正声望会降低税收，默认 1）。 */
@@ -67,6 +73,21 @@ interface PopulationState {
   /** 动员加成（默认 0；全民皆兵 +0.15）。mobilizeCap = base + conscriptionBonus。旧存档无此字段默认 0。 */
   conscriptionBonus?: number;
   lastTick: number;
+}
+
+interface GrowthSource {
+  label: string;
+  /** 加性倍率（0.2 = +20%）。 */
+  delta: number;
+  expiresAt?: number;
+}
+
+interface GrowthBreakdownItem {
+  source: string;
+  label: string;
+  ratePerHour: number;
+  percent?: number;
+  expiresAt?: number;
 }
 
 const COLLECTION = 'population';
@@ -166,6 +187,11 @@ export class PopulationModule {
       if (s.tribe === undefined) s.tribe = 'romans';
       if (s.mainLevel === undefined) s.mainLevel = 1;
       if (s.hardCap === undefined) s.hardCap = 0;
+      if (!Array.isArray(s.treasureGrowthSources)) s.treasureGrowthSources = [];
+      if (!Array.isArray(s.treasureGoldSources)) s.treasureGoldSources = [];
+      if (!Array.isArray(s.techGrowthSources)) s.techGrowthSources = [];
+      if (!Array.isArray(s.reputationGrowthSources)) s.reputationGrowthSources = [];
+      if (!Array.isArray(s.reputationGoldSources)) s.reputationGoldSources = [];
 
       // 若重启前处于饥荒但任务丢失，重新调度
       if (s.inFamine && !s.starveTaskId) {
@@ -349,6 +375,50 @@ export class PopulationModule {
     return Math.max(0, this.growthRateRaw(s));
   }
 
+  /** 将人口增长倍率按来源拆解；各来源贡献之和严格等于最终理论增长。 */
+  private growthBreakdown(s: PopulationState): GrowthBreakdownItem[] {
+    const base = Math.max(0, (this.config.buildings.main?.popGrowthPerLevel ?? 0) * s.mainLevel);
+    const entries: GrowthBreakdownItem[] = [{ source: 'main', label: `主基地基础人口增长（Lv${s.mainLevel}）`, ratePerHour: base }];
+    let current = base;
+    const applyGroup = (source: string, sources: GrowthSource[] | undefined, aggregateDelta: number): void => {
+      const valid = (sources ?? []).filter((item) => Number.isFinite(item.delta) && item.delta !== 0);
+      const total = Number.isFinite(aggregateDelta) ? aggregateDelta : valid.reduce((sum, item) => sum + item.delta, 0);
+      if (valid.length) {
+        const groupBase = current;
+        for (const item of valid) entries.push({ source, label: item.label, ratePerHour: groupBase * item.delta, percent: item.delta * 100, ...(item.expiresAt ? { expiresAt: item.expiresAt } : {}) });
+        current = groupBase * (1 + total);
+      } else if (total !== 0) {
+        entries.push({ source, label: source, ratePerHour: current * total, percent: total * 100 });
+        current *= 1 + total;
+      }
+    };
+    applyGroup('treasure', s.treasureGrowthSources, (s.treasureGrowthMult ?? 1) - 1);
+    applyGroup('technology', s.techGrowthSources, (s.techGrowthMult ?? 1) - 1);
+    applyGroup('reputation', s.reputationGrowthSources, (s.reputationGrowthMult ?? 1) - 1);
+    const taskDelta = s.taskGrowthBuffExpiresAt && s.taskGrowthBuffExpiresAt > this.now() ? (s.taskGrowthMult ?? 1) - 1 : 0;
+    applyGroup('task', taskDelta ? [{ label: '任务临时加成', delta: taskDelta, expiresAt: s.taskGrowthBuffExpiresAt }] : [], taskDelta);
+    return entries.filter((entry, index) => index === 0 || entry.ratePerHour !== 0);
+  }
+
+  /** 将金币税按宝物/声望来源拆解；金币没有资源田，基础项为劳动人口税基。 */
+  private goldBreakdown(s: PopulationState): GrowthBreakdownItem[] {
+    const base = Math.max(0, s.currentPop * this.config.constants.goldTaxPerCivilianPerHour);
+    const entries: GrowthBreakdownItem[] = [{ source: 'gold_tax', label: '劳动人口基础税收', ratePerHour: base }];
+    let current = base;
+    const applyGroup = (source: string, sources: GrowthSource[] | undefined, aggregateDelta: number): void => {
+      const valid = (sources ?? []).filter((item) => Number.isFinite(item.delta) && item.delta !== 0);
+      const total = Number.isFinite(aggregateDelta) ? aggregateDelta : valid.reduce((sum, item) => sum + item.delta, 0);
+      if (!valid.length && total === 0) return;
+      const groupBase = current;
+      if (valid.length) for (const item of valid) entries.push({ source, label: item.label, ratePerHour: groupBase * item.delta, percent: item.delta * 100, ...(item.expiresAt ? { expiresAt: item.expiresAt } : {}) });
+      else entries.push({ source, label: source, ratePerHour: groupBase * total, percent: total * 100 });
+      current = groupBase * (1 + total);
+    };
+    applyGroup('treasure', s.treasureGoldSources, (s.treasureGoldMult ?? 1) - 1);
+    applyGroup('reputation', s.reputationGoldSources, (s.reputationGoldTaxMult ?? 1) - 1);
+    return entries;
+  }
+
   // ── Economy 同步（铁律#4：只上报，不回查软上限）──────────────────────────
 
   /**
@@ -367,7 +437,12 @@ export class PopulationModule {
     for (const res of ['wood', 'clay', 'iron', 'crop']) rateMult[res] = mult - 1;
     await this.commands.send({
       name: 'economy.SetRateModifier', from: PopulationModule.NAME,
-      payload: { villageId: s.villageId, source: 'pop_labor', mult: rateMult },
+      payload: {
+        villageId: s.villageId,
+        source: 'pop_labor',
+        mult: rateMult,
+        details: [{ source: 'pop_labor', label: '繁荣度（劳动人口比例）', mult: rateMult }],
+      },
     });
   }
 
@@ -469,6 +544,8 @@ export class PopulationModule {
       civilianCropPerHour: Math.round(s.currentPop * c.popCropPerLabor * 10) / 10,
       /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响；受宝物/声望倍率影响）。供资源条展示金币速率。 */
       goldPerHour: Math.round(s.currentPop * c.goldTaxPerCivilianPerHour * (s.treasureGoldMult ?? 1) * (s.reputationGoldTaxMult ?? 1)),
+      growthBreakdown: this.growthBreakdown(s),
+      goldBreakdown: this.goldBreakdown(s),
       /** 存储溢出扣减系数（0~1）。前端据此显示人口增长被扣减的原因。 */
       overflowRatio: Math.round((s.storedOverflowRatio ?? 0) * 100) / 100,
     };
@@ -828,40 +905,45 @@ export class PopulationModule {
 
   /** 宝物模块推送的人口增长/金币税倍率（乘数，默认 1）。增长速率(growthRateRaw)/金币税实时读取，无需重算。 */
   private async setTreasureGrowthMult(cmd: Command): Promise<CommandResult> {
-    const { villageId, mult, goldMult } = cmd.payload as { villageId: string; mult: number; goldMult?: number };
+    const { villageId, mult, goldMult, growthSources, goldSources } = cmd.payload as { villageId: string; mult: number; goldMult?: number; growthSources?: GrowthSource[]; goldSources?: GrowthSource[] };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.treasureGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
     if (goldMult !== undefined) s.treasureGoldMult = Number.isFinite(goldMult) && goldMult > 0 ? goldMult : 1;
+    if (Array.isArray(growthSources)) s.treasureGrowthSources = growthSources;
+    if (Array.isArray(goldSources)) s.treasureGoldSources = goldSources;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
 
   /** 科研模块推送的人口增长倍率（乘数，默认 1）。与 treasure 倍率独立叠乘。 */
   private async setTechGrowthMult(cmd: Command): Promise<CommandResult> {
-    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const { villageId, mult, sources } = cmd.payload as { villageId: string; mult: number; sources?: GrowthSource[] };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.techGrowthMult = Number.isFinite(mult) && mult > 0 ? (1 + mult) : 1;
+    if (Array.isArray(sources)) s.techGrowthSources = sources;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
 
   private async setReputationGrowthMult(cmd: Command): Promise<CommandResult> {
-    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const { villageId, mult, sources } = cmd.payload as { villageId: string; mult: number; sources?: GrowthSource[] };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.reputationGrowthMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
+    if (Array.isArray(sources)) s.reputationGrowthSources = sources;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
 
   /** 声望模块推送的金币税收倍率（乘数，默认 1；正声望会降低税收）。 */
   private async setReputationGoldTaxMult(cmd: Command): Promise<CommandResult> {
-    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const { villageId, mult, sources } = cmd.payload as { villageId: string; mult: number; sources?: GrowthSource[] };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.reputationGoldTaxMult = Number.isFinite(mult) && mult > 0 ? mult : 1;
+    if (Array.isArray(sources)) s.reputationGoldSources = sources;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
