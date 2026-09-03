@@ -613,8 +613,12 @@ test('商队固定速度不受军队规模参数影响', async () => {
   const mv = movements(app).find((m) => m.type === 'caravan');
   assert.ok(mv, '应创建商队行军');
   const distance = hexDistanceWrapped({ q: from.q, r: from.r }, { q: to.q, r: to.r }, app.config.constants.worldW, app.config.constants.worldH);
-  const expectedTotal = Math.max(3_000, Math.round((distance / app.config.constants.tradeCaravanSpeed) * 3_600)) * 1_000;
+  const expectedTotal = Math.max(
+    Math.round(app.config.constants.tradeCaravanMinDurationSec * 1_000),
+    Math.round((distance / app.config.constants.tradeCaravanSpeed) * 3_600) * 1_000,
+  );
   assert.equal(mv.arriveAt - mv.departAt, expectedTotal, '商队仍应使用独立固定速度');
+  assert.ok(mv.arriveAt - mv.departAt < 3_000_000, '商队不应再被固定 3000 秒最低时长卡住');
 });
 
 test('缺失 popCost 时按1人口回退且不阻断行军', async () => {

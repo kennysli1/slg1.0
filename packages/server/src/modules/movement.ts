@@ -1574,6 +1574,11 @@ export class MovementModule {
     return terrain === 'forest' || terrain === 'hills' ? terrain : 'plain';
   }
 
+  /** 商队最低行进时长（毫秒）；配置中心默认 3 秒，避免零距离商队瞬间完成。 */
+  private caravanMinDurationMs(): number {
+    return Math.max(1, Math.round((this.config.constants.tradeCaravanMinDurationSec ?? 3) * 1000));
+  }
+
   /** 计算行军的基础每格耗时。贸易商队不属于军队，不吃丘陵移速惩罚。 */
   private async baseStepMs(villageId: string, troops: Record<string, number>, type: MovementRecord['type']): Promise<number> {
     if (type === 'caravan') {
@@ -1615,7 +1620,12 @@ export class MovementModule {
     type: MovementRecord['type'],
   ): Promise<PathTiming> {
     const steps = Math.max(0, path.length - 1);
-    if (steps === 0) return { totalMs: 3_000, segmentMs: [] };
+    if (steps === 0) {
+      return {
+        totalMs: type === 'caravan' ? this.caravanMinDurationMs() : 3_000,
+        segmentMs: [],
+      };
+    }
     const base = await this.baseStepMs(villageId, troops, type);
     const terrains = await Promise.all(path.slice(0, -1).map((point) => this.terrainAt(point)));
     const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
@@ -1626,9 +1636,9 @@ export class MovementModule {
     let segmentMs = type === 'caravan'
       ? existingSegmentMs
       : existingSegmentMs.map((ms) => Math.max(1, Math.ceil(ms / sizeMultiplier)));
-    const minimumMs = type === 'caravan' ? 3_000_000 : 3_000;
+    const minimumMs = type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
-    // 商队原有口径是全程统一分摊（且有 3000 秒最低时长），保持逐格调度与 arriveAt 一致。
+    // 商队全程统一分摊，保持逐格调度与 arriveAt 一致；最低时长由配置中心控制。
     if (type === 'caravan') segmentMs = Array.from({ length: steps }, () => Math.max(1, Math.round(totalMs / steps)));
     return { totalMs, segmentMs };
   }
@@ -2251,7 +2261,7 @@ export class MovementModule {
     const steps = Math.max(1, path.length - 1);
     const mult = this.config.constants.tradeCaravanSpeed ?? 100;
     const dist = hexDistanceWrapped(opts.fromXY, opts.toXY, W, H);
-    const totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
+    const totalMs = Math.max(this.caravanMinDurationMs(), Math.round((dist / mult) * 3600) * 1000);
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
     const full: MovementRecord = {
       id: opts.id, type: 'caravan', fromVillage: opts.fromVillage, fromXY: opts.fromXY, toXY: opts.toXY,
@@ -3833,7 +3843,7 @@ export class MovementModule {
       const mult = this.config.constants.tradeCaravanSpeed ?? 100;
       totalMs = routeProgressMs && routeProgressMs > 0
         ? routeProgressMs
-        : (returnTiming.totalMs || (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000));
+        : (returnTiming.totalMs || Math.max(this.caravanMinDurationMs(), Math.round((dist / mult) * 3600) * 1000));
     } else {
       totalMs = routeProgressMs && routeProgressMs > 0 ? routeProgressMs : returnTiming.totalMs;
     }
@@ -3935,7 +3945,7 @@ export class MovementModule {
     const expected = mv.path.slice(0, index + 1).reverse();
     if (expected.length !== path.length || expected.some((point, i) => point.q !== path[i].q || point.r !== path[i].r)) return undefined;
     const segmentMs = timing.segmentMs.slice(0, index).reverse();
-    const minimumMs = mv.type === 'caravan' ? 3_000_000 : 3_000;
+    const minimumMs = mv.type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     return { totalMs: Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0)), segmentMs };
   }
 

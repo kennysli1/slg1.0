@@ -1070,6 +1070,7 @@ function sectionMarchSize(){
 var TRADE_ROWS = [
   ['trade_route_capacity','每条贸易路线运力','每条路线可运输的资源/金币单位数'],
   ['trade_caravan_speed','商队速度','商队行进速度（格/小时），独立于军队行军速度和规模减速'],
+  ['trade_caravan_min_duration_sec','商队最低时长','商队单程最低行进时长（秒）；只防止零距离或极高速商队瞬间抵达'],
   ['trade_npc_gold_per_resource','NPC资源计价','NPC订单中每个资源单位的金币基准价值'],
   ['trade_npc_sell_margin','NPC出售折价','玩家出售资源给NPC时获得的基准价值比例'],
   ['trade_order_max_per_village','每村玩家订单上限','每个村庄同时可挂出的玩家贸易订单数量'],
@@ -1082,7 +1083,7 @@ function sectionTrade(){
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<TRADE_ROWS.length;j++){
     var item = TRADE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
-    var min = item[0] === 'trade_order_ttl_sec' ? '1' : item[0] === 'trade_caravan_speed' ? '0.0001' : '0';
+    var min = item[0] === 'trade_order_ttl_sec' ? '1' : item[0] === 'trade_caravan_speed' || item[0] === 'trade_caravan_min_duration_sec' ? '0.0001' : '0';
     var step = item[0] === 'trade_caravan_speed' || item[0] === 'trade_npc_gold_per_resource' || item[0] === 'trade_npc_sell_margin' ? 'any' : '1';
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
     h += '<td><input type="number" min="'+min+'" step="'+step+'" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';

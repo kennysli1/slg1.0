@@ -23,6 +23,7 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
   assert.equal(c.tradeCaravanSpeed, 100, '商队速度默认值');
+  assert.equal(c.tradeCaravanMinDurationSec, 3, '商队最低时长默认值');
   assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
   assert.deepEqual(
     [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
@@ -437,6 +438,11 @@ test('校验器：商队速度必须为正', () => {
     constants: { ...cfg.constants, tradeCaravanSpeed: 0 },
   };
   assert.throws(() => validateGameConfig(bad), /trade_caravan_speed/);
+  const badMinimum: GameConfig = {
+    ...cfg,
+    constants: { ...cfg.constants, tradeCaravanMinDurationSec: 0 },
+  };
+  assert.throws(() => validateGameConfig(badMinimum), /trade_caravan_min_duration_sec/);
 });
 
 test('特性：多效果特性正确展开', () => {

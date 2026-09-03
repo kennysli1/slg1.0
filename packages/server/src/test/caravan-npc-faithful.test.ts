@@ -71,7 +71,10 @@ test('真实链路：幸福村(pve.Spawn id=happy-X)消失后，发往它的商�
   assert.deepEqual(mv.toXY, { q: A.q, r: A.r }, '商队应转向出发村 A');
 
   // 关键断言：返程倒计时应基于「当前位置 → 出发村」的距离，而非原送达倒计时
-  const expectedReturnMs = Math.max(3000, Math.round((hexDist(mid, { q: A.q, r: A.r }) / 12) * 3600)) * 1000;
+  const expectedReturnMs = Math.max(
+    Math.round(app.config.constants.tradeCaravanMinDurationSec * 1_000),
+    Math.round((hexDist(mid, { q: A.q, r: A.r }) / app.config.constants.tradeCaravanSpeed) * 3_600) * 1_000,
+  );
   assert.ok(Math.abs((mv.arriveAt - clock) - expectedReturnMs) < 2000,
     `返程倒计时应≈从当前位置返程(${expectedReturnMs}ms)，实际 arriveAt=${mv.arriveAt} clock=${clock} diff=${mv.arriveAt - clock}`);
   assert.notEqual(mv.arriveAt, clock + 100000, 'arriveAt 不应仍是原送达倒计时（证明已重置为返程）');
