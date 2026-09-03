@@ -138,12 +138,19 @@ const ERR_MSG: Record<string, string> = {
   garrison_not_found: '这支驻扎军已不存在或不归你指挥',
   war_plan_not_found: '联盟军事目标不存在',
   war_plan_closed: '联盟军事目标已关闭',
+  participation_window_invalid: '参军倒计时必须大于 0 且小于战争倒计时',
   deadline_too_soon: '倒计时至少需要 10 秒',
   cannot_arrive_before_deadline: '倒计时太短，军队无法及时到达目标',
+  war_join_deadline_passed: '参军倒计时已结束，不能再报名',
+  war_travel_too_long: '军队预计行军时间过长，无法在战争倒计时内抵达',
+  war_cancel_window_expired: '参战取消窗口已结束（报名截止后 90 秒）',
+  war_participation_not_found: '你尚未参加该军事行动',
+  war_participation_dispatched: '军队已经派出，不能取消报名',
+  insufficient_reserved_troops: '联盟战事预备队兵力不足',
   war_or_leader_required: '只有盟主或战争专家可以操作联盟战事',
   war_deadline_passed: '倒计时已结束，不能再取消行动',
   war_not_dispatched: '全部兵力尚未派出，暂时不能执行全员撤回',
-  war_recall_window_expired: '全员撤回窗口已过（派出后 90 秒）',
+  war_recall_window_expired: '全员撤回窗口已过（参军截止后 90 秒）',
   garrison_player_target_forbidden: '驻扎军不能续行至玩家控制的格子',
   invalid_continuation_mode: '该目标不支持此行军模式，请重新选择',
   same_tile: '目标不能是部队当前所在格',
@@ -169,6 +176,7 @@ export function errText(code?: string): string {
   if (code.startsWith('bad_troops')) return '出征兵力不合法';
   if (code.startsWith('requires_building')) return '缺少训练所需建筑';
   if (code.startsWith('insufficient_troops')) return '兵力不足';
+  if (code.startsWith('insufficient_reserved_troops')) return '联盟战事预备队兵力不足';
   if (code.startsWith('unknown_unit')) return '未知兵种';
   if (code.startsWith('unknown_building')) return '未知建筑';
   if (code.startsWith('insufficient:')) {

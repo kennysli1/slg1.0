@@ -547,6 +547,29 @@ export class MovementModule {
     return { ok: true, troops: cleaned };
   }
 
+  /** 联盟计划派出时消费预备队；普通公网行军仍走 AdjustTroops。 */
+  private allianceReservation(cmd: Command): { allianceId: string; planId: string; playerId: string } | undefined {
+    if (cmd.from !== 'alliance') return undefined;
+    const value = (cmd.payload as any)?.allianceReservation;
+    return value && typeof value === 'object' && value.planId ? value : undefined;
+  }
+
+  private async deductDepartureTroops(cmd: Command, villageId: string, troops: Record<string, number>): Promise<CommandResult> {
+    const reservation = this.allianceReservation(cmd);
+    if (reservation) return this.commands.send({ name: 'military.ConsumeReservedTroops', from: MovementModule.NAME, payload: { villageId, troops } });
+    const delta = Object.fromEntries(Object.entries(troops).map(([unit, count]) => [unit, -count]));
+    return this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+  }
+
+  private async refundDepartureTroops(cmd: Command, villageId: string, troops: Record<string, number>): Promise<void> {
+    const reservation = this.allianceReservation(cmd);
+    if (reservation) {
+      await this.commands.send({ name: 'military.RestoreConsumedTroops', from: MovementModule.NAME, payload: { villageId, troops, restoreReservation: true } });
+      return;
+    }
+    await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: troops } });
+  }
+
   private async villageTile(villageId: string): Promise<{ q: number; r: number; name?: string } | null> {
     const res = await this.commands.send({
       name: 'world.GetTileByRef',
@@ -1675,20 +1698,14 @@ export class MovementModule {
     const toXY: Hex = { q: tp.q, r: tp.r };
 
     // 从源村扣出兵力（负 delta）
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({
-      name: 'military.AdjustTroops',
-      from: MovementModule.NAME,
-      payload: { villageId, delta },
-    });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     // 装宝物上军队（失败则退还兵力）
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
@@ -1739,16 +1756,14 @@ export class MovementModule {
       if (!relation.ok) return relation;
     }
     // 从源村扣出兵力
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
 
     // 装宝物上军队（失败则退还兵力）
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       return { ok: false, payload: {}, reason: carry.reason };
     }
 
@@ -1906,7 +1921,7 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'same_village' };
     }
     const army = await this.commands.send({ name: 'military.GetArmy', from: MovementModule.NAME, payload: { villageId } });
-    const availableTroops = army.ok ? ((army.payload as any).troops ?? {}) : {};
+    const availableTroops = army.ok ? ((army.payload as any).availableTroops ?? (army.payload as any).troops ?? {}) : {};
     const point = await this.marchPointState(villageId);
     let declarationRequired = false, relation = 'neutral';
     if (targetVillage && (mode === 'raid' || mode === 'attack')) {
@@ -1914,7 +1929,8 @@ export class MovementModule {
       const rel = await this.commands.send({ name: 'diplomacy.GetRelation', from: MovementModule.NAME, payload: { playerId: mine, targetPlayerId: other } });
       relation = rel.ok ? (rel.payload as any).relation : 'neutral'; declarationRequired = relation === 'neutral';
     }
-    return { ok: true, payload: { travelSec: await this.travelSec(villageId, from, target, valid.troops), availableTroops, selectedTroops: valid.troops, marchPoints: point, rallyPointLevel: await this.getRallyLevel(villageId), relation, declarationRequired } };
+    const timing = await this.pathTiming(villageId, linePathWrapped(from, target, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41), valid.troops, 'raid');
+    return { ok: true, payload: { travelSec: Math.max(3, Math.round(timing.totalMs / 1000)), travelMs: timing.totalMs, availableTroops, selectedTroops: valid.troops, marchPoints: point, rallyPointLevel: await this.getRallyLevel(villageId), relation, declarationRequired } };
   }
 
   /** 向玩家村发起掠夺。与攻城共享战斗结算，但保留 raid 行军类型供地图/UI识别。 */
@@ -1931,12 +1947,11 @@ export class MovementModule {
     const relation = await this.validatePvPRelation(villageId, targetVillage, declareWar === undefined ? true : declareWar);
     if (!relation.ok) return relation;
     const point = await this.ensureMarchPoint(villageId); if (point) return point;
-    const delta = Object.fromEntries(Object.entries(valid.troops).map(([u, n]) => [u, -n]));
-    const adj = await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta } });
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) return { ok: false, payload: {}, reason: adj.reason ?? 'no_troops' };
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
-    if (!carry.ok) { await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } }); return { ok: false, payload: {}, reason: carry.reason }; }
+    if (!carry.ok) { await this.refundDepartureTroops(cmd, villageId, valid.troops); return { ok: false, payload: {}, reason: carry.reason }; }
     const mv = await this.launch({ id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
@@ -2160,12 +2175,8 @@ export class MovementModule {
     });
     if (!spend.ok) return { ok: false, payload: {}, reason: spend.reason ?? 'insufficient_resources' };
 
-    const delta: Record<string, number> = {};
-    for (const [u, n] of Object.entries(valid.troops)) delta[u] = -n;
-    const adj = await this.commands.send({
-      name: 'military.AdjustTroops', from: MovementModule.NAME,
-      payload: { villageId, delta },
-    });
+    if (this.allianceReservation(cmd) && !isReinforce) return { ok: false, payload: {}, reason: 'alliance_reservation_requires_reinforce' };
+    const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
     if (!adj.ok) {
       if (!isTransfer) await this.commands.send({
         name: 'economy.Grant', from: MovementModule.NAME,
@@ -2178,7 +2189,7 @@ export class MovementModule {
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) {
-      await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
+      await this.refundDepartureTroops(cmd, villageId, valid.troops);
       if (!isTransfer) await this.commands.send({ name: 'economy.Grant', from: MovementModule.NAME, payload: { villageId, gain: cleanedCargo } });
       return { ok: false, payload: {}, reason: carry.reason };
     }

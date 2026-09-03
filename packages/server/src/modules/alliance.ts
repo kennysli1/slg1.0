@@ -32,6 +32,10 @@ interface WarPlan {
   deadlineAt: number;
   /** 创建时的倒计时秒数；deadlineAt 保留为服务端权威截止时刻。 */
   countdownSec?: number;
+  /** 从创建时起允许成员报名的时长。 */
+  participationCountdownSec?: number;
+  /** 报名截止的服务端绝对时间。 */
+  joinDeadlineAt?: number;
   createdAt?: number;
   status: 'open' | 'dispatched' | 'cancelled';
   allDispatchedAt?: number;
@@ -171,8 +175,10 @@ export class AllianceModule {
     this.commands.register('alliance.ContributeTech', (c) => this.contributeTech(c));
     this.commands.register('alliance.CreateWarPlan', (c) => this.createWarPlan(c));
     this.commands.register('alliance.JoinWarPlan', (c) => this.joinWarPlan(c));
+    this.commands.register('alliance.CancelWarParticipation', (c) => this.cancelWarParticipation(c));
     this.commands.register('alliance.CancelWarPlan', (c) => this.cancelWarPlan(c));
     this.commands.register('alliance.RecallWarPlan', (c) => this.recallWarPlan(c));
+    this.commands.register('alliance.GetTroopReservations', (c) => this.getTroopReservations(c));
     this.commands.register('alliance.GetRelation', (c) => this.getRelation(c));
     // Movement/Building 等 owner 通过命令查询，不直接依赖联盟存储。
     this.commands.register('alliance.CanBuildHall', (c) => this.canBuildHall(c));
@@ -272,7 +278,17 @@ export class AllianceModule {
       researchingBuilding: normalizeBuildPlan(raw.researchingBuilding),
       technologies: raw.technologies ?? {},
       researchingTech: normalizeTechPlan(raw.researchingTech),
-      warPlans: raw.warPlans ?? {},
+      warPlans: Object.fromEntries(Object.entries(raw.warPlans ?? {}).map(([id, rawPlan]) => {
+        const plan = rawPlan as WarPlan;
+        const createdAt = Number(plan.createdAt) > 0 ? Number(plan.createdAt) : this.now();
+        const deadlineAt = Number(plan.deadlineAt);
+        const totalSec = Number(plan.countdownSec) > 0 ? Math.floor(Number(plan.countdownSec)) : Math.max(1, Math.ceil((deadlineAt - createdAt) / 1000));
+        const participationSec = Number(plan.participationCountdownSec) > 0
+          ? Math.floor(Number(plan.participationCountdownSec))
+          : totalSec;
+        const joinDeadlineAt = Number(plan.joinDeadlineAt) > 0 ? Number(plan.joinDeadlineAt) : (participationSec >= totalSec ? deadlineAt : createdAt + participationSec * 1000);
+        return [id, { ...plan, createdAt, countdownSec: totalSec, participationCountdownSec: participationSec, joinDeadlineAt, deadlineAt, participants: plan.participants ?? {} }];
+      })),
       serviceSeq: positiveInt(raw.serviceSeq),
       serviceOrders: Array.isArray(raw.serviceOrders) ? raw.serviceOrders.map((order) => ({ ...order, id: String(order.id ?? ''), serviceCode: String(order.serviceCode ?? ''), status: order.status === 'completed' || order.status === 'failed' ? order.status : 'pending' })) : [],
       level,
@@ -381,7 +397,10 @@ export class AllianceModule {
       // movement.ReturnAllianceDeliveries 处理，不在这里直接改 Movement owner。
       for (const plan of Object.values(a.warPlans)) {
         const dispatched = Object.values(plan.participants).some((p) => p.status === 'dispatched' && p.movementId);
-        for (const participant of Object.values(plan.participants)) if (participant.status === 'joined') participant.status = 'failed';
+        for (const participant of Object.values(plan.participants)) if (participant.status === 'joined') {
+          await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+          participant.status = 'failed';
+        }
         if (!dispatched) {
           plan.status = 'cancelled';
           plan.cancelledAt = this.now();
@@ -543,7 +562,7 @@ export class AllianceModule {
     for (const village of villages) {
       const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: village.id } });
       if (!army.ok) continue;
-      result[String(village.id)] = Object.fromEntries(Object.entries((army.payload as any)?.troops ?? {}).map(([code, count]) => [code, positiveInt(count)]));
+      result[String(village.id)] = Object.fromEntries(Object.entries((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}).map(([code, count]) => [code, positiveInt(count)]));
     }
     return result;
   }
@@ -611,6 +630,7 @@ export class AllianceModule {
     const playerId = String((cmd.payload as any)?.playerId ?? ''); const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a) return { ok: false, payload: {}, reason: 'not_in_alliance' };
     if (a.leaderId === playerId) return { ok: false, payload: {}, reason: 'leader_must_transfer_first' };
+    await this.releaseJoinedWarReservations(a, playerId);
     a.memberIds = a.memberIds.filter((x) => x !== playerId); delete a.roles[playerId]; this.store.delete(PLAYER_INDEX, playerId); this.store.set(COLLECTION, a.id, a); await this.syncPlayerModifiers(playerId); await this.push(a); return { ok: true, payload: { left: true } };
   }
 
@@ -633,7 +653,19 @@ export class AllianceModule {
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
     if (targetPlayerId === a.leaderId || !this.isMember(a, targetPlayerId)) return { ok: false, payload: {}, reason: 'member_not_found' };
+    await this.releaseJoinedWarReservations(a, targetPlayerId);
     a.memberIds = a.memberIds.filter((x) => x !== targetPlayerId); delete a.roles[targetPlayerId]; this.store.delete(PLAYER_INDEX, targetPlayerId); this.store.set(COLLECTION, a.id, a); await this.syncPlayerModifiers(targetPlayerId); await this.push(a); return { ok: true, payload: { removed: targetPlayerId } };
+  }
+
+  /** 离盟或被移除时，取消尚未出发的联盟战事报名，避免预备队锁永久占用兵力。 */
+  private async releaseJoinedWarReservations(a: AllianceState, playerId: string): Promise<void> {
+    for (const plan of Object.values(a.warPlans)) {
+      const participant = plan.participants?.[playerId];
+      if (!participant || participant.status !== 'joined') continue;
+      this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
+      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+      delete plan.participants[playerId];
+    }
   }
 
   private buildingCost(def: AllianceBuildingDef, level: number): Resources { return { wood: Math.ceil(def.baseCost.wood * level), clay: Math.ceil(def.baseCost.clay * level), iron: Math.ceil(def.baseCost.iron * level), crop: Math.ceil(def.baseCost.crop * level) }; }
@@ -704,6 +736,37 @@ export class AllianceModule {
     await this.syncAllModifiers(a);
     await this.push(a);
     return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
+  }
+
+  /**
+   * 返回指定村庄被联盟战事预定的兵力明细。预定只包含尚未派出的参与者，
+   * 由 Alliance 作为计划状态的唯一所有者派生，Military 只保存数量锁。
+   */
+  private async getTroopReservations(cmd: Command): Promise<CommandResult> {
+    const villageId = String((cmd.payload as any)?.villageId ?? '');
+    if (!villageId) return { ok: true, payload: { reserved: {}, reservations: [] } };
+    const reservations: any[] = [];
+    for (const raw of this.store.all<AllianceState>(COLLECTION)) {
+      const a = this.normalize(raw);
+      if (a.disconnected) continue;
+      for (const plan of Object.values(a.warPlans)) {
+        for (const participant of Object.values(plan.participants ?? {})) {
+          if (participant.sourceVillageId !== villageId || participant.status !== 'joined') continue;
+          const member = await this.commands.send({ name: 'player.Get', from: AllianceModule.NAME, payload: { playerId: participant.playerId } });
+          const player = (member.payload as any)?.player;
+          reservations.push({
+            allianceId: a.id, allianceName: a.name, planId: plan.id, playerId: participant.playerId,
+            playerName: player?.name ?? participant.playerId, mode: plan.mode, targetKind: plan.targetKind,
+            targetVillage: plan.targetVillage, targetId: plan.targetId, status: participant.status,
+            troops: { ...participant.troops }, travelSec: participant.travelSec,
+            joinDeadlineAt: plan.joinDeadlineAt, deadlineAt: plan.deadlineAt,
+          });
+        }
+      }
+    }
+    const reserved: Record<string, number> = {};
+    for (const row of reservations) for (const [code, count] of Object.entries(row.troops ?? {})) reserved[code] = (reserved[code] ?? 0) + positiveInt(count);
+    return { ok: true, payload: { reserved, reservations } };
   }
 
   /** 王国服务资源商队抵达后的结算；不计入成员贡献，服务订单只结算一次。 */
@@ -900,7 +963,7 @@ export class AllianceModule {
   }
 
   private async createWarPlan(cmd: Command): Promise<CommandResult> {
-    const { playerId, mode, targetKind, targetVillage, targetId, q, r, countdownSec, deadlineAt: legacyDeadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; countdownSec?: number; deadlineAt?: number };
+    const { playerId, mode, targetKind, targetVillage, targetId, q, r, countdownSec, participationCountdownSec, deadlineAt: legacyDeadlineAt } = cmd.payload as { playerId: string; mode: WarPlan['mode']; targetKind: WarPlan['targetKind']; targetVillage?: string; targetId?: string; q: number; r: number; countdownSec?: number; participationCountdownSec?: number; deadlineAt?: number };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
     if (!['reinforce', 'raid', 'attack'].includes(mode) || !['village', 'pve'].includes(targetKind)) return { ok: false, payload: {}, reason: 'invalid_war_plan' };
@@ -914,6 +977,13 @@ export class AllianceModule {
       : legacyDeadline;
     if (!Number.isFinite(deadline) || deadline < this.now() + 10_000) return { ok: false, payload: {}, reason: 'deadline_too_soon' };
     const normalizedCountdownSec = Math.max(1, Math.ceil((deadline - this.now()) / 1000));
+    const participationSec = Number(participationCountdownSec);
+    const hasParticipationWindow = Number.isInteger(participationSec);
+    if (hasParticipationWindow && (participationSec <= 0 || participationSec >= normalizedCountdownSec)) {
+      return { ok: false, payload: {}, reason: 'participation_window_invalid' };
+    }
+    const effectiveParticipationSec = hasParticipationWindow ? participationSec : normalizedCountdownSec;
+    const createdAt = this.now();
     let targetQ = Number.isFinite(Number(q)) ? Math.trunc(Number(q)) : 0;
     let targetR = Number.isFinite(Number(r)) ? Math.trunc(Number(r)) : 0;
     if (targetKind === 'pve' && targetId) {
@@ -931,7 +1001,7 @@ export class AllianceModule {
       const targetVillageView = (targetPlayer?.villages ?? []).find((v: any) => v.id === targetVillage);
       if (targetVillageView) { targetQ = Math.trunc(Number(targetVillageView.q)); targetR = Math.trunc(Number(targetVillageView.r)); }
     }
-    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, createdAt: this.now(), status: 'open', participants: {} };
+    const plan: WarPlan = { id: `${a.id}-war-${Object.keys(a.warPlans).length + 1}`, mode, targetKind, targetVillage, targetId, q: targetQ, r: targetR, deadlineAt: deadline, countdownSec: normalizedCountdownSec, participationCountdownSec: effectiveParticipationSec, joinDeadlineAt: hasParticipationWindow ? createdAt + effectiveParticipationSec * 1000 : deadline, createdAt, status: 'open', participants: {} };
     a.warPlans[plan.id] = plan; this.store.set(COLLECTION, a.id, a); await this.push(a); return { ok: true, payload: { plan } };
   }
 
@@ -939,10 +1009,12 @@ export class AllianceModule {
     const { playerId, planId, sourceVillageId, troops } = cmd.payload as { playerId: string; planId: string; sourceVillageId: string; troops: Record<string, number> };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined; if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     const plan = a.warPlans[planId]; if (!plan || plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? (plan.createdAt ?? this.now()) + Number(plan.participationCountdownSec ?? 0) * 1000);
+    if (this.now() >= joinDeadlineAt) return { ok: false, payload: {}, reason: 'war_join_deadline_passed' };
     if (plan.participants[playerId]) return { ok: false, payload: {}, reason: 'already_joined' };
     if (!this.isMember(a, playerId) || !(await this.ownedVillage(playerId, sourceVillageId))) return { ok: false, payload: {}, reason: 'village_not_owned' };
     const army = await this.commands.send({ name: 'military.GetArmy', from: AllianceModule.NAME, payload: { villageId: sourceVillageId } });
-    const available = ((army.payload as any)?.troops ?? {}) as Record<string, number>;
+    const available = ((army.payload as any)?.availableTroops ?? (army.payload as any)?.troops ?? {}) as Record<string, number>;
     const cleanTroops: Record<string, number> = {};
     for (const [code, amount] of Object.entries(troops ?? {})) {
       const n = positiveInt(amount);
@@ -953,7 +1025,13 @@ export class AllianceModule {
     if (!Object.keys(cleanTroops).length) return { ok: false, payload: {}, reason: 'empty_troops' };
     const preview = await this.commands.send({ name: 'movement.PreviewMarch', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, q: plan.q, r: plan.r, mode: plan.mode, targetVillage: plan.targetVillage, targetId: plan.targetId, troops: cleanTroops } });
     if (!preview.ok) return { ok: false, payload: {}, reason: preview.reason ?? 'march_preview_failed' };
-    const travelSec = positiveInt((preview.payload as any)?.travelSec); if (this.now() + travelSec * 1000 > plan.deadlineAt) return { ok: false, payload: { travelSec, deadlineAt: plan.deadlineAt }, reason: 'cannot_arrive_before_deadline' };
+    const travelMsRaw = Number((preview.payload as any)?.travelMs);
+    const travelMs = Number.isFinite(travelMsRaw) && travelMsRaw > 0 ? travelMsRaw : positiveInt((preview.payload as any)?.travelSec) * 1000;
+    const travelSec = Math.max(3, Math.ceil(travelMs / 1000));
+    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
+    if (legacyWindow ? this.now() + travelMs > plan.deadlineAt : travelMs >= Math.max(0, plan.deadlineAt - joinDeadlineAt)) return { ok: false, payload: { travelSec, travelMs, deadlineAt: plan.deadlineAt, joinDeadlineAt }, reason: 'war_travel_too_long' };
+    const reserved = await this.commands.send({ name: 'military.ReserveTroops', from: AllianceModule.NAME, payload: { villageId: sourceVillageId, troops: cleanTroops } });
+    if (!reserved.ok) return { ok: false, payload: {}, reason: reserved.reason ?? 'insufficient_troops' };
     plan.participants[playerId] = { playerId, sourceVillageId, troops: cleanTroops, travelSec, status: 'joined' }; this.store.set(COLLECTION, a.id, a); this.scheduleParticipant(a, plan, plan.participants[playerId]!); await this.push(a); return { ok: true, payload: { plan, travelSec } };
   }
 
@@ -966,7 +1044,7 @@ export class AllianceModule {
   private async dispatchParticipant(allianceId: string, planId: string, playerId: string): Promise<void> {
     const a = this.load(allianceId); const plan = a?.warPlans[planId]; const p = plan?.participants[playerId];
     if (!a || !plan || !p || plan.status !== 'open' || a.disconnected) return;
-    const payload: any = { villageId: p.sourceVillageId, troops: p.troops };
+    const payload: any = { villageId: p.sourceVillageId, troops: p.troops, allianceReservation: { allianceId, planId, playerId } };
     let action = '';
     if (plan.mode === 'reinforce') { action = 'movement.SendReinforce'; payload.targetVillage = plan.targetVillage; }
     else if (plan.targetKind === 'pve') { action = plan.mode === 'raid' ? 'movement.SendRaid' : 'movement.SendAttack'; payload.targetId = plan.targetId; }
@@ -976,15 +1054,21 @@ export class AllianceModule {
     // CancelWarPlan may have won the race while the movement command was in
     // flight. Do not resurrect a cancelled plan; best-effort recall the
     // movement that was created before cancellation became visible.
-    if (plan.status !== 'open') {
+    if (plan.status !== 'open' || plan.participants[playerId] !== p) {
       if (movementId) {
         p.movementId = movementId; p.status = 'dispatched'; p.dispatchedAt = this.now();
         await this.recallParticipant(plan, p);
-        this.store.set(COLLECTION, a.id, a);
+        if (plan.participants[playerId] === p) this.store.set(COLLECTION, a.id, a);
+      } else if (plan.participants[playerId] === p && p.status === 'joined') {
+        await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: p.sourceVillageId, troops: p.troops } });
+        p.status = 'recalled'; p.recalledAt = this.now(); this.store.set(COLLECTION, a.id, a);
       }
       return;
     }
     p.status = result.ok && movementId ? 'dispatched' : 'failed';
+    if (p.status === 'failed') {
+      await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: p.sourceVillageId, troops: p.troops } });
+    }
     if (p.status === 'dispatched') { p.movementId = movementId; p.dispatchedAt = this.now(); }
     this.store.set(COLLECTION, a.id, a);
     if (Object.values(plan.participants).every((x) => x.status !== 'joined')) {
@@ -994,6 +1078,22 @@ export class AllianceModule {
     await this.push(a);
   }
 
+  /** 成员在报名截止前取消自己的参战报名，并立即释放服务端预备队锁。 */
+  private async cancelWarParticipation(cmd: Command): Promise<CommandResult> {
+    const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
+    const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
+    if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
+    const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
+    const participant = plan.participants[playerId];
+    if (!participant) return { ok: false, payload: {}, reason: 'war_participation_not_found' };
+    if (participant.status !== 'joined') return { ok: false, payload: {}, reason: 'war_participation_dispatched' };
+    this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${playerId}`);
+    await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+    delete plan.participants[playerId];
+    this.store.set(COLLECTION, a.id, a); await this.push(a);
+    return { ok: true, payload: { plan } };
+  }
+
   /** 盟主/战争专家在倒计时结束前取消尚未完成的集结；已发出的部队尽量复用通用撤回命令。 */
   private async cancelWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
@@ -1001,11 +1101,17 @@ export class AllianceModule {
     if (!a || a.disconnected) return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     if (!this.hasRole(a, playerId, 'war')) return { ok: false, payload: {}, reason: 'war_or_leader_required' };
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
-    if (plan.status !== 'open') return { ok: false, payload: {}, reason: 'war_plan_closed' };
-    if (this.now() >= plan.deadlineAt) return { ok: false, payload: {}, reason: 'war_deadline_passed' };
+    if (plan.status !== 'open' && plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_plan_closed' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt);
+    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
+    if (legacyWindow ? this.now() >= Number(plan.deadlineAt) : (this.now() < joinDeadlineAt || this.now() - joinDeadlineAt >= 90_000)) return { ok: false, payload: {}, reason: legacyWindow ? 'war_deadline_passed' : 'war_cancel_window_expired' };
     plan.status = 'cancelled'; plan.cancelledAt = this.now();
     for (const participant of Object.values(plan.participants)) {
-      if (participant.status === 'joined') this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+      if (participant.status === 'joined') {
+        this.scheduler.cancelByOwner(`alliance-war:${plan.id}:${participant.playerId}`);
+        await this.commands.send({ name: 'military.ReleaseReservedTroops', from: AllianceModule.NAME, payload: { villageId: participant.sourceVillageId, troops: participant.troops } });
+        participant.status = 'recalled'; participant.recalledAt = this.now();
+      }
     }
     this.store.set(COLLECTION, a.id, a);
     const recalls = [];
@@ -1026,7 +1132,9 @@ export class AllianceModule {
     const plan = a.warPlans[planId]; if (!plan) return { ok: false, payload: {}, reason: 'war_plan_not_found' };
     if (plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_not_dispatched' };
     const dispatchedAt = Number(plan.allDispatchedAt);
-    if (!Number.isFinite(dispatchedAt) || this.now() - dispatchedAt >= 90_000) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
+    const joinDeadlineAt = Number(plan.joinDeadlineAt ?? dispatchedAt);
+    const legacyWindow = Number(plan.participationCountdownSec ?? 0) >= Number(plan.countdownSec ?? 0);
+    if (!Number.isFinite(dispatchedAt) || (legacyWindow ? this.now() - dispatchedAt >= 90_000 : this.now() < joinDeadlineAt || this.now() - joinDeadlineAt >= 90_000)) return { ok: false, payload: {}, reason: 'war_recall_window_expired' };
     const recalls = [];
     for (const participant of Object.values(plan.participants)) {
       if (participant.status !== 'dispatched' || !participant.movementId) continue;

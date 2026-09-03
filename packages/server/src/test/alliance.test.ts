@@ -308,6 +308,50 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id].status, 'recalled');
 });
 
+test('联盟战事：报名预备队锁定兵力，成员可取消报名，报名截止后拒绝新成员', async () => {
+  let clock = 6_000_000;
+  const app = createGameApp({ manualScheduler: true, now: () => clock });
+  app.setupWorld();
+  const leader = (await send(app, 'player.Register', { name: '预备队盟主', password: 'pass1', tribe: 'romans' })).payload as any;
+  addAllianceHall(app, leader.player.villageId);
+  await send(app, 'military.AdjustTroops', { villageId: leader.player.villageId, delta: { legionnaire: 10 } });
+  const created = await send(app, 'alliance.Create', { playerId: leader.player.id, sourceVillageId: leader.player.villageId, name: '预备队测试联盟' });
+  const allianceId = (created.payload as any).allianceId as string;
+  const target = await send(app, 'pve.GetTarget', { id: 'pve-0' });
+  const planResult = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 3600, participationCountdownSec: 60 });
+  assert.equal(planResult.ok, true, planResult.reason);
+  const planId = (planResult.payload as any).plan.id as string;
+  const joined = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 6 } });
+  assert.equal(joined.ok, true, joined.reason);
+  const army = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((army.payload as any).availableTroops.legionnaire, 4);
+  assert.equal((army.payload as any).allianceReservedTroops.legionnaire, 6);
+  const blocked = await send(app, 'military.AdjustTroops', { villageId: leader.player.villageId, delta: { legionnaire: -5 } });
+  assert.equal(blocked.ok, false);
+  const cancelled = await send(app, 'alliance.CancelWarParticipation', { playerId: leader.player.id, planId });
+  assert.equal(cancelled.ok, true, cancelled.reason);
+  const released = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((released.payload as any).availableTroops.legionnaire, 10);
+  const plan = app.store.get<any>('alliance', allianceId)!.warPlans[planId];
+  clock = plan.createdAt + 1_000;
+  const joinedAgain = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 6 } });
+  assert.equal(joinedAgain.ok, true, joinedAgain.reason);
+  clock = plan.joinDeadlineAt + 1;
+  const cancelledAfterCutoff = await send(app, 'alliance.CancelWarParticipation', { playerId: leader.player.id, planId });
+  assert.equal(cancelledAfterCutoff.ok, true, cancelledAfterCutoff.reason);
+  const releasedAfterCutoff = await send(app, 'military.GetArmy', { villageId: leader.player.villageId });
+  assert.equal((releasedAfterCutoff.payload as any).availableTroops.legionnaire, 10);
+  const late = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(late.ok, false);
+  assert.equal(late.reason, 'war_join_deadline_passed');
+
+  const shortPlan = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 10, participationCountdownSec: 9 });
+  assert.equal(shortPlan.ok, true, shortPlan.reason);
+  const tooLong = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: (shortPlan.payload as any).plan.id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 1 } });
+  assert.equal(tooLong.ok, false);
+  assert.equal(tooLong.reason, 'war_travel_too_long');
+});
+
 test('联盟职位：四级按配置解锁，形象大使声望成为联盟声望并放大成员加成', async () => {
   const app = createGameApp({ manualScheduler: true });
   const leader = (await send(app, 'player.Register', { name: '声望大使', password: 'pass1', tribe: 'romans' })).payload as any;

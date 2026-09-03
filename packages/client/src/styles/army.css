@@ -615,6 +615,15 @@
   padding: var(--s-2) var(--s-3);
 }
 
+/* ---------- 联盟战事预备队 ---------- */
+.alliance-reserve-panel { display: grid; gap: var(--s-2); }
+.alliance-reserve-total { display: flex; flex-wrap: wrap; gap: var(--s-2); color: var(--c-gold); font-size: var(--f-sm); }
+.alliance-reserve-total span, .alliance-reserve-row__troops span { padding: 2px var(--s-2); border: 1px solid var(--c-line); border-radius: var(--r-sm); background: var(--c-surface-2); }
+.alliance-reserve-row { display: grid; gap: var(--s-1); padding: var(--s-2); border: 1px solid var(--c-line); border-radius: var(--r-sm); background: rgba(0,0,0,.12); }
+.alliance-reserve-row__head { display: flex; justify-content: space-between; gap: var(--s-2); font-size: var(--f-xs); }
+.alliance-reserve-row__head span { color: var(--c-ink-dim); }
+.alliance-reserve-row__troops { display: flex; flex-wrap: wrap; gap: var(--s-1); font-size: var(--f-xs); }
+
 /* ---------- 手机适配 ---------- */
 @media (max-width: 720px) {
   .army-page {
