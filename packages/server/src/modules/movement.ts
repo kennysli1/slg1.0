@@ -3421,6 +3421,10 @@ export class MovementModule {
       if (other.type === 'return' || other.type === 'caravan' || other.type === 'transport' || other.type === 'scout' || other.type === 'incoming_scout' || other.status !== 'marching') continue;
       const otherOwner = await this.ownerOf(other.fromVillage);
       if (otherOwner && myOwner && otherOwner === myOwner) continue;
+      // 同一联盟成员互为盟友，不能因为两支联盟战事行军在途中同格而
+      // 被普通野外遭遇战误判为敌军。这里按联盟模块的权威关系查询，
+      // 不依赖 movement 记录是否带有旧版 allianceId 字段。
+      if (await this.areAllied(myOwner, otherOwner)) continue;
       return other;
     }
     return undefined;
@@ -3435,7 +3439,11 @@ export class MovementModule {
       // NPC 行军不属于可被玩家伏击系统处理的普通出征军，不能触发
       // 或被卷入野外伏击战；双方均需是玩家军队。
       if (other.npcService) continue;
-      if (await this.ownerOf(other.fromVillage) === myOwner) continue;
+      const otherOwner = await this.ownerOf(other.fromVillage);
+      if (otherOwner === myOwner) continue;
+      // 盟友不能互相伏击；即使驻扎伏击军和行军军队来自不同村庄，
+      // 也必须尊重联盟关系，避免联盟集结路线触发友军伏击战。
+      if (await this.areAllied(myOwner, otherOwner)) continue;
       if (hexDistanceWrapped(other.pos, mv.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) <= 1) return other;
     }
     return undefined;
@@ -3445,6 +3453,16 @@ export class MovementModule {
   private async ownerOf(villageId: string): Promise<string> {
     const res = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
     return res.ok ? ((res.payload as any).player?.id ?? villageId) : villageId;
+  }
+
+  /** 查询两个玩家是否同属联盟；关系模块不可用时保守地视为非盟友。 */
+  private async areAllied(leftPlayerId: string, rightPlayerId: string): Promise<boolean> {
+    if (!leftPlayerId || !rightPlayerId || leftPlayerId === rightPlayerId) return leftPlayerId === rightPlayerId;
+    const relation = await this.commands.send({
+      name: 'alliance.GetRelation', from: MovementModule.NAME,
+      payload: { playerId: leftPlayerId, targetPlayerId: rightPlayerId },
+    });
+    return relation.ok && (relation.payload as any)?.relation === 'allied';
   }
 
   /** 两座村庄是否属于同一玩家；用于跨村攻击该玩家自己的任务营地。 */
