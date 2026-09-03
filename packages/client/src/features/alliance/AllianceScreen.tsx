@@ -196,7 +196,11 @@ function WarPlanCardV2({ p, now, canPlan, busy, onAction, villages, sourceVillag
   const myJoined = participants.some((participant) => participant.playerId === me?.id && participant.status === 'joined');
   const memberCount = new Set(participants.map((participant) => participant.playerId)).size;
   const cancelAnchor = Number(p.joinDeadlineAt ?? p.deadlineAt);
-  const cancelWindow = canPlan && (p.status === 'open' || p.status === 'dispatched') && Number.isFinite(cancelAnchor) && now >= cancelAnchor && now - cancelAnchor < 90_000;
+  // 盟主/战争专家在报名期间就可以取消尚未出发的行动；报名截止后
+  // 仍保留原定的 90 秒“取消并撤回”窗口。
+  const cancelBeforeCutoff = canPlan && p.status === 'open' && Number.isFinite(cancelAnchor) && now < cancelAnchor;
+  const cancelAfterCutoff = canPlan && (p.status === 'open' || p.status === 'dispatched') && Number.isFinite(cancelAnchor) && now >= cancelAnchor && now - cancelAnchor < 90_000;
+  const cancelWindow = cancelBeforeCutoff || cancelAfterCutoff;
   const cancelRemain = Number.isFinite(cancelAnchor) ? Math.max(0, Math.ceil((cancelAnchor + 90_000 - now) / 1000)) : 0;
   const availableCodes = Object.keys(available).filter((code) => Number(available[code]) > 0).sort();
   const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, count]) => Number(count) > 0));
@@ -209,6 +213,8 @@ function WarPlanCardV2({ p, now, canPlan, busy, onAction, villages, sourceVillag
   useEffect(() => { if (treasures.length > treasureCap) setTreasures((prev) => prev.slice(0, treasureCap)); }, [treasureCap]);
   const [travelPreview, setTravelPreview] = useState<any>(null);
   const [travelPreviewBusy, setTravelPreviewBusy] = useState(false);
+  const selectedTroopKey = JSON.stringify(selectedTroops);
+  const selectedTreasureKey = JSON.stringify(selectedTreasures);
   useEffect(() => {
     let live = true;
     if (p.status !== 'open' || joinRemain <= 0 || !sourceVillageId || !Object.keys(selectedTroops).length) {
@@ -224,7 +230,7 @@ function WarPlanCardV2({ p, now, canPlan, busy, onAction, villages, sourceVillag
       }).catch(() => { if (live) setTravelPreview({ error: '行军时间计算失败，请重试' }); }).finally(() => { if (live) setTravelPreviewBusy(false); });
     }, 150);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [p.id, p.status, joinRemain, sourceVillageId, JSON.stringify(selectedTroops), JSON.stringify(selectedTreasures)]);
+  }, [p.id, p.status, sourceVillageId, selectedTroopKey, selectedTreasureKey]);
   const troopSummary = (troopMap: Record<string, number>) => {
     const entries = Object.entries(troopMap ?? {}).filter(([, count]) => Number(count) > 0);
     const total = entries.reduce((sum, [, count]) => sum + Number(count), 0);

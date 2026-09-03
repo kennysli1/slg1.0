@@ -1269,7 +1269,10 @@ export class AllianceModule {
     return { ok: true, payload: { plan } };
   }
 
-  /** 盟主/战争专家只能在报名截止后的 90 秒窗口取消集结；已发出的部队尽量复用通用撤回命令。 */
+  /**
+   * 盟主/战争专家可在报名期间取消行动；报名截止后保留 90 秒的取消并撤回窗口。
+   * 报名期间所有部队仍处于预备队锁定状态，不会提前派出，因此可安全释放锁。
+   */
   private async cancelWarPlan(cmd: Command): Promise<CommandResult> {
     const { playerId, planId } = cmd.payload as { playerId: string; planId: string };
     const id = this.idForPlayer(playerId); const a = id ? this.load(id) : undefined;
@@ -1279,13 +1282,12 @@ export class AllianceModule {
     if (plan.status !== 'open' && plan.status !== 'dispatched') return { ok: false, payload: {}, reason: 'war_plan_closed' };
     const now = this.now();
     const joinDeadlineAt = Number(plan.joinDeadlineAt ?? plan.deadlineAt);
-    // 取消窗口统一锚定报名截止时间，而不是战争目标截止时间或某支军队的
-    // 派出时间。这样最远的参战军队即使卡在报名截止时刻出发，报名截止
-    // 后 90 秒也会和其他部队一样失去被盟主一键撤回的资格。
-    if (!Number.isFinite(joinDeadlineAt) || now < joinDeadlineAt) {
+    // 报名截止前可直接取消；截止后仍以截止时间为锚点保留 90 秒窗口。
+    // 这样最远的参战军队即使卡在报名截止时刻出发，也不会延长窗口。
+    if (!Number.isFinite(joinDeadlineAt)) {
       return { ok: false, payload: {}, reason: 'war_cancel_window_not_started' };
     }
-    if (now - joinDeadlineAt >= 90_000) {
+    if (now >= joinDeadlineAt && now - joinDeadlineAt >= 90_000) {
       return { ok: false, payload: {}, reason: 'war_cancel_window_expired' };
     }
     plan.status = 'cancelled'; plan.cancelledAt = now;
