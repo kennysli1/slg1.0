@@ -99,6 +99,18 @@ test('联盟战事：普通 PvE/个人任务营地不可攻城，盟友只能增
   assert.equal(privateCamp.ok, false);
   assert.equal(privateCamp.reason, 'war_private_task_target');
 
+  const publicTaskSpawn = await send(app, 'pve.Spawn', {
+    id: 'alliance-public-task', type: 'tianwang_village', q: 18, r: 18,
+    task: true, ownerVillageId: leader.player.villageId,
+  });
+  assert.equal(publicTaskSpawn.ok, true, publicTaskSpawn.reason);
+  const publicTask = await send(app, 'pve.GetTarget', { id: 'alliance-public-task' });
+  const publicRaid = await send(app, 'alliance.CreateWarPlan', {
+    playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'alliance-public-task',
+    q: (publicTask.payload as any).q, r: (publicTask.payload as any).r, countdownSec: 60,
+  });
+  assert.equal(publicRaid.ok, true, publicRaid.reason);
+
   const alliedAttack = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'attack', targetKind: 'village', targetVillage: member.player.villageId, q: member.player.q, r: member.player.r, countdownSec: 60 });
   assert.equal(alliedAttack.ok, false);
   assert.equal(alliedAttack.reason, 'allied_target');
