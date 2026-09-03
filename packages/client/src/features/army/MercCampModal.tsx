@@ -15,7 +15,7 @@ import { req } from '../../api.js';
 import { resInfo, mercenaryInfo } from '../../app/config.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import {
-  Modal, SectionHead, Empty, Btn, Tag, Icon, IconPlate,
+  Modal, SectionHead, Empty, Btn, Icon, IconPlate,
   Bar, StatGrid, Stat,
 } from '../../ui/index.js';
 import { BuildingManagement } from '../village/BuildingManagement.js';
@@ -199,14 +199,11 @@ function MercCard({
   const commandCost: number = o.commandCost ?? 1;
   const contractSec: number = o.contractSec ?? 259200;
   const hasCapacity = remainingCapacity >= commandCost;
-  const formLabel = o.form === 'ranged' ? '远程' : '近战';
-
-  // 优先从 config 取完整属性（含 rangedDef、carry），回退到 payload 字段
+  // 优先从配置取完整三维战斗属性，回退到服务端报价载荷。
   const cfgInfo = mercenaryInfo(o.code);
-  const meleeAtk = cfgInfo?.meleeAtk ?? o.meleeAtk ?? 0;
-  const meleeDef = cfgInfo?.meleeDef ?? o.meleeDef ?? 0;
-  const rangedAtk = cfgInfo?.rangedAtk ?? o.rangedAtk ?? 0;
-  const rangedDef = cfgInfo?.rangedDef ?? o.rangedDef ?? 0;
+  const attack = cfgInfo?.attack ?? o.attack ?? 0;
+  const defense = cfgInfo?.defense ?? o.defense ?? 0;
+  const hp = cfgInfo?.hp ?? o.hp ?? 0;
   const speed = cfgInfo?.speed ?? o.speed ?? 0;
   const carry = cfgInfo?.carry ?? o.carry ?? 0;
 
@@ -217,14 +214,12 @@ function MercCard({
       <div class="merc-card-body">
         <div class="merc-card-name">
           {o.name}
-          <Tag kind="steel">{formLabel}</Tag>
         </div>
 
         <StatGrid>
-          <Stat icon="ui_icon_atk" label="近战攻击" value={meleeAtk} />
-          <Stat icon="ui_icon_def" label="近战防御" value={meleeDef} />
-          <Stat icon="ui_icon_atk" label="远程攻击" value={rangedAtk} />
-          <Stat icon="ui_icon_def" label="远程防御" value={rangedDef} />
+          <Stat icon="ui_icon_atk" label="攻击" value={attack} />
+          <Stat icon="ui_icon_def" label="防御" value={defense} />
+          <Stat icon="ui_icon_pop" label="生命" value={hp} />
           <Stat icon="ui_icon_speed" label="速度" value={speed} />
           <Stat icon="ui_icon_carry" label="负重" value={carry} />
           <Stat icon="ui_icon_pop" label="统御占用" value={commandCost} />

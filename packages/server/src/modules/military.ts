@@ -426,36 +426,17 @@ export class MilitaryModule {
     this.reportGarrisonPop(s); // 同步更新士兵池口粮（不返还人口）
   }
 
-  /** 派生管线：最终数值 = 基础 × 科技/宝物倍率。对外只暴露最终结果快照。 */
-  private finalStats(unit: string, atkMult = 1, defMult = 1) {
+  /** 新战斗只使用配置中的攻击、防御、生命三属性。 */
+  private finalStats(unit: string) {
     const def = this.config.units[unit];
     return {
-      form: def.form,
       popCost: def.popCost,
-      meleeAtk: def.meleeAtk * atkMult,
-      rangedAtk: def.rangedAtk * atkMult,
-      meleeDef: def.meleeDef * defMult,
-      rangedDef: def.rangedDef * defMult,
+      attack: def.attack,
+      defense: def.defense,
       hp: def.hp,
       speed: def.speed,
       carry: def.carry,
       upkeep: def.upkeep,
-      isCavalry: this.config.constants.cavalryUnitCodes.includes(unit),
-      traits: def.traits.flatMap((tc) => {
-        const t = this.config.unitTraits[tc];
-        return t.effects;
-      }),
-    };
-  }
-
-  private techCombatMult(s: MilitaryState, unit: string): { atk: number; def: number } {
-    const all = s.techCombatByUnit?.all;
-    const own = s.techCombatByUnit?.[unit];
-    const form = this.config.units[unit]?.form;
-    const byForm = form ? s.techCombatByUnit?.[`form:${form}`] : undefined;
-    return {
-      atk: 1 + (all?.atk ?? 0) + (byForm?.atk ?? 0) + (own?.atk ?? 0),
-      def: 1 + (all?.def ?? 0) + (byForm?.def ?? 0) + (own?.def ?? 0),
     };
   }
 
@@ -732,12 +713,10 @@ export class MilitaryModule {
     const tribeUnits = Object.values(this.config.units).filter((u) => u.tribe === s.tribe || u.tribe === 'all');
     const { slots, kindLevels } = await this.resolveLayout(s.villageId);
 
-    // 本族可训练兵种列表（前端据此显示）：通用攻防字段保持最终值快照，供驻军汇总与详情使用；
-    // baseStats 明确下发 CSV 基础值，仅供训练卡展示，避免把玩家科技/宝物加成误认为配置基础值。
+    // 本族可训练兵种列表（前端据此显示）：战斗数值直接来自三属性配置。
     // unlocked / lockReason 与建筑页 GetBuildOptions 同形态：未满足前置时灰显并写明要求。
     const trainable = tribeUnits.map((u) => {
-      const tm = this.techCombatMult(s, u.key);
-      const st = this.finalStats(u.key, (s.treasureAtkMult ?? 1) * tm.atk, (s.treasureDefMult ?? 1) * tm.def);
+      const st = this.finalStats(u.key);
       const trainers = this.trainerSlotsFor(slots, u.key);
       const selectedTrainer = this.selectTrainSlot(s, slots, u.key);
       // 队列全忙时仍以最高等级实例投影数值，保证卡片展示稳定且不暴露建筑实例。
@@ -749,16 +728,14 @@ export class MilitaryModule {
       const level = projectedTrainer?.level ?? 1;
       const kind = projectedTrainer?.kind ?? u.building;
       return {
-        key: u.key, name: u.name, icon: u.icon, form: u.form,
+        key: u.key, name: u.name, icon: u.icon,
         buildingKind: u.building,
         cost: this.effectiveCost(u.cost, level, kind),
         trainSec: Math.max(1, Math.round(u.trainSec * this.trainTimeFactor(level, kind) * (1 - (s.techTrainSpeed ?? 0)) * (this.isCavalry(u.key) ? (s.treasureCavalryTrainMult ?? 1) : 1))),
-        meleeAtk: st.meleeAtk, rangedAtk: st.rangedAtk,
-        meleeDef: st.meleeDef, rangedDef: st.rangedDef,
+        attack: st.attack, defense: st.defense, hp: st.hp,
         speed: st.speed, carry: st.carry, upkeep: st.upkeep,
         baseStats: {
-          meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
-          meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+          attack: u.attack, defense: u.defense, hp: u.hp,
           speed: u.speed, carry: u.carry, upkeep: u.upkeep,
         },
         // 每兵每小时口粮（含精神食粮减免）
@@ -1110,14 +1087,6 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const raidConfig = s.raidDefense ?? { enabled: true, troops: { ...s.troops } };
     if (purpose === 'raid' && !raidConfig.enabled) return { ok: true, payload: { snapshot: {} } };
-    // 声望是玩家级派生加成；负声望的军队攻防 buff 适用于所有由该村出战/守城的快照，
-    // 包括掠夺防守（掠夺仍不叠加城墙、宝物、科技等守城专属加成）。
-    const reputation = await this.commands.send({
-      name: 'reputation.GetByVillage', from: MilitaryModule.NAME, payload: { villageId },
-    });
-    const reputationPayload = (reputation.ok ? reputation.payload : {}) as { armyAttackMult?: number; armyDefenseMult?: number };
-    const reputationAtk = Number.isFinite(reputationPayload.armyAttackMult) ? Math.max(1, reputationPayload.armyAttackMult!) : 1;
-    const reputationDef = Number.isFinite(reputationPayload.armyDefenseMult) ? Math.max(1, reputationPayload.armyDefenseMult!) : 1;
     // units 指定已经由 Movement 验证并扣出村庄的参战兵力；此时不能再按当前驻军钳制，
     // 否则“派出20、城里剩10”会只用10人参战。缺省/掠夺防守才按现有驻军取值。
     const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
@@ -1128,13 +1097,7 @@ export class MilitaryModule {
         ? requested
         : Math.min(requested, Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (!this.config.units[unit] || available <= 0) continue;
-      // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
-      const stats = purpose === 'raid'
-        ? this.finalStats(unit, reputationAtk * (1 + (s.allianceAtkMult ?? 0)), reputationDef * (1 + (s.allianceDefMult ?? 0)))
-        : (() => {
-          const tm = this.techCombatMult(s, unit);
-          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk * (1 + (s.allianceAtkMult ?? 0)), (s.treasureDefMult ?? 1) * tm.def * reputationDef * (1 + (s.allianceDefMult ?? 0)));
-        })();
+      const stats = this.finalStats(unit);
       snapshot[unit] = { count: available, ...stats };
     }
     return { ok: true, payload: { snapshot } };

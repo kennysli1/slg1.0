@@ -67,13 +67,13 @@ test('宝物：旧版 locked 桶中的勇士之证迁入城镇中心，可正常
   assert.equal(discarded.ok, true, `迁移后的凭证应可交互: ${discarded.reason ?? ''}`);
 });
 
-test('宝物：atkMult 被动提升军事攻防快照 (+5%)', async () => {
+test('宝物：不再改变军事战斗属性', async () => {
   const app = await freshApp();
   const a0 = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   const unit0 = a0.trainable.find((u: any) => u.key === 'legionnaire');
-  const baseAtk = unit0.meleeAtk;
+  const baseAtk = unit0.attack;
   assert.ok(baseAtk > 0, 'legionnaire 应有基础攻');
-  assert.equal(unit0.baseStats.meleeAtk, app.config.units.legionnaire.meleeAtk,
+  assert.equal(unit0.baseStats.attack, app.config.units.legionnaire.attack,
     '训练卡基础快照应直接来自 units.csv');
 
   const g = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });
@@ -81,10 +81,8 @@ test('宝物：atkMult 被动提升军事攻防快照 (+5%)', async () => {
 
   const a1 = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
   const unit1 = a1.trainable.find((u: any) => u.key === 'legionnaire');
-  const newAtk = unit1.meleeAtk;
-  // 铁匠0级→bonus=1；war_flag atkMult=5 → ×1.05
-  assert.ok(Math.abs(newAtk - baseAtk * 1.05) < 1e-6,
-    `攻防应 ×1.05: base=${baseAtk} new=${newAtk}`);
+  const newAtk = unit1.attack;
+  assert.equal(newAtk, baseAtk, '宝物不得提供未约定的战斗倍率');
   assert.deepEqual(unit1.baseStats, unit0.baseStats,
     '宝物只改变最终战斗属性，不能污染训练卡的 CSV 基础快照');
 });
@@ -398,7 +396,7 @@ test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主�
   assert.deepEqual(stored.town, ['war_flag'], '新获得的宝物应优先进入城镇中心');
   assert.deepEqual(stored.treasury, ['chainsaw'], '城镇中心满后才进入宝库主栏');
   const before = (await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any;
-  const baseAtk = before.trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
+  const baseAtk = before.trainable.find((u: any) => u.key === 'legionnaire').attack;
   assert.ok(baseAtk > 0);
 
   const unload = await send(app, 'treasure.Unload', { villageId: 'v1', code: 'war_flag', from: 'town' });
@@ -408,8 +406,8 @@ test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主�
   assert.deepEqual(parked.town, [], '卸下后城镇中心主栏应为空');
   assert.deepEqual(parked.treasuryReserve, ['war_flag'], '卸下后应进入备用栏');
   assert.equal(parked.needsLoad, true, '主栏出现空位且备用栏有宝物时应提醒');
-  const parkedAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
-  assert.equal(parkedAtk, baseAtk / 1.05, '备用栏宝物不应继续提供攻防加成');
+  const parkedAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').attack;
+  assert.equal(parkedAtk, baseAtk, '备用栏宝物不应改变战斗属性');
 
   const load = await send(app, 'treasure.Load', { villageId: 'v1', code: 'war_flag' });
   assert.equal(load.ok, true, `备用栏宝物应可装载: ${load.reason ?? ''}`);
@@ -417,8 +415,8 @@ test('宝库：主栏生效、备用栏不生效，卸下/装载均需玩家主�
   assert.deepEqual(active.town, ['war_flag'], '装载后有城镇中心空位时应优先回到城镇中心');
   assert.deepEqual(active.treasury, ['chainsaw'], '装载不应挪动原宝库主栏宝物');
   assert.deepEqual(active.treasuryReserve, [], '装载后备用栏应为空');
-  const activeAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').meleeAtk;
-  assert.equal(activeAtk, baseAtk, '装载后攻防加成应恢复');
+  const activeAtk = ((await send(app, 'military.GetArmy', { villageId: 'v1' })).payload as any).trainable.find((u: any) => u.key === 'legionnaire').attack;
+  assert.equal(activeAtk, baseAtk, '装载后也不应改变战斗属性');
 });
 
 test('宝库：备用栏装载在城镇中心和宝库主栏都有空位时优先城镇中心', async () => {

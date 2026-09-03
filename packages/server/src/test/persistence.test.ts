@@ -125,7 +125,7 @@ test('重启后：进行中的战斗恢复并跑完（combat.resume）', async (
         targetKind: 'pve', targetId: 'pve-4', targetXY: { q: 0, r: 0 },
         movementId: 'mv-persist', fromVillage: 'v-ghost', fromXY: { q: 0, r: 0 },
         troops: { legionnaire: 60 },
-        attackerSnapshot: { legionnaire: { count: 60, form: 'melee', meleeAtk: 40, rangedAtk: 0, meleeDef: 35, rangedDef: 50, carry: 10 } },
+        attackerSnapshot: { legionnaire: { count: 60, attack: 40, defense: 35, hp: 100, carry: 10 } },
       },
     });
     // 推进一个 tick，让战斗真正开始减员但尚未结束

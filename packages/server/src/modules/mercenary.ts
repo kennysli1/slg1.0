@@ -136,9 +136,8 @@ export class MercenaryModule {
       const u = this.config.units[code];
       if (!u) return null;
       return {
-        code: u.key, name: u.name, icon: u.icon, form: u.form,
-        meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
-        meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+        code: u.key, name: u.name, icon: u.icon,
+        attack: u.attack, defense: u.defense, hp: u.hp,
         speed: u.speed, carry: u.carry, goldCost: u.goldCost ?? 0,
         commandCost: u.commandCost ?? 1, contractSec: u.contractSec ?? 259200, tier: u.mercTier ?? 1,
       };

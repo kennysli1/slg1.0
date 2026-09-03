@@ -313,8 +313,9 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
   const cfg = seedConfig();
   const state = tempDir('kow-config-conflict-state-');
   const localUnits = readFileSync(join(cfg.dir, 'units.csv'), 'utf8');
-  const mainUnits = localUnits.replace('80,0,45,40,100,50', '81,0,45,40,100,50');
-  const branchUnits = localUnits.replace('80,0,45,40,100,50', '79,0,45,40,100,50');
+  // 使用当前三属性兵种表中稳定存在的军团攻击值，模拟同一行的并发改动。
+  const mainUnits = localUnits.replace('59.04', '59.05');
+  const branchUnits = localUnits.replace('59.04', '59.06');
   let branchSha = 'branch-sha';
   let mergeable = false;
   let mergeState = 'dirty';
@@ -387,7 +388,12 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
   assert.ok(address && typeof address === 'object');
   try {
     writeFileSync(join(state, 'config_revision.json'), JSON.stringify({ revision: 53, updatedAt: new Date().toISOString(), files: { 'units.csv': 'hash' } }));
-    writeFileSync(join(state, 'config_sync_status.json'), JSON.stringify({ revision: 53, pullRequestUrl: 'https://github.com/owner/repo/pull/7' }));
+    writeFileSync(join(state, 'config_sync_status.json'), JSON.stringify({
+      revision: 53,
+      files: ['units.csv'],
+      lastSuccessAt: new Date().toISOString(),
+      pullRequestUrl: 'https://github.com/owner/repo/pull/7',
+    }));
     const authority = new ConfigAuthority({
       configDir: cfg.dir,
       stateDir: state,
@@ -421,13 +427,17 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
     assert.equal(merged.syncState, 'merged');
 
     // An ordinary closed PR must not remain as a stale “ready” link.  The
-    // next status refresh returns to an idle state so a later config edit can
+    // next status refresh requeues its files so the normal flush path can
     // create a fresh PR from the current branch baseline.
     mergedAt = null;
+    pullState = 'open';
+    await authority.inspectStatus();
+    pullState = 'closed';
     const closed = await authority.inspectStatus();
     assert.equal(closed.pullRequest, null);
     assert.equal(closed.pullRequestUrl, null);
-    assert.equal(closed.syncState, 'idle');
+    assert.equal(closed.syncState, 'pending');
+    assert.deepEqual(closed.pending?.files, ['units.csv']);
     authority.close();
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
