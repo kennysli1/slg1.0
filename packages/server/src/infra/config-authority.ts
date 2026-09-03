@@ -712,7 +712,20 @@ export class ConfigAuthority {
       number = open[0]?.number ?? null;
       if (!number) return null;
     }
-    const pr = await this.github<GithubPullResponse>(`/repos/${this.githubRepo}/pulls/${number}`);
+    let pr = await this.github<GithubPullResponse>(`/repos/${this.githubRepo}/pulls/${number}`);
+    // A closed, unmerged sync PR is no longer an active source of truth.  Look
+    // for a replacement open PR on the canonical branch first; if none exists,
+    // return null so persisted status can drop the stale link instead of
+    // presenting a closed PR as "ready to merge".
+    if (pr.state.toLowerCase() === 'closed' && !pr.merged_at) {
+      const open = await this.github<Array<{ number: number; html_url: string }>>(
+        `/repos/${this.githubRepo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${CONFIG_SYNC_BRANCH}`)}&base=main`,
+      );
+      const replacement = open[0]?.number;
+      if (!replacement) return null;
+      number = replacement;
+      pr = await this.github<GithubPullResponse>(`/repos/${this.githubRepo}/pulls/${number}`);
+    }
     const changed = await this.github<GithubPullFileResponse[]>(`/repos/${this.githubRepo}/pulls/${number}/files?per_page=100`);
     let checks: ConfigCheckStatus[] = [];
     try {
@@ -787,7 +800,19 @@ export class ConfigAuthority {
     if (!this.githubToken) return local;
     try {
       const pullRequest = await this.fetchPullRequestStatus(local.pullRequestUrl);
-      if (pullRequest) this.persistPullRequestStatus(pullRequest, null);
+      if (pullRequest) {
+        this.persistPullRequestStatus(pullRequest, null);
+      } else if (local.pullRequest) {
+        // Clear an ordinary closed/missing PR (merged PRs are represented as
+        // MERGED and intentionally remain visible as the last successful sync).
+        const current = this.readSyncStatus() ?? {} as Outbox;
+        delete current.pullRequest;
+        delete current.pullRequestUrl;
+        current.syncState = deriveSyncState(null, null, null);
+        current.blockedReason = undefined;
+        current.lastStatusError = undefined;
+        this.writeSyncStatus(current);
+      }
       return this.status();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
