@@ -1548,7 +1548,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     foundMaxInflight: cn('found_max_inflight', 1),
     foundAbandonLockSec: cn('found_abandon_lock_sec', 86400),
     tradeRouteCapacity: cn('trade_route_capacity', 500),
-    tradeCaravanSpeed: cn('trade_caravan_speed', 12),
+    tradeCaravanSpeed: cn('trade_caravan_speed', 100),
     tradeNpcGoldPerResource: cn('trade_npc_gold_per_resource', 0.5),
     tradeNpcSellMargin: cn('trade_npc_sell_margin', 0.8),
     tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
@@ -2352,6 +2352,7 @@ export function validateGameConfig(config: GameConfig): void {
   ] as const) if (value < 0) errors.push(`game_constants.csv ${key} 必须≥0`);
   if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
+  if (c.tradeCaravanSpeed <= 0) errors.push(`game_constants.csv trade_caravan_speed 必须>0`);
   if (c.forestVisionPenalty < 0) errors.push(`game_constants.csv forest_vision_penalty 必须≥0`);
   if (c.hillsVisionBonus < 0) errors.push(`game_constants.csv hills_vision_bonus 必须≥0`);
   if (c.hillsMarchSpeedMultiplier <= 0 || c.hillsMarchSpeedMultiplier > 1) {

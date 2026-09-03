@@ -73,7 +73,7 @@ found_abandon_lock_sec,86400,number,新建分城后禁止放弃的秒数
 gold_tax_per_civilian_per_hour,100,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
 start_gold_amount,100,number,新村初始金币存量（让首座建筑可立即开建）
 trade_route_capacity,500,number,每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各算 1 单位 多条路线叠加）
-trade_caravan_speed,12,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
+trade_caravan_speed,100,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
 trade_npc_gold_per_resource,0.5,number,NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）
 trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价 0.8=玩家拿到 80% 基准价值）
 trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易订单上限

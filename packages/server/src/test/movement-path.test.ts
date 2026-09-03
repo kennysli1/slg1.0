@@ -598,6 +598,8 @@ test('行军规模减速：按实际 popCost 计算并逐段叠加，20 人口�
 
 test('商队固定速度不受军队规模参数影响', async () => {
   const app = freshApp();
+  assert.equal(app.config.constants.tradeCaravanSpeed, 100, '商队速度默认值应来自 game_constants.csv');
+  app.config.constants.tradeCaravanSpeed = 50;
   app.config.constants.marchSizePenalty = 10;
   app.config.constants.marchSizeMinMultiplier = 0.1;
   const ra = await send(app, 'player.Register', { name: '商队源', password: 'pass123', tribe: 'romans' });

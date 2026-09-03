@@ -1577,7 +1577,7 @@ export class MovementModule {
   /** 计算行军的基础每格耗时。贸易商队不属于军队，不吃丘陵移速惩罚。 */
   private async baseStepMs(villageId: string, troops: Record<string, number>, type: MovementRecord['type']): Promise<number> {
     if (type === 'caravan') {
-      const speed = Math.max(0.0001, Number(this.config.constants.tradeCaravanSpeed) || 12);
+      const speed = Math.max(0.0001, Number(this.config.constants.tradeCaravanSpeed) || 100);
       return 3_600_000 / speed;
     }
     const speed = await this.commands.send({
@@ -2249,7 +2249,7 @@ export class MovementModule {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
     const steps = Math.max(1, path.length - 1);
-    const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+    const mult = this.config.constants.tradeCaravanSpeed ?? 100;
     const dist = hexDistanceWrapped(opts.fromXY, opts.toXY, W, H);
     const totalMs = Math.max(3000, Math.round((dist / mult) * 3600)) * 1000;
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
@@ -3830,7 +3830,7 @@ export class MovementModule {
       ?? await this.pathTiming(mv.fromVillage, path, mv.troops, mv.type === 'caravan' ? 'caravan' : 'return');
     if (mv.type === 'caravan') {
       const dist = hexDistanceWrapped(cur, home, W, H);
-      const mult = this.config.constants.tradeCaravanSpeed ?? 12;
+      const mult = this.config.constants.tradeCaravanSpeed ?? 100;
       totalMs = routeProgressMs && routeProgressMs > 0
         ? routeProgressMs
         : (returnTiming.totalMs || (Math.max(3000, Math.round((dist / mult) * 3600)) * 1000));
