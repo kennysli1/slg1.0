@@ -180,6 +180,10 @@ describe('联盟目录与战事目标交互', () => {
     assert.match(app, /allianceWarFocus\.value = true/);
     assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
     assert.match(alliance, /CancelAllianceWarParticipation/);
+    assert.match(alliance, /p\.status === 'open'\s*\? now < Number\(p\.deadlineAt\)/);
+    assert.match(alliance, /war-treasure-picker/);
+    assert.match(alliance, /treasureCarryCap\(troopCount\)/);
+    assert.match(alliance, /treasures: selectedTreasures/);
     assert.match(alliance, /允许最大行军时间/);
     assert.match(alliance, /PreviewAllianceWarParticipation/);
     assert.match(alliance, /当前兵力预计行军/);
@@ -476,6 +480,12 @@ describe('errText', () => {
 
   it('unknown_building 前缀返回专用文案', () => {
     assert.equal(errText('unknown_building:forge'), '未知建筑');
+  });
+
+  it('联盟战事宝物校验错误返回明确文案', () => {
+    assert.equal(errText('carry_cap_exceeded'), '携带宝物超出兵力上限');
+    assert.equal(errText('treasure_not_held'), '所选宝物已不在该村庄，请刷新后重试');
+    assert.equal(errText('unknown_treasure:horse_rope'), '所选宝物不存在或配置已更新');
   });
 
   it('unknown_ 通用前缀返回"目标不存在"', () => {
