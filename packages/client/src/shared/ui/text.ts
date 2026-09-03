@@ -99,6 +99,8 @@ const ERR_MSG: Record<string, string> = {
   // 宝物相关
   army_not_returned: '军队尚未归村，无法领取',
   carry_cap_exceeded: '携带宝物超出兵力上限',
+  treasure_not_held: '所选宝物已不在该村庄，请刷新后重试',
+  unknown_treasure: '所选宝物不存在或配置已更新',
   pending_not_found: '该战报已不存在或已被处理',
   pending_expired: '该战报已超时遗弃',
   no_room: '宝物栏已满，无法替换入栏',
@@ -181,6 +183,7 @@ export function errText(code?: string): string {
   if (code.startsWith('insufficient_reserved_troops')) return '联盟战事预备队兵力不足';
   if (code.startsWith('unknown_unit')) return '未知兵种';
   if (code.startsWith('unknown_building')) return '未知建筑';
+  if (code.startsWith('unknown_treasure')) return '所选宝物不存在或配置已更新';
   if (code.startsWith('insufficient:')) {
     const r = code.split(':')[1];
     return `${resInfo(r).name ?? r}不足`;
