@@ -19,7 +19,7 @@ function etaText(arriveAt: number): string {
 }
 
 function IncomingScoutModal({ warning, close }: { warning: IncomingWarning; close: () => void }) {
-  const available = Object.entries(getCache().army?.troops ?? {})
+  const available = Object.entries(getCache().army?.availableTroops ?? getCache().army?.troops ?? {})
     .filter(([code, count]) => SCOUT_CODES.has(code) && Number(count) > 0)
     .map(([code, count]) => ({ code, max: Math.max(0, Math.floor(Number(count))) }));
   const [troops, setTroops] = useState<Record<string, number>>({});

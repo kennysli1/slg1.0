@@ -313,8 +313,8 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
   const cfg = seedConfig();
   const state = tempDir('kow-config-conflict-state-');
   const localUnits = readFileSync(join(cfg.dir, 'units.csv'), 'utf8');
-  const mainUnits = localUnits.replace('4000', '4001');
-  const branchUnits = localUnits.replace('4000', '40');
+  const mainUnits = localUnits.replace('80,0,45,40,100,50', '81,0,45,40,100,50');
+  const branchUnits = localUnits.replace('80,0,45,40,100,50', '79,0,45,40,100,50');
   let branchSha = 'branch-sha';
   let mergeable = false;
   let mergeState = 'dirty';
@@ -342,14 +342,24 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
         head: { sha: branchSha },
       });
     }
+    if (req.method === 'GET' && path === '/repos/owner/repo/pulls') {
+      return send(200, []);
+    }
     if (req.method === 'GET' && path === '/repos/owner/repo/pulls/7/files') {
-      return send(200, [{ filename: 'config/units.csv', status: 'modified', additions: 1, deletions: 1 }]);
+      return send(200, [
+        { filename: 'config/units.csv', status: 'modified', additions: 1, deletions: 1 },
+        { filename: 'config/dialogues.csv', status: 'modified', additions: 1, deletions: 1 },
+      ]);
+    }
+    if (req.method === 'GET' && path === '/repos/owner/repo/compare/main-sha...branch-sha') {
+      return send(200, { merge_base_commit: { sha: 'base-sha' } });
     }
     if (req.method === 'GET' && path === `/repos/owner/repo/commits/${branchSha}/check-runs`) {
       return send(200, { check_runs: [] });
     }
     if (req.method === 'GET' && path === '/repos/owner/repo/contents/config/units.csv') {
-      const text = url.searchParams.get('ref') === 'main-sha' ? mainUnits : branchUnits;
+      const ref = url.searchParams.get('ref');
+      const text = ref === 'main-sha' ? mainUnits : ref === 'base-sha' ? localUnits : branchUnits;
       return send(200, { type: 'file', encoding: 'base64', content: Buffer.from(text, 'utf8').toString('base64') });
     }
     if (req.method === 'GET' && path === '/repos/owner/repo/git/ref/heads/main') return send(200, { object: { sha: 'main-sha' } });
@@ -390,6 +400,9 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
     const details = await authority.conflictDetails();
     assert.equal(details.pullRequest.mergeable, false);
     assert.deepEqual(details.pullRequest.conflictFiles, ['units.csv']);
+    assert.deepEqual(details.pullRequest.changedFiles, ['units.csv', 'dialogues.csv']);
+    assert.equal(details.pullRequest.conflictDetection, 'exact');
+    assert.ok(details.pullRequest.conflictLocations['units.csv']?.length, '应返回具体冲突行/字段');
     assert.equal(details.files[0]?.authority, localUnits);
     assert.equal(details.files[0]?.main, mainUnits);
     assert.equal(details.files[0]?.branch, branchUnits);
@@ -406,6 +419,15 @@ test('配置中心：显示 PR 冲突并可提交人工确认后的双父解决�
     const merged = await authority.inspectStatus();
     assert.equal(merged.pullRequest?.state, 'MERGED');
     assert.equal(merged.syncState, 'merged');
+
+    // An ordinary closed PR must not remain as a stale “ready” link.  The
+    // next status refresh returns to an idle state so a later config edit can
+    // create a fresh PR from the current branch baseline.
+    mergedAt = null;
+    const closed = await authority.inspectStatus();
+    assert.equal(closed.pullRequest, null);
+    assert.equal(closed.pullRequestUrl, null);
+    assert.equal(closed.syncState, 'idle');
     authority.close();
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
