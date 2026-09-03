@@ -1,0 +1,4 @@
+id,code,name,category,reputationCost,unitCode,unitCount,wood,clay,iron,crop,delaySec,desc
+#数字ID,代码,显示名,服务类型(supplies/reinforcement),形象大使声望价格,兵种代码,数量,木材,泥土,铁矿,粮食,抵达延迟秒数,玩家可见说明
+1,alliance_supplies_small,联盟补给箱,supplies,5,,0,1000,1000,1000,1000,0,王国向联盟大厅运送一批基础资源
+2,alliance_reinforcement_guard,王国步兵增援,reinforcement,8,legionnaire,240,0,0,0,0,0,王国步兵抵达联盟大厅所在村庄并临时驻防

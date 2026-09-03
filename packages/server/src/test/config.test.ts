@@ -23,6 +23,12 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
   assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
+  assert.deepEqual(
+    [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
+    [1, 2, 3, 4],
+    '联盟职位应按 1/2/3/4 级解锁',
+  );
+  assert.equal(c.allianceReputationBonusMaxMultiplier, 2, '联盟声望加成倍率上限');
   assert.ok(c.cavalryUnitCodes.includes('equlegati'), '骑兵代码配置应包含罗马骑兵');
   assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
 });
@@ -80,6 +86,9 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
 test('校验器：合法配置不抛错', () => {
   const cfg = loadGameConfig(configDir);
   assert.doesNotThrow(() => validateGameConfig(cfg));
+  assert.deepEqual(Object.keys(cfg.allianceServices), ['alliance_supplies_small', 'alliance_reinforcement_guard']);
+  assert.equal(cfg.allianceServices.alliance_supplies_small.category, 'supplies');
+  assert.equal(cfg.allianceServices.alliance_reinforcement_guard.unitCode, 'legionnaire');
 });
 
 test('任务图：六表编译后保留任务线、目标、效果与关系', () => {

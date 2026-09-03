@@ -17,6 +17,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       SetAllianceRole: { command: 'alliance.SetRole', needAuth: true, injectPlayerId: true, schema: { targetPlayerId: { type: 'string', minLen: 1, maxLen: 64 }, role: { type: 'string', optional: true, maxLen: 32 } } },
       RemoveAllianceMember: { command: 'alliance.RemoveMember', needAuth: true, injectPlayerId: true, schema: { targetPlayerId: { type: 'string', minLen: 1, maxLen: 64 } } },
       DepositAllianceResources: { command: 'alliance.DepositResources', needAuth: true, injectPlayerId: true, schema: { sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, amount: { type: 'json' } } },
+      BuyAllianceService: { command: 'alliance.BuyService', needAuth: true, injectPlayerId: true, schema: { serviceCode: { type: 'string', minLen: 1, maxLen: 64 } } },
       StartAllianceBuilding: { command: 'alliance.StartBuilding', needAuth: true, injectPlayerId: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
       StartAllianceTech: { command: 'alliance.StartTech', needAuth: true, injectPlayerId: true, schema: { code: { type: 'string', minLen: 1, maxLen: 64 } } },
       ContributeAllianceTech: { command: 'alliance.ContributeTech', needAuth: true, injectPlayerId: true, schema: { sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, amount: { type: 'integer', min: 1, max: 1000000 } } },

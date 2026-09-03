@@ -744,6 +744,12 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     text: ['name', 'effectType', 'description'],
     labels: ['code', 'name'],
   },
+  alliance_services: {
+    file: 'alliance_services.csv', key: 'code',
+    numeric: ['id', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'delaySec'],
+    text: ['name', 'category', 'unitCode', 'desc'],
+    labels: ['code', 'name', 'category'],
+  },
 };
 
 /**
@@ -845,8 +851,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}};
+const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -883,7 +889,7 @@ function sectionGeneric(table){
     rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -921,13 +927,19 @@ var ALLIANCE_ROWS = [
   ['alliance_war_combat_mult','战争专家军队攻防加成','战争专家所有村庄军队的攻防倍率'],
   ['alliance_tech_probability_bonus','首席科技官科技点概率加成','首席科技官所有村庄的科技点获得概率'],
   ['alliance_ambassador_reputation_bonus','形象大使声望额外加成','形象大使每次获得声望时额外增加的点数'],
+  ['alliance_reputation_bonus_per_point','联盟声望加成/点','联盟声望每点带来的职位、建筑和科技加成倍率增长'],
+  ['alliance_reputation_bonus_max_multiplier','联盟声望加成上限','联盟职位、建筑和科技加成的最终倍率上限'],
+  ['alliance_logistics_role_level','后勤主管解锁等级','达到此联盟等级解锁后勤主管'],
+  ['alliance_war_role_level','战争专家解锁等级','达到此联盟等级解锁战争专家'],
+  ['alliance_tech_role_level','首席科技官解锁等级','达到此联盟等级解锁首席科技官'],
+  ['alliance_ambassador_role_level','形象大使解锁等级','达到此联盟等级解锁形象大使'],
   ['alliance_project_duration_sec','联盟建筑/科技耗时','联盟建筑建造与联盟科技研发耗时（秒）'],
 ];
 
 function sectionAlliance(){
   var rows = DATA.constants || [], byKey = {};
   for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
-  var h = '<div class="hint">联盟创建成本、职位加成、等级容量，以及联盟建筑和联盟科技目录都在此集中编辑。创建成本和职位加成写入 game_constants.csv；等级、建筑和科技的等级/成本/效果分别写入对应 CSV。保存后会校验、热重载并进入配置同步流程。</div>';
+  var h = '<div class="hint">联盟创建成本、职位加成、声望放大、等级容量，以及联盟建筑、科技和形象大使服务目录都在此集中编辑。常量写入 game_constants.csv；等级、建筑、科技和服务的等级/成本/效果分别写入对应 CSV。保存后会校验、热重载并进入配置同步流程。</div>';
   h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
   for (var j=0;j<ALLIANCE_ROWS.length;j++){
     var item = ALLIANCE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
@@ -1472,6 +1484,7 @@ function render(){
   html += sectionGeneric('alliance_levels');
   html += sectionGeneric('alliance_buildings');
   html += sectionGeneric('alliance_tech');
+  html += sectionGeneric('alliance_services');
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
   html += sectionFounding();
@@ -1486,7 +1499,7 @@ function render(){
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects' || t === 'alliance_levels' || t === 'alliance_buildings' || t === 'alliance_tech') continue; // 已在专用视图合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects' || t === 'alliance_levels' || t === 'alliance_buildings' || t === 'alliance_tech' || t === 'alliance_services') continue; // 已在专用视图合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;
