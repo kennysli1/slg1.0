@@ -18,12 +18,16 @@ export const tick = signal(0);
 export const dataVersion = signal(0);
 export function bumpData(): void { dataVersion.value++; }
 
+/** 联盟专用数据版本号；只在 AllianceUpdated 推送时递增，避免联盟页因地图/行军心跳重复请求。 */
+export const allianceVersion = signal(0);
+export function bumpAlliance(): void { allianceVersion.value++; }
+
 /** 战报列表版本号（战报数组原地更新，靠版本号触发重渲）。 */
 export const reportsVersion = signal(0);
 export function bumpReports(): void { reportsVersion.value++; }
 
 /** 当前页签。 */
-export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports';
+export type TabKey = 'village' | 'army' | 'map' | 'tech' | 'tasks' | 'reports' | 'alliance';
 export const tab = signal<TabKey>('village');
 
 /** 登录态版本号（登录/切村后自增，驱动整壳重渲）。 */
@@ -96,6 +100,10 @@ export function showToast(msg: string, kind: ToastEntry['kind'] = 'info'): void 
 
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string; visibility?: 'unexplored' | 'explored' | 'visible';
+  /** 玩家村庄外交关系；联盟战事选点时复用地图服务端快照。 */
+  relation?: 'allied' | 'neutral' | 'hostile';
+  /** 王国城邦标记；普通 PvE 没有攻城选项。 */
+  cityState?: boolean;
   taskInfo?: TaskCampInfo;
   /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
   playerName?: string;
@@ -105,6 +113,12 @@ export interface SelectedTarget {
   mainBaseName?: string;
 }
 export const selected = signal<SelectedTarget | null>(null);
+
+/** 联盟战事创建时的地图选点状态；选中 PvE/玩家村后由 App 自动带回联盟页。 */
+export const allianceTargetPicker = signal(false);
+export const allianceWarTarget = signal<SelectedTarget | null>(null);
+/** 地图选点完成后让联盟页直接打开“联盟战事”板块，而不是默认成员页。 */
+export const allianceWarFocus = signal(false);
 
 /** 已驻扎军选择“行军”后暂存的续行命令；玩家再点地图目标格即可下达。 */
 export const garrisonContinue = signal<{ movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate' } | null>(null);

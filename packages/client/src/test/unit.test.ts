@@ -15,7 +15,7 @@ import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
 import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
-import { populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
+import { breakdownTooltip, populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
@@ -29,6 +29,19 @@ import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDial
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+
+describe('军队面板折叠区顺序', () => {
+  it('防御掠夺位于训练下方、解散上方，并使用与解散相同的折叠控件', () => {
+    const source = readFileSync(new URL('../features/army/ArmyScreen.tsx', import.meta.url), 'utf8');
+    const training = source.indexOf('<TrainingCenterSection />');
+    const raidDefense = source.indexOf('<RaidDefenseSection army={army} />');
+    const disband = source.indexOf('<DisbandSection army={army} />');
+    assert.ok(training >= 0 && raidDefense > training && disband > raidDefense);
+    assert.match(source, /<details class="army-collapsible-details raid-defense-details">/);
+    assert.match(source, /<details class="army-collapsible-details disband-details">/);
+    assert.match(source, /<summary class="section-head section-head--toggle">[\s\S]*?防御掠夺/);
+  });
+});
 
 describe('骰子任务逐帧回放', () => {
   const base = (): DiceQuestReplayBase => ({
@@ -136,6 +149,54 @@ describe('阶段化战斗模拟器的科技与宝物多选', () => {
     selected = toggleMultiSelection(selected, 'tech-a', false);
     assert.deepEqual(selected, ['tech-b']);
     assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+  });
+});
+
+describe('联盟目录与战事目标交互', () => {
+  it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
+    const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /if \(alliance\.disconnected\) \{[\s\S]*?<DisconnectedAlliance/);
+    assert.match(source, /DisconnectedAlliance[\s\S]*?onLeave=\{\(\) => action\('LeaveAlliance'/);
+    assert.match(source, /pane === 'directory'[\s\S]*?canApply=\{false\}/);
+    assert.match(source, /canApply && !a\.full \? <Btn/);
+  });
+
+  it('联盟战事按活跃优先、创建时间倒序，并让历史记录默认折叠', () => {
+    const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /const sortedPlans = \[\.\.\.\(alliance\.warPlans \?\? \[\]\)\]\.sort/);
+    assert.match(source, /if \(isActive\(a\) !== isActive\(b\)\) return isActive\(a\) \? -1 : 1/);
+    assert.match(source, /<details ref=\{detailsRef\} class=\{`war-plan\$\{active \? ' war-plan--active' : ' war-plan--history'\}`\} open=\{active \|\| expanded\}/);
+    assert.match(source, /const \[expanded, setExpanded\] = useState\(active\)/);
+    assert.match(source, /useEffect\(\(\) => \{ setExpanded\(active\); \}, \[active\]\)/);
+    assert.match(source, /deadline > now : plan\.status === 'open'/);
+    assert.match(source, /detailsRef\.current\.open = active \|\| expanded/);
+  });
+
+  it('地图选目标后回到联盟页，并限制任务营地、普通 PvE 与盟友模式', () => {
+    const app = readFileSync(new URL('../shell/App.tsx', import.meta.url), 'utf8');
+    const alliance = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
+    assert.match(app, /allianceTargetPicker\.value = false;[\s\S]*?tab\.value = 'alliance'/);
+    assert.match(app, /if \(target\.taskInfo && target\.taskInfo\.scope !== 'global'\)[\s\S]*?个人任务营地不能作为联盟战事目标/);
+    assert.match(app, /allianceWarFocus\.value = true/);
+    assert.match(alliance, /useState<Pane>\(\(\) => allianceWarFocus\.value \? 'war' : 'members'\)/);
+    assert.match(alliance, /CancelAllianceWarParticipation/);
+    assert.match(alliance, /const cancelAnchor = Number\(p\.joinDeadlineAt \?\? p\.deadlineAt\)/);
+    assert.match(alliance, /const cancelBeforeCutoff = canPlan && p\.status === 'open'/);
+    assert.match(alliance, /const cancelWindow = cancelBeforeCutoff \|\| cancelAfterCutoff/);
+    assert.match(alliance, /now >= cancelAnchor/);
+    assert.match(alliance, /now - cancelAnchor < 90_000/);
+    assert.match(alliance, /war-treasure-picker/);
+    assert.match(alliance, /treasureCarryCap\(troopCount\)/);
+    assert.match(alliance, /treasures: selectedTreasures/);
+    assert.match(alliance, /允许最大行军时间/);
+    assert.match(alliance, /PreviewAllianceWarParticipation/);
+    assert.match(alliance, /当前兵力预计行军/);
+    assert.doesNotMatch(alliance, /若现在出发，预计/);
+    assert.match(alliance, /withinLimit/);
+    assert.doesNotMatch(alliance, /\[p\.id, p\.status, joinRemain, sourceVillageId/);
+    assert.match(alliance, /picked\?\.relation === 'allied' \? \['reinforce'\]/);
+    assert.match(alliance, /picked\?\.cityState === true \? \['raid', 'attack'\] : \['raid'\]/);
+    assert.match(alliance, /targetModeAllowed/);
   });
 });
 
@@ -424,6 +485,12 @@ describe('errText', () => {
 
   it('unknown_building 前缀返回专用文案', () => {
     assert.equal(errText('unknown_building:forge'), '未知建筑');
+  });
+
+  it('联盟战事宝物校验错误返回明确文案', () => {
+    assert.equal(errText('carry_cap_exceeded'), '携带宝物超出兵力上限');
+    assert.equal(errText('treasure_not_held'), '所选宝物已不在该村庄，请刷新后重试');
+    assert.equal(errText('unknown_treasure:horse_rope'), '所选宝物不存在或配置已更新');
   });
 
   it('unknown_ 通用前缀返回"目标不存在"', () => {
@@ -754,6 +821,18 @@ describe('村庄资源栏受限状态', () => {
     assert.equal(rate.label, '+90/时');
   });
 
+  it('资源悬浮明细显示基础产值、来源加成和剩余时间', () => {
+    const text = breakdownTooltip('木材', [
+      { kind: 'base', source: 'building:woodcutter:a', label: '资源田基础产值 · 伐木场 Lv2', ratePerHour: 100 },
+      { kind: 'modifier', source: 'tech:forestry', label: '科技：林业', ratePerHour: 20, percent: 20 },
+      { kind: 'timed', source: 'task:m1', label: '任务：临时鼓舞', ratePerHour: 10, percent: 10, expiresAt: Date.now() + 60_000 },
+    ], 130, 130);
+    assert.match(text, /资源田基础产值/);
+    assert.match(text, /科技：林业：\+20\.0\/时（\+20\.0%） · 永久/);
+    assert.match(text, /任务：临时鼓舞：\+10\.0\/时（\+10\.0%） · 剩余/);
+    assert.match(text, /理论总产出：\+130\.0\/时/);
+  });
+
   it('人口达到上限后显示潜在增长率而不是零', () => {
     const state = {
       hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
@@ -774,6 +853,23 @@ describe('村庄资源栏受限状态', () => {
     assert.match(text, /劳动人口 120/);
     assert.match(text, /军队人口 80/);
     assert.match(text, /训练中 10/);
+  });
+
+  it('人口悬浮说明同时显示人口增长和金币税收来源', () => {
+    const text = populationTooltip({
+      hardCap: 300, inFamine: false, overflowRatio: 0, soldierPop: 80, trainingPop: 0,
+      growthPerHour: 6, potentialGrowthPerHour: 6, cropDeficitRate: 0,
+    }, 210, 120, 6, [
+      { source: 'main', label: '主基地基础人口增长（Lv2）', ratePerHour: 5 },
+      { source: 'technology', label: '科技：人口法典', ratePerHour: 1, percent: 20 },
+    ], [
+      { source: 'gold_tax', label: '劳动人口基础税收', ratePerHour: 60 },
+      { source: 'treasure', label: '宝物：金袋', ratePerHour: 12, percent: 20 },
+    ]);
+    assert.match(text, /主基地基础人口增长/);
+    assert.match(text, /科技：人口法典/);
+    assert.match(text, /劳动人口基础税收/);
+    assert.match(text, /宝物：金袋/);
   });
 
   it('仓储溢出时说明人口增长扣减比例', () => {

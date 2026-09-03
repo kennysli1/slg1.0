@@ -438,26 +438,26 @@ refreshAll();
 const CONFIG_CENTER_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>配置中心</title>
 <style>
-*{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:1180px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:inline-block;padding:9px 12px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit;margin:3px 4px 3px 0}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8;overflow:auto;max-height:260px}.sync-state{display:inline-block;padding:5px 9px;border-radius:4px;background:#245b3d;color:#b9f6c8;margin:5px 0}.sync-state.warn{background:#6b4c1d;color:#ffe1a3}.sync-state.bad{background:#6d2d34;color:#ffd1d5}.pr-link{margin-left:8px}.conflict{border:1px solid #8e5f3b;border-radius:7px;padding:14px;margin:12px 0;background:#241e1a}.conflict h3{margin:0 0 8px;color:#ffd08a}.source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.source-grid section{min-width:0}.source-grid h4{margin:4px 0;color:#9dd8ff;font-size:12px}.source-grid pre{margin:0;padding:9px;background:#0b1219;border:1px solid #2b4358;white-space:pre-wrap;overflow:auto;max-height:180px;font:11px ui-monospace,monospace;color:#c4d1df}.resolved{width:100%;min-height:220px;background:#0b1219;border:1px solid #65c7ff;border-radius:4px;color:#e5eef8;padding:9px;font:12px ui-monospace,monospace}.resolve-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.resolve-bar select{background:#0b1219;color:#e5eef8;border:1px solid #557692;border-radius:4px;padding:7px;font:inherit}.hidden{display:none}@media(max-width:780px){.source-grid{grid-template-columns:1fr}}
+*{box-sizing:border-box}body{margin:0;padding:24px;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}main{max-width:1180px;margin:auto}.card{border:1px solid #3b6e91;border-radius:8px;padding:18px;background:#142532;margin:14px 0}h1{color:#8ed5ff;margin:0 0 8px}.notice{border-left:4px solid #f1c575;padding:10px 12px;background:#2b2a22;color:#f7dda0;line-height:1.6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}a,button{display:inline-block;padding:9px 12px;border:1px solid #65c7ff;border-radius:5px;color:#dce7f7;background:#173550;text-decoration:none;cursor:pointer;font:inherit;margin:3px 4px 3px 0}a:hover,button:hover{background:#2b6689}.meta{color:#9bb0c9;line-height:1.6;font-size:12px}#status{white-space:pre-wrap;color:#b9f6c8;overflow:auto;max-height:260px}.sync-state{display:inline-block;padding:5px 9px;border-radius:4px;background:#245b3d;color:#b9f6c8;margin:5px 0}.sync-state.warn{background:#6b4c1d;color:#ffe1a3}.sync-state.bad{background:#6d2d34;color:#ffd1d5}.pr-link{margin-left:8px}.conflict{border:1px solid #8e5f3b;border-radius:7px;padding:14px;margin:12px 0;background:#241e1a}.conflict h3{margin:0 0 8px;color:#ffd08a}.conflict-location{margin:0 0 10px;padding:8px 10px;border-left:3px solid #ffb25d;background:#33271e;color:#ffe0b0;line-height:1.5}.source-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.source-grid section{min-width:0}.source-grid h4{margin:4px 0;color:#9dd8ff;font-size:12px}.source-grid pre{margin:0;padding:9px;background:#0b1219;border:1px solid #2b4358;white-space:pre-wrap;overflow:auto;max-height:180px;font:11px ui-monospace,monospace;color:#c4d1df}.resolved{width:100%;min-height:220px;background:#0b1219;border:1px solid #65c7ff;border-radius:4px;color:#e5eef8;padding:9px;font:12px ui-monospace,monospace}.resolve-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.resolve-bar select{background:#0b1219;color:#e5eef8;border:1px solid #557692;border-radius:4px;padding:7px;font:inherit}.hidden{display:none}@media(max-width:780px){.source-grid{grid-template-columns:1fr}}
 </style></head><body><main>
 <h1>配置中心（CSV）</h1>
 <div class="card"><div class="grid">
 <a href="/config/balance">平衡参数与常量</a><a href="/config/quest-modules">任务定义模块</a><a href="/config/quests">任务目录</a><a href="/config/quest-graph">任务关系图（只读审查）</a><a href="/config/dialogues">任务/NPC 对话</a>
 </div></div>
 <div class="notice">这里修改的是版本化游戏配置，不是当前玩家状态。保存后会校验 CSV、写入共享配置、热重载当前服务器，并异步创建 GitHub 配置 PR。下方会显示 PR 检查与冲突状态；冲突时可逐文件确认最终内容，配置中心值默认作为权威版本。</div>
-<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><div id="state" class="sync-state">加载中…</div><span id="pr"></span><pre id="status">加载中…</pre></div>
+<div class="card"><div class="meta">GM 面板只负责实时 JSON 状态（资源、人口、任务进度、村庄和军队）。本页不提供删档或账号操作。</div><p><button onclick="loadStatus()">刷新配置同步状态</button> <button onclick="syncNow()">立即同步 / 重试</button> <a href="/gm">返回 GM 实时状态</a></p><div id="state" class="sync-state">加载中…</div><span id="pr"></span><div id="conflict-summary" class="meta hidden"></div><pre id="status">加载中…</pre></div>
 <div id="conflicts" class="card hidden"><h2>需要确认的配置冲突</h2><div class="meta">配置中心内容是运行时权威。每个文件都可以查看 main、PR 当前版本和配置中心版本，编辑“最终提交内容”后一次性提交。提交前会执行整套 CSV 校验。</div><div id="conflict-list"></div><div class="resolve-bar"><button id="resolve" onclick="resolveConflicts()">确认全部文件并更新 PR</button><span id="resolve-status" class="meta"></span></div></div>
 <script>
 let token=sessionStorage.getItem('gmToken')??'';let latest=null;let conflictData=null;
 function headers(){let h={};if(token)h['X-GM-Token']=token;return h}
 async function request(url,opt={}){opt.headers=Object.assign({},opt.headers||{},headers(),opt.body?{'Content-Type':'application/json'}:{});let r=await fetch(url,opt);if(r.status===401){let x=prompt('GM Token:',token);if(x!==null){token=x.trim();if(token)sessionStorage.setItem('gmToken',token);return request(url,opt)}}let d=await r.json();if(!r.ok&&!d.ok)throw Error(d.reason||'请求失败');return d}
 function esc(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-function renderStatus(d){latest=d;let state=d.syncState||'idle';let labels={idle:'尚未同步',pending:'等待同步',checking:'PR 检查中',conflict:'PR 存在冲突',ready:'可以合并',merged:'已合并 main',error:'同步失败'};let el=document.getElementById('state');el.textContent=labels[state]||state;el.className='sync-state '+(state==='conflict'||state==='error'?'bad':state==='checking'||state==='pending'?'warn':'');let pr=document.getElementById('pr');pr.innerHTML=d.pullRequestUrl?'<a class="pr-link" target="_blank" rel="noreferrer" href="'+esc(d.pullRequestUrl)+'">打开 GitHub PR</a>':'';document.getElementById('status').textContent=JSON.stringify(d,null,2);if(state==='conflict')loadConflicts();else document.getElementById('conflicts').classList.add('hidden')}
+function renderStatus(d){latest=d;let state=d.syncState||'idle';let labels={idle:'尚未同步',pending:'等待同步',checking:'PR 检查中',conflict:'PR 存在冲突',ready:'可以合并',merged:'已合并 main',error:'同步失败'};let el=document.getElementById('state');el.textContent=labels[state]||state;el.className='sync-state '+(state==='conflict'||state==='error'?'bad':state==='checking'||state==='pending'?'warn':'');let pr=document.getElementById('pr');pr.innerHTML=d.pullRequestUrl?'<a class="pr-link" target="_blank" rel="noreferrer" href="'+esc(d.pullRequestUrl)+'">打开 GitHub PR</a>':'';let summary=document.getElementById('conflict-summary');if(state==='conflict'&&d.pullRequest){let p=d.pullRequest;if(p.conflictDetection==='exact'&&p.conflictFiles?.length){summary.textContent='实际冲突位置：'+p.conflictFiles.map(function(file){let rows=p.conflictLocations?.[file]||[];return file+(rows.length?' → '+rows.map(function(row){return row.key+'['+row.columns.join(',')+']'}).join('、'):'')}).join('；')}else if(p.conflictDetection==='unavailable'){summary.textContent='冲突位置暂时无法计算：'+(p.conflictDetectionError||'请刷新后重试')}else{summary.textContent='GitHub 报告 PR 不可合并，但当前配置 CSV 未检测到行级冲突；请检查 PR 检查项或刷新状态'}summary.className='meta conflict-location';summary.classList.remove('hidden')}else{summary.textContent='';summary.className='meta hidden'}document.getElementById('status').textContent=JSON.stringify(d,null,2);if(state==='conflict')loadConflicts();else document.getElementById('conflicts').classList.add('hidden')}
 async function loadStatus(){try{renderStatus(await request('/config/status'))}catch(e){document.getElementById('state').textContent='状态读取失败：'+e.message;document.getElementById('state').className='sync-state bad'}}
 async function syncNow(){try{renderStatus(await request('/config/sync',{method:'POST'}));}catch(e){document.getElementById('state').textContent='同步失败：'+e.message;document.getElementById('state').className='sync-state bad';loadStatus()}}
 function setResolution(file,source){let card=document.querySelector('[data-file="'+CSS.escape(file)+'"]');if(!card||!conflictData)return;let entry=conflictData.files.find(x=>x.file===file);let area=card.querySelector('textarea');area.value=source==='authority'?entry.authority:source==='main'?entry.main:entry.branch;area.dataset.source=source}
-function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
-async function loadConflicts(){try{renderConflicts(await request('/config/sync/conflicts'))}catch(e){document.getElementById('resolve-status').textContent='冲突读取失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}}
+function renderConflicts(d){conflictData=d;let list=document.getElementById('conflict-list');list.innerHTML=d.files.map(function(entry){let locations=(entry.locations||[]).map(function(row){return row.key+'['+row.columns.join(',')+']'}).join('、');return '<div class="conflict" data-file="'+esc(entry.file)+'"><h3>'+esc(entry.file)+'</h3><div class="conflict-location">冲突位置：'+esc(locations||'请比较三方内容')+'</div><div class="source-grid"><section><h4>配置中心（权威）</h4><pre>'+esc(entry.authority)+'</pre></section><section><h4>main</h4><pre>'+esc(entry.main)+'</pre></section><section><h4>PR 当前版本</h4><pre>'+esc(entry.branch)+'</pre></section></div><div class="resolve-bar"><label>初始版本 <select class="resolution-source"><option value="authority">配置中心（权威）</option><option value="main">main</option><option value="branch">PR 当前版本</option></select></label></div><textarea class="resolved" data-source="authority">'+esc(entry.authority)+'</textarea></div>'}).join('');list.querySelectorAll('.resolution-source').forEach(function(select){select.addEventListener('change',function(){let card=select.closest('.conflict');if(card)setResolution(card.dataset.file,select.value)})});document.getElementById('conflicts').classList.remove('hidden')}
+async function loadConflicts(){try{renderConflicts(await request('/config/sync/conflicts'))}catch(e){document.getElementById('conflict-list').textContent='冲突内容读取失败：'+e.message;document.getElementById('conflicts').classList.remove('hidden');document.getElementById('resolve-status').textContent='冲突读取失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}}
 async function resolveConflicts(){if(!conflictData||!latest?.pullRequest)return;let button=document.getElementById('resolve');button.disabled=true;document.getElementById('resolve-status').textContent='提交并校验中…';try{let files=[...document.querySelectorAll('.conflict')].map(function(card){return {file:card.dataset.file,content:card.querySelector('textarea').value}});let d=await request('/config/sync/resolve',{method:'POST',body:JSON.stringify({expectedHeadSha:latest.pullRequest.headSha,files})});renderStatus(d);document.getElementById('resolve-status').textContent=d.syncState==='conflict'?'仍需处理冲突':'已提交解决版本，等待 PR 检查';}catch(e){document.getElementById('resolve-status').textContent='提交失败：'+e.message;document.getElementById('resolve-status').style.color='#ffb6b6'}finally{button.disabled=false}}
 loadStatus();
 </script>
@@ -726,6 +726,30 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'],
     labels: ['level'],
   },
+  alliance_levels: {
+    file: 'alliance_levels.csv', key: 'level',
+    numeric: ['hallLevel', 'memberCap'],
+    text: ['description'],
+    labels: ['level', 'description'],
+  },
+  alliance_buildings: {
+    file: 'alliance_buildings.csv', key: 'code',
+    numeric: ['maxLevel', 'requiredAllianceLevel', 'costWood', 'costClay', 'costIron', 'costCrop', 'effectValue'],
+    text: ['name', 'effectType', 'description'],
+    labels: ['code', 'name'],
+  },
+  alliance_tech: {
+    file: 'alliance_tech.csv', key: 'code',
+    numeric: ['maxLevel', 'requiredAllianceLevel', 'techPointCost', 'effectValue'],
+    text: ['name', 'effectType', 'description'],
+    labels: ['code', 'name'],
+  },
+  alliance_services: {
+    file: 'alliance_services.csv', key: 'code',
+    numeric: ['id', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'delaySec'],
+    text: ['name', 'category', 'unitCode', 'desc'],
+    labels: ['code', 'name', 'category'],
+  },
 };
 
 /**
@@ -827,8 +851,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}};
+const TABLES = ['buildings','building_levels','units','unit_traits','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, unit_traits:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -854,16 +878,20 @@ function sectionGeneric(table){
     var m8Keys = {}; for (var mi=0;mi<M8_ROWS.length;mi++) m8Keys[M8_ROWS[mi][0]] = true;
     var terrainKeys = {}; for (var ti=0;ti<TERRAIN_ROWS.length;ti++) terrainKeys[TERRAIN_ROWS[ti][0]] = true;
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
+    var tradeKeys = {}; for (var tri=0;tri<TRADE_ROWS.length;tri++) tradeKeys[TRADE_ROWS[tri][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
     var terrainKeysOnly = {}; for (var tj=0;tj<TERRAIN_ROWS.length;tj++) terrainKeysOnly[TERRAIN_ROWS[tj][0]] = true;
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
+    var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
+    var tradeKeysOnly = {}; for (var atk=0;atk<TRADE_ROWS.length;atk++) tradeKeysOnly[TRADE_ROWS[atk][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec' && r.key !== 'ambush_attack_bonus'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', unit_traits:'兵种特性', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -886,6 +914,43 @@ function sectionGeneric(table){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>'+title+'</h2>'+h+'</div>';
+}
+
+// ── 联盟专用视图：创建成本与四类职位加成集中展示；建筑/科技目录紧随其后渲染。 ──
+// 这些行仍然写入 game_constants.csv，编辑后沿用配置中心的校验、热重载和同步流程。
+var ALLIANCE_ROWS = [
+  ['alliance_create_wood','创建联盟木材成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_clay','创建联盟泥土成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_iron','创建联盟铁矿成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_crop','创建联盟粮食成本','建立联盟时从选定村庄扣除'],
+  ['alliance_create_gold','创建联盟金币成本','建立联盟时从选定村庄扣除'],
+  ['alliance_logistics_resource_mult','后勤主管资源产量加成','后勤主管所有村庄的资源产量倍率'],
+  ['alliance_war_speed_mult','战争专家军队移速加成','战争专家所有村庄军队的移速倍率'],
+  ['alliance_war_combat_mult','战争专家军队攻防加成','战争专家所有村庄军队的攻防倍率'],
+  ['alliance_tech_probability_bonus','首席科技官科技点概率加成','首席科技官所有村庄的科技点获得概率'],
+  ['alliance_ambassador_reputation_bonus','形象大使声望额外加成','形象大使每次获得声望时额外增加的点数'],
+  ['alliance_reputation_bonus_per_point','联盟声望加成/点','联盟声望每点带来的职位、建筑和科技加成倍率增长'],
+  ['alliance_reputation_bonus_max_multiplier','联盟声望加成上限','联盟职位、建筑和科技加成的最终倍率上限'],
+  ['alliance_logistics_role_level','后勤主管解锁等级','达到此联盟等级解锁后勤主管'],
+  ['alliance_war_role_level','战争专家解锁等级','达到此联盟等级解锁战争专家'],
+  ['alliance_tech_role_level','首席科技官解锁等级','达到此联盟等级解锁首席科技官'],
+  ['alliance_ambassador_role_level','形象大使解锁等级','达到此联盟等级解锁形象大使'],
+  ['alliance_project_duration_sec','联盟建筑/科技耗时','联盟建筑建造与联盟科技研发耗时（秒）'],
+];
+
+function sectionAlliance(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">联盟创建成本、职位加成、声望放大、等级容量，以及联盟建筑、科技和形象大使服务目录都在此集中编辑。常量写入 game_constants.csv；等级、建筑、科技和服务的等级/成本/效果分别写入对应 CSV。保存后会校验、热重载并进入配置同步流程。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<ALLIANCE_ROWS.length;j++){
+    var item = ALLIANCE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="0" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>联盟参数</h2>'+h+'</div>';
 }
 
 // ── 声望专用视图：把行为、门槛和城镇/PvE效果集中展示，避免在庞大的全局常量表中遗漏。 ──
@@ -999,6 +1064,33 @@ function sectionMarchSize(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>军队规模行军参数</h2>'+h+'</div>';
+}
+
+// ── 贸易专用视图：商队速度与贸易中心全局参数写入 game_constants.csv。 ──
+var TRADE_ROWS = [
+  ['trade_route_capacity','每条贸易路线运力','每条路线可运输的资源/金币单位数'],
+  ['trade_caravan_speed','商队速度','商队行进速度（格/小时），独立于军队行军速度和规模减速'],
+  ['trade_caravan_min_duration_sec','商队最低时长','商队单程最低行进时长（秒）；只防止零距离或极高速商队瞬间抵达'],
+  ['trade_npc_gold_per_resource','NPC资源计价','NPC订单中每个资源单位的金币基准价值'],
+  ['trade_npc_sell_margin','NPC出售折价','玩家出售资源给NPC时获得的基准价值比例'],
+  ['trade_order_max_per_village','每村玩家订单上限','每个村庄同时可挂出的玩家贸易订单数量'],
+  ['trade_order_ttl_sec','玩家订单有效期','玩家贸易订单未被接受时的存活时间（秒）'],
+];
+function sectionTrade(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">商队速度独立于军队行军速度、地形效果和军队规模减速。修改后只影响新派出的商队；已在途商队沿用出发时已确定的到达时间。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TRADE_ROWS.length;j++){
+    var item = TRADE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0] === 'trade_order_ttl_sec' ? '1' : item[0] === 'trade_caravan_speed' || item[0] === 'trade_caravan_min_duration_sec' ? '0.0001' : '0';
+    var step = item[0] === 'trade_caravan_speed' || item[0] === 'trade_npc_gold_per_resource' || item[0] === 'trade_npc_sell_margin' ? 'any' : '1';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="'+step+'" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>贸易参数</h2>'+h+'</div>';
 }
 
 // ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
@@ -1416,12 +1508,19 @@ function toggleBl(code){
 
 function render(){
   var html = '';
+  // 联盟相关常量与三张联盟目录表靠前显示，避免埋在长列表底部。
+  html += sectionAlliance();
+  html += sectionGeneric('alliance_levels');
+  html += sectionGeneric('alliance_buildings');
+  html += sectionGeneric('alliance_tech');
+  html += sectionGeneric('alliance_services');
   // ── 建筑统一卡片（合并 buildings + building_levels，点开展开全部参数）──
   html += sectionBuildings();
   html += sectionFounding();
   html += sectionReputation();
   html += sectionTerrain();
   html += sectionMarchSize();
+  html += sectionTrade();
   html += sectionCavalry();
   html += sectionHorseHunter();
   html += sectionCityState();
@@ -1430,7 +1529,7 @@ function render(){
   html += sectionAmbush();
   for (var i=0;i<TABLES.length;i++){
     var t = TABLES[i];
-    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects') continue; // 已在专用视图合并渲染
+    if (t === 'buildings' || t === 'building_levels' || t === 'trade_center' || t === 'merc_camp' || t === 'academy' || t === 'quest_objectives' || t === 'quest_effects' || t === 'alliance_levels' || t === 'alliance_buildings' || t === 'alliance_tech' || t === 'alliance_services') continue; // 已在专用视图合并渲染
     html += sectionGeneric(t);
   }
   document.getElementById('tables').innerHTML = html;

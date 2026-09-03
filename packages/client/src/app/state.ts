@@ -5,8 +5,20 @@
 import { resourceKeys } from './config.js';
 import type { ListMovementsPayload, MarchStepPush, Movement } from '@slg/shared';
 
+/** 服务端下发的产出组成项；expiresAt 缺省表示永久生效。 */
+export interface RateBreakdownEntry {
+  kind?: 'base' | 'modifier' | 'timed' | 'upkeep';
+  source: string;
+  label: string;
+  ratePerHour: number;
+  percent?: number;
+  expiresAt?: number;
+}
+
 export interface SelectedTarget {
   refId: string; kind: string; q: number; r: number; name: string; icon?: string;
+  relation?: 'allied' | 'neutral' | 'hostile';
+  cityState?: boolean;
   /** 地图可见玩家村庄的公开详情（由 World.GetArea 动态补齐）。 */
   playerName?: string;
   reputation?: number;
@@ -87,6 +99,9 @@ export interface PopSnapshot {
   inFamine: boolean;
   /** 每小时金币产量（仅劳动人口交税，绑定城镇中心，不受繁荣度影响）。供资源条展示金币速率。 */
   goldPerHour?: number;
+  /** 人口增长与金币税收的来源明细（悬浮说明使用）。 */
+  growthBreakdown?: RateBreakdownEntry[];
+  goldBreakdown?: RateBreakdownEntry[];
   /** 平民耗粮 /h。 */
   civilianCropPerHour: number;
   /** 实际驻军人口（含在途），旧面板展示与总人数重算用；服务端权威为 soldierPop。GetPopulation 快照不携带，由 bootstrap 用 soldierPop 兜底。 */

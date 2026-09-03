@@ -34,10 +34,12 @@ interface EconomyState {
   lastTick: number;
   /** 各资源基础每秒产率（资源田等级决定，building 事件更新） */
   baseRate: ResMap;
+  /** 资源田基础产值的组成明细；由 building 模块随 SetBaseRate 一并上报。 */
+  baseComponents?: Partial<Record<ResourceType, { source?: string; label: string; ratePerHour: number }[]>>;
   /** 产率加成层（派生管线：建筑强化/英雄/工会…每个一层） */
-  rateModifiers: { source: string; mult: Partial<ResMap> }[];
+  rateModifiers: { source: string; mult: Partial<ResMap>; details?: RateModifierDetail[] }[];
   /** 定时 buff（如祭祀台）：到期自动失效，逐条叠加，各自独立到期。 */
-  timedBuffs?: { source: string; mult: Partial<ResMap>; until: number }[];
+  timedBuffs?: { source: string; mult: Partial<ResMap>; until: number; label?: string; details?: RateModifierDetail[] }[];
   /** crop 每小时消耗，按来源记（building 人口 / military 耗粮） */
   cropUpkeep: Record<string, number>;
   capacity: ResMap;
@@ -53,6 +55,25 @@ interface EconomyState {
    * 旧存档无此字段，默认 false（视为非赤字状态，下次 settle 若赤字则正常触发）。
    */
   wasCropDeficit?: boolean;
+}
+
+/** 产率修正的可读来源；mult 是加性倍率（0.2 = +20%）。 */
+interface RateModifierDetail {
+  source?: string;
+  label?: string;
+  mult?: Partial<ResMap>;
+}
+
+export interface RateBreakdownItem {
+  kind: 'base' | 'modifier' | 'timed' | 'upkeep';
+  source: string;
+  label: string;
+  /** 对该资源每小时的贡献；upkeep 为负数。 */
+  ratePerHour: number;
+  /** 加成百分比（+20% 表示 20），基础/耗粮项通常为空。 */
+  percent?: number;
+  /** 定时加成失效时间；未提供表示永久。 */
+  expiresAt?: number;
 }
 
 const COLLECTION = 'economy';
@@ -188,6 +209,53 @@ export class EconomyModule {
     return base * mult;
   }
 
+  /** 生成客户端悬浮窗使用的产率组成；不改变结算口径。 */
+  private rateBreakdown(s: EconomyState, t: ResourceType): RateBreakdownItem[] {
+    const basePerHour = (Number(s.baseRate[t]) || 0) * 3600;
+    const entries: RateBreakdownItem[] = [];
+    const components = s.baseComponents?.[t];
+    if (components?.length) {
+      for (const component of components) {
+        const rate = Number(component.ratePerHour);
+        if (!Number.isFinite(rate) || rate === 0) continue;
+        entries.push({ kind: 'base', source: component.source ?? 'building', label: component.label || '资源田基础产值', ratePerHour: rate });
+      }
+    } else if (basePerHour !== 0) {
+      entries.push({ kind: 'base', source: 'building', label: '资源田基础产值', ratePerHour: basePerHour });
+    }
+
+    const addModifier = (kind: 'modifier' | 'timed', source: string, mult: number, label: string, expiresAt?: number): void => {
+      if (!Number.isFinite(mult) || mult === 0) return;
+      entries.push({ kind, source, label, ratePerHour: basePerHour * mult, percent: mult * 100, ...(expiresAt ? { expiresAt } : {}) });
+    };
+    const addDetails = (kind: 'modifier' | 'timed', source: string, mult: Partial<ResMap>, details: RateModifierDetail[] | undefined, expiresAt?: number): void => {
+      const relevant = (details ?? []).filter((d) => Number(d.mult?.[t]) !== 0);
+      if (relevant.length) {
+        for (const detail of relevant) {
+          const value = Number(detail.mult?.[t]);
+          addModifier(kind, detail.source ?? source, value, detail.label ?? detail.source ?? source, expiresAt);
+        }
+      } else {
+        addModifier(kind, source, Number(mult[t]), source, expiresAt);
+      }
+    };
+    for (const modifier of s.rateModifiers ?? []) addDetails('modifier', modifier.source, modifier.mult, modifier.details);
+    const now = this.now();
+    for (const buff of s.timedBuffs ?? []) {
+      if (buff.until <= now) continue;
+      if (buff.details?.length) addDetails('timed', buff.source, buff.mult, buff.details, buff.until);
+      else addModifier('timed', buff.source, Number(buff.mult[t]), buff.label ?? buff.source, buff.until);
+    }
+    if (t === 'crop') {
+      for (const [source, amount] of Object.entries(s.cropUpkeep)) {
+        const upkeep = Number(amount);
+        if (!Number.isFinite(upkeep) || upkeep === 0) continue;
+        entries.push({ kind: 'upkeep', source: `upkeep:${source}`, label: source === 'civilian_pop' ? '劳动人口耗粮' : source === 'troops' ? '军队耗粮' : `耗粮：${source}`, ratePerHour: -upkeep });
+      }
+    }
+    return entries;
+  }
+
   /**
    * 净产率。满仓(≥容量)时生产先抵消耗、多余丢弃（净变化 ≤0，不增长），
    * 而不是「生产归零 + 仍减消耗」——避免满仓资源被消耗拖出锯齿波动。
@@ -226,13 +294,18 @@ export class EconomyModule {
       productionPaused[t] = s.resources[t] >= s.capacity[t];
     }
     const upkeep = Object.values(s.cropUpkeep).reduce((a, b) => a + b, 0);
+    const rawRate = { wood: this.grossRate(s, 'wood') * 3600, clay: this.grossRate(s, 'clay') * 3600, iron: this.grossRate(s, 'iron') * 3600, crop: this.grossRate(s, 'crop') * 3600 };
+    const resourceBreakdown: Partial<Record<ResourceType, RateBreakdownItem[]>> = {};
+    for (const t of ['wood', 'clay', 'iron', 'crop'] as const) resourceBreakdown[t] = this.rateBreakdown(s, t);
     return {
       ok: true,
       payload: {
         resources: { ...s.resources },
         capacity: { ...s.capacity },
         netRate, // 每秒
-        rawRate: { wood: this.grossRate(s, 'wood') * 3600, clay: this.grossRate(s, 'clay') * 3600, iron: this.grossRate(s, 'iron') * 3600, crop: this.grossRate(s, 'crop') * 3600 },
+        rawRate,
+        /** 资源田、宝物、科技、联盟、任务等来源的理论产出组成（每小时）。 */
+        resourceBreakdown,
         cropUpkeep: upkeep, // 每小时
         overCapacity,       // 各资源超出容量的量（0=未超额）
         productionPaused,   // 超额则该资源生产暂停
@@ -382,16 +455,23 @@ export class EconomyModule {
 
   /** Building 上报某资源类型的全村总产率（每小时），Economy 换算后更新 baseRate。 */
   private setBaseRate(cmd: Command): CommandResult {
-    const { villageId, resource, ratePerHour } = cmd.payload as {
+    const { villageId, resource, ratePerHour, components } = cmd.payload as {
       villageId: string;
       resource: string;
       ratePerHour: number;
+      components?: { source?: string; label?: string; ratePerHour?: number }[];
     };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s);
     if (RESOURCE_TYPES.includes(resource as ResourceType)) {
       s.baseRate[resource as ResourceType] = ratePerHour / 3600;
+      s.baseComponents ??= {};
+      s.baseComponents[resource as ResourceType] = Array.isArray(components)
+        ? components
+          .map((component) => ({ source: component.source, label: String(component.label ?? '资源田基础产值'), ratePerHour: Number(component.ratePerHour) || 0 }))
+          .filter((component) => component.ratePerHour !== 0)
+        : [];
     }
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
@@ -417,17 +497,18 @@ export class EconomyModule {
    * economy 只存不回调 population，无环（见架构文档§二·2.4）。
    */
   private setRateModifier(cmd: Command): CommandResult {
-    const { villageId, source, mult } = cmd.payload as {
+    const { villageId, source, mult, details } = cmd.payload as {
       villageId: string;
       source: string;
       mult: Partial<ResMap>;
+      details?: RateModifierDetail[];
     };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s); // 改修正器前先结算，避免旧倍率被新值覆盖后多算
     // 覆盖式：移除同 source 旧层，追加新层
     s.rateModifiers = s.rateModifiers.filter((m) => m.source !== source);
-    s.rateModifiers.push({ source, mult });
+    s.rateModifiers.push({ source, mult, details: Array.isArray(details) ? details : undefined });
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
   }
@@ -438,18 +519,20 @@ export class EconomyModule {
    * 到期无需调度器——grossRate 按 now<until 判断，settle 惰性清理过期项。
    */
   private applyTimedBuff(cmd: Command): CommandResult {
-    const { villageId, source, mult, durationSec } = cmd.payload as {
+    const { villageId, source, mult, durationSec, label, details } = cmd.payload as {
       villageId: string;
       source: string;
       mult: Partial<ResMap>;
       durationSec: number;
+      label?: string;
+      details?: RateModifierDetail[];
     };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     this.settle(s); // 施加前先结算
     const dur = Math.max(1, Math.floor(durationSec));
     s.timedBuffs = (s.timedBuffs ?? []).filter((b) => b.until > this.now());
-    s.timedBuffs.push({ source, mult, until: this.now() + dur * 1000 });
+    s.timedBuffs.push({ source, mult, until: this.now() + dur * 1000, label, details: Array.isArray(details) ? details : undefined });
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: { until: s.timedBuffs[s.timedBuffs.length - 1].until, durationSec: dur } };
   }

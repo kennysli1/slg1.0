@@ -60,6 +60,10 @@
 | 表23 | `pvp_power_curve.csv` | **PvP 强弱差掠夺衰减曲线** | 调大打小的战利品倍率 |
 | 表24 | `kingdom_services.csv` | **议会厅王国服务目录** | 调等级门槛、声望价格、增援/代打兵力、物资、宝物和延迟 |
 | 表25 | `dialogues.csv` | **NPC 对话 session 目录** | 调任务触发点、NPC 名称/文本和玩家回复选项 |
+| 表26 | `alliance_levels.csv` | **联盟等级与成员容量** | 调联盟大厅等级对应的联盟等级、成员上限与说明 |
+| 表27 | `alliance_buildings.csv` | **联盟建筑目录** | 调联盟建筑最高等级、解锁等级、资源成本与成员加成 |
+| 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
+| 表29 | `alliance_services.csv` | **联盟王国服务** | 调形象大使可购买的资源/增援服务、声望价格、数量与抵达时间 |
 
 `quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
@@ -318,6 +322,13 @@
 | march_size_reference_pop | 20 | 军队规模减速的免惩罚人口基准 |
 | march_size_penalty | 0.0015 | 超出基准人口后的规模减速系数 |
 | march_size_min_multiplier | 0.45 | 军队规模减速后的最低速度比例 |
+| trade_route_capacity | 500 | 每条贸易路线可运输的资源/金币单位数 |
+| trade_caravan_speed | 100 | 商队速度（格/小时，可在配置中心“贸易参数”板块修改） |
+| trade_caravan_min_duration_sec | 3 | 商队单程最低行进时长（秒，可在配置中心“贸易参数”板块修改） |
+| trade_npc_gold_per_resource | 0.5 | NPC订单中每个资源单位的金币基准价值 |
+| trade_npc_sell_margin | 0.8 | 玩家向 NPC 出售资源时的折价比例 |
+| trade_order_max_per_village | 5 | 每村同时可挂出的玩家贸易订单上限 |
+| trade_order_ttl_sec | 86400 | 玩家贸易订单有效期（秒） |
 | pop_prosperity_full_ratio | 0.70 | 劳动人口 / 总人口达到此比例时繁荣度额外加成达到上限 |
 | pop_prosperity_max_bonus | 0.30 | 繁荣度满值时资源产量、建造、训练、研究的额外速率加成（+30%） |
 | kingdom_city_state_count | 8 | 地图随机生成的王国城邦数量 |
@@ -359,7 +370,7 @@
 
 > 加新常量：加一行，并在 `packages/server/src/infra/config.ts` 的 `GameConstants` 里加一个字段映射（`cn('your_key', 默认值)`）。
 
-配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队固定速度不受影响，已在途行军不会因热重载改变原定到达时间。
+配置中心 `/config/balance` 会把 `forest_vision_penalty`、`hills_vision_bonus` 和 `hills_march_speed_multiplier` 单独集中显示在“地图格子特性 / 地形参数”板块；军队规模减速的三个参数在“军队规模行军参数”板块显示；贸易路线、商队速度、最低时长和订单参数在“贸易参数”板块显示。它们仍写入同一张 `game_constants.csv`。规模人口只取本次行军实际携带部队的 `units.csv.popCost` 总和，按既有兵种/科技/全局/地形计时后逐段应用倍率；商队速度和最低时长独立于军队规模减速，已在途行军不会因热重载改变原定到达时间。
 
 M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 28800 秒/8 小时）、`m8_task_village_spawn_radius`（相对接取村的生成搜索半径，默认 8 格）、`m8_task_village_resource_amount`（四种资源各自初始量，默认 500）、`m8_task_village_gold`（初始金币，默认 500）。任务村坐标以 World 中对应 `refId` 地块为准；配置中心的平衡参数区提供独立的“M8 任务村参数”区编辑攻城倒计时，其余任务村参数仍在全局常量表中。保存后均写回默认 CSV，删档/重启仍沿用。
 
@@ -537,6 +548,58 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 | treasureCode | 宝物服务发放的 `treasures.csv` 代码 |
 | delaySec | 代打服务购买后出发延迟；即时服务填 0 |
 | desc | 玩家可见说明 |
+
+## alliance_levels.csv — 联盟等级与成员容量
+
+| 列 | 含义 |
+|----|------|
+| level | 联盟等级（由联盟大厅等级映射） |
+| hallLevel | 对应的联盟大厅等级 |
+| memberCap | 联盟成员上限 |
+| description | 管理页面显示的等级说明 |
+
+联盟大厅最高 10 级，联盟等级与大厅等级一一对应。四个职位默认分别在联盟 1/2/3/4 级解锁，具体门槛仍可在 `game_constants.csv` 的 `alliance_*_role_level` 参数中调整。
+
+## alliance_buildings.csv — 联盟建筑目录
+
+| 列 | 含义 |
+|----|------|
+| code / name | 稳定代码 / 显示名称 |
+| maxLevel | 该联盟建筑最高等级 |
+| requiredAllianceLevel | 解锁所需联盟等级 |
+| costWood/costClay/costIron/costCrop | 建造 1 级的资源基准成本；后续等级按目标等级倍增 |
+| effectType / effectValue | 建筑提供的成员加成类型与数值（由运行时效果适配器使用） |
+| description | 玩家可见说明 |
+
+## alliance_tech.csv — 联盟科技目录
+
+| 列 | 含义 |
+|----|------|
+| code / name | 稳定代码 / 显示名称 |
+| maxLevel | 该联盟科技最高等级 |
+| requiredAllianceLevel | 研发所需联盟等级 |
+| techPointCost | 研发 1 级所需科技点；后续等级按目标等级倍增 |
+| effectType / effectValue | 科技提供的成员加成类型与数值（由运行时效果适配器使用） |
+| description | 玩家可见说明 |
+
+联盟建筑和联盟科技在资源/科技点满足后才开始执行，默认建造/研发耗时由 `game_constants.csv` 的
+`alliance_project_duration_sec`（默认 10 秒）控制；配置中心“联盟”板块可直接修改，修改只影响新开始的项目。
+
+## alliance_services.csv — 联盟王国服务
+
+| 列 | 含义 |
+|----|------|
+| id / code / name | 数字 ID、稳定代码与显示名称 |
+| category | `supplies` 资源 / `reinforcement` 增援 |
+| reputationCost | 由形象大使本人支付的声望 |
+| unitCode / unitCount | 增援服务使用的兵种代码与数量；资源服务留空/填 0 |
+| wood/clay/iron/crop | 资源服务抵达联盟大厅后加入联盟仓库的数量 |
+| delaySec | 王国服务从购买到派出的延迟秒数（当前预留，默认 0） |
+| desc | 玩家可见说明 |
+
+联盟服务仅由已任命的形象大使购买；形象大使的当前声望同时作为联盟声望。联盟声望按
+`game_constants.csv` 的 `alliance_reputation_bonus_per_point` 与
+`alliance_reputation_bonus_max_multiplier` 对职位、建筑和科技成员加成进行倍率放大。
 
 ---
 

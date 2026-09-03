@@ -9,6 +9,7 @@ const tabs: { key: TabKey; name: string; icon: string }[] = [
   { key: 'map', name: '地图', icon: 'ui_tab_map' },
   { key: 'tech', name: '科技', icon: 'bld_academy' },
   { key: 'reports', name: '战报', icon: 'ui_tab_reports' },
+  { key: 'alliance', name: '联盟', icon: 'ui_tab_village' },
 ];
 
 export function TabBar() {

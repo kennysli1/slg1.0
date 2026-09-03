@@ -21,6 +21,8 @@ interface ReputationState {
   /** 已由王国 PvE 击杀累计触发的 -5 声望批次，用于每批只触发一次报复检查。 */
   kingdomPvePenaltyChunks?: number;
   kingdomPvePenaltyRemainder?: number;
+  /** 联盟形象大使带来的每次正声望获得额外点数。 */
+  allianceBonus?: number;
 }
 
 const COLLECTION = 'reputation';
@@ -47,6 +49,7 @@ export class ReputationModule {
     this.commands.register('reputation.AdjustByVillage', (c) => this.adjustByVillage(c));
     this.commands.register('reputation.SetTreasureDelta', (c) => this.setTreasureDelta(c));
     this.commands.register('reputation.ProcessPvpBattle', (c) => this.processPvpBattle(c));
+    this.commands.register('reputation.SetAllianceBonus', (c) => this.setAllianceBonus(c));
     // BattleEnded 的声望结算属于战斗完成的同步后置步骤；等待处理器，
     // 让战斗命令返回时跨战斗累计与报复阈值检查已经落库。
     this.bus.on('combat.BattleEnded', (evt: DomainEvent) => this.onBattleEnded(evt));
@@ -75,6 +78,7 @@ export class ReputationModule {
       kingdomPveKillRemainder: Math.max(0, Math.trunc(raw.kingdomPveKillRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveKilledPopulationPerReputation),
       kingdomPvePenaltyChunks: Math.max(0, Math.trunc(raw.kingdomPvePenaltyChunks ?? 0)),
       kingdomPvePenaltyRemainder: Math.max(0, Math.trunc(raw.kingdomPvePenaltyRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveRetaliationChunk),
+      allianceBonus: Math.max(0, Math.trunc(raw.allianceBonus ?? 0)),
     };
   }
 
@@ -153,7 +157,8 @@ export class ReputationModule {
     if (!Number.isFinite(amount) || amount === 0) return { ok: false, payload: {}, reason: 'invalid_delta' };
     const state = this.ensure(playerId);
     const before = state.value;
-    state.baseValue = Math.trunc((state.baseValue ?? before - (state.treasureDelta ?? 0)) + amount);
+    const effectiveAmount = amount > 0 ? amount + (state.allianceBonus ?? 0) : amount;
+    state.baseValue = Math.trunc((state.baseValue ?? before - (state.treasureDelta ?? 0)) + effectiveAmount);
     state.value = state.baseValue + (state.treasureDelta ?? 0);
     state.updatedAt = this.now();
     this.store.set(COLLECTION, playerId, state);
@@ -162,6 +167,15 @@ export class ReputationModule {
     const payload = { ...this.payload(state), delta: state.value - before, reason: reason ?? 'gameplay', playerIds: [playerId], ...(kingdomPvePenaltyChunks > 0 ? { kingdomPvePenaltyChunks } : {}) };
     await this.bus.emit({ name: 'reputation.Changed', source: ReputationModule.NAME, ts: this.now(), payload } as DomainEvent);
     return { ok: true, payload };
+  }
+
+  private setAllianceBonus(cmd: Command): CommandResult {
+    const playerId = String((cmd.payload as any)?.playerId ?? '');
+    if (!playerId) return { ok: false, payload: {}, reason: 'player_not_found' };
+    const state = this.ensure(playerId);
+    state.allianceBonus = Math.max(0, Math.trunc(Number((cmd.payload as any)?.bonus) || 0));
+    this.store.set(COLLECTION, playerId, state);
+    return { ok: true, payload: { bonus: state.allianceBonus } };
   }
 
   /** 议会厅消费等用途的原子扣除：声望是道德值，购买不能把正声望透支成负声望。 */
@@ -283,9 +297,11 @@ export class ReputationModule {
     const p = await this.commands.send({ name: 'player.Get', from: ReputationModule.NAME, payload: { playerId } });
     if (!p.ok) return;
     const mult = this.effects(value).populationGrowthMult;
+    const goldMult = this.effects(value).goldTaxMult;
+    const label = `声望修正（当前 ${value >= 0 ? '+' : ''}${value}）`;
     for (const village of ((p.payload as any)?.player?.villages ?? [])) {
-      await this.commands.send({ name: 'population.SetReputationGrowthMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult } });
-      await this.commands.send({ name: 'population.SetReputationGoldTaxMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult: this.effects(value).goldTaxMult } });
+      await this.commands.send({ name: 'population.SetReputationGrowthMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult, sources: [{ label, delta: mult - 1 }] } });
+      await this.commands.send({ name: 'population.SetReputationGoldTaxMult', from: ReputationModule.NAME, payload: { villageId: village.id, mult: goldMult, sources: [{ label, delta: goldMult - 1 }] } });
     }
   }
 }

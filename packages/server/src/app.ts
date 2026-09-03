@@ -31,6 +31,7 @@ import { KingdomModule } from './modules/kingdom.js';
 import { DialoguesModule } from './modules/dialogues.js';
 import { DiceQuestModule } from './modules/dice-quest.js';
 import { BattleSimulatorModule } from './modules/battle-simulator.js';
+import { AllianceModule } from './modules/alliance.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
 
@@ -68,6 +69,9 @@ const PROGRESS_COLLECTIONS = [
   'reputation',
   'alchemy',
   'kingdom',
+  'alliance',
+  'alliance_by_player',
+  'alliance_seq',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -119,6 +123,7 @@ export interface GameApp {
   kingdom: KingdomModule;
   diceQuest: DiceQuestModule;
   battleSimulator: BattleSimulatorModule;
+  alliance: AllianceModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
@@ -256,16 +261,17 @@ export function createGameApp(opts?: {
   const kingdom = new KingdomModule(store, bus, commands, scheduler, now, config, opts?.rng ?? Math.random);
   const diceQuest = new DiceQuestModule(commands, now, config, opts?.rng ?? Math.random);
   const battleSimulator = new BattleSimulatorModule(commands, config);
+  const alliance = new AllianceModule(store, bus, commands, scheduler, now, config);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, battleSimulator,
+    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, alliance, battleSimulator,
     diceQuest,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
-    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom,
+    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom, alliance,
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -366,7 +372,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, alliance, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
@@ -431,6 +437,8 @@ export function createGameApp(opts?: {
       }
       // 城邦数量是配置化地图派生项；热重载时补齐新增城邦（不覆盖已有战损状态）。
       ensureWorldPlan();
+      // 联盟职位、建筑和科技效果同样来自 CSV；热重载后立即刷新在线成员的派生加成。
+      void alliance.refreshModifiers();
       return newConfig;
     },
     async resetWorld({ keepAccounts, reassignSpots = false }) {
@@ -519,6 +527,7 @@ export function createGameApp(opts?: {
       }
       store.delete('reputation', playerId);
       kingdom.deletePlayer(playerId);
+      alliance.deletePlayer(playerId);
       for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
         if (
           (m.fromVillage && villageSet.has(m.fromVillage)) ||

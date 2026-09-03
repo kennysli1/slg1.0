@@ -1,7 +1,7 @@
 ---
 class: reference
 status: active
-updated: 2026-09-01
+updated: 2026-09-03
 owner: ops
 summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 ---
@@ -23,7 +23,7 @@ summary: 配置中心、GM 实时状态、旧覆盖迁移与 GitHub 同步边界
 2. 校验通过后写入当前 release 和生产 `shared/config/`，更新 `balance_csv_files.list`。
 3. 写入 `config_revision.json`（所有 CSV 的 SHA-256）并把文件列表合并进 `config_sync_outbox.json`。
 4. 异步 worker 在短暂防抖后调用 GitHub API，提交 `config-sync/live` 分支并创建/更新配置 PR；没有 `GITHUB_CONFIG_SYNC_TOKEN` 时只保留队列并在 `/config/status` 报错，不阻塞游戏。页面“立即同步 / 重试”调用 `POST /config/sync`，与定时 worker 共用互斥锁，避免重复提交。
-5. 配置中心会读取 PR 的 `mergeable`、检查和冲突文件状态；`/config` 页面会把“已上传”“检查中”“存在冲突”“可以合并”“已合并”分开显示。冲突文件可在页面中查看配置中心、`main` 和 PR 当前版本，人工编辑最终 CSV 后通过 `POST /config/sync/resolve` 生成包含最新 `main` 的双父提交。配置中心值默认作为权威版本，提交前会做整图配置校验。
+5. 配置中心会读取 PR 的 `mergeable`、检查和冲突文件状态，并以 PR 合并基点对 changed CSV 做三方逐行/逐字段比较；`/config` 页面会把“已上传”“检查中”“存在冲突”“可以合并”“已合并”分开显示，并在冲突状态直接列出文件、稳定主键和字段。冲突文件可在页面中查看配置中心、`main` 和 PR 当前版本，人工编辑最终 CSV 后通过 `POST /config/sync/resolve` 生成包含最新 `main` 的双父提交。配置中心值默认作为权威版本，提交前会做整图配置校验。
 
 发布时由配置中心持久化内容负责现有生产值，Git 只负责结构和从未出现过的默认值。`tools/remote-release.sh` 调用 `scripts/merge-persisted-config.mjs`，以各表稳定主键合并：共享 CSV 表头中已经存在的单元格（包括明确空值）覆盖 Git，同步 PR 尚未合并的配置中心新增行也继续保留；Git 只补共享文件尚无的新列和没有删除记录的新行。编辑器删除行时会在 `shared/config/config_row_tombstones.json` 留下稳定主键，后续部署不得从 Git 复活该行；重新添加同一主键会清除删除记录。真正的结构删除或改名必须走显式迁移，不能借代码部署静默删除生产配置。
 5. PR checks 通过后按 `CLAUDE.md` 的顺序合并和运行 `npm run deploy:prod`。发布脚本会在构建和激活前覆盖共享配置，并校验迁移/配置文件，确保服务器、GitHub 和当前 release 使用同一版本。

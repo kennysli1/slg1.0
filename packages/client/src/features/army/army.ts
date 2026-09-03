@@ -45,7 +45,7 @@ export function renderArmy(): string {
   if (!army) return '<div class="loading">加载中…</div>';
 
   // 驻军展示（点击兵种 → 弹出属性详情）
-  const troops = Object.entries(army.troops || {});
+  const troops = Object.entries(army.availableTroops ?? army.troops ?? {});
   const troopList = troops.length
     ? troops.map(([u, n]: any) => `<span class="troop" data-unit-detail="${u}" title="点击查看 ${escapeAttr(unitName(u))} 属性">${art(unitArt(u), unitName(u), 'sm', unitArtFallback(u))}<span class="troop-name">${escapeHtml(unitName(u))}</span><b class="troop-count">×${n}</b></span>`).join('')
     : '<small class="muted">暂无驻军</small>';
@@ -100,7 +100,7 @@ export function renderArmy(): string {
 
 /** 解散部队区：每个驻守兵种一行（含数量输入和解散按钮）。 */
 function renderDisbandSection(army: any): string {
-  const troops = Object.entries(army.troops || {});
+  const troops = Object.entries(army.availableTroops ?? army.troops ?? {});
   if (!troops.length) return '';
 
   const rows = troops.map(([key, count]: any) => {

@@ -63,11 +63,50 @@ export function VillageArmyManagement() {
         <small>驻军、训练、援军与防御都归属当前村庄</small>
       </div>
       <GarrisonSection army={army} />
+      <AllianceReserveSection army={army} />
       <ReinforcementSection army={army} />
-      <RaidDefenseSection army={army} />
       <TrainingCenterSection />
+      <RaidDefenseSection army={army} />
       <DisbandSection army={army} />
     </section>
+  );
+}
+
+// ============================================================
+// § 1.1  联盟战事预备队（默认折叠）
+// ============================================================
+
+function AllianceReserveSection({ army }: { army: any }) {
+  const reservations: any[] = army.allianceWarReservations ?? [];
+  const reserved: Record<string, number> = army.allianceReservedTroops ?? {};
+  const rows = Object.entries(reserved).filter(([, count]) => Number(count) > 0);
+  if (reservations.length === 0 && rows.length === 0) return null;
+  const modeName: Record<string, string> = { raid: '掠夺', attack: '攻城', reinforce: '增援' };
+  return (
+    <Panel pad class="army-management-panel">
+      <details class="army-collapsible-details alliance-reserve-details">
+        <summary class="section-head section-head--toggle">
+          <span>联盟战事预备队</span>
+          <small>已报名锁定 · 不可用于其他行动</small>
+          <i aria-hidden="true">›</i>
+        </summary>
+        <div class="alliance-reserve-panel">
+          <div class="alliance-reserve-total">
+            {rows.length ? rows.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>) : <span>暂无锁定兵力</span>}
+          </div>
+          {reservations.map((row, rowIndex) => {
+            const troopEntries = Object.entries(row.troops ?? {}).filter(([, count]) => Number(count) > 0);
+            const target = row.targetVillage ?? row.targetId ?? '目标地块';
+            return (
+              <div class="alliance-reserve-row" key={`${row.allianceId}-${row.planId}-${row.participantId ?? `${row.playerId}-${rowIndex}`}`}>
+                <div class="alliance-reserve-row__head"><strong>{row.allianceName ?? '联盟'} · {modeName[row.mode] ?? row.mode}</strong><span>{row.playerName ?? row.playerId} · {target}</span></div>
+                <div class="alliance-reserve-row__troops">{troopEntries.map(([code, count]) => <span key={code}>{unitInfo(code).name} ×{fmt(Number(count))}</span>)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+    </Panel>
   );
 }
 
@@ -80,7 +119,7 @@ export function VillageArmyManagement() {
  * 系统分别管理。使用 details 保留旧版“页面最底部、默认折叠”的交互。
  */
 function DisbandSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const entries = Object.entries(troops).filter(([, count]) => Number(count) > 0);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const snapshotKey = JSON.stringify(troops);
@@ -113,7 +152,7 @@ function DisbandSection({ army }: { army: any }) {
 
   return (
     <Panel pad class="army-management-panel">
-      <details class="disband-details">
+      <details class="army-collapsible-details disband-details">
         <summary class="section-head section-head--toggle">
           <span>解散军队</span>
           <small>仅本村驻军 · 出征部队不能在此解散</small>
@@ -208,7 +247,7 @@ function ReinforcementSection({ army }: { army: any }) {
  * 这是村庄级配置：只影响「掠夺」而不影响攻城战，且兵力上限始终按当前驻军校验。
  */
 function RaidDefenseSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const raidDefense = army.raidDefense ?? { enabled: true, troops: troops };
   const [enabled, setEnabled] = useState(raidDefense.enabled !== false);
   const [selected, setSelected] = useState<Record<string, number>>({ ...(raidDefense.troops ?? troops) });
@@ -298,45 +337,49 @@ function RaidDefenseSection({ army }: { army: any }) {
   };
 
   return (
-    <Panel pad>
-      <SectionHead sub="仅用于玩家掠夺战；攻城战不受此配置影响">
-        防御掠夺
-      </SectionHead>
-      <div class="raid-defense-panel">
-        <div class="raid-defense-source-card">
-          <div class="raid-defense-source-head">
-            <strong>本村驻军</strong><span class="hint-sm">自己的部队</span>
-          </div>
-          <label class="raid-defense-toggle">
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
-            <span>投入掠夺防守</span>
-          </label>
-          <div class="hint-sm">关闭或将数量设为 0 后，本村部队不会参加掠夺防守。</div>
-          {entries.length === 0 ? <div class="hint-sm">暂无可配置驻军。</div> : renderRows(troops, selected, enabled, setSelected, 'own')}
-        </div>
-
-        {reinforcements.map((entry) => {
-          const draft = reinforcementDrafts[entry.id] ?? { enabled: entry.raidDefense?.enabled !== false, troops: entry.raidDefense?.troops ?? entry.troops ?? {} };
-          const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
-          const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
-          const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
-          return (
-            <div class="raid-defense-source-card" key={entry.id}>
-              <div class="raid-defense-source-head">
-                <strong>援军 · {sourceVillage}</strong><span class="hint-sm">来自 {sourcePlayer} · {status}</span>
-              </div>
-              <label class="raid-defense-toggle">
-                <input type="checkbox" checked={draft.enabled} onChange={(event) => updateReinforcement(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })} />
-                <span>投入掠夺防守</span>
-              </label>
-              <div class="hint-sm">该来源援军独立配置，不会与本村或其他援军同兵种合并。</div>
-              {renderRows(entry.troops ?? {}, draft.troops, draft.enabled, (next) => updateReinforcement(entry.id, { troops: next }), `reinforcement:${entry.id}`)}
+    <Panel pad class="army-management-panel">
+      <details class="army-collapsible-details raid-defense-details">
+        <summary class="section-head section-head--toggle">
+          <span>防御掠夺</span>
+          <small>仅用于玩家掠夺战 · 攻城战不受此配置影响</small>
+          <i aria-hidden="true">›</i>
+        </summary>
+        <div class="raid-defense-panel">
+          <div class="raid-defense-source-card">
+            <div class="raid-defense-source-head">
+              <strong>本村驻军</strong><span class="hint-sm">自己的部队</span>
             </div>
-          );
-        })}
+            <label class="raid-defense-toggle">
+              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled((event.currentTarget as HTMLInputElement).checked)} />
+              <span>投入掠夺防守</span>
+            </label>
+            <div class="hint-sm">关闭或将数量设为 0 后，本村部队不会参加掠夺防守。</div>
+            {entries.length === 0 ? <div class="hint-sm">暂无可配置驻军。</div> : renderRows(troops, selected, enabled, setSelected, 'own')}
+          </div>
 
-        <Btn variant="primary" block onClick={() => void save()}>保存全部防守配置</Btn>
-      </div>
+          {reinforcements.map((entry) => {
+            const draft = reinforcementDrafts[entry.id] ?? { enabled: entry.raidDefense?.enabled !== false, troops: entry.raidDefense?.troops ?? entry.troops ?? {} };
+            const sourcePlayer = entry.fromPlayerName ?? (entry.npcService ? '王国' : '未知玩家');
+            const sourceVillage = entry.fromVillageName ?? entry.fromVillage ?? '未知村庄';
+            const status = entry.status === 'stationed' ? '已驻扎' : '行军中';
+            return (
+              <div class="raid-defense-source-card" key={entry.id}>
+                <div class="raid-defense-source-head">
+                  <strong>援军 · {sourceVillage}</strong><span class="hint-sm">来自 {sourcePlayer} · {status}</span>
+                </div>
+                <label class="raid-defense-toggle">
+                  <input type="checkbox" checked={draft.enabled} onChange={(event) => updateReinforcement(entry.id, { enabled: (event.currentTarget as HTMLInputElement).checked })} />
+                  <span>投入掠夺防守</span>
+                </label>
+                <div class="hint-sm">该来源援军独立配置，不会与本村或其他援军同兵种合并。</div>
+                {renderRows(entry.troops ?? {}, draft.troops, draft.enabled, (next) => updateReinforcement(entry.id, { troops: next }), `reinforcement:${entry.id}`)}
+              </div>
+            );
+          })}
+
+          <Btn variant="primary" block onClick={() => void save()}>保存全部防守配置</Btn>
+        </div>
+      </details>
     </Panel>
   );
 }
@@ -346,7 +389,7 @@ function RaidDefenseSection({ army }: { army: any }) {
 // ============================================================
 
 function GarrisonSection({ army }: { army: any }) {
-  const troops: Record<string, number> = army.troops ?? {};
+  const troops: Record<string, number> = army.availableTroops ?? army.troops ?? {};
   const trainable: any[] = army.trainable ?? [];
 
   const entries = Object.entries(troops).filter(([, n]) => (n as number) > 0);

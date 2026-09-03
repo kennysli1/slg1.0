@@ -43,6 +43,8 @@ interface MilitaryState {
   tribe: string;
   /** 驻村兵力：兵种 -> 数量 */
   troops: Record<string, number>;
+  /** 联盟战事报名锁定的驻军；仍属于 troops，但不可被其他行动使用。 */
+  allianceReserved?: Record<string, number>;
   /** 掠夺防守配置；未设置的旧存档按“全军防守”兼容。 */
   raidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
@@ -58,6 +60,10 @@ interface MilitaryState {
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
   techDefMult?: number;
+  /** 联盟战争专家加成（由 alliance 模块按职位注入）。 */
+  allianceSpeedMult?: number;
+  allianceAtkMult?: number;
+  allianceDefMult?: number;
   techCombatByUnit?: Record<string, { atk: number; def: number }>;
   techUnlockedUnits?: string[];
   techTrainSpeed?: number;
@@ -146,6 +152,17 @@ export class MilitaryModule {
     return { ok: true, payload: {} };
   }
 
+  private setAllianceModifiers(cmd: Command): CommandResult {
+    const { villageId, speedMult, atkMult, defMult } = cmd.payload as { villageId: string; speedMult?: number; atkMult?: number; defMult?: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.allianceSpeedMult = Math.max(0, Number(speedMult) || 0);
+    s.allianceAtkMult = Math.max(0, Number(atkMult) || 0);
+    s.allianceDefMult = Math.max(0, Number(defMult) || 0);
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { speedMult: s.allianceSpeedMult, atkMult: s.allianceAtkMult, defMult: s.allianceDefMult } };
+  }
+
   /** 行军模块只可取得已聚合的最终最慢速度快照，不能读取军事状态。 */
   private getMarchSpeedSnapshot(cmd: Command): CommandResult {
     const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
@@ -153,7 +170,7 @@ export class MilitaryModule {
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     const units = Object.keys(troops ?? {}).filter((unit) => (troops[unit] ?? 0) > 0 && this.config.units[unit]);
     if (units.length === 0) return { ok: false, payload: {}, reason: 'empty_troops' };
-    const bonus = 1 + (s.techMarchSpeed ?? 0);
+    const bonus = 1 + (s.techMarchSpeed ?? 0) + (s.allianceSpeedMult ?? 0);
     const slowest = Math.min(...units.map((unit) => this.config.units[unit].speed * bonus));
     return { ok: true, payload: { slowestSpeed: slowest } };
   }
@@ -172,6 +189,10 @@ export class MilitaryModule {
     this.commands.register('military.SetRaidDefense', (c) => this.setRaidDefense(c));
     // 增减驻村兵力（行军出征扣出、返程/训练完成加入），由 Movement 等调用
     this.commands.register('military.AdjustTroops', (c) => this.adjustTroops(c));
+    this.commands.register('military.ReserveTroops', (c) => this.reserveTroops(c));
+    this.commands.register('military.ReleaseReservedTroops', (c) => this.releaseReservedTroops(c));
+    this.commands.register('military.ConsumeReservedTroops', (c) => this.consumeReservedTroops(c));
+    this.commands.register('military.RestoreConsumedTroops', (c) => this.restoreConsumedTroops(c));
     // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
     this.commands.register('military.SetMarchingTroops', (c) => this.setMarchingTroops(c));
     // 祭祀台等消耗型效果：按 popCost 升序移除驻村士兵直到满足人口缺口（允许超扣）。
@@ -183,6 +204,7 @@ export class MilitaryModule {
     this.commands.register('military.SetTreasureCombatMult', (c) => this.setTreasureCombatMult(c));
     this.commands.register('military.SetTechCombatMult', (c) => this.setTechCombatMult(c));
     this.commands.register('military.SetTechEffects', (c) => this.setTechEffects(c));
+    this.commands.register('military.SetAllianceModifiers', (c) => this.setAllianceModifiers(c));
     this.commands.register('military.GetMarchSpeedSnapshot', (c) => this.getMarchSpeedSnapshot(c));
     // 伯乐：骑兵训练加速倍率 + 使用后翻倍骑兵
     this.commands.register('military.SetTreasureCavalryTrainMult', (c) => this.setTreasureCavalryTrainMult(c));
@@ -217,6 +239,7 @@ export class MilitaryModule {
     if (s.techDefMult === undefined) s.techDefMult = 1;
     if (s.treasureCavalryTrainMult === undefined) s.treasureCavalryTrainMult = 1;
     if (s.treasureFoodReduce === undefined) s.treasureFoodReduce = 0;
+    s.allianceReserved = s.allianceReserved ?? {};
     // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
     const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
       if (!order) return;
@@ -243,6 +266,7 @@ export class MilitaryModule {
       villageId,
       tribe,
       troops: {},
+      allianceReserved: {},
       training: null,
       trainingBySlot: {},
     };
@@ -251,6 +275,71 @@ export class MilitaryModule {
 
   private load(villageId: string): MilitaryState | undefined {
     return this.store.get<MilitaryState>(COLLECTION, villageId);
+  }
+
+  private reservedCount(s: MilitaryState, unit: string): number { return Math.max(0, Math.floor(Number(s.allianceReserved?.[unit]) || 0)); }
+
+  private async reserveTroops(cmd: Command): Promise<CommandResult> {
+    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const s = this.load(villageId); if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const clean: Record<string, number> = {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const n = Math.max(0, Math.floor(Number(raw) || 0));
+      if (!n) continue;
+      if (!this.config.units[unit]) return { ok: false, payload: {}, reason: `unknown_unit:${unit}` };
+      if ((s.troops[unit] ?? 0) - this.reservedCount(s, unit) < n) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
+      clean[unit] = n;
+    }
+    if (!Object.keys(clean).length) return { ok: false, payload: {}, reason: 'empty_troops' };
+    s.allianceReserved = s.allianceReserved ?? {};
+    for (const [unit, n] of Object.entries(clean)) s.allianceReserved[unit] = this.reservedCount(s, unit) + n;
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { reserved: { ...s.allianceReserved } } };
+  }
+
+  private async releaseReservedTroops(cmd: Command): Promise<CommandResult> {
+    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const s = this.load(villageId); if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.allianceReserved = s.allianceReserved ?? {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const n = Math.max(0, Math.floor(Number(raw) || 0)); if (!n) continue;
+      const left = this.reservedCount(s, unit) - n;
+      if (left > 0) s.allianceReserved[unit] = left; else delete s.allianceReserved[unit];
+    }
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { reserved: { ...s.allianceReserved } } };
+  }
+
+  private consumeReservedTroops(cmd: Command): CommandResult {
+    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const s = this.load(villageId); if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const n = Math.max(0, Math.floor(Number(raw) || 0)); if (!n) continue;
+      if (this.reservedCount(s, unit) < n || (s.troops[unit] ?? 0) < n) return { ok: false, payload: {}, reason: `insufficient_reserved_troops:${unit}` };
+    }
+    s.allianceReserved = s.allianceReserved ?? {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const n = Math.max(0, Math.floor(Number(raw) || 0)); if (!n) continue;
+      const left = this.reservedCount(s, unit) - n;
+      if (left > 0) s.allianceReserved[unit] = left; else delete s.allianceReserved[unit];
+      s.troops[unit] = (s.troops[unit] ?? 0) - n;
+      if (s.troops[unit] <= 0) delete s.troops[unit];
+    }
+    this.store.set(COLLECTION, villageId, s); this.reportUpkeep(s); this.reportGarrisonPop(s);
+    return { ok: true, payload: { troops: { ...s.troops }, reserved: { ...s.allianceReserved } } };
+  }
+
+  private restoreConsumedTroops(cmd: Command): CommandResult {
+    const { villageId, troops, restoreReservation } = cmd.payload as { villageId: string; troops: Record<string, number>; restoreReservation?: boolean };
+    const s = this.load(villageId); if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.allianceReserved = s.allianceReserved ?? {};
+    for (const [unit, raw] of Object.entries(troops ?? {})) {
+      const n = Math.max(0, Math.floor(Number(raw) || 0)); if (!n) continue;
+      s.troops[unit] = (s.troops[unit] ?? 0) + n;
+      if (restoreReservation) s.allianceReserved[unit] = this.reservedCount(s, unit) + n;
+    }
+    this.store.set(COLLECTION, villageId, s); this.reportUpkeep(s); this.reportGarrisonPop(s);
+    return { ok: true, payload: { troops: { ...s.troops } } };
   }
 
   /**
@@ -741,15 +830,25 @@ export class MilitaryModule {
       name: 'movement.ListReinforcements', from: MilitaryModule.NAME,
       payload: { villageId: s.villageId },
     });
+    const reservationRes = await this.commands.send({
+      name: 'alliance.GetTroopReservations', from: MilitaryModule.NAME,
+      payload: { villageId: s.villageId },
+    });
+    const reserved = { ...(s.allianceReserved ?? {}) };
+    const availableTroops = Object.fromEntries(Object.entries(s.troops).map(([unit, count]) => [unit, Math.max(0, Number(count) - this.reservedCount(s, unit))]).filter(([, count]) => Number(count) > 0));
+    const raidDefenseTroops = Object.fromEntries(Object.entries(s.raidDefense?.troops ?? s.troops).map(([unit, count]) => [unit, Math.min(Number(count) || 0, Number(availableTroops[unit] ?? 0))]).filter(([, count]) => Number(count) > 0));
 
     return {
       ok: true,
       payload: {
         tribe: s.tribe,
         troops: { ...s.troops },
+        availableTroops,
+        allianceReservedTroops: reserved,
+        allianceWarReservations: reservationRes.ok ? ((reservationRes.payload as any)?.reservations ?? []) : [],
         raidDefense: {
           enabled: s.raidDefense?.enabled !== false,
-          troops: { ...(s.raidDefense?.troops ?? s.troops) },
+          troops: raidDefenseTroops,
         },
         trainable,
         trainingQueues,
@@ -978,7 +1077,7 @@ export class MilitaryModule {
     for (const [unit, cnt] of Object.entries(units)) {
       if (!Number.isInteger(cnt) || cnt <= 0) return { ok: false, payload: {}, reason: `bad_count:${unit}` };
       const have = s.troops[unit] ?? 0;
-      if (have < cnt) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
+      if (have - this.reservedCount(s, unit) < cnt) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
     }
 
     // 扣减兵力
@@ -1027,14 +1126,14 @@ export class MilitaryModule {
       const requested = Math.max(0, Math.floor(Number(n) || 0));
       const available = units && purpose !== 'raid'
         ? requested
-        : Math.min(requested, s.troops[unit] ?? 0);
+        : Math.min(requested, Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (!this.config.units[unit] || available <= 0) continue;
       // 掠夺防守明确不吃城墙、宝物、科技等守城加成；基础兵种属性仍有效。
       const stats = purpose === 'raid'
-        ? this.finalStats(unit, reputationAtk, reputationDef)
+        ? this.finalStats(unit, reputationAtk * (1 + (s.allianceAtkMult ?? 0)), reputationDef * (1 + (s.allianceDefMult ?? 0)))
         : (() => {
           const tm = this.techCombatMult(s, unit);
-          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk, (s.treasureDefMult ?? 1) * tm.def * reputationDef);
+          return this.finalStats(unit, (s.treasureAtkMult ?? 1) * tm.atk * reputationAtk * (1 + (s.allianceAtkMult ?? 0)), (s.treasureDefMult ?? 1) * tm.def * reputationDef * (1 + (s.allianceDefMult ?? 0)));
         })();
       snapshot[unit] = { count: available, ...stats };
     }
@@ -1049,7 +1148,7 @@ export class MilitaryModule {
     const selected: Record<string, number> = {};
     for (const [unit, raw] of Object.entries(troops ?? {})) {
       if (!this.config.units[unit]) continue;
-      const count = Math.min(Math.max(0, Math.floor(Number(raw) || 0)), s.troops[unit] ?? 0);
+      const count = Math.min(Math.max(0, Math.floor(Number(raw) || 0)), Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (count > 0) selected[unit] = count;
     }
     s.raidDefense = { enabled: enabled !== false, troops: selected };
@@ -1085,7 +1184,7 @@ export class MilitaryModule {
     const removed: Record<string, number> = {};
     for (const [unit, requested] of Object.entries(units ?? {})) {
       if (!this.config.units[unit]?.isMercenary) continue;
-      const take = Math.min(s.troops[unit] ?? 0, Math.max(0, Math.floor(requested)));
+      const take = Math.min(Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)), Math.max(0, Math.floor(requested)));
       if (take <= 0) continue;
       s.troops[unit] -= take;
       if (s.troops[unit] <= 0) delete s.troops[unit];
@@ -1103,7 +1202,8 @@ export class MilitaryModule {
     // 先校验不会扣成负数
     for (const [unit, d] of Object.entries(delta)) {
       const cur = s.troops[unit] ?? 0;
-      if (cur + d < 0) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
+      if (d < 0 && cur + d < this.reservedCount(s, unit)) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
+      if (d >= 0 && cur + d < 0) return { ok: false, payload: {}, reason: `insufficient_troops:${unit}` };
     }
     for (const [unit, d] of Object.entries(delta)) {
       s.troops[unit] = (s.troops[unit] ?? 0) + d;
@@ -1140,7 +1240,7 @@ export class MilitaryModule {
     let sacrificedPop = 0;
     if (remaining > 0) {
       const entries = Object.entries(s.troops)
-        .map(([unit, n]) => ({ unit, n, popCost: this.config.units[unit]?.popCost ?? 1 }))
+        .map(([unit, n]) => ({ unit, n: Math.max(0, n - this.reservedCount(s, unit)), popCost: this.config.units[unit]?.popCost ?? 1 }))
         .filter((e) => e.popCost > 0)
         .sort((a, b) => a.popCost - b.popCost);
       for (const e of entries) {

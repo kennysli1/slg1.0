@@ -24,4 +24,4 @@ id,code,name,icon,zone,resource,maxLevel,mainBaseLevel,requires,prosperityPerLev
 22,vault,保险库,bld_vault,inner,,10,1,1:1,4,0,保护城镇资源和金币免受攻城战掠夺,每级增加木材泥土铁粮与金币的安全储备,-1
 23,council,议会厅,bld_main,inner,,5,2,,6,0,与所属封地领主议事并用声望购买王国服务,每级解锁更强的王国物资增援宝物与代打服务,1
 24,explorers_guild,探险家协会,bld_explorers_guild,outer,,1,1,1:1,4,0,训练冒险者并派出执行探索与侦察任务,可训练冒险者,-1
-25,alliance_hall,联盟大厅,bld_main,inner,,1,2,,4,0,联盟成员管理大厅（功能将在联盟系统中开放）,需要联盟系统,1
+25,alliance_hall,联盟大厅,bld_alliance_hall,inner,,10,2,,4,0,联盟成员管理大厅，等级决定联盟等级与成员上限,每级提高联盟等级与成员上限,1
