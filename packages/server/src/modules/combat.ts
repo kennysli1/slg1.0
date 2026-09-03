@@ -5,14 +5,13 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
 import type { Snapshot } from '../infra/combat-types.js';
+import { normalizeTotalAdSnapshot, TOTAL_AD_RULESET_VERSION } from '../infra/total-ad-combat.js';
 import { makeLogger } from '../infra/logger.js';
 // eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的内部边界；架构测试按 owner 归并校验。
 import type { Battle, Contribution, DefenderContribution } from './combat/types.js';
 // eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的纯计算层。
 import {
   aggregateCounts,
-  applyAmbushBonus,
-  applyAmbushSnapshot,
   countDelta,
   filterNonSiegeWeapons,
   filterSiegeWeapons,
@@ -41,10 +40,8 @@ const log = makeLogger('combat');
  *
  * 核心机制（§4）：
  *  - 一地一场战：同一目标只有一个战场；后到的部队按阵营并入，下一 tick 生效。
- *  - 两排：前排=melee，后排=ranged。永远先掉前排，前排全灭才掉后排。
- *  - 远程兵按"己方/敌方近战是否存活"切换用 rangedAtk / meleeAtk（§4.3）。
- *  - 逐 tick 按兰开斯特平方律减员，人数优势会在战斗过程中持续放大（§4.4）。
- *  - 打到一方归零结束，不撤退（§4.5）。
+ *  - 每回合仅按总攻击、总防御和 hp 计算；伤害按回合初始人数比例分摊。
+ *  - 双方同时结算，任一方归零立即结束；不设回合上限。
  *
  * 本轮范围：PvE/PvP 单场 + 攻击方并入（一地一场战）+ 每 tick 实时快照推送。
  * 暂缓：协防 reinforce、PvE 多人合战分战利品（见 08 文档§七）。
@@ -240,9 +237,9 @@ export class CombatModule {
         movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-        existing.attacker[`${contribId}#${code}`] = existing.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
+        existing.attacker[`${contribId}#${code}`] = { ...u };
       }
-      existing.attackPower0 += totalPower(existing.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
+      existing.attackPower0 += totalPower(p.attackerSnapshot);
       mergeCounts(existing.initialAttacker, aggregateCounts(p.attackerSnapshot));
       this.store.set(COLLECTION, existing.id, existing);
       log('援军并入', { battleId: existing.id, from: p.fromVillage, troops: p.troops, newAtkPower: Math.round(existing.attackPower0) });
@@ -260,9 +257,9 @@ export class CombatModule {
           movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-          raceCheck.attacker[`${contribId}#${code}`] = raceCheck.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
+          raceCheck.attacker[`${contribId}#${code}`] = { ...u };
         }
-        raceCheck.attackPower0 += totalPower(raceCheck.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
+        raceCheck.attackPower0 += totalPower(p.attackerSnapshot);
         this.store.set(COLLECTION, raceCheck.id, raceCheck);
         log('竞态并入（claiming）', { battleId: raceCheck.id, from: p.fromVillage });
         return { ok: true, payload: { battleId: raceCheck.id, merged: true } };
@@ -280,7 +277,7 @@ export class CombatModule {
       const defenderOriginal: Record<string, number> = {};
       for (const [code, u] of Object.entries(defender)) defenderOriginal[code] = u.count;
       const attacker: Snapshot = {};
-      for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = p.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
+      for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
 
       const id = this.nextId();
       const defContrib: Contribution = {
@@ -293,7 +290,7 @@ export class CombatModule {
         battleType: p.battleType, taskCode: p.taskCode,
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
         defenderContribution: defContrib,
-        attackerPending: 0, defenderPending: 0,
+        attackerDamageCarry: {}, defenderDamageCarry: {}, rulesetVersion: TOTAL_AD_RULESET_VERSION,
         initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
         attackPower0: totalPower(attacker), defensePower0: totalPower(defender),
         startedAt: this.now(), ticks: 0, status: 'active',
@@ -326,9 +323,9 @@ export class CombatModule {
         movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
-        raceExisting.attacker[`${contribId}#${code}`] = raceExisting.battleType === 'ambush' ? applyAmbushBonus(u, this.config.constants.ambushAttackBonus) : { ...u };
+        raceExisting.attacker[`${contribId}#${code}`] = { ...u };
       }
-      raceExisting.attackPower0 += totalPower(raceExisting.battleType === 'ambush' ? applyAmbushSnapshot(p.attackerSnapshot, this.config.constants.ambushAttackBonus) : p.attackerSnapshot);
+      raceExisting.attackPower0 += totalPower(p.attackerSnapshot);
       mergeCounts(raceExisting.initialAttacker, aggregateCounts(p.attackerSnapshot));
       this.store.set(COLLECTION, raceExisting.id, raceExisting);
       log('二次检查并入', { battleId: raceExisting.id, from: p.fromVillage });
@@ -357,8 +354,9 @@ export class CombatModule {
       defenderOriginal,
       defenderContributions,
       contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
-      attackerPending: 0,
-      defenderPending: 0,
+      attackerDamageCarry: {},
+      defenderDamageCarry: {},
+      rulesetVersion: TOTAL_AD_RULESET_VERSION,
       initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
       attackPower0: totalPower(attacker),
       defensePower0: totalPower(defender),
@@ -442,50 +440,25 @@ export class CombatModule {
   private async tick(id: string): Promise<void> {
     const b = this.load(id);
     if (!b || b.status !== 'active') return;
+    // 存量战场没有 rulesetVersion 或仍是旧四维快照时，在首个未结算回合安全迁移。
+    if (b.rulesetVersion !== TOTAL_AD_RULESET_VERSION) {
+      b.attacker = normalizeTotalAdSnapshot(b.attacker as any);
+      b.defender = normalizeTotalAdSnapshot(b.defender as any);
+      b.attackerDamageCarry = {};
+      b.defenderDamageCarry = {};
+      b.rulesetVersion = TOTAL_AD_RULESET_VERSION;
+    }
     b.ticks += 1;
-
-    const dt = this.tickMs() / 1000;
-    const k = this.config.constants.combatStrength;
-    const wallMult = (() => {
-      const wallDef = this.config.buildings['wall'];
-      let totalDef = 0;
-      for (let lv = 1; lv <= b.wallLevel; lv++) {
-        totalDef += wallDef.levels[lv]?.defensePerLevel ?? this.config.constants.wallBonusPerLevel;
-      }
-      return 1 + totalDef;
-    })();
-
-    // 双方同时用 tick 开始时的兵力互算（避免先手偏差）。绞马索属于
-    // 携带方的效果，只对承伤方骑兵防御生效；驻城守军没有携带宝物清单，
-    // 不会错误继承守方城内宝库效果。
-    const attackerCavalryDefMult = this.enemyCavalryDefMultiplier(Object.values(b.contributions).flatMap((c) => c.treasures ?? []));
-    const defenderCavalryDefMult = this.enemyCavalryDefMultiplier(b.defenderContribution?.treasures ?? []);
     const result = simulateCombatTick({
       attacker: b.attacker,
       defender: b.defender,
-      attackerPending: b.attackerPending,
-      defenderPending: b.defenderPending,
-      combatStrength: k,
-      dt,
-      defenderWallMultiplier: wallMult,
-      attackerCavalryDefMultiplier: attackerCavalryDefMult,
-      defenderCavalryDefMultiplier: defenderCavalryDefMult,
-      combatInfluence: {
-        referenceValue: this.config.constants.combatInfluenceReferenceValue,
-        qualityExponent: this.config.constants.combatInfluenceQualityExponent,
-        minQuality: this.config.constants.combatInfluenceMinQuality,
-        maxQuality: this.config.constants.combatInfluenceMaxQuality,
-        meleeAttackWeight: this.config.constants.combatValueMeleeAttackWeight,
-        rangedAttackWeight: this.config.constants.combatValueRangedAttackWeight,
-        meleeDefenseWeight: this.config.constants.combatValueMeleeDefenseWeight,
-        rangedDefenseWeight: this.config.constants.combatValueRangedDefenseWeight,
-        hpWeight: this.config.constants.combatValueHpWeight,
-      },
+      attackerDamageCarry: b.attackerDamageCarry,
+      defenderDamageCarry: b.defenderDamageCarry,
     });
     b.attacker = result.attacker;
     b.defender = result.defender;
-    b.attackerPending = result.attackerPending;
-    b.defenderPending = result.defenderPending;
+    b.attackerDamageCarry = result.attackerDamageCarry;
+    b.defenderDamageCarry = result.defenderDamageCarry;
 
     const atkAlive = totalCount(b.attacker);
     const defAlive = totalCount(b.defender);
@@ -498,14 +471,20 @@ export class CombatModule {
       defenderLosses: countDelta(result.defenderBefore, defenderAfter),
       attacker: attackerAfter,
       defender: defenderAfter,
+      attackerTotalAttack: result.attackerTotalAttack,
+      attackerTotalDefense: result.attackerTotalDefense,
+      defenderTotalAttack: result.defenderTotalAttack,
+      defenderTotalDefense: result.defenderTotalDefense,
+      damageToAttacker: result.damageToAttacker,
+      damageToDefender: result.damageToDefender,
     });
 
     // 每10 tick 记录一次兵力变化（避免刷屏）
     if (b.ticks % 10 === 0) {
-      log(`tick#${b.ticks}`, { battleId: id, atkAlive, defAlive, killsToDef: Math.round(result.killsToDefender * 100) / 100, killsToAtk: Math.round(result.killsToAttacker * 100) / 100 });
+      log(`round#${b.ticks}`, { battleId: id, atkAlive, defAlive, damageToDef: Math.round(result.damageToDefender * 100) / 100, damageToAtk: Math.round(result.damageToAttacker * 100) / 100 });
     }
 
-    if (atkAlive <= 0 || defAlive <= 0 || b.ticks >= this.config.constants.combatMaxTicks) {
+    if (atkAlive <= 0 || defAlive <= 0) {
       await this.beginResolution(b);
       return;
     }
@@ -520,22 +499,17 @@ export class CombatModule {
         attacker: attackerAfter, defender: defenderAfter,
         attackerLosses: b.rounds[b.rounds.length - 1]!.attackerLosses,
         defenderLosses: b.rounds[b.rounds.length - 1]!.defenderLosses,
+        attackerTotalAttack: result.attackerTotalAttack,
+        attackerTotalDefense: result.attackerTotalDefense,
+        defenderTotalAttack: result.defenderTotalAttack,
+        defenderTotalDefense: result.defenderTotalDefense,
+        damageToAttacker: result.damageToAttacker,
+        damageToDefender: result.damageToDefender,
         round: b.ticks,
       }));
     }
 
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
-  }
-
-  /** 取一方携带的最强敌方骑兵防御削弱；同一件独特宝物不会重复叠乘。 */
-  private enemyCavalryDefMultiplier(codes: string[]): number {
-    let multiplier = 1;
-    for (const code of codes) {
-      const treasure = this.config.treasures[code];
-      if (!treasure || treasure.effectType !== 'enemyCavalryDef') continue;
-      multiplier = Math.min(multiplier, Math.max(0, 1 - treasure.effectValue / 100));
-    }
-    return multiplier;
   }
 
   /** 进入可恢复结算状态；结算失败时保留 battle 记录，重启后由 resume() 继续。 */
@@ -963,10 +937,8 @@ function mergeCounts(target: Record<string, number>, source: Record<string, numb
 function snapshotSummary(snap: Snapshot): Record<string, unknown>[] {
   return Object.entries(snap).map(([key, u]) => ({
     code: key.includes('#') ? key.slice(key.indexOf('#') + 1) : key,
-    count: u.count, form: u.form, popCost: u.popCost,
-    meleeAtk: u.meleeAtk, rangedAtk: u.rangedAtk,
-    meleeDef: u.meleeDef, rangedDef: u.rangedDef,
+    count: u.count, popCost: u.popCost,
+    attack: u.attack, defense: u.defense, hp: u.hp,
     carry: u.carry,
-    traits: u.traits?.map((t) => `${t.effect}:${t.value}`) ?? [],
   }));
 }

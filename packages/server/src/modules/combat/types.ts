@@ -27,6 +27,12 @@ export interface BattleRound {
   defenderLosses: Record<string, number>;
   attacker: Record<string, number>;
   defender: Record<string, number>;
+  attackerTotalAttack: number;
+  attackerTotalDefense: number;
+  defenderTotalAttack: number;
+  defenderTotalDefense: number;
+  damageToAttacker: number;
+  damageToDefender: number;
 }
 
 export type ResolutionStep = 'apply_domain' | 'emit_attacker_reports' | 'emit_defender_report';
@@ -63,8 +69,11 @@ export interface Battle {
   defenderContributions?: Record<string, DefenderContribution>;
   contributions: Record<string, Contribution>;
   defenderContribution?: Contribution;
-  attackerPending: number;
-  defenderPending: number;
+  /** Total-AD v2 每个快照条目的生命值余伤；旧字段保留只为平滑读旧档。 */
+  attackerDamageCarry?: Record<string, number>;
+  defenderDamageCarry?: Record<string, number>;
+  /** 规则版本：缺省的旧战场会在下次 tick 惰性迁移到 v2。 */
+  rulesetVersion?: number;
   initialAttacker: Record<string, number>;
   initialDefender: Record<string, number>;
   rounds: BattleRound[];

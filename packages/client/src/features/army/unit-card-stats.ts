@@ -1,13 +1,11 @@
 interface UnitCardStatValues {
-  meleeAtk?: unknown;
-  rangedAtk?: unknown;
-  meleeDef?: unknown;
-  rangedDef?: unknown;
+  attack?: unknown;
+  defense?: unknown;
+  hp?: unknown;
   speed?: unknown;
 }
 
 interface UnitCardStatSource extends UnitCardStatValues {
-  form?: string;
   baseStats?: UnitCardStatValues;
 }
 
@@ -18,17 +16,13 @@ function finiteValue(primary: unknown, fallback: unknown): number {
   return Number.isFinite(legacy) ? legacy : 0;
 }
 
-/** 训练卡只展示 CSV 基础属性；旧服务端没有 baseStats 时兼容回退原字段。 */
-export function unitCardBaseStats(unit: UnitCardStatSource): { attack: number; defense: number; speed: number } {
-  const ranged = unit.form === 'ranged';
+/** 训练卡只展示 CSV 基础属性；最终属性由服务端用于实际战斗。 */
+export function unitCardBaseStats(unit: UnitCardStatSource): { attack: number; defense: number; hp: number; speed: number } {
   const base = unit.baseStats;
   return {
-    attack: Math.round(ranged
-      ? finiteValue(base?.rangedAtk, unit.rangedAtk)
-      : finiteValue(base?.meleeAtk, unit.meleeAtk)),
-    defense: Math.round(ranged
-      ? finiteValue(base?.rangedDef, unit.rangedDef)
-      : finiteValue(base?.meleeDef, unit.meleeDef)),
+    attack: Math.round(finiteValue(base?.attack, unit.attack)),
+    defense: Math.round(finiteValue(base?.defense, unit.defense)),
+    hp: Math.round(finiteValue(base?.hp, unit.hp)),
     speed: Math.round(finiteValue(base?.speed, unit.speed)),
   };
 }

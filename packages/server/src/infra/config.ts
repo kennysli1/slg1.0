@@ -377,12 +377,20 @@ export interface UnitDef {
   icon: string; // 基名
   /** 形态：melee(近战/前排) / ranged(远程/后排)。取代旧的 cat。 */
   form: UnitForm;
-  meleeAtk: number;
-  rangedAtk: number;
-  meleeDef: number;
-  rangedDef: number;
-  /** 阶段化战斗模拟器的生命值伤亡池。 */
+  /** 战斗唯一攻击属性。 */
+  attack: number;
+  /** 战斗唯一防御属性。 */
+  defense: number;
+  /** 单兵生命值。 */
   hp: number;
+  /** @deprecated 仅维持非战斗旧调用兼容；恒等于 attack。 */
+  meleeAtk: number;
+  /** @deprecated 仅维持非战斗旧调用兼容；恒等于 attack。 */
+  rangedAtk: number;
+  /** @deprecated 仅维持非战斗旧调用兼容；恒等于 defense。 */
+  meleeDef: number;
+  /** @deprecated 仅维持非战斗旧调用兼容；恒等于 defense。 */
+  rangedDef: number;
   speed: number;
   /** 地图视野半径（格）。 */
   vision: number;
@@ -393,7 +401,7 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
-  /** 阶段化战斗模拟器专用特性引用；不改变主战斗旧特性语义。 */
+  /** 历史展示标签；不参与战斗。 */
   simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
@@ -424,10 +432,8 @@ export interface PveTemplate {
   defender: Record<string, {
     count: number;
     form: UnitForm;
-    meleeAtk: number;
-    rangedAtk: number;
-    meleeDef: number;
-    rangedDef: number;
+    attack: number;
+    defense: number;
     hp?: number;
     carry: number;
     traitCodes?: string[];
@@ -484,39 +490,6 @@ export interface GameConstants {
   worldH: number;
   /** 战斗每 tick 间隔(ms)：越小越平滑越费算力（08设计§4.4 的 dt）。 */
   combatTickMs: number;
-  /** 战斗全局强度系数 k：越大减员越快、战斗越短（08设计§4.4 的 k）。 */
-  combatStrength: number;
-  /** 线上战斗安全上限；达到后按守方守住战场结算，避免极端防御阵容无限运行。 */
-  combatMaxTicks: number;
-  /** 基础战斗价值/人口的参考点；用于映射有效战斗人口。 */
-  combatInfluenceReferenceValue: number;
-  /** 战斗质量指数；>1 放大高质量兵种、压低低质量兵种。 */
-  combatInfluenceQualityExponent: number;
-  combatInfluenceMinQuality: number;
-  combatInfluenceMaxQuality: number;
-  combatValueMeleeAttackWeight: number;
-  combatValueRangedAttackWeight: number;
-  combatValueMeleeDefenseWeight: number;
-  combatValueRangedDefenseWeight: number;
-  combatValueHpWeight: number;
-  /** 阶段化战斗模拟器：第三阶段全军近战互殴轮数。 */
-  battleSimulatorMeleeRounds: number;
-  /** 阶段化战斗模拟器各步骤伤害系数。默认均为 1，便于数值测试时独立调节。 */
-  battlePhaseCavalryVsCavalryCoeff: number;
-  battlePhaseCavalryVsMeleeCoeff: number;
-  battlePhaseCavalryVsRangedCoeff: number;
-  battlePhaseRangedStrikeCoeff: number;
-  battlePhaseMeleeRoundCoeff: number;
-  /** 阶段化伤害中攻击高于防御时的优势放大系数。 */
-  battlePhaseAdvantageAmplifier: number;
-  /** 阶段模拟器战术窗口结束后，优势方有效战力达到该倍数才判定胜负。 */
-  battlePhaseDecisionRatio: number;
-  /** 攻城最终阶段比较浮点数时的相等容差。 */
-  battlePhaseCompareEpsilon: number;
-  /** 攻城最终阶段胜方至少保留的单位数。 */
-  battlePhaseMinSurvivorUnits: number;
-  /** 伏击方攻击加成（0.5=+50%），仅在伏击战结算时生效。 */
-  ambushAttackBonus: number;
   /** 行军速度全局倍率（march_speed_multiplier）：>1加速、<1减速、1=原速。 */
   marchSpeedMultiplier: number;
   /** 森林方向视野衰减格数（仅军队视野）。 */
@@ -1212,7 +1185,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       // GM 平衡表按 units.csv 的数字 id 保存覆盖；这里必须使用同一主键，
       // 否则覆盖文件存在但重启/删档后会静默回退到 CSV 默认值。
       file: 'units.csv', key: 'id',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost','techTier'],
+      numeric: ['attack','defense','hp','speed','vision','carry','upkeep','costWood','costClay','costIron','costCrop','trainSec','popCost','techTier'],
     }, overrides.units);
   }
   const units: Record<string, UnitDef> = {};
@@ -1220,8 +1193,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[r.code] = {
       id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
-      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
-      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef), hp: Math.max(1, num(r.hp, 100)),
+      attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
+      meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: num(r.upkeep, 1),
       cost: { wood: num(r.costWood), clay: num(r.costClay), iron: num(r.costIron), crop: num(r.costCrop) },
       trainSec: num(r.trainSec, 30),
@@ -1242,7 +1215,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.mercenaries) {
     mercRows = mergeOverridesIntoRows(mercRows, {
       file: 'mercenaries.csv', key: 'id',
-      numeric: ['meleeAtk','rangedAtk','meleeDef','rangedDef','hp','speed','carry','upkeep','goldCost','commandCost','contractSec','tier','costWood','costClay','costIron','costCrop','trainSec','popCost'],
+      numeric: ['attack','defense','hp','speed','carry','upkeep','goldCost','commandCost','contractSec','tier','costWood','costClay','costIron','costCrop','trainSec','popCost'],
     }, overrides.mercenaries);
   }
   for (const r of mercRows) {
@@ -1251,8 +1224,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[code] = {
       id: num(r.id), key: code, tribe: 'merc', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
-      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
-      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef), hp: Math.max(1, num(r.hp, 100)),
+      attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
+      meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: 0,
       cost: { wood: 0, clay: 0, iron: 0, crop: 0 },
       trainSec: 0,
@@ -1338,7 +1311,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.pve_defenders) {
     pveDefenderRows = mergeOverridesIntoRows(pveDefenderRows, {
       file: 'pve_defenders.csv', keyComposite: ['targetId','unitCode'],
-      numeric: ['count','meleeAtk','rangedAtk','meleeDef','rangedDef','hp','carry'],
+      numeric: ['count','attack','defense','hp','carry'],
     }, overrides.pve_defenders);
   }
   for (const r of pveDefenderRows) {
@@ -1348,8 +1321,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tpl.defender[r.unitCode] = {
       count: num(r.count),
       form: (r.form as UnitForm) || 'melee',
-      meleeAtk: num(r.meleeAtk), rangedAtk: num(r.rangedAtk),
-      meleeDef: num(r.meleeDef), rangedDef: num(r.rangedDef), hp: Math.max(1, num(r.hp, 100)),
+      attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       carry: num(r.carry), traitCodes: parseTraitRefs(r.traits, traitIdToCode),
     };
   }
@@ -1420,28 +1392,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     worldW: cn('world_width', 41),
     worldH: cn('world_height', 41),
     combatTickMs: cn('combat_tick_ms', 200),
-    combatStrength: cn('combat_strength', 1),
-    combatMaxTicks: Math.max(1, Math.floor(cn('combat_max_ticks', 180))),
-    combatInfluenceReferenceValue: Math.max(1, cn('combat_influence_reference_value', 200)),
-    combatInfluenceQualityExponent: Math.max(1, cn('combat_influence_quality_exponent', 1.15)),
-    combatInfluenceMinQuality: Math.max(0, cn('combat_influence_min_quality', 0.65)),
-    combatInfluenceMaxQuality: Math.max(0.01, cn('combat_influence_max_quality', 1.55)),
-    combatValueMeleeAttackWeight: Math.max(0, cn('combat_value_melee_attack_weight', 1)),
-    combatValueRangedAttackWeight: Math.max(0, cn('combat_value_ranged_attack_weight', 1.1)),
-    combatValueMeleeDefenseWeight: Math.max(0, cn('combat_value_melee_defense_weight', 0.85)),
-    combatValueRangedDefenseWeight: Math.max(0, cn('combat_value_ranged_defense_weight', 0.75)),
-    combatValueHpWeight: Math.max(0, cn('combat_value_hp_weight', 0.65)),
-    battleSimulatorMeleeRounds: Math.max(1, Math.floor(cn('battle_sim_melee_rounds', 6))),
-    battlePhaseCavalryVsCavalryCoeff: Math.max(0, cn('combat_phase_cavalry_vs_cavalry_coeff', 1)),
-    battlePhaseCavalryVsMeleeCoeff: Math.max(0, cn('combat_phase_cavalry_vs_melee_coeff', 1)),
-    battlePhaseCavalryVsRangedCoeff: Math.max(0, cn('combat_phase_cavalry_vs_ranged_coeff', 1)),
-    battlePhaseRangedStrikeCoeff: Math.max(0, cn('combat_phase_ranged_strike_coeff', 1)),
-    battlePhaseMeleeRoundCoeff: Math.max(0, cn('combat_phase_melee_round_coeff', 1)),
-    battlePhaseAdvantageAmplifier: Math.max(0, cn('combat_phase_advantage_amplifier', 1.5)),
-    battlePhaseDecisionRatio: Math.max(1, cn('combat_phase_decision_ratio', 1.15)),
-    battlePhaseCompareEpsilon: Math.max(0, cn('combat_phase_compare_epsilon', 0.0001)),
-    battlePhaseMinSurvivorUnits: Math.max(1, Math.floor(cn('combat_phase_min_survivor_units', 1))),
-    ambushAttackBonus: cn('ambush_attack_bonus', 0.5),
     notificationsPerVillage: cn('notifications_per_village', 60),
     marchSpeedMultiplier: cn('march_speed_multiplier', 1),
     forestVisionPenalty: cn('forest_vision_penalty', 2),
@@ -2340,20 +2290,6 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
   if (c.combatTickMs <= 0) errors.push(`game_constants.csv combat_tick_ms 必须>0`);
-  if (c.combatStrength <= 0) errors.push(`game_constants.csv combat_strength 必须>0`);
-  if (c.combatMaxTicks <= 0) errors.push(`game_constants.csv combat_max_ticks 必须>0`);
-  if (c.combatInfluenceReferenceValue <= 0) errors.push(`game_constants.csv combat_influence_reference_value 必须>0`);
-  if (c.combatInfluenceQualityExponent < 1) errors.push(`game_constants.csv combat_influence_quality_exponent 必须≥1`);
-  if (c.combatInfluenceMinQuality < 0) errors.push(`game_constants.csv combat_influence_min_quality 必须≥0`);
-  if (c.combatInfluenceMaxQuality < c.combatInfluenceMinQuality) errors.push(`game_constants.csv combat_influence_max_quality 必须≥min_quality`);
-  for (const [key, value] of [
-    ['combat_value_melee_attack_weight', c.combatValueMeleeAttackWeight],
-    ['combat_value_ranged_attack_weight', c.combatValueRangedAttackWeight],
-    ['combat_value_melee_defense_weight', c.combatValueMeleeDefenseWeight],
-    ['combat_value_ranged_defense_weight', c.combatValueRangedDefenseWeight],
-    ['combat_value_hp_weight', c.combatValueHpWeight],
-  ] as const) if (value < 0) errors.push(`game_constants.csv ${key} 必须≥0`);
-  if (c.ambushAttackBonus < 0) errors.push(`game_constants.csv ambush_attack_bonus 必须≥0`);
   if (c.marchSpeedMultiplier <= 0) errors.push(`game_constants.csv march_speed_multiplier 必须>0`);
   if (c.tradeCaravanSpeed <= 0) errors.push(`game_constants.csv trade_caravan_speed 必须>0`);
   if (c.tradeCaravanMinDurationSec <= 0) errors.push(`game_constants.csv trade_caravan_min_duration_sec 必须>0`);

@@ -7,14 +7,13 @@ import { useState } from 'preact/hooks';
 import { dataVersion, tick } from '../../app/store.js';
 import { getCache, interpolatePop, getPopState, liveResources } from '../../app/state.js';
 import { buildingInfo, unitInfo, resourceKeys, unitCropPerHour } from '../../app/config.js';
-import { formName } from '../../shared/ui/text.js';
 import { req } from '../../api.js';
 import { act } from '../../app/refresh.js';
 import { fmt, fmtDur } from '../../shared/utils/format.js';
 import { openUnitDetail } from './UnitDetail.js';
 import { unitCardBaseStats } from './unit-card-stats.js';
 import {
-  IconPlate, Tag, Btn, CostRow, TimerBar, StatGrid, Stat, Empty, confirmDanger,
+  IconPlate, Btn, CostRow, TimerBar, StatGrid, Stat, Empty, confirmDanger,
 } from '../../ui/index.js';
 import '../../styles/army.css';
 
@@ -229,12 +228,12 @@ function TrainUnitRow({ unit, qty, onQtyChange, buildingId, buildingBusy }: Trai
         <div class="train-unit-row__info">
           <div class="train-unit-row__name">
             {unit.name}
-            <Tag kind={unit.form === 'ranged' ? 'steel' : 'ember'}>{formName(unit.form)}</Tag>
           </div>
           <div class="train-unit-row__stats">
             <StatGrid>
               <Stat icon="ui_icon_atk" label="攻" value={cardStats.attack} />
               <Stat icon="ui_icon_def" label="防" value={cardStats.defense} />
+              <Stat icon="ui_icon_pop" label="生命" value={cardStats.hp} />
               <Stat icon="ui_icon_speed" label="速" value={cardStats.speed} />
               {popCost > 0 && <Stat icon="ui_icon_pop" label="人口" value={popCost} />}
             </StatGrid>

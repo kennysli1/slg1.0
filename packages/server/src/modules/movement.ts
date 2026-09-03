@@ -2092,7 +2092,7 @@ export class MovementModule {
     if (this.isAdventurerUnit(code)) return false;
     if (['equlegati', 'pathfinder', 'teuscout'].includes(code)) return true;
     const def = this.config.units[code];
-    return !!def && /侦察|探路/.test(def.name) && (def.meleeAtk + def.rangedAtk) <= 0;
+    return !!def && /侦察|探路/.test(def.name) && def.attack <= 0;
   }
 
   private isAdventurerUnit(code: string): boolean {
@@ -3384,23 +3384,8 @@ export class MovementModule {
       payload: { villageId: mv.fromVillage, units: mv.troops },
     });
     const snap = (res.ok ? (res.payload as { snapshot?: Snapshot }).snapshot : undefined);
-    const base = (snap && Object.keys(snap).length > 0) ? snap : this.buildSnapshot(mv.troops); // 回退：源村已消失等异常，用原始数值保证出征仍能结算
-    // 叠加该军队携带宝物的效果（城镇在途时失去加成，军队获得加成）
-    if (mv.treasures && mv.treasures.length > 0) {
-      const effRes = await this.commands.send({
-        name: 'treasure.GetCarriedEffects', from: MovementModule.NAME,
-        payload: { movementId: mv.id },
-      });
-      const eff = (effRes.ok ? (effRes.payload as any)?.effects : undefined) as { atkMult?: number; defMult?: number } | undefined;
-      if (eff && (eff.atkMult !== 1 || eff.defMult !== 1)) {
-        const atk = eff.atkMult ?? 1, def = eff.defMult ?? 1;
-        for (const u of Object.values(base)) {
-          u.meleeAtk *= atk; u.rangedAtk *= atk;
-          u.meleeDef *= def; u.rangedDef *= def;
-        }
-      }
-    }
-    return base;
+    // 新战斗没有行军、宝物或地形的额外攻防倍率；只交付三属性快照。
+    return (snap && Object.keys(snap).length > 0) ? snap : this.buildSnapshot(mv.troops);
   }
 
   /**
@@ -4021,16 +4006,10 @@ export class MovementModule {
       const def = this.config.units[u];
       if (!def || n <= 0) continue;
       snap[u] = {
-        count: n, form: def.form, popCost: def.popCost,
-        meleeAtk: def.meleeAtk, rangedAtk: def.rangedAtk,
-        meleeDef: def.meleeDef, rangedDef: def.rangedDef,
+        count: n, popCost: def.popCost,
+        attack: def.attack, defense: def.defense,
         hp: def.hp,
         carry: def.carry,
-        isCavalry: this.config.constants.cavalryUnitCodes.includes(u),
-        traits: def.traits.flatMap((tc) => {
-          const t = this.config.unitTraits[tc];
-          return t.effects;
-        }),
       };
     }
     return snap;
