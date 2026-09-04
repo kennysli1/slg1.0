@@ -361,6 +361,20 @@ test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   assert.equal(cfg.units.clubswinger.attack, 82.37);
 });
 
+test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.deepEqual(cfg.units.clubswinger.simTraits, ['sunder', 'teuton_origin_attack']);
+  assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
+  assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.074);
+  assert.equal(cfg.unitTraits.gaul_origin_defense.effects[0]?.value, 0.2206);
+  assert.equal(cfg.units.merc_slinger.attack, 35);
+  assert.equal(cfg.units.merc_slinger.defense, 15);
+  assert.equal(cfg.units.merc_slinger.hp, 80);
+  const rat = Object.values(cfg.pveTemplates).flatMap((template) => Object.entries(template.defender))
+    .find(([code]) => code === 'rat')?.[1];
+  assert.deepEqual(rat && { attack: rat.attack, defense: rat.defense, hp: rat.hp }, { attack: 5, defense: 10, hp: 10 });
+});
+
 test('校验器：兵种 form 非法应抛错', () => {
   const cfg = loadGameConfig(configDir);
   const bad: GameConfig = { ...cfg, units: { ...cfg.units } };
