@@ -692,8 +692,9 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   // 宝物目录（treasures.csv）：id → {effectValue, reputationValue, priceGold, dropRate} 可编辑；其余为展示标签
   treasures: {
     file: 'treasures.csv', key: 'id',
-    numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
-    labels: ['id', 'code', 'name', 'category', 'rarity', 'effectType', 'applyType'],
+    numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate', 'activeEffectValue', 'activeDurationSec', 'activeConsume'],
+    text: ['activeEffectType'],
+    labels: ['id', 'code', 'name', 'category', 'rarity', 'effectType', 'applyType', 'activeEffectType'],
   },
   // 任务中的声望目标/效果也在声望专用视图集中展示；params 保持字符串，由运行时按 kind 校验。
   quest_objectives: {
@@ -2364,6 +2365,7 @@ th{background:#16213e;color:#a0a8c0;text-align:left}
 <div style="font-size:12px;color:#8a7a5a;margin:6px 0 12px;line-height:1.7">
   目标类型 objKind：<b>submit_resources</b>=上交资源(objParam 形如 wood:200|clay:200) ·
   <b>clear_camp</b>=清剿营地(objParam 形如 task_camp:1) ·
+  <b>clear_public_pve</b>=清剿常驻公开 PvE（objParam 形如 4:3，最低模板ID:数量） ·
   <b>build_buildings</b>=建造建筑(objParam 形如 inner:2/outer:1) ·
   <b>population_reached</b>=人口达到数量(objParam 形如 30) ·
   <b>resource_owned</b>=拥有资源且不扣除(objParam 形如 gold:100) ·

@@ -234,3 +234,33 @@ test('M16 达到声望 10 后奖励无期限佣兵弓手', async () => {
   const after = (await send(app, 'task.GetState', { villageId })).payload as any;
   assert.ok(after.completedMain.includes('m16'), 'M16 领取后应完成');
 });
+
+test('M19 只累计清除雇佣兵营及更强的常驻公开 PvE 营地', async () => {
+  const app = freshApp();
+  const villageId = await register(app, 'm19-flow');
+  const state = app.store.get<any>('task', villageId)!;
+  state.completedMain = [...new Set([...(state.completedMain ?? []), 'm18'])];
+  state.offeredMain = [...new Set([...(state.offeredMain ?? []), 'm19'])];
+  app.store.set('task', villageId, state);
+  assert.equal((await send(app, 'task.Accept', { villageId, code: 'm19' })).ok, true);
+
+  const ids = ['m19-public-merc', 'm19-public-barb', 'm19-public-fort'];
+  const types = ['mercenaries', 'barbarians', 'fortress'];
+  for (let i = 0; i < ids.length; i++) {
+    const spawned = await send(app, 'pve.Spawn', { id: ids[i], type: types[i], q: 10 + i, r: 20 + i });
+    assert.equal(spawned.ok, true, spawned.reason);
+    await emit(app, 'combat.BattleEnded', {
+      side: 'attacker', attackerWins: true, villageId, targetKind: 'pve', targetId: ids[i],
+      campCleared: true, movementId: `m19-battle-${i}`, treasures: [], looted: {},
+    });
+    await tick();
+  }
+  const result = (await send(app, 'task.GetState', { villageId })).payload as any;
+  const m19 = result.active.find((task: any) => task.code === 'm19');
+  assert.equal(m19?.progress, 3, '三处常驻公开营地应完成 M19 进度');
+  assert.equal(m19?.ready, true, '达到三处后 M19 应就绪');
+  const delivered = await send(app, 'task.Deliver', { villageId, code: 'm19' });
+  assert.equal(delivered.ok, true, delivered.reason);
+  assert.deepEqual((delivered.payload as any).rewards.treasures, ['warrior_banner']);
+  assert.equal((delivered.payload as any).rewards.reputation, 4);
+});

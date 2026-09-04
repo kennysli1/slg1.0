@@ -21,6 +21,7 @@ export interface TreasureInfo {
   category: string; rarity: string;
   effectType: string; effectValue: number;
   reputationValue?: number;
+  activeEffectType?: string; activeEffectValue?: number; activeDurationSec?: number; activeConsume?: boolean;
   priceGold: number; dropRate: number; applyType: string;
   equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean;
 }
@@ -33,7 +34,7 @@ interface ServerConfig {
   mercenaries: { key: string; name: string; icon: string; attack: number; defense: number; hp: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
   /** 宝物目录（服务端下发）：code → 展示与数值信息。 */
-  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; reputationValue?: number; priceGold: number; dropRate: number; applyType: string; equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean }[];
+  treasures: { code: string; name: string; icon: string; category: string; rarity: string; effectType: string; effectValue: number; reputationValue?: number; activeEffectType?: string; activeEffectValue?: number; activeDurationSec?: number; activeConsume?: boolean; priceGold: number; dropRate: number; applyType: string; equipCategory?: string; stackGroup?: string; effectCap?: number; uniqueEffect?: boolean }[];
   constants: {
     mapViewRadius: number; mapSize: number; worldW: number; worldH: number;
     goldTaxPerCivilianPerHour: number; startGoldAmount: number; popCropPerLabor: number;
@@ -167,6 +168,16 @@ export function treasureEffectText(info: TreasureInfo): string {
   // 正直的心：复合效果（value=百分比，统一作用于四项）
   if (info.effectType === 'honestHeart') {
     return `全军攻击 +${v}%、全军防御 +${v}%、金币收入 +${v}%、科技点判定间隔 -${v}%${reputationText}`;
+  }
+  if (info.effectType === 'smartPerson') {
+    const active = info.activeEffectType === 'instantResearchPoints'
+      ? `、主动获得 ${Math.max(0, Math.floor(Number(info.activeEffectValue ?? 0)))} 科研点` : '';
+    return `科技点判定间隔 -${v}%${active}${reputationText}`;
+  }
+  if (info.effectType === 'warriorBanner') {
+    const active = info.activeEffectType === 'temporaryCombatBuff'
+      ? `；主动：村庄军队攻防 +${info.activeEffectValue ?? 0}%（持续${Math.round((info.activeDurationSec ?? 0) / 3600)}小时）` : '';
+    return `全军攻防 +${v}%、人口增长 +${v}%${reputationText}${active}`;
   }
   const map: Record<string, string> = {
     woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,

@@ -352,7 +352,7 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   kingdom_services: { file: 'kingdom_services.csv', key: 'id', numeric: ['minCouncilLevel', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'gold', 'delaySec'] },
   pve_targets: { file: 'pve_targets.csv', key: 'id', numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'] },
   pve_defenders: { file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'], numeric: ['count', 'attack', 'defense', 'hp', 'carry'] },
-  treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'] },
+  treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate', 'activeEffectValue', 'activeDurationSec', 'activeConsume'] },
   constants: { file: 'game_constants.csv', key: 'key', numericByType: true },
   research: { file: 'research.csv', key: 'id', numeric: ['tier', 'mainBaseLevel', 'effectValue', 'durationSec', 'rpCost'] },
   academy: { file: 'academy.csv', key: 'level', numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'] },

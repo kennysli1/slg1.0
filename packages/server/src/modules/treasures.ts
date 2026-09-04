@@ -546,6 +546,16 @@ export class TreasureModule {
         case 'atkMult': atkMult = 1 + (atkMult - 1) + frac; break;
         case 'defMult': defMult = 1 + (defMult - 1) + frac; break;
         case 'popGrowth': popGrowthMult = 1 + (popGrowthMult - 1) + frac; break;
+        case 'smartPerson':
+          // 聪明人：科技点判定间隔缩短 effectValue%（25 → ×0.75）。
+          techIntervalMult *= Math.max(0, 1 - frac);
+          break;
+        case 'warriorBanner':
+          // 勇士锦旗：被动全军攻防与人口增长各提升 effectValue%。
+          atkMult = 1 + (atkMult - 1) + frac;
+          defMult = 1 + (defMult - 1) + frac;
+          popGrowthMult = 1 + (popGrowthMult - 1) + frac;
+          break;
         case 'reputation': reputationDelta += t.effectValue; break;
         case 'cavalryTrainSpeed': cavalryTrainMult *= (1 - frac); break; // 伯乐：效果值=减时百分比
         case 'soldierFoodReduce': soldierFoodReduce += t.effectValue; break; // 精神食粮：每兵减粮绝对值（非百分比，直接累加）
@@ -609,7 +619,7 @@ export class TreasureModule {
       else if (t.effectType === 'allResRate') Object.assign(mult, { wood: frac, clay: frac, iron: frac, crop: frac });
       if (Object.keys(mult).length) resourceDetails.push({ source: `treasure:${code}`, label, mult });
       if (t.effectType === 'goldRate' || t.effectType === 'honestHeart') goldSources.push({ label, delta: frac });
-      if (t.effectType === 'popGrowth') growthSources.push({ label, delta: frac });
+      if (t.effectType === 'popGrowth' || t.effectType === 'warriorBanner') growthSources.push({ label, delta: frac });
     }
     // 经济产出倍率（加性分数直接作 mult）
     await this.commands.send({
@@ -1028,17 +1038,34 @@ export class TreasureModule {
   }
 
   /**
-   * 使用宝物：仅对特殊宝物(instantGold)有效，发放 effectValue 金币并移除。
-   * 被动宝物不可「使用」，返回 reason='not_usable'。
+   * 使用宝物：即时宝物按原规则消耗；带 activeEffectType 的混合宝物保留在
+   * 主栏（除非 CSV 明确 activeConsume=1），只结算其主动效果。
    */
   private async use(cmd: Command): Promise<CommandResult> {
     const { villageId, code, location } = cmd.payload as { villageId: string; code: string; location?: TreasureLocation };
     const s = this.ensureState(villageId);
     const t = this.config.treasures[code];
-    // 先校验可用性再移除，避免「不可用也吞宝物」的旧隐患
-    if (!t || t.applyType !== 'instant') return { ok: false, payload: {}, reason: 'not_usable' };
-    if (!this.removeStored(s, code, location)) return { ok: false, payload: {}, reason: 'not_held' };
-    this.store.set(COLLECTION, villageId, s);
+    const activeEffectType = t?.activeEffectType?.trim();
+    // 先校验可用性再移除，避免「不可用也吞宝物」的旧隐患。
+    if (!t || (t.applyType !== 'instant' && !activeEffectType)) return { ok: false, payload: {}, reason: 'not_usable' };
+    // 混合宝物的主动参数必须在扣除宝物前校验；异常/旧配置不能造成宝物
+    // 已被移除但效果又没有发放的不可恢复状态。
+    if (activeEffectType === 'instantResearchPoints') {
+      const amount = Math.max(0, Math.floor(Number(t.activeEffectValue ?? 0)));
+      if (amount <= 0) return { ok: false, payload: {}, reason: 'bad_active_effect' };
+    } else if (activeEffectType === 'temporaryCombatBuff') {
+      const percent = Math.max(0, Number(t.activeEffectValue ?? 0));
+      const durationSec = Math.max(0, Math.floor(Number(t.activeDurationSec ?? 0)));
+      if (percent <= 0 || durationSec <= 0) return { ok: false, payload: {}, reason: 'bad_active_effect' };
+    }
+    const consumes = activeEffectType ? t.activeConsume !== false : true;
+    if (consumes) {
+      if (!this.removeStored(s, code, location)) return { ok: false, payload: {}, reason: 'not_held' };
+      this.store.set(COLLECTION, villageId, s);
+    } else {
+      // 不消耗的主动效果只能从主宝物栏使用；备用栏中的宝物尚未生效。
+      if (!this.activeCodes(s).includes(code) || location === 'reserve') return { ok: false, payload: {}, reason: 'not_held' };
+    }
     // 使用宝物本身是任务触发事件（例如“我的努力”→m13）；事件在消耗
     // 成功后立即发出，避免客户端对话关闭与任务解锁之间出现竞态。
     await this.bus.emit({ name: 'treasure.Used', source: TreasureModule.NAME, ts: this.now(), payload: { villageId, code } } as DomainEvent);
@@ -1060,6 +1087,31 @@ export class TreasureModule {
       await this.recomputeAndPush(villageId);
       await this.emitChanged(villageId);
       return { ok: true, payload: { gold, codes: this.storedCodes(s) } };
+    }
+
+    if (activeEffectType === 'instantResearchPoints') {
+      const amount = Math.max(0, Math.floor(Number(t.activeEffectValue ?? 0)));
+      const result = await this.commands.send({
+        name: 'research.GrantPoints', from: TreasureModule.NAME,
+        payload: { villageId, amount },
+      });
+      if (!result.ok) return result;
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { researchPoints: amount, codes: this.storedCodes(s) } };
+    }
+
+    if (activeEffectType === 'temporaryCombatBuff') {
+      const percent = Math.max(0, Number(t.activeEffectValue ?? 0));
+      const durationSec = Math.max(0, Math.floor(Number(t.activeDurationSec ?? 0)));
+      const result = await this.commands.send({
+        name: 'military.ApplyTimedCombatBuff', from: TreasureModule.NAME,
+        payload: { villageId, source: code, percent, durationSec },
+      });
+      if (!result.ok) return result;
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+      return { ok: true, payload: { combatBuffPercent: percent, durationSec, codes: this.storedCodes(s) } };
     }
 
     if (t.effectType === 'ritualBuff') {

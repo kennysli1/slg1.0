@@ -64,3 +64,9 @@ id,code,taskCode,trigger,segment,npcName,npcText,replies
 59,s9_deliver_failure,s9,deliver_failure,1,骰子裁判,困难对手已赢得两局，巅峰对决以失败告终。本任务没有失败奖励。,s9_deliver_failure
 60,m16_accept,m16,accept,1,王国使者,声望是你在这片土地上立足的证明。请让你的声望达到十点，证明你值得更高的信任。,accept:接受任务
 61,m16_deliver,m16,deliver,1,王国使者,你的威望已经传遍四方。这支弓手队伍将为你效力。,take:收下
+62,m17_accept,m17,accept,1,王国税务官,缴纳五百金币税款，证明你的村庄已经成为王国值得信赖的纳税大户。,accept:接受任务
+63,m17_deliver,m17,deliver,1,王国税务官,税款已经登记。你的村庄将在接下来十二小时获得人口增长加成。,take:收下
+64,m18_accept,m18,accept,1,王国贵族,听说你已赢得声望。再让声望达到十五点，你就能尝到王国真正的恩惠。,accept:接受任务
+65,m18_deliver,m18,deliver,1,王国贵族,这件聪明人的宝物属于真正懂得积累声望的人。,take:收下
+66,m19_accept,m19,accept,1,王国使者,王国边境的雇佣兵营地正在滋长。清除三处常驻营地，证明你能替王国解决麻烦。,accept:接受任务
+67,m19_deliver,m19,deliver,1,王国使者,三处营地已经覆灭。这面勇士锦旗将记录你的功绩。,take:收下

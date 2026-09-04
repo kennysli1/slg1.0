@@ -10,7 +10,7 @@
  *  - 主线任务：全玩家共有，科技树式前置（requires），不可放弃；仅 m1 建村自动激活，后续主线解锁后进入可接取提示。
  *  - 日常任务：酒馆随机刷新，可反复出现、完成后冷却可再次刷出，可放弃。
  *  - 支线任务：满足触发条件(trigger)+前置(requires)后出现的一次性任务，有任务线；放弃后永久不再出现（客户端需警告）。
- *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most/reputation_at_least（声望值上下限）、clear_camp（清理地图上真实生成的任务营地）。
+ *  - 目标种类：submit_resources（上交资源）、repair_buildings（修复指定建筑）、build_buildings（建造数量）、population_reached（人口门槛）、resource_owned（拥有资源）、explore_tiles（累计探索格数）、reputation_at_most/reputation_at_least（声望值上下限）、clear_camp（清理地图上真实生成的任务营地）、clear_public_pve（清理全玩家可见的常驻 PvE 营地）。
  *
  * 命令：
  *   task.GetState       → 完整快照（active / offeredMain / offered / offeredSide / completed*）
@@ -2248,10 +2248,38 @@ export class TasksModule {
     // 都不是常驻营地，不能意外推进“村民的请求”。Combat 的事件只携带通用字段，
     // 因此这里回查 PvE owner 的快照作为唯一判定依据，而不是依赖 targetId 命名约定。
     let residentPveCleared = false;
-    if (p.targetKind === 'pve' && p.campCleared === true) {
+    if (p.targetKind === 'pve' && p.campCleared === true && !p.npcService) {
       const target = await this.commands.send({ name: 'pve.GetTarget', from: TasksModule.NAME, payload: { id: targetId } });
-      const targetState = target.payload as { task?: boolean; noRespawn?: boolean } | undefined;
-      residentPveCleared = target.ok && !!targetState && targetState.task !== true && targetState.noRespawn !== true;
+      const targetState = target.payload as { type?: string; task?: boolean; noRespawn?: boolean; cityState?: boolean } | undefined;
+      residentPveCleared = target.ok && !!targetState
+        && targetState.task !== true && targetState.noRespawn !== true && targetState.cityState !== true;
+
+      // M19 只统计地图上所有玩家可见的常驻普通 PvE 营地，并要求达到
+      // 配置的最低模板等级（默认从雇佣兵营 id=4 起算）。任务营地、不可重生
+      // NPC 以及王国城邦都不计入，也不会因此生成任何个人可见营地。
+      if (residentPveCleared && targetState) {
+        const template = targetState.type ? this.config.pveTemplates[targetState.type] : undefined;
+        const ready: string[] = [];
+        let changed = false;
+        for (const { storageVillageId, state } of this.taskCandidates(villageId)) {
+          for (const [code, inst] of Object.entries(state.active)) {
+            const q = this.quest(code);
+            if (!q || q.objective.kind !== 'clear_public_pve' || inst.readyToDeliver) continue;
+            if (this.storageVillageForQuest(villageId, code) !== storageVillageId) continue;
+            const minTargetId = q.objective.minPveTargetId ?? 1;
+            if (!template || template.id < minTargetId) continue;
+            const targetCount = q.objective.count ?? 1;
+            const next = Math.min(targetCount, Math.max(0, inst.progress ?? 0) + 1);
+            inst.progress = next;
+            inst.executionVillageId = villageId;
+            this.store.set(COLLECTION, storageVillageId, state);
+            changed = true;
+            if (next >= targetCount) ready.push(code);
+          }
+        }
+        for (const code of ready) await this.markReady(villageId, code);
+        if (changed && !ready.length) await this.pushList(villageId);
+      }
     }
     if (residentPveCleared) {
       const chance = this.gmNum('villager_request_trigger_chance', 0.3);
@@ -3256,6 +3284,7 @@ export class TasksModule {
       buildingZone: q.objective.buildingZone ?? null,
       resourceKey: q.objective.resourceKey ?? null,
       campTemplate: q.objective.campTemplate ?? null,
+      minPveTargetId: q.objective.minPveTargetId ?? null,
       minRarity: q.objective.minRarity ?? null,
       count: q.objective.count ?? 0,
       flagCode: q.objective.flagCode ?? null,
