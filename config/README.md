@@ -390,8 +390,11 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | equipCategory | 自动生效槽类别：`economic/military/social/special` |
 | stackGroup / effectCap | 同类叠加组 / 该效果封顶值 |
 | uniqueEffect | `1` 表示同名只允许一份生效 |
+| activeEffectType / activeEffectValue | 可选主动效果类型与数值；混合宝物可在保留被动效果的同时主动使用 |
+| activeDurationSec / activeConsume | 主动效果持续秒数（即时效果填0）/ 使用后是否消耗（1/0） |
 
 `enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
+`smartPerson`（聪明人）缩短科研点判定间隔，并可主动获得科研点；`warriorBanner`（勇士锦旗）被动提升全军攻防/人口增长，主动为本村（含本村在外活动的军队）提供限时攻防加成。
 
 ## research.csv — 科技树目录
 | 列 | 含义 |
@@ -485,8 +488,8 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | 列 | 含义 |
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
-| kind | 目标类型，如 `submit_resources`、`clear_camp`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
-| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
+| kind | 目标类型，如 `submit_resources`、`clear_camp`、`clear_public_pve`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果

@@ -132,6 +132,34 @@ test('宝物：instantGold 经 Use 发放金币并移除', async () => {
   assert.deepEqual(list.codes, [], '使用后 code 应已被移除');
 });
 
+test('宝物：聪明人主动科研点且保留被动，勇士锦旗限时攻防作用于战斗快照', async () => {
+  const app = await freshApp();
+  const smart = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'smart_person' });
+  assert.equal(smart.ok, true, `聪明人应可入栏: ${smart.reason ?? ''}`);
+  const rp0 = (await send(app, 'research.GetState', { villageId: 'v1' })).payload as any;
+  const usedSmart = await send(app, 'treasure.Use', { villageId: 'v1', code: 'smart_person' });
+  assert.equal(usedSmart.ok, true, `聪明人主动效果应成功: ${usedSmart.reason ?? ''}`);
+  const rp1 = (await send(app, 'research.GetState', { villageId: 'v1' })).payload as any;
+  assert.equal(rp1.rp, rp0.rp + 20, '主动效果应获得20科研点');
+  const smartList = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
+  assert.deepEqual(smartList.codes, ['smart_person'], '主动使用不应消耗聪明人');
+  assert.equal(smartList.effect.techIntervalMult, 0.75, '被动效果应缩短25%科研点判定间隔');
+
+  await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 1 });
+  const banner = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'warrior_banner' });
+  assert.equal(banner.ok, true, `勇士锦旗应可入栏: ${banner.reason ?? ''}`);
+  const baseAtk = app.config.units.legionnaire.attack;
+  const before = await send(app, 'military.GetCombatSnapshot', { villageId: 'v1', units: { legionnaire: 1 } });
+  assert.equal((before.payload as any).snapshot.legionnaire.attack, baseAtk * 1.05, '被动锦旗应提升战斗快照5%');
+  const usedBanner = await send(app, 'treasure.Use', { villageId: 'v1', code: 'warrior_banner' });
+  assert.equal(usedBanner.ok, true, `勇士锦旗主动效果应成功: ${usedBanner.reason ?? ''}`);
+  const active = await send(app, 'military.GetCombatSnapshot', { villageId: 'v1', units: { legionnaire: 1 } });
+  assert.ok(Math.abs((active.payload as any).snapshot.legionnaire.attack - baseAtk * 1.05 * 1.15) < 1e-9, '主动锦旗应叠加15%攻防');
+  setClock(1_000_000 + 86_400_001);
+  const expired = await send(app, 'military.GetCombatSnapshot', { villageId: 'v1', units: { legionnaire: 1 } });
+  assert.equal((expired.payload as any).snapshot.legionnaire.attack, baseAtk * 1.05, '24小时后主动加成应失效');
+});
+
 test('宝物：槽位满时拒绝授予', async () => {
   const app = await freshApp();
   const g1 = await send(app, 'treasure.Grant', { villageId: 'v1', code: 'chainsaw' });

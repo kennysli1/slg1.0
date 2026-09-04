@@ -29,6 +29,11 @@ e-m14-reputation-mercenaries,m14,deliver,grant_mercenaries_by_positive_reputatio
 e-m15-research,m15,deliver,grant_research_points,10,1
 e-m15-crop-growth,m15,deliver,grant_resource_growth,crop:25:86400,2
 e-m16-mercenaries,m16,deliver,grant_mercenaries,merc_archer:10,1
+e-m17-growth,m17,deliver,grant_population_growth,25:43200,1
+e-m17-reputation,m17,deliver,adjust_reputation,5,2
+e-m18-treasure,m18,deliver,grant_treasure,smart_person,1
+e-m19-treasure,m19,deliver,grant_treasure,warrior_banner,1
+e-m19-reputation,m19,deliver,adjust_reputation,4,2
 e-s5-rope,s5,deliver,grant_treasure,horse_rope,1
 e-s6-ticket,s6,deliver,grant_treasure,dice_tournament_ticket,1
 e-s7-gold,s7,deliver,grant_resources,gold:200,1

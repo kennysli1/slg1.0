@@ -55,6 +55,7 @@ function objText(task: any): string {
   if (o.kind === 'resource_owned') return `主城拥有${resInfo(o.resourceKey).name} ${o.count}`;
   if (o.kind === 'explore_tiles') return `累计探索地图 ${o.count} 格`;
   if (o.kind === 'clear_camp') return `清理营地 ×${task.campTotal}`;
+  if (o.kind === 'clear_public_pve') return `清理雇佣兵营及更强的常驻 PvE 营地 ×${o.count}`;
   if (o.kind === 'sell_discard_treasure') return `出售/丢弃稀有+宝物 ×${o.count}`;
   if (o.kind === 'deliver_to_npc') return `向幸福村运输 ${resInfo(o.deliverResource).name} ×${o.deliverAmount}`;
   if (o.kind === 'research_completed') return `拥有学院并研发科技 ×${o.count}`;

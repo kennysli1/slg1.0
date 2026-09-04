@@ -23,6 +23,9 @@ id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCoold
 17,m14,other_story,一份礼物,向神秘人上交500粮食,main,global,0,0,0,0
 18,m15,other_story,小试屠刀,声望值达到-5或更低,main,global,0,0,0,0
 24,m16,world_exploration,树立威望,到达十点声望值,main,global,0,0,0,0,
+25,m17,world_exploration,纳税大户,上交500金币税款,main,global,0,0,0,0,
+26,m18,world_exploration,初尝贵果,声望值达到15点,main,global,0,0,0,0,
+27,m19,world_exploration,王国的大麻烦,消灭三处雇佣兵营及更强的常驻PvE营地,main,global,0,0,0,0,
 19,s5,horse_hunter,猎马人,累计击杀50人口的骑兵,side,village,2,0,0,0
 20,s6,dice_king,骰子王,在投骰子游戏中战胜简单对手（目标分数2000）,side,village,2,0,0,0,
 21,s7,dice_king,这下来真的了,支付入场费并在三局两胜的投骰子对局中战胜简单对手,side,village,0,0,0,0,gold:100

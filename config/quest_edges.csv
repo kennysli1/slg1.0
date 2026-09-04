@@ -11,6 +11,9 @@ q-m8-m9,m8,m9,requires,1
 q-m9-m10,m9,m10,requires,1
 q-m11-m12,m11,m12,requires,1
 q-m12-m16,m12,m16,requires,1
+q-m16-m17,m16,m17,requires,1
+q-m17-m18,m17,m18,requires,1
+q-m18-m19,m18,m19,requires,1
 q-m13-m14,m13,m14,requires,1
 q-m14-m15,m14,m15,requires,1
 q-villager-investigate,s3,s4,failure_unlock,1

@@ -84,6 +84,8 @@ export class MetaModule {
           code: t.code, name: t.name, icon: t.icon,
           category: t.category, rarity: t.rarity,
           effectType: t.effectType, effectValue: t.effectValue,
+          activeEffectType: t.activeEffectType, activeEffectValue: t.activeEffectValue,
+          activeDurationSec: t.activeDurationSec, activeConsume: t.activeConsume,
           priceGold: t.priceGold, dropRate: t.dropRate, applyType: t.applyType,
           equipCategory: t.equipCategory,
           stackGroup: t.stackGroup,

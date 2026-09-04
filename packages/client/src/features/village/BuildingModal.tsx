@@ -228,7 +228,12 @@ function TreasureMgmtSection({ kind }: { kind: 'main' | 'treasury' }) {
             {isInstant && (
               <Btn size="sm" variant="primary" onClick={async () => {
                 const effectType = (info as any)?.effectType ?? '';
-                const useToast = effectType === 'ritualBuff'
+                const activeEffectType = (info as any)?.activeEffectType ?? '';
+                const useToast = activeEffectType === 'instantResearchPoints'
+                  ? `已使用「${info.name}」，获得 ${fmt((info as any)?.activeEffectValue ?? 0)} 科研点`
+                  : activeEffectType === 'temporaryCombatBuff'
+                    ? `已使用「${info.name}」，军队攻防 +${fmt((info as any)?.activeEffectValue ?? 0)}%（持续${Math.round(Number((info as any)?.activeDurationSec ?? 0) / 3600)}小时）`
+                  : effectType === 'ritualBuff'
                   ? `已使用「${info.name}」，全资源产出 +${fmt(info.effectValue ?? 0)}%（持续2小时）`
                   : effectType === 'dialogue'
                     ? `已使用「${info.name}」`
