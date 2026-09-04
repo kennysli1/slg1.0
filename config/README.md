@@ -155,7 +155,8 @@
 | code | 英文代码（程序/存档用，勿改） |
 | tribe | 所属部族（语义串 romans/gauls/teutons；`all` 表示所有部族可训练） |
 | name / icon | 显示名 / 图标基名 |
-| form | 仅用于目录展示，不参与战斗计算 |
+| form | 近战/远程形态：远程单位参加第二阶段；远程骑兵还会在第一阶段预射 |
+| role | 阶段角色：`cavalry` 参加第一阶段冲锋；其余角色不冲锋；第三阶段所有幸存单位（含攻城器）参战 |
 | attack | 攻击：每名存活兵贡献到己方总攻击 |
 | defense | 防御：每名存活兵贡献到己方总防御 |
 | hp | 生命：分摊到该兵种的伤害累计达到此值时阵亡一名 |
@@ -167,10 +168,10 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits / simTraits | 历史展示列，不参与现行战斗 |
+| traits / simTraits | `traits` 为线上战斗特性 ID；`simTraits` 保留给目录兼容。新战斗创建时会把角色和 traits 冻结进快照 |
 | techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
-> 现行战斗只有总攻击、总防御、生命三项：`伤害=A²/(A+D)`，双方用回合开始快照同时结算；伤害按参战人数比例分摊，再按各兵种自身生命累计阵亡。条顿 `clubswinger` 仅原始进攻方攻击 +7.40%，高卢 `phalanx` 仅原始防守方防御 +22.06%。
+> 现行战斗只有攻击、防御、生命三项基础属性：每个步骤的伤害为 `A²/(A+D)`，双方使用步骤开始快照同时结算；伤害按当前人数比例分摊，并按各兵种自身生命累计阵亡。固定顺序为“弓骑预射 → 近战骑冲锋 → 远程 → 全员近战至一方归零”。`unit_traits.csv` 的效果只在标注阶段生效，绝不跨阶段；相同 unit code 的群体特性有幸存者时只生效一次，不按人数叠加。
 
 ## mercenaries.csv — 雇佣兵目录
 | 列 | 含义 |
@@ -199,16 +200,17 @@
 | maxStoredRefreshes | 最多可囤积的手动刷新次数 |
 | capacity | 该等级提供的佣兵统御容量 |
 
-## unit_traits.csv — 历史特性目录
+## unit_traits.csv — 阶段战斗特性目录
 | 列 | 含义 |
 |----|------|
 | id | 数字主键（units.csv 的 traits 列引用它） |
 | code | 英文代码（程序内部用，勿改） |
 | name | 显示名（如"持盾"） |
-| effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
-| value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
+| effect1..effect3 | 效果类型代码（枚举，见下；可填多组） |
+| value1..value3 | 整数百分比数值（如 `-15` 表示 -15%） |
+| phase1..phase3 | 生效阶段：`charge`（冲锋）、`ranged`（远程）、`melee`（近战）或 `all`（全程） |
 
-> 此表不参与当前三属性战斗；当前仅 `clubswinger` 的进攻 +7.40% 和 `phalanx` 的防守 +22.06% 两项固定特性生效。
+> 此表由线上战斗与独立模拟器共同使用。特性在开战/模拟请求创建时冻结，配置热更不会改变已进行战斗；同 code 不叠层、不同 code 百分比相加。
 
 阶段化战斗模拟器页面为 `/battle-simulator`。它通过 `battleSimulator.GetCatalog` / `battleSimulator.Simulate` 读取这些 CSV 配置，不读写主游戏存档。
 > 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
@@ -235,10 +237,11 @@
 | unitCode | 守军单位代码（仅此目标内部标签，不跨表引用，保留英文串） |
 | name | 显示名 |
 | count | 数量 |
-| form | 仅用于目录展示 |
+| form | 近战/远程形态；远程守军参加第二阶段 |
+| role | 阶段角色；`cavalry` 参加冲锋，第三阶段所有幸存单位参战 |
 | attack / defense / hp | 唯一战斗属性：攻击 / 防御 / 生命 |
 | carry | 载货（守军一般0） |
-| traits | 历史展示标签，不参与现行战斗 |
+| traits | `unit_traits.csv` 的数字 ID；守军在开战时冻结对应特性 |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
 

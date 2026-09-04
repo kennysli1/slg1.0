@@ -11,5 +11,5 @@
  * 标记双向绑定——升了不写标记、写了标记不升，都会被拒绝提交。
  * 规矩全文见 docs/00_变更契约.md R6。
  */
-// v6：战场快照改为 attack/defense/hp，并以 rulesetVersion/carry 惰性迁移旧战场。
-export const SAVE_SCHEMA_VERSION = 6;
+// v7：新战场冻结 role/traits 与阶段游标；旧 rulesetVersion=2 战场继续用 v2 结算。
+export const SAVE_SCHEMA_VERSION = 7;

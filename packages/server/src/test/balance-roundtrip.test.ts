@@ -128,10 +128,10 @@ test('GM 面板：兵种线上/模拟器特性引用可随统一 CSV 一起保�
   withTmp((tmp) => {
     const phalanxId = String(loadGameConfig(configDir).units.phalanx.id);
     applyBalanceEdits(configDir, tmp, table, {
-      [phalanxId]: { traits: '6|18|23', simTraits: '13|18|23' },
+      [phalanxId]: { traits: 'gaul_origin_defense', simTraits: 'gaul_origin_defense' },
     });
     const cfg = loadGameConfig(tmp);
-    assert.deepEqual(cfg.units.phalanx.traits, ['spear_wall', 'brace', 'gaul_origin_defense']);
-    assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
+    assert.deepEqual(cfg.units.phalanx.traits, ['gaul_origin_defense']);
+    assert.deepEqual(cfg.units.phalanx.simTraits, ['gaul_origin_defense']);
   });
 });

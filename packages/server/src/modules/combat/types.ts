@@ -23,6 +23,10 @@ export interface DefenderContribution {
 
 export interface BattleRound {
   round: number;
+  /** v3 阶段；旧 v2 回放缺失时按 total-ad 兼容展示。 */
+  phase?: 'charge' | 'ranged' | 'melee';
+  /** v3 的具体步骤：弓骑预射/骑兵冲锋/远程/近战。 */
+  step?: 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';
   attackerLosses: Record<string, number>;
   defenderLosses: Record<string, number>;
   attacker: Record<string, number>;
@@ -74,6 +78,10 @@ export interface Battle {
   defenderDamageCarry?: Record<string, number>;
   /** 规则版本：缺省的旧战场会在下次 tick 惰性迁移到 v2。 */
   rulesetVersion?: number;
+  /** v3 当前待结算步骤；只对 rulesetVersion=3 有意义。 */
+  stagedStep?: 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';
+  /** 阶段三轮次，供“每回合”特性只在阶段三累积。 */
+  meleeRound?: number;
   initialAttacker: Record<string, number>;
   initialDefender: Record<string, number>;
   rounds: BattleRound[];

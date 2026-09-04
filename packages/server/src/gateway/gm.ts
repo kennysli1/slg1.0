@@ -651,8 +651,14 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['attack', 'defense', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
      // 兵种的线上展示特性与模拟器特性同样属于配置中心可维护的文本字段。
      // 这样在统一攻防/生命字段迁移后，保存兵种数值时不会把特性列留在旧共享表。
-     text: ['traits', 'simTraits'],
+     text: ['role', 'traits', 'simTraits'],
     labels: ['id', 'code', 'name', 'tribe'],
+  },
+  unit_traits: {
+    file: 'unit_traits.csv', key: 'id',
+    numeric: ['value1', 'value2', 'value3'],
+    text: ['effect1', 'phase1', 'effect2', 'phase2', 'effect3', 'phase3'],
+    labels: ['id', 'code', 'name'],
   },
   // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
   mercenaries: {

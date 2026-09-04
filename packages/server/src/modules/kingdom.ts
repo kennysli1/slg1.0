@@ -576,7 +576,8 @@ export class KingdomModule {
     return {
       [unit.key]: {
         count: service.unitCount, attack: unit.attack, defense: unit.defense, hp: unit.hp, carry: 0,
-        traits: unit.traits.flatMap((code) => this.config.unitTraits[code]?.effects ?? []),
+        form: unit.form, role: unit.role,
+        traits: unit.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
       },
     };
   }
@@ -675,7 +676,11 @@ export class KingdomModule {
     for (const [code, count] of Object.entries(troops)) {
       const unit = this.config.units[code];
       if (!unit || count <= 0) continue;
-      attackerSnapshot[code] = { count, attack: unit.attack, defense: unit.defense, hp: unit.hp, carry: unit.carry };
+      attackerSnapshot[code] = {
+        count, attack: unit.attack, defense: unit.defense, hp: unit.hp, carry: unit.carry,
+        form: unit.form, role: unit.role,
+        traits: unit.traits.map((trait) => this.config.unitTraits[trait]).filter(Boolean),
+      };
     }
     if (Object.keys(attackerSnapshot).length === 0) return;
     const anchors = kingdomLandmarkAnchors(this.config.constants.worldW, this.config.constants.worldH, this.n('kingdom_fief_offset_ratio', 0.25));

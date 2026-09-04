@@ -1144,6 +1144,9 @@ export class MilitaryModule {
         ...stats,
         attack: stats.attack * atkMult,
         defense: stats.defense * defMult,
+        form: this.config.units[unit]!.form,
+        role: this.config.units[unit]!.role,
+        traits: this.config.units[unit]!.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
       };
     }
     return { ok: true, payload: { snapshot } };

@@ -1,4 +1,4 @@
-targetId,unitCode,name,count,form,attack,defense,carry,hp,traits
+targetId,unitCode,name,count,form,attack,defense,carry,hp,traits,role
 #所属野怪类型(野怪数字ID),守军兵种代码,显示名,数量,形态(仅展示),攻击,防御,负重,生命值,非战斗展示标签
 1,rat,老鼠,10,melee,5,10,0,10,
 2,wolf,野狼,20,melee,20,30,0,28,
@@ -32,6 +32,6 @@ targetId,unitCode,name,count,form,attack,defense,carry,hp,traits
 105,fiefGuardNw,西北封地卫队,260,melee,170,180,0,170,
 105,fiefArcherNw,西北封地弓手,120,ranged,140,150,0,125,
 105,fiefKnightNw,西北封地骑士,40,melee,240,210,0,195,
-106,clubswinger,掠袭棍兵,15,melee,82.37,58.79,0,152.45,4|20
+106,clubswinger,锤子兵,15,melee,81,58,0,153,1
 107,mercGuard,雇佣卫兵,8,melee,60,65,0,60,
 107,mercArcher,雇佣弓手,3,ranged,45,55,0,42,

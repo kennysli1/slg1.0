@@ -327,7 +327,12 @@ export class PveModule {
     const defender: Snapshot = {};
     for (const [index, code] of selected.entries()) {
       const def = this.config.units[code]!;
-      defender[code] = { count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax), popCost: def.popCost, attack: def.attack, defense: def.defense, hp: def.hp, carry: def.carry };
+      defender[code] = {
+        count: randomInt(`${seed}:${version}:${id}:count:${code}:${index}`, profile.unitMin, profile.unitMax),
+        popCost: def.popCost, attack: def.attack, defense: def.defense, hp: def.hp, carry: def.carry,
+        form: def.form, role: def.role,
+        traits: def.traits.map((trait) => this.config.unitTraits[trait]).filter(Boolean),
+      };
     }
     const ratio = c.kingdomCityStateRaidDefenseMinRatio + random01(`${seed}:${version}:${id}:raid-ratio`) * (c.kingdomCityStateRaidDefenseMaxRatio - c.kingdomCityStateRaidDefenseMinRatio);
     const raidDefense: Snapshot = {};
@@ -502,12 +507,20 @@ export class PveModule {
     // 兵种类别由全局配置统一维护；旧存档和旧模板没有 isCavalry 字段，
     // 在跨模块快照边界补齐，确保绞马索与猎马人任务对所有 PvE 守军一致生效。
     for (const [code, unit] of Object.entries(snapshot)) {
-      unit.isCavalry = this.config.constants.cavalryUnitCodes.includes(code);
+      const def = this.config.units[code];
+      unit.isCavalry = unit.role === 'cavalry' || def?.role === 'cavalry';
       // 旧 PvE 存档可能没有 popCost；以当前兵种配置补齐，保证战斗影响力
       // 不会因迁移缺字段而把高人口单位错误当成 1 人口单位。
-      unit.popCost = this.config.units[code]?.popCost ?? unit.popCost ?? 1;
+      unit.popCost = def?.popCost ?? unit.popCost ?? 1;
       // 同理补齐旧快照的生命值，让在线战斗的基础战斗价值与阶段模拟器一致。
-      unit.hp = this.config.units[code]?.hp ?? unit.hp ?? 100;
+      unit.hp = def?.hp ?? unit.hp ?? 100;
+      unit.form ??= def?.form ?? 'melee';
+      unit.role ??= def?.role ?? 'infantry';
+      // PvE 的 traits 仍以 CSV traitCodes 保存；跨 Combat 边界时转成冻结定义。
+      if (!Array.isArray(unit.traits)) {
+        const codes = (unit as any).traitCodes ?? [];
+        unit.traits = (Array.isArray(codes) ? codes : []).map((trait: string) => this.config.unitTraits[trait]).filter(Boolean);
+      }
     }
     const wallLevel = purpose === 'siege' ? Math.max(0, ...(s.buildings ?? []).filter((b) => b.kind === 'wall').map((b) => b.level)) : 0;
     return { ok: true, payload: { snapshot, loot: structuredClone(s.loot), noRespawn: !!s.noRespawn, wallLevel, cityState: !!s.cityState, faction: s.faction, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, scoutModes: s.cityState ? ['scout_resources', 'scout_buildings'] : ['scout_resources'], buildings: structuredClone(s.buildings ?? []), recovery: s.recovery ? { ...s.recovery, troopProgress: this.recoveryProgress(s, 'troop'), resourceProgress: this.recoveryProgress(s, 'resource') } : undefined } };

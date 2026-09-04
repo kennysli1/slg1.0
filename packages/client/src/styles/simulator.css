@@ -1,1 +1,61 @@
-.battle-sim-page{min-height:100dvh;padding:24px;max-width:1500px;margin:auto;background:#0d1720;color:#dce7f7;font:14px ui-monospace,monospace}.battle-sim-header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:1px solid #31516d;padding-bottom:14px}.battle-sim-header h1{margin:0;color:#8ed5ff}.battle-sim-header p{margin:6px 0 0;color:#9bb0c9}.battle-sim-header a,.battle-sim-page button{color:#dce7f7;background:#173550;border:1px solid #65c7ff;border-radius:4px;padding:8px 12px;text-decoration:none;cursor:pointer;font:inherit}.battle-sim-page button:disabled{opacity:.5;cursor:wait}.battle-sim-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin:16px 0;padding:12px;background:#142532;border:1px solid #3b6e91;border-radius:6px}.battle-sim-toolbar label,.battle-sim-side label{display:flex;flex-direction:column;gap:4px;color:#b8cbe0}.battle-sim-page input,.battle-sim-page select{background:#0d1622;color:#e5eef8;border:1px solid #365671;border-radius:3px;padding:6px;font:inherit}.battle-sim-toolbar select{min-width:150px}.battle-sim-toolbar input{width:140px}.battle-sim-rule{color:#9bb0c9;font-size:12px;flex:1}.battle-sim-sides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.battle-sim-side,.battle-sim-report{background:#142532;border:1px solid #3b6e91;border-radius:6px;padding:14px;margin-bottom:16px}.battle-sim-side h2,.battle-sim-report h2{margin:0 0 12px;color:#8ed5ff}.battle-sim-side h3{font-size:13px;color:#a9c4db;border-top:1px solid #31516d;padding-top:10px;margin:14px 0 8px}.battle-sim-row{display:grid;grid-template-columns:minmax(180px,1fr) 90px minmax(100px,1fr) auto;gap:6px;align-items:center;margin:5px 0}.battle-sim-row input{width:90px}.battle-sim-row button{padding:5px 8px;border-color:#bd7171;color:#ffbaba}.battle-sim-unit-hint{color:#9bb0c9;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.battle-sim-multi{width:100%;min-height:92px}.battle-sim-choice-group{border:1px solid #365671;border-radius:4px;background:#0d1622}.battle-sim-choice-toolbar{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;color:#9bb0c9;font-size:12px;border-bottom:1px solid #294b68}.battle-sim-choice-toolbar .battle-sim-clear{padding:3px 7px;border-color:#6b859b;color:#c3d8e8;font-size:12px}.battle-sim-choice-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:4px;padding:6px;max-height:220px;overflow:auto}.battle-sim-choice{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:7px;padding:6px 7px;border:1px solid transparent;border-radius:3px;cursor:pointer;color:#b8cbe0!important}.battle-sim-choice:hover{background:#173550}.battle-sim-choice.is-selected{border-color:#65c7ff;background:#173550;color:#e5eef8!important}.battle-sim-choice input{width:auto!important;margin:2px 0 0;accent-color:#65c7ff}.battle-sim-choice-empty{padding:8px;color:#9bb0c9}.battle-sim-mods{display:flex;flex-wrap:wrap;gap:8px}.battle-sim-mods label{width:125px}.battle-sim-input{display:flex;align-items:center;gap:4px}.battle-sim-input input{width:90px}.battle-sim-input small{color:#9bb0c9}.battle-sim-error{padding:10px;border:1px solid #bd7171;background:#331c22;color:#ffbaba}.battle-sim-report-title{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.battle-sim-report-title strong{color:#b9f6c8}.battle-sim-report-title span{color:#9bb0c9;font-size:12px}.battle-sim-report details{border-top:1px solid #31516d;padding:8px 0}.battle-sim-report summary{cursor:pointer;color:#f1c575}.battle-sim-step{margin:10px 0;padding:10px;background:#10202c;border:1px solid #294b68;border-radius:4px}.battle-sim-step h3{font-size:13px;color:#e5eef8;margin:0 0 8px}.battle-sim-numbers{display:flex;flex-wrap:wrap;gap:16px;color:#b9f6c8;font-size:12px}.battle-sim-json{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.battle-sim-json pre{max-height:280px;overflow:auto;background:#0b141b;color:#c3d8e8;padding:8px;font-size:11px}.battle-sim-report table{border-collapse:collapse;width:100%;font-size:11px}.battle-sim-report th,.battle-sim-report td{border:1px solid #31516d;padding:5px;text-align:left}.battle-sim-report th{background:#173550;color:#8ed5ff}@media(max-width:900px){.battle-sim-sides,.battle-sim-json{grid-template-columns:1fr}.battle-sim-row{grid-template-columns:1fr 80px auto}.battle-sim-unit-hint{grid-column:1 / -1}}
+.battle-sim-page { max-width: var(--page-max); min-height: 100dvh; margin: 0 auto; padding: var(--s-5); color: var(--c-ink); }
+.battle-sim-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-5); }
+.battle-sim-header h1, .battle-sim-report h2 { margin: 0; color: var(--c-gold-hi); font-family: var(--ff-han); font-size: var(--f-xl); }
+.battle-sim-header p, .battle-sim-report-title p { margin: var(--s-2) 0 0; color: var(--c-ink-dim); font-size: var(--f-sm); line-height: 1.5; }
+.battle-sim-header a { min-height: 44px; color: var(--c-gold-hi); font-size: var(--f-sm); line-height: 44px; white-space: nowrap; }
+.battle-sim-toolbar { display: flex; align-items: center; gap: var(--s-4); margin-bottom: var(--s-4); }
+.battle-sim-rule { flex: 1; color: var(--c-ink-soft); font-size: var(--f-sm); line-height: 1.5; }
+.battle-sim-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); }
+.battle-sim-side .section-head { margin-bottom: var(--s-3); }
+.battle-sim-roster { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-3); }
+.battle-sim-row { display: grid; grid-template-columns: minmax(0, 1fr) 88px minmax(92px, .75fr) auto; align-items: center; gap: var(--s-2); }
+.battle-sim-page select, .battle-sim-page input { width: 100%; min-height: 36px; padding: 0 var(--s-2); border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--c-void); color: var(--c-ink); font: inherit; }
+.battle-sim-page select:focus-visible, .battle-sim-page input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.battle-sim-unit-hint { overflow: hidden; color: var(--c-ink-dim); font-size: var(--f-xs); text-overflow: ellipsis; white-space: nowrap; }
+.battle-sim-error { margin: var(--s-4) 0; padding: var(--s-3); border: 1px solid var(--c-crimson); border-radius: var(--r-sm); background: color-mix(in srgb, var(--c-crimson) 14%, var(--c-panel)); color: var(--c-crimson-hi); }
+.battle-sim-report { display: flex; flex-direction: column; gap: var(--s-3); margin-top: var(--s-5); padding: var(--s-5); border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--c-panel); box-shadow: var(--sh-2); }
+.battle-sim-report-title, .battle-sim-final { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); }
+.battle-sim-final { justify-content: flex-start; gap: var(--s-5); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--c-panel-2); color: var(--c-ink-soft); font-size: var(--f-sm); }
+.battle-sim-final strong { margin-left: var(--s-1); color: var(--c-ink); font-family: var(--ff-num); }
+.battle-sim-phase { overflow: hidden; border: 1px solid var(--line-strong); border-left: 3px solid var(--c-gold); border-radius: var(--r-md); background: var(--c-panel-2); }
+.battle-sim-phase--melee { border-left-color: var(--c-crimson); }
+.battle-sim-phase-heading h3 { margin: 0; color: var(--c-ink); font-family: var(--ff-han); font-size: var(--f-md); }
+.battle-sim-phase-heading span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+.battle-sim-phase > .battle-sim-phase-heading { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); }
+.battle-sim-phase-summary { padding: var(--s-3); }
+.battle-sim-melee-details { border-top: 1px solid var(--line); }
+.battle-sim-melee-details > summary { display: flex; align-items: center; min-height: 44px; padding: 0 var(--s-3); color: var(--c-gold-hi); cursor: pointer; font-size: var(--f-sm); list-style: none; }
+.battle-sim-melee-details > summary::-webkit-details-marker { display: none; }
+.battle-sim-melee-details > summary::after { content: '›'; margin-left: var(--s-1); font-size: var(--f-md); transition: transform var(--t-fast) var(--ease-out); }
+.battle-sim-melee-details[open] > summary::after { transform: rotate(90deg); }
+.battle-sim-phase-body { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); }
+.battle-sim-step { padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--c-panel-3); }
+.battle-sim-step-title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-2); }
+.battle-sim-step-title h4 { margin: 0; color: var(--c-gold-hi); font-family: var(--ff-han); font-size: var(--f-sm); }
+.battle-sim-step-title span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+.battle-sim-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+.battle-sim-metric { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--s-1); min-height: 30px; padding: var(--s-2); border-left: 2px solid var(--c-steel); background: var(--c-panel); }
+.battle-sim-metric:nth-child(3), .battle-sim-metric:nth-child(4) { border-left-color: var(--c-crimson); }
+.battle-sim-metric span { min-width: 0; color: var(--c-ink-dim); font-size: var(--f-xs); }
+.battle-sim-metric strong { color: var(--c-ink); font-family: var(--ff-num); font-size: var(--f-xs); }
+.battle-sim-metric i { color: var(--c-ink-dim); font-size: var(--f-2xs); font-style: normal; }
+.battle-sim-traits { display: flex; flex-wrap: wrap; gap: var(--s-1); margin: var(--s-2) 0 0; padding: 0; list-style: none; }
+.battle-sim-traits li { padding: 2px var(--s-2); border: 1px solid var(--line-strong); border-radius: var(--r-pill); color: var(--c-gold-hi); font-size: var(--f-xs); }
+.battle-sim-survivors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px dashed var(--line-strong); }
+.battle-sim-survivor-side { min-width: 0; }
+.battle-sim-survivor-side h5 { margin: 0 0 var(--s-1); color: var(--c-ink-soft); font-size: var(--f-xs); font-weight: 600; }
+.battle-sim-survivor-side ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.battle-sim-survivor-side li { display: flex; justify-content: space-between; gap: var(--s-2); color: var(--c-ink-dim); font-size: var(--f-xs); }
+.battle-sim-survivor-side li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.battle-sim-survivor-side li strong { flex: none; color: var(--c-ink); font-family: var(--ff-num); }
+.battle-sim-survivor-side p, .battle-sim-empty { margin: 0; color: var(--c-ink-dim); font-size: var(--f-xs); }
+
+@media (max-width: 720px) {
+  .battle-sim-page { padding: var(--s-3); }
+  .battle-sim-header, .battle-sim-toolbar, .battle-sim-report-title { align-items: stretch; flex-direction: column; }
+  .battle-sim-header a { line-height: 1.5; }
+  .battle-sim-sides, .battle-sim-metrics, .battle-sim-survivors { grid-template-columns: 1fr; }
+  .battle-sim-row { grid-template-columns: minmax(0, 1fr) 80px auto; }
+  .battle-sim-unit-hint { grid-column: 1 / -1; }
+  .battle-sim-final { flex-direction: column; gap: var(--s-1); }
+}

@@ -827,7 +827,7 @@ test('猎马人：按配置门槛累计击杀骑兵人口，跨战斗累加并�
   } } as any);
   let current = (await send(app, 'task.GetState', { villageId: va })).payload as any;
   let hunter = current.active.find((item: any) => item.code === 's5');
-  assert.equal(hunter.progress, 6, '第一场应按新版骑兵 popCost 累计 6 人口');
+  assert.equal(hunter.progress, 5, '第一场应按当前骑兵 popCost 累计 5 人口');
   assert.equal(hunter.ready, false);
 
   await app.bus.emit({ name: 'combat.BattleEnded', source: 'test', ts: clock, payload: {

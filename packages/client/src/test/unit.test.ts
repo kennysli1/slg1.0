@@ -26,7 +26,6 @@ import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } fro
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
-import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 
@@ -141,14 +140,18 @@ describe('兵种训练卡基础属性', () => {
   });
 });
 
-describe('阶段化战斗模拟器的科技与宝物多选', () => {
-  it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
-    let selected = toggleMultiSelection([], 'tech-a', true);
-    selected = toggleMultiSelection(selected, 'tech-b', true);
-    assert.deepEqual(selected, ['tech-a', 'tech-b']);
-    selected = toggleMultiSelection(selected, 'tech-a', false);
-    assert.deepEqual(selected, ['tech-b']);
-    assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+describe('阶段化战斗模拟器界面', () => {
+  it('只提交兵力，并将阶段步骤中的伤害、伤亡、特性与存活兵力展示为可读内容', () => {
+    const source = readFileSync(new URL('../features/simulator/BattleSimulatorScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /attacker: \{ troops: sumTroops\(attacker\.rows\) \}/);
+    assert.match(source, /defender: \{ troops: sumTroops\(defender\.rows\) \}/);
+    assert.doesNotMatch(source, /attackPct|defensePct|hpPct/);
+    assert.match(source, /弓骑齐射/);
+    assert.match(source, /总攻击/);
+    assert.match(source, /承受伤害/);
+    assert.match(source, /阵亡/);
+    assert.match(source, /进攻方存活/);
+    assert.match(source, /展开近战回合/);
   });
 });
 

@@ -4028,6 +4028,8 @@ export class MovementModule {
         attack: def.attack, defense: def.defense,
         hp: def.hp,
         carry: def.carry,
+        form: def.form, role: def.role,
+        traits: def.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
       };
     }
     return snap;
