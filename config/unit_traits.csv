@@ -22,3 +22,5 @@ id,code,name,effect1,value1,effect2,value2,effect3,value3
 19,war_drum,战鼓,def_melee,0.10,def_ranged,0.10,,
 20,sunder,裂甲,atk_melee,0.20,def_melee,-0.10,,
 21,skirmish,游走,atk_ranged,0.12,dmg_taken_melee,-0.10,,
+22,teuton_origin_attack,条顿原始进攻,atk_melee,0.074,,,,
+23,gaul_origin_defense,高卢原始防守,def_melee,0.2206,,,,

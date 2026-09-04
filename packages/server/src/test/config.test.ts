@@ -154,6 +154,22 @@ test('任务图：六表编译后保留任务线、目标、效果与关系', ()
   assert.equal(cfg.quests.m16.objective.threshold, 10);
   assert.deepEqual(cfg.quests.m16.rewards.mercenaries, { merc_archer: 10 });
   assert.ok(cfg.questGraph.edges.some((edge) => edge.fromQuest === 'm12' && edge.toQuest === 'm16' && edge.relation === 'requires'));
+  assert.deepEqual(cfg.quests.m17.requires, ['m16']);
+  assert.deepEqual(cfg.quests.m17.objective.resources, { gold: 500 });
+  assert.deepEqual(cfg.quests.m17.rewards.populationGrowth, { percent: 25, durationSec: 43200 });
+  assert.equal(cfg.quests.m17.rewards.reputation, 5);
+  assert.deepEqual(cfg.quests.m18.requires, ['m17']);
+  assert.equal(cfg.quests.m18.objective.threshold, 15);
+  assert.deepEqual(cfg.quests.m18.rewards.treasures, ['smart_person']);
+  assert.deepEqual(cfg.quests.m19.requires, ['m18']);
+  assert.equal(cfg.quests.m19.objective.kind, 'clear_public_pve');
+  assert.equal(cfg.quests.m19.objective.minPveTargetId, 4);
+  assert.equal(cfg.quests.m19.objective.count, 3);
+  assert.deepEqual(cfg.quests.m19.rewards.treasures, ['warrior_banner']);
+  assert.equal(cfg.treasures.smart_person.activeEffectType, 'instantResearchPoints');
+  assert.equal(cfg.treasures.smart_person.activeEffectValue, 20);
+  assert.equal(cfg.treasures.warrior_banner.reputationValue, 4);
+  assert.equal(cfg.treasures.warrior_banner.activeDurationSec, 86400);
   assert.deepEqual(cfg.quests.m14.objective.resources, { crop: 500 });
   assert.deepEqual(cfg.quests.m14.rewards.reputationMercenaryExchange, { unitCode: 'merc_sword', perPoint: 2 });
   assert.equal(cfg.quests.m15.objective.threshold, -5);
@@ -359,7 +375,21 @@ test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   assert.ok(cat.attack > 0 && cat.defense > 0 && cat.hp > 0, '所有兵种只需三项战斗属性');
   assert.equal(cfg.units.phalanx.defense, 47.39);
   assert.equal(cfg.units.clubswinger.attack, 82.37);
-});
+ });
+
+ test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.deepEqual(cfg.units.clubswinger.simTraits, ['sunder', 'teuton_origin_attack']);
+  assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
+  assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.074);
+  assert.equal(cfg.unitTraits.gaul_origin_defense.effects[0]?.value, 0.2206);
+  assert.equal(cfg.units.merc_slinger.attack, 35);
+  assert.equal(cfg.units.merc_slinger.defense, 15);
+  assert.equal(cfg.units.merc_slinger.hp, 80);
+  const rat = Object.values(cfg.pveTemplates).flatMap((template) => Object.entries(template.defender))
+    .find(([code]) => code === 'rat')?.[1];
+  assert.deepEqual(rat && { attack: rat.attack, defense: rat.defense, hp: rat.hp }, { attack: 5, defense: 10, hp: 10 });
+ });
 
 test('校验器：兵种 form 非法应抛错', () => {
   const cfg = loadGameConfig(configDir);

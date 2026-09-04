@@ -138,6 +138,14 @@ export interface TreasureDef {
   effectValue: number;
   /** 主宝物栏被动声望修正；独立于主效果，允许为负。 */
   reputationValue?: number;
+  /** 可选主动效果类型；用于兼具被动与主动效果的宝物。 */
+  activeEffectType?: string;
+  /** 主动效果数值（由 activeEffectType 解释）。 */
+  activeEffectValue?: number;
+  /** 主动效果持续时间（秒）；即时效果填 0。 */
+  activeDurationSec?: number;
+  /** 主动使用后是否消耗宝物；默认 true（旧 instant 宝物保持原行为）。 */
+  activeConsume?: boolean;
   /** NPC 售卖价（金币）。 */
   priceGold: number;
   /** 掉落/出现概率（0-1）：清理野外营地、贸易中心刷新时按此概率出现。 */
@@ -151,7 +159,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -168,6 +176,8 @@ export interface QuestObjective {
   /** explore_tiles：累计已探索格数达到 count（包含城镇视野）。 */
   /** clear_camp：PvE 营地模板 code（pve_targets.csv）+ 需清理的数量。完全真实化——会在地图上生成真实营地。 */
   campTemplate?: string;
+  /** clear_public_pve：常驻、全玩家可见 PvE 营地的最低模板 id（含该等级及以上）。 */
+  minPveTargetId?: number;
   /** sell_discard_treasure：累计出售/丢弃 count 个 minRarity 及以上品质的宝物（minRarity ∈ common/rare/epic/legendary）。 */
   minRarity?: string;
   /** 通用数量：clear_camp=清理营地数、sell_discard_treasure=宝物数量。 */
@@ -1574,12 +1584,12 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
-  // 宝物目录（treasures.csv）：code → TreasureDef。覆盖层 key='id'，numeric=effectValue/reputationValue/priceGold/dropRate。
+  // 宝物目录（treasures.csv）：code → TreasureDef。覆盖层 key='id'，numeric=效果/价格及主动效果数值。
   let treasureRows = loadCsv(p('treasures.csv'));
   if (overrides?.treasures) {
     treasureRows = mergeOverridesIntoRows(treasureRows, {
       file: 'treasures.csv', key: 'id',
-      numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'],
+      numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate', 'activeEffectValue', 'activeDurationSec'],
     }, overrides.treasures);
   }
   assertUniqueRows(treasureRows, 'treasures.csv');
@@ -1597,6 +1607,10 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       effectType: r.effectType ?? '',
       effectValue: num(r.effectValue, 0),
       reputationValue: num(r.reputationValue, 0),
+      activeEffectType: r.activeEffectType?.trim() || undefined,
+      activeEffectValue: r.activeEffectValue === undefined || r.activeEffectValue === '' ? undefined : num(r.activeEffectValue, 0),
+      activeDurationSec: r.activeDurationSec === undefined || r.activeDurationSec === '' ? undefined : Math.max(0, num(r.activeDurationSec, 0)),
+      activeConsume: r.activeConsume === undefined || r.activeConsume === '' ? undefined : num(r.activeConsume, 1) !== 0,
       priceGold: num(r.priceGold, 0),
       dropRate: num(r.dropRate, 0),
       applyType: r.applyType ?? 'passive',
@@ -1846,6 +1860,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       return { kind: row.kind, resourceKey: resourceKey?.trim(), count: Math.max(1, num(count, 1)) };
     }
     if (row.kind === 'clear_camp') { const [campTemplate, count] = row.params.split(':'); return { kind: row.kind, campTemplate: campTemplate?.trim(), count: Math.max(1, num(count, 1)) }; }
+    if (row.kind === 'clear_public_pve') { const [minTargetId, count] = row.params.split(':'); return { kind: row.kind, minPveTargetId: Math.max(1, Math.floor(num(minTargetId, 1))), count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'sell_discard_treasure') { const [minRarity, count] = row.params.split(':'); return { kind: row.kind, minRarity: minRarity?.trim() || 'rare', count: Math.max(1, num(count, 1)) }; }
     if (row.kind === 'carry_flag') { const [flagCode, minTroops] = row.params.split(':'); return { kind: row.kind, flagCode: flagCode?.trim(), minTroops: Math.max(1, num(minTroops, 1)) }; }
     if (row.kind === 'deliver_to_npc') { const [deliverResource, deliverAmount] = row.params.split(':'); return { kind: row.kind, deliverResource: deliverResource?.trim() || 'crop', deliverAmount: Math.max(1, num(deliverAmount, 1)) }; }
@@ -2223,7 +2238,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -2236,6 +2251,9 @@ export function validateGameConfig(config: GameConfig): void {
     if (t.effectValue < 0 && t.effectType !== 'reputation') errors.push(`treasures.csv[${t.code}] effectValue 必须≥0（当前${t.effectValue}）`);
     if (t.priceGold < 0) errors.push(`treasures.csv[${t.code}] priceGold 必须≥0（当前${t.priceGold}）`);
     if (t.dropRate < 0 || t.dropRate > 1) errors.push(`treasures.csv[${t.code}] dropRate 必须在[0,1]（当前${t.dropRate}）`);
+    if (t.activeEffectValue !== undefined && t.activeEffectValue < 0) errors.push(`treasures.csv[${t.code}] activeEffectValue 必须≥0（当前${t.activeEffectValue}）`);
+    if (t.activeDurationSec !== undefined && t.activeDurationSec < 0) errors.push(`treasures.csv[${t.code}] activeDurationSec 必须≥0（当前${t.activeDurationSec}）`);
+    if (t.activeEffectType && !['instantResearchPoints', 'temporaryCombatBuff'].includes(t.activeEffectType)) errors.push(`treasures.csv[${t.code}] activeEffectType=${t.activeEffectType} 不是已知主动效果`);
   }
 
   // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
@@ -2419,7 +2437,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2454,6 +2472,9 @@ export function validateGameConfig(config: GameConfig): void {
       const tmpl = q.objective.campTemplate;
       if (!tmpl || !config.pveTemplates[tmpl]) errors.push(`quests.csv[${q.code}] clear_camp 模板 ${tmpl} 不在 pve_targets.csv`);
       if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] clear_camp 数量必须≥1`);
+    } else if (q.objective.kind === 'clear_public_pve') {
+      if (!q.objective.minPveTargetId || !Object.values(config.pveTemplates).some((template) => template.id === q.objective.minPveTargetId)) errors.push(`quests.csv[${q.code}] clear_public_pve 最低 PvE 模板 id 无效`);
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] clear_public_pve 数量必须≥1`);
     } else if (q.objective.kind === 'sell_discard_treasure') {
       if (!q.objective.minRarity || !TREASURE_RARITY_ORDER.includes(q.objective.minRarity)) {
         errors.push(`quests.csv[${q.code}] sell_discard_treasure 的 minRarity 必须是 common/rare/epic/legendary`);

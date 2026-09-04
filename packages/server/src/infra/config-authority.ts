@@ -352,7 +352,7 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   kingdom_services: { file: 'kingdom_services.csv', key: 'id', numeric: ['minCouncilLevel', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'gold', 'delaySec'] },
   pve_targets: { file: 'pve_targets.csv', key: 'id', numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'] },
   pve_defenders: { file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'], numeric: ['count', 'attack', 'defense', 'hp', 'carry'] },
-  treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate'] },
+  treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate', 'activeEffectValue', 'activeDurationSec', 'activeConsume'] },
   constants: { file: 'game_constants.csv', key: 'key', numericByType: true },
   research: { file: 'research.csv', key: 'id', numeric: ['tier', 'mainBaseLevel', 'effectValue', 'durationSec', 'rpCost'] },
   academy: { file: 'academy.csv', key: 'level', numeric: ['checkIntervalSec', 'baseProbability', 'probabilityGainPerFail', 'maxProbability', 'popFactor'] },
@@ -557,6 +557,29 @@ export class ConfigAuthority {
       return;
     }
     atomicWrite(this.outboxPath, JSON.stringify(outbox, null, 2) + '\n');
+  }
+
+  /**
+   * A sync PR can be closed without merging after its commit has already been
+   * pushed to config-sync/live.  In that case there is no new edit to call
+   * recordChange(), so the old outbox is gone and the branch would remain
+   * stranded without a PR.  Requeue the files from the last successful push
+   * so the normal flush path can create a replacement PR.
+   */
+  private requeueAfterClosedPullRequest(local: ConfigSyncStatus, previous: Outbox): void {
+    if (this.readOutbox() || !this.outboxPath || local.pullRequest?.state === 'MERGED') return;
+    const files = Array.isArray(previous.files)
+      ? [...new Set(previous.files)].filter((file) => /^[A-Za-z0-9_.-]+\.csv$/.test(file))
+      : [];
+    if (files.length === 0 || local.revision <= 0) return;
+    this.writeOutbox({
+      revision: local.revision,
+      files,
+      enqueuedAt: new Date(this.now()).toISOString(),
+      lastSuccessAt: previous.lastSuccessAt,
+      syncState: 'pending',
+    });
+    this.scheduleFlush();
   }
 
   private snapshot(files: readonly string[], revision: number): ConfigRevision {
@@ -806,6 +829,7 @@ export class ConfigAuthority {
         // Clear an ordinary closed/missing PR (merged PRs are represented as
         // MERGED and intentionally remain visible as the last successful sync).
         const current = this.readSyncStatus() ?? {} as Outbox;
+        this.requeueAfterClosedPullRequest(local, current);
         delete current.pullRequest;
         delete current.pullRequestUrl;
         current.syncState = deriveSyncState(null, null, null);

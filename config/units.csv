@@ -10,7 +10,7 @@ id,code,tribe,name,icon,form,attack,defense,speed,carry,upkeep,costWood,costClay
 8,catapult,romans,投石机,unit_catapult,ranged,75,60,3,0,6,95,135,60,9,18,6,11,5,1,120,,
 9,senator,romans,元老,unit_senator,melee,50,40,4,0,5,3075,2720,4500,3750,60,1,,10,2,200,,
 10,settler,romans,拓荒者,unit_settler,melee,10,80,5,3000,1,580,530,720,550,40,1,,5,1,100,,
-11,phalanx,gauls,盾矛方阵,unit_phalanx,melee,84.34,47.39,7,35,1,10,13,5.5,3,2.6,4,6|18,1,2,162.41,13|18,1
+11,phalanx,gauls,盾矛方阵,unit_phalanx,melee,84.34,47.39,7,35,1,10,13,5.5,3,2.6,4,6|18|23,1,2,162.41,13|18|23,1
 12,swordsman,gauls,狂战剑士,unit_swordsman,melee,100,40,7,45,1,14,15,18.5,6,3.1,4,3|12,1,2,90,3,1
 13,pathfinder,gauls,探路者,unit_pathfinder,melee,10,20,17,0,2,17,15,2,4,2.8,5,,1,5,60,,
 14,theutates,gauls,猎袭骑兵,unit_theutates,melee,185,80,19,75,2,35,45,23,6,5.5,5,5|12,2,3,195,16,2
@@ -20,7 +20,7 @@ id,code,tribe,name,icon,form,attack,defense,speed,carry,upkeep,costWood,costClay
 18,gcaultrebuchet,gauls,投石机,unit_gcaultrebuchet,ranged,70,45,3,0,6,96,145,63,9,18,6,,5,1,120,,
 19,gaulchief,gauls,首领,unit_gaulchief,melee,40,50,5,0,4,3075,4540,3100,3750,60,1,,10,2,200,,
 20,gaulsettler,gauls,拓荒者,unit_gaulsettler,melee,10,80,5,3000,1,550,700,550,490,40,1,,5,1,100,,
-21,clubswinger,teutons,掠袭棍兵,unit_clubswinger,melee,82.37,58.79,7,60,1,9.5,7.5,4,4,1.8,4,4|20,1,2,152.45,20,1
+21,clubswinger,teutons,掠袭棍兵,unit_clubswinger,melee,82.37,58.79,7,60,1,9.5,7.5,4,4,1.8,4,4|20|22,1,2,152.45,20|22,1
 22,spearman,teutons,拒马长矛,unit_spearman,melee,70,180,7,40,1,14.5,7,8.5,4,2.4,4,6,1,2,110,13|18,1
 23,axeman,teutons,破阵斧手,unit_axeman,melee,95,35,6,50,1,13,12,17,7,3,4,7,1,2,90,15,1
 24,teuscout,teutons,侦察兵,unit_teuscout,melee,10,10,9,0,1,16,10,5,5,2.8,5,,1,5,60,,

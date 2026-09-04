@@ -73,6 +73,8 @@ interface MilitaryState {
   treasureCavalryTrainMult?: number;
   /** 精神食粮减粮（每兵每小时减免的绝对 crop 值，加性；默认 0）。 */
   treasureFoodReduce?: number;
+  /** 主动宝物提供的限时全军攻防加成；过期项在取战斗快照时自动忽略。 */
+  timedCombatBuffs?: Array<{ source: string; atkMult: number; defMult: number; until: number }>;
 }
 
 const COLLECTION = 'military';
@@ -211,6 +213,7 @@ export class MilitaryModule {
     this.commands.register('military.DuplicateCavalry', (c) => this.duplicateCavalry(c));
     // 精神食粮：每兵粮耗减免
     this.commands.register('military.SetTreasureFoodReduce', (c) => this.setTreasureFoodReduce(c));
+    this.commands.register('military.ApplyTimedCombatBuff', (c) => this.applyTimedCombatBuff(c));
 
     // 极端饥荒逃兵：订阅 economy.CropDeficit 事件，扣除驻军（不返还人口，避免同步环）
     this.bus.on('economy.CropDeficit', (evt: DomainEvent) => {
@@ -239,6 +242,7 @@ export class MilitaryModule {
     if (s.techDefMult === undefined) s.techDefMult = 1;
     if (s.treasureCavalryTrainMult === undefined) s.treasureCavalryTrainMult = 1;
     if (s.treasureFoodReduce === undefined) s.treasureFoodReduce = 0;
+    s.timedCombatBuffs = Array.isArray(s.timedCombatBuffs) ? s.timedCombatBuffs : [];
     s.allianceReserved = s.allianceReserved ?? {};
     // 旧档案兼容：trainMsEach 缺失时回退到 def.trainSec；逐建筑队列 + 旧单队列都重新登记出兵任务。
     const scheduleOrder = (order: TrainOrder | null, slotId?: string) => {
@@ -438,7 +442,19 @@ export class MilitaryModule {
       carry: def.carry,
       upkeep: def.upkeep,
     };
-  }
+   }
+
+   /** 当前仍有效的主动宝物攻防倍率；同一村重复使用时按加成百分比相加。 */
+  private timedCombatMult(s: MilitaryState): { atk: number; def: number } {
+    const now = this.now();
+    let atk = 1, def = 1;
+    for (const buff of s.timedCombatBuffs ?? []) {
+      if (!buff || Number(buff.until) <= now) continue;
+      atk = 1 + (atk - 1) + Math.max(0, Number(buff.atkMult) || 0);
+      def = 1 + (def - 1) + Math.max(0, Number(buff.defMult) || 0);
+    }
+     return { atk, def };
+   }
 
   private needsTechUnlock(unit: string): boolean {
     return Object.values(this.config.research).some((t) => t.effects.some((e) => e.effectType === 'unit_unlock' && e.effectKey === unit));
@@ -603,6 +619,22 @@ export class MilitaryModule {
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
     return { ok: true, payload: {} };
+  }
+
+  /** 应用主动宝物限时攻防加成；效果写入村庄，移动中的军队在战斗取快照时读取。 */
+  private applyTimedCombatBuff(cmd: Command): CommandResult {
+    const { villageId, source, percent, durationSec } = cmd.payload as { villageId: string; source?: string; percent?: number; durationSec?: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    const pct = Math.max(0, Number(percent) || 0);
+    const duration = Math.max(0, Math.floor(Number(durationSec) || 0));
+    if (pct <= 0 || duration <= 0) return { ok: false, payload: {}, reason: 'bad_buff' };
+    const now = this.now();
+    s.timedCombatBuffs = (s.timedCombatBuffs ?? []).filter((buff) => Number(buff.until) > now);
+    const until = now + duration * 1000;
+    s.timedCombatBuffs.push({ source: source?.trim() || 'treasure', atkMult: pct / 100, defMult: pct / 100, until });
+    this.store.set(COLLECTION, villageId, s);
+    return { ok: true, payload: { until, percent: pct, durationSec: duration } };
   }
 
   /**
@@ -1091,6 +1123,15 @@ export class MilitaryModule {
     // 否则“派出20、城里剩10”会只用10人参战。缺省/掠夺防守才按现有驻军取值。
     const source = purpose === 'raid' ? raidConfig.troops : (units ?? s.troops);
     const snapshot: Record<string, any> = {};
+    const timed = this.timedCombatMult(s);
+    const atkMult = Math.max(0, Number(s.treasureAtkMult ?? 1))
+      * Math.max(0, Number(s.techAtkMult ?? 1))
+      * (1 + Math.max(0, Number(s.allianceAtkMult ?? 0)))
+      * timed.atk;
+    const defMult = Math.max(0, Number(s.treasureDefMult ?? 1))
+      * Math.max(0, Number(s.techDefMult ?? 1))
+      * (1 + Math.max(0, Number(s.allianceDefMult ?? 0)))
+      * timed.def;
     for (const [unit, n] of Object.entries(source)) {
       const requested = Math.max(0, Math.floor(Number(n) || 0));
       const available = units && purpose !== 'raid'
@@ -1098,7 +1139,12 @@ export class MilitaryModule {
         : Math.min(requested, Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (!this.config.units[unit] || available <= 0) continue;
       const stats = this.finalStats(unit);
-      snapshot[unit] = { count: available, ...stats };
+      snapshot[unit] = {
+        count: available,
+        ...stats,
+        attack: stats.attack * atkMult,
+        defense: stats.defense * defMult,
+      };
     }
     return { ok: true, payload: { snapshot } };
   }
