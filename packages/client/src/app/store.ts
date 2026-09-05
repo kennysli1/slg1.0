@@ -111,6 +111,8 @@ export interface SelectedTarget {
   population?: number;
   mainBaseLevel?: number;
   mainBaseName?: string;
+  /** 同一格叠放的可交互目标；地图点击后保留整组，供目标切换栏选择。 */
+  stackedTargets?: SelectedTarget[];
 }
 export const selected = signal<SelectedTarget | null>(null);
 

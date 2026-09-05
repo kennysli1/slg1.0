@@ -735,6 +735,24 @@
 }
 .map-tactical-stack > * { pointer-events: auto; }
 
+/* 点击同格地块时列出所有可交互对象，避免移动标记遮住村庄或营地。 */
+.map-stacked-targets {
+  padding: var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: rgba(13, 24, 30, .96);
+  box-shadow: var(--sh-2);
+}
+.map-stacked-targets-title { margin-bottom: var(--s-2); color: var(--c-gold); font-size: var(--f-xs); font-weight: 700; }
+.map-stacked-targets-list { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.map-stacked-target {
+  display: inline-flex; align-items: center; gap: var(--s-1);
+  padding: var(--s-1) var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  color: var(--c-ink); background: var(--surface-raised); cursor: pointer; font: inherit; font-size: var(--f-xs);
+}
+.map-stacked-target:hover, .map-stacked-target[aria-current="true"] { border-color: var(--c-gold); background: var(--surface-panel); }
+.map-stacked-target-kind { color: var(--c-ink-dim); }
+
 /* 桌面：右侧悬浮战术栏；手机：贴底工作流。 */
 .map-target-panel {
   position: relative;

@@ -1638,6 +1638,8 @@
   align-items: center;
   gap: var(--s-2);
 }
+.council-caravan-pickers { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
+.council-caravan-pickers .task-submit-row { grid-template-columns: 150px 1fr; }
 .task-submit-res {
   font-size: var(--f-sm);
 }

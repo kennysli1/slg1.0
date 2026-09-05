@@ -38,10 +38,12 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
   tick.value;
   const state = kingdomState.value;
   const [targetKey, setTargetKey] = useState('');
-  const [caravanId, setCaravanId] = useState('');
+  const [incomingCaravanId, setIncomingCaravanId] = useState('');
+  const [outgoingCaravanId, setOutgoingCaravanId] = useState('');
   const [buying, setBuying] = useState(false);
-  const eligibleCaravans = (state?.eligibleCaravans ?? []) as Array<{ id: string; originVillageName: string; destinationVillageName: string }>;
-  const escortTarget = eligibleCaravans.find((caravan) => caravan.id === caravanId);
+  const incomingCaravans = (state?.incomingCaravans ?? []) as Array<{ id: string; originVillageName: string; destinationVillageName: string; missionLabel?: string }>;
+  const outgoingCaravans = (state?.outgoingCaravans ?? []) as Array<{ id: string; originVillageName: string; destinationVillageName: string; missionLabel?: string }>;
+  const escortTarget = [...incomingCaravans, ...outgoingCaravans].find((caravan) => caravan.id === incomingCaravanId || caravan.id === outgoingCaravanId);
   const own = new Set(me?.villages?.map((v) => v.id) ?? []);
   const targets = ((getCache().area?.tiles ?? []) as any[]).filter((tile) =>
     (tile.kind === 'pve' || tile.kind === 'village')
@@ -91,13 +93,22 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
           )}
 
           {state.services.some((s: any) => s.category === 'escort' && state.councilLevel >= s.minCouncilLevel) && (
-            <label class="task-submit-row">
-              <span class="task-submit-res">护卫商队</span>
-              <select class="task-submit-input" value={caravanId} disabled={buying} onChange={(e) => setCaravanId(e.currentTarget.value)}>
-                <option value="">{eligibleCaravans.length ? '选择前往本村或从本村出发的送货商队' : '当前没有可护卫的送货商队'}</option>
-                {eligibleCaravans.map((caravan, index) => <option key={caravan.id} value={caravan.id}>商队 {index + 1}：{caravan.originVillageName} → {caravan.destinationVillageName}</option>)}
-              </select>
-            </label>
+            <div class="council-caravan-pickers">
+              <label class="task-submit-row">
+                <span class="task-submit-res">前往此村的商队</span>
+                <select class="task-submit-input" value={incomingCaravanId} disabled={buying} onChange={(e) => { setIncomingCaravanId(e.currentTarget.value); setOutgoingCaravanId(''); }}>
+                  <option value="">{incomingCaravans.length ? '选择来向商队' : '当前没有前往本村的商队'}</option>
+                  {incomingCaravans.map((caravan) => <option key={caravan.id} value={caravan.id}>{caravan.originVillageName} → 本村 · {caravan.missionLabel ?? '商队任务'}</option>)}
+                </select>
+              </label>
+              <label class="task-submit-row">
+                <span class="task-submit-res">从此村出发的商队</span>
+                <select class="task-submit-input" value={outgoingCaravanId} disabled={buying} onChange={(e) => { setOutgoingCaravanId(e.currentTarget.value); setIncomingCaravanId(''); }}>
+                  <option value="">{outgoingCaravans.length ? '选择去向商队' : '当前没有从本村出发的商队'}</option>
+                  {outgoingCaravans.map((caravan) => <option key={caravan.id} value={caravan.id}>本村 → {caravan.destinationVillageName} · {caravan.missionLabel ?? '商队任务'}</option>)}
+                </select>
+              </label>
+            </div>
           )}
 
           <div class="task-menu-body">

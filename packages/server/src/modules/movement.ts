@@ -207,6 +207,8 @@ export class MovementModule {
    * 不增加存档字段，也不改变遭遇、视野或路径计算。
    */
   private turnTransitions = new Map<string, MovementTurnTransition>();
+  /** 商队劫掠可同时影响起点/终点多个村庄，按村庄分别缓存预警可见状态。 */
+  private caravanWarningVisibility = new Map<string, Map<string, boolean>>();
   private caravanClaims = new Set<string>();
   private caravanRecoveries = new Set<string>();
   private caravanRecoveryTasks = new Set<string>();
@@ -355,6 +357,7 @@ export class MovementModule {
     this.store.delete(COLLECTION, id);
     this.timingCache.delete(id);
     this.turnTransitions.delete(id);
+    this.caravanWarningVisibility.delete(id);
     if (prev) void this.syncIncomingWarningsForOwnerVillage(prev.fromVillage);
   }
 
@@ -714,7 +717,28 @@ export class MovementModule {
   }
 
   private isIncomingHostile(mv: MovementRecord): boolean {
-    return (mv.type === 'attack' || mv.type === 'raid') && !!mv.targetVillage;
+    return ((mv.type === 'attack' || mv.type === 'raid') && !!mv.targetVillage)
+      || (mv.type === 'caravan_raid' && !!mv.targetMovementId);
+  }
+
+  /** 来袭商队劫掠没有 targetVillage；把目标商队所属玩家的村庄作为预警受众。 */
+  private async incomingWarningVillages(mv: MovementRecord): Promise<string[]> {
+    if (mv.type !== 'caravan_raid') return mv.targetVillage ? [mv.targetVillage] : [];
+    const caravan = this.load(mv.targetMovementId ?? '');
+    if (!caravan || caravan.type !== 'caravan') return [];
+    const origin = caravan.caravanOrigin ?? caravan.homeVillage ?? caravan.fromVillage;
+    const destination = caravan.caravanDestination ?? caravan.targetVillage;
+    const owners = new Set<string>();
+    for (const villageId of [origin, destination].filter(Boolean) as string[]) {
+      const owner = await this.ownerOf(villageId);
+      if (owner) owners.add(owner);
+    }
+    const villages: string[] = [];
+    for (const playerId of owners) {
+      const result = await this.commands.send({ name: 'player.Get', from: MovementModule.NAME, payload: { playerId } });
+      for (const village of ((result.payload as any)?.player?.villages ?? [])) if (village?.id) villages.push(String(village.id));
+    }
+    return [...new Set(villages)];
   }
 
   /** 侦察行军对目标方与第三方均不可见；仅发起方可在自己的行军列表中查看。 */
@@ -736,7 +760,9 @@ export class MovementModule {
     const visible = new Set<string>((visibleRes.payload as any)?.tiles ?? []);
     const out: IncomingWarning[] = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
-      if (!this.isIncomingHostile(mv) || mv.targetVillage !== villageId || mv.status !== 'marching') continue;
+      if (!this.isIncomingHostile(mv) || mv.status !== 'marching') continue;
+      const recipients = await this.incomingWarningVillages(mv);
+      if (!recipients.includes(villageId)) continue;
       if (!visible.has(this.posKey(mv.pos.q, mv.pos.r))) continue;
       const [origin, target] = await Promise.all([
         this.villageTile(mv.fromVillage),
@@ -749,12 +775,13 @@ export class MovementModule {
         : (origin?.name ?? mv.fromVillage);
       out.push({
         id: mv.id,
-        type: mv.type as 'raid' | 'attack',
+        // 商队劫掠在预警层按掠夺显示，避免把 caravan_raid 暴露为新的兵种协议。
+        type: mv.type === 'attack' ? 'attack' : 'raid',
         battleType: mv.battleType === 'raid' || mv.battleType === 'siege' ? mv.battleType : undefined,
         targetVillage: villageId,
         targetVillageName: target?.name ?? villageId,
         fromVillage: mv.fromVillage,
-        fromVillageName: originName,
+        fromVillageName: mv.type === 'caravan_raid' ? `${originName}（商队劫掠）` : originName,
         from: mv.originalFromXY ?? mv.fromXY,
         to: mv.toXY,
         path: mv.path,
@@ -765,6 +792,7 @@ export class MovementModule {
         turningPoint: this.turnTransitions.get(mv.id),
         arriveAt: mv.arriveAt,
         intelligence: mv.incomingIntel,
+        ...(mv.type === 'caravan_raid' ? { caravanRaid: true } : {}),
       });
     }
     return out.sort((a, b) => a.arriveAt - b.arriveAt);
@@ -787,6 +815,33 @@ export class MovementModule {
 
   /** 只在可见状态发生变化时推送刷新；该事件不进入 notifications/report 持久层。 */
   private async syncIncomingWarningVisibility(mv: MovementRecord): Promise<void> {
+    if (mv.type === 'caravan_raid') {
+      const recipients = await this.incomingWarningVillages(mv);
+      const previous = this.caravanWarningVisibility.get(mv.id) ?? new Map<string, boolean>();
+      const current = new Map<string, boolean>();
+      for (const villageId of recipients) {
+        const visibleRes = await this.commands.send({ name: 'vision.GetVisibility', from: MovementModule.NAME, payload: { playerId: await this.ownerOf(villageId), q: mv.pos.q, r: mv.pos.r } });
+        const visible = visibleRes.ok && (visibleRes.payload as any)?.visibility === 'visible';
+        current.set(villageId, visible);
+        if (previous.get(villageId) !== visible && (visible || previous.get(villageId) === true)) {
+          void this.bus.emit({
+            name: 'movement.IncomingWarningChanged', source: MovementModule.NAME, ts: this.now(),
+            payload: { villageId, movementId: mv.id, visible },
+          } as DomainEvent);
+        }
+      }
+      for (const [villageId, wasVisible] of previous) {
+        if (wasVisible && !current.has(villageId)) {
+          void this.bus.emit({
+            name: 'movement.IncomingWarningChanged', source: MovementModule.NAME, ts: this.now(),
+            payload: { villageId, movementId: mv.id, visible: false },
+          } as DomainEvent);
+        }
+      }
+      if (current.size > 0) this.caravanWarningVisibility.set(mv.id, current);
+      else this.caravanWarningVisibility.delete(mv.id);
+      return;
+    }
     const visible = await this.isIncomingVisible(mv);
     if (!!mv.warningVisibleToTarget === visible) return;
     mv.warningVisibleToTarget = visible;
@@ -800,6 +855,18 @@ export class MovementModule {
 
   /** 行军结束/转向时立刻撤销可见预警。调用方负责随后保存或删除 movement。 */
   private clearIncomingWarning(mv: MovementRecord): void {
+    if (mv.type === 'caravan_raid') {
+      const previous = this.caravanWarningVisibility.get(mv.id);
+      this.caravanWarningVisibility.delete(mv.id);
+      if (previous) for (const [villageId, visible] of previous) {
+        if (!visible) continue;
+        void this.bus.emit({
+          name: 'movement.IncomingWarningChanged', source: MovementModule.NAME, ts: this.now(),
+          payload: { villageId, movementId: mv.id, visible: false },
+        } as DomainEvent);
+      }
+      return;
+    }
     if (!mv.warningVisibleToTarget || !mv.targetVillage) return;
     mv.warningVisibleToTarget = false;
     void this.bus.emit({
@@ -812,8 +879,10 @@ export class MovementModule {
   private async syncIncomingWarningsForOwnerVillage(villageId: string): Promise<void> {
     const playerId = await this.ownerOf(villageId);
     for (const incoming of this.store.all<MovementRecord>(COLLECTION)) {
-      if (!this.isIncomingHostile(incoming) || !incoming.targetVillage || incoming.status !== 'marching') continue;
-      if (await this.ownerOf(incoming.targetVillage) !== playerId) continue;
+      if (!this.isIncomingHostile(incoming) || incoming.status !== 'marching') continue;
+      const recipients = await this.incomingWarningVillages(incoming);
+      if (!recipients.includes(villageId)) continue;
+      if (incoming.type !== 'caravan_raid' && await this.ownerOf(incoming.targetVillage ?? '') !== playerId) continue;
       await this.syncIncomingWarningVisibility(incoming);
     }
   }
@@ -1495,10 +1564,10 @@ export class MovementModule {
    * 编队、宝物和已占用的行军点都保持不变。
    */
   private async continueGarrison(cmd: Command): Promise<CommandResult> {
-    const { villageId, movementId, q, r, mode, targetId, targetVillage } = cmd.payload as {
+    const { villageId, movementId, q, r, mode, targetId, targetVillage, targetMovementId } = cmd.payload as {
       villageId: string; movementId: string; q: number; r: number;
-      mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'scout' | 'reinforce' | 'transfer' | 'ambush' | 'investigate';
-      targetId?: string; targetVillage?: string;
+      mode: 'garrison' | 'explore' | 'raid' | 'attack' | 'scout' | 'reinforce' | 'transfer' | 'ambush' | 'investigate' | 'caravan_raid' | 'caravan_escort';
+      targetId?: string; targetVillage?: string; targetMovementId?: string;
     };
     const mv = this.load(movementId);
     if (!mv || mv.fromVillage !== villageId || (mv.type !== 'garrison' && mv.type !== 'ambush' && mv.type !== 'investigate') || mv.status !== 'stationed') return { ok: false, payload: {}, reason: 'garrison_not_found' };
@@ -1506,13 +1575,24 @@ export class MovementModule {
     const worldW = this.config.constants.worldW ?? 41;
     const worldH = this.config.constants.worldH ?? 41;
     let toXY = wrapHex({ q, r }, worldW, worldH);
-    let targetKind: 'empty' | 'unexplored' | 'pve' | 'taskcamp' | 'village' = 'empty';
+    let targetKind: 'empty' | 'unexplored' | 'pve' | 'taskcamp' | 'village' | 'caravan' = 'empty';
     let resolvedTargetId = targetId;
     let resolvedTargetVillage = targetVillage;
 
+    // 移动商队不是地块实体，续行必须锁定其 movement id，并以商队当前
+    // 显示格为目标，不能使用地图缓存中的旧坐标。
+    if (targetMovementId) {
+      const caravan = this.load(targetMovementId);
+      if (!caravan || caravan.type !== 'caravan') return { ok: false, payload: {}, reason: 'caravan_unavailable' };
+      targetKind = 'caravan';
+      toXY = this.caravanGrid(this.caravanPosition(caravan));
+    }
+
     // 目标村/PvE 的坐标和类型全部以服务端快照为准，避免客户端地图缓存
     // 或 GM 移动目标后续行军仍使用旧坐标。
-    if (targetVillage) {
+    if (targetMovementId) {
+      // 已在上面按商队权威位置解析；不再读取同格村庄地块。
+    } else if (targetVillage) {
       const tile = await this.villageTile(targetVillage);
       if (!tile) return { ok: false, payload: {}, reason: 'target_not_found' };
       targetKind = 'village';
@@ -1554,7 +1634,7 @@ export class MovementModule {
     // NPC 格子（王国地标、普通营地、任务营地）不走这里，继续沿用原有模式规则。
     if (String(targetKind) === 'village') return { ok: false, payload: {}, reason: 'garrison_player_target_forbidden' };
 
-    if (toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
+    if (targetKind !== 'caravan' && toXY.q === mv.pos.q && toXY.r === mv.pos.r) return { ok: false, payload: {}, reason: 'same_tile' };
 
     // 与首次派遣完全相同的权威模式清单；不在清单中的续行命令一律拒绝。
     const options = await this.getMarchOptions({
@@ -1566,6 +1646,7 @@ export class MovementModule {
         kind: targetKind,
         ...(resolvedTargetId ? { refId: resolvedTargetId } : {}),
         ...(resolvedTargetVillage ? { refId: resolvedTargetVillage } : {}),
+        ...(targetMovementId ? { targetMovementId, refId: targetMovementId } : {}),
       },
     } as Command);
     const availableModes = options.ok ? ((options.payload as any)?.modes ?? []) as Array<{ mode?: string }> : [];
@@ -1574,7 +1655,7 @@ export class MovementModule {
     const continuationModes = mv.type === 'ambush' ? [] : availableModes.filter((entry) => entry.mode !== 'ambush');
     if (!continuationModes.some((entry) => entry.mode === mode)) return { ok: false, payload: {}, reason: 'invalid_continuation_mode' };
 
-    if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack' || mode === 'scout' || mode === 'reinforce' || mode === 'transfer' || mode === 'investigate') {
+    if (mode === 'garrison' || mode === 'ambush' || mode === 'raid' || mode === 'attack' || mode === 'scout' || mode === 'reinforce' || mode === 'transfer' || mode === 'investigate' || mode === 'caravan_raid' || mode === 'caravan_escort') {
       const known = await this.ensureKnown(villageId, toXY);
       if (known) return known;
     }
@@ -1583,6 +1664,7 @@ export class MovementModule {
       if (exploration) return exploration;
     }
     if ((mode === 'raid' || mode === 'investigate') && targetKind !== 'pve' && targetKind !== 'taskcamp' && targetKind !== 'village') return { ok: false, payload: {}, reason: 'target_not_found' };
+    if ((mode === 'caravan_raid' || mode === 'caravan_escort') && targetKind !== 'caravan') return { ok: false, payload: {}, reason: 'caravan_unavailable' };
     if ((mode === 'attack' || mode === 'reinforce' || mode === 'transfer') && targetKind !== 'village' && !(mode === 'attack' && targetKind === 'pve')) return { ok: false, payload: {}, reason: 'target_not_found' };
     if (mode === 'attack' && targetKind === 'pve') {
       const city = await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: resolvedTargetId } });
@@ -1592,7 +1674,9 @@ export class MovementModule {
     if (mode === 'scout' && Object.entries(mv.troops).some(([code, count]) => Number(count) > 0 && !this.isScoutUnit(code) && !this.isAdventurerUnit(code))) {
       return { ok: false, payload: {}, reason: 'scout_units_only' };
     }
-    const path = linePathWrapped(mv.pos, toXY, worldW, worldH);
+    const caravanTarget = targetKind === 'caravan' ? this.load(targetMovementId ?? '') : undefined;
+    if ((mode === 'caravan_raid' || mode === 'caravan_escort') && (!caravanTarget || caravanTarget.type !== 'caravan')) return { ok: false, payload: {}, reason: 'caravan_unavailable' };
+    const path = caravanTarget ? this.caravanChasePath(mv.pos, caravanTarget) : linePathWrapped(mv.pos, toXY, worldW, worldH);
     const timing = await this.pathTiming(mv.fromVillage, path, mv.troops, mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode);
     const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
 
@@ -1603,6 +1687,7 @@ export class MovementModule {
     mv.type = mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode;
     mv.targetId = isPveTarget && (mode === 'raid' || mode === 'scout' || mode === 'investigate' || mode === 'attack') ? resolvedTargetId : undefined;
     mv.targetVillage = isVillageTarget && ['attack', 'raid', 'scout', 'reinforce', 'transfer'].includes(mode) ? resolvedTargetVillage : undefined;
+    mv.targetMovementId = targetKind === 'caravan' ? targetMovementId : undefined;
     mv.transportMode = mode === 'reinforce' || mode === 'transfer' ? mode : undefined;
     mv.cargo = mode === 'reinforce' || mode === 'transfer' ? {} : undefined;
     mv.battleType = mode === 'attack' ? 'siege' : mode === 'raid' ? 'raid' : undefined;
@@ -1619,11 +1704,25 @@ export class MovementModule {
     mv.arriveAt = this.now() + timing.totalMs;
     mv.launchedAt = this.now();
     mv.status = 'marching';
+    if (caravanTarget) {
+      const missionType = mode === 'reinforce' || mode === 'transfer' ? 'transport' : mode;
+      const base = await this.baseStepMs(mv.fromVillage, mv.troops, missionType);
+      const size = this.marchSizeMultiplier(mv.troops, missionType);
+      mv.caravanMission = {
+        flatMs: Math.max(1, Math.ceil(Math.round(base) / size)),
+        hillsMs: Math.max(1, Math.ceil(Math.round(base / Math.max(0.0001, this.config.constants.hillsMarchSpeedMultiplier || 2 / 3)) / size)),
+      };
+      mv.caravanTiming = [...timing.segmentMs];
+    } else {
+      mv.caravanMission = undefined;
+      mv.caravanTiming = undefined;
+    }
     mv.stepToken += 1;
     this.save(mv);
     await this.revealVision(mv);
     const token = mv.stepToken;
     this.scheduler.schedule(perStepMs, () => this.step(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
+    if (caravanTarget) await this.checkCaravanMission(mv);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - this.now()) / 1000) } };
   }
 
@@ -1897,9 +1996,9 @@ export class MovementModule {
       ? await this.villageTile(refId)
       : null;
     // 客户端可能缓存了 GM 修改前的坐标/名称；己方村目标必须回传 World 的权威值。
-    const targetQ = targetTile?.q ?? q;
-    const targetR = targetTile?.r ?? r;
-    const targetName = targetTile?.name;
+    let targetQ = targetTile?.q ?? q;
+    let targetR = targetTile?.r ?? r;
+    let targetName = targetTile?.name;
     if (kind === 'empty') {
       modes.push({ mode: 'garrison', label: '驻扎' });
       modes.push({ mode: 'ambush', label: '伏击' });
@@ -1915,6 +2014,19 @@ export class MovementModule {
       }
       modes.push({ mode: 'raid', label: '掠夺' });
       if (targetData?.cityState === true) modes.push({ mode: 'attack', label: '攻城' });
+    }
+    else if (kind === 'caravan') {
+      const caravan = refId ? this.load(refId) : undefined;
+      if (caravan?.type === 'caravan') {
+        const grid = this.caravanGrid(this.caravanPosition(caravan));
+        targetQ = grid.q;
+        targetR = grid.r;
+        targetData = caravan;
+        targetName = `前往「${caravan.caravanDestination ?? caravan.targetVillage ?? '目标村'}」的商队`;
+        const permissions = await this.caravanPermissions(caravan, await this.ownerOf(villageId));
+        if (permissions.canRaid) modes.push({ mode: 'caravan_raid', label: '劫掠商队' });
+        if (permissions.canEscort) modes.push({ mode: 'caravan_escort', label: '护送商队' });
+      }
     }
     else if (kind === 'village' || kind === 'own_village') {
       const owner = refId ? await this.ownerOf(refId) : '';
@@ -1955,7 +2067,7 @@ export class MovementModule {
         // 坐标快照为准隐藏续行模式，服务端 ContinueGarrison 仍会再次拒绝。
         const tileRes = await this.commands.send({ name: 'world.GetTile', from: MovementModule.NAME, payload: { q: targetQ, r: targetR } });
         const tile = (tileRes.payload as any)?.tile;
-        if (kind === 'village' || kind === 'own_village' || tile?.kind === 'village') modes.length = 0;
+        if (kind !== 'caravan' && (kind === 'village' || kind === 'own_village' || tile?.kind === 'village')) modes.length = 0;
 
         const scoutOnly = this.isScoutOnlyTroops(movement.troops);
         if (!scoutOnly) {
@@ -2410,14 +2522,47 @@ export class MovementModule {
 
   private async listEscortCaravans(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
-    const out = [];
+    const incoming: any[] = [];
+    const outgoing: any[] = [];
+    const playerId = await this.ownerOf(villageId);
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (mv.type !== 'caravan' || mv.returning || mv.status !== 'marching' || mv.caravanGuard) continue;
-      if ((mv.homeVillage ?? mv.fromVillage) !== villageId && mv.targetVillage !== villageId) continue;
-      const info = await this.caravanInfo(mv, await this.ownerOf(villageId));
-      out.push({ id: mv.id, originVillageName: info.originVillageName, destinationVillageName: info.destinationVillageName });
+      const originVillageId = mv.caravanOrigin ?? mv.homeVillage ?? mv.fromVillage;
+      const destinationVillageId = mv.caravanDestination ?? mv.targetVillage;
+      const isOutgoing = originVillageId === villageId;
+      const isIncoming = destinationVillageId === villageId;
+      if (!isOutgoing && !isIncoming) continue;
+      const info = await this.caravanInfo(mv, playerId);
+      const task = await this.caravanTaskInfo(mv);
+      const item = {
+        id: mv.id,
+        originVillageId,
+        destinationVillageId: destinationVillageId ?? '',
+        originVillageName: info.originVillageName,
+        destinationVillageName: info.destinationVillageName,
+        counterpartVillageName: isIncoming ? info.originVillageName : info.destinationVillageName,
+        missionType: task.type,
+        missionLabel: task.label,
+      };
+      if (isIncoming) incoming.push(item);
+      if (isOutgoing) outgoing.push(item);
     }
-    return { ok: true, payload: { eligibleCaravans: out, caravans: out } };
+    const all = [...incoming, ...outgoing.filter((item) => !incoming.some((entry) => entry.id === item.id))];
+    return { ok: true, payload: { eligibleCaravans: all, caravans: all, incomingCaravans: incoming, outgoingCaravans: outgoing } };
+  }
+
+  /** 商队任务只返回可公开的类型，数量与货物仍不进入议会厅状态。 */
+  private async caravanTaskInfo(mv: MovementRecord): Promise<{ type: 'trade' | 'resource_transfer' | 'special'; label: string }> {
+    if (mv.allianceService) return { type: 'special', label: '联盟服务' };
+    const destination = mv.caravanDestination ?? mv.targetVillage;
+    const target = destination
+      ? await this.commands.send({ name: 'pve.GetTarget', from: MovementModule.NAME, payload: { id: destination } })
+      : null;
+    if (target?.ok) return { type: 'special', label: (target.payload as any)?.task ? '任务物资' : '特殊运输' };
+    const originOwner = await this.ownerOf(mv.caravanOrigin ?? mv.homeVillage ?? mv.fromVillage);
+    const destinationOwner = destination ? await this.ownerOf(destination) : '';
+    if (originOwner && destinationOwner) return { type: 'resource_transfer', label: '资源转移' };
+    return { type: 'trade', label: '交易' };
   }
 
   private validateCaravanProtection(cmd: Command): CommandResult {

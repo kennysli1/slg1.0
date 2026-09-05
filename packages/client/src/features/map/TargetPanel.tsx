@@ -204,6 +204,7 @@ function targetAssessmentTitle(meta: TargetMeta): string {
 }
 
 function targetAssessmentCopy(meta: TargetMeta): string {
+  if (meta.targetKind === 'caravan') return '这是正在移动的商队。驻扎军可根据权限劫掠或护送，服务端会在确认时复核商队当前位置。';
   if (meta.targetKind === 'empty') return '这是可行动的空地。驻扎军可继续驻扎或伏击。';
   if (meta.targetKind === 'unexplored') return '该格尚未探索。只能执行探索，军队抵达后会立即返城。';
   if (meta.kingdomCityState) return '这是王国阵营的 PvE 城邦。可侦察、掠夺或攻城；这些行动会扣除2点声望。';
@@ -682,6 +683,7 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
   const chosenLabel = choice?.label ?? '';
   const isVillage = targetKind === 'village' || targetKind === 'own_village';
   const isPve = targetKind === 'pve' || targetKind === 'taskcamp';
+  const isCaravan = targetKind === 'caravan';
 
   async function continueMarch() {
     if (!choice) return;
@@ -694,6 +696,7 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
     };
     if (isPve && ['scout', 'raid', 'investigate', 'attack'].includes(mode)) payload.targetId = resolvedTarget.refId;
     if (isVillage && ['scout', 'raid', 'attack', 'reinforce', 'transfer'].includes(mode)) payload.targetVillage = resolvedTarget.refId;
+    if (isCaravan && ['caravan_raid', 'caravan_escort'].includes(mode)) payload.targetMovementId = resolvedTarget.refId;
     if (await act(req('ContinueGarrison', payload), { okToast: `${continueLabel}开始${chosenLabel}` })) {
       garrisonContinue.value = null;
       onClose();
@@ -707,7 +710,7 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
       r: resolvedTarget.r,
       name: resolvedTarget.name,
       dist: 0,
-      icon: isPve ? 'pve_bandits' : 'bld_main',
+      icon: isPve ? 'pve_bandits' : isCaravan ? 'bld_tradecenter' : 'bld_main',
       mode: 'garrison',
       targetKind,
       kingdomCityState: !!(resolvedTarget as any).cityState,
@@ -731,7 +734,7 @@ function GarrisonContinuation({ movementId, movementType, target, onClose }: {
         r: resolvedTarget.r,
         name: resolvedTarget.name,
         dist: 0,
-        icon: isPve ? 'pve_bandits' : 'bld_main',
+        icon: isPve ? 'pve_bandits' : isCaravan ? 'bld_tradecenter' : 'bld_main',
         mode: chosenMode ?? 'garrison',
         targetKind,
         kingdomCityState: !!(resolvedTarget as any).cityState,
@@ -956,6 +959,57 @@ function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garriso
   );
 }
 
+/** 同一格叠放目标选择器：移动中的图标、村庄、营地和来袭预警都可分别打开。 */
+function StackedTargetChooser({ targets }: { targets: SelectedTarget[] }) {
+  if (targets.length < 2) return null;
+  const label = (target: SelectedTarget): string => {
+    if (target.kind === 'own_army') return target.name || '己方军队';
+    if (target.kind === 'enemy_army') return target.name || '敌方军队';
+    if (target.kind === 'incoming_warning') return '来袭军队';
+    return target.name || '目标地块';
+  };
+  return (
+    <section class="map-stacked-targets" aria-label="同格目标">
+      <div class="map-stacked-targets-title">同一格有多个目标</div>
+      <div class="map-stacked-targets-list">
+        {targets.map((target) => (
+          <button
+            type="button"
+            key={`${target.kind}:${target.refId}`}
+            class="map-stacked-target"
+            aria-current={selected.value?.kind === target.kind && selected.value?.refId === target.refId ? 'true' : undefined}
+            onClick={() => { selected.value = { ...target, stackedTargets: targets }; }}
+          >
+            <span class="map-stacked-target-kind">{target.kind === 'own_army' || target.kind === 'enemy_army' || target.kind === 'incoming_warning' ? '行军' : '地块'}</span>
+            <span>{label(target)}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function IncomingWarningPanel({ warning, onClose }: { warning: any; onClose: () => void }) {
+  return (
+    <Panel variant="danger" corners class="map-target-panel">
+      <div class="target-head">
+        <IconPlate icon="map_marker_enemy" label="来袭军队" size="sm" plate="round" />
+        <div class="target-heading-copy"><div class="target-title">来袭军队</div><div class="target-coord">({warning.pos?.q ?? '?'},{warning.pos?.r ?? '?'})</div></div>
+        <button type="button" class="target-close" onClick={onClose} aria-label="关闭">×</button>
+      </div>
+      <div class="target-body expedition-body">
+        <dl class="enemy-army-facts">
+          <div><dt>出发村庄</dt><dd>{warning.fromVillageName ?? warning.fromVillage ?? '未知'}</dd></div>
+          <div><dt>目标村庄</dt><dd>{warning.targetVillageName ?? warning.targetVillage ?? '未知'}</dd></div>
+          <div><dt>行动类型</dt><dd>{warning.caravanRaid ? '商队劫掠' : warning.battleType === 'siege' ? '攻城' : '掠夺'}</dd></div>
+        </dl>
+        <p class="enemy-army-note">该目标当前处于你的视野内，详细兵力需通过侦察获得。</p>
+        <div class="target-foot expedition-foot"><Btn onClick={onClose}>关闭</Btn></div>
+      </div>
+    </Panel>
+  );
+}
+
 export function TargetPanel() {
   const _dv = dataVersion.value;
   void foreignMoves.value;
@@ -968,12 +1022,24 @@ export function TargetPanel() {
   const dist = hexDistanceWrapped({ q: sel.q, r: sel.r }, { q: me.q, r: me.r }, worldW(), worldH());
   const clearSelection = () => { selected.value = null; };
   const cancelAll = () => { selected.value = null; garrisonContinue.value = null; };
+  const stackBar = sel.stackedTargets && sel.stackedTargets.length > 1
+    ? <StackedTargetChooser targets={sel.stackedTargets} />
+    : null;
+  const wrap = (content: any) => stackBar ? <>{stackBar}{content}</> : content;
 
   const movement = selectedMapMovement(sel, getCache().playerMoves?.movements ?? [], foreignMoves.value?.movements ?? []);
-  if (movement?.movement.caravan) return <CaravanPanel key={movement.movement.id} move={movement.movement} onClose={clearSelection} />;
+  if (pending && movement?.movement.caravan) {
+    return wrap(<GarrisonContinuation
+      movementId={pending.movementId}
+      movementType={pending.movementType}
+      target={{ ...sel, refId: movement.movement.id, kind: 'caravan', q: sel.q, r: sel.r, name: sel.name }}
+      onClose={cancelAll}
+    />);
+  }
+  if (movement?.movement.caravan) return wrap(<CaravanPanel key={movement.movement.id} move={movement.movement} onClose={clearSelection} />);
   if (movement?.kind === 'enemy_army') {
     const foe = movement.movement;
-    return (
+    return wrap(
       <EnemyArmyPanel
         sel={{ ...sel, refId: foe.id, kind: 'enemy_army', name: foreignArmyName(foe) }}
         onClose={clearSelection}
@@ -984,26 +1050,30 @@ export function TargetPanel() {
   const own = movement?.kind === 'own_army' ? movement.movement : undefined;
   if (own) {
     if (own.fromVillage === me.villageId && own.status === 'stationed') {
-      return <OwnStationedPanel move={own} onClose={clearSelection} />;
+      return wrap(<OwnStationedPanel move={own} onClose={clearSelection} />);
     }
-    return <OwnArmyPanel move={own} onClose={clearSelection} />;
+    return wrap(<OwnArmyPanel move={own} onClose={clearSelection} />);
   }
 
-  const stationed = sel.kind === 'own_army' || sel.kind === 'enemy_army' ? null : ownStationedMoveAt(sel.q, sel.r);
+  const stationed = sel.stackedTargets?.length ? null : sel.kind === 'own_army' || sel.kind === 'enemy_army' ? null : ownStationedMoveAt(sel.q, sel.r);
   if (stationed) {
-    return <OwnStationedPanel move={stationed} onClose={clearSelection} />;
+    return wrap(<OwnStationedPanel move={stationed} onClose={clearSelection} />);
   }
 
-  if (pending) return <GarrisonContinuation movementId={pending.movementId} movementType={pending.movementType} target={sel} onClose={cancelAll} />;
-  if (sel.kind === 'enemy_army') {
-    return <EnemyArmyPanel sel={sel} onClose={clearSelection} />;
+  if (pending) return wrap(<GarrisonContinuation movementId={pending.movementId} movementType={pending.movementType} target={sel} onClose={cancelAll} />);
+  if (sel.kind === 'incoming_warning') {
+    const warning = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []).find((entry: any) => entry.id === sel.refId);
+    return wrap(warning ? <IncomingWarningPanel warning={warning} onClose={clearSelection} /> : <Panel class="map-target-panel"><p>该预警已失效。</p><Btn onClick={clearSelection}>关闭</Btn></Panel>);
   }
-  if (sel.kind === 'own_army') return <Panel class="map-target-panel"><p>该军队或商队已结束行程。</p><Btn onClick={clearSelection}>关闭</Btn></Panel>;
-  if (sel.kind === 'empty') return <EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />;
+  if (sel.kind === 'enemy_army') {
+    return wrap(<EnemyArmyPanel sel={sel} onClose={clearSelection} />);
+  }
+  if (sel.kind === 'own_army') return wrap(<Panel class="map-target-panel"><p>该军队或商队已结束行程。</p><Btn onClick={clearSelection}>关闭</Btn></Panel>);
+  if (sel.kind === 'empty') return wrap(<EmptyTilePanel q={sel.q} r={sel.r} dist={dist} visibility={sel.visibility} onClose={clearSelection} />);
 
   const isOwn = sel.kind === 'own_village' || isOwnVillageId(sel.refId);
   if (sel.kind === 'own_village' || isOwnVillageId(sel.refId)) {
-    return <OwnVillagePanel village={sel} onClose={clearSelection} />;
+    return wrap(<OwnVillagePanel village={sel} onClose={clearSelection} />);
   }
 
   const meta: TargetMeta = {
@@ -1024,7 +1094,7 @@ export function TargetPanel() {
     mainBaseName: sel.mainBaseName,
   };
 
-  return <ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />;
+  return wrap(<ModeSelectPanel base={meta} kind={sel.kind} onClose={clearSelection} />);
 }
 
 function OwnVillagePanel({ village, onClose }: { village: SelectedTarget; onClose: () => void }) {
