@@ -153,6 +153,18 @@ describe('阶段化战斗模拟器的科技与宝物多选', () => {
   });
 });
 
+describe('科研点判定公式展示', () => {
+  it('使用服务端下发的基础值与来源明细，不在客户端硬编码学院等级概率', () => {
+    const academy = readFileSync(new URL('../features/research/AcademyModal.tsx', import.meta.url), 'utf8');
+    const tree = readFileSync(new URL('../features/research/TechTreeScreen.tsx', import.meta.url), 'utf8');
+    assert.match(academy, /state\?\.rpFormula/);
+    assert.match(academy, /intervalSources/);
+    assert.match(tree, /state\?\.rpFormula/);
+    assert.match(tree, /durationLabel/);
+    assert.doesNotMatch(tree, /0\.10 \+ Math\.max\(0, highest - 1\)/);
+  });
+});
+
 describe('联盟目录与战事目标交互', () => {
   it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
     const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
@@ -234,6 +246,12 @@ describe('任务接取与奖励领取对话状态机', () => {
       '只有首次收下进入互斥后才能正式 Deliver');
     assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
     assert.match(autoHost, /req\('task\.ConsumeDialogue'/, '自动对话关闭必须消费整个等待 session');
+  });
+
+  it('常驻公开 PvE 任务显示清剿计数器', () => {
+    const taskBar = readFileSync(new URL('../features/village/TaskBar.tsx', import.meta.url), 'utf8');
+    assert.match(taskBar, /o\.kind === 'clear_public_pve'/);
+    assert.match(taskBar, /当前进度[\s\S]*o\.count/);
   });
 });
 
