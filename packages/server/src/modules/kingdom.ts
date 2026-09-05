@@ -486,6 +486,8 @@ export class KingdomModule {
         services: Object.values(this.config.kingdomServices).sort((a, b) => a.minCouncilLevel - b.minCouncilLevel || a.id - b.id),
         landmarks,
         eligibleCaravans: caravans.ok ? ((caravans.payload as { caravans?: unknown[] }).caravans ?? []) : [],
+        incomingCaravans: caravans.ok ? ((caravans.payload as { incomingCaravans?: unknown[] }).incomingCaravans ?? []) : [],
+        outgoingCaravans: caravans.ok ? ((caravans.payload as { outgoingCaravans?: unknown[] }).outgoingCaravans ?? []) : [],
       },
     };
   }

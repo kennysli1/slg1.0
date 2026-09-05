@@ -8,13 +8,13 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab, type SelectedTarget } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
-import { foreignArmyAt, foreignArmyName, escortMarkerOffset } from './map-target-helpers.js';
+import { foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.8;
@@ -828,10 +828,11 @@ export function HexMap() {
         <g
           key={`incoming-mk-${m.id}`}
           id={`incoming-march-mk-${m.id}`}
+          data-move-id={m.id}
           class="enemy-march-mk enemy-march-mk--attack incoming-march-mk"
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>来袭军队 · {m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
+          <title>来袭军队 · {m.caravanRaid ? '商队劫掠' : m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
           <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
           <image
@@ -1125,51 +1126,44 @@ export function HexMap() {
   function handleMapTap(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
     const ownMarker = hit?.closest?.('[data-own-move-id]') as Element | null;
-    if (ownMarker) {
-      const movementId = ownMarker.getAttribute('data-own-move-id');
-      const listed = movementId
-        ? (getCache().playerMoves?.movements ?? []).find((m: any) => m.id === movementId)
-        : undefined;
-      if (listed?.pos) {
-        selected.value = { refId: listed.id, kind: 'own_army', q: listed.pos.q, r: listed.pos.r, name: '己方军队' };
-        return;
-      }
-    }
-    const foreignMarker = hit?.closest?.('[data-move-id]') as Element | null;
-    if (foreignMarker) {
-      const movementId = foreignMarker.getAttribute('data-move-id');
-      const listed = (foreignMoves.value?.movements ?? []).find((m) => m.id === movementId);
-      if (listed?.pos) {
-        selected.value = { refId: listed.id, kind: 'enemy_army', q: listed.pos.q, r: listed.pos.r, name: foreignArmyName(listed) };
-        return;
-      }
-    }
+    const incomingMarker = hit?.closest?.('.incoming-march-mk[data-move-id]') as Element | null;
+    const foreignMarker = !incomingMarker ? hit?.closest?.('[data-move-id]') as Element | null : null;
+    const clickedId = ownMarker?.getAttribute('data-own-move-id')
+      ?? incomingMarker?.getAttribute('data-move-id')
+      ?? foreignMarker?.getAttribute('data-move-id');
+    const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+    const foreignList: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+    const incomingList: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []);
+    const clickedOwn = clickedId ? ownMoves.find((m) => m.id === clickedId) : undefined;
+    const clickedForeign = clickedId ? foreignList.find((m) => m.id === clickedId) : undefined;
+    const clickedIncoming = clickedId ? incomingList.find((m) => m.id === clickedId) : undefined;
+    const clickedMovement = clickedOwn ?? clickedForeign ?? clickedIncoming;
     let cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) {
-      // 可能点在外军标记层之上：暂时隐藏后回落到底层格
-      const foreignLayer = foreignEl.current;
-      if (foreignLayer) {
-        foreignLayer.style.pointerEvents = 'none';
-        foreignLayer.style.visibility = 'hidden';
-        cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
-        foreignLayer.style.pointerEvents = '';
-        foreignLayer.style.visibility = '';
-      }
+      // 标记层覆盖在村庄/地块之上时，先临时隐藏所有移动层，再读取底层格；
+      // 这样商队刚出发也不会挡住城镇点击。
+      const layers = [markerEl.current, foreignEl.current].filter(Boolean) as SVGGElement[];
+      layers.forEach((layer) => { layer.style.pointerEvents = 'none'; layer.style.visibility = 'hidden'; });
+      cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
+      layers.forEach((layer) => { layer.style.pointerEvents = ''; layer.style.visibility = ''; });
     }
-    if (!cell) return;
-    const q = Number(cell.getAttribute('data-tq'));
-    const r = Number(cell.getAttribute('data-tr'));
-    const kind = cell.getAttribute('data-kind') ?? 'empty';
-    const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
-    const name = cell.getAttribute('data-name') ?? '空地';
-    const icon = cell.getAttribute('data-icon') ?? undefined;
+    const frameNow = Date.now();
+    const displayed = clickedMovement ? displayGridForMovement(clickedMovement, frameNow) : null;
+    const q = displayed?.q ?? Number(cell?.getAttribute('data-tq'));
+    const r = displayed?.r ?? Number(cell?.getAttribute('data-tr'));
+    if (!Number.isFinite(q) || !Number.isFinite(r)) return;
+    const cellAtClick = cell && Number(cell.getAttribute('data-tq')) === q && Number(cell.getAttribute('data-tr')) === r ? cell : null;
+    const kind = cellAtClick?.getAttribute('data-kind') ?? tileAt(q, r)?.kind ?? 'empty';
+    const refId = cellAtClick?.getAttribute('data-ref') ?? tileAt(q, r)?.refId ?? `empty-${q},${r}`;
+    const name = cellAtClick?.getAttribute('data-name') ?? tileAt(q, r)?.name ?? '空地';
+    const icon = cellAtClick?.getAttribute('data-icon') ?? tileAt(q, r)?.icon ?? undefined;
     const relation = kind === 'village'
-      ? normalizeMapVillageRelation(cell.getAttribute('data-relation'))
+      ? normalizeMapVillageRelation(cellAtClick?.getAttribute('data-relation') ?? tileAt(q, r)?.relation)
       : undefined;
-    const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
+    const visibility = (cellAtClick?.getAttribute('data-visibility') ?? tileAt(q, r)?.visibility) as 'unexplored' | 'explored' | 'visible' | null;
     const tile = tileAt(q, r);
     const taskCamp = findTaskCampMarker(refId, q, r);
-    selected.value = {
+    const baseTarget = {
       refId, kind, q, r, name,
       ...(icon ? { icon } : {}),
       ...(relation ? { relation } : {}),
@@ -1182,6 +1176,32 @@ export function HexMap() {
       ...(kind === 'village' && typeof tile?.mainBaseName === 'string' ? { mainBaseName: tile.mainBaseName } : {}),
       ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
     };
+    const ownAt = ownMoves.filter((m) => {
+      const grid = displayGridForMovement(m, frameNow);
+      return grid?.q === q && grid?.r === r;
+    });
+    const foreignAt = foreignList.filter((m) => {
+      const grid = displayGridForMovement(m, frameNow);
+      return grid?.q === q && grid?.r === r;
+    });
+    const incomingAt = incomingList.filter((m) => {
+      const grid = displayGridForMovement(m, frameNow);
+      return grid?.q === q && grid?.r === r;
+    });
+    const targetForOwn = (m: any): SelectedTarget => ({ refId: m.id, kind: 'own_army', q, r, name: m.caravan ? `商队 → ${m.caravan.destinationVillageName}` : '己方军队' });
+    const targetForForeign = (m: ForeignArmy): SelectedTarget => ({ refId: m.id, kind: 'enemy_army', q, r, name: foreignArmyName(m) });
+    const targetForIncoming = (m: any): SelectedTarget => ({ refId: m.id, kind: 'incoming_warning', q, r, name: '来袭军队' });
+    const targets: SelectedTarget[] = [];
+    const pushUnique = (target: SelectedTarget) => { if (!targets.some((entry) => entry.kind === target.kind && entry.refId === target.refId)) targets.push(target); };
+    if (clickedOwn) pushUnique(targetForOwn(clickedOwn));
+    if (clickedForeign) pushUnique(targetForForeign(clickedForeign));
+    if (clickedIncoming) pushUnique(targetForIncoming(clickedIncoming));
+    pushUnique(baseTarget);
+    ownAt.forEach((m) => pushUnique(targetForOwn(m)));
+    foreignAt.forEach((m) => pushUnique(targetForForeign(m)));
+    incomingAt.forEach((m) => pushUnique(targetForIncoming(m)));
+    const active = (clickedOwn ? targetForOwn(clickedOwn) : clickedForeign ? targetForForeign(clickedForeign) : clickedIncoming ? targetForIncoming(clickedIncoming) : baseTarget);
+    selected.value = targets.length > 1 ? { ...active, stackedTargets: targets } : active;
     // 己方村庄先进入观察态；只有目标卡的明确确认按钮才会切换操作上下文。
   }
 

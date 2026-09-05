@@ -25,7 +25,7 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
-import { caravanAction, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
+import { caravanAction, displayGridForMovement, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
@@ -349,6 +349,24 @@ describe('地图定位', () => {
     const warning = normalizeIncomingWarningForRender({ id: 'm8-incoming', type: 'attack', stepIndex: 0 });
     assert.equal(warning.type, 'incoming_warning');
     assert.equal(warning.status, 'marching');
+  });
+
+  it('移动图标跨过六边形边界后按下一格选择', () => {
+    const movement = {
+      pos: { q: 1, r: 1 },
+      path: [{ q: 1, r: 1 }, { q: 2, r: 1 }],
+      stepIndex: 0,
+      status: 'marching',
+      perStepMs: 1_000,
+      nextStepAt: 2_000,
+    };
+    assert.deepEqual(displayGridForMovement(movement, 1_499), { q: 1, r: 1 });
+    assert.deepEqual(displayGridForMovement(movement, 1_500), { q: 2, r: 1 });
+  });
+
+  it('同格目标选择器切回村庄时不被坐标兜底重新抢成军队', () => {
+    const own = [{ id: 'army-1', pos: { q: 3, r: 3 } }] as any;
+    assert.equal(selectedMapMovement({ kind: 'village', refId: 'village-1', q: 3, r: 3, stackedTargets: [{}] }, own, []), null);
   });
 
   it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {

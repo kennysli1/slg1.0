@@ -126,6 +126,8 @@ export interface IncomingIntelligence {
 export interface IncomingWarning {
   id: string;
   type: 'raid' | 'attack';
+  /** 商队劫掠预警：仍按掠夺类型展示，但不提供侦察来袭军队按钮。 */
+  caravanRaid?: boolean;
   battleType?: 'raid' | 'siege';
   targetVillage: string;
   targetVillageName: string;
