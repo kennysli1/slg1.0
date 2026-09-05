@@ -152,6 +152,69 @@ test('科研：总人口（含士兵）提高判定成功因子并缩短间隔',
   assert.equal(highInterval, Math.round(app.config.academy[1].checkIntervalSec / 1.25), '人口因子应按含士兵总人口计算');
 });
 
+test('科研状态下发基础公式、当前概率与加成来源明细', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '科研公式明细', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId as string;
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [],
+    allianceTechProbabilityBonus: 0.05,
+    academy: { failStreak: 2, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+  const state = await send(app, 'research.GetState', { villageId: va });
+  assert.equal(state.ok, true);
+  const formula = (state.payload as any).rpFormula;
+  assert.equal(formula.baseIntervalSec, app.config.academy[1].checkIntervalSec);
+  assert.equal(formula.baseProbability, app.config.academy[1].baseProbability);
+  assert.equal(formula.probabilityGainPerFail, app.config.academy[1].probabilityGainPerFail);
+  assert.ok(formula.currentProbability > formula.baseProbability, '连续失败与联盟加成应体现在当前概率');
+  assert.ok(formula.intervalSources.some((x: any) => x.source === 'academy.base'));
+  assert.ok(formula.probabilitySources.some((x: any) => x.source === 'academy.fail_streak'));
+  assert.ok(formula.probabilitySources.some((x: any) => x.source === 'alliance.tech_probability'));
+  assert.ok(formula.probabilitySources.every((x: any) => 'durationLabel' in x), '每个来源应有持续时间说明');
+});
+
+test('科研判定的人口查询变慢时不阻塞下一次计划任务，且按计划时间记账', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '科研判定调度', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId as string;
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [], treasureTechIntervalMult: 1,
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+  const changed = await send(app, 'research.SetTreasureTechInterval', { villageId: va, mult: 0.9 });
+  assert.equal(changed.ok, true);
+  const scheduled = await send(app, 'research.GetState', { villageId: va });
+  const scheduledPayload = scheduled.payload as any;
+
+  const originalSend = app.commands.send.bind(app.commands);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const oldSend = app.commands.send;
+  app.commands.send = (async (command: any) => {
+    if (command.name === 'population.GetSnapshot') await gate;
+    return originalSend(command);
+  }) as typeof app.commands.send;
+  try {
+    const dueAt = Number(scheduledPayload.academy.lastCheckTime) + Math.round(
+      Number(scheduledPayload.rpFormula.baseIntervalSec) * 1000
+      * 0.9 / Number(scheduledPayload.rpFormula.populationMultiplier ?? 1),
+    );
+    await app.scheduler.advanceTo(dueAt, (t) => { clock = t; });
+    assert.ok(app.scheduler.pending >= 1, '慢查询期间下一次计划任务仍应已登记');
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const state = await send(app, 'research.GetState', { villageId: va });
+    assert.equal((state.payload as any).academy.lastCheckTime, dueAt, '判定时间应使用计划时刻而非异步完成时刻');
+  } finally {
+    release();
+    app.commands.send = oldSend;
+  }
+});
+
 // ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────
 test('研究：注册时初始 RP=0（不回溯赠送）', async () => {
   const app = freshApp();

@@ -91,15 +91,15 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
 
   const academy = state?.academy ?? {};
   const count: number = academy.academyCount ?? 0;
-  const highest: number = academy.highestLevel ?? 0;
   const failStreak: number = academy.failStreak ?? 0;
   const intervalSec: number = state?.intervalSec ?? 0;
   const lastCheck: number = academy.lastCheckTime ?? Date.now();
-
-  // 概率随连续失败递增（保底机制），公式与服务端一致
-  const baseProb = 0.10 + Math.max(0, highest - 1) * 0.01;
-  const maxProb = 0.30 + Math.max(0, highest - 1) * 0.02;
-  const curProb = count > 0 ? Math.min(maxProb, baseProb + failStreak * 0.02) : 0;
+  const formula = state?.rpFormula ?? {};
+  // 判定公式由服务端下发，页面不再按学院等级硬编码概率，避免配置中心改值后显示错误。
+  const baseProb = Number(formula.baseProbability ?? 0);
+  const maxProb = Number(formula.maxProbability ?? 0);
+  const curProb = Number(formula.currentProbability ?? 0);
+  const baseIntervalSec = Number(formula.baseIntervalSec ?? 0);
 
   async function cancel() {
     await act(req('CancelResearch', {}), { okToast: '已取消研发，按剩余进度的 90% 返还科研点' });
@@ -120,10 +120,12 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
               <span class="num">{(curProb * 100).toFixed(1)}%</span>
             </div>
             <Bar pct={(curProb / Math.max(0.01, maxProb)) * 100} kind="steel" thin />
-            <div class="rp-prob-foot">连续失败 {failStreak} 次 · 上限 {(maxProb * 100).toFixed(0)}%</div>
+            <div class="rp-prob-foot">基础 {(baseProb * 100).toFixed(1)}% · 连续失败 {failStreak} 次 · 上限 {(maxProb * 100).toFixed(1)}%</div>
           </div>
         )}
       </div>
+
+      {count > 0 && <ResearchFormula formula={formula} baseIntervalSec={baseIntervalSec} intervalSec={intervalSec} />}
 
       {researching && (
         <div class="rp-researching">
@@ -148,6 +150,34 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
         </div>
       )}
     </Panel>
+  );
+}
+
+function ResearchFormula({ formula, baseIntervalSec, intervalSec }: { formula: any; baseIntervalSec: number; intervalSec: number }) {
+  const intervalSources = Array.isArray(formula?.intervalSources) ? formula.intervalSources : [];
+  const probabilitySources = Array.isArray(formula?.probabilitySources) ? formula.probabilitySources : [];
+  if (!intervalSources.length && !probabilitySources.length) return null;
+  const sourceRows = (items: any[]) => items.map((item: any) => (
+    <div class="rp-source-row" key={`${item.source}-${item.label}`}>
+      <span>{item.label}</span><b>{item.displayValue}</b><small>{item.durationLabel ?? '持续生效'}</small>
+    </div>
+  ));
+  return (
+    <details class="rp-formula" open>
+      <summary>判定公式与加成明细</summary>
+      <div class="rp-formula-grid">
+        <div>
+          <h4>判定间隔</h4>
+          <p class="rp-formula-total">基础 {fmtDur(baseIntervalSec * 1000)} → 当前 {fmtDur(intervalSec * 1000)}</p>
+          {sourceRows(intervalSources)}
+        </div>
+        <div>
+          <h4>成功概率</h4>
+          <p class="rp-formula-total">当前 {((Number(formula.currentProbability) || 0) * 100).toFixed(1)}% · 上限 {((Number(formula.maxProbability) || 0) * 100).toFixed(1)}%</p>
+          {sourceRows(probabilitySources)}
+        </div>
+      </div>
+    </details>
   );
 }
 
