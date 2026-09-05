@@ -6,7 +6,19 @@ export interface Hex {
 
 export type MovementType =
   | 'raid' | 'attack' | 'return' | 'found'
-  | 'transport' | 'caravan' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'incoming_scout' | 'ambush' | 'investigate';
+  | 'transport' | 'caravan' | 'caravan_raid' | 'caravan_escort' | 'garrison' | 'explore' | 'auto_explore' | 'scout' | 'incoming_scout' | 'ambush' | 'investigate';
+
+/** 商队公开信息；不包含货物数量、王国保护或护送兵力。权限按查看者计算。 */
+export interface CaravanInfo {
+  originVillageId: string;
+  originVillageName: string;
+  destinationVillageId: string;
+  destinationVillageName: string;
+  destination: Hex;
+  phase: 'delivery' | 'return';
+  canRaid: boolean;
+  canEscort: boolean;
+}
 
 export type MovementStatus = 'marching' | 'paused' | 'stationed' | 'stopped';
 export type MovementDir = 'in' | 'out';
@@ -42,6 +54,9 @@ export interface Movement {
   reinforcementUntil?: number;
   /** 途中侦察锁定的来袭行军 id；仅己方视图下发。 */
   targetMovementId?: string;
+  caravan?: CaravanInfo;
+  escortCaravanId?: string;
+  escortAttached?: boolean;
   scoutType?: 'scout_resources' | 'scout_buildings';
   /** 玩家村战斗模式：掠夺或攻城。 */
   battleType?: 'raid' | 'siege' | 'ambush';
@@ -72,9 +87,10 @@ export interface Movement {
   recallForfeits?: boolean;
 }
 
-/** 他国视图：ListForeign 下发。绝不含 path / to / arriveAt / troops / cargo / loot / treasures。 */
+/** 他国视图：不含路径、兵力或携带物；仅商队通过 caravan 公开目的地。 */
 export interface ForeignArmy {
   id: string;
+  caravan?: CaravanInfo;
   type: MovementType;
   status: MovementStatus;
   ownerPlayerId?: string;

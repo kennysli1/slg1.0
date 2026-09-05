@@ -27,16 +27,16 @@ function troopMapText(value: unknown): string {
 /** 战报语义分类：驱动列表的图标、色带与筛选。类型定义在 app/state 以守住依赖方向。 */
 export type { ReportKind };
 
-/** 报告页只展示可复盘的战斗结算与侦察情报。 */
+/** 报告页展示战斗、侦察与商队劫掠结算。 */
 export function isReportEvent(event: string): boolean {
-  return event === 'BattleEnded' || event === 'ScoutReport';
+  return event === 'BattleEnded' || event === 'ScoutReport' || event === 'CaravanRaidReport';
 }
 
 export function notificationKind(event: string, payload?: any): ReportKind {
   if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingRepaired' || event === 'BuildingDemolished' || event === 'BuildingDemolishing') return 'build';
   if (event === 'BuildingBattleDamaged') return 'battle';
   if (event === 'TroopTrained') return 'train';
-  if (event === 'BattleStarted' || event === 'BattleEnded' || event === 'MarchIntercepted' || event === 'ScoutReport') return 'battle';
+  if (event === 'BattleStarted' || event === 'BattleEnded' || event === 'MarchIntercepted' || event === 'ScoutReport' || event === 'CaravanRaidReport') return 'battle';
   if (event === 'MarchSent' || event === 'MarchReturned' || event === 'MarchRecalled' || event === 'VillageFounded') return 'march';
   if (event === 'IncomingAttack' || event === 'CropDeficit') return 'alarm';
   if (event.startsWith('Treasure')) return 'treasure';
@@ -48,7 +48,17 @@ export function notificationKind(event: string, payload?: any): ReportKind {
 
 export function notificationText(event: string, payload: any, ts?: number): string | null {
   const time = ts ? `[${new Date(ts).toLocaleTimeString()}] ` : '';
-  if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingRepaired') {
+  if (event === 'CaravanRaidReport') {
+    const resources = (cargo: Record<string, number> | undefined) => Object.entries(cargo ?? {})
+      .filter(([, amount]) => Number(amount) > 0)
+      .map(([key, amount]) => `${key === 'gold' ? '金币' : resInfo(key).name} ${fmt(amount)}`).join('、') || '无';
+    const route = `从「${payload.originVillageName}」前往「${payload.destinationVillageName}」的商队`;
+    const result = payload.outcome === 'empty_return' ? '货物被抢光，商队立即原路返回'
+      : payload.outcome === 'partial_delivery' ? `剩余货物：${resources(payload.remaining)}，商队继续送往目的地`
+        : payload.outcome === 'empty' ? '商队正空载返程，没有可劫掠的货物，未发生损失'
+          : '护卫击退了劫掠军，商队货物未被抢走';
+    return `${time}${payload.side === 'attacker' ? '劫掠' : '遭到劫掠：'}${route}｜${payload.side === 'attacker' ? '获得物资' : '被抢物资'}：${resources(payload.loot)}｜${result}`;
+  } else if (event === 'BuildingBuilt' || event === 'BuildingUpgraded' || event === 'BuildingRepaired') {
     const name = fieldInfo(payload.kind).name ?? buildingInfo(payload.kind).name ?? payload.kind;
     const verb = event === 'BuildingBuilt' ? '建造完成' : event === 'BuildingRepaired' ? '修复完成' : '升级完成';
     return `${time}${verb}：${name} → ${payload.level}级`;

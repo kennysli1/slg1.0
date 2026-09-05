@@ -32,6 +32,7 @@ interface VillageNotifications {
 export const EVENT_MAP: Record<string, string> = {
   'combat.BattleEnded':       'BattleEnded',
   'movement.ScoutReport':     'ScoutReport',
+  'movement.CaravanRaidReport': 'CaravanRaidReport',
 };
 
 const REPORT_EVENTS = new Set(Object.values(EVENT_MAP));

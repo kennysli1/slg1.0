@@ -14,7 +14,7 @@ import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
-import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
+import { foreignArmyAt, foreignArmyName, escortMarkerOffset } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.8;
@@ -90,7 +90,7 @@ export function mapEntityRingKind(kind: string, isSelf: boolean, relation?: unkn
  * attack/raid 返程后会被服务端改写为 return，因此不会继续显示红色。
  */
 export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' | 'neutral' {
-  return (type === 'attack' || type === 'raid')
+  return (type === 'attack' || type === 'raid' || type === 'caravan_raid')
     && (status === 'marching' || status === 'paused')
     ? 'threat'
     : 'neutral';
@@ -98,6 +98,11 @@ export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' 
 
 export function normalizeMapVillageRelation(value: unknown): MapVillageRelation {
   return value === 'allied' || value === 'hostile' ? value : 'neutral';
+}
+
+/** 商队统一用运输车徽记；是否有王国或玩家护卫不改变外观。 */
+function CaravanMarkerArt() {
+  return <g class="march-caravan-art" aria-hidden="true"><path d="M-12-15h18v11h-18zM6-11h5l4 7H6M-8-15v-4H1v4" /><circle cx="-7" cy="-2" r="2.5" /><circle cx="10" cy="-2" r="2.5" /></g>;
 }
 
 function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
@@ -755,6 +760,8 @@ export function HexMap() {
         : m.type === 'transport' ? 'transport'
         : m.type === 'found'     ? 'found'
         : m.type === 'caravan'   ? 'caravan'
+        : m.type === 'caravan_raid' ? 'raid'
+        : m.type === 'caravan_escort' ? 'transport'
         : m.type === 'garrison'  ? 'garrison'
         : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
@@ -792,13 +799,14 @@ export function HexMap() {
           id={`march-mk-${i}`}
           data-own-move-id={m.id}
           class="own-march-mk"
-          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
+          transform={`translate(${(p.x + escortMarkerOffset(m)).toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>{m.type ?? 'return'} · {m.status === 'stationed' ? '驻扎中' : '行军中'}</title>
+          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : `${m.type === 'caravan_escort' ? (m.escortAttached ? '护送商队中' : '追赶商队中') : m.type ?? 'return'} · ${m.status === 'stationed' ? '驻扎中' : '行军中'}`}</title>
+          <circle class="march-marker-hit" cx="-2" cy="-9" r="15" />
           {/* 圆底对齐战旗的视觉重心，而不是把旗杆脚点放在圆心。 */}
           <circle class="march-marker-base march-marker-base--own" cx="-2" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--own" cx="-2" cy="-9" r="9.2" />
-          <image
+          {m.caravan ? <CaravanMarkerArt /> : <image
             class={`march-marker-art march-marker-art--${t}`}
             href={artPath('map_marker_own')}
             x={-16}
@@ -806,7 +814,7 @@ export function HexMap() {
             width={32}
             height={42}
             preserveAspectRatio="xMidYMid meet"
-          />
+          />}
         </g>,
       );
     });
@@ -881,10 +889,11 @@ export function HexMap() {
           class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>敌方军队 · {m.type ?? 'return'}</title>
+          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : `外军 · ${m.type ?? 'return'}`}</title>
+          <circle class="march-marker-hit" cx="-3" cy="-9" r="15" />
           <circle class={`march-marker-base march-marker-base--foreign march-marker-base--foreign-${tone}`} cx="-3" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--foreign" cx="-3" cy="-9" r="9.2" />
-          <image
+          {m.caravan ? <CaravanMarkerArt /> : <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
             x={-16}
@@ -892,7 +901,7 @@ export function HexMap() {
             width={32}
             height={42}
             preserveAspectRatio="xMidYMid meet"
-          />
+          />}
           {arrowEl}
         </g>,
       );
@@ -1088,7 +1097,7 @@ export function HexMap() {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y);
       });
       const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
         .map((warning: any) => normalizeIncomingWarningForRender(warning));
@@ -1123,6 +1132,15 @@ export function HexMap() {
         : undefined;
       if (listed?.pos) {
         selected.value = { refId: listed.id, kind: 'own_army', q: listed.pos.q, r: listed.pos.r, name: '己方军队' };
+        return;
+      }
+    }
+    const foreignMarker = hit?.closest?.('[data-move-id]') as Element | null;
+    if (foreignMarker) {
+      const movementId = foreignMarker.getAttribute('data-move-id');
+      const listed = (foreignMoves.value?.movements ?? []).find((m) => m.id === movementId);
+      if (listed?.pos) {
+        selected.value = { refId: listed.id, kind: 'enemy_army', q: listed.pos.q, r: listed.pos.r, name: foreignArmyName(listed) };
         return;
       }
     }

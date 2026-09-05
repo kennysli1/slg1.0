@@ -536,13 +536,15 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 | 列 | 含义 |
 |----|------|
 | id / code / name | 数字主键、稳定代码与显示名 |
-| category | `reinforcement` 增援 / `attack` 代打 / `supplies` 物资 / `treasure` 宝物 |
+| category | `reinforcement` 增援 / `attack` 代打 / `supplies` 物资 / `treasure` 宝物 / `escort` 商队护卫 |
 | minCouncilLevel / reputationCost | 最低议会厅等级 / 声望价格 |
-| unitCode / unitCount | 增援或代打使用的 `units.csv` 兵种代码与数量 |
+| unitCode / unitCount | 增援、代打或商队护卫使用的 `units.csv` 兵种代码与数量；护卫数量必须为正整数 |
 | wood/clay/iron/crop/gold | 物资服务发放量 |
 | treasureCode | 宝物服务发放的 `treasures.csv` 代码 |
 | delaySec | 代打服务购买后出发延迟；即时服务填 0 |
 | desc | 玩家可见说明 |
+
+商队护卫默认条目为 `caravan_guard`（1 级议会厅、3 声望、100 军团兵）。配置中心“平衡参数与常量 → 议会厅王国服务”可编辑等级、声望成本与兵力数量。护卫购买后立即保护所选当前村庄相关的送货商队，送达或提前返程后解除；不保护返程，不重复购买，不占玩家驻军人口。价格也出现在“声望参数”中。部署只补充缺失条目，不覆盖配置中心现有单元格。
 
 ## alliance_levels.csv — 联盟等级与成员容量
 

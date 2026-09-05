@@ -396,6 +396,13 @@ export function handlePush(event: string, payload: any, ts?: number): void {
     void refreshMovements();
     return;
   }
+  if (event === 'CaravanRaidReport') {
+    void refreshMovements();
+    scheduleForeignRefresh(0);
+    void reloadTrade();
+    void reloadKingdom();
+    return;
+  }
 
   // 人口变化很频繁：只校正快照，绝不触发 refreshAll，
   // 否则会形成 push → refresh → settle → emit 的正反馈死循环。

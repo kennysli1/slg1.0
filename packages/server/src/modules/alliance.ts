@@ -220,6 +220,7 @@ export class AllianceModule {
     this.bus.on('movement.Recalled', (evt) => void this.onWarMovementRecalled(evt));
     this.bus.on('movement.GarrisonRecalled', (evt) => void this.onWarMovementRecalled(evt));
     this.bus.on('movement.ReinforcementArrived', (evt) => void this.onServiceReinforcementArrived(evt));
+    this.bus.on('movement.CaravanDeliveryAborted', (evt) => this.onCaravanDeliveryAborted(evt));
     this.bus.on('reputation.Changed', (evt) => {
       const playerId = String((evt.payload as any)?.playerId ?? '');
       if (playerId) void this.syncAllianceByMember(playerId);
@@ -777,20 +778,42 @@ export class AllianceModule {
       return { ok: false, payload: {}, reason: 'alliance_disconnected' };
     }
     const received = cloneResources(cargo);
-    if (RESOURCE_KEYS.some((k) => received[k] !== pending.amount[k])) {
+    if (RESOURCE_KEYS.some((k) => received[k] > pending.amount[k])) {
       delete a.pendingResourceDeliveries![String(movementId)];
       this.store.set(COLLECTION, a.id, a);
       await this.push(a);
       return { ok: false, payload: {}, reason: 'alliance_delivery_mismatch' };
     }
-    a.warehouse = addResources(a.warehouse, pending.amount);
-    a.resourceContributions[pending.playerId] = addResources(a.resourceContributions[pending.playerId] ?? zeroResources(), pending.amount);
+    a.warehouse = addResources(a.warehouse, received);
+    a.resourceContributions[pending.playerId] = addResources(a.resourceContributions[pending.playerId] ?? zeroResources(), received);
     delete a.pendingResourceDeliveries![String(movementId)];
     this.store.set(COLLECTION, a.id, a);
     await this.maybeStartBuilding(a);
     await this.syncAllModifiers(a);
     await this.push(a);
-    return { ok: true, payload: { warehouse: a.warehouse, delivered: pending.amount } };
+    return { ok: true, payload: { warehouse: a.warehouse, delivered: received } };
+  }
+
+  /** 被抢空或目的地失联而提前返航的商队，不再保留联盟待收货记录。 */
+  private async onCaravanDeliveryAborted(evt: DomainEvent): Promise<void> {
+    const { movementId, allianceId } = evt.payload as { movementId?: string; allianceId?: string };
+    if (!movementId || !allianceId) return;
+    const a = this.load(allianceId);
+    if (!a) return;
+    let changed = false;
+    if (a.pendingResourceDeliveries?.[movementId]) {
+      delete a.pendingResourceDeliveries[movementId];
+      changed = true;
+    }
+    for (const order of a.serviceOrders ?? []) {
+      if (order.movementId !== movementId || order.status !== 'pending') continue;
+      order.status = 'failed';
+      order.failureReason = 'caravan_delivery_aborted';
+      changed = true;
+    }
+    if (!changed) return;
+    this.store.set(COLLECTION, a.id, a);
+    await this.push(a);
   }
 
   /**
@@ -839,7 +862,7 @@ export class AllianceModule {
     }
     const received = cloneResources(cargo);
     const service = this.config.allianceServices[order.serviceCode];
-    if (!service || RESOURCE_KEYS.some((key) => received[key] !== service.resources[key])) {
+    if (!service || RESOURCE_KEYS.some((key) => received[key] > service.resources[key])) {
       order.status = 'failed'; order.failureReason = 'alliance_service_payload_mismatch';
       this.store.set(COLLECTION, a.id, a); await this.push(a);
       return { ok: false, payload: {}, reason: 'alliance_service_payload_mismatch' };

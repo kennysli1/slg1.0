@@ -768,7 +768,7 @@ export interface TradeCenterLevel {
   npcStoredRefreshes: number;
 }
 
-export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure';
+export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure' | 'escort';
 
 /** 议会厅可购买服务；所有价格、门槛、数量与延迟来自 kingdom_services.csv。 */
 export interface KingdomServiceDef {
@@ -2069,11 +2069,14 @@ export function validateGameConfig(config: GameConfig): void {
   const knownTribes = new Set(['romans', 'gauls', 'teutons']);
 
   for (const service of Object.values(config.kingdomServices)) {
-    if (!['reinforcement', 'attack', 'supplies', 'treasure'].includes(service.category)) {
+    if (!['reinforcement', 'attack', 'supplies', 'treasure', 'escort'].includes(service.category)) {
       errors.push(`kingdom_services.csv[${service.code}] category 非法：${service.category}`);
     }
-    if ((service.category === 'reinforcement' || service.category === 'attack') && (!service.unitCode || !config.units[service.unitCode])) {
+    if ((service.category === 'reinforcement' || service.category === 'attack' || service.category === 'escort') && (!service.unitCode || !config.units[service.unitCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 兵种 ${service.unitCode ?? '(空)'} 不在 units.csv`);
+    }
+    if (service.category === 'escort' && (!Number.isInteger(service.unitCount) || service.unitCount <= 0)) {
+      errors.push(`kingdom_services.csv[${service.code}] escort unitCount 必须为正整数`);
     }
     if (service.category === 'treasure' && (!service.treasureCode || !config.treasures[service.treasureCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 宝物 ${service.treasureCode ?? '(空)'} 不在 treasures.csv`);

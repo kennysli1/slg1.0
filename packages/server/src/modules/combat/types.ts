@@ -53,6 +53,10 @@ export interface BattleResolution {
   isTaskCamp?: boolean;
   isNoRespawn?: boolean;
   attackerReportIndex?: number;
+  /** 野战结算的来源游标，恢复后不重做已经完成的伤亡回收/战报步骤。 */
+  fieldCasualtyIndex?: number;
+  defenderReportIndex?: number;
+  caravanResultEmitted?: boolean;
 }
 
 export interface Battle {
@@ -69,6 +73,9 @@ export interface Battle {
   defenderContributions?: Record<string, DefenderContribution>;
   contributions: Record<string, Contribution>;
   defenderContribution?: Contribution;
+  /** 商队护送战按行军隔离守方快照；缺省继续使用旧单行军野战。 */
+  defenderFieldContributions?: Record<string, Contribution>;
+  caravanId?: string;
   /** Total-AD v2 每个快照条目的生命值余伤；旧字段保留只为平滑读旧档。 */
   attackerDamageCarry?: Record<string, number>;
   defenderDamageCarry?: Record<string, number>;
