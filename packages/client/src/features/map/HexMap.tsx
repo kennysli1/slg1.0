@@ -790,6 +790,7 @@ export function HexMap() {
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
+      const grid = displayGridForMovement(m, Date.now());
       const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
@@ -798,6 +799,7 @@ export function HexMap() {
           key={`mk-${i}`}
           id={`march-mk-${i}`}
           data-own-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="own-march-mk"
           transform={`translate(${(p.x + escortMarkerOffset(m)).toFixed(1)},${p.y.toFixed(1)})`}
         >
@@ -822,6 +824,7 @@ export function HexMap() {
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
+      const grid = displayGridForMovement(m, Date.now());
       const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
@@ -829,6 +832,7 @@ export function HexMap() {
           key={`incoming-mk-${m.id}`}
           id={`incoming-march-mk-${m.id}`}
           data-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="enemy-march-mk enemy-march-mk--attack incoming-march-mk"
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
@@ -857,6 +861,7 @@ export function HexMap() {
     const ref = viewRef();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
+      const grid = displayGridForMovement(m, Date.now());
       const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
@@ -887,6 +892,7 @@ export function HexMap() {
           key={`fmk-${m.id}`}
           id={`foreign-mk-${m.id}`}
           data-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
@@ -935,7 +941,13 @@ export function HexMap() {
   }
 
   // ─── rAF march animation ───────────────────────────────────────────────────
-  function setMarkerTransform(el: SVGGElement, x: number, y: number) {
+  function setMarkerTransform(el: SVGGElement, x: number, y: number, grid?: { q: number; r: number } | null) {
+    // 点击命中与图标渲染共用这一帧的离散格。这样图标跨过边界后，
+    // 同格目标选择和底层地块定位会立即切换到新格，而不是继续锁在旧格。
+    if (grid) {
+      el.dataset.displayQ = String(grid.q);
+      el.dataset.displayR = String(grid.r);
+    }
     const key = `${x.toFixed(1)},${y.toFixed(1)}`;
     if (el.dataset.pos === key) return;
     el.dataset.pos = key;
@@ -1098,7 +1110,7 @@ export function HexMap() {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y);
+        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
       const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
         .map((warning: any) => normalizeIncomingWarningForRender(warning));
@@ -1107,7 +1119,7 @@ export function HexMap() {
         const el = markerEl.current?.querySelector(`#incoming-march-mk-${m.id}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
       });
       // 外国军队：pos+heading 单段插值（无 path），读数来自 foreignMoves 信号。
       const foeArmies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
@@ -1116,7 +1128,7 @@ export function HexMap() {
         const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
         const px = foreignMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
       });
       rafRef.current = requestAnimationFrame(frame);
     };
@@ -1148,7 +1160,15 @@ export function HexMap() {
       layers.forEach((layer) => { layer.style.pointerEvents = ''; layer.style.visibility = ''; });
     }
     const frameNow = Date.now();
-    const displayed = clickedMovement ? displayGridForMovement(clickedMovement, frameNow) : null;
+    const markerGrid = clickedId
+      ? (() => {
+          const source = ownMarker ?? incomingMarker ?? foreignMarker;
+          const q = Number(source?.getAttribute('data-display-q'));
+          const r = Number(source?.getAttribute('data-display-r'));
+          return Number.isFinite(q) && Number.isFinite(r) ? { q, r } : null;
+        })()
+      : null;
+    const displayed = markerGrid ?? (clickedMovement ? displayGridForMovement(clickedMovement, frameNow) : null);
     const q = displayed?.q ?? Number(cell?.getAttribute('data-tq'));
     const r = displayed?.r ?? Number(cell?.getAttribute('data-tr'));
     if (!Number.isFinite(q) || !Number.isFinite(r)) return;
@@ -1188,8 +1208,8 @@ export function HexMap() {
       const grid = displayGridForMovement(m, frameNow);
       return grid?.q === q && grid?.r === r;
     });
-    const targetForOwn = (m: any): SelectedTarget => ({ refId: m.id, kind: 'own_army', q, r, name: m.caravan ? `商队 → ${m.caravan.destinationVillageName}` : '己方军队' });
-    const targetForForeign = (m: ForeignArmy): SelectedTarget => ({ refId: m.id, kind: 'enemy_army', q, r, name: foreignArmyName(m) });
+    const targetForOwn = (m: any): SelectedTarget => ({ refId: m.id, kind: m.caravan ? 'caravan' : 'own_army', q, r, name: m.caravan ? `商队 → ${m.caravan.destinationVillageName}` : '己方军队' });
+    const targetForForeign = (m: ForeignArmy): SelectedTarget => ({ refId: m.id, kind: m.caravan ? 'caravan' : 'enemy_army', q, r, name: foreignArmyName(m) });
     const targetForIncoming = (m: any): SelectedTarget => ({ refId: m.id, kind: 'incoming_warning', q, r, name: '来袭军队' });
     const targets: SelectedTarget[] = [];
     const pushUnique = (target: SelectedTarget) => { if (!targets.some((entry) => entry.kind === target.kind && entry.refId === target.refId)) targets.push(target); };

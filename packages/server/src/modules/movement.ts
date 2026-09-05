@@ -2611,6 +2611,12 @@ export class MovementModule {
     mv.caravanTiming = [...(this.timingCache.get(id)?.segmentMs ?? [])];
     this.save(mv);
     await this.checkCaravanMission(mv);
+    // 商队劫掠从创建瞬间就可能进入受害方视野。此前只在追兵
+    // 走完第一格后重算预警，导致受害玩家收不到初始来袭提示。
+    if (type === 'caravan_raid') {
+      const current = this.load(id);
+      if (current && current.status === 'marching') await this.syncIncomingWarningVisibility(current);
+    }
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id, type: mv.type, villageId, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - this.now()) / 1000) } };
   }
@@ -2618,6 +2624,9 @@ export class MovementModule {
   private caravanChasePath(from: Hex, caravan: MovementRecord): Hex[] {
     const paused = caravan.status === 'paused' || caravan.caravanSettlement || caravan.caravanBattleResult;
     if (paused && hexDistanceWrapped(from, caravan.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001) return [{ ...from }];
+    // 以商队当前已落地的离散格为锚点；商队每推进一格后，step() 会
+    // 立即重排追兵的后续最短路线。段内连续位置只用于相遇时刻和战斗切点，
+    // 避免把路线锚在尚未抵达的下一格。
     const anchor = this.caravanGrid(caravan.pos);
     const path = linePathWrapped(this.caravanGrid(from), anchor, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     if (hexDistance(from, path[0]) > 0.000001) path.unshift({ ...from });
@@ -2630,13 +2639,15 @@ export class MovementModule {
       }
       return path;
     }
-    const tail = caravan.path.slice(caravan.stepIndex + 1);
-    return [...path, ...tail];
+    return [...path, ...caravan.path.slice(caravan.stepIndex + 1)];
   }
 
   /** 两条当前线性路段的真正相交时刻，包含同向追上、迎面相遇和环面接缝。 */
   private caravanMeetDelay(a: MovementRecord, b: MovementRecord): number | undefined {
     const ap = this.caravanPosition(a), bp = this.caravanPosition(b);
+    // 追赶路线按离散格重排，但相遇仍按两条当前线性路段的连续位置
+    // 计算，避免仅因同格就提前结算；目标跨入下一格后旧回调会由
+    // 下方的 stepIndex/nextStepAt 校验作废。
     const separation = this.caravanDelta(ap, bp);
     if (hexDistance({ q: 0, r: 0 }, separation) < 0.000001) return 0;
     const velocity = (m: MovementRecord) => {
@@ -2693,10 +2704,18 @@ export class MovementModule {
     if (delay === undefined) return;
     if (delay === 0) { await this.catchCaravan(mv.id, target.id); return; }
     const token = mv.stepToken, targetToken = target.stepToken;
+    const expectedStepIndex = mv.stepIndex;
+    const expectedNextStepAt = mv.nextStepAt;
+    const expectedTargetStepIndex = target.stepIndex;
+    const expectedTargetNextStepAt = target.nextStepAt;
     this.scheduler.schedule(delay, async () => {
       const current = this.load(mv.id), caravan = this.load(target.id);
       if (!current || !caravan || current.stepToken !== token || caravan.stepToken !== targetToken) return;
-      // 令牌不变说明两条路段仍有效；ceil到毫秒后可能已交错，不能再要求精确重合。
+      // 商队和追兵每走一格都会重排后续路线，但普通步进不会递增
+      // stepToken。连同段索引/截止时间一起校验，令旧的相遇回调失效，
+      // 防止按上一条路线提前判定“追上”。
+      if (current.stepIndex !== expectedStepIndex || current.nextStepAt !== expectedNextStepAt
+        || caravan.stepIndex !== expectedTargetStepIndex || caravan.nextStepAt !== expectedTargetNextStepAt) return;
       await this.catchCaravan(current.id, caravan.id);
     }, `movement:${mv.id}`, `caravan-meet:${mv.id}`);
   }
