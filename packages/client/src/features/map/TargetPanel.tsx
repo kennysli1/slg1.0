@@ -963,6 +963,7 @@ function GarrisonWaitPanel({ movementType, onCancel }: { movementType?: 'garriso
 function StackedTargetChooser({ targets }: { targets: SelectedTarget[] }) {
   if (targets.length < 2) return null;
   const label = (target: SelectedTarget): string => {
+    if (target.kind === 'caravan') return target.name || '商队';
     if (target.kind === 'own_army') return target.name || '己方军队';
     if (target.kind === 'enemy_army') return target.name || '敌方军队';
     if (target.kind === 'incoming_warning') return '来袭军队';
@@ -980,7 +981,7 @@ function StackedTargetChooser({ targets }: { targets: SelectedTarget[] }) {
             aria-current={selected.value?.kind === target.kind && selected.value?.refId === target.refId ? 'true' : undefined}
             onClick={() => { selected.value = { ...target, stackedTargets: targets }; }}
           >
-            <span class="map-stacked-target-kind">{target.kind === 'own_army' || target.kind === 'enemy_army' || target.kind === 'incoming_warning' ? '行军' : '地块'}</span>
+            <span class="map-stacked-target-kind">{target.kind === 'caravan' ? '商队' : target.kind === 'own_army' || target.kind === 'enemy_army' || target.kind === 'incoming_warning' ? '行军' : '地块'}</span>
             <span>{label(target)}</span>
           </button>
         ))}
@@ -1055,7 +1056,7 @@ export function TargetPanel() {
     return wrap(<OwnArmyPanel move={own} onClose={clearSelection} />);
   }
 
-  const stationed = sel.stackedTargets?.length ? null : sel.kind === 'own_army' || sel.kind === 'enemy_army' ? null : ownStationedMoveAt(sel.q, sel.r);
+  const stationed = sel.stackedTargets?.length ? null : sel.kind === 'own_army' || sel.kind === 'enemy_army' || sel.kind === 'caravan' ? null : ownStationedMoveAt(sel.q, sel.r);
   if (stationed) {
     return wrap(<OwnStationedPanel move={stationed} onClose={clearSelection} />);
   }

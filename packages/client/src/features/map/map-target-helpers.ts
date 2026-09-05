@@ -53,11 +53,18 @@ export function selectedMapMovement(
   selection: { kind: string; refId: string; q: number; r: number; stackedTargets?: unknown[] },
   own: Movement[], foreign: ForeignArmy[],
 ): { kind: 'own_army'; movement: Movement } | { kind: 'enemy_army'; movement: ForeignArmy } | null {
-  const ownMove = selection.kind === 'own_army' ? own.find((m) => m.id === selection.refId) : undefined;
-  const foreignMove = selection.kind === 'enemy_army' ? foreign.find((m) => m.id === selection.refId) : undefined;
+  // 商队是移动记录而不是地块实体。目标选择器将其标记为 caravan，
+  // 但为了兼容 TargetPanel 既有的 own/enemy movement 分支，仍返回原来的
+  // army 外壳；关键是必须按 ID 锁定，不能回退到同格第一支军队。
+  const ownMove = selection.kind === 'own_army' || selection.kind === 'caravan'
+    ? own.find((m) => m.id === selection.refId)
+    : undefined;
+  const foreignMove = selection.kind === 'enemy_army' || selection.kind === 'caravan'
+    ? foreign.find((m) => m.id === selection.refId)
+    : undefined;
   if (ownMove) return { kind: 'own_army', movement: ownMove };
   if (foreignMove) return { kind: 'enemy_army', movement: foreignMove };
-  if (selection.kind === 'own_army' || selection.kind === 'enemy_army') return null;
+  if (selection.kind === 'own_army' || selection.kind === 'enemy_army' || selection.kind === 'caravan') return null;
   // 同格目标选择器中的村庄/营地是明确目标，不能再次被旧的“按坐标找军队”
   // 兜底逻辑抢走，否则用户无法从叠放列表切回底层地块。
   if (selection.stackedTargets?.length) return null;

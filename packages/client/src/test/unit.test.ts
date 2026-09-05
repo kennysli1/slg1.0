@@ -998,6 +998,11 @@ describe('商队地图交互', () => {
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'caravan', q: 5, r: 6 }, [escort], [caravan])?.movement.pos.q, 6);
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'departed', q: 5, r: 6 }, [escort], [caravan]), null);
   });
+  it('商队目标按 movement id 锁定，驻扎续行不会退回首次出兵分支', () => {
+    const caravan = { id: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '河畔镇' } } as any;
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'caravan', q: 5, r: 6 }, [], [caravan])?.movement.id, 'caravan');
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'departed', q: 5, r: 6 }, [], [caravan]), null);
+  });
 
   it('己方关联商队只护送，未获权限时不展示行动', () => {
     assert.equal(caravanAction({ canRaid: true, canEscort: true }), 'caravan_escort');
