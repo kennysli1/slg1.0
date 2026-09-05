@@ -253,6 +253,7 @@
 .march-path--transport{ stroke: var(--c-steel);      stroke-dasharray: 6 4; }
 .march-path--found    { stroke: var(--c-gold);       stroke-dasharray: 6 4; }
 .march-path--caravan  { stroke: var(--c-gold-dim); }
+.march-caravan-art { fill: var(--c-bg); stroke: var(--c-ink); stroke-width: 1.8; stroke-linejoin: round; }
 .march-path--garrison { stroke: var(--c-jade);      stroke-dasharray: 3 3; }
 .march-path--ambush   { stroke: var(--c-gold);      stroke-dasharray: 2 6; }
 .march-path--explore  { stroke: var(--c-steel);     stroke-dasharray: 2 5; }
@@ -345,6 +346,8 @@
 
 /* ---------- 外国军队标记（视野内其他玩家，脱敏，不可点自己的） ---------- */
 .enemy-march-mk { pointer-events: none; }
+.enemy-march-mk[data-move-id] { pointer-events: all; cursor: pointer; }
+.march-marker-hit { fill: transparent; pointer-events: all; }
 .enemy-march-ring {
   fill: rgba(192, 57, 43, 0.16);
   stroke: var(--c-crimson);
@@ -1084,6 +1087,8 @@
 }
 .march-item--attack .march-item-icon { background: var(--c-crimson-hi); }
 .march-item--raid .march-item-icon { background: var(--c-ember); }
+.march-item--caravan_raid .march-item-icon { background: var(--c-ember); }
+.march-item--caravan_escort .march-item-icon { background: var(--c-steel); }
 .march-item--transport .march-item-icon,
 .march-item--caravan .march-item-icon { background: var(--c-steel); }
 .march-item--found .march-item-icon { background: var(--c-gold); }

@@ -157,7 +157,8 @@ export class ReputationModule {
     if (!Number.isFinite(amount) || amount === 0) return { ok: false, payload: {}, reason: 'invalid_delta' };
     const state = this.ensure(playerId);
     const before = state.value;
-    const effectiveAmount = amount > 0 ? amount + (state.allianceBonus ?? 0) : amount;
+    const isRefund = reason === 'kingdom_service_refund';
+    const effectiveAmount = amount > 0 && !isRefund ? amount + (state.allianceBonus ?? 0) : amount;
     state.baseValue = Math.trunc((state.baseValue ?? before - (state.treasureDelta ?? 0)) + effectiveAmount);
     state.value = state.baseValue + (state.treasureDelta ?? 0);
     state.updatedAt = this.now();

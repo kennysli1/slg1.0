@@ -25,6 +25,7 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
+import { caravanAction, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
@@ -895,6 +896,7 @@ describe('notificationKind', () => {
   it('only admits battle settlements and scout intel to reports', () => {
     assert.equal(isReportEvent('BattleEnded'), true);
     assert.equal(isReportEvent('ScoutReport'), true);
+    assert.equal(isReportEvent('CaravanRaidReport'), true);
     assert.equal(isReportEvent('BuildingUpgraded'), false);
     assert.equal(isReportEvent('TroopTrained'), false);
   });
@@ -940,6 +942,55 @@ describe('notificationKind', () => {
 
   it('未知事件归 info（不抛错）', () => {
     assert.equal(notificationKind('SomethingBrandNew'), 'info');
+  });
+});
+
+describe('商队地图交互', () => {
+  it('移动标记可直接按 ID 点击，商队不受旧外军 pointer-events:none 阻挡', () => {
+    const source = readFileSync(new URL('../features/map/HexMap.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../styles/map.css', import.meta.url), 'utf8');
+    assert.match(source, /closest\?\.\('\[data-move-id\]'\)/);
+    assert.match(source, /class="march-marker-hit"/);
+    assert.match(css, /\.enemy-march-mk\[data-move-id\]\s*\{\s*pointer-events:\s*all/);
+  });
+  it('按点击 ID 选择同格商队和护送军，不被占格顺序替换', () => {
+    const escort = { id: 'escort', pos: { q: 5, r: 6 }, escortAttached: true } as any;
+    const caravan = { id: 'caravan', pos: { q: 5, r: 6 } } as any;
+    assert.equal(selectedMapMovement({ kind: 'own_army', refId: 'escort', q: 5, r: 6 }, [escort], [caravan])?.movement.id, 'escort');
+    assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'caravan', q: 5, r: 6 }, [escort], [caravan])?.movement.id, 'caravan');
+    caravan.pos = { q: 6, r: 6 };
+    assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'caravan', q: 5, r: 6 }, [escort], [caravan])?.movement.pos.q, 6);
+    assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'departed', q: 5, r: 6 }, [escort], [caravan]), null);
+  });
+
+  it('己方关联商队只护送，未获权限时不展示行动', () => {
+    assert.equal(caravanAction({ canRaid: true, canEscort: true }), 'caravan_escort');
+    assert.equal(caravanAction({ canRaid: true, canEscort: false }), 'caravan_raid');
+    assert.equal(caravanAction({ canRaid: false, canEscort: false }), null);
+    assert.equal(caravanAction(), null);
+  });
+
+  it('已附着护送军并列显示，商队公开名称带目的地', () => {
+    assert.ok(escortMarkerOffset({ escortAttached: true }) > 0);
+    assert.equal(escortMarkerOffset({ escortAttached: false }), 0);
+    assert.equal(foreignArmyName({ ownerPlayerName: '商人', caravan: { destinationVillageName: '河畔镇' } } as any), '商人 的商队 → 河畔镇');
+  });
+});
+
+describe('商队劫掠报告', () => {
+  const base = { originVillageName: '山城', destinationVillageName: '河畔镇', loot: { wood: 15, gold: 3 }, remaining: { wood: 4 } };
+  it('无战斗的部分劫掠可进入战报并说明剩余货物继续配送', () => {
+    assert.equal(isReportEvent('CaravanRaidReport'), true);
+    assert.equal(notificationKind('CaravanRaidReport'), 'battle');
+    const text = notificationText('CaravanRaidReport', { ...base, side: 'attacker', outcome: 'partial_delivery' })!;
+    assert.match(text, /前往「河畔镇」/);
+    assert.match(text, /金币 3/);
+    assert.match(text, /剩余货物.*4.*继续送往目的地/);
+  });
+  it('被抢光、空车和护卫获胜分别说明真实结果', () => {
+    assert.match(notificationText('CaravanRaidReport', { ...base, side: 'defender', outcome: 'empty_return' })!, /被抢物资.*立即原路返回/);
+    assert.match(notificationText('CaravanRaidReport', { ...base, loot: {}, side: 'attacker', outcome: 'empty' })!, /空载返程.*未发生损失/);
+    assert.match(notificationText('CaravanRaidReport', { ...base, loot: {}, side: 'defender', outcome: 'defeated' })!, /护卫击退.*未被抢走/);
   });
 });
 

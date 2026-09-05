@@ -473,6 +473,9 @@ export class KingdomModule {
       : { ok: true, payload: { level: 0 } } as CommandResult;
     const pves = await this.commands.send({ name: 'pve.ListTargets', from: KingdomModule.NAME, payload: {} });
     const landmarks = ((pves.payload as any)?.targets ?? []).filter((p: any) => LANDMARK_IDS.has(String(p.id)));
+    const caravans = villageId
+      ? await this.commands.send({ name: 'movement.ListEscortCaravans', from: KingdomModule.NAME, payload: { villageId } })
+      : { ok: true, payload: { caravans: [] } };
     return {
       ok: true,
       payload: {
@@ -482,6 +485,7 @@ export class KingdomModule {
         councilLevel: Number((levelResult.payload as any)?.level ?? 0),
         services: Object.values(this.config.kingdomServices).sort((a, b) => a.minCouncilLevel - b.minCouncilLevel || a.id - b.id),
         landmarks,
+        eligibleCaravans: caravans.ok ? ((caravans.payload as { caravans?: unknown[] }).caravans ?? []) : [],
       },
     };
   }
@@ -496,8 +500,8 @@ export class KingdomModule {
   }
 
   private async buyService(cmd: Command): Promise<CommandResult> {
-    const { playerId, villageId, serviceCode, targetKind, targetId } = cmd.payload as {
-      playerId: string; villageId: string; serviceCode: string; targetKind?: 'village' | 'pve'; targetId?: string;
+    const { playerId, villageId, serviceCode, targetKind, targetId, targetMovementId } = cmd.payload as {
+      playerId: string; villageId: string; serviceCode: string; targetKind?: 'village' | 'pve'; targetId?: string; targetMovementId?: string;
     };
     const state = await this.ensure(playerId);
     const service = this.config.kingdomServices[serviceCode];
@@ -506,6 +510,11 @@ export class KingdomModule {
     if (!level.ok || Number((level.payload as any)?.level ?? 0) < service.minCouncilLevel) return { ok: false, payload: {}, reason: 'council_level_too_low' };
     if (service.category === 'attack') {
       const valid = await this.validateAttackTarget(playerId, targetKind, targetId);
+      if (!valid.ok) return valid;
+    }
+    if (String(service.category) === 'escort') {
+      if (!service.unitCode || !this.config.units[service.unitCode] || service.unitCount <= 0) return { ok: false, payload: {}, reason: 'kingdom_service_invalid_troops' };
+      const valid = await this.commands.send({ name: 'movement.ValidateCaravanProtection', from: KingdomModule.NAME, payload: { villageId, targetMovementId } });
       if (!valid.ok) return valid;
     }
     const spent = await this.commands.send({ name: 'reputation.TrySpend', from: KingdomModule.NAME, payload: { playerId, amount: service.reputationCost, reason: `kingdom_service:${service.code}` } });
@@ -525,6 +534,11 @@ export class KingdomModule {
           durationSec: Number(this.config.constants.raw.kingdom_reinforcement_duration_sec) || 3600,
           orderId: `kr-${playerId}-${this.now()}`,
         },
+      });
+    } else if (String(service.category) === 'escort') {
+      result = await this.commands.send({
+        name: 'movement.ProtectCaravan', from: KingdomModule.NAME,
+        payload: { villageId, targetMovementId, troops: { [service.unitCode!]: service.unitCount } },
       });
     } else if (service.category === 'treasure') {
       result = await this.commands.send({ name: 'treasure.Grant', from: KingdomModule.NAME, payload: { villageId, code: service.treasureCode, pendingIfFull: true, rewardVillageId: villageId } });

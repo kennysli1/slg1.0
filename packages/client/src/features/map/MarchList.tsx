@@ -29,6 +29,8 @@ const MARCH_LABEL: Record<string, (inDir: boolean) => string> = {
   found:     (_) => '拓荒',
   transport: (_) => '运输',
   caravan:   (d) => d ? '商队抵达' : '商队出发',
+  caravan_raid: (_) => '劫掠商队',
+  caravan_escort: (_) => '护送商队',
   garrison:  (_) => '野外驻扎',
   explore:   (_) => '探索返程',
   auto_explore: (_) => '自动探索',
@@ -76,7 +78,11 @@ export function MarchList() {
 
         // 目标行文本
         let destText = '';
-        if (stationed) {
+        if (m.caravan) {
+          destText = `${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程中' : '送货中'}`;
+        } else if (m.escortAttached) {
+          destText = `随商队同行 → (${m.to?.q ?? '?'},${m.to?.r ?? '?'})`;
+        } else if (stationed) {
           destText = `驻扎于 (${m.pos?.q ?? '?'},${m.pos?.r ?? '?'})`;
         } else if (inDir) {
           const originHex = m.originalFrom ?? m.from;
@@ -156,7 +162,7 @@ export function MarchList() {
           <div key={`${m.id ?? type}-${i}`} class={`march-item march-item--${type}${inDir ? ' march-item--in' : ''}${paused ? ' march-item--paused' : ''}${stopped ? ' march-item--stopped' : ''}`}>
             <span class="march-item-icon" aria-hidden="true" />
             <div class="march-item-body">
-              <div class="march-item-kind">{displayLabel}{paused ? ' · 交战中' : stationed && !m.npcService ? ' · 等待命令' : stopped ? ' · 已停止' : ''}</div>
+              <div class="march-item-kind">{displayLabel}{paused ? ' · 交战中' : stationed && !m.npcService ? ' · 等待命令' : stopped ? (m.type === 'caravan_raid' || m.type === 'caravan_escort' ? ' · 等待商队战斗结束' : ' · 已停止') : ''}</div>
               <div class="march-item-dest">{destText}{troops ? ` · ${troops}` : ''}</div>
               {prog && (
                 <div class="march-item-progress" role="progressbar" aria-valuenow={Math.round(prog.ratio * 100)} aria-valuemin={0} aria-valuemax={100}>

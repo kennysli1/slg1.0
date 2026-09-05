@@ -11,5 +11,5 @@
  * 标记双向绑定——升了不写标记、写了标记不升，都会被拒绝提交。
  * 规矩全文见 docs/00_变更契约.md R6。
  */
-// v6：战场快照改为 attack/defense/hp，并以 rulesetVersion/carry 惰性迁移旧战场。
-export const SAVE_SCHEMA_VERSION = 6;
+// v7：商队追赶/护卫/分货恢复与多来源野战的可选字段；旧记录缺失即未启用，无需重置。
+export const SAVE_SCHEMA_VERSION = 7;

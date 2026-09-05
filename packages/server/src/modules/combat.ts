@@ -49,6 +49,17 @@ const log = makeLogger('combat');
 
 const COLLECTION = 'battle';
 
+interface FieldDefenderInput {
+  movementId: string;
+  fromVillage: string;
+  fromXY: { q: number; r: number };
+  originalFromXY?: { q: number; r: number };
+  troops: Record<string, number>;
+  attackerSnapshot: Snapshot;
+  treasures?: string[];
+  npcService?: boolean;
+}
+
 export class CombatModule {
   static readonly NAME = 'combat';
 
@@ -149,12 +160,12 @@ export class CombatModule {
     if (!movementId) return { ok: false, payload: {}, reason: 'movement_id_required' };
     const battle = this.store.all<Battle>(COLLECTION).find((b) => {
       if (b.status !== 'active' || b.targetKind !== 'field') return false;
-      return Boolean(b.contributions?.[movementId] || b.defenderContribution?.movementId === movementId);
+      return Boolean(b.contributions?.[movementId] || this.fieldDefenders(b).some((c) => c.movementId === movementId));
     });
     if (!battle) return { ok: true, payload: { battle: null } };
     const movementIds = [
       ...Object.keys(battle.contributions ?? {}),
-      ...(battle.defenderContribution?.movementId ? [battle.defenderContribution.movementId] : []),
+      ...this.fieldDefenders(battle).map((c) => c.movementId),
     ];
     return { ok: true, payload: { battle: { id: battle.id, movementIds: [...new Set(movementIds)] } } };
   }
@@ -166,7 +177,7 @@ export class CombatModule {
       ? this.store.get<Battle>(COLLECTION, battleId)
       : movementId
         ? this.store.all<Battle>(COLLECTION).find((b) => b.status === 'active' && b.targetKind === 'field'
-          && Boolean(b.contributions?.[movementId] || b.defenderContribution?.movementId === movementId))
+          && Boolean(b.contributions?.[movementId] || this.fieldDefenders(b).some((c) => c.movementId === movementId)))
         : undefined;
     if (!battle || battle.status !== 'active' || battle.targetKind !== 'field') {
       return { ok: true, payload: { cancelled: false } };
@@ -179,15 +190,21 @@ export class CombatModule {
     } as DomainEvent);
     const movementIds = [
       ...Object.keys(battle.contributions ?? {}),
-      ...(battle.defenderContribution?.movementId ? [battle.defenderContribution.movementId] : []),
+      ...this.fieldDefenders(battle).map((c) => c.movementId),
     ];
     return { ok: true, payload: { cancelled: true, battleId: battle.id, movementIds: [...new Set(movementIds)] } };
   }
 
   private canViewBattle(b: Battle, villageId: string): boolean {
     if (b.targetKind === 'village' && b.targetId === villageId) return true;
-    if (b.defenderContribution?.fromVillage === villageId) return true;
+    if (this.fieldDefenders(b).some((c) => !c.npcService && c.fromVillage === villageId)) return true;
     return Object.values(b.contributions).some((c) => c.fromVillage === villageId);
+  }
+
+  private fieldDefenders(b: Battle): Contribution[] {
+    return b.defenderFieldContributions
+      ? Object.values(b.defenderFieldContributions)
+      : b.defenderContribution ? [b.defenderContribution] : [];
   }
 
   /**
@@ -216,11 +233,9 @@ export class CombatModule {
       /** 该军队携带的宝物（军队携带宝物机制）。 */
       treasures?: string[];
       /** 野战时：防守方行军贡献信息（由 movement 模块提供）。 */
-      defenderField?: {
-        movementId: string; fromVillage: string; fromXY: { q: number; r: number };
-        originalFromXY?: { q: number; r: number };
-        troops: Record<string, number>; attackerSnapshot: Snapshot; treasures?: string[];
-      };
+      defenderField?: FieldDefenderInput;
+      defendersField?: FieldDefenderInput[];
+      caravanId?: string;
       npcService?: boolean;
       kingdomMercenary?: boolean;
       returnPveId?: string;
@@ -232,6 +247,8 @@ export class CombatModule {
     const battleKey = this.battleKey(p.targetKind, p.targetId);
     const existing = this.findActive(p.targetId, p.targetKind);
     if (existing) {
+      if (existing.caravanId !== p.caravanId) return { ok: false, payload: {}, reason: 'field_battle_context_mismatch' };
+      if (existing.contributions[contribId]) return { ok: true, payload: { battleId: existing.id, merged: true } };
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
         movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
@@ -267,12 +284,27 @@ export class CombatModule {
     }
     // 野战（field）：从 payload 直接取防守方，跳过 fetchDefender
     if (p.targetKind === 'field') {
-      const df = p.defenderField;
-      if (!df) return { ok: false, payload: {}, reason: 'field_missing_defender' };
+      const defenders = p.defendersField ?? (p.defenderField ? [p.defenderField] : []);
+      if (defenders.length === 0) return { ok: false, payload: {}, reason: 'field_missing_defender' };
+      if (new Set(defenders.map((d) => d.movementId)).size !== defenders.length) return { ok: false, payload: {}, reason: 'field_duplicate_defender' };
+      const multiple = p.defendersField !== undefined;
       const defender: Snapshot = {};
-      for (const [code, u] of Object.entries(df.attackerSnapshot)) {
-        // 伏击只打击路过军队的远程排，并让这些单位按近战数据加入前排。
-        defender[code] = p.battleType === 'ambush' && u.form === 'ranged' ? { ...u, form: 'melee', ambushPriority: true } : { ...u };
+      const fieldContributions: Record<string, Contribution> = {};
+      const defenderContributions: Record<string, DefenderContribution> = {};
+      for (const df of defenders) {
+        for (const [code, u] of Object.entries(df.attackerSnapshot)) {
+          const key = multiple ? `${df.movementId}#${code}` : code;
+          // 各支护送军的快照已包含自己的宝物加成，不合并数值到其他来源。
+          defender[key] = p.battleType === 'ambush' && u.form === 'ranged' ? { ...u, form: 'melee', ambushPriority: true } : { ...u };
+        }
+        fieldContributions[df.movementId] = {
+          movementId: df.movementId, fromVillage: df.fromVillage, fromXY: { ...df.fromXY },
+          troops: { ...df.troops }, treasures: [...(df.treasures ?? [])], npcService: !!df.npcService,
+        };
+        if (multiple) defenderContributions[df.movementId] = {
+          sourceId: df.movementId, movementId: df.movementId, fromVillage: df.fromVillage,
+          npcService: !!df.npcService, troops: { ...df.troops },
+        };
       }
       const defenderOriginal: Record<string, number> = {};
       for (const [code, u] of Object.entries(defender)) defenderOriginal[code] = u.count;
@@ -280,16 +312,15 @@ export class CombatModule {
       for (const [code, u] of Object.entries(p.attackerSnapshot)) attacker[`${contribId}#${code}`] = { ...u };
 
       const id = this.nextId();
-      const defContrib: Contribution = {
-        movementId: df.movementId, fromVillage: df.fromVillage, fromXY: df.fromXY,
-        troops: { ...df.troops }, treasures: df.treasures ?? [],
-      };
       const battle: Battle = {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
         battleType: p.battleType, taskCode: p.taskCode,
         contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
-        defenderContribution: defContrib,
+        defenderContribution: multiple ? undefined : fieldContributions[defenders[0]!.movementId],
+        defenderFieldContributions: multiple ? fieldContributions : undefined,
+        defenderContributions: multiple ? defenderContributions : undefined,
+        caravanId: p.caravanId,
         attackerDamageCarry: {}, defenderDamageCarry: {}, rulesetVersion: TOTAL_AD_RULESET_VERSION,
         initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
         attackPower0: totalPower(attacker), defensePower0: totalPower(defender),
@@ -834,31 +865,68 @@ export class CombatModule {
 
   /** 野战结算：双方同等对待，各自处理伤亡回收，然后发 BattleEnded（targetKind:'field'）给双方。 */
   private async finishField(b: Battle, attackerLosses: Record<string, number>, defenderLosses: Record<string, number>, attackerWins: boolean): Promise<void> {
+    const resolution = b.resolution!;
+    const attackers = Object.entries(b.contributions).map(([id, contribution]) =>
+      this.fieldResult(contribution, b.attacker, `${id}#`));
+    const defenders = this.fieldDefenders(b).map((contribution) =>
+      this.fieldResult(contribution, b.defender, b.defenderFieldContributions ? `${contribution.movementId}#` : ''));
+    // 每一来源分别回收；NPC 护卫不属于购买者的人口，不能计入其医院。
+    const parties = [...attackers, ...defenders];
+    for (let index = resolution.fieldCasualtyIndex ?? 0; index < parties.length; index++) {
+      const party = parties[index]!;
+      if (!party.contribution.npcService && Object.keys(party.losses).length > 0) {
+        const recovered = await this.commands.send({
+          name: 'population.RecoverCasualties', from: CombatModule.NAME,
+          payload: { villageId: party.contribution.fromVillage, losses: party.losses },
+        });
+        // 普通野战沿用既有容错；源村已放弃时也不应让结算永久卡在 resolving。
+        if (b.caravanId && !recovered.ok && recovered.reason !== 'village_not_found') {
+          throw new Error(`field casualty recovery failed: ${recovered.reason}`);
+        }
+      }
+      resolution.fieldCasualtyIndex = index + 1;
+      this.store.set(COLLECTION, b.id, b);
+    }
+    // Movement 以 battleId 幂等处理整场商队结算；先拿到所有幸存者再分货、恢复移动。
+    // 普通 BattleEnded 仍用于每位参战者的战报，但 caravanId 阻止其再次触发行军结算。
+    if (b.caravanId && !resolution.caravanResultEmitted) {
+      const payload = {
+        caravanId: b.caravanId, battleId: b.id, resolutionId: resolution.id, attackerWins,
+        attackers: attackers.map((p) => ({ movementId: p.contribution.movementId, survivors: p.survivors, carryCapacity: p.carryCapacity })),
+        defenders: defenders.map((p) => ({ movementId: p.contribution.movementId, survivors: p.survivors, npcService: !!p.contribution.npcService })),
+      };
+      // 先取得 movement 的落盘确认；首次写 journal 失败必须沿 resolution 重试，
+      // 不能被 EventBus 的容错吞掉后误认为已经交付结果。
+      try {
+        const recorded = await this.commands.send({ name: 'movement.RecordCaravanBattleResult', from: CombatModule.NAME, payload });
+        if (!recorded.ok) throw new Error(`caravan result persistence failed: ${recorded.reason}`);
+      } catch (error) {
+        this.scheduler.schedule(1_000, () => this.resumeResolution(b.id), `combat:${b.id}`, `battle:${b.id}`);
+        throw error;
+      }
+      await this.bus.emit({
+        name: 'combat.CaravanBattleEnded', source: CombatModule.NAME, ts: this.now(),
+        payload,
+      });
+      resolution.caravanResultEmitted = true;
+      this.store.set(COLLECTION, b.id, b);
+    }
     const reportBase = {
       resolutionId: b.resolution?.id,
       phase: 'resolved' as const,
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
       attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, battleType: b.battleType,
-      battleLabel: b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
+      battleLabel: b.caravanId ? '商队劫掠' : b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
+      caravanId: b.caravanId,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
       totalRounds: b.rounds.length,
       rounds: sampleBattleRounds(b.rounds),
     };
 
-    // 进攻方（各贡献村）幸存者 → BattleEnded(attacker)
-    for (const [cid, contrib] of Object.entries(b.contributions)) {
-      const survivors: Record<string, number> = {};
-      const losses: Record<string, number> = {};
-      for (const code of Object.keys(contrib.troops)) {
-        const alive = b.attacker[`${cid}#${code}`]?.count ?? 0;
-        const dead = contrib.troops[code] - alive;
-        if (alive > 0) survivors[code] = alive;
-        if (dead > 0) losses[code] = dead;
-      }
-      if (Object.keys(losses).length > 0) {
-        void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: contrib.fromVillage, losses } });
-      }
+    resolution.step = 'emit_attacker_reports';
+    for (let index = resolution.attackerReportIndex ?? 0; index < attackers.length; index++) {
+      const { contribution: contrib, survivors, losses } = attackers[index]!;
       await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
         payload: {
@@ -866,25 +934,25 @@ export class CombatModule {
           movementId: contrib.movementId, fromVillage: contrib.fromVillage,
           fromXY: contrib.fromXY, toXY: b.targetXY,
           survivors, loot: {}, treasures: contrib.treasures, deployedTroops: contrib.troops,
+          ownLosses: losses, npcService: !!contrib.npcService,
           attackerWins, ...reportBase,
         },
       } as DomainEvent);
+      resolution.attackerReportIndex = index + 1;
+      this.store.set(COLLECTION, b.id, b);
     }
 
     // 防守方（另一支行军）幸存者 → BattleEnded(defender)。
     // side 表示这支军队在本场战斗中的真实阵营，不能为了“己方视角”伪装成 attacker；
     // 否则客户端会把 attackerLosses（伏击方损失）误显示成被伏击方自己的损失。
-    const dc = b.defenderContribution;
-    if (dc) {
-      const defSurvivors: Record<string, number> = {};
-      const defLosses: Record<string, number> = {};
-      for (const [code, orig] of Object.entries(dc.troops)) {
-        const alive = orig - (defenderLosses[code] ?? 0);
-        if (alive > 0) defSurvivors[code] = alive;
-        if (defenderLosses[code]) defLosses[code] = defenderLosses[code]!;
-      }
-      if (Object.keys(defLosses).length > 0) {
-        void this.commands.send({ name: 'population.RecoverCasualties', from: CombatModule.NAME, payload: { villageId: dc.fromVillage, losses: defLosses } });
+    resolution.step = 'emit_defender_report';
+    this.store.set(COLLECTION, b.id, b);
+    for (let index = resolution.defenderReportIndex ?? 0; index < defenders.length; index++) {
+      const { contribution: dc, survivors: defSurvivors, losses: defLosses } = defenders[index]!;
+      if (dc.npcService && b.caravanId) {
+        resolution.defenderReportIndex = index + 1;
+        this.store.set(COLLECTION, b.id, b);
+        continue;
       }
       await this.bus.emit({
         name: 'combat.BattleEnded', source: CombatModule.NAME, ts: this.now(),
@@ -893,10 +961,28 @@ export class CombatModule {
           movementId: dc.movementId, fromVillage: dc.fromVillage,
           fromXY: dc.fromXY, toXY: b.targetXY,
           survivors: defSurvivors, loot: {}, treasures: dc.treasures, deployedTroops: dc.troops,
+          ownLosses: defLosses, npcService: !!dc.npcService,
           attackerWins, ...reportBase,
         },
       } as DomainEvent);
+      resolution.defenderReportIndex = index + 1;
+      this.store.set(COLLECTION, b.id, b);
     }
+  }
+
+  private fieldResult(contribution: Contribution, snapshot: Snapshot, prefix: string): {
+    contribution: Contribution; survivors: Record<string, number>; losses: Record<string, number>; carryCapacity: number;
+  } {
+    const survivors: Record<string, number> = {};
+    const losses: Record<string, number> = {};
+    let carryCapacity = 0;
+    for (const [code, original] of Object.entries(contribution.troops)) {
+      const unit = snapshot[`${prefix}${code}`];
+      const alive = Math.min(original, Math.max(0, unit?.count ?? 0));
+      if (alive > 0) { survivors[code] = alive; carryCapacity += alive * Math.max(0, unit?.carry ?? 0); }
+      if (original > alive) losses[code] = original - alive;
+    }
+    return { contribution, survivors, losses, carryCapacity };
   }
 
   /** 给战场相关的双方各发一个事件（attacker 各贡献村 + defender 村/野战防守方村）。 */
@@ -909,10 +995,14 @@ export class CombatModule {
     }
     if (b.targetKind === 'village') {
       void this.bus.emit({ name, source: CombatModule.NAME, ts: this.now(), payload: make(b.targetId, 'defender') } as DomainEvent);
-    } else if (b.targetKind === 'field' && b.defenderContribution) {
-      const v = b.defenderContribution.fromVillage;
-      if (!seen.has(v)) {
-        void this.bus.emit({ name, source: CombatModule.NAME, ts: this.now(), payload: make(v, 'defender') } as DomainEvent);
+    } else if (b.targetKind === 'field') {
+      for (const defender of this.fieldDefenders(b)) {
+        if (defender.npcService && b.caravanId) continue;
+        const v = defender.fromVillage;
+        if (!seen.has(v)) {
+          seen.add(v);
+          void this.bus.emit({ name, source: CombatModule.NAME, ts: this.now(), payload: make(v, 'defender') } as DomainEvent);
+        }
       }
     }
   }
