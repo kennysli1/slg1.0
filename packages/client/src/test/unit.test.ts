@@ -235,6 +235,12 @@ describe('任务接取与奖励领取对话状态机', () => {
     assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
     assert.match(autoHost, /req\('task\.ConsumeDialogue'/, '自动对话关闭必须消费整个等待 session');
   });
+
+  it('常驻公开 PvE 任务显示清剿计数器', () => {
+    const taskBar = readFileSync(new URL('../features/village/TaskBar.tsx', import.meta.url), 'utf8');
+    assert.match(taskBar, /o\.kind === 'clear_public_pve'/);
+    assert.match(taskBar, /当前进度[\s\S]*o\.count/);
+  });
 });
 
 describe('王国地标中心标记', () => {
