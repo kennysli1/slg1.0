@@ -56,6 +56,15 @@ export interface AcademyState {
   academyCount: number;
 }
 
+/** 科研点判定页使用的来源明细。durationSec=null 表示没有固定到期时间。 */
+interface ResearchSourceView {
+  source: string;
+  label: string;
+  displayValue: string;
+  durationSec: number | null;
+  durationLabel: string;
+}
+
 // ── 模块 ──
 export class ResearchModule {
   static NAME = 'research';
@@ -69,6 +78,10 @@ export class ResearchModule {
   private now: () => number;
   private playerVillages: (playerId: string) => string[];
   private playerByVillage: (villageId: string) => string | null;
+  /** 最近一次成功读取的人口倍率。判定调度使用缓存，避免人口查询阻塞后续 tick。 */
+  private readonly popFactorCache = new Map<string, number>();
+  /** 单村同时只执行一个异步判定；计划中的后续 tick 仍会保留在 Scheduler 中。 */
+  private readonly rpTickInFlight = new Set<string>();
 
   constructor(
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
@@ -165,6 +178,8 @@ export class ResearchModule {
     const s = this.load(villageId);
     if (s?.researching?.taskId) this.scheduler.cancelByOwner(`research-tech:${villageId}`);
     this.scheduler.cancelByOwner(`research-rp:${villageId}`);
+    this.popFactorCache.delete(villageId);
+    this.rpTickInFlight.delete(villageId);
     this.store.delete(COLLECTION, villageId);
   }
 
@@ -193,7 +208,73 @@ export class ResearchModule {
     const intervalSec = s.academy.academyCount > 0 && params
       ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1) / popMult))
       : 0;
-    return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
+    const probability = params && s.academy.academyCount > 0
+      ? this.probabilityFor(s, params, popMult)
+      : 0;
+    const treasureNames = await this.activeTechIntervalTreasureNames(villageId);
+    const intervalSources: ResearchSourceView[] = [];
+    const probabilitySources: ResearchSourceView[] = [];
+    if (params) {
+      intervalSources.push({
+        source: 'academy.base', label: '基础判定间隔', displayValue: `${params.checkIntervalSec} 秒`,
+        durationSec: null, durationLabel: '配置值',
+      });
+      if (s.academy.academyCount > 0) intervalSources.push({
+        source: 'academy.count', label: '学院数量', displayValue: `÷ ${s.academy.academyCount}`,
+        durationSec: null, durationLabel: '学院存在期间',
+      });
+      if ((s.treasureTechIntervalMult ?? 1) !== 1) intervalSources.push({
+        source: 'treasure.tech_interval',
+        label: treasureNames.length ? `宝物：${treasureNames.join('、')}` : '宝物科技点判定间隔加成',
+        displayValue: `× ${(s.treasureTechIntervalMult ?? 1).toFixed(3)}`,
+        durationSec: null, durationLabel: '宝物在主栏期间',
+      });
+      if (popMult !== 1) intervalSources.push({
+        source: 'population.factor', label: '总人口因子', displayValue: `÷ ${popMult.toFixed(3)}`,
+        durationSec: null, durationLabel: '随总人口动态变化',
+      });
+      probabilitySources.push({
+        source: 'academy.base_probability', label: '基础成功概率', displayValue: `${(params.baseProbability * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '配置值',
+      });
+      if (s.academy.failStreak > 0) probabilitySources.push({
+        source: 'academy.fail_streak', label: '连续失败保底',
+        displayValue: `+ ${(s.academy.failStreak * params.probabilityGainPerFail * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '持续至下一次成功',
+      });
+      if (popMult !== 1) probabilitySources.push({
+        source: 'population.factor', label: '总人口因子', displayValue: `× ${popMult.toFixed(3)}`,
+        durationSec: null, durationLabel: '随总人口动态变化',
+      });
+      if ((s.allianceTechProbabilityBonus ?? 0) > 0) probabilitySources.push({
+        source: 'alliance.tech_probability', label: '联盟科技/职位',
+        displayValue: `+ ${((s.allianceTechProbabilityBonus ?? 0) * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '联盟生效期间',
+      });
+      probabilitySources.push({
+        source: 'academy.max_probability', label: '概率上限', displayValue: `${(params.maxProbability * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '配置值',
+      });
+    }
+    return {
+      ok: true,
+      payload: {
+        villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed,
+        academy: s.academy, intervalSec,
+        rpFormula: {
+          baseIntervalSec: params?.checkIntervalSec ?? 0,
+          effectiveIntervalSec: intervalSec,
+          baseProbability: params?.baseProbability ?? 0,
+          probabilityGainPerFail: params?.probabilityGainPerFail ?? 0,
+          maxProbability: params?.maxProbability ?? 0,
+          currentProbability: probability,
+          populationFactor: params?.popFactor ?? 0,
+          populationMultiplier: popMult,
+          intervalSources,
+          probabilitySources,
+        },
+      },
+    };
   }
 
   /** 任务等系统发放科研点；科研点归属执行任务的村庄。 */
@@ -451,7 +532,7 @@ export class ResearchModule {
 
     // 惰性回溯：计算从上一次判定到现在的 tick 数
     const now = this.now();
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
+    const intervalMs = this.intervalMs(s, params, popMult);
     let lastCheck = s.academy.lastCheckTime || now;
     if (lastCheck > now) lastCheck = now;
     let failStreak = s.academy.failStreak;
@@ -471,9 +552,9 @@ export class ResearchModule {
     this.store.set(COLLECTION, villageId, s);
 
     // 调度下一次 tick
-    const nextTickMs = Math.max(1000, lastCheck + intervalMs - now);
-    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
-    this.scheduler.schedule(nextTickMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
+    // 以逻辑上的上一次判定时间为锚点，而不是以本次结算完成时间为锚点，
+    // 避免人口查询/事件处理较慢时把后续判定整体向后推迟。
+    this.scheduleRpTick(villageId, lastCheck + intervalMs);
   }
 
   /** 由 treasure 模块下发：设置宝物（正直的心）带来的科技点判定间隔倍率（<1 更快）。倍率变化即按新间隔重调度 RP tick。 */
@@ -490,27 +571,82 @@ export class ResearchModule {
   }
 
   /** 单次 RP tick：roll 一次判定，失败则递增 failStreak，成功则 rp+1 并重置。调度下一次。 */
-  private async tickRp(villageId: string): Promise<void> {
+  private async tickRp(villageId: string, plannedAt = this.now()): Promise<void> {
     const s = this.ensureState(villageId);
     const { highestLevel, academyCount } = s.academy;
     if (academyCount < 1 || highestLevel < 1) return;
     const params = this.config.academy[highestLevel];
     if (!params) return;
 
-    const popMult = await this.getPopFactor(villageId);
-    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
-    if (Math.random() < prob) {
-      s.rp += 1;
-      s.academy.failStreak = 0;
-      void this.pushRp(villageId, s.rp);
-    } else {
-      s.academy.failStreak++;
-    }
-    s.academy.lastCheckTime = this.now();
-    this.store.set(COLLECTION, villageId, s);
+    const dueAt = Number.isFinite(plannedAt) ? plannedAt : this.now();
+    if (this.rpTickInFlight.has(villageId)) return;
+    this.rpTickInFlight.add(villageId);
+    // 先登记下一次计划时间，再读取人口。回调本身采用 fire-and-forget，
+    // 因而人口模块或其他慢命令不会堵住 Scheduler 的其他任务。
+    this.scheduleRpTick(villageId, dueAt + this.intervalMs(s, params, this.cachedPopFactor(villageId)));
 
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
-    this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
+    try {
+      const popMult = await this.getPopFactor(villageId);
+      const latest = this.ensureState(villageId);
+      // 其他路径（例如建筑变化或惰性结算）已经处理过这个计划点时，
+      // 不重复掷骰；预先登记的下一次任务仍然有效。
+      if (latest.academy.lastCheckTime >= dueAt) return;
+      const prob = this.probabilityFor(latest, params, popMult);
+      if (Math.random() < prob) {
+        latest.rp += 1;
+        latest.academy.failStreak = 0;
+        void this.pushRp(villageId, latest.rp);
+      } else {
+        latest.academy.failStreak++;
+      }
+      // lastCheckTime 表示逻辑判定时刻，不是异步结算完成时刻。
+      latest.academy.lastCheckTime = Math.max(latest.academy.lastCheckTime || 0, dueAt);
+      this.store.set(COLLECTION, villageId, latest);
+
+      // 人口倍率可能已变化；仍以原计划时刻为锚点重排，不把查询耗时加入间隔。
+      this.scheduleRpTick(villageId, dueAt + this.intervalMs(latest, params, popMult));
+      // 若异步结算期间已经错过了多个计划点，惰性结算补齐它们。
+      if (this.now() >= dueAt + this.intervalMs(latest, params, popMult)) void this.settleRp(villageId);
+    } finally {
+      this.rpTickInFlight.delete(villageId);
+    }
+  }
+
+  /** 登记 RP tick。回调不把 Promise 返回给 Scheduler，避免慢的跨模块查询阻塞全局调度器。 */
+  private scheduleRpTick(villageId: string, triggerAt: number): void {
+    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
+    this.scheduler.scheduleAt(triggerAt, () => {
+      void this.tickRp(villageId, triggerAt).catch((err) => {
+        console.error(`[Research] RP tick failed for ${villageId}:`, err);
+      });
+    }, `research-rp:${villageId}`);
+  }
+
+  private intervalMs(s: ResearchState, params: NonNullable<GameConfig['academy'][number]>, popMult: number): number {
+    return Math.max(1000, Math.round((params.checkIntervalSec * 1000) / Math.max(1, s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1) / Math.max(1, popMult)));
+  }
+
+  private cachedPopFactor(villageId: string): number {
+    return Math.max(1, this.popFactorCache.get(villageId) ?? 1);
+  }
+
+  private probabilityFor(s: ResearchState, params: NonNullable<GameConfig['academy'][number]>, popMult: number): number {
+    return Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
+  }
+
+  /** 返回当前主栏中影响科研判定间隔的宝物名称；仅用于解释性展示。 */
+  private async activeTechIntervalTreasureNames(villageId: string): Promise<string[]> {
+    try {
+      const res = await this.commands.send({ name: 'treasure.List', from: ResearchModule.NAME, payload: { villageId } });
+      if (!res.ok) return [];
+      const active = (res.payload as any)?.activeTreasures;
+      if (!Array.isArray(active)) return [];
+      return active
+        .filter((t: any) => t?.effectType === 'smartPerson' || t?.effectType === 'honestHeart')
+        .map((t: any) => String(t.name ?? t.code)).filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   // ── 辅助 ──
@@ -518,16 +654,19 @@ export class ResearchModule {
   /** 查询人口模块获取科研人口因子：popMult = 1 + popFactor × (totalPop / hardCap)。
    * totalPop 包括平民、驻军、在途与训练中的士兵；异常时返回 1（不影响概率/间隔）。 */
   private async getPopFactor(villageId: string): Promise<number> {
+    const cached = this.cachedPopFactor(villageId);
     try {
       const res = await this.commands.send({ name: 'population.GetSnapshot', from: ResearchModule.NAME, payload: { villageId } });
-      if (!res.ok) return 1;
+      if (!res.ok) return cached;
       const p = res.payload as any;
       const totalPop = Number(p.totalPop) || (Number(p.currentPop) || 0) + (Number(p.soldierPop) || 0) + (Number(p.trainingPop) || 0);
       const ratio = p.hardCap > 0 ? Math.min(1, Math.max(0, totalPop / Math.max(1, p.hardCap))) : 0;
       const params = this.config.academy[this.ensureState(villageId).academy.highestLevel];
       const popFactor = params?.popFactor ?? 0;
-      return 1 + popFactor * ratio;
-    } catch { return 1; }
+      const result = 1 + popFactor * ratio;
+      this.popFactorCache.set(villageId, result);
+      return result;
+    } catch { return cached; }
   }
 
   private prereqsMet(villageId: string, requires: string[]): boolean {

@@ -153,6 +153,18 @@ describe('阶段化战斗模拟器的科技与宝物多选', () => {
   });
 });
 
+describe('科研点判定公式展示', () => {
+  it('使用服务端下发的基础值与来源明细，不在客户端硬编码学院等级概率', () => {
+    const academy = readFileSync(new URL('../features/research/AcademyModal.tsx', import.meta.url), 'utf8');
+    const tree = readFileSync(new URL('../features/research/TechTreeScreen.tsx', import.meta.url), 'utf8');
+    assert.match(academy, /state\?\.rpFormula/);
+    assert.match(academy, /intervalSources/);
+    assert.match(tree, /state\?\.rpFormula/);
+    assert.match(tree, /durationLabel/);
+    assert.doesNotMatch(tree, /0\.10 \+ Math\.max\(0, highest - 1\)/);
+  });
+});
+
 describe('联盟目录与战事目标交互', () => {
   it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
     const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
