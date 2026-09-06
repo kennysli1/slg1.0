@@ -45,12 +45,17 @@ export function notificationText(event: string, payload: any, ts?: number): stri
   } else if (event === 'MarchSent') {
     return `${time}🏃 出征已派出`;
   } else if (event === 'BattleStarted') {
+    if (payload.battleLabel === '野战') return `${time}⚔️ 野战开始，双方军队交战中…`;
     if (payload.side === 'attacker') return `${time}⚔️ 战斗开始！攻${payload.attackPower} vs 防${payload.defensePower}，交战中…`;
     return `${time}🛡️ 遭遇进攻！攻${payload.attackPower} vs 防${payload.defensePower}，正在防守…`;
   } else if (event === 'BattleEnded') {
     const loot = Object.entries(payload.looted || {}).map(([t, n]: any) => `${resInfo(t).name}${n}`).join(' ');
     const mine = payload.side === 'attacker' ? payload.attackerLosses : payload.defenderLosses;
     const lossStr = Object.entries(mine || {}).map(([u, n]: any) => `${unitName(u)}${n}`).join(' ') || '无';
+    if (payload.battleLabel === '野战') {
+      const won = payload.fieldWinner === (payload.side === 'attacker');
+      return `${time}⚔️ 野战结束（${won ? '胜利' : '失败'}）｜我方损失：${lossStr}`;
+    }
     if (payload.side === 'attacker') {
       const win = payload.attackerWins ? '🎉 胜利' : '💀 失败';
       const damage = (payload.buildingDamage ?? []).map((d: any) => `${buildingInfo(d.kind).name ?? d.kind}${d.mode === 'demolish' ? (d.removed ? '拆除（建筑移除）' : '拆除') : '破坏'}${d.fromLevel}→${d.toLevel}`).join('、');

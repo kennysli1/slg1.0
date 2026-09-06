@@ -10,6 +10,10 @@ export interface Contribution {
   npcService?: boolean;
   kingdomMercenary?: boolean;
   returnPveId?: string;
+  /** 野战主动追击标记；普通交叉相遇为 false。 */
+  fieldPursuer?: boolean;
+  /** 该军队在此前野战中缴获、尚未归城入库的宝物。 */
+  capturedTreasures?: string[];
 }
 
 /** 防守方兵力来源：驻军或临时增援。 */

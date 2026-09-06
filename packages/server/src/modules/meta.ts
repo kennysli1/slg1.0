@@ -129,6 +129,7 @@ export class MetaModule {
           tradeNpcSellMargin: c.constants.tradeNpcSellMargin,
           tradeOrderMaxPerVillage: c.constants.tradeOrderMaxPerVillage,
           tradeOrderTtlSec: c.constants.tradeOrderTtlSec,
+          marchLossRateDefault: c.constants.marchLossRateDefault,
           treasureCampDropChance: c.constants.treasureCampDropChance,
           // 军队携带宝物：携带上限换算（每多少兵力+1格）与格数硬上限
           treasureCarryTroopsPerSlot: c.constants.treasureCarryTroopsPerSlot,

@@ -20,6 +20,7 @@ interface BattleDetails {
   rounds?: BattleRound[];
   totalRounds?: number;
   battleLabel?: string;
+  fieldWinner?: boolean;
   attackPower?: number;
   defensePower?: number;
 }
@@ -75,8 +76,9 @@ function lossText(counts?: Counts): string {
 }
 
 function BattleReplay({ details }: { details: BattleDetails }) {
-  const attackerLabel = details.side === 'defender' ? '敌方（攻）' : '我方（攻）';
-  const defenderLabel = details.side === 'defender' ? '我方（守）' : '敌方（守）';
+  const fieldBattle = details.battleLabel === '野战';
+  const attackerLabel = fieldBattle ? (details.side === 'defender' ? '敌方' : '我方') : details.side === 'defender' ? '敌方（攻）' : '我方（攻）';
+  const defenderLabel = fieldBattle ? (details.side === 'defender' ? '我方' : '敌方') : details.side === 'defender' ? '我方（守）' : '敌方（守）';
   const rounds = Array.isArray(details.rounds) ? details.rounds : [];
   const totalRounds = Math.max(rounds.length, Number(details.totalRounds) || 0);
 
@@ -127,8 +129,8 @@ function BattleReplay({ details }: { details: BattleDetails }) {
                 </div>
               </div>
               <div class="battle-report-round-survivors">
-                <span>攻方剩余</span><CountList counts={round.attacker} />
-                <span>守方剩余</span><CountList counts={round.defender} />
+                <span>{fieldBattle ? attackerLabel : '攻方'}剩余</span><CountList counts={round.attacker} />
+                <span>{fieldBattle ? defenderLabel : '守方'}剩余</span><CountList counts={round.defender} />
               </div>
             </div>
           ))}

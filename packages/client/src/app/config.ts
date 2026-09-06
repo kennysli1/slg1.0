@@ -50,7 +50,7 @@ interface ServerConfig {
     trainTimeReducePerLevel: number; trainTimeReduceCap: number;
     trainCostReducePerLevel: number; trainCostReduceCap: number;
     /** 贸易中心：路线运力/商队速度/最低时长/NPC 计价/挂单上限与存活时长 */
-    tradeRouteCapacity: number; tradeCaravanSpeed: number; tradeCaravanMinDurationSec: number;
+    tradeRouteCapacity: number; tradeCaravanSpeed: number; tradeCaravanMinDurationSec: number; marchLossRateDefault?: number;
     tradeNpcGoldPerResource: number; tradeNpcSellMargin: number;
     tradeOrderMaxPerVillage: number; tradeOrderTtlSec: number;
     /** 清理普通 PvE 营地时命中宝物掉落的基础概率（0–1）。 */
