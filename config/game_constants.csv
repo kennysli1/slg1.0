@@ -47,6 +47,7 @@ hills_march_speed_multiplier,0.6666666667,number,军队位于丘陵时行军速�
 march_size_reference_pop,20,number,军队规模减速的免惩罚人口基准
 march_size_penalty,0.0015,number,军队规模减速系数
 march_size_min_multiplier,0.45,number,军队规模减速后的最低速度比例
+march_loss_rate_default,40,number,玩家派军默认战损返城阈值（百分比；野战/被伏击方适用）
 cavalry_unit_codes,equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|gaul_warboar_rider|paladin|teutonknight|merc_cavalry|merc_knight,string,骑兵兵种代码（以|分隔；用于猎马人任务和绞马索效果）
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
@@ -73,7 +74,7 @@ found_abandon_lock_sec,86400,number,新建分城后禁止放弃的秒数
 gold_tax_per_civilian_per_hour,100,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
 start_gold_amount,100,number,新村初始金币存量（让首座建筑可立即开建）
 trade_route_capacity,500,number,每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各算 1 单位 多条路线叠加）
-trade_caravan_speed,30,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
+trade_caravan_speed,10,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
 trade_caravan_min_duration_sec,3,number,商队单程最低行进时长（秒；仅防止零距离或极高速商队瞬间抵达）
 trade_npc_gold_per_resource,0.5,number,NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）
 trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价 0.8=玩家拿到 80% 基准价值）
@@ -83,7 +84,7 @@ treasure_camp_drop_chance,1,number,清理野外营地后掉落宝物的总体概
 treasure_npc_offer_chance,1,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1
 treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃
-treasure_carry_troops_per_slot,40,number,军队携带宝物容量换算:每多少兵力+1携带格
+treasure_carry_troops_per_slot,30,number,军队携带宝物容量换算:每多少兵力+1携带格
 treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值
 ritual_buff_duration_sec,7200,number,祭祀台(ritualBuff)buff持续时长(秒;7200=2小时)
 ritual_buff_pop_cost,20,number,祭祀台(ritualBuff)使用时扣除的劳动人口数(不足则扣除士兵人口)
@@ -128,6 +129,7 @@ reputation_good_gold_tax_penalty_per_point,0.005,number,每点正声望带来的
 reputation_good_gold_tax_penalty_cap,0.5,number,正声望金币税收下降倍率上限（0.5=−50%）
 reputation_evil_pve_drop_rate_per_point,0.01,number,每点负声望带来的PvE宝物掉落概率倍率
 reputation_evil_pve_drop_rate_cap,0.5,number,负声望PvE宝物掉落倍率上限（0.5=+50%）
+caravan_raid_reputation_goods_per_point,2000,number,商队劫掠每累计掠得多少单位物资扣1点声望（跨多次劫掠累计）
 kingdom_fief_offset_ratio,0.25,number,四封地中心相对世界宽高的偏移比例
 kingdom_task_initial_min_sec,1,number,注册或首次进入王国系统后首次任务最短等待秒数
 kingdom_task_initial_max_sec,2,number,注册或首次进入王国系统后首次任务最长等待秒数
