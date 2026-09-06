@@ -985,6 +985,7 @@ var REP_ROWS = [
   ['reputation_good_gold_tax_penalty_cap','正声望税收下降上限','正声望金币税收下降倍率上限'],
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
+  ['caravan_raid_reputation_goods_per_point','商队劫掠物资声望阈值','每累计掠得多少单位物资扣1点声望；跨多次劫掠累加'],
 ];
 
 var KINGDOM_ROWS = [

@@ -24,7 +24,7 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   const playerVillages: Record<string, Array<{ id: string; name: string }>> = {
     a: [{ id: 'a', name: '村a' }], b: [{ id: 'b', name: '村b' }], r: [{ id: 'r', name: '村r' }],
   };
-  const grants: any[] = [], returns: any[] = [], reports: any[] = [], foreign: any[] = [], removed: any[] = [], warnings: any[] = [];
+  const grants: any[] = [], returns: any[] = [], reports: any[] = [], foreign: any[] = [], removed: any[] = [], warnings: any[] = [], reputationRaids: any[] = [];
   commands.register<any, any>('player.GetByVillage', ({ payload }: any) => {
     const villageId = String(payload.villageId);
     const playerId = villageOwners[villageId] ?? villageId;
@@ -52,6 +52,7 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   commands.register('treasure.LoseCarried', () => ({ ok: true, payload: {} }));
   commands.register('treasure.RestoreCarried', () => ({ ok: true, payload: {} }));
   commands.register('economy.Grant', ({ payload }: any) => { grants.push(payload); return { ok: true, payload: {} }; });
+  commands.register('reputation.ProcessCaravanRaid', ({ payload }: any) => { reputationRaids.push(payload); return { ok: true, payload: {} }; });
   bus.on('movement.CaravanReturned', (e) => { returns.push(e.payload); });
   bus.on('movement.CaravanRaidReport', (e) => { reports.push(e.payload); });
   bus.on('movement.ForeignStepped', (e) => { foreign.push(e.payload); });
@@ -62,7 +63,7 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   const combat = new CombatModule(store, bus, commands, scheduler, () => now, config); combat.init();
   new NotificationsModule(store, bus, commands, () => now, config).init();
   const send = (name: string, payload: any) => commands.send({ name, from: 'test', payload });
-  return { store, movement, config, grants, returns, reports, foreign, removed, warnings, commands, bus, send, villages,
+  return { store, movement, config, grants, returns, reports, foreign, removed, warnings, reputationRaids, commands, bus, send, villages,
     addVillage: (id: string, ownerId: string, pos: { q: number; r: number }) => {
       villages[id] = pos; villageOwners[id] = ownerId;
       (playerVillages[ownerId] ??= []).push({ id, name: `村${id}` });
@@ -82,6 +83,7 @@ test('商队追赶：段内追上，部分取货后分头原路返程/继续送�
   assert.equal(returned.type, 'return');
   assert.ok(returned.pos.q > 0 && returned.pos.q < 1, '必须在段内相遇原地掉头，不能跳到格心');
   assert.deepEqual(returned.loot, { wood: 30 });
+  assert.deepEqual(f.reputationRaids[0].loot, { wood: 30 });
   assert.deepEqual(f.store.get<any>('movement', car).cargo, { wood: 70 });
   assert.equal(f.reports[0].outcome, 'partial_delivery');
   assert.equal(f.reports[0].destinationVillageName, '村b');
