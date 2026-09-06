@@ -77,6 +77,20 @@ test('商队追赶：段内追上，部分取货后分头原路返程/继续送�
   assert.equal(f.returns.length, 1);
 });
 
+test('商队追兵：只按当前商队位置计算最短追赶路径，不拼接商队送货路线', async () => {
+  const f = fixture();
+  // 让追兵与商队不在同一路线上；旧实现会把商队剩余路线拼到追兵路径末尾。
+  f.villages.r = { q: 0, r: 8 };
+  const car = await f.caravan();
+  await f.advance(1_200);
+  const caravan = f.store.get<any>('movement', car)!;
+  const chase = (f.movement as any).caravanChasePath({ q: 0, r: 8 }, caravan) as Array<{ q: number; r: number }>;
+  const current = (f.movement as any).caravanPosition(caravan) as { q: number; r: number };
+  assert.deepEqual(chase[chase.length - 1], current, '追兵路径终点应是商队当前连续位置');
+  assert.notDeepEqual(chase[chase.length - 1], caravan.path[caravan.path.length - 1], '追兵不应沿用商队目的地尾段');
+  assert.ok(chase.length <= 11, '追兵路径应是出发点到当前商队格的短路径');
+});
+
 test('抢空商队：立即原路回家，路线仅在返家释放，空返商队再被追上没有货物', async () => {
   const f = fixture(); const car = await f.caravan({ wood: 20 }); await f.advance(300);
   await f.mission(car); await f.advance(310);
