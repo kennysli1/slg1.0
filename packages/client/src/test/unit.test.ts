@@ -25,7 +25,7 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
-import { caravanAction, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
+import { caravanAction, collectMapTargetStack, displayGridForMovement, escortMarkerOffset, foreignArmyName, ownMovementsFromCache, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
@@ -349,6 +349,24 @@ describe('地图定位', () => {
     const warning = normalizeIncomingWarningForRender({ id: 'm8-incoming', type: 'attack', stepIndex: 0 });
     assert.equal(warning.type, 'incoming_warning');
     assert.equal(warning.status, 'marching');
+  });
+
+  it('移动图标跨过六边形边界后按下一格选择', () => {
+    const movement = {
+      pos: { q: 1, r: 1 },
+      path: [{ q: 1, r: 1 }, { q: 2, r: 1 }],
+      stepIndex: 0,
+      status: 'marching',
+      perStepMs: 1_000,
+      nextStepAt: 2_000,
+    };
+    assert.deepEqual(displayGridForMovement(movement, 1_499), { q: 1, r: 1 });
+    assert.deepEqual(displayGridForMovement(movement, 1_500), { q: 2, r: 1 });
+  });
+
+  it('同格目标选择器切回村庄时不被坐标兜底重新抢成军队', () => {
+    const own = [{ id: 'army-1', pos: { q: 3, r: 3 } }] as any;
+    assert.equal(selectedMapMovement({ kind: 'village', refId: 'village-1', q: 3, r: 3, stackedTargets: [{}] }, own, []), null);
   });
 
   it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {
@@ -980,12 +998,50 @@ describe('商队地图交互', () => {
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'caravan', q: 5, r: 6 }, [escort], [caravan])?.movement.pos.q, 6);
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'departed', q: 5, r: 6 }, [escort], [caravan]), null);
   });
+  it('商队目标按 movement id 锁定，驻扎续行不会退回首次出兵分支', () => {
+    const caravan = { id: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '河畔镇' } } as any;
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'caravan', q: 5, r: 6 }, [], [caravan])?.movement.id, 'caravan');
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'departed', q: 5, r: 6 }, [], [caravan]), null);
+  });
 
   it('己方关联商队只护送，未获权限时不展示行动', () => {
     assert.equal(caravanAction({ canRaid: true, canEscort: true }), 'caravan_escort');
     assert.equal(caravanAction({ canRaid: true, canEscort: false }), 'caravan_raid');
     assert.equal(caravanAction({ canRaid: false, canEscort: false }), null);
     assert.equal(caravanAction(), null);
+  });
+
+  it('同格目标栈保留底层地块、商队和军队，点击任一移动标记仍可切换', () => {
+    const base = { refId: 'village-1', kind: 'village', q: 5, r: 6, name: '目标村' } as any;
+    const caravan = { id: 'caravan', type: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '目标村' } } as any;
+    const army = { id: 'garrison', type: 'garrison', status: 'stationed', pos: { q: 5, r: 6 } } as any;
+    const stack = collectMapTargetStack(base, 5, 6, caravan, undefined, undefined, [caravan, army], [], []);
+    assert.deepEqual(stack.targets.map((target) => `${target.kind}:${target.refId}`), [
+      'caravan:caravan', 'village:village-1', 'own_army:garrison',
+    ]);
+    assert.equal(stack.active.kind, 'caravan');
+  });
+
+  it('己方行军合并当前村与跨村快照，空数组不会短路另一份数据', () => {
+    const previous = getCache();
+    const local = { id: 'local', pos: { q: 1, r: 1 } } as any;
+    const remote = { id: 'remote', pos: { q: 2, r: 2 } } as any;
+    const newerLocal = { id: 'same', pos: { q: 3, r: 3 }, stepIndex: 3 } as any;
+    const stalePlayer = { id: 'same', pos: { q: 2, r: 2 }, stepIndex: 2 } as any;
+    setCache({ moves: { movements: [local, newerLocal] }, playerMoves: { movements: [remote, stalePlayer] } });
+    assert.deepEqual(ownMovementsFromCache().map((movement) => movement.id).sort(), ['local', 'remote', 'same']);
+    assert.deepEqual(ownMovementsFromCache().find((movement) => movement.id === 'same')?.pos, { q: 3, r: 3 });
+    setCache(previous);
+  });
+
+  it('跨越环面边界的移动仍返回规范地图格坐标', () => {
+    const W = 41;
+    const now = 1_000;
+    const grid = displayGridForMovement({
+      pos: { q: W - 1, r: 2 }, path: [{ q: W - 1, r: 2 }, { q: 0, r: 2 }],
+      stepIndex: 0, status: 'marching', perStepMs: 1_000, nextStepAt: now + 500,
+    }, now);
+    assert.deepEqual(grid, { q: 0, r: 2 });
   });
 
   it('已附着护送军并列显示，商队公开名称带目的地', () => {
