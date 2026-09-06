@@ -30,6 +30,25 @@ import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDial
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
+
+describe('M1 资源田修复状态', () => {
+  it('任务已就绪时即使没有修复事件记录也把四块资源田显示为已修复', () => {
+    const task = { ready: true, repairedBuildings: [] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'claypit'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), true);
+    assert.equal(isRepairBuildingDone(task, 'cropland'), true);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), false);
+  });
+
+  it('只有仍有未完成修复项时才显示待修复提示', () => {
+    const task = { ready: false, repairedBuildings: ['woodcutter', 'claypit'] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), false);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), true);
+  });
+});
 
 describe('军队面板折叠区顺序', () => {
   it('防御掠夺位于训练下方、解散上方，并使用与解散相同的折叠控件', () => {
