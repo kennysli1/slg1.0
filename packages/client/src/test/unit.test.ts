@@ -25,7 +25,7 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
-import { caravanAction, displayGridForMovement, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
+import { caravanAction, collectMapTargetStack, displayGridForMovement, escortMarkerOffset, foreignArmyName, ownMovementsFromCache, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
@@ -1009,6 +1009,39 @@ describe('商队地图交互', () => {
     assert.equal(caravanAction({ canRaid: true, canEscort: false }), 'caravan_raid');
     assert.equal(caravanAction({ canRaid: false, canEscort: false }), null);
     assert.equal(caravanAction(), null);
+  });
+
+  it('同格目标栈保留底层地块、商队和军队，点击任一移动标记仍可切换', () => {
+    const base = { refId: 'village-1', kind: 'village', q: 5, r: 6, name: '目标村' } as any;
+    const caravan = { id: 'caravan', type: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '目标村' } } as any;
+    const army = { id: 'garrison', type: 'garrison', status: 'stationed', pos: { q: 5, r: 6 } } as any;
+    const stack = collectMapTargetStack(base, 5, 6, caravan, undefined, undefined, [caravan, army], [], []);
+    assert.deepEqual(stack.targets.map((target) => `${target.kind}:${target.refId}`), [
+      'caravan:caravan', 'village:village-1', 'own_army:garrison',
+    ]);
+    assert.equal(stack.active.kind, 'caravan');
+  });
+
+  it('己方行军合并当前村与跨村快照，空数组不会短路另一份数据', () => {
+    const previous = getCache();
+    const local = { id: 'local', pos: { q: 1, r: 1 } } as any;
+    const remote = { id: 'remote', pos: { q: 2, r: 2 } } as any;
+    const newerLocal = { id: 'same', pos: { q: 3, r: 3 }, stepIndex: 3 } as any;
+    const stalePlayer = { id: 'same', pos: { q: 2, r: 2 }, stepIndex: 2 } as any;
+    setCache({ moves: { movements: [local, newerLocal] }, playerMoves: { movements: [remote, stalePlayer] } });
+    assert.deepEqual(ownMovementsFromCache().map((movement) => movement.id).sort(), ['local', 'remote', 'same']);
+    assert.deepEqual(ownMovementsFromCache().find((movement) => movement.id === 'same')?.pos, { q: 3, r: 3 });
+    setCache(previous);
+  });
+
+  it('跨越环面边界的移动仍返回规范地图格坐标', () => {
+    const W = 41;
+    const now = 1_000;
+    const grid = displayGridForMovement({
+      pos: { q: W - 1, r: 2 }, path: [{ q: W - 1, r: 2 }, { q: 0, r: 2 }],
+      stepIndex: 0, status: 'marching', perStepMs: 1_000, nextStepAt: now + 500,
+    }, now);
+    assert.deepEqual(grid, { q: 0, r: 2 });
   });
 
   it('已附着护送军并列显示，商队公开名称带目的地', () => {

@@ -13,7 +13,7 @@ import { act, switchVillage } from '../../app/refresh.js';
 import { req, me, isOwnVillageId } from '../../api.js';
 import { fmt } from '../../shared/utils/format.js';
 import { Btn, Icon, IconPlate, Panel, Tag } from '../../ui/index.js';
-import { foreignArmyName, ownStationedMoveAt, selectedMapMovement, caravanAction } from './map-target-helpers.js';
+import { foreignArmyName, ownIncomingWarningsFromCache, ownMovementsFromCache, ownStationedMoveAt, selectedMapMovement, caravanAction } from './map-target-helpers.js';
 import { confirmOwnedVillage } from './owned-village-selection.js';
 import type { Movement, ForeignArmy } from '@slg/shared';
 
@@ -1028,7 +1028,7 @@ export function TargetPanel() {
     : null;
   const wrap = (content: any) => stackBar ? <>{stackBar}{content}</> : content;
 
-  const movement = selectedMapMovement(sel, getCache().playerMoves?.movements ?? [], foreignMoves.value?.movements ?? []);
+  const movement = selectedMapMovement(sel, ownMovementsFromCache(), foreignMoves.value?.movements ?? []);
   if (pending && movement?.movement.caravan) {
     return wrap(<GarrisonContinuation
       movementId={pending.movementId}
@@ -1063,7 +1063,7 @@ export function TargetPanel() {
 
   if (pending) return wrap(<GarrisonContinuation movementId={pending.movementId} movementType={pending.movementType} target={sel} onClose={cancelAll} />);
   if (sel.kind === 'incoming_warning') {
-    const warning = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []).find((entry: any) => entry.id === sel.refId);
+    const warning = ownIncomingWarningsFromCache().find((entry: any) => entry.id === sel.refId);
     return wrap(warning ? <IncomingWarningPanel warning={warning} onClose={clearSelection} /> : <Panel class="map-target-panel"><p>该预警已失效。</p><Btn onClick={clearSelection}>关闭</Btn></Panel>);
   }
   if (sel.kind === 'enemy_army') {

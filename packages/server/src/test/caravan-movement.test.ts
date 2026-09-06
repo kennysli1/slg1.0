@@ -121,6 +121,11 @@ test('商队劫掠初始预警：派出瞬间向商队所属玩家的可见村�
     f.warnings.filter((warning: any) => warning.movementId === raid.id && warning.visible).map((warning: any) => warning.villageId).sort(),
     ['a', 'b'],
   );
+  const playerView = await f.send('movement.ListPlayer', { playerId: 'a' });
+  assert.ok(
+    (playerView.payload as any).incomingWarnings.some((warning: any) => warning.id === raid.id),
+    '受害玩家的玩家级行军列表必须包含商队劫掠预警',
+  );
 });
 
 test('驻扎军劫掠商队复用原 movement：不会从城镇重新派出一支军队', async () => {
