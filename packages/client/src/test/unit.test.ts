@@ -982,6 +982,14 @@ describe('notificationKind', () => {
 });
 
 describe('商队地图交互', () => {
+  it('议会厅护卫服务在服务卡内提供商队选择，驻扎军按钮文案为继续行军', () => {
+    const council = readFileSync(new URL('../features/village/CouncilModal.tsx', import.meta.url), 'utf8');
+    const targetPanel = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(council, /council-caravan-pickers--card/);
+    assert.match(council, /选择护卫商队/);
+    assert.match(targetPanel, /继续行军<\/Btn>/);
+    assert.doesNotMatch(targetPanel, />选择行军模式<\/Btn>/);
+  });
   it('移动标记可直接按 ID 点击，商队不受旧外军 pointer-events:none 阻挡', () => {
     const source = readFileSync(new URL('../features/map/HexMap.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../styles/map.css', import.meta.url), 'utf8');

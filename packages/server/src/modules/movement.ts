@@ -2610,6 +2610,12 @@ export class MovementModule {
     mv.caravanMission = mission;
     mv.caravanTiming = [...(this.timingCache.get(id)?.segmentMs ?? [])];
     this.save(mv);
+    // launch() 的通用 pathTiming 以整格为单位，商队追兵首次目标可能是
+    // 当前格内的连续位置，必须立即按实际段长重算，避免把半格路程按整格
+    // 时长推进而错过相遇时刻。作废 launch 已登记的旧回调，再登记新段。
+    mv.stepToken += 1;
+    await this.replanCaravanChase(mv, target);
+    this.scheduler.schedule(mv.perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
     await this.checkCaravanMission(mv);
     // 商队劫掠从创建瞬间就可能进入受害方视野。此前只在追兵
     // 走完第一格后重算预警，导致受害玩家收不到初始来袭提示。
@@ -2623,28 +2629,40 @@ export class MovementModule {
 
   private caravanChasePath(from: Hex, caravan: MovementRecord): Hex[] {
     const paused = caravan.status === 'paused' || caravan.caravanSettlement || caravan.caravanBattleResult;
-    if (paused && hexDistanceWrapped(from, caravan.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001) return [{ ...from }];
+    // 商队尚在格间移动时，把它此刻的连续位置作为直达追赶目标；
+    // 后续每次落格都会重排路线，因此不会沿着商队的送货尾路行进。
+    const current = paused ? caravan.pos : this.caravanPosition(caravan);
+    if (paused && hexDistanceWrapped(from, current, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001) return [{ ...from }];
     // 以商队当前已落地的离散格为锚点；商队每推进一格后，step() 会
     // 立即重排追兵的后续最短路线。段内连续位置只用于相遇时刻和战斗切点，
     // 避免把路线锚在尚未抵达的下一格。
-    const anchor = this.caravanGrid(caravan.pos);
+    const anchor = this.caravanGrid(current);
     const path = linePathWrapped(this.caravanGrid(from), anchor, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    if (hexDistance(from, path[0]) > 0.000001) path.unshift({ ...from });
-    if (paused) {
-      const last = path[path.length - 1], previous = path[path.length - 2];
-      const distance = (a: Hex, b: Hex) => hexDistanceWrapped(a, b, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-      if (distance(last, caravan.pos) > 0.000001) {
-        if (previous && Math.abs(distance(previous, caravan.pos) + distance(caravan.pos, last) - distance(previous, last)) < 0.000001) path[path.length - 1] = { ...caravan.pos };
-        else path.push({ ...caravan.pos });
-      }
-      return path;
+    if (hexDistance(from, path[0]) > 0.000001) {
+      // from 可能是当前格内的连续位置。若仍保留 linePath 的格心首点，
+      // 重新规划会先把追兵拉回格心，表现为地图上瞬移/倒退半格；直接
+      // 用连续起点替换同格格心，只有跨格时才插入连续起点。
+      if (this.caravanGrid(from).q === path[0].q && this.caravanGrid(from).r === path[0].r) path[0] = { ...from };
+      else path.unshift({ ...from });
     }
-    return [...path, ...caravan.path.slice(caravan.stepIndex + 1)];
+    // 追兵只负责追上商队，不沿用商队后续的送货路线。
+    const last = path[path.length - 1], previous = path[path.length - 2];
+    const distance = (a: Hex, b: Hex) => hexDistanceWrapped(a, b, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if (distance(last, current) > 0.000001) {
+      if (previous && Math.abs(distance(previous, current) + distance(current, last) - distance(previous, last)) < 0.000001) path[path.length - 1] = { ...current };
+      else path.push({ ...current });
+    }
+    return path;
   }
 
   /** 两条当前线性路段的真正相交时刻，包含同向追上、迎面相遇和环面接缝。 */
   private caravanMeetDelay(a: MovementRecord, b: MovementRecord): number | undefined {
     const ap = this.caravanPosition(a), bp = this.caravanPosition(b);
+    // 追兵已经完成至少一段且与商队在同一格内非常接近时会合；保留
+    // 连续距离阈值，避免仅因同格就把仍相距半格的两支队伍提前结算。
+    if (a.stepIndex > 0
+      && hexDistanceWrapped(this.caravanGrid(ap), this.caravanGrid(bp), this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001
+      && hexDistance({ q: 0, r: 0 }, this.caravanDelta(ap, bp)) <= 0.05) return 0;
     // 追赶路线按离散格重排，但相遇仍按两条当前线性路段的连续位置
     // 计算，避免仅因同格就提前结算；目标跨入下一格后旧回调会由
     // 下方的 stepIndex/nextStepAt 校验作废。

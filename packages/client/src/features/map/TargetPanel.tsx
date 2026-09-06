@@ -779,7 +779,7 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
       <div class="target-body expedition-body">
         <section class="expedition-assessment">
           <div class="expedition-kicker">驻扎中</div>
-          <p>该格有你的{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
+          <p>该格有你的{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军。可召回返城，或继续行军（编队与宝物保持原样）。</p>
         </section>
         <div class="target-foot expedition-foot expedition-foot--split">
           <Btn onClick={async () => {
@@ -790,7 +790,7 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
             selected.value = null;
             showToast(`请在地图上选择${investigating ? '调查军' : '驻扎军'}的下一处行军目标`);
             onClose();
-          }}>选择行军模式</Btn>}
+          }}>继续行军</Btn>}
         </div>
       </div>
     </Panel>
