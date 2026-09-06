@@ -903,7 +903,14 @@ export class MovementModule {
       .map((m) => this.wireWithCaravan(m, '', playerId)));
     const incomingWarnings = (await Promise.all(
       [...villageIds].map((villageId) => this.listIncomingWarnings(villageId)),
-    )).flat().sort((a, b) => a.arriveAt - b.arriveAt);
+    )).flat().reduce<IncomingWarning[]>((unique, warning) => {
+      // 商队劫掠预警会发给商队所属玩家的所有村庄；玩家级快照
+      // 汇总这些村庄时，同一支劫掠军只能显示一张预警卡。
+      // 普通 PvP 来袭以 targetVillage 区分，不能在这里合并。
+      if (warning.caravanRaid && unique.some((item) => item.id === warning.id)) return unique;
+      unique.push(warning);
+      return unique;
+    }, []).sort((a, b) => a.arriveAt - b.arriveAt);
     return { ok: true, payload: { movements, incomingWarnings } };
   }
 
@@ -2490,13 +2497,25 @@ export class MovementModule {
 
   private async caravanInfo(mv: MovementRecord, playerId: string): Promise<CaravanInfo> {
     const originVillageId = mv.caravanOrigin ?? mv.homeVillage ?? mv.fromVillage;
-    const destinationVillageId = mv.returning ? (mv.homeVillage ?? mv.fromVillage) : (mv.caravanDestination ?? mv.targetVillage ?? '');
+    // 送货目的地是商队对外公开的固定路线。只有出发村/收货村的玩家
+    // 才能知道商队已经掉头返程；第三方始终看到原送货目的地，不能据此
+    // 判断当前商队是否已经空返，从而保留劫掠跑空的风险。
+    const deliveryDestinationVillageId = mv.caravanDestination ?? mv.targetVillage ?? '';
+    const homeVillageId = mv.homeVillage ?? mv.fromVillage;
+    const [originOwner, destinationOwner] = await Promise.all([
+      this.ownerOf(originVillageId),
+      deliveryDestinationVillageId ? this.ownerOf(deliveryDestinationVillageId) : Promise.resolve(''),
+    ]);
+    const relatedPlayer = !!playerId && (playerId === originOwner || playerId === destinationOwner);
+    const showingReturn = !!mv.returning && relatedPlayer;
+    const destinationVillageId = showingReturn ? homeVillageId : deliveryDestinationVillageId;
     const origin = await this.villageTile(originVillageId);
     const target = await this.villageTile(destinationVillageId);
     return {
       originVillageId, originVillageName: origin?.name ?? originVillageId,
       destinationVillageId, destinationVillageName: target?.name ?? destinationVillageId,
-      destination: mv.toXY, phase: mv.returning ? 'return' : 'delivery',
+      destination: showingReturn ? mv.toXY : (target?.q !== undefined && target?.r !== undefined ? { q: target.q, r: target.r } : mv.toXY),
+      phase: showingReturn ? 'return' : 'delivery',
       ...await this.caravanPermissions(mv, playerId),
     };
   }

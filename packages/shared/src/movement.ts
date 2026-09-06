@@ -15,6 +15,7 @@ export interface CaravanInfo {
   destinationVillageId: string;
   destinationVillageName: string;
   destination: Hex;
+  /** 非商队所属玩家始终收到 delivery，不能据此判断商队是否已返程。 */
   phase: 'delivery' | 'return';
   canRaid: boolean;
   canEscort: boolean;
