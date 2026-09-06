@@ -8,13 +8,13 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab, type SelectedTarget } from '../../app/store.js';
+import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, tab } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
-import { foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement } from './map-target-helpers.js';
+import { collectMapTargetStack, foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement, ownIncomingWarningsFromCache, ownMovementsFromCache } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.8;
@@ -732,8 +732,8 @@ export function HexMap() {
 
   // ─── march path + marker rendering ────────────────────────────────────────
   function buildMarchPaths() {
-    const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
-    const incoming = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+    const ownMoves: any[] = ownMovementsFromCache();
+    const incoming = ownIncomingWarningsFromCache()
       .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const moves: any[] = [...ownMoves, ...incoming];
     const paths: preact.VNode[] = [];
@@ -783,15 +783,18 @@ export function HexMap() {
   }
 
   function buildMarchMarkers() {
-    const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
-    const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+    const moves: any[] = ownMovementsFromCache();
+    const incoming: any[] = ownIncomingWarningsFromCache()
       .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const grid = displayGridForMovement(m, Date.now());
-      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+      // 像素位置和 data-display 坐标必须来自同一个时刻；若分别读取
+      // Date.now()，恰好跨格时会出现“图标已经在下一格但命中仍在上一格”。
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = marchMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       markers.push(
@@ -824,8 +827,9 @@ export function HexMap() {
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const grid = displayGridForMovement(m, Date.now());
-      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = marchMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
@@ -861,8 +865,9 @@ export function HexMap() {
     const ref = viewRef();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const grid = displayGridForMovement(m, Date.now());
-      const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = foreignMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       const tone = foreignArmyMarkerTone(m.type, m.status);
@@ -1104,7 +1109,7 @@ export function HexMap() {
         return;
       }
       const ref = viewRef();
-      const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+      const moves: any[] = ownMovementsFromCache();
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
@@ -1112,7 +1117,7 @@ export function HexMap() {
         if (!el || !px) return;
         setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
-      const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+      const incoming: any[] = ownIncomingWarningsFromCache()
         .map((warning: any) => normalizeIncomingWarningForRender(warning));
       incoming.forEach((m) => {
         if (!m.id) return;
@@ -1143,13 +1148,31 @@ export function HexMap() {
     const clickedId = ownMarker?.getAttribute('data-own-move-id')
       ?? incomingMarker?.getAttribute('data-move-id')
       ?? foreignMarker?.getAttribute('data-move-id');
-    const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+    const ownMoves: any[] = ownMovementsFromCache();
     const foreignList: ForeignArmy[] = foreignMoves.value?.movements ?? [];
-    const incomingList: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? []);
+    const incomingList: any[] = ownIncomingWarningsFromCache();
     const clickedOwn = clickedId ? ownMoves.find((m) => m.id === clickedId) : undefined;
     const clickedForeign = clickedId ? foreignList.find((m) => m.id === clickedId) : undefined;
     const clickedIncoming = clickedId ? incomingList.find((m) => m.id === clickedId) : undefined;
     const clickedMovement = clickedOwn ?? clickedForeign ?? clickedIncoming;
+    const frameNow = Date.now();
+
+    // 目标栈要复用“屏幕这一帧”实际显示的格，而不是在点击时为每支军队
+    // 分别重新取 Date.now()。否则点击发生在 rAF 切格边界附近时，商队和
+    // 同格军队可能被分到两个格，面板就只剩最上层的商队。
+    const domGrid = (root: Element | null, attr: string, id: string): { q: number; r: number } | null => {
+      if (!root || !id) return null;
+      for (const element of Array.from(root.querySelectorAll(`[${attr}]`))) {
+        if (element.getAttribute(attr) !== id) continue;
+        const q = Number(element.getAttribute('data-display-q'));
+        const r = Number(element.getAttribute('data-display-r'));
+        if (Number.isFinite(q) && Number.isFinite(r)) return { q, r };
+      }
+      return null;
+    };
+    const gridForOwn = (m: any) => domGrid(markerEl.current, 'data-own-move-id', m.id) ?? displayGridForMovement(m, frameNow);
+    const gridForIncoming = (m: any) => domGrid(markerEl.current, 'data-move-id', m.id) ?? displayGridForMovement(m, frameNow);
+    const gridForForeign = (m: ForeignArmy) => domGrid(foreignEl.current, 'data-move-id', m.id) ?? displayGridForMovement(m, frameNow);
     let cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) {
       // 标记层覆盖在村庄/地块之上时，先临时隐藏所有移动层，再读取底层格；
@@ -1159,7 +1182,6 @@ export function HexMap() {
       cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
       layers.forEach((layer) => { layer.style.pointerEvents = ''; layer.style.visibility = ''; });
     }
-    const frameNow = Date.now();
     const markerGrid = clickedId
       ? (() => {
           const source = ownMarker ?? incomingMarker ?? foreignMarker;
@@ -1197,31 +1219,19 @@ export function HexMap() {
       ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
     };
     const ownAt = ownMoves.filter((m) => {
-      const grid = displayGridForMovement(m, frameNow);
+      const grid = gridForOwn(m);
       return grid?.q === q && grid?.r === r;
     });
     const foreignAt = foreignList.filter((m) => {
-      const grid = displayGridForMovement(m, frameNow);
+      const grid = gridForForeign(m);
       return grid?.q === q && grid?.r === r;
     });
     const incomingAt = incomingList.filter((m) => {
-      const grid = displayGridForMovement(m, frameNow);
+      const grid = gridForIncoming(m);
       return grid?.q === q && grid?.r === r;
     });
-    const targetForOwn = (m: any): SelectedTarget => ({ refId: m.id, kind: m.caravan ? 'caravan' : 'own_army', q, r, name: m.caravan ? `商队 → ${m.caravan.destinationVillageName}` : '己方军队' });
-    const targetForForeign = (m: ForeignArmy): SelectedTarget => ({ refId: m.id, kind: m.caravan ? 'caravan' : 'enemy_army', q, r, name: foreignArmyName(m) });
-    const targetForIncoming = (m: any): SelectedTarget => ({ refId: m.id, kind: 'incoming_warning', q, r, name: '来袭军队' });
-    const targets: SelectedTarget[] = [];
-    const pushUnique = (target: SelectedTarget) => { if (!targets.some((entry) => entry.kind === target.kind && entry.refId === target.refId)) targets.push(target); };
-    if (clickedOwn) pushUnique(targetForOwn(clickedOwn));
-    if (clickedForeign) pushUnique(targetForForeign(clickedForeign));
-    if (clickedIncoming) pushUnique(targetForIncoming(clickedIncoming));
-    pushUnique(baseTarget);
-    ownAt.forEach((m) => pushUnique(targetForOwn(m)));
-    foreignAt.forEach((m) => pushUnique(targetForForeign(m)));
-    incomingAt.forEach((m) => pushUnique(targetForIncoming(m)));
-    const active = (clickedOwn ? targetForOwn(clickedOwn) : clickedForeign ? targetForForeign(clickedForeign) : clickedIncoming ? targetForIncoming(clickedIncoming) : baseTarget);
-    selected.value = targets.length > 1 ? { ...active, stackedTargets: targets } : active;
+    const stack = collectMapTargetStack(baseTarget, q, r, clickedOwn, clickedForeign, clickedIncoming, ownAt, foreignAt, incomingAt);
+    selected.value = stack.targets.length > 1 ? { ...stack.active, stackedTargets: stack.targets } : stack.active;
     // 己方村庄先进入观察态；只有目标卡的明确确认按钮才会切换操作上下文。
   }
 
