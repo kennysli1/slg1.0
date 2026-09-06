@@ -443,6 +443,9 @@ export class MovementModule {
     return {
       id: mv.id,
       type: mv.type,
+      ...(mv.caravanMission?.attached && mv.targetMovementId
+        ? { escortCaravanId: mv.targetMovementId, escortAttached: true }
+        : {}),
       status: mv.status,
       ownerPlayerId: owner.playerId,
       ownerPlayerName: owner.name,
@@ -1057,9 +1060,11 @@ export class MovementModule {
     const out: ForeignArmy[] = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!mv.fromVillage || !mv.pos) continue;
+      const attachedCaravan = mv.caravanMission?.attached ? this.load(mv.targetMovementId ?? '') : undefined;
+      const escortForPlayer = !!attachedCaravan && await this.caravanRelatedToPlayer(attachedCaravan, playerId);
       // 侦察部队不产生地图外军标记；无论是主动侦察还是途中拦截侦察，
       // 都只对派出方可见，不能被目标或第三方通过地图轮询/推送发现。
-      if (this.isScoutMovement(mv) || mv.caravanMission?.attached) continue;
+      if (this.isScoutMovement(mv) || (mv.caravanMission?.attached && !escortForPlayer)) continue;
       const grid = this.caravanGrid(mv.pos);
       const key = `${grid.q},${grid.r}`;
       const incomingCaravan = mv.type === 'caravan' && !mv.returning && mv.targetVillage && await this.ownerOf(mv.targetVillage) === playerId;
@@ -1067,7 +1072,7 @@ export class MovementModule {
         // 伏击军的隐蔽性不受城池视野影响：只有查看方自己的地图单位在一格内时可见。
         const nearby = await this.hasNearbyArmySource(playerId, mv.pos);
         if (!nearby) continue;
-      } else if (!visible.has(key) && !incomingCaravan) continue;
+      } else if (!visible.has(key) && !incomingCaravan && !escortForPlayer) continue;
       // 王国 NPC 行军使用 `kingdom-fief:*` / `task:*` 等内部来源 ID，
       // 没有对应的玩家村庄，不能走 player.GetByVillage；否则移动中的
       // 王国军队（尤其是复仇军返程）会在地图外军列表里被静默丢弃。
@@ -2824,6 +2829,7 @@ export class MovementModule {
         this.splitCaravanSegment(mv);
         mv.caravanMission!.attached = true;
         mv.status = 'marching';
+        this.alignAttachedEscort(mv, caravan);
         this.save(mv);
         await this.removePreviousForeignAudience(mv, previousAudience);
         await this.publishCaravanMovement(mv);
@@ -3114,10 +3120,22 @@ export class MovementModule {
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!this.isCaravanMission(mv) || mv.targetMovementId !== caravan.id) continue;
       if (mv.caravanMission?.attached) {
-        this.appendEscortPoint(mv, caravan.pos);
+        this.alignAttachedEscort(mv, caravan);
         await this.publishCaravanMovement(mv);
       } else await this.checkCaravanMission(mv);
     }
+  }
+
+  /** 将附着护送军的显示路径/计时对齐到商队；附着军不再独立调度步进。 */
+  private alignAttachedEscort(escort: MovementRecord, caravan: MovementRecord): void {
+    escort.path = caravan.path.map((point) => ({ ...point }));
+    escort.stepIndex = caravan.stepIndex;
+    escort.pos = { ...caravan.pos };
+    escort.perStepMs = caravan.perStepMs;
+    escort.nextStepAt = caravan.nextStepAt;
+    escort.arriveAt = caravan.arriveAt;
+    escort.caravanTiming = caravan.caravanTiming ? [...caravan.caravanTiming] : undefined;
+    this.save(escort);
   }
 
   /**
@@ -3905,13 +3923,32 @@ export class MovementModule {
     this.scheduler.schedule(mv.perStepMs, () => this.step(id, stepToken), `movement:${id}`, `movement:${id}`);
   }
 
-  /** 商队的视野外收货方也属于受众；隐藏护送队/侦察军不属于外军视图。 */
+  /** 商队的视野外收货方也属于受众；护送军仅向商队相关玩家公开，侦察军仍隐藏。 */
   private async foreignAudience(mv: MovementRecord): Promise<string[]> {
-    if (this.isScoutMovement(mv) || mv.caravanMission?.attached) return [];
+    if (this.isScoutMovement(mv)) return [];
+    if (mv.caravanMission?.attached) {
+      const caravan = this.load(mv.targetMovementId ?? '');
+      return caravan ? this.caravanRelatedPlayers(caravan) : [];
+    }
     const result = await this.commands.send({ name: 'vision.GetObservers', from: MovementModule.NAME, payload: this.caravanGrid(mv.pos) });
     const ids: string[] = [...((result.payload as any)?.playerIds ?? [])];
     if (mv.type === 'caravan' && !mv.returning && mv.targetVillage) ids.push(await this.ownerOf(mv.targetVillage));
     return [...new Set(ids.filter(Boolean))];
+  }
+
+  /** 商队出发方和收货方都能看到附着的他人护送军；第三方仍不可见。 */
+  private async caravanRelatedPlayers(caravan: MovementRecord): Promise<string[]> {
+    const origin = caravan.caravanOrigin ?? caravan.homeVillage ?? caravan.fromVillage;
+    const destination = caravan.caravanDestination ?? caravan.targetVillage;
+    const owners = await Promise.all(
+      [origin, destination].filter(Boolean).map((villageId) => this.ownerOf(villageId!)),
+    );
+    return [...new Set(owners.filter(Boolean))];
+  }
+
+  private async caravanRelatedToPlayer(caravan: MovementRecord, playerId: string): Promise<boolean> {
+    if (!playerId) return false;
+    return (await this.caravanRelatedPlayers(caravan)).includes(playerId);
   }
 
   private async removePreviousForeignAudience(mv: MovementRecord, previous: string[]): Promise<void> {
@@ -3927,7 +3964,7 @@ export class MovementModule {
   private async emitForeignStep(mv: MovementRecord): Promise<void> {
     // ListForeign 已过滤侦察，这里也必须在增量通道早退，避免地图轮询间隔内
     // 通过 ForeignStepped 短暂暴露侦察部队。
-    if (this.isScoutMovement(mv) || mv.caravanMission?.attached) return;
+    if (this.isScoutMovement(mv)) return;
     // NPC 行军使用内部来源 ID，不存在 player/village 记录；为其提供
     // 稳定的脱敏归属，避免 ForeignArmyStep 因查不到玩家而直接丢弃。
     const owner = mv.npcService

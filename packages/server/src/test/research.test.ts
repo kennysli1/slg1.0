@@ -215,6 +215,41 @@ test('科研判定的人口查询变慢时不阻塞下一次计划任务，且�
   }
 });
 
+test('科研判定失败也推送新时间戳，页面不会卡在完成阶段', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '科研失败刷新', 'pass1');
+  assert.equal(regRes.ok, true);
+  const va = (regRes.payload as any).player.villageId as string;
+  app.store.set('research', va, {
+    villageId: va, rp: 0, completed: [], treasureTechIntervalMult: 1,
+    academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 },
+  });
+  const changed = await send(app, 'research.SetTreasureTechInterval', { villageId: va, mult: 0.9 });
+  assert.equal(changed.ok, true);
+  const scheduled = await send(app, 'research.GetState', { villageId: va });
+  const scheduledPayload = scheduled.payload as any;
+  const dueAt = Number(scheduledPayload.academy.lastCheckTime) + Math.round(
+    Number(scheduledPayload.rpFormula.baseIntervalSec) * 1000
+      * 0.9 / Number(scheduledPayload.rpFormula.populationMultiplier ?? 1),
+  );
+  let event: any;
+  app.bus.on('research.RpChanged', (evt) => { event = evt; });
+  const originalRandom = Math.random;
+  Math.random = () => 0.999999;
+  try {
+    await app.scheduler.advanceTo(dueAt, (t) => { clock = t; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    Math.random = originalRandom;
+  }
+  const state = await send(app, 'research.GetState', { villageId: va });
+  assert.equal((state.payload as any).academy.lastCheckTime, dueAt);
+  assert.equal((state.payload as any).rp, 0, '失败判定不应增加科研点');
+  assert.equal(event?.payload?.gained, 0, '失败判定仍应带 gained=0 的刷新事件');
+  assert.equal(event?.payload?.rp, 0);
+});
+
 // ─── 新增：初建不回溯赠送 RP ──────────────────────────────────────────
 test('研究：注册时初始 RP=0（不回溯赠送）', async () => {
   const app = freshApp();
