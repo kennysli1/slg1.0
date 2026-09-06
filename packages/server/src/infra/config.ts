@@ -514,6 +514,8 @@ export interface GameConstants {
   marchSizePenalty: number;
   /** 军队规模减速：速度倍率下限。 */
   marchSizeMinMultiplier: number;
+  /** 野战/被伏击方达到该战损比例后返城的默认阈值（百分比）。 */
+  marchLossRateDefault: number;
   /** 骑兵兵种代码（由 cavalry_unit_codes 以 | 分隔配置），用于猎马人任务与绞马索效果。 */
   cavalryUnitCodes: string[];
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -1412,6 +1414,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
     marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
     marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
+    marchLossRateDefault: Math.max(0, Math.min(100, cn('march_loss_rate_default', 40))),
     cavalryUnitCodes: parseConstantList(cs('cavalry_unit_codes', 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'), 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
@@ -2326,6 +2329,9 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.marchSizePenalty < 0) errors.push(`game_constants.csv march_size_penalty 必须≥0`);
   if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
     errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
+  }
+  if (c.marchLossRateDefault < 0 || c.marchLossRateDefault > 100) {
+    errors.push(`game_constants.csv march_loss_rate_default 必须在[0,100]`);
   }
   if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
   if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);

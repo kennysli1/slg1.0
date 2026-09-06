@@ -22,6 +22,7 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
+  assert.equal(c.marchLossRateDefault, 40, '默认战损返城阈值');
   assert.equal(c.tradeCaravanSpeed, 100, '商队速度默认值');
   assert.equal(c.tradeCaravanMinDurationSec, 3, '商队最低时长默认值');
   assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');

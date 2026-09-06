@@ -172,6 +172,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetId: { type: 'string', minLen: 1, maxLen: 64 },
           troops:   { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -181,6 +182,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           declareWar: { type: 'boolean', optional: true },
         },
@@ -191,6 +193,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           scoutType: { type: 'enum', optional: true, values: ['scout_resources', 'scout_buildings'] },
         },
@@ -200,6 +203,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           movementId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -208,6 +212,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetMovementId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -216,6 +221,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetMovementId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -224,6 +230,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           declareWar: { type: 'boolean', optional: true },
         },
@@ -233,6 +240,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -264,6 +272,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           cargo: { type: 'record_int', maxKeys: 4, minVal: 0, maxVal: 10_000_000 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           mode: { type: 'enum', optional: true, values: ['transfer', 'transport', 'reinforce'] },
@@ -275,6 +284,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -284,6 +294,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -292,6 +303,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -301,6 +313,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -310,6 +323,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },

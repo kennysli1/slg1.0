@@ -1047,6 +1047,7 @@ var MARCH_SIZE_ROWS = [
   ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
   ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
   ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+  ['march_loss_rate_default','默认战损返城阈值','野战/被伏击方达到该战损比例后返城；玩家可在派兵界面覆盖'],
 ];
 function sectionMarchSize(){
   var rows = DATA.constants || [], byKey = {};
@@ -1056,8 +1057,9 @@ function sectionMarchSize(){
   for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
     var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
     var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    var max = item[0] === 'march_loss_rate_default' ? '100' : '';
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
-    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td><input type="number" min="'+min+'"'+(max ? ' max="'+max+'"' : '')+' step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';

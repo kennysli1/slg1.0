@@ -206,6 +206,9 @@ export class TreasureModule {
     this.commands.register('treasure.StoreCarried', (c) => this.storeCarried(c));
     // 抵达另一个村庄时把携带宝物转为该村庄的待处理报告
     this.commands.register('treasure.OffloadForeign', (c) => this.offloadForeign(c));
+    // 野战胜方缴获的宝物：战斗中先从败方军队携带记录转移，胜方归城后生成待处理报告。
+    this.commands.register('treasure.TransferCarried', (c) => this.transferCarried(c));
+    this.commands.register('treasure.StoreCaptured', (c) => this.storeCaptured(c));
     // 携带宝物的军队被全歼：pve 回收系统池 / pvp 转交防守方
     this.commands.register('treasure.LoseCarried', (c) => this.loseCarried(c));
     // 军队到家：标记本军队对应的 camp 掉落 pending 为已到达（仅标记，不删记录；claimPending 据此放行）
@@ -951,6 +954,28 @@ export class TreasureModule {
       } as DomainEvent);
     }
     return { ok: true, payload: { villageId, codes: got, stored, pending } };
+  }
+
+  /** 原子转移一支被击败军队的携带宝物；重复调用安全，已转移时返回空数组。 */
+  private transferCarried(cmd: Command): CommandResult {
+    const { movementId } = cmd.payload as { movementId: string };
+    const codes = this.removeCarried(movementId) ?? [];
+    return { ok: true, payload: { movementId, codes } };
+  }
+
+  /** 胜方返城后把野战缴获物作为永久 deliver 报告交给玩家处理。 */
+  private async storeCaptured(cmd: Command): Promise<CommandResult> {
+    const { villageId, codes } = cmd.payload as { villageId: string; codes?: string[] };
+    if (!villageId || !Array.isArray(codes) || codes.length === 0) return { ok: true, payload: { villageId, pending: [] } };
+    const pending: string[] = [];
+    for (const code of codes.filter(Boolean)) {
+      if (!this.config.treasures[code]) continue;
+      const id = `captured-${villageId}-${this.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      this.createDeliverPending(villageId, code, id, false);
+      pending.push(id);
+    }
+    if (pending.length > 0) await this.emitChanged(villageId);
+    return { ok: true, payload: { villageId, pending } };
   }
 
   /**
