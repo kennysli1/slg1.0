@@ -592,16 +592,20 @@ export class ResearchModule {
       // 不重复掷骰；预先登记的下一次任务仍然有效。
       if (latest.academy.lastCheckTime >= dueAt) return;
       const prob = this.probabilityFor(latest, params, popMult);
-      if (Math.random() < prob) {
+      const gained = Math.random() < prob;
+      if (gained) {
         latest.rp += 1;
         latest.academy.failStreak = 0;
-        void this.pushRp(villageId, latest.rp);
       } else {
         latest.academy.failStreak++;
       }
       // lastCheckTime 表示逻辑判定时刻，不是异步结算完成时刻。
       latest.academy.lastCheckTime = Math.max(latest.academy.lastCheckTime || 0, dueAt);
       this.store.set(COLLECTION, villageId, latest);
+      // 每次判定都推送一次快照，即使判定失败也要让客户端拿到新的
+      // lastCheckTime，重新绘制下一轮倒计时。失败事件带 gained=0，
+      // 不进入战报，但仍会触发轻量 research 刷新。
+      void this.pushRp(villageId, latest.rp, gained ? 1 : 0);
 
       // 人口倍率可能已变化；仍以原计划时刻为锚点重排，不把查询耗时加入间隔。
       this.scheduleRpTick(villageId, dueAt + this.intervalMs(latest, params, popMult));
@@ -701,8 +705,8 @@ export class ResearchModule {
     return out;
   }
 
-  private async pushRp(villageId: string, rp: number): Promise<void> {
-    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp } });
+  private async pushRp(villageId: string, rp: number, gained = 0): Promise<void> {
+    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp, gained } });
   }
 
   /** 查询指定效果类型的已完成科技效果值总和（供 building/military 等模块计算时查询）。 */

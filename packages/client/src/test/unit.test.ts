@@ -997,6 +997,11 @@ describe('商队地图交互', () => {
     assert.match(source, /class="march-marker-hit"/);
     assert.match(css, /\.enemy-march-mk\[data-move-id\]\s*\{\s*pointer-events:\s*all/);
   });
+  it('野战战损返城阈值使用 0-100 滑条而不是数字输入', () => {
+    const source = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(source, /class="loss-rate-slider"\s+type="range"\s+min=\{0\}\s+max=\{100\}/);
+    assert.match(source, /aria-label="野战战损返城阈值百分比"/);
+  });
   it('按点击 ID 选择同格商队和护送军，不被占格顺序替换', () => {
     const escort = { id: 'escort', pos: { q: 5, r: 6 }, escortAttached: true } as any;
     const caravan = { id: 'caravan', pos: { q: 5, r: 6 } } as any;

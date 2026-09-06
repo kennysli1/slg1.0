@@ -209,8 +209,9 @@ test('驻扎军劫掠商队复用原 movement：不会从城镇重新派出一�
   assert.equal(f.store.get<any>('movement', (continued.payload as any).id)?.id, garrisonId);
 });
 
-test('护送：段内会合与商队同速，第三方不可见军队，抵达原派兵村直接收兵', async () => {
+test('护送：段内会合与商队同速，商队相关玩家可见，第三方不可见，抵达原派兵村直接收兵', async () => {
   const f = fixture(); const car = await f.caravan(); await f.advance(200);
+  const foreignBeforeAttach = f.foreign.length;
   const escort = await f.mission(car, 'Escort', 'b');
   await f.advance(3_000);
   assert.equal(f.store.get<any>('movement', escort).caravanMission.attached, true);
@@ -218,6 +219,18 @@ test('护送：段内会合与商队同速，第三方不可见军队，抵达�
   const army = (wire.payload as any).movements.find((m: any) => m.id === escort);
   const caravan = f.store.get<any>('movement', car);
   assert.deepEqual(army.pos, caravan.pos); assert.equal(army.nextStepAt, caravan.nextStepAt);
+  assert.equal(army.perStepMs, caravan.perStepMs, '护送军应与商队使用同一段计时');
+  assert.deepEqual(army.path, caravan.path, '护送军地图路径应跟随商队当前路径');
+  const originView = await f.send('movement.ListForeign', { playerId: 'a' });
+  const originEscort = (originView.payload as any).movements.find((m: any) => m.id === escort);
+  assert.ok(originEscort, '商队出发方应能看到他人护送军');
+  assert.equal(originEscort.escortAttached, true);
+  assert.equal(originEscort.escortCaravanId, car);
+  const escortPushes = f.foreign.slice(foreignBeforeAttach).filter((event: any) => event.army?.id === escort && event.army?.escortAttached);
+  assert.ok(escortPushes.some((event: any) => event.army?.id === escort && event.playerIds.includes('a')),
+    '商队步进应向出发方推送护送军图标');
+  assert.equal(escortPushes.some((event: any) => event.army?.id === escort && event.playerIds.includes('r')), false,
+    '护送军步进不得向第三方推送');
   const foreign = await f.send('movement.ListForeign', { playerId: 'r' });
   assert.equal((foreign.payload as any).movements.some((m: any) => m.id === escort), false);
   assert.ok(f.removed.some((e) => e.id === escort && e.playerIds.includes('r')), '合体时立即移除此前的外军图标');

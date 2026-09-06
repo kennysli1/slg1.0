@@ -423,7 +423,7 @@ function Preparation({
       <section class="target-section loss-rate-picker">
         <div class="target-section-head"><span>野战战损返城阈值</span><strong>{lossRate}%</strong></div>
         <p class="expedition-hint">野战或被伏击方获胜后，累计损失超过此比例会自动返城；默认 40%。伏击方获胜始终返城。</p>
-        <input type="number" min={0} max={100} step={1} value={lossRate} aria-label="野战战损返城阈值百分比"
+        <input class="loss-rate-slider" type="range" min={0} max={100} step={1} value={lossRate} aria-label="野战战损返城阈值百分比"
           onInput={(event) => {
             const raw = Number((event.currentTarget as HTMLInputElement).value);
             setLossRate(Math.max(0, Math.min(100, Number.isFinite(raw) ? Math.floor(raw) : 40)));

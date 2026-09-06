@@ -899,9 +899,9 @@ export function HexMap() {
           data-move-id={m.id}
           {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
-          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
+          transform={`translate(${(p.x + escortMarkerOffset(m)).toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : `外军 · ${m.type ?? 'return'}`}</title>
+          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : m.escortAttached ? `${m.ownerPlayerName ?? '他人'}的护送军 · 随商队行进` : `外军 · ${m.type ?? 'return'}`}</title>
           <circle class="march-marker-hit" cx="-3" cy="-9" r="15" />
           <circle class={`march-marker-base march-marker-base--foreign march-marker-base--foreign-${tone}`} cx="-3" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--foreign" cx="-3" cy="-9" r="9.2" />
@@ -1133,7 +1133,7 @@ export function HexMap() {
         const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
         const px = foreignMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
+        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
       rafRef.current = requestAnimationFrame(frame);
     };
