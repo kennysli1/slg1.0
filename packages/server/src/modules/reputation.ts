@@ -21,6 +21,10 @@ interface ReputationState {
   /** 已由王国 PvE 击杀累计触发的 -5 声望批次，用于每批只触发一次报复检查。 */
   kingdomPvePenaltyChunks?: number;
   kingdomPvePenaltyRemainder?: number;
+  /** 商队劫掠物资累计；不足一声望点的部分跨多次劫掠保留。 */
+  caravanRaidGoodsRemainder?: number;
+  /** 已结算的商队劫掠批次，防止结算日志重放重复扣声望。 */
+  caravanRaidSettlementIds?: Record<string, number>;
   /** 联盟形象大使带来的每次正声望获得额外点数。 */
   allianceBonus?: number;
 }
@@ -49,6 +53,7 @@ export class ReputationModule {
     this.commands.register('reputation.AdjustByVillage', (c) => this.adjustByVillage(c));
     this.commands.register('reputation.SetTreasureDelta', (c) => this.setTreasureDelta(c));
     this.commands.register('reputation.ProcessPvpBattle', (c) => this.processPvpBattle(c));
+    this.commands.register('reputation.ProcessCaravanRaid', (c) => this.processCaravanRaid(c));
     this.commands.register('reputation.SetAllianceBonus', (c) => this.setAllianceBonus(c));
     // BattleEnded 的声望结算属于战斗完成的同步后置步骤；等待处理器，
     // 让战斗命令返回时跨战斗累计与报复阈值检查已经落库。
@@ -78,6 +83,13 @@ export class ReputationModule {
       kingdomPveKillRemainder: Math.max(0, Math.trunc(raw.kingdomPveKillRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveKilledPopulationPerReputation),
       kingdomPvePenaltyChunks: Math.max(0, Math.trunc(raw.kingdomPvePenaltyChunks ?? 0)),
       kingdomPvePenaltyRemainder: Math.max(0, Math.trunc(raw.kingdomPvePenaltyRemainder ?? 0)) % Math.max(1, this.config.constants.kingdomPveRetaliationChunk),
+      caravanRaidGoodsRemainder: Math.max(0, Math.trunc(raw.caravanRaidGoodsRemainder ?? 0)),
+      caravanRaidSettlementIds: Object.fromEntries(
+        Object.entries(raw.caravanRaidSettlementIds ?? {})
+          .filter(([id, ts]) => !!id && Number.isFinite(Number(ts)))
+          .slice(-512)
+          .map(([id, ts]) => [id, Math.trunc(Number(ts))]),
+      ),
       allianceBonus: Math.max(0, Math.trunc(raw.allianceBonus ?? 0)),
     };
   }
@@ -85,7 +97,7 @@ export class ReputationModule {
   private ensure(playerId: string): ReputationState {
     const existing = this.store.get<ReputationState>(COLLECTION, playerId);
     if (existing) return this.normalize(existing);
-    const state: ReputationState = { playerId, baseValue: 0, treasureDelta: 0, value: 0, updatedAt: this.now(), goodPvpKillRemainder: 0, evilPvpKillRemainder: 0, kingdomPveKillRemainder: 0, kingdomPvePenaltyChunks: 0, kingdomPvePenaltyRemainder: 0 };
+    const state: ReputationState = { playerId, baseValue: 0, treasureDelta: 0, value: 0, updatedAt: this.now(), goodPvpKillRemainder: 0, evilPvpKillRemainder: 0, kingdomPveKillRemainder: 0, kingdomPvePenaltyChunks: 0, kingdomPvePenaltyRemainder: 0, caravanRaidGoodsRemainder: 0, caravanRaidSettlementIds: {} };
     this.store.set(COLLECTION, playerId, state);
     return state;
   }
@@ -243,6 +255,44 @@ export class ReputationModule {
     const delta = (isGoodAttack ? c.reputationGoodPvpReward : -c.reputationEvilPvpReward) * rewardUnits;
     const result = await this.adjust({ ...cmd, payload: { playerId: attackerId, delta, reason: 'pvp_alignment_kills' } });
     return { ok: result.ok, payload: { rewarded: result.ok, killedPop, rewardUnits, ...(result.payload as any) }, reason: result.reason };
+  }
+
+  /**
+   * 商队劫掠声望结算：只按实际交给劫掠军的物资计算，木/泥/铁/粮/金币各占一个单位。
+   * settlementId 由商队结算日志提供，和累计余数一起落盘，保证重放不会重复扣分。
+   */
+  private async processCaravanRaid(cmd: Command): Promise<CommandResult> {
+    const villageId = String((cmd.payload as any)?.villageId ?? '');
+    const settlementId = String((cmd.payload as any)?.settlementId ?? '');
+    if (!villageId || !settlementId) return { ok: false, payload: {}, reason: 'invalid_caravan_raid_settlement' };
+    const owner = await this.commands.send({ name: 'player.GetByVillage', from: ReputationModule.NAME, payload: { villageId } });
+    if (!owner.ok) return owner;
+    const playerId = String((owner.payload as any)?.player?.id ?? '');
+    if (!playerId) return { ok: false, payload: {}, reason: 'owner_not_found' };
+    const state = this.ensure(playerId);
+    const processed = state.caravanRaidSettlementIds ?? {};
+    if (Object.prototype.hasOwnProperty.call(processed, settlementId)) {
+      return { ok: true, payload: { ...this.payload(state), processed: false, duplicate: true, stolenGoods: 0, reputationPoints: 0, remainder: state.caravanRaidGoodsRemainder ?? 0 } };
+    }
+    let stolenGoods = 0;
+    for (const raw of Object.values(((cmd.payload as any)?.loot ?? {}) as Record<string, unknown>)) {
+      const amount = Number(raw);
+      if (Number.isFinite(amount) && amount > 0) stolenGoods += Math.floor(amount);
+    }
+    const threshold = Math.max(1, Math.floor(this.config.constants.caravanRaidReputationGoodsPerPoint));
+    const total = (state.caravanRaidGoodsRemainder ?? 0) + stolenGoods;
+    const reputationPoints = Math.floor(total / threshold);
+    state.caravanRaidGoodsRemainder = total % threshold;
+    state.caravanRaidSettlementIds = { ...processed, [settlementId]: this.now() };
+    this.store.set(COLLECTION, playerId, state);
+    if (reputationPoints <= 0) {
+      return { ok: true, payload: { ...this.payload(state), processed: true, stolenGoods, reputationPoints: 0, remainder: state.caravanRaidGoodsRemainder } };
+    }
+    const result = await this.adjust({
+      name: 'reputation.Adjust', from: ReputationModule.NAME,
+      payload: { playerId, delta: -reputationPoints, reason: 'caravan_raid_goods' },
+    });
+    return { ok: result.ok, payload: { ...(result.payload as any), processed: result.ok, stolenGoods, reputationPoints, remainder: state.caravanRaidGoodsRemainder }, reason: result.reason };
   }
 
   private async onBattleEnded(evt: DomainEvent): Promise<void> {

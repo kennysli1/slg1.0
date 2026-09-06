@@ -3018,6 +3018,19 @@ export class MovementModule {
       if (raider?.type === 'caravan_raid') {
         const next = structuredClone(raider); next.loot = { ...plan.raidLootAfter }; this.save(next);
       }
+      if (plan.raiderVillage && plan.loot) {
+        const reputation = await this.commands.send({
+          name: 'reputation.ProcessCaravanRaid', from: MovementModule.NAME,
+          payload: {
+            villageId: plan.raiderVillage,
+            loot: plan.loot,
+            settlementId: `caravan-raid:${caravanId}:${journal.raiderId}:${journal.battleId ?? 'direct'}`,
+          },
+        });
+        if (!reputation.ok && !String(reputation.reason ?? '').startsWith('no_handler:')) {
+          log.warn('商队劫掠声望结算未完成', { caravanId, raiderId: journal.raiderId, reason: reputation.reason });
+        }
+      }
       for (let i = journal.reportIndex ?? 0; i < plan.reportVillages.length; i++) {
         const villageId = plan.reportVillages[i]!;
         await this.bus.emit({ name: 'movement.CaravanRaidReport', source: MovementModule.NAME, ts: this.now(), payload: {
