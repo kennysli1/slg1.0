@@ -1284,3 +1284,45 @@
 .map-village-index-item:not(.is-current) { border-left-color: var(--status-info); }
 .own-village-target { border-top: calc(var(--s-1) / 2) solid var(--accent); }
 .own-village-target .target-actions { align-items: stretch; }
+
+/* 手机地图遵循“地图优先”：默认只有三个入口，详情按需拉起抽屉。 */
+.map-mobile-ui { display: none; }
+@media (max-width: 720px) {
+  .map-overlay { display: none; }
+  .map-tactical-stack { display: none; }
+  .map-mobile-ui { display: block; position: absolute; inset: 0; z-index: calc(var(--z-map-ui) + 8); pointer-events: none; }
+  .map-mobile-buttons { position: absolute; right: var(--s-3); bottom: calc(var(--tabbar-h) + var(--safe-b) + var(--s-3)); display: flex; flex-direction: column; gap: var(--s-2); pointer-events: auto; }
+  .map-mobile-fab { position: relative; width: 48px; height: 48px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: var(--c-panel); box-shadow: var(--sh-2); color: var(--c-ink); font-size: var(--f-lg); cursor: pointer; }
+  .map-mobile-fab.is-danger { border-color: var(--c-crimson-hi); color: var(--c-crimson-hi); }
+  .map-mobile-fab b { position: absolute; top: -5px; right: -5px; min-width: 20px; height: 20px; display: grid; place-items: center; padding: 0 4px; border-radius: var(--r-pill); background: var(--c-crimson); color: var(--c-ink); font-family: var(--ff-num); font-size: var(--f-2xs); }
+  .map-mobile-sheet { position: absolute; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-b)); left: 0; max-height: min(68vh, 600px); margin: 0; overflow: auto; border-radius: var(--r-lg) var(--r-lg) 0 0; pointer-events: auto; box-shadow: var(--sh-2); animation: sheet-up var(--t-med) var(--ease-out) both; }
+  .map-mobile-sheet--full { padding: 0 var(--s-3) calc(var(--s-4) + var(--safe-b)); }
+  .map-mobile-sheet-grip { width: 38px; height: 4px; margin: var(--s-2) auto; border-radius: var(--r-pill); background: var(--line-strong); }
+  .map-mobile-sheet-head, .map-mobile-preview-main { display: flex; align-items: center; gap: var(--s-2); min-height: 48px; }
+  .map-mobile-sheet-head { border-bottom: 1px solid var(--line); font-size: var(--f-md); }
+  .map-mobile-close { width: 44px; height: 44px; margin-left: auto; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--c-ink); font-size: var(--f-lg); cursor: pointer; }
+  .map-mobile-target-preview { padding: 0 var(--s-3) var(--s-3); max-height: min(42vh, 260px); }
+  .map-mobile-preview-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+  .map-mobile-preview-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--f-md); }
+  .map-mobile-preview-copy span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+  .map-mobile-stack-list { display: grid; gap: var(--s-1); margin: 0 0 var(--s-2); }
+  .map-mobile-stack-row { width: 100%; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--c-panel-3); color: var(--c-ink); text-align: left; cursor: pointer; }
+  .map-mobile-stack-row span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+  .map-mobile-stack-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .map-mobile-tool-section { display: grid; gap: var(--s-2); padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+  .map-mobile-coordinate-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--s-2); }
+  .map-mobile-coordinate-row label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s-1); color: var(--c-ink-dim); font-size: var(--f-xs); }
+  .map-mobile-coordinate-row input { width: 100%; min-width: 0; min-height: 44px; padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--c-panel-3); color: var(--c-ink); font: inherit; }
+  .map-mobile-coordinate-row .btn, .map-mobile-tool-actions .btn, .map-mobile-tool-section > .btn { min-height: 44px; }
+  .map-mobile-tool-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+  .map-mobile-tool-error { margin: 0; color: var(--status-danger-strong); font-size: var(--f-xs); }
+  .map-mobile-legend-toggle { min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; background: transparent; color: var(--c-ink); font: inherit; text-align: left; cursor: pointer; }
+  .map-mobile-legend-toggle span { color: var(--c-gold); font-size: var(--f-xs); }
+  .map-mobile-legend { display: grid; gap: var(--s-1); color: var(--c-ink-soft); font-size: var(--f-xs); }
+  .map-mobile-sheet .map-village-index { position: static; width: 100%; max-height: 210px; margin: 0; }
+  .map-mobile-sheet .incoming-warnings, .map-mobile-sheet .map-march-list { position: static; width: 100%; max-height: none; margin: var(--s-3) 0 0; }
+  .map-mobile-target-actions { position: absolute; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-b)); left: 0; max-height: min(76vh, 680px); overflow: auto; pointer-events: auto; }
+  .map-mobile-target-actions .map-target-panel { position: static; max-height: none; border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  .map-mobile-target-actions .target-foot { position: sticky; bottom: 0; z-index: 1; padding-bottom: calc(var(--s-3) + var(--safe-b)); background: var(--c-panel); }
+  .map-mobile-target-actions .expedition-steps { grid-template-columns: 1fr; gap: var(--s-1); }
+}

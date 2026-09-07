@@ -17,8 +17,10 @@ import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseM
 import { collectMapTargetStack, foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement, ownIncomingWarningsFromCache, ownMovementsFromCache } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
-const ZOOM_MIN = 0.8;
-const ZOOM_MAX = 1.2;
+const DESKTOP_ZOOM_MIN = 0.8;
+const DESKTOP_ZOOM_MAX = 1.2;
+const MOBILE_ZOOM_MIN = 0.85;
+const MOBILE_ZOOM_MAX = 1.75;
 const INITIAL_ZOOM = 1;
 const PAD = HEX_SIZE * 1.4;
 const DRAG_THRESHOLD = 8; // 超过此像素视为拖拽，不触发点击
@@ -274,7 +276,14 @@ function pveIcon(name?: string): string {
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
-export function HexMap() {
+/** 供地图页外壳调用的最小相机接口；不暴露地图内部状态或 DOM。 */
+export interface MapCameraApi {
+  focusCurrentVillage(): void;
+  jumpTo(q: string, r: string): { ok: true } | { ok: false; error: string };
+  zoom(direction: 'in' | 'out'): void;
+}
+
+export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | null } }) {
   // 订阅服务端数据（dataVersion 变化时整组件重渲，重算可见格）
   const _dv = dataVersion.value;
   const _tk = tick.value; // 订阅心跳：行军 ETA 文案每秒刷新
@@ -348,7 +357,17 @@ export function HexMap() {
 
   // ─── camera helpers ────────────────────────────────────────────────────────
   function clampZoom(z: number): number {
-    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches;
+    const min = compact ? MOBILE_ZOOM_MIN : DESKTOP_ZOOM_MIN;
+    const max = compact ? MOBILE_ZOOM_MAX : DESKTOP_ZOOM_MAX;
+    return Math.max(min, Math.min(max, z));
+  }
+
+  function zoomBounds(): { min: number; max: number } {
+    const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches;
+    return compact
+      ? { min: MOBILE_ZOOM_MIN, max: MOBILE_ZOOM_MAX }
+      : { min: DESKTOP_ZOOM_MIN, max: DESKTOP_ZOOM_MAX };
   }
 
   function applyTransform() {
@@ -1384,6 +1403,23 @@ export function HexMap() {
     setJumpR(String(parsed.coordinate.r));
   }
 
+  if (cameraApi) cameraApi.current = {
+    focusCurrentVillage: doHome,
+    jumpTo(q: string, r: string) {
+      const parsed = parseMapCoordinate(q, r, W, H);
+      if (!parsed.ok) return parsed;
+      setJumpError('');
+      jumpEditing.current = false;
+      setMapCenter(parsed.coordinate);
+      centerViewOn(parsed.coordinate.q, parsed.coordinate.r);
+      syncNavUI();
+      setJumpQ(String(parsed.coordinate.q));
+      setJumpR(String(parsed.coordinate.r));
+      return { ok: true };
+    },
+    zoom(direction: 'in' | 'out') { adjustZoom(direction === 'in' ? 1.15 : 1 / 1.15); },
+  };
+
   // ─── initial center & resize ───────────────────────────────────────────────
   useEffect(() => {
     if (!svgEl.current) return;
@@ -1473,6 +1509,7 @@ export function HexMap() {
   const terrainLayers = buildTerrainLayers(visibleCells);
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
+  const zoomRange = zoomBounds();
   const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
 
@@ -1721,7 +1758,7 @@ export function HexMap() {
               type="button"
               class="map-zoom-btn"
               title="缩小"
-              disabled={zoomUi <= ZOOM_MIN + 0.001}
+              disabled={zoomUi <= zoomRange.min + 0.001}
               onClick={() => adjustZoom(1 / 1.15)}
             >−</button>
             <span class="map-zoom-label">{Math.round(zoomUi * 100)}%</span>
@@ -1729,7 +1766,7 @@ export function HexMap() {
               type="button"
               class="map-zoom-btn"
               title="放大"
-              disabled={zoomUi >= ZOOM_MAX - 0.001}
+              disabled={zoomUi >= zoomRange.max - 0.001}
               onClick={() => adjustZoom(1.15)}
             >+</button>
           </div>
