@@ -441,8 +441,8 @@ function Preparation({
 }
 
 function Confirmation({
-  meta, troops, treasures, lossRate, onBack, onDispatch, busy,
-}: { meta: TargetMeta; troops: NumberMap; treasures: string[]; lossRate: number; onBack: () => void; onDispatch: () => void; busy: boolean }) {
+  meta, troops, treasures, lossRate, rapidMarch, setRapidMarch, onBack, onDispatch, busy,
+}: { meta: TargetMeta; troops: NumberMap; treasures: string[]; lossRate: number; rapidMarch: boolean; setRapidMarch: (value: boolean) => void; onBack: () => void; onDispatch: () => void; busy: boolean }) {
   const [preview, setPreview] = useState<any>(null);
   const caravanTarget = meta.mode === 'caravan_raid' || meta.mode === 'caravan_escort';
   useEffect(() => {
@@ -468,6 +468,7 @@ function Confirmation({
         </dl>
       </section>
       {(meta.mode === 'attack' || meta.mode === 'raid') && <p class="expedition-warning">{meta.declareWar ? '该目标当前为中立玩家，确认后将同时宣战。' : '这是最终确认：部队抵达目标后将立即进入战斗。'}</p>}
+      {meta.mode === 'raid' && (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') && <label class="expedition-warning"><input type="checkbox" checked={rapidMarch} onChange={(event) => setRapidMarch(event.currentTarget.checked)} /> 急行军：去程速度 +25%，在外粮耗 +50%（需完成「急行军」科技）</label>}
       {caravanTarget && <p class="expedition-warning">商队持续移动，实际追赶时间会随商队位置变化。{meta.mode === 'caravan_raid' ? '如有护卫，将先交战；只有幸存部队可以搬运物资。' : '追上后以商队速度同行，送货结束后返回。'}</p>}
       <div class="target-foot expedition-foot expedition-foot--split">
         <Btn disabled={busy} onClick={onBack}>返回调整</Btn>
@@ -493,6 +494,7 @@ function ExpeditionWorkflow({
   const [treasures, setTreasures] = useState<string[]>([]);
   const [scoutType, setScoutType] = useState<'scout_resources' | 'scout_buildings'>('scout_resources');
   const [lossRate, setLossRate] = useState(() => Math.max(0, Math.min(100, Math.floor(Number(gameConstants()?.marchLossRateDefault) || 40))));
+  const [rapidMarch, setRapidMarch] = useState(false);
   const [busy, setBusy] = useState(false);
   const dispatching = useRef(false);
 
@@ -521,7 +523,7 @@ function ExpeditionWorkflow({
       ok = await act(req('SendReinforce', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '增援部队出发' });
     } else if (meta.mode === 'raid') {
       const isPve = meta.targetKind === 'pve' || meta.targetKind === 'taskcamp';
-      const p = isPve ? { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions } : { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar, ...lossOptions };
+      const p = isPve ? { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures, rapidMarch, ...lossOptions } : { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar, ...lossOptions };
       ok = await act(req(isPve ? 'SendRaid' : 'SendVillageRaid', p), { okToast: '掠夺部队出发' });
     } else if (meta.mode === 'garrison') {
       ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '驻扎部队出发' });
@@ -547,7 +549,7 @@ function ExpeditionWorkflow({
         ? <TargetAssessment meta={meta} options={modeOptions} onChoose={(option) => onSelectMode?.(option)} />
         : <Assessment meta={meta} onNext={() => setStep(2)} />)}
       {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} lossRate={lossRate} setLossRate={setLossRate} onBack={() => { if (onModeBack) onModeBack(); else setStep(1); }} onNext={() => setStep(3)} />}
-      {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} lossRate={lossRate} busy={busy} onBack={() => setStep(2)} onDispatch={dispatch} />}
+      {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} lossRate={lossRate} rapidMarch={rapidMarch} setRapidMarch={setRapidMarch} busy={busy} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
   );
 }

@@ -811,6 +811,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** T2 战略纲领互斥组；同一玩家同组只能确立一项。 */
+  doctrineGroup?: string;
   /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
@@ -1666,6 +1668,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      doctrineGroup: r.doctrineGroup?.trim() || undefined,
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
@@ -2465,6 +2468,12 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.checkIntervalSec < 1) errors.push(`academy.csv[Lv${a.level}] checkIntervalSec=${a.checkIntervalSec} 必须>0`);
     if (a.baseProbability < 0 || a.baseProbability > 1) errors.push(`academy.csv[Lv${a.level}] baseProbability 必须在[0,1]`);
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
+  }
+  const academyLevels = Object.values(config.academy).sort((a, b) => a.level - b.level);
+  for (let i = 1; i < academyLevels.length; i++) {
+    if (academyLevels[i].checkIntervalSec > academyLevels[i - 1].checkIntervalSec) {
+      errors.push(`academy.csv[Lv${academyLevels[i].level}] 判定间隔不得高于 Lv${academyLevels[i - 1].level}`);
+    }
   }
 
   // 科技效果类型白名单校验：新增 effectType 必须先在源码中接线，否则启动报错

@@ -82,6 +82,8 @@ interface MovementRecord {
   caravanDestination?: string;
   /** 战斗类型：玩家村 raid=掠夺、siege=攻城；ambush=伏击；PvE/旧存档为空。 */
   battleType?: 'raid' | 'siege' | 'ambush';
+  /** 急行军在出征时冻结；返程、攻城、商队与拓荒均不会写入。 */
+  rapidRaidBonus?: number;
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -478,17 +480,20 @@ export class MovementModule {
     // 长时间空转占用 CPU，并让双方按当前位置正常返村。
     void this.cancelScoutEncounters({ name: 'movement.CancelScoutEncounters', from: MovementModule.NAME, payload: {} });
     // 先汇总各村的在途部队 popCost 总量 + 在途兵力，恢复 population.SetEnRoutePop 与 military 粮耗。
-    const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number> }>();
+    const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number>; movements: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> }>();
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       const popSum = this.calcTroopsPopCost(mv.troops);
       if (mv.npcService) continue;
-      const cur = enRouteByVillage.get(mv.fromVillage) ?? { popCostSum: 0, marching: {} };
+      const cur = enRouteByVillage.get(mv.fromVillage) ?? { popCostSum: 0, marching: {}, movements: [] };
       cur.popCostSum += popSum;
       for (const [unit, n] of Object.entries(mv.troops)) {
         cur.marching[unit] = (cur.marching[unit] ?? 0) + n;
       }
+      cur.movements.push({ troops: mv.troops, upkeepMultiplier: this.marchingUpkeepMultiplier(mv) });
       enRouteByVillage.set(mv.fromVillage, cur);
     }
+    // 先由军事 owner 清零旧在途快照，避免崩溃后已到达/死亡的旧记录残留军粮。
+    void this.commands.send({ name: 'military.ClearMarchingTroops', from: MovementModule.NAME, payload: {} });
     for (const [villageId, data] of enRouteByVillage) {
       void this.commands.send({
         name: 'population.SetEnRoutePop',
@@ -498,7 +503,7 @@ export class MovementModule {
       void this.commands.send({
         name: 'military.SetMarchingTroops',
         from: MovementModule.NAME,
-        payload: { villageId, troops: data.marching },
+        payload: { villageId, troops: data.marching, movements: data.movements },
       });
     }
 
@@ -603,12 +608,14 @@ export class MovementModule {
     if (!villageId || villageId.startsWith('task:')) return;
     let total = 0;
     const marching: Record<string, number> = {};
+    const movements: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (mv.npcService || mv.fromVillage !== villageId) continue;
       total += this.calcTroopsPopCost(mv.troops);
       for (const [unit, n] of Object.entries(mv.troops)) {
         marching[unit] = (marching[unit] ?? 0) + n;
       }
+      movements.push({ troops: mv.troops, upkeepMultiplier: this.marchingUpkeepMultiplier(mv) });
     }
     void this.commands.send({
       name: 'population.SetEnRoutePop',
@@ -619,8 +626,13 @@ export class MovementModule {
     void this.commands.send({
       name: 'military.SetMarchingTroops',
       from: MovementModule.NAME,
-      payload: { villageId, troops: marching },
+      payload: { villageId, troops: marching, movements },
     });
+  }
+
+  /** 急行粮耗只在带有出征快照的 raid 去程生效；返程记录绝不继承该字段。 */
+  private marchingUpkeepMultiplier(mv: MovementRecord): number {
+    return mv.type === 'raid' && mv.status === 'marching' && (mv.rapidRaidBonus ?? 0) > 0 ? 1.5 : 1;
   }
 
   private load(id: string): MovementRecord | undefined {
@@ -1825,7 +1837,7 @@ export class MovementModule {
     villageId: string,
     path: Hex[],
     troops: Record<string, number>,
-    type: MovementRecord['type'],
+    type: MovementRecord['type'], rapidRaidBonus = 0,
   ): Promise<PathTiming> {
     const steps = Math.max(0, path.length - 1);
     if (steps === 0) {
@@ -1844,6 +1856,7 @@ export class MovementModule {
     let segmentMs = type === 'caravan'
       ? existingSegmentMs
       : existingSegmentMs.map((ms) => Math.max(1, Math.ceil(ms / sizeMultiplier)));
+    if (rapidRaidBonus > 0 && type === 'raid') segmentMs = segmentMs.map((ms) => Math.max(1, Math.ceil(ms / (1 + rapidRaidBonus))));
     const minimumMs = type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
     // 商队全程统一分摊，保持逐格调度与 arriveAt 一致；最低时长由配置中心控制。
@@ -1854,17 +1867,19 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId' | 'lossRate' | 'initialTroopCount' | 'fieldPursuer' | 'capturedTreasures'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId' | 'lossRate' | 'initialTroopCount' | 'fieldPursuer' | 'capturedTreasures' | 'rapidRaidBonus'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
       ? pathOverride.map((point) => wrapHex(point, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41))
       : linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type);
+    const rapidRaidBonus = base.type === 'raid' ? Math.max(0, Number(base.rapidRaidBonus) || 0) : 0;
+    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type, rapidRaidBonus);
     this.timingCache.set(base.id, timing);
     const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
     const full: MovementRecord = {
       ...base,
+      rapidRaidBonus: rapidRaidBonus || undefined,
       lossRate: this.normalizeLossRate(base.lossRate),
       initialTroopCount: Math.max(1, Math.floor(Number(base.initialTroopCount) || this.troopCount(base.troops))),
       capturedTreasures: base.capturedTreasures ? [...base.capturedTreasures] : undefined,
@@ -1895,11 +1910,11 @@ export class MovementModule {
    * 1. 校验兵力(从 Military 扣出) 2. 算路径 3. 逐格推进。
    */
   private async sendRaid(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetId, troops, treasures, lossRate } = cmd.payload as {
+    const { villageId, targetId, troops, treasures, lossRate, rapidMarch } = cmd.payload as {
       villageId: string;
       targetId: string;
       troops: Record<string, number>;
-      treasures?: string[]; lossRate?: number;
+      treasures?: string[]; lossRate?: number; rapidMarch?: boolean;
     };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -1917,6 +1932,10 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'not_task_owner' };
     }
     const toXY: Hex = { q: tp.q, r: tp.r };
+    if (rapidMarch) {
+      const rapid = await this.commands.send({ name: 'research.HasMechanism', from: MovementModule.NAME, payload: { villageId, key: 'rapid_raid' } });
+      if (!rapid.ok || !(rapid.payload as any)?.active) return { ok: false, payload: {}, reason: 'rapid_march_not_unlocked' };
+    }
 
     // 从源村扣出兵力（负 delta）
     const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
@@ -1932,12 +1951,12 @@ export class MovementModule {
 
     const mv = await this.launch({
       id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
-      treasures: carry.codes, lossRate, departAt: this.now(),
+      treasures: carry.codes, lossRate, rapidRaidBonus: rapidMarch ? 0.25 : undefined, departAt: this.now(),
     });
 
     log('出征(raid)', { id: mv.id, from: villageId, targetId, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
-    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+    return { ok: true, payload: { id: mv.id, rapidMarch: !!mv.rapidRaidBonus, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
   /**

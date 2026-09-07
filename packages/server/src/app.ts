@@ -62,6 +62,7 @@ const PROGRESS_COLLECTIONS = [
   'treasure',
   'treasure_pending',
   'research',
+  'research_player',
   'task',
   'vision',
   'vision_reveal',

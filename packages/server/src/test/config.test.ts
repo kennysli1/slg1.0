@@ -529,8 +529,8 @@ test('特性：多效果特性正确展开', () => {
 
 test('游戏设计约束表：军事科技、PvP曲线、佣兵合同与随机任务冷却均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
-  const formation = cfg.research.melee_attack_iii;
-  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk']);
+  const formation = cfg.research.formation_doctrine;
+  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk', 'combat_def']);
   assert.equal(cfg.mercCamp[1].capacity, 10);
   assert.equal(cfg.units.merc_champion.commandCost, 5);
   assert.equal(cfg.units.merc_champion.contractSec, 259200);

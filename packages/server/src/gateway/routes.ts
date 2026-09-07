@@ -173,6 +173,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           targetId: { type: 'string', minLen: 1, maxLen: 64 },
           troops:   { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
           lossRate: { type: 'number', optional: true, min: 0, max: 100 },
+          rapidMarch: { type: 'boolean', optional: true },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
