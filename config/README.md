@@ -223,6 +223,8 @@
 | lootWood/Clay/Iron/Crop | 战利品总量 |
 | faction | 阵营（`neutral`/`kingdom`）；王国城邦填 `kingdom` |
 | cityState | 是否启用运行时随机城邦生成（`true`） |
+| kingdomProfile | 王国 PvE 档位（`city_state`/`fief`/`capital`，普通营地留空） |
+| treasureTier | 普通野外营地宝物掉落档位：1 低、2 中、3 高；高档提高总体掉宝概率并提高高稀有度权重 |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
@@ -392,6 +394,13 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | uniqueEffect | `1` 表示同名只允许一份生效 |
 | activeEffectType / activeEffectValue | 可选主动效果类型与数值；混合宝物可在保留被动效果的同时主动使用 |
 | activeDurationSec / activeConsume | 主动效果持续秒数（即时效果填0）/ 使用后是否消耗（1/0） |
+
+野外营地掉落仍以 `dropRate` 为宝物目录的基础权重，不会改写 `treasures.csv`。清营时先按
+`treasure_camp_drop_chance × treasure_camp_drop_chance_tier{1,2,3}_multiplier` 判定是否掉宝；
+默认低/中/高档倍率为 `0.5/0.75/1`，因此即使全局基础概率配置为 1，三档仍会保持明确的难度梯度；
+命中后，中/高档营地分别按 `treasure_camp_rarity_multiplier_tier2/3` 的稀有度底数提高
+rare/epic/legendary 权重（普通宝物倍率为1，稀有度每升一级再乘一次）。这些参数均可在配置中心
+“野外营地宝物掉落参数”板块修改。
 
 `enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
 `smartPerson`（聪明人）缩短科研点判定间隔，并可主动获得科研点；`warriorBanner`（勇士锦旗）被动提升全军攻防/人口增长，主动为本村（含本村在外活动的军队）提供限时攻防加成。

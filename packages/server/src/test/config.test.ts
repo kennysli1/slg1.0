@@ -25,6 +25,16 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.marchLossRateDefault, 40, '默认战损返城阈值');
   assert.equal(c.tradeCaravanSpeed, 100, '商队速度默认值');
   assert.equal(c.tradeCaravanMinDurationSec, 3, '商队最低时长默认值');
+  assert.deepEqual(
+    [c.treasureCampDropChanceTier1Multiplier, c.treasureCampDropChanceTier2Multiplier, c.treasureCampDropChanceTier3Multiplier],
+    [0.5, 0.75, 1],
+    '野外营地掉宝总体倍率应按低/中/高档递增',
+  );
+  assert.deepEqual(
+    [c.treasureCampRarityMultiplierTier2, c.treasureCampRarityMultiplierTier3],
+    [1.25, 1.6],
+    '中高档营地应有独立稀有度权重底数',
+  );
   assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
   assert.deepEqual(
     [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
@@ -390,6 +400,14 @@ test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特
   const rat = Object.values(cfg.pveTemplates).flatMap((template) => Object.entries(template.defender))
     .find(([code]) => code === 'rat')?.[1];
   assert.deepEqual(rat && { attack: rat.attack, defense: rat.defense, hp: rat.hp }, { attack: 5, defense: 10, hp: 10 });
+});
+
+test('PvE 营地：宝物掉落档位按难度递增且可由模板配置', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.equal(cfg.pveTemplates.rats.treasureTier, 1);
+  assert.equal(cfg.pveTemplates.bandits.treasureTier, 2);
+  assert.equal(cfg.pveTemplates.fortress.treasureTier, 3);
+  assert.equal(cfg.treasures.chainsaw.dropRate, 0.08, '宝物目录原始 dropRate 不应被营地规则改写');
 });
 
 test('校验器：兵种 form 非法应抛错', () => {

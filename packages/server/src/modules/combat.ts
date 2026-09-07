@@ -596,6 +596,7 @@ export class CombatModule {
     let campCleared = false;
     let isTaskCamp = false;
     let isNoRespawn = false;
+    let treasureTier: 1 | 2 | 3 = 1;
     const shouldApplyDomain = b.resolution.step === 'apply_domain';
     if (shouldApplyDomain && b.targetKind === 'pve') {
       const apply = await this.commands.send({
@@ -610,6 +611,7 @@ export class CombatModule {
       storedLoot = (apply.payload as any)?.storedLoot ?? {};
       buildingDamage = (apply.payload as any)?.buildingDamage ?? [];
       campCleared = !!((apply.payload as any)?.cleared);
+      treasureTier = ((apply.payload as any)?.treasureTier === 3 ? 3 : (apply.payload as any)?.treasureTier === 2 ? 2 : 1);
       // M8/M9 的天王老子村是任务专属目标，不应触发普通 PvE 宝物掉落。
       // 旧存档可能没有 task=true 标记，因此同时按模板类型兜底识别。
       isTaskCamp = !!((apply.payload as any)?.task)
@@ -719,6 +721,7 @@ export class CombatModule {
       campCleared = !!b.resolution.campCleared;
       isTaskCamp = !!b.resolution.isTaskCamp;
       isNoRespawn = !!b.resolution.isNoRespawn;
+      treasureTier = b.resolution.treasureTier ?? 1;
     } else {
       b.resolution.looted = looted;
       b.resolution.storedLoot = storedLoot;
@@ -727,6 +730,7 @@ export class CombatModule {
       b.resolution.campCleared = campCleared;
       b.resolution.isTaskCamp = isTaskCamp;
       b.resolution.isNoRespawn = isNoRespawn;
+      b.resolution.treasureTier = treasureTier;
       b.resolution.attackerLosses = attackerLosses;
       b.resolution.defenderLosses = defenderLosses;
       b.resolution.step = 'emit_attacker_reports';
@@ -808,7 +812,7 @@ export class CombatModule {
       if (!contrib.npcService && campCleared && attackerWins && !isTaskCamp && !isNoRespawn) {
         void this.commands.send({
           name: 'treasure.RollDrop', from: CombatModule.NAME,
-          payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId },
+          payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId, treasureTier },
         });
       }
 

@@ -3,7 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
-import type { GameConfig, TreasureDef } from '../infra/config.js';
+import type { GameConfig, GameConstants, TreasureDef } from '../infra/config.js';
 
 /**
  * 领域模块 · Treasures（宝物）
@@ -30,6 +30,27 @@ import type { GameConfig, TreasureDef } from '../infra/config.js';
 /** 资源键（与 economy.RESOURCE_TYPES 对齐，但此处不复用 economy 模块以避免跨模块 import）。 */
 type ResKey = 'wood' | 'clay' | 'iron' | 'crop' | 'gold';
 type ResMult = Partial<Record<ResKey, number>>;
+
+export type TreasureDropTier = 1 | 2 | 3;
+
+const TREASURE_RARITY_RANK: Record<string, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
+
+/** 清营总体掉宝概率：保留原基础概率，并按营地档位套用配置倍率。 */
+export function treasureCampDropChance(baseChance: number, reputationMultiplier: number, pveBonus: number, tier: TreasureDropTier, constants: Pick<GameConstants, 'treasureCampDropChanceTier1Multiplier' | 'treasureCampDropChanceTier2Multiplier' | 'treasureCampDropChanceTier3Multiplier'>): number {
+  const tierMultiplier = tier === 3
+    ? constants.treasureCampDropChanceTier3Multiplier
+    : tier === 2
+      ? constants.treasureCampDropChanceTier2Multiplier
+      : constants.treasureCampDropChanceTier1Multiplier;
+  return Math.min(1, Math.max(0, baseChance) * Math.max(0, reputationMultiplier) * Math.max(0, tierMultiplier) + Math.max(0, pveBonus));
+}
+
+/** 按原始 dropRate 计算单个宝物在该营地档位的临时权重；目录值本身不变。 */
+export function treasureCampDropWeight(treasure: Pick<TreasureDef, 'dropRate' | 'rarity'>, tier: TreasureDropTier, constants: Pick<GameConstants, 'treasureCampRarityMultiplierTier2' | 'treasureCampRarityMultiplierTier3'>): number {
+  const rarityBase = tier === 3 ? constants.treasureCampRarityMultiplierTier3 : tier === 2 ? constants.treasureCampRarityMultiplierTier2 : 1;
+  const rarityRank = TREASURE_RARITY_RANK[treasure.rarity] ?? 0;
+  return Math.max(0, Number(treasure.dropRate) || 0) * Math.pow(Math.max(1, rarityBase), rarityRank);
+}
 
 /** 聚合后的宝物效果（倍率以「乘数」表示，如 1.05 = +5%）。 */
 export interface TreasureEffects {
@@ -1355,7 +1376,7 @@ export class TreasureModule {
    * 这是「军队带回宝物 → 战报确认 + 超时自动遗弃」机制的服务端实现。
    */
   private async rollDrop(cmd: Command): Promise<CommandResult> {
-    const { villageId, source, movementId, forceCode, taskRelated } = cmd.payload as {
+    const { villageId, source, movementId, forceCode, taskRelated, treasureTier: requestedTier } = cmd.payload as {
       villageId: string;
       source: 'camp';
       /** 关联的行军 id（attack movement），用作待领取记录主键；缺省时自动生成。 */
@@ -1364,8 +1385,11 @@ export class TreasureModule {
       forceCode?: string;
       /** 任务专属掉落不设置报告处理期限。captured_natalies 也按旧调用自动识别。 */
       taskRelated?: boolean;
+      /** 清营营地的宝物档位；由 PvE 模板传入，旧调用回退低档。 */
+      treasureTier?: 1 | 2 | 3;
     };
     const c = this.config.constants;
+    const treasureTier: 1 | 2 | 3 = requestedTier === 3 ? 3 : requestedTier === 2 ? 2 : 1;
     const baseChance = c.treasureCampDropChance;
     let chanceMult = 1;
     try {
@@ -1379,11 +1403,11 @@ export class TreasureModule {
       const bonusRes = await this.commands.send({ name: 'treasure.GetPveDropRateBonus', from: TreasureModule.NAME, payload: { villageId } });
       pveBonus = bonusRes.ok ? Math.max(0, Number((bonusRes.payload as any)?.bonus) || 0) : 0;
     }
-    const hit = forceCode ? true : this.rng() < Math.min(1, baseChance * chanceMult + pveBonus);
+    const hit = forceCode ? true : this.rng() < treasureCampDropChance(baseChance, chanceMult, pveBonus, treasureTier, c);
     if (!hit) return { ok: true, payload: { dropped: null } };
 
     // 加权抽选宝物（按 dropRate 轮盘赌）
-    const code = forceCode ?? this.weightedPick();
+    const code = forceCode ?? this.weightedPick(treasureTier);
     if (!code) return { ok: true, payload: { dropped: null } };
     const t = this.config.treasures[code];
     if (!t) return { ok: true, payload: { dropped: null } };
@@ -1547,14 +1571,19 @@ export class TreasureModule {
       }));
   }
 
-  /** 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。 */
-  private weightedPick(): string | undefined {
+  /**
+   * 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。
+   * dropRate 本身保持目录原值；中/高难度营地只在本次抽取时按稀有度提高权重，
+   * 稀有度等级 common=0、rare=1、epic=2、legendary=3。
+   */
+  private weightedPick(treasureTier: 1 | 2 | 3 = 1): string | undefined {
     const entries = Object.values(this.config.treasures).filter((t) => (t.dropRate ?? 0) > 0);
     if (entries.length === 0) return undefined;
-    const total = entries.reduce((a, t) => a + t.dropRate, 0);
+    const weightOf = (t: TreasureDef): number => treasureCampDropWeight(t, treasureTier, this.config.constants);
+    const total = entries.reduce((a, t) => a + weightOf(t), 0);
     let r = this.rng() * total;
     for (const t of entries) {
-      r -= t.dropRate;
+      r -= weightOf(t);
       if (r <= 0) return t.code;
     }
     return entries[entries.length - 1].code;
