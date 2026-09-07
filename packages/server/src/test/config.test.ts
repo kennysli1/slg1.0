@@ -377,6 +377,16 @@ test('校验器：建筑 requires 循环依赖应抛错', () => {
   assert.throws(() => validateGameConfig(bad), /循环依赖/);
 });
 
+test('校验器：建筑主基地前置必须与 mainBaseLevel 一致', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = { ...cfg, buildings: { ...cfg.buildings } };
+  bad.buildings.stable = {
+    ...bad.buildings.stable,
+    mainBaseLevel: bad.buildings.stable.mainBaseLevel + 1,
+  };
+  assert.throws(() => validateGameConfig(bad), /mainBaseLevel=.*requires 主基地前置/);
+});
+
 test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];

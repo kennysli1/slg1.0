@@ -764,6 +764,56 @@ function isBalanceKeyCol(col: string, table: BalanceTable): boolean {
   return table.keyComposite ? table.keyComposite.includes(col) : col === (table.key ?? '');
 }
 
+/**
+ * 建筑表的主基地门槛有两个历史字段：mainBaseLevel 与 requires 中的 1:n。
+ * 1:n 只是通用建筑前置语法中对主基地(id=1)的表达；两者同时存在时必须
+ * 指向同一个等级，否则运行时会出现“主基地栏写二级、前置又要求五级”的
+ * 隐藏额外门槛。配置中心修改任一字段时，将另一字段一并同步。
+ */
+function syncBuildingMainRequirement(orig: CsvRow, merged: CsvRow, inc: Record<string, string>): void {
+  const hasMainEdit = inc.mainBaseLevel !== undefined && inc.mainBaseLevel !== '';
+  const hasRequiresEdit = inc.requires !== undefined && inc.requires !== '';
+  if (!hasMainEdit && !hasRequiresEdit) return;
+
+  const parseMainLevel = (value: string): number | undefined => {
+    const levels = value.split('|')
+      .map((part) => part.trim())
+      .filter((part) => /^1:\d+$/.test(part))
+      .map((part) => Number(part.slice(2)));
+    const unique = [...new Set(levels)];
+    if (unique.length > 1) throw new Error(`buildings.csv 行 ${orig.id} 的 requires 含有多个不一致的主基地前置`);
+    return unique[0];
+  };
+
+  const requestedMain = hasMainEdit ? Number(inc.mainBaseLevel) : undefined;
+  if (requestedMain !== undefined && (!Number.isFinite(requestedMain) || requestedMain < 1)) {
+    throw new Error(`buildings.csv 行 ${orig.id} 字段 mainBaseLevel 必须是≥1的数字`);
+  }
+  const reqValue = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  // 只修改 mainBaseLevel 时，旧的 requires 值是待被同步的旧值，不能当作冲突；
+  // 只有玩家同时提交 requires 时，才用它参与一致性校验。
+  const requestedFromRequires = hasRequiresEdit ? parseMainLevel(reqValue) : undefined;
+  if (requestedMain !== undefined && requestedFromRequires !== undefined && requestedMain !== requestedFromRequires) {
+    throw new Error(`buildings.csv 行 ${orig.id} 的 mainBaseLevel=${requestedMain} 与 requires 主基地前置=${requestedFromRequires} 不一致；请只修改一个或填相同值`);
+  }
+
+  const level = requestedMain ?? requestedFromRequires;
+  if (level === undefined) return;
+
+  // 只替换已有的主基地前置；没有 1:n 的建筑（例如 smithy 的 7:1）
+  // 保持纯“其他建筑”依赖，不强行新增主基地 token。
+  const sourceRequires = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  const parts = sourceRequires.split('|').map((part) => part.trim()).filter(Boolean);
+  let replaced = false;
+  const next = parts.map((part) => {
+    if (!/^1:\d+$/.test(part)) return part;
+    replaced = true;
+    return `1:${level}`;
+  });
+  if (replaced) merged.requires = next.join('|');
+  if (requestedFromRequires !== undefined && !hasMainEdit) merged.mainBaseLevel = String(level);
+}
+
 export function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
   const doc = parseCsvStructured(readFileSync(join(srcDir, table.file), 'utf8'));
   const incByKey = new Map(Object.entries(changes));
@@ -797,6 +847,7 @@ export function applyBalanceEdits(srcDir: string, targetDir: string, table: Bala
       }
       // 非声明可编辑字段：忽略（不覆盖原值）
     }
+    if (table.file === 'buildings.csv') syncBuildingMainRequirement(orig, merged, inc);
     return merged;
   });
   writeFileSync(join(targetDir, table.file), serializeCsv(doc), 'utf8');
@@ -1398,7 +1449,7 @@ function sectionBuildings(){
   }
   var bFields = ['maxLevel','maxCount','mainBaseLevel','requires','prosperityPerLevel','popGrowthPerLevel'];
   var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','建筑前置（数字ID:等级）','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
+  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。主基地等级与 requires 中的 1:n 前置会自动联动；requires 中其他建筑前置保持不变。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -1552,11 +1603,43 @@ function render(){
   document.getElementById('tables').innerHTML = html;
 }
 
-function onEdit(el){
-  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+function recordEdit(t,k,f,v){
   if (!CHANGES[t][k]) CHANGES[t][k] = {};
   if (v==='') delete CHANGES[t][k][f];
   else CHANGES[t][k][f] = v;
+}
+
+function linkedBuildingInput(k,f){
+  var all = document.querySelectorAll('input[data-t="buildings"]');
+  for (var i=0;i<all.length;i++) if (all[i].dataset.k===k && all[i].dataset.f===f) return all[i];
+  return null;
+}
+
+function syncBuildingInputs(k,f,v){
+  if (v === '') return;
+  if (f === 'mainBaseLevel' && /^\d+$/.test(v)){
+    var req = linkedBuildingInput(k,'requires');
+    if (!req) return;
+    var parts = req.value.split('|').map(function(part){ return part.trim(); }).filter(Boolean);
+    var replaced = false;
+    parts = parts.map(function(part){
+      if (!/^1:\d+$/.test(part)) return part;
+      replaced = true;
+      return '1:'+v;
+    });
+    if (replaced){ req.value = parts.join('|'); recordEdit('buildings',k,'requires',req.value); }
+  } else if (f === 'requires'){
+    var match = v.match(/(?:^|\|)\s*1:(\d+)(?:\||$)/);
+    if (!match) return;
+    var main = linkedBuildingInput(k,'mainBaseLevel');
+    if (main){ main.value = match[1]; recordEdit('buildings',k,'mainBaseLevel',match[1]); }
+  }
+}
+
+function onEdit(el){
+  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+  recordEdit(t,k,f,v);
+  if (t === 'buildings' && (f === 'mainBaseLevel' || f === 'requires')) syncBuildingInputs(k,f,v);
   status('已修改「'+t+' / '+k+' / '+f+'」，记得点保存');
 }
 

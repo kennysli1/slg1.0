@@ -121,6 +121,54 @@ test('GM 面板：建筑 requires 前置写回并进入运行时配置', () => {
   });
 });
 
+test('GM 面板：建筑 mainBaseLevel 修改会同步 requires 中的主基地前置', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { mainBaseLevel: '4' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.stable.mainBaseLevel, 4);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 4 }]);
+  });
+});
+
+test('GM 面板：建筑 requires 中的主基地前置修改会同步 mainBaseLevel', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { requires: '1:3' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.stable.mainBaseLevel, 3);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 3 }]);
+  });
+});
+
+test('GM 面板：建筑两个主基地字段同时修改但不一致时拒绝保存', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    assert.throws(
+      () => applyBalanceEdits(configDir, tmp, table, { ['5']: { mainBaseLevel: '4', requires: '1:3' } }),
+      /不一致/,
+    );
+  });
+});
+
+test('GM 面板：非主基地 requires 不被联动规则改写', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['8']: { mainBaseLevel: '2' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.smithy.mainBaseLevel, 2);
+    assert.deepEqual(cfg.buildings.smithy.requires, [{ kind: 'academy', level: 1 }]);
+  });
+});
+
+test('建筑配置：所有 requires=1:n 均与 mainBaseLevel 对齐', () => {
+  const cfg = loadGameConfig(configDir);
+  for (const [code, building] of Object.entries(cfg.buildings)) {
+    const mainReqs = building.requires.filter((req) => req.kind === 'main');
+    assert.ok(mainReqs.every((req) => req.level === building.mainBaseLevel), `${code} 的主基地前置应与 mainBaseLevel 一致`);
+  }
+});
+
 test('GM 面板：兵种视野可编辑并由配置加载为运行时权威值', () => {
   const table = BALANCE_TABLES['units'];
   const numeric = table.numeric ?? [];
