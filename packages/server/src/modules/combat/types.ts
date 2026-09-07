@@ -56,6 +56,8 @@ export interface BattleResolution {
   campCleared?: boolean;
   isTaskCamp?: boolean;
   isNoRespawn?: boolean;
+  /** 清营宝物掉落档位；仅普通 PvE 掉落使用。 */
+  treasureTier?: 1 | 2 | 3;
   attackerReportIndex?: number;
   /** 野战结算的来源游标，恢复后不重做已经完成的伤亡回收/战报步骤。 */
   fieldCasualtyIndex?: number;

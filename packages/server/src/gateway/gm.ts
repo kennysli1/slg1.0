@@ -680,7 +680,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   pve_targets: {
     file: 'pve_targets.csv', key: 'id',
-    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'],
+    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop', 'treasureTier'],
     labels: ['id', 'code', 'name'],
   },
   pve_defenders: {
@@ -877,7 +877,8 @@ function sectionGeneric(table){
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
     var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
     var tradeKeys = {}; for (var tri=0;tri<TRADE_ROWS.length;tri++) tradeKeys[TRADE_ROWS[tri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeys = {}; for (var tci=0;tci<TREASURE_CAMP_ROWS.length;tci++) treasureCampKeys[TREASURE_CAMP_ROWS[tci][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && !treasureCampKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
@@ -885,7 +886,8 @@ function sectionGeneric(table){
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
     var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
     var tradeKeysOnly = {}; for (var atk=0;atk<TRADE_ROWS.length;atk++) tradeKeysOnly[TRADE_ROWS[atk][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeysOnly = {}; for (var tco=0;tco<TREASURE_CAMP_ROWS.length;tco++) treasureCampKeysOnly[TREASURE_CAMP_ROWS[tco][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && !treasureCampKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
@@ -1091,6 +1093,31 @@ function sectionTrade(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>贸易参数</h2>'+h+'</div>';
+}
+
+// ── 野外营地宝物掉落专用视图：总体命中倍率与稀有度权重写入 game_constants.csv。 ──
+var TREASURE_CAMP_ROWS = [
+  ['treasure_camp_drop_chance','基础掉宝概率','清理野外营地后先按此总体概率判定是否掉宝'],
+  ['treasure_camp_drop_chance_tier1_multiplier','低难度营地掉宝倍率','低难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier2_multiplier','中难度营地掉宝倍率','中难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier3_multiplier','高难度营地掉宝倍率','高难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_rarity_multiplier_tier2','中难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+  ['treasure_camp_rarity_multiplier_tier3','高难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+];
+function sectionTreasureCamp(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">宝物目录中的 dropRate 不会被改写。清营时先用基础掉宝概率 × 营地档位倍率做总体命中，再按 dropRate 轮盘抽取；中/高难度营地只临时提高稀有、史诗、传说宝物的权重。pve_targets.csv 的 treasureTier 可逐营地调整档位。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TREASURE_CAMP_ROWS.length;j++){
+    var item = TREASURE_CAMP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0].indexOf('rarity_multiplier') >= 0 ? '1' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>野外营地宝物掉落参数</h2>'+h+'</div>';
 }
 
 // ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
@@ -1508,6 +1535,7 @@ function render(){
   html += sectionTerrain();
   html += sectionMarchSize();
   html += sectionTrade();
+  html += sectionTreasureCamp();
   html += sectionCavalry();
   html += sectionHorseHunter();
   html += sectionCityState();
