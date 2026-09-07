@@ -2179,6 +2179,13 @@ export function validateGameConfig(config: GameConfig): void {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
+    const mainRequires = b.requires.filter((r) => r.kind === 'main');
+    const mainLevels = [...new Set(mainRequires.map((r) => r.level))];
+    if (mainLevels.length > 1) {
+      errors.push(`buildings.csv[${b.kind}] requires 不能包含多个不同的主基地等级`);
+    } else if (mainLevels.length === 1 && mainLevels[0] !== b.mainBaseLevel) {
+      errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 必须与 requires 主基地前置=${mainLevels[0]} 一致`);
+    }
     if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
     if (b.popGrowthPerLevel < 0) errors.push(`buildings.csv[${b.kind}] popGrowthPerLevel 必须≥0（当前${b.popGrowthPerLevel}）`);
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
