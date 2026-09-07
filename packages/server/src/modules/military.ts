@@ -49,6 +49,8 @@ interface MilitaryState {
   raidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
   marching?: Record<string, number>;
+  /** 在途口粮快照；Movement 仅提供部队与倍率，单位口粮公式仍由本模块唯一计算。 */
+  marchingUpkeep?: Array<{ troops: Record<string, number>; upkeepMultiplier: number }>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
   training: TrainOrder | null;
   /** 逐建筑实例训练队列：slotId -> 该建筑的独立训练队列（多实例并行训练）。 */
@@ -197,6 +199,7 @@ export class MilitaryModule {
     this.commands.register('military.RestoreConsumedTroops', (c) => this.restoreConsumedTroops(c));
     // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
     this.commands.register('military.SetMarchingTroops', (c) => this.setMarchingTroops(c));
+    this.commands.register('military.ClearMarchingTroops', () => this.clearMarchingTroops());
     // 祭祀台等消耗型效果：按 popCost 升序移除驻村士兵直到满足人口缺口（允许超扣）。
     this.commands.register('military.SacrificeTroops', (c) => this.sacrificeTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
@@ -364,8 +367,12 @@ export class MilitaryModule {
       ration += this.foodPerSoldier(unit, s, base) * n;
     }
     // 在途（行军）部队同样耗粮（出征不减免口粮）。
-    for (const [unit, n] of Object.entries(s.marching ?? {})) {
-      ration += this.foodPerSoldier(unit, s, base) * n;
+    const marchingGroups = s.marchingUpkeep ?? [{ troops: s.marching ?? {}, upkeepMultiplier: 1 }];
+    for (const group of marchingGroups) {
+      const multiplier = Math.max(0, Number(group.upkeepMultiplier) || 1);
+      for (const [unit, n] of Object.entries(group.troops ?? {})) {
+        ration += this.foodPerSoldier(unit, s, base) * n * multiplier;
+      }
     }
     // 训练队列：每个未产出的兵也按 foodPerSoldier 计入（即便尚未入 troops）。
     if (s.training) {
@@ -1226,13 +1233,32 @@ export class MilitaryModule {
 
   /** 记录在途（行军）兵力快照：仅计粮耗，不改驻村兵力/动员上限（动员由 population.SetEnRoutePop 单独算）。 */
   private setMarchingTroops(cmd: Command): CommandResult {
-    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const { villageId, troops, movements } = cmd.payload as { villageId: string; troops?: Record<string, number>; movements?: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    s.marching = troops;
+    const groups = Array.isArray(movements) ? movements.map((entry) => ({
+      troops: entry?.troops ?? {}, upkeepMultiplier: Math.max(0, Number(entry?.upkeepMultiplier) || 1),
+    })) : [{ troops: troops ?? {}, upkeepMultiplier: 1 }];
+    s.marchingUpkeep = groups;
+    s.marching = {};
+    for (const group of groups) for (const [unit, raw] of Object.entries(group.troops)) {
+      const count = Math.max(0, Math.floor(Number(raw) || 0));
+      if (count) s.marching[unit] = (s.marching[unit] ?? 0) + count;
+    }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
-    return { ok: true, payload: { marching: { ...troops } } };
+    return { ok: true, payload: { marching: { ...s.marching } } };
+  }
+
+  /** 重启前由 Movement 先清理旧快照，再按仍在途的行军逐村回填。 */
+  private clearMarchingTroops(): CommandResult {
+    for (const state of this.store.all<MilitaryState>(COLLECTION)) {
+      state.marching = {};
+      state.marchingUpkeep = [];
+      this.store.set(COLLECTION, state.villageId, state);
+      this.reportUpkeep(state);
+    }
+    return { ok: true, payload: {} };
   }
 
   /**

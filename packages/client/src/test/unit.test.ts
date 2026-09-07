@@ -184,6 +184,17 @@ describe('科研点判定公式展示', () => {
   });
 });
 
+describe('科技纲领树呈现', () => {
+  it('使用服务端纲领组与锁定状态呈现不可逆路线，不在客户端硬编码科技名称或效果', () => {
+    const tree = readFileSync(new URL('../features/research/TechTreeScreen.tsx', import.meta.url), 'utf8');
+    assert.match(tree, /doctrineGroup/);
+    assert.match(tree, /doctrine_locked/);
+    assert.match(tree, /战略纲领二选一/);
+    assert.match(tree, /完成后锁定本局路线；取消研发不会锁定/);
+    assert.doesNotMatch(tree, /rapid_march|全民皆兵|露天仓库/);
+  });
+});
+
 describe('联盟目录与战事目标交互', () => {
   it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
     const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
