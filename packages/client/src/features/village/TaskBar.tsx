@@ -19,6 +19,7 @@ import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
 import { DiceQuestModal } from './DiceQuestModal.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from './task-progress.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -430,6 +431,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const taskVillage = (o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.taskVillageXY
     ? { id: String(task.taskVillageId ?? `${task.taskVillageXY.q},${task.taskVillageXY.r}`), q: Number(task.taskVillageXY.q), r: Number(task.taskVillageXY.r) }
     : undefined;
+  const repairBuildingKinds = o.kind === 'repair_buildings' ? (o.buildingKinds ?? []) as string[] : [];
+  const hasRepairPending = hasRepairBuildingPending(task, repairBuildingKinds);
 
   const onAbandon = async () => {
     const isSide = task.type === 'side';
@@ -536,8 +539,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       {o.kind === 'repair_buildings' && (
         <div class="task-card-obj">
           <ol class="task-checklist" aria-label="资源田修复进度">
-            {((o.buildingKinds ?? []) as string[]).map((kind, index) => {
-              const done = (task.repairedBuildings ?? []).includes(kind);
+            {repairBuildingKinds.map((kind, index) => {
+              const done = isRepairBuildingDone(task, kind);
               const info = buildingInfo(kind);
               return (
                 <li key={kind} class={`task-checklist-item${done ? ' done' : ''}`}>
@@ -549,10 +552,10 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
               );
             })}
           </ol>
-          <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
+          {hasRepairPending && <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>}
         </div>
       )}
-      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units') && (
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units' || o.kind === 'clear_public_pve') && (
         <div class="task-card-obj">
           <div class="task-card-prog">
             <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
@@ -564,6 +567,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
             {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
             {o.kind === 'kill_units' && <span class="task-prog-hint">累计消灭敌方{ o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种') }人口</span>}
+            {o.kind === 'clear_public_pve' && <span class="task-prog-hint">已清除雇佣兵营及更强的常驻公开 PvE 营地</span>}
           </div>
         </div>
       )}

@@ -126,3 +126,33 @@ test('王国 PvE 声望批次：-10 触发封地掠夺，-20 改为攻城，雇�
   const all = app.store.all<any>('movement').filter((m) => m.kingdomMercenary);
   assert.ok(all.some((m) => m.battleType === 'siege'));
 });
+
+test('声望：商队劫掠按实际物资跨多次累计，重放同一结算不重复扣分', async () => {
+  const app = createGameApp({ manualScheduler: true }); app.setupWorld();
+  const reg = (await send(app, 'player.Register', { name: '商队劫掠声望', password: 'p1234', tribe: 'romans' })).payload as any;
+  const villageId = reg.player.villageId;
+  assert.equal(app.config.constants.caravanRaidReputationGoodsPerPoint, 2000);
+
+  const first = await send(app, 'reputation.ProcessCaravanRaid', {
+    villageId, settlementId: 'caravan-raid-1', loot: { wood: 1200, gold: 300 },
+  });
+  assert.equal(first.ok, true);
+  assert.equal((first.payload as any).stolenGoods, 1500);
+  assert.equal((first.payload as any).reputationPoints, 0);
+  assert.equal((first.payload as any).remainder, 1500);
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, 0);
+
+  const duplicate = await send(app, 'reputation.ProcessCaravanRaid', {
+    villageId, settlementId: 'caravan-raid-1', loot: { wood: 1200, gold: 300 },
+  });
+  assert.equal(duplicate.ok, true);
+  assert.equal((duplicate.payload as any).duplicate, true);
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, 0);
+
+  const second = await send(app, 'reputation.ProcessCaravanRaid', {
+    villageId, settlementId: 'caravan-raid-2', loot: { clay: 500 },
+  });
+  assert.equal((second.payload as any).reputationPoints, 1);
+  assert.equal((second.payload as any).remainder, 0);
+  assert.equal((await send(app, 'reputation.GetByVillage', { villageId })).payload.value, -1);
+});

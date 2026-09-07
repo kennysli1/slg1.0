@@ -28,6 +28,22 @@
 }
 .rp-researching > .progress { flex: 1; }
 .rp-next { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.rp-formula, .acad-formula {
+  margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line);
+  color: var(--c-ink-soft); font-size: var(--f-xs);
+}
+.rp-formula summary, .acad-formula summary { cursor: pointer; color: var(--c-gold); font-weight: 700; }
+.rp-formula-grid, .acad-formula-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--s-4); margin-top: var(--s-3);
+}
+.rp-formula h4, .acad-formula h4 { margin: 0 0 var(--s-1); color: var(--c-ink); font-size: var(--f-sm); }
+.rp-formula-total, .acad-formula-total { margin: 0 0 var(--s-2); color: var(--c-ink); }
+.rp-source-row, .acad-source-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s-2);
+  padding: 4px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.rp-source-row b, .acad-source-row b { color: var(--c-steel); font-family: var(--ff-num); font-weight: 600; }
+.rp-source-row small, .acad-source-row small { grid-column: 1 / -1; color: var(--c-ink-dim); font-size: var(--f-2xs); }
 
 /* ---------- 分支切换 ---------- */
 .tech-branch-tabs {

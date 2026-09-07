@@ -559,6 +559,7 @@ export class PveModule {
         task: !!s.task,
         taskType: s.type,
         noRespawn: !!s.noRespawn,
+        treasureTier: this.config.pveTemplates[s.type]?.treasureTier ?? 1,
       },
     };
   }
@@ -594,7 +595,7 @@ export class PveModule {
     const hasLoot = Object.values({ ...buildingLoot, ...storedLoot }).some((n) => n > 0);
     if (hasLoss || hasLoot) this.resetRecovery(s);
     this.store.set(COLLECTION, s.id, s);
-    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, task: false, noRespawn: false } };
+    return { ok: true, payload: { looted: this.mergeResources(buildingLoot, storedLoot), buildingLoot, storedLoot, buildingDamage, cleared: false, cityState: true, faction: 'kingdom', cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile, task: false, noRespawn: false, treasureTier: this.config.pveTemplates[s.type]?.treasureTier ?? 1 } };
   }
 
   /** 王国封地雇佣军返程时把掠夺所得存回来源封地，不加入玩家经济。 */

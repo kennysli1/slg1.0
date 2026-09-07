@@ -23,6 +23,7 @@ import './manifest.test.js';
 import './architecture.test.js';
 import './notifications.test.js';
 import './population.test.js';
+import './famine-recovery.test.js';
 // ---- 新增回归测试（阶段 1-3）----
 import './scheduler.test.js';
 import './lock-concurrency.test.js';

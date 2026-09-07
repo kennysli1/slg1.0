@@ -25,11 +25,30 @@ import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
-import { caravanAction, escortMarkerOffset, foreignArmyName, selectedMapMovement } from '../features/map/map-target-helpers.js';
+import { caravanAction, collectMapTargetStack, displayGridForMovement, escortMarkerOffset, foreignArmyName, ownMovementsFromCache, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
+
+describe('M1 资源田修复状态', () => {
+  it('任务已就绪时即使没有修复事件记录也把四块资源田显示为已修复', () => {
+    const task = { ready: true, repairedBuildings: [] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'claypit'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), true);
+    assert.equal(isRepairBuildingDone(task, 'cropland'), true);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), false);
+  });
+
+  it('只有仍有未完成修复项时才显示待修复提示', () => {
+    const task = { ready: false, repairedBuildings: ['woodcutter', 'claypit'] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), false);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), true);
+  });
+});
 
 describe('军队面板折叠区顺序', () => {
   it('防御掠夺位于训练下方、解散上方，并使用与解散相同的折叠控件', () => {
@@ -153,6 +172,18 @@ describe('阶段化战斗模拟器的科技与宝物多选', () => {
   });
 });
 
+describe('科研点判定公式展示', () => {
+  it('使用服务端下发的基础值与来源明细，不在客户端硬编码学院等级概率', () => {
+    const academy = readFileSync(new URL('../features/research/AcademyModal.tsx', import.meta.url), 'utf8');
+    const tree = readFileSync(new URL('../features/research/TechTreeScreen.tsx', import.meta.url), 'utf8');
+    assert.match(academy, /state\?\.rpFormula/);
+    assert.match(academy, /intervalSources/);
+    assert.match(tree, /state\?\.rpFormula/);
+    assert.match(tree, /durationLabel/);
+    assert.doesNotMatch(tree, /0\.10 \+ Math\.max\(0, highest - 1\)/);
+  });
+});
+
 describe('联盟目录与战事目标交互', () => {
   it('失联联盟只显示公开目录，已有联盟成员目录不显示申请按钮', () => {
     const source = readFileSync(new URL('../features/alliance/AllianceScreen.tsx', import.meta.url), 'utf8');
@@ -234,6 +265,12 @@ describe('任务接取与奖励领取对话状态机', () => {
       '只有首次收下进入互斥后才能正式 Deliver');
     assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
     assert.match(autoHost, /req\('task\.ConsumeDialogue'/, '自动对话关闭必须消费整个等待 session');
+  });
+
+  it('常驻公开 PvE 任务显示清剿计数器', () => {
+    const taskBar = readFileSync(new URL('../features/village/TaskBar.tsx', import.meta.url), 'utf8');
+    assert.match(taskBar, /o\.kind === 'clear_public_pve'/);
+    assert.match(taskBar, /当前进度[\s\S]*o\.count/);
   });
 });
 
@@ -331,6 +368,24 @@ describe('地图定位', () => {
     const warning = normalizeIncomingWarningForRender({ id: 'm8-incoming', type: 'attack', stepIndex: 0 });
     assert.equal(warning.type, 'incoming_warning');
     assert.equal(warning.status, 'marching');
+  });
+
+  it('移动图标跨过六边形边界后按下一格选择', () => {
+    const movement = {
+      pos: { q: 1, r: 1 },
+      path: [{ q: 1, r: 1 }, { q: 2, r: 1 }],
+      stepIndex: 0,
+      status: 'marching',
+      perStepMs: 1_000,
+      nextStepAt: 2_000,
+    };
+    assert.deepEqual(displayGridForMovement(movement, 1_499), { q: 1, r: 1 });
+    assert.deepEqual(displayGridForMovement(movement, 1_500), { q: 2, r: 1 });
+  });
+
+  it('同格目标选择器切回村庄时不被坐标兜底重新抢成军队', () => {
+    const own = [{ id: 'army-1', pos: { q: 3, r: 3 } }] as any;
+    assert.equal(selectedMapMovement({ kind: 'village', refId: 'village-1', q: 3, r: 3, stackedTargets: [{}] }, own, []), null);
   });
 
   it('地图地形只消费服务端字段，旧响应降级平原且未探索不泄露', () => {
@@ -946,12 +1001,25 @@ describe('notificationKind', () => {
 });
 
 describe('商队地图交互', () => {
+  it('议会厅护卫服务在服务卡内提供商队选择，驻扎军按钮文案为继续行军', () => {
+    const council = readFileSync(new URL('../features/village/CouncilModal.tsx', import.meta.url), 'utf8');
+    const targetPanel = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(council, /council-caravan-pickers--card/);
+    assert.match(council, /选择护卫商队/);
+    assert.match(targetPanel, /继续行军<\/Btn>/);
+    assert.doesNotMatch(targetPanel, />选择行军模式<\/Btn>/);
+  });
   it('移动标记可直接按 ID 点击，商队不受旧外军 pointer-events:none 阻挡', () => {
     const source = readFileSync(new URL('../features/map/HexMap.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../styles/map.css', import.meta.url), 'utf8');
     assert.match(source, /closest\?\.\('\[data-move-id\]'\)/);
     assert.match(source, /class="march-marker-hit"/);
     assert.match(css, /\.enemy-march-mk\[data-move-id\]\s*\{\s*pointer-events:\s*all/);
+  });
+  it('野战战损返城阈值使用 0-100 滑条而不是数字输入', () => {
+    const source = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(source, /class="loss-rate-slider"\s+type="range"\s+min=\{0\}\s+max=\{100\}/);
+    assert.match(source, /aria-label="野战战损返城阈值百分比"/);
   });
   it('按点击 ID 选择同格商队和护送军，不被占格顺序替换', () => {
     const escort = { id: 'escort', pos: { q: 5, r: 6 }, escortAttached: true } as any;
@@ -962,12 +1030,50 @@ describe('商队地图交互', () => {
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'caravan', q: 5, r: 6 }, [escort], [caravan])?.movement.pos.q, 6);
     assert.equal(selectedMapMovement({ kind: 'enemy_army', refId: 'departed', q: 5, r: 6 }, [escort], [caravan]), null);
   });
+  it('商队目标按 movement id 锁定，驻扎续行不会退回首次出兵分支', () => {
+    const caravan = { id: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '河畔镇' } } as any;
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'caravan', q: 5, r: 6 }, [], [caravan])?.movement.id, 'caravan');
+    assert.equal(selectedMapMovement({ kind: 'caravan', refId: 'departed', q: 5, r: 6 }, [], [caravan]), null);
+  });
 
   it('己方关联商队只护送，未获权限时不展示行动', () => {
     assert.equal(caravanAction({ canRaid: true, canEscort: true }), 'caravan_escort');
     assert.equal(caravanAction({ canRaid: true, canEscort: false }), 'caravan_raid');
     assert.equal(caravanAction({ canRaid: false, canEscort: false }), null);
     assert.equal(caravanAction(), null);
+  });
+
+  it('同格目标栈保留底层地块、商队和军队，点击任一移动标记仍可切换', () => {
+    const base = { refId: 'village-1', kind: 'village', q: 5, r: 6, name: '目标村' } as any;
+    const caravan = { id: 'caravan', type: 'caravan', pos: { q: 5, r: 6 }, caravan: { destinationVillageName: '目标村' } } as any;
+    const army = { id: 'garrison', type: 'garrison', status: 'stationed', pos: { q: 5, r: 6 } } as any;
+    const stack = collectMapTargetStack(base, 5, 6, caravan, undefined, undefined, [caravan, army], [], []);
+    assert.deepEqual(stack.targets.map((target) => `${target.kind}:${target.refId}`), [
+      'caravan:caravan', 'village:village-1', 'own_army:garrison',
+    ]);
+    assert.equal(stack.active.kind, 'caravan');
+  });
+
+  it('己方行军合并当前村与跨村快照，空数组不会短路另一份数据', () => {
+    const previous = getCache();
+    const local = { id: 'local', pos: { q: 1, r: 1 } } as any;
+    const remote = { id: 'remote', pos: { q: 2, r: 2 } } as any;
+    const newerLocal = { id: 'same', pos: { q: 3, r: 3 }, stepIndex: 3 } as any;
+    const stalePlayer = { id: 'same', pos: { q: 2, r: 2 }, stepIndex: 2 } as any;
+    setCache({ moves: { movements: [local, newerLocal] }, playerMoves: { movements: [remote, stalePlayer] } });
+    assert.deepEqual(ownMovementsFromCache().map((movement) => movement.id).sort(), ['local', 'remote', 'same']);
+    assert.deepEqual(ownMovementsFromCache().find((movement) => movement.id === 'same')?.pos, { q: 3, r: 3 });
+    setCache(previous);
+  });
+
+  it('跨越环面边界的移动仍返回规范地图格坐标', () => {
+    const W = 41;
+    const now = 1_000;
+    const grid = displayGridForMovement({
+      pos: { q: W - 1, r: 2 }, path: [{ q: W - 1, r: 2 }, { q: 0, r: 2 }],
+      stepIndex: 0, status: 'marching', perStepMs: 1_000, nextStepAt: now + 500,
+    }, now);
+    assert.deepEqual(grid, { q: 0, r: 2 });
   });
 
   it('已附着护送军并列显示，商队公开名称带目的地', () => {

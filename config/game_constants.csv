@@ -81,6 +81,11 @@ trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折
 trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易订单上限
 trade_order_ttl_sec,86400,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
 treasure_camp_drop_chance,1,number,清理野外营地后掉落宝物的总体概率(0-1
+treasure_camp_drop_chance_tier1_multiplier,0.5,number,低难度野外营地宝物总体掉落概率倍率（默认基础概率的50%）
+treasure_camp_drop_chance_tier2_multiplier,0.75,number,中难度野外营地宝物总体掉落概率倍率（默认基础概率的75%）
+treasure_camp_drop_chance_tier3_multiplier,1,number,高难度野外营地宝物总体掉落概率倍率（默认基础概率的100%）
+treasure_camp_rarity_multiplier_tier2,1.25,number,中难度营地按稀有度提高宝物dropRate权重的倍率底数（每提升一级稀有度再乘一次）
+treasure_camp_rarity_multiplier_tier3,1.6,number,高难度营地按稀有度提高宝物dropRate权重的倍率底数（每提升一级稀有度再乘一次）
 treasure_npc_offer_chance,1,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1
 treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃

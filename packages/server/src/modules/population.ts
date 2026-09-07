@@ -193,12 +193,15 @@ export class PopulationModule {
       if (!Array.isArray(s.reputationGrowthSources)) s.reputationGrowthSources = [];
       if (!Array.isArray(s.reputationGoldSources)) s.reputationGoldSources = [];
 
-      // 若重启前处于饥荒但任务丢失，重新调度
-      if (s.inFamine && !s.starveTaskId) {
-        const c = this.config.constants;
+      // Scheduler 任务仅存在于当前进程；存档中的编号不能证明任务仍在运行。
+      // 按 owner 去重，立即复核恢复状态；仍缺粮时等完整减员间隔，不在重启时额外扣人口。
+      const needsFamineCheck = s.inFamine || !!s.starveTaskId;
+      this.scheduler.cancelByOwner(`population:starve:${s.villageId}`);
+      s.starveTaskId = undefined;
+      if (needsFamineCheck) {
         s.starveTaskId = this.scheduler.schedule(
-          c.popFamineTickSec * 1000,
-          () => this.runStarveTick(s.villageId),
+          0,
+          () => this.runStarveTick(s.villageId, false),
           `population:starve:${s.villageId}`,
           `village:${s.villageId}`,
         );
@@ -240,6 +243,9 @@ export class PopulationModule {
   /** 结算并持久化单个村庄状态（供周期 tick 复用；命令路径各自在结算后自行 store.set）。 */
   private async settleAndPersist(s: PopulationState): Promise<void> {
     await this.settle(s);
+    // 恢复不依赖减员任务是否仍存在（例如零人口、旧任务编号或减员后刚好收支平衡）。
+    // GetSnapshot/settle 仍不发事件；恢复事件只由 Scheduler 周期路径发出。
+    if (s.inFamine && (await this.computeDeficit(s)) === false) await this.recoverFromFamine(s);
     this.store.set(COLLECTION, s.villageId, s);
   }
 
@@ -568,47 +574,63 @@ export class PopulationModule {
   }
 
   /** 当前是否仍处粮食赤字（currentCrop<=0 且净产率<0）。减员后重新评估以决定是否续排。 */
-  private async computeDeficit(s: PopulationState): Promise<boolean> {
+  private async computeDeficit(s: PopulationState): Promise<boolean | undefined> {
     const c = this.config.constants;
-    const cropRes = await this.commands.send({
-      name: 'economy.GetCropContext', from: PopulationModule.NAME,
-      payload: { villageId: s.villageId },
-    });
-    const baseCropPerHour: number = (cropRes.payload as any)?.baseCropPerHour ?? 0;
-    const nonCivilianUpkeep: number = (cropRes.payload as any)?.nonCivilianUpkeep ?? 0;
-    const currentCrop: number = (cropRes.payload as any)?.currentCrop ?? 0;
+    let cropRes: CommandResult;
+    try {
+      cropRes = await this.commands.send({
+        name: 'economy.GetCropContext', from: PopulationModule.NAME,
+        payload: { villageId: s.villageId },
+      });
+    } catch { return undefined; }
+    const { baseCropPerHour, nonCivilianUpkeep, currentCrop } = (cropRes.payload ?? {}) as {
+      baseCropPerHour: number; nonCivilianUpkeep: number; currentCrop: number;
+    };
+    // 查询失败不等于粮食收支为零；未知时既不恢复也不减员，由下一次检查重试。
+    if (!cropRes.ok || ![baseCropPerHour, nonCivilianUpkeep, currentCrop].every(Number.isFinite)) return undefined;
     const mult = this.prosperityMult(s);
     const civilianCrop = s.currentPop * c.popCropPerLabor;
     const netCropRatePerHour = baseCropPerHour * mult - nonCivilianUpkeep - civilianCrop;
     return currentCrop <= 0 && netCropRatePerHour < 0;
   }
 
-  /**
-   * 饥荒减员 tick：唯一可执行减员并 emit 的路径（铁律：settle 永不 emit）。
-   * 减员公式（指数解析）：reduced = currentPop × (1 − exp(−popDeathRateFactor × dtHours))。
-   * 退出赤字则发 'recovery' 并停止；仍在赤字则续排。
-   */
-  private async runStarveTick(villageId: string): Promise<void> {
+  /** Scheduler 路径统一退出饥荒；只取消本村饥荒任务，恢复事件最多发一次。 */
+  private async recoverFromFamine(s: PopulationState): Promise<void> {
+    const wasInFamine = !!s.inFamine;
+    this.scheduler.cancelByOwner(`population:starve:${s.villageId}`);
+    s.starveTaskId = undefined;
+    s.inFamine = false;
+    // 饥荒期间禁止增长，不能把暂停的整段时间在恢复后补算成人口。
+    if (wasInFamine) s.lastTick = this.now();
+    this.store.set(COLLECTION, s.villageId, s);
+    if (wasInFamine) {
+      await this.bus.emit({
+        name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
+        payload: { ...this.publicPayload(s), event: 'recovery' },
+      } as DomainEvent);
+    }
+  }
+
+  /** 减员仅由正常 tick 执行；启动复核不减员，仍赤字则续排完整间隔。 */
+  private async runStarveTick(villageId: string, applyLoss = true): Promise<void> {
     const s = this.load(villageId);
     if (!s) return;
     s.starveTaskId = undefined;
 
+    if (s.inFamine) await this.settle(s);
     await this.reportToEconomy(s);
 
-    if (!(await this.computeDeficit(s))) {
-      const wasInFamine = s.inFamine;
-      s.inFamine = false;
-      this.store.set(COLLECTION, villageId, s);
-      if (wasInFamine) {
-        await this.bus.emit({
-          name: 'population.Changed', source: PopulationModule.NAME, ts: this.now(),
-          payload: { ...this.publicPayload(s), event: 'recovery' },
-        } as DomainEvent);
-      }
+    const deficit = await this.computeDeficit(s);
+    if (deficit === false) {
+      await this.recoverFromFamine(s);
       return;
     }
 
     const c = this.config.constants;
+    if (deficit === undefined || !applyLoss) {
+      await this.onCropDeficit(villageId);
+      return;
+    }
     const tickHours = c.popFamineTickSec / 3600;
     const reduced = Math.max(
       0,
@@ -633,7 +655,10 @@ export class PopulationModule {
     } as DomainEvent);
 
     // 减员后若仍赤字则续排，否则停止（避免永久空转）
-    if (s.currentPop > 0 && (await this.computeDeficit(s))) {
+    const stillInDeficit = await this.computeDeficit(s);
+    if (stillInDeficit === false) {
+      await this.recoverFromFamine(s);
+    } else if (s.currentPop > 0) {
       s.starveTaskId = this.scheduler.schedule(
         c.popFamineTickSec * 1000,
         () => this.runStarveTick(villageId),

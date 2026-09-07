@@ -58,6 +58,8 @@ interface FieldDefenderInput {
   attackerSnapshot: Snapshot;
   treasures?: string[];
   npcService?: boolean;
+  fieldPursuer?: boolean;
+  capturedTreasures?: string[];
 }
 
 export class CombatModule {
@@ -240,6 +242,8 @@ export class CombatModule {
       kingdomMercenary?: boolean;
       returnPveId?: string;
       taskCode?: string;
+      fieldPursuer?: boolean;
+      capturedTreasures?: string[];
     };
 
     const contribId = p.movementId;
@@ -251,7 +255,7 @@ export class CombatModule {
       if (existing.contributions[contribId]) return { ok: true, payload: { battleId: existing.id, merged: true } };
       // 并入已有战场的 attacker 阵营（下一 tick 生效）
       existing.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], capturedTreasures: [...(p.capturedTreasures ?? [])], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId, fieldPursuer: !!p.fieldPursuer,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         existing.attacker[`${contribId}#${code}`] = { ...u };
@@ -271,7 +275,7 @@ export class CombatModule {
       const raceCheck = this.findActive(p.targetId, p.targetKind);
       if (raceCheck) {
         raceCheck.contributions[contribId] = {
-          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
+          movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], capturedTreasures: [...(p.capturedTreasures ?? [])], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId, fieldPursuer: !!p.fieldPursuer,
         };
         for (const [code, u] of Object.entries(p.attackerSnapshot)) {
           raceCheck.attacker[`${contribId}#${code}`] = { ...u };
@@ -299,7 +303,7 @@ export class CombatModule {
         }
         fieldContributions[df.movementId] = {
           movementId: df.movementId, fromVillage: df.fromVillage, fromXY: { ...df.fromXY },
-          troops: { ...df.troops }, treasures: [...(df.treasures ?? [])], npcService: !!df.npcService,
+          troops: { ...df.troops }, treasures: [...(df.treasures ?? [])], capturedTreasures: [...(df.capturedTreasures ?? [])], npcService: !!df.npcService, fieldPursuer: !!df.fieldPursuer,
         };
         if (multiple) defenderContributions[df.movementId] = {
           sourceId: df.movementId, movementId: df.movementId, fromVillage: df.fromVillage,
@@ -316,7 +320,7 @@ export class CombatModule {
         id, targetKind: 'field', targetId: p.targetId, targetXY: p.targetXY,
         wallLevel: 0, attacker, defender, defenderOriginal,
         battleType: p.battleType, taskCode: p.taskCode,
-        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
+        contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], capturedTreasures: [...(p.capturedTreasures ?? [])], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId, fieldPursuer: !!p.fieldPursuer } },
         defenderContribution: multiple ? undefined : fieldContributions[defenders[0]!.movementId],
         defenderFieldContributions: multiple ? fieldContributions : undefined,
         defenderContributions: multiple ? defenderContributions : undefined,
@@ -330,6 +334,7 @@ export class CombatModule {
       log('野战开始', { battleId: id, at: p.targetXY, atkPower: Math.round(battle.attackPower0), defPower: Math.round(battle.defensePower0) });
       this.emitToParties(battle, 'combat.BattleStarted', (villageId, side) => ({
         villageId, side, battleId: id, targetKind: 'field', targetId: p.targetId,
+        battleLabel: p.caravanId ? '商队劫掠' : p.battleType === 'ambush' ? '伏击' : '野战',
         attackPower: Math.round(battle.attackPower0), defensePower: Math.round(battle.defensePower0),
         attacker: battle.initialAttacker, defender: battle.initialDefender, round: 0,
       }));
@@ -351,7 +356,7 @@ export class CombatModule {
     if (raceExisting) {
       // 安全并入
       raceExisting.contributions[contribId] = {
-        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId,
+        movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId, fieldPursuer: !!p.fieldPursuer,
       };
       for (const [code, u] of Object.entries(p.attackerSnapshot)) {
         raceExisting.attacker[`${contribId}#${code}`] = { ...u };
@@ -384,7 +389,7 @@ export class CombatModule {
       defender,
       defenderOriginal,
       defenderContributions,
-      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId } },
+      contributions: { [contribId]: { movementId: p.movementId, fromVillage: p.fromVillage, fromXY: p.fromXY, troops: { ...p.troops }, treasures: [...treasures], npcService: !!p.npcService, kingdomMercenary: !!p.kingdomMercenary, returnPveId: p.returnPveId, fieldPursuer: !!p.fieldPursuer } },
       attackerDamageCarry: {},
       defenderDamageCarry: {},
       rulesetVersion: TOTAL_AD_RULESET_VERSION,
@@ -591,6 +596,7 @@ export class CombatModule {
     let campCleared = false;
     let isTaskCamp = false;
     let isNoRespawn = false;
+    let treasureTier: 1 | 2 | 3 = 1;
     const shouldApplyDomain = b.resolution.step === 'apply_domain';
     if (shouldApplyDomain && b.targetKind === 'pve') {
       const apply = await this.commands.send({
@@ -605,6 +611,7 @@ export class CombatModule {
       storedLoot = (apply.payload as any)?.storedLoot ?? {};
       buildingDamage = (apply.payload as any)?.buildingDamage ?? [];
       campCleared = !!((apply.payload as any)?.cleared);
+      treasureTier = ((apply.payload as any)?.treasureTier === 3 ? 3 : (apply.payload as any)?.treasureTier === 2 ? 2 : 1);
       // M8/M9 的天王老子村是任务专属目标，不应触发普通 PvE 宝物掉落。
       // 旧存档可能没有 task=true 标记，因此同时按模板类型兜底识别。
       isTaskCamp = !!((apply.payload as any)?.task)
@@ -714,6 +721,7 @@ export class CombatModule {
       campCleared = !!b.resolution.campCleared;
       isTaskCamp = !!b.resolution.isTaskCamp;
       isNoRespawn = !!b.resolution.isNoRespawn;
+      treasureTier = b.resolution.treasureTier ?? 1;
     } else {
       b.resolution.looted = looted;
       b.resolution.storedLoot = storedLoot;
@@ -722,6 +730,7 @@ export class CombatModule {
       b.resolution.campCleared = campCleared;
       b.resolution.isTaskCamp = isTaskCamp;
       b.resolution.isNoRespawn = isNoRespawn;
+      b.resolution.treasureTier = treasureTier;
       b.resolution.attackerLosses = attackerLosses;
       b.resolution.defenderLosses = defenderLosses;
       b.resolution.step = 'emit_attacker_reports';
@@ -803,7 +812,7 @@ export class CombatModule {
       if (!contrib.npcService && campCleared && attackerWins && !isTaskCamp && !isNoRespawn) {
         void this.commands.send({
           name: 'treasure.RollDrop', from: CombatModule.NAME,
-          payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId },
+          payload: { villageId: contrib.fromVillage, source: 'camp', movementId: contrib.movementId, treasureTier },
         });
       }
 
@@ -870,6 +879,12 @@ export class CombatModule {
       this.fieldResult(contribution, b.attacker, `${id}#`));
     const defenders = this.fieldDefenders(b).map((contribution) =>
       this.fieldResult(contribution, b.defender, b.defenderFieldContributions ? `${contribution.movementId}#` : ''));
+    const winnerParties = attackerWins ? attackers : defenders;
+    const loserParties = attackerWins ? defenders : attackers;
+    const winnerMovementId = winnerParties[0]?.contribution.movementId;
+    const loserMovementIds = loserParties.map((party) => party.contribution.movementId);
+    // 只有普通野战缴获宝物；伏击沿用原规则，不把伏击败方宝物转给胜方。
+    const fieldTreasureCapture = !b.caravanId && b.battleType !== 'ambush';
     // 每一来源分别回收；NPC 护卫不属于购买者的人口，不能计入其医院。
     const parties = [...attackers, ...defenders];
     for (let index = resolution.fieldCasualtyIndex ?? 0; index < parties.length; index++) {
@@ -916,7 +931,7 @@ export class CombatModule {
       phase: 'resolved' as const,
       attackPower: Math.round(b.attackPower0), defensePower: Math.round(b.defensePower0),
       attackerLosses, defenderLosses, targetKind: 'field' as const, targetId: b.targetId, battleType: b.battleType,
-      battleLabel: b.caravanId ? '商队劫掠' : b.battleType === 'ambush' ? '伏击' : undefined, campCleared: false,
+      battleLabel: b.caravanId ? '商队劫掠' : b.battleType === 'ambush' ? '伏击' : '野战', campCleared: false,
       caravanId: b.caravanId,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
@@ -935,7 +950,12 @@ export class CombatModule {
           fromXY: contrib.fromXY, toXY: b.targetXY,
           survivors, loot: {}, treasures: contrib.treasures, deployedTroops: contrib.troops,
           ownLosses: losses, npcService: !!contrib.npcService,
-          attackerWins, ...reportBase,
+          attackerWins, fieldWinner: !attackerWins ? false : true,
+          capturedMovementIds: fieldTreasureCapture && attackerWins && contrib.movementId === winnerMovementId ? loserMovementIds : [],
+          capturedTreasureCodes: fieldTreasureCapture && attackerWins && contrib.movementId === winnerMovementId
+            ? loserParties.flatMap((party) => party.contribution.capturedTreasures ?? []) : [],
+          capturedByMovementId: fieldTreasureCapture && !attackerWins ? winnerMovementId : undefined,
+          ...reportBase,
         },
       } as DomainEvent);
       resolution.attackerReportIndex = index + 1;
@@ -962,7 +982,12 @@ export class CombatModule {
           fromXY: dc.fromXY, toXY: b.targetXY,
           survivors: defSurvivors, loot: {}, treasures: dc.treasures, deployedTroops: dc.troops,
           ownLosses: defLosses, npcService: !!dc.npcService,
-          attackerWins, ...reportBase,
+          attackerWins, fieldWinner: !attackerWins ? true : false,
+          capturedMovementIds: fieldTreasureCapture && !attackerWins && dc.movementId === winnerMovementId ? loserMovementIds : [],
+          capturedTreasureCodes: fieldTreasureCapture && !attackerWins && dc.movementId === winnerMovementId
+            ? loserParties.flatMap((party) => party.contribution.capturedTreasures ?? []) : [],
+          capturedByMovementId: fieldTreasureCapture && attackerWins ? winnerMovementId : undefined,
+          ...reportBase,
         },
       } as DomainEvent);
       resolution.defenderReportIndex = index + 1;
