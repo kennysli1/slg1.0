@@ -83,6 +83,7 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   assert.equal(cfg.buildings['council'].mainBaseLevel, 2, '议会厅需要二级主基地');
   assert.equal(cfg.buildings['alliance_hall'].maxCount, 1, '联盟大厅每村最多 1 座');
   assert.equal(cfg.buildings['alliance_hall'].mainBaseLevel, 2, '联盟大厅需要二级主基地');
+  assert.deepEqual(cfg.buildings['stable'].requires, [{ kind: 'main', level: 2 }], '马厩前置应为二级主基地');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
   assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');
