@@ -99,6 +99,7 @@ test('GM 面板：不存在的复合主键应是 no-op（不报错、不新增�
 test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 residence maxLevel=5）', () => {
   const table = BALANCE_TABLES['buildings'];
   assert.ok(table.key && !table.keyComposite, 'buildings 应为单主键');
+  assert.ok(table.text?.includes('requires'), '建筑表应开放 requires 前置字段编辑');
   withTmp((tmp) => {
     // residence 的 id=16（从配置读，避免硬编码）
     const resId = String(loadGameConfig(configDir).buildings['residence'].id);
@@ -106,6 +107,17 @@ test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 resid
     const cfg = loadGameConfig(tmp);
     assert.equal(cfg.buildings['residence'].maxLevel, 5, 'residence maxLevel 应改为 5');
     assert.equal(cfg.buildings['main'].maxLevel, 4, 'main maxLevel 应保持新版四级主基地');
+  });
+});
+
+test('GM 面板：建筑 requires 前置写回并进入运行时配置', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { requires: '1:2' } });
+    const cfg = loadGameConfig(tmp);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 2 }], '马厩前置应可由配置中心改为二级主基地');
+    const raw = readFileSync(join(tmp, 'buildings.csv'), 'utf8');
+    assert.match(raw, /^5,stable,[^\r\n]*,1:2,/m, 'buildings.csv 应写回 stable 的 1:2 前置');
   });
 });
 

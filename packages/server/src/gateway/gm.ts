@@ -638,6 +638,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
     numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    text: ['requires'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -1395,8 +1396,8 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','繁荣/级','人口增长/级·时'];
+  var bFields = ['maxLevel','maxCount','mainBaseLevel','requires','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','建筑前置（数字ID:等级）','繁荣/级','人口增长/级·时'];
   var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
@@ -1421,7 +1422,9 @@ function sectionBuildings(){
         var f0 = bFields[bf];
         var val0 = bld[f0]==null?'':bld[f0];
         h += '<label style="font-size:10px;color:#7a86a8;margin-left:4px;white-space:nowrap">'+bLabels[bf]+':</label> ';
-        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:62px;font-size:11px">';
+        var inputType = f0 === 'requires' ? 'text' : 'number';
+        var inputWidth = f0 === 'requires' ? '112px' : '62px';
+        h += '<input type="'+inputType+'" '+(inputType === 'number' ? 'step="any" ' : '')+'value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:'+inputWidth+';font-size:11px">';
       }
       h += '</div>';
     }
