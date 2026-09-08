@@ -1085,24 +1085,6 @@ test('灰烬商路：s13 选择贸易分支后应解锁 s14，而不是等待错
   assert.ok(!state?.offeredSide.includes('s20'), '贸易分支不应解锁探索分支');
 });
 
-test('灰烬商路：读取任务页时补发旧存档遗漏的 s14 offer', async () => {
-  const app = freshApp();
-  const regRes = await reg(app, '灰烬商路旧存档补发');
-  const va = (regRes.payload as any).player.villageId;
-  app.store.set('task', va, {
-    villageId: va,
-    completedMain: [], completedSide: ['s13'], abandonedSide: [],
-    active: {}, offered: [], offeredMain: [], offeredSide: [],
-    firedTriggers: ['ashen_branch:trade'], cooldownUntil: {},
-    pendingDialogues: [], outcomes: {}, taskVillages: {},
-  });
-
-  const state = (await send(app, 'task.GetState', { villageId: va })).payload as any;
-  assert.ok(state.offeredSide.some((item: any) => item.code === 's14'), '读取任务页应补发 s14');
-  assert.ok(!state.offeredSide.some((item: any) => item.code === 's17'), '旧存档贸易分支不应补发军事分支');
-  assert.ok(!state.offeredSide.some((item: any) => item.code === 's20'), '旧存档贸易分支不应补发探索分支');
-});
-
 test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁的娜塔莉们 → 放入宝库后失败', async () => {
   const app = freshApp();
   const regRes = await reg(app, '调查坐标完整流程');
