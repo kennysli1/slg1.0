@@ -597,6 +597,29 @@
   flex-wrap: wrap;
   gap: var(--s-1);
 }
+.unit-trait-btn {
+  min-height: 28px;
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--c-panel-2);
+  color: var(--c-gold-hi);
+  font: inherit;
+  font-size: var(--f-xs);
+  cursor: pointer;
+}
+.unit-trait-btn:hover,
+.unit-trait-btn:focus-visible {
+  border-color: var(--c-gold);
+  background: var(--c-panel-3);
+  outline: none;
+}
+.unit-trait-detail { display: grid; gap: var(--s-3); }
+.unit-trait-detail__effects { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.unit-trait-detail__effects li { display: grid; gap: var(--s-1); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--c-panel-2); }
+.unit-trait-detail__effects span { color: var(--c-ink-dim); font-size: var(--f-xs); }
+.unit-trait-detail__effects strong { color: var(--c-ink); font-size: var(--f-sm); }
+.unit-trait-detail__rule { margin: 0; color: var(--c-ink-dim); font-size: var(--f-xs); line-height: 1.6; }
 .unit-detail-sec {
   font-family: var(--ff-han);
   font-size: var(--f-sm);
@@ -626,6 +649,7 @@
 
 /* ---------- 手机适配 ---------- */
 @media (max-width: 720px) {
+  .unit-trait-btn { min-height: 44px; }
   .army-page {
     padding: var(--s-3);
     gap: var(--s-4);

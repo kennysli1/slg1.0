@@ -23,17 +23,29 @@ const send = (app: GameApp, name: string, payload: any) =>
 const reg = (app: GameApp, name: string, pwd = 'pass') =>
   send(app, 'player.Register', { name, password: pwd, tribe: 'romans' });
 
-async function drain(app: GameApp, step = 3_600_000, maxIters = 1000): Promise<void> {
-  for (let i = 0; i < maxIters && app.scheduler.pending > 0; i++) {
-    await app.scheduler.advanceTo(clock + step, setClock);
+/**
+ * 等待当前测试派出的行军结束。
+ *
+ * Scheduler 同时承载 NPC 订单刷新等永久周期任务，不能以
+ * `scheduler.pending === 0` 作为测试完成条件；否则周期任务会让假时钟
+ * 无限前推并淹没测试输出。
+ */
+async function settleMovements(app: GameApp, maxIters = 100): Promise<void> {
+  for (let i = 0; i < maxIters; i++) {
+    const movements = app.store.all<any>('movement');
+    if (movements.length === 0) return;
+    const nextAt = Math.min(...movements.map((m) => Number(m.nextStepAt) || Number(m.arriveAt)));
+    assert.ok(Number.isFinite(nextAt) && nextAt > clock, `行军应有未来的下一推进时刻，实际=${nextAt}`);
+    await app.scheduler.advanceTo(nextAt, setClock);
   }
+  assert.fail(`行军在 ${maxIters} 次调度推进后仍未结束`);
 }
 
 /** 找到 zone 内的空槽并建造指定 kind */
 async function buildInZone(app: GameApp, villageId: string, zone: 'inner' | 'outer', kind: string): Promise<boolean> {
   const r = await send(app, 'building.Build', { villageId, zone, kind });
   if (!r.ok) return false;
-  await drain(app, 60_000);
+  await app.scheduler.advanceTo((r.payload as any).finishAt, setClock);
   return true;
 }
 
@@ -205,7 +217,7 @@ test('Trade: 己方村资源转移在半径内可选并消耗路线，商队抵�
   assert.equal(sent.ok, true, sent.reason);
   const afterSend = await send(app, 'trade.GetCenter', { villageId: source });
   assert.equal((afterSend.payload as any).tradeRoutesUsed, 1);
-  await drain(app);
+  await settleMovements(app);
   const after = (await send(app, 'economy.GetResources', { villageId: target })).payload as any;
   assert.ok(after.resources.wood >= before.resources.wood + 100 - 0.01, '资源商队抵达后应进入目标村');
 });

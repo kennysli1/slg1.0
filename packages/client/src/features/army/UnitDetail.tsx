@@ -4,7 +4,7 @@
  */
 import { dataVersion } from '../../app/store.js';
 import { getCache } from '../../app/state.js';
-import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour } from '../../app/config.js';
+import { unitInfo, mercenaryInfo, resourceKeys, unitCropPerHour, unitTraitEffectText, unitTraitPhaseText, type UnitTraitInfo } from '../../app/config.js';
 import { tribeName } from '../../shared/ui/text.js';
 import { openModal } from '../../app/store.js';
 import {
@@ -15,6 +15,24 @@ import '../../styles/army.css';
 /** 打开兵种详情弹窗。签名固定（跨特性接口）。 */
 export function openUnitDetail(unitKey: string): void {
   openModal((close) => <UnitDetailModal unitKey={unitKey} onClose={close} />, 'unit-detail');
+}
+
+function openTraitDetail(unitName: string, trait: UnitTraitInfo): void {
+  openModal((close) => (
+    <Modal title={trait.name} sub={`${unitName}的战斗特性`} onClose={close}>
+      <div class="unit-trait-detail">
+        <ul class="unit-trait-detail__effects">
+          {trait.effects.map((effect, index) => (
+            <li key={`${effect.effect}-${index}`}>
+              <span>{unitTraitPhaseText(effect.phase)}</span>
+              <strong>{unitTraitEffectText(effect)}</strong>
+            </li>
+          ))}
+        </ul>
+        <p class="unit-trait-detail__rule">仅在标注阶段生效；同特性有幸存者时触发一次；不同特性可叠加。</p>
+      </div>
+    </Modal>
+  ), 'unit-trait-detail');
 }
 
 function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () => void }) {
@@ -71,6 +89,17 @@ function UnitDetailModal({ unitKey, onClose }: { unitKey: string; onClose: () =>
               {army?.tribe && <Tag kind="gold">{tribeName(army.tribe)}族</Tag>}
               {info.isMercenary && <Tag kind="gold">雇佣兵</Tag>}
               {isLocked && <Tag kind="crimson">未解锁</Tag>}
+              {info.traits.map((trait) => (
+                <button
+                  type="button"
+                  class="unit-trait-btn"
+                  key={trait.code}
+                  onClick={() => openTraitDetail(name, trait)}
+                  aria-label={`查看特性：${trait.name}`}
+                >
+                  {trait.name}
+                </button>
+              ))}
             </div>
           </div>
         </div>
