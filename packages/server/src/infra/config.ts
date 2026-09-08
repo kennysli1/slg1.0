@@ -159,7 +159,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match' | 'rune_sequence';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -201,6 +201,8 @@ export interface QuestObjective {
   diceDifficulty?: 'easy' | 'normal' | 'hard';
   diceTargetScore?: number;
   diceWinsRequired?: number;
+  /** rune_sequence：以逗号分隔的唯一符文序列。 */
+  runeSequence?: string[];
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -1934,6 +1936,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         diceWinsRequired: Math.max(1, num(winsRequired, 1)),
       };
     }
+    if (row.kind === 'rune_sequence') {
+      return { kind: row.kind, runeSequence: row.params.split(/[|,]/).map((v) => v.trim()).filter(Boolean), count: 1 };
+    }
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
   const parseReputationMercenaryExchange = (s: string): { unitCode: string; perPoint: number } | null => {
@@ -2297,7 +2302,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner', 'vaultGoldLoot', 'armyVision']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -2508,7 +2513,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match', 'rune_sequence']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2575,12 +2580,14 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
       if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
       if (!q.objective.diceDifficulty || !['easy', 'normal', 'hard'].includes(q.objective.diceDifficulty)) errors.push(`quests.csv[${q.code}] dice_match 难度无效`);
+    } else if (q.objective.kind === 'rune_sequence') {
+      if (!q.objective.runeSequence || q.objective.runeSequence.length < 2) errors.push(`quests.csv[${q.code}] rune_sequence 至少需要两个符文`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
       if (q.type !== 'side' && !(q.type === 'main' && (q.trigger.startsWith('main_base_level:') || q.trigger.startsWith('building_level:') || q.trigger.startsWith('treasure_used:')))) errors.push(`quests.csv[${q.code}] 仅支线或主基地/建筑/宝物使用门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used' && tk !== 'branch_selected') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

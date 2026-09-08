@@ -513,6 +513,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       'task.StartDeliver': { command: 'task.StartDeliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
+      'task.SolveRune': { command: 'task.SolveRune', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, sequence: { type: 'string_array', minItems: 2, maxItems: 8, minLen: 1, maxLen: 32 } } },
+      'task.SelectBranch': { command: 'task.SelectBranch', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, branch: { type: 'string', minLen: 1, maxLen: 16 } } },
       'task.Fail': { command: 'task.Fail', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
     // 左=内部事件名，右=推给客户端的裸名（与 research/tech 等保持一致）

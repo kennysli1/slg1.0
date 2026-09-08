@@ -699,6 +699,21 @@ export class CombatModule {
           });
           const protectedAmount = (vaultRes.payload as any)?.protection ?? {};
           const afterVault = subtractProtected(available, protectedAmount);
+          // 「破保金印」只在攻城胜利时生效：从保险库保护的金币中按宝物配置比例
+          // 取出可掠夺部分；其它资源仍完全受保险保护。多个参战军队携带时取最高值，
+          // 避免联盟/多军队叠加超过配置上限。
+          const vaultLootPct = Object.values(b.contributions ?? {}).reduce((max, contribution) => {
+            const value = (contribution.treasures ?? []).reduce((inner, code) => {
+              const def = this.config.treasures[code];
+              return def?.effectType === 'vaultGoldLoot' ? Math.max(inner, Number(def.effectValue) || 0) : inner;
+            }, 0);
+            return Math.max(max, value);
+          }, 0);
+          if (vaultLootPct > 0) {
+            const protectedGold = Math.min(Math.max(0, Number(available.gold) || 0), Math.max(0, Number(protectedAmount.gold) || 0));
+            const extraGold = Math.floor(protectedGold * Math.min(100, vaultLootPct) / 100);
+            if (extraGold > 0) afterVault.gold = (afterVault.gold ?? 0) + extraGold;
+          }
           storedAvailable = scaleResources(afterVault, this.config.constants.pvpSiegeStorageLootRatio);
         }
         const lootPlan = planPvpLoot(storedAvailable, buildingLoot, totalCarry);

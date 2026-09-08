@@ -65,7 +65,7 @@
 | 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
 | 表29 | `alliance_services.csv` | **联盟王国服务** | 调形象大使可购买的资源/增援服务、声望价格、数量与抵达时间 |
 
-`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
+`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），以及 `rune_sequence`（参数为逗号或竖线分隔的符文唯一序列，由服务端校验）。`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 attack / defense / hp。
@@ -387,7 +387,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | id / code | 数字主键 / 稳定英文代码 |
 | name / icon | 显示名 / 图标基名 |
 | category / rarity | 宝物类别 / 稀有度 |
-| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写） |
+| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写；`vaultGoldLoot` 为攻城时可掠夺保险库金币比例，`armyVision` 为随军视野格数） |
 | reputationValue | 主宝物栏被动声望修正（可为负；备用栏和军队携带中不生效） |
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
@@ -502,7 +502,7 @@ rare/epic/legendary 权重（普通宝物倍率为1，稀有度每升一级再�
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
 | kind | 目标类型，如 `submit_resources`、`clear_camp`、`clear_public_pve`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
-| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，`rune_sequence` 用逗号或竖线分隔的符文顺序，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果

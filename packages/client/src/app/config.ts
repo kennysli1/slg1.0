@@ -179,6 +179,12 @@ export function treasureEffectText(info: TreasureInfo): string {
       ? `；主动：村庄军队攻防 +${info.activeEffectValue ?? 0}%（持续${Math.round((info.activeDurationSec ?? 0) / 3600)}小时）` : '';
     return `全军攻防 +${v}%、人口增长 +${v}%${reputationText}${active}`;
   }
+  if (info.effectType === 'armyVision') return `随军视野 +${v}；存放在村庄时村庄视野 +${Math.floor(Number(v) / 2)}${reputationText}`;
+  if (info.effectType === 'vaultGoldLoot') {
+    const active = info.activeEffectType === 'temporaryCombatBuff'
+      ? `；主动：村庄军队攻防 +${info.activeEffectValue ?? 0}%（持续${Math.round((info.activeDurationSec ?? 0) / 3600)}小时）` : '';
+    return `攻城胜利时可掠夺敌方保险库金币的 ${v}%${active}${reputationText}`;
+  }
   const map: Record<string, string> = {
     woodRate: `木材产出 +${v}%`, clayRate: `泥土产出 +${v}%`, ironRate: `铁矿产出 +${v}%`,
     cropRate: `粮食产出 +${v}%`, goldRate: `金币产出 +${v}%`, allResRate: `全资源产出 +${v}%`,

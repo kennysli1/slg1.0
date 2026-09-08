@@ -20,3 +20,15 @@ q-villager-investigate,s3,s4,failure_unlock,1
 q-s6-s7,s6,s7,requires,1
 q-s7-s8,s7,s8,requires,1
 q-s8-s9,s8,s9,requires,1
+q-s10-s11,s10,s11,requires,1
+q-s11-s12,s11,s12,requires,1
+q-s12-s13,s12,s13,requires,1
+q-s13-s14,s13,s14,requires,1
+q-s14-s15,s14,s15,requires,1
+q-s15-s16,s15,s16,requires,1
+q-s13-s17,s13,s17,requires,1
+q-s17-s18,s17,s18,requires,1
+q-s18-s19,s18,s19,requires,1
+q-s13-s20,s13,s20,requires,1
+q-s20-s21,s20,s21,requires,1
+q-s21-s22,s21,s22,requires,1
