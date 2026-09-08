@@ -32,3 +32,6 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 30,dice_trophy,骰子奖杯,trs_dice_trophy,social,epic,reputation,0,600,0,passive,social,dice_trophy,0,1,10
 31,smart_person,聪明人,trs_staff,special,epic,smartPerson,25,0,0,instant,special,smartPerson,100,1,,instantResearchPoints,20,0,0
 32,warrior_banner,勇士锦旗,trs_warflag,military,legendary,warriorBanner,5,0,0,instant,military,warriorBanner,100,1,4,temporaryCombatBuff,15,86400,0
+33,merchant_seal,灰烬商印,trs_merchant_seal,economic,legendary,allResRate,12,0,0,passive,economic,merchant_seal,100,1,0,,,0
+34,vault_breaker_seal,破保金印,trs_vault_seal,military,legendary,vaultGoldLoot,30,0,0,passive,military,vaultGoldLoot,100,1,0,temporaryCombatBuff,15,86400,0
+35,cipher_lens,解密棱镜,trs_cipher_lens,special,legendary,armyVision,2,0,0,passive,special,armyVision,100,1,0,,,0

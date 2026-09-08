@@ -1032,7 +1032,11 @@ export class MovementModule {
         const sight = this.config.units[code]?.vision ?? 1;
         if (count > most || (count === most && sight > radius)) { most = count; radius = sight; }
       }
-      if (most > 0) sources.push({ ...this.caravanGrid(mv.pos), radius: mv.type === 'ambush' ? 1 : radius, terrainAware: true });
+      if (most > 0) {
+        const effects = await this.commands.send({ name: 'treasure.GetCarriedEffects', from: MovementModule.NAME, payload: { movementId: mv.id } });
+        const treasureBonus = effects.ok ? Math.max(0, Number((effects.payload as any)?.effects?.armyVisionBonus) || 0) : 0;
+        sources.push({ ...this.caravanGrid(mv.pos), radius: mv.type === 'ambush' ? 1 : radius + treasureBonus, terrainAware: true });
+      }
     }
     return { ok: true, payload: { sources } };
   }
@@ -1155,6 +1159,12 @@ export class MovementModule {
     return radius;
   }
 
+  private async visionRadiusForMovement(mv: MovementRecord): Promise<number> {
+    const base = this.visionRadius(mv.troops);
+    const effects = await this.commands.send({ name: 'treasure.GetCarriedEffects', from: MovementModule.NAME, payload: { movementId: mv.id } });
+    return base + (effects.ok ? Math.max(0, Number((effects.payload as any)?.effects?.armyVisionBonus) || 0) : 0);
+  }
+
   private async targetVisibility(villageId: string, target: Hex): Promise<{ visibility: string; unexploredDepth: number } | null> {
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
@@ -1192,7 +1202,7 @@ export class MovementModule {
 
   /** 行军起步与每一步都将当时视野写入探索历史；无需依赖客户端刷新地图。 */
   private async revealVision(mv: MovementRecord, revealId?: string): Promise<Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>> {
-    const radius = mv.type === 'ambush' ? 1 : this.visionRadius(mv.troops);
+    const radius = mv.type === 'ambush' ? 1 : await this.visionRadiusForMovement(mv);
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
     if (!playerId) return [];
@@ -3863,7 +3873,7 @@ export class MovementModule {
       mv.nextStepAt = this.now();
     }
     if (mv.type === 'auto_explore') {
-      const radius = this.visionRadius(mv.troops);
+      const radius = await this.visionRadiusForMovement(mv);
       mv.autoExplore = {
         ...mv.autoExplore,
         pendingReveal: { revealId: `${mv.id}:${mv.stepIndex}`, q: mv.pos.q, r: mv.pos.r, radius },

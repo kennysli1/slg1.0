@@ -31,3 +31,16 @@ id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCoold
 21,s7,dice_king,这下来真的了,支付入场费并在三局两胜的投骰子对局中战胜简单对手,side,village,0,0,0,0,gold:100
 22,s8,dice_king,有高手,三局两胜骰子游戏战胜普通 NPC（目标分数4000）,side,village,0,0,0,0,gold:150
 23,s9,dice_king,巅峰对决,三局两胜骰子游戏战胜困难 NPC（目标分数6000）,side,village,0,0,0,0,gold:200
+28,s10,ashen_road,灰烬商路,酒馆里流传着一条被战火截断的古老商路，先备好物资再追查线索,side,village,1,0,0,0
+29,s11,ashen_road,烬中余火,清理商路旁的鼠巢，找回被烧毁的路标,side,village,0,0,0,0
+30,s12,ashen_road,迷雾中的路标,探索地图并沿着残存路标寻找灰烬商路,side,village,0,0,0,0
+31,s13,ashen_road,五符之门,根据五条线索破解唯一的符文排列，然后选择你要追随的道路,side,village,0,0,0,0
+32,s14,ashen_road,账本与车辙,用金币重建商路账本，证明你有经营这条路的能力,side,village,0,0,0,0
+33,s15,ashen_road,商人的承诺,积攒一千金币完成第一笔大宗交易,side,village,0,0,0,0
+34,s16,ashen_road,灰烬商印,为商路筹齐修复所需的四类资源,side,village,0,0,0,0
+35,s17,ashen_road,先发制人,清理一处强盗营地，确保商路不会再次被截断,side,village,0,0,0,0
+36,s18,ashen_road,兵临边线,清理一处雇佣兵营及更强的常驻 PvE 营地,side,village,0,0,0,0
+37,s19,ashen_road,破城之钥,清理一处更强的常驻 PvE 营地，夺回攻城钥匙,side,village,0,0,0,0
+38,s20,ashen_road,旧路图,探索更远的地图，拼出灰烬商路的旧路线,side,village,0,0,0,0
+39,s21,ashen_road,星图残片,以金币和科研点解读星图残片,side,village,0,0,0,0
+40,s22,ashen_road,无名之门,沿星图探索到最后一处遗迹，揭开灰烬商路的秘密,side,village,0,0,0,0

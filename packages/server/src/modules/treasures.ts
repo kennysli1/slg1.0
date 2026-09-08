@@ -76,6 +76,8 @@ export interface TreasureEffects {
   pveDropRateBonus: number;
   /** 绞马索：攻击方对敌方骑兵防御的倍率（默认 1，30% 削弱为 0.7）。 */
   enemyCavalryDefMult: number;
+  /** 解密棱镜：随军视野 +2；放入村庄时由 vision owner 折算为村庄视野 +1。 */
+  armyVisionBonus: number;
 }
 
 /** 资源/人口/金币明细使用的宝物来源；数值为加性倍率（0.05 = +5%）。 */
@@ -238,6 +240,7 @@ export class TreasureModule {
     this.commands.register('treasure.SetExpectedArrival', (c) => this.setExpectedArrival(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
+    this.commands.register('treasure.GetVillageVisionBonus', (c) => this.getVillageVisionBonus(c));
     this.commands.register('treasure.GetPveDropRateBonus', (c) => this.getPveDropRateBonus(c));
     this.commands.register('treasure.ExchangeQuestFlag', (c) => this.exchangeQuestFlag(c));
     // 炼金炉消耗宝物：由 alchemy owner 通过命令请求，避免跨模块直读 treasure 存档。
@@ -547,6 +550,7 @@ export class TreasureModule {
     let techIntervalMult = 1;
     let pveDropRateBonus = 0;
     let enemyCavalryDefMult = 1;
+    let armyVisionBonus = 0;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -608,6 +612,7 @@ export class TreasureModule {
           // Combat 取最强单项，避免跨军队重复乘算造成非预期指数削弱。
           enemyCavalryDefMult = Math.min(enemyCavalryDefMult, Math.max(0, 1 - frac));
           break;
+        case 'armyVision': armyVisionBonus += Math.max(0, Math.floor(Number(t.effectValue) || 0)); break;
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -615,7 +620,7 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus, enemyCavalryDefMult };
+    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus, enemyCavalryDefMult, armyVisionBonus };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
@@ -1074,6 +1079,14 @@ export class TreasureModule {
       if (entry) return { ok: true, payload: { effects: this.aggregate(entry.codes, s.victoryFlagBonus ?? 0) } };
     }
     return { ok: true, payload: { effects: this.aggregate([]) } };
+  }
+
+  private getVillageVisionBonus(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId?: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const s = this.ensureState(villageId);
+    const bonus = Math.floor(this.aggregate(this.activeCodes(s), s.victoryFlagBonus ?? 0).armyVisionBonus / 2);
+    return { ok: true, payload: { bonus } };
   }
 
   private getPveDropRateBonus(cmd: Command): CommandResult {

@@ -12,3 +12,8 @@ c-s5-tavern-refresh,s5,offer,all,tavern_refresh,1
 c-s5-mainbase,s5,offer,all,main_base_level,2
 c-s6-tavern-refresh,s6,offer,all,tavern_refresh,1
 c-s7-ticket,s7,offer,all,treasure_used,dice_tournament_ticket
+c-s10-tavern,s10,offer,all,tavern_refresh,1
+c-s10-base,s10,offer,all,main_base_level,2
+c-s14-branch,s14,offer,all,branch_selected,trade
+c-s17-branch,s17,offer,all,branch_selected,military
+c-s20-branch,s20,offer,all,branch_selected,explore
