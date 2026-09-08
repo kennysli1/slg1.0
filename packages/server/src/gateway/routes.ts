@@ -502,6 +502,9 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'task.GetPlayerState': { command: 'task.GetPlayerState', needAuth: true, injectPlayerId: true, schema: {} },
       'task.ConsumeDialogue': { command: 'task.ConsumeDialogue', needAuth: true, injectPlayerId: true, schema: { dialogueId: { type: 'string', minLen: 1, maxLen: 160 } } },
       'task.StartAccept': { command: 'task.StartAccept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
+      // 已接取任务的明确 NPC 行动确认（当前仅 s23 的 sanctum_awaken）。这只是
+      // 读取配置对话；实际公共事件状态仍须由随后的 sanctum.Activate 处理。
+      'task.StartActiveDialogue': { command: 'task.StartActiveDialogue', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, trigger: { type: 'string', minLen: 1, maxLen: 48 } } },
       'task.Accept': { command: 'task.Accept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Abandon': { command: 'task.Abandon', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.SubmitResources': {
@@ -523,6 +526,41 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'task.MapUpdated': 'TaskMapUpdated',
     },
     },
+  {
+    moduleName: 'sanctum',
+    publicActions: {
+      'sanctum.GetState': { command: 'sanctum.GetState', needAuth: true, injectPlayerId: true, schema: {} },
+      'sanctum.Activate': {
+        command: 'sanctum.Activate', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.BeginCondition': {
+        command: 'sanctum.BeginCondition', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.SubmitRune': {
+        command: 'sanctum.SubmitRune', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 }, answer: { type: 'string_array', minItems: 1, maxItems: 12, minLen: 1, maxLen: 32 } },
+      },
+      'sanctum.Contribute': {
+        command: 'sanctum.Contribute', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 }, sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, resources: { type: 'record_int', maxKeys: 5, minVal: 0, maxVal: 10_000_000 } },
+      },
+      'sanctum.Discover': {
+        command: 'sanctum.Discover', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.Claim': {
+        command: 'sanctum.Claim', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 }, sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.TakeRelic': {
+        command: 'sanctum.TakeRelic', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 }, movementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, returnVillageId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+    },
+    eventPushMap: { 'sanctum.Updated': 'SanctumUpdated' },
+  },
   {
     moduleName: 'dialogue',
     publicActions: {

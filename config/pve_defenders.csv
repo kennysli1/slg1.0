@@ -35,3 +35,16 @@ targetId,unitCode,name,count,form,attack,defense,carry,hp,traits,role
 106,clubswinger,锤子兵,15,melee,81,58,0,153,teuton_origin_attack
 107,mercGuard,雇佣卫兵,8,melee,60,65,0,60,
 107,mercArcher,雇佣弓手,3,ranged,45,55,0,42,
+109,sanctumPursuer,信使追兵,50,melee,55,45,0,75,,infantry
+110,sanctumWatchGuard,哨所卫兵,80,melee,75,70,0,95,,infantry
+111,sanctumEliteGuard,精英卫兵,180,melee,105,95,0,125,,infantry
+111,sanctumEliteArcher,精英弓手,120,ranged,95,85,0,100,,infantry
+112,sanctumWarGuard,失序军团兵,400,melee,130,120,0,145,,infantry
+112,sanctumWarArcher,失序弓手,200,ranged,115,105,0,115,,infantry
+113,sanctumCoopGuard,共战禁卫,500,melee,150,140,0,165,,infantry
+113,sanctumCoopArcher,共战弓卫,300,ranged,135,120,0,135,,infantry
+114,sanctumBeast,天门巨兽,1200,melee,240,220,0,300,,special
+115,sanctumBannerGuard,旗卫重步兵,200,melee,145,135,0,160,,infantry
+115,sanctumBannerArcher,旗卫弩手,100,ranged,125,115,0,130,,infantry
+116,sanctumGuardian,远弦守卫,500,melee,175,165,0,190,,infantry
+116,sanctumSanctuaryArcher,远弦弓卫,300,ranged,155,145,0,155,,infantry

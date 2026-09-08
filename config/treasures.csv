@@ -35,3 +35,10 @@ id,code,name,icon,category,rarity,effectType,effectValue,priceGold,dropRate,appl
 33,merchant_seal,灰烬商印,trs_merchant_seal,economic,legendary,allResRate,12,0,0,passive,economic,merchant_seal,100,1,0,,,0
 34,vault_breaker_seal,破保金印,trs_vault_seal,military,legendary,vaultGoldLoot,30,0,0,passive,military,vaultGoldLoot,100,1,0,temporaryCombatBuff,15,86400,0
 35,cipher_lens,解密棱镜,trs_cipher_lens,special,legendary,armyVision,2,0,0,passive,special,armyVision,100,1,0,,,0
+36,sanctum_fragment,圣地残印,trs_stone,special,epic,sanctum_fragment,0,0,0,passive,special,sanctum_fragment,0,1,0,,,0,1
+37,breach_horn,破阵号角,trs_spear,military,legendary,sanctum_breach_horn,15,0,0,passive,military,sanctum_breach_horn,100,1,0,,,0,1
+38,watcher_prism,守望棱镜,trs_stone,special,legendary,sanctum_watcher_prism,15,0,0,passive,special,sanctum_watcher_prism,100,1,0,,,0,1
+39,trade_sanctum_seal,商路圣印,ui_seal_gold,economic,legendary,sanctum_trade_seal,20,0,0,passive,economic,sanctum_trade_seal,100,1,0,,,0,1
+40,resonance_medallion,共鸣徽章,trs_medal,social,legendary,sanctum_resonance_medallion,15,0,0,passive,social,sanctum_resonance_medallion,100,1,0,,,0,1
+41,hunter_king_seal,猎王印,ui_seal_crimson,military,legendary,sanctum_hunter_king_seal,12,0,0,passive,military,sanctum_hunter_king_seal,100,1,0,,,0,1
+42,farstring_crest,远弦圣徽,trs_banner,military,legendary,sanctum_farstring_crest,30,0,0,passive,military,sanctum_farstring_crest,100,1,0,,,0,1

@@ -53,3 +53,9 @@ e-s7-gold,s7,deliver,grant_resources,gold:200,1
 e-s8-gold,s8,deliver,grant_resources,gold:300,1
 e-s9-gold,s9,deliver,grant_resources,gold:400,1
 e-s9-trophy,s9,deliver,grant_treasure,dice_trophy,2
+e-s24-gold,s24,deliver,grant_resources,gold:1000,1
+e-s24-rp,s24,deliver,grant_research_points,10,2
+e-s25-gold,s25,deliver,grant_resources,gold:1000,1
+e-s25-rep,s25,deliver,adjust_reputation,2,2
+e-s28-rep,s28,deliver,adjust_reputation,5,1
+e-s29-complete,s29,deliver,sanctum_complete,farstring_crest,1

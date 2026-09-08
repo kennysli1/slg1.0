@@ -48,10 +48,23 @@ export function normalizeTotalAdSnapshot(snapshot: Snapshot | Record<string, any
       form: legacy.form === 'ranged' ? 'ranged' : 'melee',
       role: normalizeRole(legacy.role, legacy.isCavalry),
       traits: Array.isArray(legacy.traits) ? structuredClone(legacy.traits) as UnitTraitDef[] : [],
+      ...(normalizePhaseMultipliers(legacy.phaseAtkMult) ? { phaseAtkMult: normalizePhaseMultipliers(legacy.phaseAtkMult) } : {}),
+      ...(normalizePhaseMultipliers(legacy.phaseDefMult) ? { phaseDefMult: normalizePhaseMultipliers(legacy.phaseDefMult) } : {}),
       ...(legacy.popCost === undefined ? {} : { popCost: Math.max(0, Number(legacy.popCost) || 0) }),
     };
   }
   return out;
+}
+
+/** 只接收三个实战阶段的正有限倍率，避免热更/旧档把无效值带进战斗快照。 */
+function normalizePhaseMultipliers(raw: unknown): Partial<Record<'charge' | 'ranged' | 'melee', number>> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const result: Partial<Record<'charge' | 'ranged' | 'melee', number>> = {};
+  for (const phase of ['charge', 'ranged', 'melee'] as const) {
+    const value = Number((raw as Record<string, unknown>)[phase]);
+    if (Number.isFinite(value) && value > 0 && value !== 1) result[phase] = value;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeRole(raw: unknown, isCavalry: unknown): CombatRole {
@@ -192,14 +205,17 @@ function effectiveStats(
   let attack = 0;
   let defense = 0;
   const participants: Record<string, number> = {};
+  const phase = phaseForStep(step);
   for (const [key, unit] of Object.entries(snapshot)) {
     if (unit.count <= 0) continue;
     const mod = ownModifiers[key] ?? { attack: 0, defense: 0 };
     // 防御是被攻击方所有幸存单位的总防御；攻击仅计算本步骤可出手的单位。
-    defense += unit.count * Math.max(0, nonNegative(unit.defense) * (1 + mod.defense));
+    const phaseAtkMult = Math.max(0, Number(unit.phaseAtkMult?.[phase] ?? 1));
+    const phaseDefMult = Math.max(0, Number(unit.phaseDefMult?.[phase] ?? 1));
+    defense += unit.count * Math.max(0, nonNegative(unit.defense) * (1 + mod.defense) * phaseDefMult);
     if (!participates(unit, step)) continue;
     participants[keyCode(key)] = (participants[keyCode(key)] ?? 0) + unit.count;
-    attack += unit.count * Math.max(0, nonNegative(unit.attack) * (1 + mod.attack));
+    attack += unit.count * Math.max(0, nonNegative(unit.attack) * (1 + mod.attack) * phaseAtkMult);
   }
   return { attack, defense, participants };
 }

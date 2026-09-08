@@ -44,3 +44,10 @@ id,code,lineCode,name,desc,type,scope,weight,repeatable,cooldownSec,abandonCoold
 38,s20,ashen_road,旧路图,探索更远的地图，拼出灰烬商路的旧路线,side,village,0,0,0,0
 39,s21,ashen_road,星图残片,以金币和科研点解读星图残片,side,village,0,0,0,0
 40,s22,ashen_road,无名之门,沿星图探索到最后一处遗迹，揭开灰烬商路的秘密,side,village,0,0,0,0
+41,s23,farstring_sanctum,圣印现世,获得圣地残印后可在学者处主动决定是否唤醒这场全服争夺,side,global,0,0,0,0
+42,s24,farstring_sanctum,散落的圣地条件,完成任意六项远弦公共条件以取得寻找圣地的资格,side,global,0,0,0,0
+43,s25,farstring_sanctum,圣地寻迹,根据自己收集到的私有线索找到远弦圣地,side,global,0,0,0,0
+44,s26,farstring_sanctum,门后的回响,抵达圣地后听取门后的回响并确认争夺资格,side,global,0,0,0,0
+45,s27,farstring_sanctum,争夺圣地,率军占领远弦圣地并守住圣物,side,global,0,0,0,0
+46,s28,farstring_sanctum,守卫远弦,首次占领后连续守卫远弦圣地直到仪式完成,side,global,0,0,0,0
+47,s29,farstring_sanctum,带回圣物,把远弦圣徽随军带回自己的村庄完成这场争夺,side,global,0,0,0,0

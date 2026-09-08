@@ -44,3 +44,10 @@ o-s22,s22,explore_tiles,150,1
 o-s7,s7,dice_match,easy:2000:2,1
 o-s8,s8,dice_match,normal:4000:2,1
 o-s9,s9,dice_match,hard:6000:2,1
+o-s23,s23,sanctum_activate,1,1
+o-s24,s24,sanctum_condition_count,6,1
+o-s25,s25,sanctum_discover,1,1
+o-s26,s26,sanctum_briefing,1,1
+o-s27,s27,sanctum_occupy,1,1
+o-s28,s28,sanctum_hold,1800,1
+o-s29,s29,sanctum_return_artifact,1,1

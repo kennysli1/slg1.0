@@ -1,0 +1,5 @@
+code,name,conditionCode,unitRequirement,minUnits,allowedSymbols,wrongCooldownSec,description
+#稳定谜题代码,显示名,所属条件,可执行兵种要求,最少兵数,可选符号(竖线分隔),答错冷却秒数,说明
+sanctum_simple_rune,残碑三符,c02,scout_or_adventurer,1,月影|狼牙|潮汐|王冠|天眼,120,从残碑语义判断三枚符文的先后
+sanctum_rotating_rune,旋转符文,c15,scout_or_adventurer,1,月影|狼牙|潮汐|王冠|天眼,240,两处节点给出的方位关系需要合并推理
+sanctum_final_rune,禁制终解,c19,scout_or_adventurer,1,月影|狼牙|潮汐|王冠|天眼,600,三地铭文共同决定五步终解顺序

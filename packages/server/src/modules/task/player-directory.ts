@@ -38,6 +38,11 @@ export class TaskPlayerDirectory {
     return this.players.get(playerId)?.villages.map((village) => village.id) ?? [];
   }
 
+  /** 已刷新目录中的所有村庄；供 task owner 重新计算“全服事件型 offer”使用。 */
+  allVillageIds(): string[] {
+    return [...this.ownerByVillage.keys()];
+  }
+
   villageName(villageId: string): string {
     const owner = this.villageOwner(villageId);
     const village = owner ? this.players.get(owner)?.villages.find((item) => item.id === villageId) : undefined;
@@ -98,6 +103,11 @@ export class TaskPlayerDirectory {
     const result = await this.commands.send({ name: 'player.ListAll', from: 'task', payload: {} });
     if (!result.ok) return;
     const players = (result.payload as { players?: unknown[] }).players ?? [];
+    // ListAll 是完整权威快照：公共事件 fan-out 前先丢弃已删号/已拆村的旧条目，
+    // 避免向不再存在的村庄重新生成任务 offer。
+    this.players.clear();
+    this.ownerByVillage.clear();
+    this.fiefByVillage.clear();
     for (const player of players) this.remember(player);
   }
 

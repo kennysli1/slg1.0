@@ -21,7 +21,7 @@ import {
   techTree, researchState, putBattle, dropBattle, modals, tab,
   setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, mapAreaStale,
   beginVillageSwitch, endVillageSwitch, patchForeignArmy, dropForeignArmy,
-  kingdomState,
+  kingdomState, setSanctumState,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
@@ -143,7 +143,11 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
 
     // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
     const taskRefresh = reloadPlayerTasks();
+    // 圣地事件有独立的可见性和刷新节奏；请求失败（例如旧服务器尚未部署事件）
+    // 不应让基础村庄刷新报错或清空已有事件视图。
+    const sanctumRefresh = reloadSanctum();
     if (options.waitForTasks !== false) await taskRefresh;
+    void sanctumRefresh;
   } catch {
     pushReport('刷新失败：网络连接异常');
   }
@@ -190,6 +194,14 @@ export async function switchVillage(villageId: string): Promise<{ ok: boolean; e
 export async function reloadPlayerTasks(): Promise<void> {
   const taskRes = await req('task.GetPlayerState').catch(() => null);
   if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
+}
+
+/** 轻量刷新远弦圣地事件；服务端仅返回当前玩家被允许看到的字段。 */
+export async function reloadSanctum(): Promise<void> {
+  const result = await req('sanctum.GetState').catch(() => null);
+  if (!result?.ok) return;
+  setSanctumState(result.payload);
+  bumpData();
 }
 
 export async function reloadKingdom(): Promise<void> {
@@ -432,6 +444,13 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
+  // 圣地状态会改变公开目标、个人线索和地图上的可见地物。不要把坐标直接塞进
+  // 普通任务标记；重新拉取服务端脱敏快照和地图区域，避免泄露私有线索。
+  if (event === 'SanctumUpdated') {
+    void reloadSanctum();
+    void refreshMapArea();
+    return;
+  }
   if (event === 'KingdomUpdated') { void reloadKingdom(); return; }
   if (event === 'AllianceUpdated') { bumpAlliance(); void refreshAll({ includeArea: false, waitForTasks: false }); return; }
 

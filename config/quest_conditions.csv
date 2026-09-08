@@ -17,3 +17,10 @@ c-s10-base,s10,offer,all,main_base_level,2
 c-s14-branch,s14,offer,all,branch_selected,trade
 c-s17-branch,s17,offer,all,branch_selected,military
 c-s20-branch,s20,offer,all,branch_selected,explore
+c-s23-fragment,s23,offer,all,sanctum_offer,fragment
+c-s24-active,s24,offer,all,sanctum_offer,active
+c-s25-qualified,s25,offer,all,sanctum_offer,qualified
+c-s26-discovered,s26,offer,all,sanctum_offer,discovered
+c-s27-briefed,s27,offer,all,sanctum_offer,briefed
+c-s28-occupied,s28,offer,all,sanctum_offer,occupied
+c-s29-artifact,s29,offer,all,sanctum_offer,artifact

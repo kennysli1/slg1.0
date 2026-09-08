@@ -268,3 +268,91 @@ test('dialogue：新账号自动激活 M1 并保留一次性待弹对话记录',
   const after = await send(app, 'task.GetPlayerState', { playerId: player.id });
   assert.equal((after.payload as any).pendingDialogues.some((item: any) => item.id === pending.id), false);
 });
+
+test('dialogue：s23 必须先接取，再显式打开唤醒确认；两者之间不启动远弦活动', async () => {
+  const app = createGameApp({ now: () => 4_100_000, manualScheduler: true });
+  app.setupWorld();
+  const registered = await send(app, 'player.Register', { name: 'sanctum-dialogue', password: 'pass1', tribe: 'romans' });
+  assert.equal(registered.ok, true, registered.reason);
+  const player = (registered.payload as any).player;
+  const villageId = player.villageId as string;
+  const state = app.store.get<any>('task', villageId)!;
+  state.offeredSide = ['s23'];
+  app.store.set('task', villageId, state);
+
+  let activationCount = 0;
+  app.bus.on('sanctum.Activated', () => { activationCount++; });
+  const started = await send(app, 'task.StartAccept', { villageId, code: 's23' });
+  assert.equal(started.ok, true, started.reason);
+  assert.equal((started.payload as any).dialogue.code, 's23_accept');
+  assert.ok((started.payload as any).dialogue.replies.some((reply: any) => reply.key === 'accept'));
+
+  // 这是“接受调查”的唯一状态变化：任务接取成功、活动仍保持 dormant，且
+  // 服务器随后才给客户端单独的 awaken session。
+  const accepted = await send(app, 'task.Accept', { villageId, code: 's23' });
+  assert.equal(accepted.ok, true, accepted.reason);
+  assert.ok((app.store.get<any>('task', villageId)!).active.s23, 's23 应已接取');
+  const awaken = (accepted.payload as any).followupDialogue;
+  assert.equal(awaken?.code, 's23_awaken');
+  assert.ok(awaken?.replies?.some((reply: any) => reply.key === 'awaken'), '第二段必须是显式唤醒按钮');
+  assert.equal(app.store.get<any>('sanctum', 'current')?.phase, 'dormant', '接取和关闭对话不能自动开启活动');
+  assert.equal(activationCount, 0, '没有点击 awaken 前不得广播活动开启');
+
+  const reopened = await send(app, 'task.StartActiveDialogue', { villageId, code: 's23', trigger: 'sanctum_awaken' });
+  assert.equal(reopened.ok, true, reopened.reason);
+  assert.equal((reopened.payload as any).dialogue?.code, 's23_awaken', '关闭后可回到学者处重新确认');
+  const forbidden = await send(app, 'task.StartActiveDialogue', { villageId, code: 's24', trigger: 'sanctum_awaken' });
+  assert.equal(forbidden.ok, false, '客户端不能借通用入口读取任意内部任务对话');
+  assert.equal(forbidden.reason, 'active_dialogue_not_available');
+});
+
+test('task：s29 的 sanctum_complete 只由 Sanctum owner 发圣徽，普通 Deliver 只收尾任务', async () => {
+  const app = createGameApp({ now: () => 4_200_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'sanctum-finalize');
+  const state = app.store.get<any>('task', villageId)!;
+  state.active.s29 = {
+    code: 's29', type: 'side', executionVillageId: villageId, spawnVillageId: villageId,
+    acceptedAt: 4_200_000, submitted: {}, camps: [], campCleared: 0, progress: 1,
+    readyToDeliver: true,
+  };
+  app.store.set('task', villageId, state);
+  assert.ok(app.config.questGraph.effects.some((effect) => effect.questCode === 's29' && effect.kind === 'sanctum_complete'), '配置应明确把最终圣物交给公共事件 owner 结算');
+
+  const delivered = await send(app, 'task.Deliver', { villageId, code: 's29' });
+  assert.equal(delivered.ok, true, delivered.reason);
+  assert.deepEqual((delivered.payload as any).rewards.treasures, [], '通用任务交付不得重复生成远弦圣徽');
+  const treasures = await send(app, 'treasure.List', { villageId });
+  const payload = treasures.payload as any;
+  assert.equal([...(payload.codes ?? []), ...((payload.pending ?? []).map((item: any) => item.code))].includes('farstring_crest'), false);
+  assert.ok((app.store.get<any>('task', villageId)!).completedSide.includes('s29'), '公共事件已经结算后，玩家仍可正常关闭 s29 任务卡');
+});
+
+test('task：Sanctum 可声明 allPlayers 重算事件型 offer，但不能直接写 task 状态', async () => {
+  const app = createGameApp({ now: () => 4_300_000, manualScheduler: true });
+  app.setupWorld();
+  const a = await village(app, 'sanctum-offer-a');
+  const b = await village(app, 'sanctum-offer-b');
+  const denied = await send(app, 'task.RefreshExternalOffers', { allPlayers: true });
+  assert.equal(denied.ok, false, '客户端/普通模块不能伪造公共事件 offer 刷新');
+  assert.equal(denied.reason, 'external_owner_required');
+  const refreshed = await app.commands.send({ name: 'task.RefreshExternalOffers', from: 'sanctum', payload: { allPlayers: true } });
+  assert.equal(refreshed.ok, true, refreshed.reason);
+  const villageIds = (refreshed.payload as any).villageIds as string[];
+  assert.ok(villageIds.includes(a) && villageIds.includes(b), '一次全服状态变化必须覆盖所有已登记玩家村庄');
+});
+
+test('task：Sanctum 状态收束时会撤掉未接取的过期事件 offer', async () => {
+  const app = createGameApp({ now: () => 4_400_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'sanctum-stale');
+  const state = app.store.get<any>('task', villageId)!;
+  state.offeredSide = ['s24'];
+  app.store.set('task', villageId, state);
+
+  // 默认 dormant 状态下 s24 的 active 条件不成立。调用者只声明受影响村庄，
+  // Task owner 通过 CanOffer 重算，不读取 Sanctum collection。
+  const refreshed = await app.commands.send({ name: 'task.RefreshExternalOffers', from: 'sanctum', payload: { villageId } });
+  assert.equal(refreshed.ok, true, refreshed.reason);
+  assert.equal((app.store.get<any>('task', villageId)!).offeredSide.includes('s24'), false);
+});

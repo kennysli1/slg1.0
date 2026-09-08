@@ -80,3 +80,7 @@ import './dice-quest.test.js';
 import './battle-simulator.test.js';
 import './staged-combat.test.js';
 import './alliance.test.js';
+import './sanctum.test.js';
+import './sanctum-offers.test.js';
+import './sanctum-movement.test.js';
+import './sanctum-integration.test.js';

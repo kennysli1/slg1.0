@@ -46,6 +46,32 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
 });
 
+test('远弦圣地：活动内容、任务图与可编辑常量均从 CSV 编译', () => {
+  const cfg = loadGameConfig(configDir);
+  const event = cfg.sanctumEvents.farstring_sanctum;
+  assert.ok(event, '应存在远弦圣地活动定义');
+  assert.equal(event.fragmentTreasureCode, 'sanctum_fragment');
+  assert.equal(event.sanctuaryTemplateCode, 'sanctum_sanctuary');
+  assert.equal(Object.keys(cfg.sanctumConditions).length, 22, '应加载 C01-C22 共二十二个条件');
+  assert.equal(cfg.sanctumConditions.c16.minPlayers, 2, '共战条件应要求两名玩家');
+  assert.equal(cfg.sanctumConditions.c21.minPlayers, 3, '三方共鸣应要求三名玩家');
+  assert.equal(cfg.sanctumConditions.c19.puzzleCode, 'sanctum_final_rune');
+  assert.equal(cfg.sanctumPuzzles.sanctum_final_rune.wrongCooldownSec, 600);
+  assert.equal(cfg.sanctumPuzzleSteps.sanctum_final_rune.length, 5, '终解应有五步答案');
+  assert.equal(cfg.sanctumClues.c22[0]?.precision, 'direction');
+  assert.ok(cfg.sanctumConditionRewards.c18.some((reward) => reward.params === 'breach_horn'));
+  assert.equal(cfg.constants.sanctumConditionsRequired, 6);
+  assert.equal(cfg.constants.sanctumFirstHoldSec, 1800);
+  assert.equal(cfg.constants.sanctumFormerHolderMinCommanderPopShare, 0.5);
+  assert.equal(cfg.treasures.sanctum_fragment.effectType, 'sanctum_fragment');
+  assert.equal(cfg.treasures.farstring_crest.effectType, 'sanctum_farstring_crest');
+  assert.equal(cfg.questGraph.lines.farstring_sanctum.entryQuest, 's23');
+  assert.deepEqual(
+    ['s23', 's24', 's25', 's26', 's27', 's28', 's29'].map((code) => cfg.quests[code]?.objective.kind),
+    ['sanctum_activate', 'sanctum_condition_count', 'sanctum_discover', 'sanctum_briefing', 'sanctum_occupy', 'sanctum_hold', 'sanctum_return_artifact'],
+  );
+});
+
 test('猎马人支线与绞马索宝物配置已接入任务图', () => {
   const cfg = loadGameConfig(configDir);
   const hunter = cfg.quests.s5;

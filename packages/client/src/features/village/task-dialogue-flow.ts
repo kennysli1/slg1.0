@@ -29,6 +29,26 @@ export function acceptReplyIntent(replyKey: string, accepted: boolean): AcceptRe
   return 'advance';
 }
 
+export type TaskDialogueReplyIntent = AcceptReplyIntent | 'sanctum_activate';
+
+/**
+ * 接取对话的少量“领域确认”回复。
+ *
+ * s23 的第二段并不是任务接取，也不是普通段落推进：玩家已经在第一段明确接取
+ * 了任务，只有再点击配置中心中的 `awaken` 回复才允许请求 Sanctum owner 开启/加入
+ * 活动。把这一层判断留在纯状态机里，能保证 X、Esc、遮罩和 `leave` 永远不会产生
+ * 副作用，也让关闭后重新打开该对话时仍使用同一条受控路径。
+ */
+export function taskDialogueReplyIntent(
+  taskCode: string,
+  trigger: string,
+  replyKey: string,
+  accepted: boolean,
+): TaskDialogueReplyIntent {
+  if (taskCode === 's23' && trigger === 'sanctum_awaken' && replyKey === 'awaken') return 'sanctum_activate';
+  return acceptReplyIntent(replyKey, accepted);
+}
+
 export type DeliverReplyIntent = 'close' | 'claim' | 'advance' | 'ignore';
 
 /** 首次 take 才结算；领取后的回复只推进，领取前的异常回复不能绕过确认。 */

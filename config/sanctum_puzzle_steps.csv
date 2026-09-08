@@ -1,0 +1,14 @@
+id,puzzleCode,step,answer,clueText
+#稳定步骤ID,谜题代码,步骤序号,服务端答案(不公开下发),给玩家的线索文本
+sp-c02-1,sanctum_simple_rune,1,月影,残碑写着月影先照见入口
+sp-c02-2,sanctum_simple_rune,2,狼牙,狼牙刻痕紧随月光划出的边线
+sp-c02-3,sanctum_simple_rune,3,潮汐,潮汐符号最后封住残碑下方的裂口
+sp-c15-1,sanctum_rotating_rune,1,王冠,第一处石环把最高的符号转向北方
+sp-c15-2,sanctum_rotating_rune,2,天眼,第二处石环要求以天眼校准王冠的影子
+sp-c15-3,sanctum_rotating_rune,3,狼牙,狼牙刻痕总在两枚高位符文之后闭合
+sp-c15-4,sanctum_rotating_rune,4,潮汐,潮汐是石环停止转动时唯一朝向水纹的符号
+sp-c19-1,sanctum_final_rune,1,天眼,东部铭文说先以天眼辨认被遮住的道路
+sp-c19-2,sanctum_final_rune,2,月影,南部铭文说月影不能越过天眼
+sp-c19-3,sanctum_final_rune,3,王冠,西部铭文把王冠留给三条道路交汇处
+sp-c19-4,sanctum_final_rune,4,狼牙,狼牙朝向王冠背后的断层
+sp-c19-5,sanctum_final_rune,5,潮汐,潮汐在最后抹去所有回头的脚印

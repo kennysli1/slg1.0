@@ -50,6 +50,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `alchemy.ts` | 炼金炉输入槽、炼化调度、掉率抽取与收获结果 |
 | `research.ts` | 科研点、研发任务和已完成科技 |
 | `tasks.ts` + `task/` | 主线/随机任务进度、任务营地与 M8/M9/M13 任务村生命周期；状态、玩家归属 Command 目录与任务图适配器均为 task owner 内部实现 |
+| `sanctum.ts` + `sanctum/` | 远弦圣地公共事件轮次、条件实例、私人线索、占领/守卫与圣物返乡状态；经 Command/Event 协作，不拥有玩家、行军、战斗或宝物库存 |
 | `dialogues.ts` | 任务绑定的 NPC 对话 session 与对话配置查找（session 不落盘） |
 | `dice-quest.ts` + `dice-quest/` | 骰子王任务的临时对局、普通骰子规则与 NPC 回合；不落盘对局，不依赖骰子实验场 |
 | `notifications.ts` | 通知和战报历史 |
@@ -95,6 +96,7 @@ infra/     Store、Scheduler、CommandBus、EventBus、配置和通用算法
 | `服务器/03_GM调试手册.md` | GM 联调和故障诊断 |
 | `配置中心与GM边界.md` | 配置中心、GM 实时状态、CSV 权威、旧覆盖迁移与 GitHub 同步 |
 | `任务模块.md` | 修改任务定义、任务图、任务营地、调查行军或 GM 任务编辑 |
+| `远弦圣地模块.md` | 修改远弦圣地公共事件、条件、占领、守卫、圣物或专属配置 |
 | `视野模块.md` | 修改战争迷雾、视野参数或探索行军 |
 | `声望模块.md` | 修改玩家声望、声望效果、任务抉择或声望 GM 参数 |
 | `王国模块.md` | 修改王都/封地、王国任务、议会厅服务或王国 GM 参数 |

@@ -169,6 +169,14 @@ export const taskStates = signal<Record<string, any>>({});
 export const playerTaskState = signal<any | null>(null);
 /** 玩家级王国任务与当前村议会厅服务快照。 */
 export const kingdomState = signal<any | null>(null);
+/**
+ * 远弦圣地全局事件快照。事件本身不是普通村庄任务：它有公开目标、私有线索和
+ * 圣地争夺三个不同可见性层级，因此单独保留服务端已经脱敏后的玩家视图。
+ */
+export const sanctumState = signal<any | null>(null);
+export function setSanctumState(payload: any): void {
+  sanctumState.value = payload ?? null;
+}
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
 

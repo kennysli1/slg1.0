@@ -13,4 +13,5 @@
  */
 // v8：科技树重构；research resume 审计式清空旧 RP/完成项/在途研发并记录 techTreeVersion。
 // v9：战斗统一迁移至阶段化总攻/总防/生命结算，移除 simTraits 与 v2 分支。
-export const SAVE_SCHEMA_VERSION = 9;
+// v10：新增远弦圣地公共事件集合；旧存档以空状态惰性初始化，不需要重置。
+export const SAVE_SCHEMA_VERSION = 10;

@@ -514,6 +514,12 @@ const WHOLE_TABLE_KEY_COLUMNS: Record<string, string[]> = {
   'quest_objectives.csv': ['id'],
   'quest_effects.csv': ['id'],
   'quest_edges.csv': ['id'],
+  'sanctum_event.csv': ['code'],
+  'sanctum_conditions.csv': ['id'],
+  'sanctum_condition_rewards.csv': ['id'],
+  'sanctum_puzzles.csv': ['code'],
+  'sanctum_puzzle_steps.csv': ['id'],
+  'sanctum_clues.csv': ['id'],
 };
 
 function persistentConfigDir(gameApp: GameApp): string | null {
@@ -754,6 +760,44 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     text: ['name', 'category', 'unitCode', 'desc'],
     labels: ['code', 'name', 'category'],
   },
+  // 远弦圣地：独立 CSV 仍由同一配置中心的校验、持久化与同步路径处理。
+  // 不放进 QUEST_MODULE_TABLES，避免保存任务图时意外重写活动条件与谜题。
+  sanctum_event: {
+    file: 'sanctum_event.csv', key: 'code',
+    numeric: ['enabled'],
+    text: ['name', 'fragmentTreasureCode', 'sanctuaryTemplateCode', 'description'],
+    labels: ['code', 'name'],
+  },
+  sanctum_conditions: {
+    file: 'sanctum_conditions.csv', key: 'id',
+    numeric: ['instances', 'refreshSec', 'minPlayers', 'minPlayerPop', 'minContributionShare', 'personalCooldownSec', 'pairCooldownSec'],
+    text: ['code', 'name', 'category', 'completionMode', 'kind', 'params', 'pveTemplateCode', 'puzzleCode', 'rewardGroup', 'clueGroup', 'description'],
+    labels: ['id', 'code', 'name', 'category', 'completionMode', 'kind'],
+  },
+  sanctum_condition_rewards: {
+    file: 'sanctum_condition_rewards.csv', key: 'id',
+    numeric: ['order'],
+    text: ['conditionCode', 'kind', 'params', 'recipient'],
+    labels: ['id', 'conditionCode', 'kind', 'recipient'],
+  },
+  sanctum_puzzles: {
+    file: 'sanctum_puzzles.csv', key: 'code',
+    numeric: ['minUnits', 'wrongCooldownSec'],
+    text: ['name', 'conditionCode', 'unitRequirement', 'allowedSymbols', 'description'],
+    labels: ['code', 'name', 'conditionCode'],
+  },
+  sanctum_puzzle_steps: {
+    file: 'sanctum_puzzle_steps.csv', key: 'id',
+    numeric: ['step'],
+    text: ['puzzleCode', 'answer', 'clueText'],
+    labels: ['id', 'puzzleCode', 'step'],
+  },
+  sanctum_clues: {
+    file: 'sanctum_clues.csv', key: 'id',
+    numeric: ['order', 'weight'],
+    text: ['conditionCode', 'template', 'precision'],
+    labels: ['id', 'conditionCode', 'precision'],
+  },
 };
 
 /**
@@ -906,8 +950,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services','sanctum_event','sanctum_conditions','sanctum_condition_rewards','sanctum_puzzles','sanctum_puzzle_steps','sanctum_clues'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}, sanctum_event:{}, sanctum_conditions:{}, sanctum_condition_rewards:{}, sanctum_puzzles:{}, sanctum_puzzle_steps:{}, sanctum_clues:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -948,7 +992,7 @@ function sectionGeneric(table){
     rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && !treasureCampKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务', sanctum_event:'远弦圣地活动', sanctum_conditions:'远弦圣地公共条件', sanctum_condition_rewards:'远弦圣地条件奖励', sanctum_puzzles:'远弦圣地谜题', sanctum_puzzle_steps:'远弦圣地谜题步骤', sanctum_clues:'远弦圣地私有线索' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';

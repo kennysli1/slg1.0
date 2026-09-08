@@ -64,6 +64,12 @@
 | 表27 | `alliance_buildings.csv` | **联盟建筑目录** | 调联盟建筑最高等级、解锁等级、资源成本与成员加成 |
 | 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
 | 表29 | `alliance_services.csv` | **联盟王国服务** | 调形象大使可购买的资源/增援服务、声望价格、数量与抵达时间 |
+| 表30 | `sanctum_event.csv` | **远弦圣地活动目录** | 调活动开关、残印与圣地模板引用 |
+| 表31 | `sanctum_conditions.csv` | **远弦圣地公共条件** | 调条件类型、数量、刷新、协作门槛、奖励/线索组与说明 |
+| 表32 | `sanctum_condition_rewards.csv` | **远弦圣地条件奖励** | 调每个公共条件的资源、声望、科技点或宝物奖励 |
+| 表33 | `sanctum_puzzles.csv` | **远弦圣地谜题目录** | 调谜题可用单位、符号集合、答错冷却与说明 |
+| 表34 | `sanctum_puzzle_steps.csv` | **远弦圣地谜题步骤** | 调服务端答案顺序和下发给玩家的逐步线索 |
+| 表35 | `sanctum_clues.csv` | **远弦圣地私有线索** | 调条件完成后给参与者的圣地方向/区域/距离提示 |
 
 `quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），以及 `rune_sequence`（参数为逗号或竖线分隔的符文唯一序列，由服务端校验）。`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
@@ -522,6 +528,72 @@ rare/epic/legendary 权重（普通宝物倍率为1，稀有度每升一级再�
 | fromQuest / toQuest | 起点与终点任务代码 |
 | relation | `requires`（前置完成）/ `success_unlock` / `failure_unlock` |
 | order | 多条入边的稳定顺序 |
+
+## 远弦圣地公共事件（`sanctum_*.csv`）
+
+这六张表共同定义一轮全服可争夺的“远弦圣地”。它们只描述活动、条件、奖励、谜题与私人线索；玩家完成情况、公共目标坐标、占领者、守卫倒计时和圣物位置属于运行时 `sanctum` 状态，不能写回 CSV。详细生命周期见 `docs/远弦圣地模块.md`。
+
+### sanctum_event.csv — 活动目录
+
+| 列 | 含义 |
+|---|---|
+| code / name | 稳定活动代码 / 显示名称；`code` 是运行时和存档引用，勿改名 |
+| enabled | 是否允许残印触发该活动，填 `1` 或 `0` |
+| fragmentTreasureCode | 开启活动所需的 `treasures.csv` 宝物代码 |
+| sanctuaryTemplateCode | 圣地守卫使用的 `pve_targets.csv` 动态 PvE 模板代码 |
+| description | 玩家可见说明 |
+
+### sanctum_conditions.csv — 公共条件目录
+
+| 列 | 含义 |
+|---|---|
+| id / code / name | 稳定数字 ID、条件代码、显示名称；跨表使用 `code` |
+| category | 难度与供给组：`low`（一次性稀少）、`repeatable`（可重复）或 `unique`（高难一次性） |
+| completionMode | `global_once`（首位完成后消失）、`personal_repeat`（玩家按冷却重复）或 `team_once`（一次协作完成） |
+| instances / refreshSec | 同时存在的目标实例数 / 重新生成的秒数；一次性条件填 `0` 刷新 |
+| kind / params | 服务器已支持的条件类型和参数；参数用 `key:value`，多项用 `\|` 分隔 |
+| pveTemplateCode / puzzleCode | 需要战斗或解谜时对应的 PvE 模板 / `sanctum_puzzles.csv` 谜题代码；不用则留空 |
+| minPlayers / minPlayerPop / minContributionShare | 协作条件最低参与者、每人最低有效人口、单人最低贡献占比；非协作条件填 `1/0/0` |
+| personalCooldownSec / pairCooldownSec | 个人重复完成冷却 / 与同一 PvP 对手再次计数的冷却；无此限制填 `0` |
+| rewardGroup / clueGroup | 对应奖励与私有线索的分组代码，通常与条件 `code` 相同 |
+| description | 玩家可见的条件说明 |
+
+### sanctum_condition_rewards.csv — 条件奖励
+
+| 列 | 含义 |
+|---|---|
+| id | 稳定奖励行 ID |
+| conditionCode | 所属 `sanctum_conditions.csv` 条件代码 |
+| kind / params | 奖励类型与参数；资源使用 `wood:数量\|...`，其他格式由服务端校验 |
+| recipient | `participant` 发给完成者；`designated_recipient` 发给协作条件指定领取者 |
+| order | 同一条件内的稳定结算顺序 |
+
+### sanctum_puzzles.csv — 谜题目录
+
+| 列 | 含义 |
+|---|---|
+| code / name / conditionCode | 稳定谜题代码、显示名、所属条件代码 |
+| unitRequirement / minUnits | 可提交谜题的兵种要求与最低数量；当前 `scout_or_adventurer` 表示侦察兵或冒险者 |
+| allowedSymbols | 可选符号，使用 `\|` 分隔；不在集合内的提交会被拒绝 |
+| wrongCooldownSec | 答错后同一玩家再次尝试的冷却秒数 |
+| description | 玩家可见的解谜说明 |
+
+### sanctum_puzzle_steps.csv — 谜题步骤
+
+| 列 | 含义 |
+|---|---|
+| id / puzzleCode / step | 稳定步骤 ID、所属谜题、从 1 连续递增的答案步骤 |
+| answer | 服务端校验用的正确符号；不得向客户端完整下发 |
+| clueText | 对应步骤可显示给玩家的解谜线索 |
+
+### sanctum_clues.csv — 私有线索
+
+| 列 | 含义 |
+|---|---|
+| id / conditionCode / order | 稳定线索 ID、所属条件、同条件内稳定顺序 |
+| template | 仅完成该条件的玩家可见的文本模板；可使用 `{direction}`、`{region}`、`{distance}` |
+| precision | 服务端替换模板变量的提示维度：`direction`、`region` 或 `distance` |
+| weight | 同条件有多条候选线索时的抽取权重，须为正数 |
 
 ## pvp_power_curve.csv — PvP 强弱差掠夺衰减
 | 列 | 含义 |
