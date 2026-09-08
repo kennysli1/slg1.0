@@ -13,7 +13,9 @@ export interface ResInfo { name: string; icon: string }
 export interface FieldInfo { name: string; icon: string; resource?: string }
 export interface VaultProtection { wood: number; clay: number; iron: number; crop: number; gold: number }
 export interface BuildingInfo { name: string; icon: string; zone?: string; resource?: string; desc?: string; effect?: string; popCapPerLevel?: number; popCapByLevel?: number[]; vaultProtectionByLevel?: VaultProtection[] }
-export interface UnitInfo { name: string; icon: string; popCost: number; upkeep?: number; isMercenary?: boolean }
+export interface UnitTraitEffectInfo { effect: string; value: number; phase: 'charge' | 'ranged' | 'melee' | 'all' }
+export interface UnitTraitInfo { code: string; name: string; effects: UnitTraitEffectInfo[] }
+export interface UnitInfo { name: string; icon: string; popCost: number; upkeep?: number; isMercenary?: boolean; traits: UnitTraitInfo[] }
 export interface MercenaryInfo { name: string; icon: string; attack: number; defense: number; hp: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }
 export interface PveInfo { name?: string; icon: string }
 export interface TreasureInfo {
@@ -29,7 +31,7 @@ export interface TreasureInfo {
 interface ServerConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: { kind: string; name: string; icon: string; zone: string; resource: string | null; desc?: string; effect?: string; popCapPerLevel: number; popCapByLevel: number[]; vaultProtectionByLevel?: VaultProtection[] }[];
-  units: { key: string; tribe: string; name: string; icon: string; attack: number; defense: number; hp: number; popCost?: number; upkeep?: number; isMercenary?: boolean }[];
+  units: { key: string; tribe: string; name: string; icon: string; attack: number; defense: number; hp: number; popCost?: number; upkeep?: number; isMercenary?: boolean; traits?: UnitTraitInfo[] }[];
   /** 雇佣兵清单（tribe=merc）：含完整战斗属性 + 金币单价。 */
   mercenaries: { key: string; name: string; icon: string; attack: number; defense: number; hp: number; speed: number; carry: number; goldCost: number; commandCost: number; contractSec: number; tier: number }[];
   pveTemplates: { type: string; name: string; icon: string }[];
@@ -83,7 +85,7 @@ export async function loadGameConfig(): Promise<void> {
       // 资源田同时并入 fields 表，让沿用 fieldInfo 的旧渲染路径继续工作
       if (x.resource) fields[x.kind] = { name: x.name, icon: x.icon, resource: x.resource };
     }
-    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, popCost: x.popCost ?? 1, upkeep: x.upkeep ?? 0, isMercenary: !!x.isMercenary };
+    for (const x of cfg.units) units[x.key] = { name: x.name, icon: x.icon, popCost: x.popCost ?? 1, upkeep: x.upkeep ?? 0, isMercenary: !!x.isMercenary, traits: x.traits ?? [] };
     for (const x of (cfg.mercenaries ?? [])) mercenaries[x.key] = { name: x.name, icon: x.icon, attack: x.attack, defense: x.defense, hp: x.hp, speed: x.speed, carry: x.carry, goldCost: x.goldCost, commandCost: x.commandCost, contractSec: x.contractSec, tier: x.tier };
     for (const x of cfg.pveTemplates) pve[x.type] = { name: x.name, icon: x.icon };
     for (const x of (cfg.treasures ?? [])) treasures[x.code] = x;
@@ -128,12 +130,47 @@ export function buildingPopCapPerLevel(kind: string): number {
 export function unitInfo(key: string): UnitInfo {
   if (units[key]) {
     const u = units[key];
-    return { name: u.name, icon: u.icon, popCost: u.isMercenary ? 0 : (u.popCost ?? 1), upkeep: u.upkeep ?? 0, isMercenary: !!u.isMercenary };
+    return { name: u.name, icon: u.icon, popCost: u.isMercenary ? 0 : (u.popCost ?? 1), upkeep: u.upkeep ?? 0, isMercenary: !!u.isMercenary, traits: u.traits ?? [] };
   }
   const fb = fallback.UNIT_INFO[key];
   const isMerc = key.startsWith('merc_');
-  if (fb) return { ...fb, popCost: isMerc ? 0 : 1, upkeep: 0, isMercenary: isMerc };
-  return { name: key, icon: `unit_${key}`, popCost: 1, upkeep: 0, isMercenary: isMerc };
+  if (fb) return { ...fb, popCost: isMerc ? 0 : 1, upkeep: 0, isMercenary: isMerc, traits: [] };
+  return { name: key, icon: `unit_${key}`, popCost: 1, upkeep: 0, isMercenary: isMerc, traits: [] };
+}
+
+/** 将服务器下发的战斗特性效果转成玩家可读文案；数值始终来自配置快照。 */
+export function unitTraitEffectText(effect: UnitTraitEffectInfo): string {
+  const percent = `${effect.value > 0 ? '+' : ''}${Math.round(effect.value * 100)}%`;
+  const labels: Record<string, string> = {
+    self_attack: `自身攻击 ${percent}`,
+    self_defense: `自身防御 ${percent}`,
+    enemy_cavalry_attack: `敌方骑兵攻击 ${percent}`,
+    enemy_cavalry_defense: `敌方骑兵防御 ${percent}`,
+    enemy_ranged_attack: `敌方远程兵攻击 ${percent}`,
+    enemy_ranged_defense: `敌方远程兵防御 ${percent}`,
+    enemy_infantry_defense: `敌方步兵防御 ${percent}`,
+    enemy_lower_hp_defense: `敌方低生命兵种防御 ${percent}`,
+    ally_cavalry_defense: `友方骑兵防御 ${percent}`,
+    origin_attacker_attack: `进攻方自身攻击 ${percent}`,
+    origin_defender_defense: `防守方自身防御 ${percent}`,
+    ramp_attack: `自身攻击 ${percent}（每轮递增）`,
+    ramp_defense: `自身防御 ${percent}（每轮递增）`,
+    dmg_taken_ranged: `承受远程伤害 ${percent}`,
+    dmg_taken_melee: `承受近战伤害 ${percent}`,
+    atk_ranged: `远程攻击 ${percent}`,
+    atk_melee: `近战攻击 ${percent}`,
+    def_ranged: `远程防御 ${percent}`,
+    def_melee: `近战防御 ${percent}`,
+    enemy_cavalry_atk: `敌方骑兵近战攻击 ${percent}`,
+    ally_ranged_def: `友方远程防御 ${percent}`,
+    enemy_ranged_melee_def: `敌方远程兵近战防御 ${percent}`,
+    cavalry_charge_atk: `骑兵冲锋攻击 ${percent}`,
+  };
+  return labels[effect.effect] ?? `战斗属性 ${percent}`;
+}
+
+export function unitTraitPhaseText(phase: UnitTraitEffectInfo['phase']): string {
+  return ({ charge: '冲锋阶段', ranged: '远程阶段', melee: '近战阶段', all: '全战斗阶段' } as const)[phase];
 }
 /** 雇佣兵详情（含金币单价 + 战斗属性）；仅 merc_* 兵种有。 */
 export function mercenaryInfo(key: string): MercenaryInfo | undefined {

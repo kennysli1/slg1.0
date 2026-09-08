@@ -30,6 +30,7 @@ import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDial
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
+import { unitTraitEffectText, unitTraitPhaseText } from '../app/config.js';
 
 describe('M1 资源田修复状态', () => {
   it('任务已就绪时即使没有修复事件记录也把四块资源田显示为已修复', () => {
@@ -157,6 +158,23 @@ describe('兵种训练卡基础属性', () => {
     assert.deepEqual(unitCardBaseStats({
       attack: 75, defense: 42, hp: 120, speed: 6,
     }), { attack: 75, defense: 42, hp: 120, speed: 6 });
+  });
+});
+
+describe('兵种战斗特性展示文案', () => {
+  it('保留服务端数值的正负号，并标注对应战斗阶段', () => {
+    assert.equal(unitTraitEffectText({ effect: 'self_attack', value: 0.18, phase: 'charge' }), '自身攻击 +18%');
+    assert.equal(unitTraitEffectText({ effect: 'enemy_cavalry_defense', value: -0.15, phase: 'ranged' }), '敌方骑兵防御 -15%');
+    assert.equal(unitTraitPhaseText('charge'), '冲锋阶段');
+    assert.equal(unitTraitPhaseText('all'), '全战斗阶段');
+  });
+
+  it('详情弹窗从配置快照渲染可点击特性标签和独立说明窗', () => {
+    const source = readFileSync(new URL('../features/army/UnitDetail.tsx', import.meta.url), 'utf8');
+    assert.match(source, /info\.traits\.map/);
+    assert.match(source, /class="unit-trait-btn"/);
+    assert.match(source, /openTraitDetail\(name, trait\)/);
+    assert.match(source, /unit-trait-detail/);
   });
 });
 
