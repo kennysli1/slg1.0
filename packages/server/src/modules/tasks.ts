@@ -1799,7 +1799,8 @@ export class TasksModule {
     s.offered = s.offered.filter((x) => x !== code);
     s.offeredSide = s.offeredSide.filter((x) => x !== code);
     // 触发状态属于村庄运行态；撤销完成后必须重新触发，不能立刻再次接取。
-    if (q.trigger) s.firedTriggers = s.firedTriggers.filter((x) => x !== q.trigger);
+    const triggerToken = this.questTriggerToken(q);
+    if (triggerToken) s.firedTriggers = s.firedTriggers.filter((x) => x !== triggerToken);
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
     if (directAccept === true) {
       await this.activateQuest(villageId, code);
@@ -1825,7 +1826,8 @@ export class TasksModule {
     // 普通“重新触发”：补回触发条件并清冷却，使 unlockSideQuests 能再次把它推入可接取列表。
     // （与 gmReopenCompleted 相反：那里是已完成→需世界事件重新触发，故移除触发标记；
     //   这里是已放弃→GM 强制重新出现，故补回触发标记。）
-    if (directAccept !== true && q.trigger && !s.firedTriggers.includes(q.trigger)) s.firedTriggers.push(q.trigger);
+    const triggerToken = this.questTriggerToken(q);
+    if (directAccept !== true && triggerToken && !s.firedTriggers.includes(triggerToken)) s.firedTriggers.push(triggerToken);
     if (s.cooldownUntil) delete s.cooldownUntil[code];
     this.store.set(COLLECTION, this.storageVillageForQuest(villageId, code), s);
     if (directAccept === true) {
@@ -1849,7 +1851,8 @@ export class TasksModule {
     s.abandonedSide = s.abandonedSide.filter((item) => item !== code);
     s.offered = s.offered.filter((item) => item !== code);
     s.offeredSide = s.offeredSide.filter((item) => item !== code);
-    if (q.trigger) s.firedTriggers = s.firedTriggers.filter((item) => item !== q.trigger);
+    const triggerToken = this.questTriggerToken(q);
+    if (triggerToken) s.firedTriggers = s.firedTriggers.filter((item) => item !== triggerToken);
     if (s.cooldownUntil) delete s.cooldownUntil[code];
     this.store.set(COLLECTION, storageVillageId, s);
     await this.pushList(villageId);
@@ -2129,6 +2132,19 @@ export class TasksModule {
     return true;
   }
 
+  /**
+   * 将兼容投影里的旧 trigger 名称转换成运行时 firedTriggers 使用的令牌。
+   * 灰烬商路分支由 SelectBranch 记录为 `ashen_branch:<branch>`，而 CSV
+   * 条件对外仍保留 `branch_selected:<branch>`，两者不能直接比较。
+   */
+  private questTriggerToken(q: QuestDef): string | undefined {
+    const trigger = q.trigger?.trim();
+    if (!trigger) return undefined;
+    const [kind, ...rest] = trigger.split(':');
+    if (kind === 'branch_selected' && rest.length > 0) return `ashen_branch:${rest.join(':')}`;
+    return trigger;
+  }
+
   private async unlockMainQuests(villageId: string): Promise<void> {
     for (const q of this.catalog.all()) {
       if (q.type !== 'main') continue;
@@ -2162,7 +2178,9 @@ export class TasksModule {
       // 酒馆刷新型支线由 refreshOffered 按槽位概率管理，不走事件触发解锁。
       if (q.trigger === 'tavern_refresh') continue;
       if (s.offeredSide.includes(q.code)) continue;
-      if ((!q.trigger || s.firedTriggers.includes(q.trigger)) && this.prereqsMet(villageId, q.requires)) {
+      // 所有声明式 offer 条件都必须参与解锁判断。尤其是 s14/s17/s20
+      // 的 branch_selected 条件，不能只比较兼容投影的旧 trigger 字符串。
+      if (await this.offerConditionsSatisfied(villageId, q) && this.prereqsMet(villageId, q.requires)) {
         s.offeredSide.push(q.code);
         changed = true;
       }
