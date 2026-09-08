@@ -409,9 +409,6 @@ export class TasksModule {
   private async getState(cmd: Command): Promise<CommandResult> {
     const { villageId } = cmd.payload as { villageId: string };
     await this.playerDirectory.refreshVillage(villageId);
-    // 任务条件可能在上个版本已写入运行态，但当时没有重新评估 offer。
-    // 每次打开任务页补做一次声明式支线解锁，兼容已选分支的旧存档。
-    await this.unlockSideQuests(villageId);
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     await this.syncTaskVillageCoordinates(villageId);
@@ -425,8 +422,6 @@ export class TasksModule {
     await this.playerDirectory.refreshPlayer(playerId);
     const villageIds = [...new Set(this.playerDirectory.villages(playerId))];
     for (const villageId of villageIds) {
-      // 与 GetState 保持一致：任务板读取也要修复历史存档中遗漏的支线 offer。
-      await this.unlockSideQuests(villageId);
       await this.syncThresholdObjectives(villageId);
       await this.syncSuccessConditions(villageId);
       await this.syncTaskVillageCoordinates(villageId);
