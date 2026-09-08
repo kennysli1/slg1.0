@@ -14,11 +14,13 @@ import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
-import { foreignArmyAt, foreignArmyName } from './map-target-helpers.js';
+import { collectMapTargetStack, foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement, ownIncomingWarningsFromCache, ownMovementsFromCache } from './map-target-helpers.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
-const ZOOM_MIN = 0.8;
-const ZOOM_MAX = 1.2;
+const DESKTOP_ZOOM_MIN = 0.8;
+const DESKTOP_ZOOM_MAX = 1.2;
+const MOBILE_ZOOM_MIN = 0.85;
+const MOBILE_ZOOM_MAX = 1.75;
 const INITIAL_ZOOM = 1;
 const PAD = HEX_SIZE * 1.4;
 const DRAG_THRESHOLD = 8; // 超过此像素视为拖拽，不触发点击
@@ -90,7 +92,7 @@ export function mapEntityRingKind(kind: string, isSelf: boolean, relation?: unkn
  * attack/raid 返程后会被服务端改写为 return，因此不会继续显示红色。
  */
 export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' | 'neutral' {
-  return (type === 'attack' || type === 'raid')
+  return (type === 'attack' || type === 'raid' || type === 'caravan_raid')
     && (status === 'marching' || status === 'paused')
     ? 'threat'
     : 'neutral';
@@ -98,6 +100,11 @@ export function foreignArmyMarkerTone(type: unknown, status: unknown): 'threat' 
 
 export function normalizeMapVillageRelation(value: unknown): MapVillageRelation {
   return value === 'allied' || value === 'hostile' ? value : 'neutral';
+}
+
+/** 商队统一用运输车徽记；是否有王国或玩家护卫不改变外观。 */
+function CaravanMarkerArt() {
+  return <g class="march-caravan-art" aria-hidden="true"><path d="M-12-15h18v11h-18zM6-11h5l4 7H6M-8-15v-4H1v4" /><circle cx="-7" cy="-2" r="2.5" /><circle cx="10" cy="-2" r="2.5" /></g>;
 }
 
 function landmarkKindFromRefId(refId?: string): 'capital' | 'fief' | null {
@@ -269,7 +276,14 @@ function pveIcon(name?: string): string {
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
-export function HexMap() {
+/** 供地图页外壳调用的最小相机接口；不暴露地图内部状态或 DOM。 */
+export interface MapCameraApi {
+  focusCurrentVillage(): void;
+  jumpTo(q: string, r: string): { ok: true } | { ok: false; error: string };
+  zoom(direction: 'in' | 'out'): void;
+}
+
+export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | null } }) {
   // 订阅服务端数据（dataVersion 变化时整组件重渲，重算可见格）
   const _dv = dataVersion.value;
   const _tk = tick.value; // 订阅心跳：行军 ETA 文案每秒刷新
@@ -343,7 +357,17 @@ export function HexMap() {
 
   // ─── camera helpers ────────────────────────────────────────────────────────
   function clampZoom(z: number): number {
-    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches;
+    const min = compact ? MOBILE_ZOOM_MIN : DESKTOP_ZOOM_MIN;
+    const max = compact ? MOBILE_ZOOM_MAX : DESKTOP_ZOOM_MAX;
+    return Math.max(min, Math.min(max, z));
+  }
+
+  function zoomBounds(): { min: number; max: number } {
+    const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches;
+    return compact
+      ? { min: MOBILE_ZOOM_MIN, max: MOBILE_ZOOM_MAX }
+      : { min: DESKTOP_ZOOM_MIN, max: DESKTOP_ZOOM_MAX };
   }
 
   function applyTransform() {
@@ -727,8 +751,8 @@ export function HexMap() {
 
   // ─── march path + marker rendering ────────────────────────────────────────
   function buildMarchPaths() {
-    const ownMoves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
-    const incoming = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+    const ownMoves: any[] = ownMovementsFromCache();
+    const incoming = ownIncomingWarningsFromCache()
       .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const moves: any[] = [...ownMoves, ...incoming];
     const paths: preact.VNode[] = [];
@@ -755,6 +779,8 @@ export function HexMap() {
         : m.type === 'transport' ? 'transport'
         : m.type === 'found'     ? 'found'
         : m.type === 'caravan'   ? 'caravan'
+        : m.type === 'caravan_raid' ? 'raid'
+        : m.type === 'caravan_escort' ? 'transport'
         : m.type === 'garrison'  ? 'garrison'
         : m.type === 'ambush'    ? 'ambush'
         : m.type === 'explore'   ? 'explore'
@@ -776,14 +802,18 @@ export function HexMap() {
   }
 
   function buildMarchMarkers() {
-    const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
-    const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+    const moves: any[] = ownMovementsFromCache();
+    const incoming: any[] = ownIncomingWarningsFromCache()
       .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     moves.forEach((m, i) => {
       if (!m.pos) return;
-      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+      // 像素位置和 data-display 坐标必须来自同一个时刻；若分别读取
+      // Date.now()，恰好跨格时会出现“图标已经在下一格但命中仍在上一格”。
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = marchMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       markers.push(
@@ -791,14 +821,16 @@ export function HexMap() {
           key={`mk-${i}`}
           id={`march-mk-${i}`}
           data-own-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="own-march-mk"
-          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
+          transform={`translate(${(p.x + escortMarkerOffset(m)).toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>{m.type ?? 'return'} · {m.status === 'stationed' ? '驻扎中' : '行军中'}</title>
+          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : `${m.type === 'caravan_escort' ? (m.escortAttached ? '护送商队中' : '追赶商队中') : m.type ?? 'return'} · ${m.status === 'stationed' ? '驻扎中' : '行军中'}`}</title>
+          <circle class="march-marker-hit" cx="-2" cy="-9" r="15" />
           {/* 圆底对齐战旗的视觉重心，而不是把旗杆脚点放在圆心。 */}
           <circle class="march-marker-base march-marker-base--own" cx="-2" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--own" cx="-2" cy="-9" r="9.2" />
-          <image
+          {m.caravan ? <CaravanMarkerArt /> : <image
             class={`march-marker-art march-marker-art--${t}`}
             href={artPath('map_marker_own')}
             x={-16}
@@ -806,7 +838,7 @@ export function HexMap() {
             width={32}
             height={42}
             preserveAspectRatio="xMidYMid meet"
-          />
+          />}
         </g>,
       );
     });
@@ -814,16 +846,20 @@ export function HexMap() {
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = marchMarkerPixel(m, Date.now(), ref.x, ref.y)
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = marchMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
           key={`incoming-mk-${m.id}`}
           id={`incoming-march-mk-${m.id}`}
+          data-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="enemy-march-mk enemy-march-mk--attack incoming-march-mk"
           transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>来袭军队 · {m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
+          <title>来袭军队 · {m.caravanRaid ? '商队劫掠' : m.battleType === 'siege' ? '攻城' : '掠夺'}</title>
           <circle class="march-marker-base march-marker-base--enemy" cx="-3" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--enemy" cx="-3" cy="-9" r="9.2" />
           <image
@@ -848,7 +884,9 @@ export function HexMap() {
     const ref = viewRef();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const p = foreignMarkerPixel(m, Date.now(), ref.x, ref.y)
+      const now = Date.now();
+      const grid = displayGridForMovement(m, now);
+      const p = foreignMarkerPixel(m, now, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       const tone = foreignArmyMarkerTone(m.type, m.status);
@@ -878,13 +916,15 @@ export function HexMap() {
           key={`fmk-${m.id}`}
           id={`foreign-mk-${m.id}`}
           data-move-id={m.id}
+          {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
-          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
+          transform={`translate(${(p.x + escortMarkerOffset(m)).toFixed(1)},${p.y.toFixed(1)})`}
         >
-          <title>敌方军队 · {m.type ?? 'return'}</title>
+          <title>{m.caravan ? `商队 · ${m.caravan.originVillageName} → ${m.caravan.destinationVillageName} · ${m.caravan.phase === 'return' ? '返程' : '送货'}` : m.escortAttached ? `${m.ownerPlayerName ?? '他人'}的护送军 · 随商队行进` : `外军 · ${m.type ?? 'return'}`}</title>
+          <circle class="march-marker-hit" cx="-3" cy="-9" r="15" />
           <circle class={`march-marker-base march-marker-base--foreign march-marker-base--foreign-${tone}`} cx="-3" cy="-9" r="12.5" />
           <circle class="march-marker-base-ring march-marker-base-ring--foreign" cx="-3" cy="-9" r="9.2" />
-          <image
+          {m.caravan ? <CaravanMarkerArt /> : <image
             class={`enemy-march-art enemy-march-art--${t}`}
             href={artPath('map_marker_enemy')}
             x={-16}
@@ -892,7 +932,7 @@ export function HexMap() {
             width={32}
             height={42}
             preserveAspectRatio="xMidYMid meet"
-          />
+          />}
           {arrowEl}
         </g>,
       );
@@ -925,7 +965,13 @@ export function HexMap() {
   }
 
   // ─── rAF march animation ───────────────────────────────────────────────────
-  function setMarkerTransform(el: SVGGElement, x: number, y: number) {
+  function setMarkerTransform(el: SVGGElement, x: number, y: number, grid?: { q: number; r: number } | null) {
+    // 点击命中与图标渲染共用这一帧的离散格。这样图标跨过边界后，
+    // 同格目标选择和底层地块定位会立即切换到新格，而不是继续锁在旧格。
+    if (grid) {
+      el.dataset.displayQ = String(grid.q);
+      el.dataset.displayR = String(grid.r);
+    }
     const key = `${x.toFixed(1)},${y.toFixed(1)}`;
     if (el.dataset.pos === key) return;
     el.dataset.pos = key;
@@ -1082,22 +1128,22 @@ export function HexMap() {
         return;
       }
       const ref = viewRef();
-      const moves: any[] = getCache().playerMoves?.movements ?? getCache().moves?.movements ?? [];
+      const moves: any[] = ownMovementsFromCache();
       const now = Date.now();
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
-      const incoming: any[] = (getCache().playerMoves?.incomingWarnings ?? getCache().moves?.incomingWarnings ?? [])
+      const incoming: any[] = ownIncomingWarningsFromCache()
         .map((warning: any) => normalizeIncomingWarningForRender(warning));
       incoming.forEach((m) => {
         if (!m.id) return;
         const el = markerEl.current?.querySelector(`#incoming-march-mk-${m.id}`) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
       });
       // 外国军队：pos+heading 单段插值（无 path），读数来自 foreignMoves 信号。
       const foeArmies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
@@ -1106,7 +1152,7 @@ export function HexMap() {
         const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
         const px = foreignMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
-        setMarkerTransform(el, px.x, px.y);
+        setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
       rafRef.current = requestAnimationFrame(frame);
     };
@@ -1116,42 +1162,69 @@ export function HexMap() {
   function handleMapTap(clientX: number, clientY: number) {
     const hit = document.elementFromPoint(clientX, clientY);
     const ownMarker = hit?.closest?.('[data-own-move-id]') as Element | null;
-    if (ownMarker) {
-      const movementId = ownMarker.getAttribute('data-own-move-id');
-      const listed = movementId
-        ? (getCache().playerMoves?.movements ?? []).find((m: any) => m.id === movementId)
-        : undefined;
-      if (listed?.pos) {
-        selected.value = { refId: listed.id, kind: 'own_army', q: listed.pos.q, r: listed.pos.r, name: '己方军队' };
-        return;
+    const incomingMarker = hit?.closest?.('.incoming-march-mk[data-move-id]') as Element | null;
+    const foreignMarker = !incomingMarker ? hit?.closest?.('[data-move-id]') as Element | null : null;
+    const clickedId = ownMarker?.getAttribute('data-own-move-id')
+      ?? incomingMarker?.getAttribute('data-move-id')
+      ?? foreignMarker?.getAttribute('data-move-id');
+    const ownMoves: any[] = ownMovementsFromCache();
+    const foreignList: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+    const incomingList: any[] = ownIncomingWarningsFromCache();
+    const clickedOwn = clickedId ? ownMoves.find((m) => m.id === clickedId) : undefined;
+    const clickedForeign = clickedId ? foreignList.find((m) => m.id === clickedId) : undefined;
+    const clickedIncoming = clickedId ? incomingList.find((m) => m.id === clickedId) : undefined;
+    const clickedMovement = clickedOwn ?? clickedForeign ?? clickedIncoming;
+    const frameNow = Date.now();
+
+    // 目标栈要复用“屏幕这一帧”实际显示的格，而不是在点击时为每支军队
+    // 分别重新取 Date.now()。否则点击发生在 rAF 切格边界附近时，商队和
+    // 同格军队可能被分到两个格，面板就只剩最上层的商队。
+    const domGrid = (root: Element | null, attr: string, id: string): { q: number; r: number } | null => {
+      if (!root || !id) return null;
+      for (const element of Array.from(root.querySelectorAll(`[${attr}]`))) {
+        if (element.getAttribute(attr) !== id) continue;
+        const q = Number(element.getAttribute('data-display-q'));
+        const r = Number(element.getAttribute('data-display-r'));
+        if (Number.isFinite(q) && Number.isFinite(r)) return { q, r };
       }
-    }
+      return null;
+    };
+    const gridForOwn = (m: any) => domGrid(markerEl.current, 'data-own-move-id', m.id) ?? displayGridForMovement(m, frameNow);
+    const gridForIncoming = (m: any) => domGrid(markerEl.current, 'data-move-id', m.id) ?? displayGridForMovement(m, frameNow);
+    const gridForForeign = (m: ForeignArmy) => domGrid(foreignEl.current, 'data-move-id', m.id) ?? displayGridForMovement(m, frameNow);
     let cell = hit?.closest?.('.hex-cell') as Element | null;
     if (!cell) {
-      // 可能点在外军标记层之上：暂时隐藏后回落到底层格
-      const foreignLayer = foreignEl.current;
-      if (foreignLayer) {
-        foreignLayer.style.pointerEvents = 'none';
-        foreignLayer.style.visibility = 'hidden';
-        cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
-        foreignLayer.style.pointerEvents = '';
-        foreignLayer.style.visibility = '';
-      }
+      // 标记层覆盖在村庄/地块之上时，先临时隐藏所有移动层，再读取底层格；
+      // 这样商队刚出发也不会挡住城镇点击。
+      const layers = [markerEl.current, foreignEl.current].filter(Boolean) as SVGGElement[];
+      layers.forEach((layer) => { layer.style.pointerEvents = 'none'; layer.style.visibility = 'hidden'; });
+      cell = document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell') as Element | null;
+      layers.forEach((layer) => { layer.style.pointerEvents = ''; layer.style.visibility = ''; });
     }
-    if (!cell) return;
-    const q = Number(cell.getAttribute('data-tq'));
-    const r = Number(cell.getAttribute('data-tr'));
-    const kind = cell.getAttribute('data-kind') ?? 'empty';
-    const refId = cell.getAttribute('data-ref') ?? `empty-${q},${r}`;
-    const name = cell.getAttribute('data-name') ?? '空地';
-    const icon = cell.getAttribute('data-icon') ?? undefined;
+    const markerGrid = clickedId
+      ? (() => {
+          const source = ownMarker ?? incomingMarker ?? foreignMarker;
+          const q = Number(source?.getAttribute('data-display-q'));
+          const r = Number(source?.getAttribute('data-display-r'));
+          return Number.isFinite(q) && Number.isFinite(r) ? { q, r } : null;
+        })()
+      : null;
+    const displayed = markerGrid ?? (clickedMovement ? displayGridForMovement(clickedMovement, frameNow) : null);
+    const q = displayed?.q ?? Number(cell?.getAttribute('data-tq'));
+    const r = displayed?.r ?? Number(cell?.getAttribute('data-tr'));
+    if (!Number.isFinite(q) || !Number.isFinite(r)) return;
+    const cellAtClick = cell && Number(cell.getAttribute('data-tq')) === q && Number(cell.getAttribute('data-tr')) === r ? cell : null;
+    const kind = cellAtClick?.getAttribute('data-kind') ?? tileAt(q, r)?.kind ?? 'empty';
+    const refId = cellAtClick?.getAttribute('data-ref') ?? tileAt(q, r)?.refId ?? `empty-${q},${r}`;
+    const name = cellAtClick?.getAttribute('data-name') ?? tileAt(q, r)?.name ?? '空地';
+    const icon = cellAtClick?.getAttribute('data-icon') ?? tileAt(q, r)?.icon ?? undefined;
     const relation = kind === 'village'
-      ? normalizeMapVillageRelation(cell.getAttribute('data-relation'))
+      ? normalizeMapVillageRelation(cellAtClick?.getAttribute('data-relation') ?? tileAt(q, r)?.relation)
       : undefined;
-    const visibility = cell.getAttribute('data-visibility') as 'unexplored' | 'explored' | 'visible' | null;
+    const visibility = (cellAtClick?.getAttribute('data-visibility') ?? tileAt(q, r)?.visibility) as 'unexplored' | 'explored' | 'visible' | null;
     const tile = tileAt(q, r);
     const taskCamp = findTaskCampMarker(refId, q, r);
-    selected.value = {
+    const baseTarget = {
       refId, kind, q, r, name,
       ...(icon ? { icon } : {}),
       ...(relation ? { relation } : {}),
@@ -1164,6 +1237,20 @@ export function HexMap() {
       ...(kind === 'village' && typeof tile?.mainBaseName === 'string' ? { mainBaseName: tile.mainBaseName } : {}),
       ...(taskCamp?.taskInfo ? { taskInfo: taskCamp.taskInfo } : {}),
     };
+    const ownAt = ownMoves.filter((m) => {
+      const grid = gridForOwn(m);
+      return grid?.q === q && grid?.r === r;
+    });
+    const foreignAt = foreignList.filter((m) => {
+      const grid = gridForForeign(m);
+      return grid?.q === q && grid?.r === r;
+    });
+    const incomingAt = incomingList.filter((m) => {
+      const grid = gridForIncoming(m);
+      return grid?.q === q && grid?.r === r;
+    });
+    const stack = collectMapTargetStack(baseTarget, q, r, clickedOwn, clickedForeign, clickedIncoming, ownAt, foreignAt, incomingAt);
+    selected.value = stack.targets.length > 1 ? { ...stack.active, stackedTargets: stack.targets } : stack.active;
     // 己方村庄先进入观察态；只有目标卡的明确确认按钮才会切换操作上下文。
   }
 
@@ -1316,6 +1403,23 @@ export function HexMap() {
     setJumpR(String(parsed.coordinate.r));
   }
 
+  if (cameraApi) cameraApi.current = {
+    focusCurrentVillage: doHome,
+    jumpTo(q: string, r: string) {
+      const parsed = parseMapCoordinate(q, r, W, H);
+      if (!parsed.ok) return parsed;
+      setJumpError('');
+      jumpEditing.current = false;
+      setMapCenter(parsed.coordinate);
+      centerViewOn(parsed.coordinate.q, parsed.coordinate.r);
+      syncNavUI();
+      setJumpQ(String(parsed.coordinate.q));
+      setJumpR(String(parsed.coordinate.r));
+      return { ok: true };
+    },
+    zoom(direction: 'in' | 'out') { adjustZoom(direction === 'in' ? 1.15 : 1 / 1.15); },
+  };
+
   // ─── initial center & resize ───────────────────────────────────────────────
   useEffect(() => {
     if (!svgEl.current) return;
@@ -1405,6 +1509,7 @@ export function HexMap() {
   const terrainLayers = buildTerrainLayers(visibleCells);
   const marchPaths   = buildMarchPaths();
   const marchMarkers = buildMarchMarkers();
+  const zoomRange = zoomBounds();
   const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
 
@@ -1653,7 +1758,7 @@ export function HexMap() {
               type="button"
               class="map-zoom-btn"
               title="缩小"
-              disabled={zoomUi <= ZOOM_MIN + 0.001}
+              disabled={zoomUi <= zoomRange.min + 0.001}
               onClick={() => adjustZoom(1 / 1.15)}
             >−</button>
             <span class="map-zoom-label">{Math.round(zoomUi * 100)}%</span>
@@ -1661,7 +1766,7 @@ export function HexMap() {
               type="button"
               class="map-zoom-btn"
               title="放大"
-              disabled={zoomUi >= ZOOM_MAX - 0.001}
+              disabled={zoomUi >= zoomRange.max - 0.001}
               onClick={() => adjustZoom(1.15)}
             >+</button>
           </div>

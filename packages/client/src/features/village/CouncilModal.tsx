@@ -6,7 +6,7 @@ import { act, reloadKingdom } from '../../app/refresh.js';
 import { Btn, Tag } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { BuildingManagement } from './BuildingManagement.js';
-import { resInfo, treasureInfo } from '../../app/config.js';
+import { resInfo, treasureInfo, unitInfo } from '../../app/config.js';
 import { fmt, secLeft } from '../../shared/utils/format.js';
 
 const KEY = 'council';
@@ -20,10 +20,12 @@ function categoryName(category: string): string {
   if (category === 'reinforcement') return '增援';
   if (category === 'attack') return '代打';
   if (category === 'supplies') return '物资';
+  if (category === 'escort') return '商队护卫';
   return '宝物';
 }
 
 function serviceContent(service: any): string {
+  if (service.category === 'escort') return `${unitInfo(service.unitCode).name} ×${fmt(service.unitCount)} · 立即保护商队，送货结束后离开`;
   if (service.category === 'reinforcement') return `${service.unitCode} ×${fmt(service.unitCount)} · 临时增援（不并入本村军队）`;
   if (service.category === 'attack') return `${service.unitCode} ×${fmt(service.unitCount)} · ${service.delaySec > 0 ? `${service.delaySec}秒后出发` : '立即出发'}`;
   if (service.category === 'treasure') return treasureInfo(service.treasureCode)?.name ?? service.treasureCode;
@@ -36,6 +38,12 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
   tick.value;
   const state = kingdomState.value;
   const [targetKey, setTargetKey] = useState('');
+  const [incomingCaravanId, setIncomingCaravanId] = useState('');
+  const [outgoingCaravanId, setOutgoingCaravanId] = useState('');
+  const [buying, setBuying] = useState(false);
+  const incomingCaravans = (state?.incomingCaravans ?? []) as Array<{ id: string; originVillageName: string; destinationVillageName: string; missionLabel?: string }>;
+  const outgoingCaravans = (state?.outgoingCaravans ?? []) as Array<{ id: string; originVillageName: string; destinationVillageName: string; missionLabel?: string }>;
+  const escortTarget = [...incomingCaravans, ...outgoingCaravans].find((caravan) => caravan.id === incomingCaravanId || caravan.id === outgoingCaravanId);
   const own = new Set(me?.villages?.map((v) => v.id) ?? []);
   const targets = ((getCache().area?.tiles ?? []) as any[]).filter((tile) =>
     (tile.kind === 'pve' || tile.kind === 'village')
@@ -47,14 +55,18 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
   const target = targets.find((tile) => `${tile.kind}:${tile.refId}` === targetKey);
 
   const buy = async (service: any) => {
+    if (buying) return;
     if (service.category === 'attack' && !target) return;
-    await act(req('BuyKingdomService', {
+    if (service.category === 'escort' && !escortTarget) return;
+    setBuying(true);
+    try { await act(req('BuyKingdomService', {
       serviceCode: service.code,
-      ...(target ? { targetKind: target.kind, targetId: target.refId } : {}),
+      ...(service.category === 'attack' && target ? { targetKind: target.kind, targetId: target.refId } : {}),
+      ...(service.category === 'escort' && escortTarget ? { targetMovementId: escortTarget.id } : {}),
     }), {
-      okToast: service.category === 'attack' ? '王国军队已受命出发' : service.category === 'reinforcement' ? '王国增援已出发，抵达后临时驻防' : `${service.name}已交付`,
+      okToast: service.category === 'escort' ? '商队已获得王国护卫保护，送货抵达后护卫离开' : service.category === 'attack' ? '王国军队已受命出发' : service.category === 'reinforcement' ? '王国增援已出发，抵达后临时驻防' : `${service.name}已交付`,
       onOk: () => void reloadKingdom(),
-    });
+    }); } finally { setBuying(false); }
   };
 
   return (
@@ -83,7 +95,7 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
           <div class="task-menu-body">
             {state.services.map((service: any) => {
               const locked = state.councilLevel < service.minCouncilLevel;
-              const needsTarget = service.category === 'attack' && !target;
+              const needsTarget = service.category === 'attack' && !target || service.category === 'escort' && !escortTarget;
               return (
                 <div class="task-card task-card--side" key={service.code}>
                   <div class="task-card-head">
@@ -96,9 +108,27 @@ function CouncilModal({ slotId, onClose }: { slotId?: string; onClose: () => voi
                     <span class="task-prog-chip">{serviceContent(service)}</span>
                     <span class="task-prog-chip">花费声望 {service.reputationCost}</span>
                   </div>
+                  {service.category === 'escort' && (
+                    <div class="council-caravan-pickers council-caravan-pickers--card">
+                      <label class="task-submit-row">
+                        <span class="task-submit-res">选择护卫商队</span>
+                        <select class="task-submit-input" value={incomingCaravanId} disabled={locked || buying} onChange={(e) => { setIncomingCaravanId(e.currentTarget.value); setOutgoingCaravanId(''); }}>
+                          <option value="">{incomingCaravans.length ? '选择前往本村的商队' : '当前没有前往本村的商队'}</option>
+                          {incomingCaravans.map((caravan) => <option key={caravan.id} value={caravan.id}>{caravan.originVillageName} → 本村 · {caravan.missionLabel ?? '商队任务'}</option>)}
+                        </select>
+                      </label>
+                      <label class="task-submit-row">
+                        <span class="task-submit-res">或从本村出发</span>
+                        <select class="task-submit-input" value={outgoingCaravanId} disabled={locked || buying} onChange={(e) => { setOutgoingCaravanId(e.currentTarget.value); setIncomingCaravanId(''); }}>
+                          <option value="">{outgoingCaravans.length ? '选择从本村出发的商队' : '当前没有从本村出发的商队'}</option>
+                          {outgoingCaravans.map((caravan) => <option key={caravan.id} value={caravan.id}>本村 → {caravan.destinationVillageName} · {caravan.missionLabel ?? '商队任务'}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  )}
                   <div class="task-card-actions">
-                    <Btn size="sm" variant="primary" disabled={locked || needsTarget} onClick={() => void buy(service)}>
-                      {locked ? `需 Lv${service.minCouncilLevel}` : needsTarget ? '先选择目标' : '购买'}
+                    <Btn size="sm" variant="primary" disabled={locked || needsTarget || buying} onClick={() => void buy(service)}>
+                      {buying ? '购买中…' : locked ? `需 Lv${service.minCouncilLevel}` : needsTarget ? (service.category === 'escort' ? '先选择商队' : '先选择目标') : '购买'}
                     </Btn>
                   </div>
                 </div>

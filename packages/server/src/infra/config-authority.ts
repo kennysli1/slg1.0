@@ -350,7 +350,7 @@ const LEGACY_TABLES: Record<string, BalanceTableMeta> = {
   merc_camp: { file: 'merc_camp.csv', key: 'level', numeric: ['refreshSec', 'mercCount', 'maxStoredRefreshes'] },
   trade_center: { file: 'trade_center.csv', key: 'level', numeric: ['tradeRoutes', 'tradeViewRadius', 'npcOrderCount', 'npcRefreshSec', 'npcStoredRefreshes'] },
   kingdom_services: { file: 'kingdom_services.csv', key: 'id', numeric: ['minCouncilLevel', 'reputationCost', 'unitCount', 'wood', 'clay', 'iron', 'crop', 'gold', 'delaySec'] },
-  pve_targets: { file: 'pve_targets.csv', key: 'id', numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'] },
+  pve_targets: { file: 'pve_targets.csv', key: 'id', numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop', 'treasureTier'] },
   pve_defenders: { file: 'pve_defenders.csv', keyComposite: ['targetId', 'unitCode'], numeric: ['count', 'attack', 'defense', 'hp', 'carry'] },
   treasures: { file: 'treasures.csv', key: 'id', numeric: ['effectValue', 'reputationValue', 'priceGold', 'dropRate', 'activeEffectValue', 'activeDurationSec', 'activeConsume'] },
   constants: { file: 'game_constants.csv', key: 'key', numericByType: true },

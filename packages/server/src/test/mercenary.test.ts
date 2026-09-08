@@ -30,7 +30,20 @@ async function drain(app: GameApp, step = 3_600_000, maxIters = 500): Promise<vo
   }
 }
 
+async function ensureMainBase(app: GameApp, villageId: string, level: number): Promise<void> {
+  await send(app, 'economy.Grant', { villageId, gain: { wood: 999999, clay: 999999, iron: 999999, crop: 999999, gold: 999999 } });
+  for (;;) {
+    const layout = (await send(app, 'building.GetLayout', { villageId })).payload as any;
+    if (layout.townCenter.level >= level) return;
+    const upgrade = await send(app, 'building.Upgrade', { villageId, slotId: 'center' });
+    if (!upgrade.ok) throw new Error(`主基地升级失败：${upgrade.reason}`);
+    await app.scheduler.advanceTo((upgrade.payload as any).finishAt, setClock);
+  }
+}
+
 async function buildMercCamp(app: GameApp, villageId: string): Promise<boolean> {
+  const required = app.config.buildings.mercenarycamp.mainBaseLevel;
+  await ensureMainBase(app, villageId, required);
   const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'mercenarycamp' });
   if (!r.ok) return false;
   await drain(app, 60_000);

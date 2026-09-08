@@ -21,6 +21,7 @@ import type { Command, CommandResult, DomainEvent } from '@slg/shared';
 import type { GameConfig, ResearchDef, ResearchEffectDef } from '../infra/config.js';
 
 const COLLECTION = 'research';
+const PLAYER_COLLECTION = 'research_player';
 
 // ── 机制注册表 ──
 export type MechanismContext = {
@@ -47,6 +48,13 @@ export interface ResearchState {
   treasureTechIntervalMult?: number;
   /** 联盟首席科技官带来的科研点获得概率加成。 */
   allianceTechProbabilityBonus?: number;
+  techTreeVersion?: number;
+}
+
+interface ResearchPlayerState {
+  playerId: string;
+  doctrines: Record<string, string>;
+  pending: Record<string, { techCode: string; villageId: string }>;
 }
 
 export interface AcademyState {
@@ -54,6 +62,15 @@ export interface AcademyState {
   lastCheckTime: number;
   highestLevel: number;
   academyCount: number;
+}
+
+/** 科研点判定页使用的来源明细。durationSec=null 表示没有固定到期时间。 */
+interface ResearchSourceView {
+  source: string;
+  label: string;
+  displayValue: string;
+  durationSec: number | null;
+  durationLabel: string;
 }
 
 // ── 模块 ──
@@ -69,6 +86,10 @@ export class ResearchModule {
   private now: () => number;
   private playerVillages: (playerId: string) => string[];
   private playerByVillage: (villageId: string) => string | null;
+  /** 最近一次成功读取的人口倍率。判定调度使用缓存，避免人口查询阻塞后续 tick。 */
+  private readonly popFactorCache = new Map<string, number>();
+  /** 单村同时只执行一个异步判定；计划中的后续 tick 仍会保留在 Scheduler 中。 */
+  private readonly rpTickInFlight = new Set<string>();
 
   constructor(
     store: Store, bus: EventBus, commands: CommandBus, scheduler: Scheduler,
@@ -97,6 +118,7 @@ export class ResearchModule {
     this.commands.register('research.StartResearch', (c: Command) => this.startResearch(c));
     this.commands.register('research.CancelResearch', (c: Command) => this.cancelResearch(c));
     this.commands.register('research.GetTechMult', (c: Command) => this.getTechMult(c));
+    this.commands.register('research.HasMechanism', (c: Command) => this.hasMechanism(c));
     // 宝物（正直的心）下发科技点判定间隔倍率
     this.commands.register('research.SetTreasureTechInterval', (c: Command) => this.setTreasureTechInterval(c));
     this.commands.register('research.GrantPoints', (c: Command) => this.grantPoints(c));
@@ -123,11 +145,7 @@ export class ResearchModule {
 
     // 注册首批默认机制
     registerMechanism('imperial_pop_boost', (ctx) => {
-      void ctx.commands.send({ name: 'population.SetTechGrowthMult', from: ResearchModule.NAME, payload: {
-        villageId: ctx.villageId,
-        mult: ctx.tech.effectValue,
-        sources: [{ label: `科技：${ctx.tech.code}`, delta: ctx.tech.effectValue }],
-      } });
+      void ctx.commands.send({ name: 'population.SetTechHardCapMult', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, mult: ctx.tech.effectValue } });
     });
     registerMechanism('storage_overflow', (ctx) => {
       void ctx.commands.send({ name: 'economy.SetOverflowCap', from: ResearchModule.NAME, payload: { villageId: ctx.villageId, cap: ctx.tech.effectValue } });
@@ -138,7 +156,16 @@ export class ResearchModule {
   }
 
   async resume(): Promise<void> {
+    const resetLegacyProgress = this.store.all<ResearchState>(COLLECTION)
+      .some((s) => (s.techTreeVersion ?? 0) < 8);
+    if (resetLegacyProgress) this.store.clear(PLAYER_COLLECTION);
     for (const s of this.store.all<ResearchState>(COLLECTION)) {
+      if ((s.techTreeVersion ?? 0) < 8) {
+        this.scheduler.cancelByOwner(`research-tech:${s.villageId}`);
+        s.rp = 0; s.completed = []; s.researching = null; s.techTreeVersion = 8;
+        this.store.set(COLLECTION, s.villageId, s);
+        await this.bus.emit({ name: 'research.ProgressReset', source: ResearchModule.NAME, ts: this.now(), payload: { villageId: s.villageId, migration: 'tech_tree_v8' } });
+      }
       // 恢复学院参数（已有存档可能缺 academyCount/highestLevel）
       void this.onAcademyChanged(s.villageId);
       // 恢复在途研发计时器
@@ -165,6 +192,8 @@ export class ResearchModule {
     const s = this.load(villageId);
     if (s?.researching?.taskId) this.scheduler.cancelByOwner(`research-tech:${villageId}`);
     this.scheduler.cancelByOwner(`research-rp:${villageId}`);
+    this.popFactorCache.delete(villageId);
+    this.rpTickInFlight.delete(villageId);
     this.store.delete(COLLECTION, villageId);
   }
 
@@ -172,7 +201,7 @@ export class ResearchModule {
   private ensureState(villageId: string): ResearchState {
     let s = this.store.get<ResearchState>(COLLECTION, villageId);
     if (!s) {
-      s = { villageId, rp: 0, completed: [], academy: { failStreak: 0, lastCheckTime: this.now(), highestLevel: 0, academyCount: 0 }, treasureTechIntervalMult: 1 };
+      s = { villageId, rp: 0, completed: [], techTreeVersion: 8, academy: { failStreak: 0, lastCheckTime: this.now(), highestLevel: 0, academyCount: 0 }, treasureTechIntervalMult: 1 };
       this.store.set(COLLECTION, villageId, s);
     }
     return s;
@@ -180,6 +209,17 @@ export class ResearchModule {
 
   private load(villageId: string): ResearchState | undefined {
     return this.store.get<ResearchState>(COLLECTION, villageId);
+  }
+
+  private playerState(villageId: string): ResearchPlayerState | null {
+    const playerId = this.playerByVillage(villageId);
+    if (!playerId) return null;
+    let state = this.store.get<ResearchPlayerState>(PLAYER_COLLECTION, playerId);
+    if (!state) {
+      state = { playerId, doctrines: {}, pending: {} };
+      this.store.set(PLAYER_COLLECTION, playerId, state);
+    }
+    return state;
   }
 
   // ── 命令 ──
@@ -193,7 +233,73 @@ export class ResearchModule {
     const intervalSec = s.academy.academyCount > 0 && params
       ? Math.max(1, Math.round((params.checkIntervalSec / s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1) / popMult))
       : 0;
-    return { ok: true, payload: { villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed, academy: s.academy, intervalSec } };
+    const probability = params && s.academy.academyCount > 0
+      ? this.probabilityFor(s, params, popMult)
+      : 0;
+    const treasureNames = await this.activeTechIntervalTreasureNames(villageId);
+    const intervalSources: ResearchSourceView[] = [];
+    const probabilitySources: ResearchSourceView[] = [];
+    if (params) {
+      intervalSources.push({
+        source: 'academy.base', label: '基础判定间隔', displayValue: `${params.checkIntervalSec} 秒`,
+        durationSec: null, durationLabel: '配置值',
+      });
+      if (s.academy.academyCount > 0) intervalSources.push({
+        source: 'academy.count', label: '学院数量', displayValue: `÷ ${s.academy.academyCount}`,
+        durationSec: null, durationLabel: '学院存在期间',
+      });
+      if ((s.treasureTechIntervalMult ?? 1) !== 1) intervalSources.push({
+        source: 'treasure.tech_interval',
+        label: treasureNames.length ? `宝物：${treasureNames.join('、')}` : '宝物科技点判定间隔加成',
+        displayValue: `× ${(s.treasureTechIntervalMult ?? 1).toFixed(3)}`,
+        durationSec: null, durationLabel: '宝物在主栏期间',
+      });
+      if (popMult !== 1) intervalSources.push({
+        source: 'population.factor', label: '总人口因子', displayValue: `÷ ${popMult.toFixed(3)}`,
+        durationSec: null, durationLabel: '随总人口动态变化',
+      });
+      probabilitySources.push({
+        source: 'academy.base_probability', label: '基础成功概率', displayValue: `${(params.baseProbability * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '配置值',
+      });
+      if (s.academy.failStreak > 0) probabilitySources.push({
+        source: 'academy.fail_streak', label: '连续失败保底',
+        displayValue: `+ ${(s.academy.failStreak * params.probabilityGainPerFail * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '持续至下一次成功',
+      });
+      if (popMult !== 1) probabilitySources.push({
+        source: 'population.factor', label: '总人口因子', displayValue: `× ${popMult.toFixed(3)}`,
+        durationSec: null, durationLabel: '随总人口动态变化',
+      });
+      if ((s.allianceTechProbabilityBonus ?? 0) > 0) probabilitySources.push({
+        source: 'alliance.tech_probability', label: '联盟科技/职位',
+        displayValue: `+ ${((s.allianceTechProbabilityBonus ?? 0) * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '联盟生效期间',
+      });
+      probabilitySources.push({
+        source: 'academy.max_probability', label: '概率上限', displayValue: `${(params.maxProbability * 100).toFixed(1)}%`,
+        durationSec: null, durationLabel: '配置值',
+      });
+    }
+    return {
+      ok: true,
+      payload: {
+        villageId, rp: s.rp, researching: s.researching ?? null, completed: s.completed,
+        academy: s.academy, intervalSec,
+        rpFormula: {
+          baseIntervalSec: params?.checkIntervalSec ?? 0,
+          effectiveIntervalSec: intervalSec,
+          baseProbability: params?.baseProbability ?? 0,
+          probabilityGainPerFail: params?.probabilityGainPerFail ?? 0,
+          maxProbability: params?.maxProbability ?? 0,
+          currentProbability: probability,
+          populationFactor: params?.popFactor ?? 0,
+          populationMultiplier: popMult,
+          intervalSources,
+          probabilitySources,
+        },
+      },
+    };
   }
 
   /** 任务等系统发放科研点；科研点归属执行任务的村庄。 */
@@ -234,9 +340,10 @@ export class ResearchModule {
       let status: string;
       if (completed.has(t.code)) status = 'completed';
       else if (s.researching?.code === t.code) status = 'researching';
+      else if (this.doctrineBlocked(villageId, t)) status = 'doctrine_locked';
       else if (mainLevel >= t.mainBaseLevel && this.prereqsMet(villageId, t.requires)) status = 'available';
       else status = 'locked';
-      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, mainBaseLevel: t.mainBaseLevel, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, effects: t.effects, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
+      return { code: t.code, name: t.name, branch: t.branch, tier: t.tier, doctrineGroup: t.doctrineGroup, mainBaseLevel: t.mainBaseLevel, requires: t.requires, desc: t.desc, effectType: t.effectType, effectKey: t.effectKey, effectValue: t.effectValue, effects: t.effects, scope: t.scope, durationSec: t.durationSec, rpCost: t.rpCost, icon: t.icon, status };
     });
     return { ok: true, payload: { techs, rp: s.rp, researching: s.researching?.code ?? null } };
   }
@@ -246,14 +353,24 @@ export class ResearchModule {
     const s = this.ensureState(villageId);
     const tech = this.config.research[techCode];
     if (!tech) return { ok: false, payload: {}, reason: 'unknown_tech' };
+    // 玩家级科技在另一村已完成时优先返回幂等结果，不要求分城也满足其研发门槛。
+    if (this.effectiveCompleted(villageId).has(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
     if (s.academy.academyCount < 1) return { ok: false, payload: {}, reason: 'academy_required' };
     if (!(await this.mainBaseLevelMet(villageId, tech.mainBaseLevel))) return { ok: false, payload: {}, reason: 'main_base_level_too_low' };
     if (s.researching) return { ok: false, payload: {}, reason: 'already_researching' };
     // scope=player 科技的完成记录来自玩家全部村庄；避免在分城重复研发全局科技。
-    if (this.effectiveCompleted(villageId).has(techCode)) return { ok: false, payload: {}, reason: 'already_completed' };
+    if (this.doctrineBlocked(villageId, tech)) return { ok: false, payload: {}, reason: 'doctrine_locked' };
+    const playerState = tech.doctrineGroup ? this.playerState(villageId) : null;
+    const pending = playerState?.pending[tech.doctrineGroup!];
+    if (pending && pending.techCode !== techCode) return { ok: false, payload: {}, reason: 'doctrine_research_in_progress' };
     if (!this.prereqsMet(villageId, tech.requires)) return { ok: false, payload: {}, reason: 'prerequisites_not_met' };
     if (s.rp < tech.rpCost) return { ok: false, payload: {}, reason: 'insufficient_rp' };
     s.rp -= tech.rpCost;
+    // 在首个 await 前占住纲领组，防止同一玩家的两个村庄并发启动互斥纲领。
+    if (playerState && tech.doctrineGroup) {
+      playerState.pending[tech.doctrineGroup] = { techCode, villageId };
+      this.store.set(PLAYER_COLLECTION, playerState.playerId, playerState);
+    }
     // 繁荣度只提供研究耗时的额外加速；繁荣度倍率从 1.0 起步，不会让基础研发更慢。
     const laborRes = await this.commands.send({
       name: 'population.GetLaborMult', from: ResearchModule.NAME, payload: { villageId, buildingKind: 'academy' },
@@ -280,6 +397,13 @@ export class ResearchModule {
     const refund = tech ? Math.floor(tech.rpCost * ratio * 0.9) : 0;
     s.rp += refund;
     if (s.researching.taskId) this.scheduler.cancelByOwner(`research-tech:${villageId}`);
+    if (tech?.doctrineGroup) {
+      const playerState = this.playerState(villageId);
+      if (playerState?.pending[tech.doctrineGroup]?.techCode === tech.code) {
+        delete playerState.pending[tech.doctrineGroup];
+        this.store.set(PLAYER_COLLECTION, playerState.playerId, playerState);
+      }
+    }
     s.researching = null;
     this.store.set(COLLECTION, villageId, s);
     this.store.flush();
@@ -290,9 +414,19 @@ export class ResearchModule {
   // ── 科技完成 ──
   private async completeResearch(villageId: string, techCode: string): Promise<void> {
     const s = this.ensureState(villageId);
+    const tech = this.config.research[techCode];
+    if (tech?.doctrineGroup) {
+      const chosen = this.doctrineFor(villageId, tech.doctrineGroup);
+      if (chosen && chosen !== tech.code) return;
+      const playerState = this.playerState(villageId);
+      if (playerState) {
+        playerState.doctrines[tech.doctrineGroup] = tech.code;
+        delete playerState.pending[tech.doctrineGroup];
+        this.store.set(PLAYER_COLLECTION, playerState.playerId, playerState);
+      }
+    }
     if (!s.completed.includes(techCode)) s.completed.push(techCode);
     s.researching = null;
-    const tech = this.config.research[techCode];
     if (tech) {
       // 应用到本村（所有 scope 类型）
       void this.recomputeTechEffects(villageId);
@@ -451,7 +585,7 @@ export class ResearchModule {
 
     // 惰性回溯：计算从上一次判定到现在的 tick 数
     const now = this.now();
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
+    const intervalMs = this.intervalMs(s, params, popMult);
     let lastCheck = s.academy.lastCheckTime || now;
     if (lastCheck > now) lastCheck = now;
     let failStreak = s.academy.failStreak;
@@ -471,9 +605,9 @@ export class ResearchModule {
     this.store.set(COLLECTION, villageId, s);
 
     // 调度下一次 tick
-    const nextTickMs = Math.max(1000, lastCheck + intervalMs - now);
-    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
-    this.scheduler.schedule(nextTickMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
+    // 以逻辑上的上一次判定时间为锚点，而不是以本次结算完成时间为锚点，
+    // 避免人口查询/事件处理较慢时把后续判定整体向后推迟。
+    this.scheduleRpTick(villageId, lastCheck + intervalMs);
   }
 
   /** 由 treasure 模块下发：设置宝物（正直的心）带来的科技点判定间隔倍率（<1 更快）。倍率变化即按新间隔重调度 RP tick。 */
@@ -490,27 +624,86 @@ export class ResearchModule {
   }
 
   /** 单次 RP tick：roll 一次判定，失败则递增 failStreak，成功则 rp+1 并重置。调度下一次。 */
-  private async tickRp(villageId: string): Promise<void> {
+  private async tickRp(villageId: string, plannedAt = this.now()): Promise<void> {
     const s = this.ensureState(villageId);
     const { highestLevel, academyCount } = s.academy;
     if (academyCount < 1 || highestLevel < 1) return;
     const params = this.config.academy[highestLevel];
     if (!params) return;
 
-    const popMult = await this.getPopFactor(villageId);
-    const prob = Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
-    if (Math.random() < prob) {
-      s.rp += 1;
-      s.academy.failStreak = 0;
-      void this.pushRp(villageId, s.rp);
-    } else {
-      s.academy.failStreak++;
-    }
-    s.academy.lastCheckTime = this.now();
-    this.store.set(COLLECTION, villageId, s);
+    const dueAt = Number.isFinite(plannedAt) ? plannedAt : this.now();
+    if (this.rpTickInFlight.has(villageId)) return;
+    this.rpTickInFlight.add(villageId);
+    // 先登记下一次计划时间，再读取人口。回调本身采用 fire-and-forget，
+    // 因而人口模块或其他慢命令不会堵住 Scheduler 的其他任务。
+    this.scheduleRpTick(villageId, dueAt + this.intervalMs(s, params, this.cachedPopFactor(villageId)));
 
-    const intervalMs = Math.max(1000, Math.round((params.checkIntervalSec * 1000) / academyCount * (s.treasureTechIntervalMult ?? 1) / popMult));
-    this.scheduler.schedule(intervalMs, () => this.tickRp(villageId), `research-rp:${villageId}`);
+    try {
+      const popMult = await this.getPopFactor(villageId);
+      const latest = this.ensureState(villageId);
+      // 其他路径（例如建筑变化或惰性结算）已经处理过这个计划点时，
+      // 不重复掷骰；预先登记的下一次任务仍然有效。
+      if (latest.academy.lastCheckTime >= dueAt) return;
+      const prob = this.probabilityFor(latest, params, popMult);
+      const gained = Math.random() < prob;
+      if (gained) {
+        latest.rp += 1;
+        latest.academy.failStreak = 0;
+      } else {
+        latest.academy.failStreak++;
+      }
+      // lastCheckTime 表示逻辑判定时刻，不是异步结算完成时刻。
+      latest.academy.lastCheckTime = Math.max(latest.academy.lastCheckTime || 0, dueAt);
+      this.store.set(COLLECTION, villageId, latest);
+      // 每次判定都推送一次快照，即使判定失败也要让客户端拿到新的
+      // lastCheckTime，重新绘制下一轮倒计时。失败事件带 gained=0，
+      // 不进入战报，但仍会触发轻量 research 刷新。
+      void this.pushRp(villageId, latest.rp, gained ? 1 : 0);
+
+      // 人口倍率可能已变化；仍以原计划时刻为锚点重排，不把查询耗时加入间隔。
+      this.scheduleRpTick(villageId, dueAt + this.intervalMs(latest, params, popMult));
+      // 若异步结算期间已经错过了多个计划点，惰性结算补齐它们。
+      if (this.now() >= dueAt + this.intervalMs(latest, params, popMult)) void this.settleRp(villageId);
+    } finally {
+      this.rpTickInFlight.delete(villageId);
+    }
+  }
+
+  /** 登记 RP tick。回调不把 Promise 返回给 Scheduler，避免慢的跨模块查询阻塞全局调度器。 */
+  private scheduleRpTick(villageId: string, triggerAt: number): void {
+    this.scheduler.cancelByOwner(`research-rp:${villageId}`);
+    this.scheduler.scheduleAt(triggerAt, () => {
+      void this.tickRp(villageId, triggerAt).catch((err) => {
+        console.error(`[Research] RP tick failed for ${villageId}:`, err);
+      });
+    }, `research-rp:${villageId}`);
+  }
+
+  private intervalMs(s: ResearchState, params: NonNullable<GameConfig['academy'][number]>, popMult: number): number {
+    return Math.max(1000, Math.round((params.checkIntervalSec * 1000) / Math.max(1, s.academy.academyCount) * (s.treasureTechIntervalMult ?? 1) / Math.max(1, popMult)));
+  }
+
+  private cachedPopFactor(villageId: string): number {
+    return Math.max(1, this.popFactorCache.get(villageId) ?? 1);
+  }
+
+  private probabilityFor(s: ResearchState, params: NonNullable<GameConfig['academy'][number]>, popMult: number): number {
+    return Math.min(params.maxProbability, (params.baseProbability + s.academy.failStreak * params.probabilityGainPerFail) * popMult + (s.allianceTechProbabilityBonus ?? 0));
+  }
+
+  /** 返回当前主栏中影响科研判定间隔的宝物名称；仅用于解释性展示。 */
+  private async activeTechIntervalTreasureNames(villageId: string): Promise<string[]> {
+    try {
+      const res = await this.commands.send({ name: 'treasure.List', from: ResearchModule.NAME, payload: { villageId } });
+      if (!res.ok) return [];
+      const active = (res.payload as any)?.activeTreasures;
+      if (!Array.isArray(active)) return [];
+      return active
+        .filter((t: any) => t?.effectType === 'smartPerson' || t?.effectType === 'honestHeart')
+        .map((t: any) => String(t.name ?? t.code)).filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   // ── 辅助 ──
@@ -518,16 +711,19 @@ export class ResearchModule {
   /** 查询人口模块获取科研人口因子：popMult = 1 + popFactor × (totalPop / hardCap)。
    * totalPop 包括平民、驻军、在途与训练中的士兵；异常时返回 1（不影响概率/间隔）。 */
   private async getPopFactor(villageId: string): Promise<number> {
+    const cached = this.cachedPopFactor(villageId);
     try {
       const res = await this.commands.send({ name: 'population.GetSnapshot', from: ResearchModule.NAME, payload: { villageId } });
-      if (!res.ok) return 1;
+      if (!res.ok) return cached;
       const p = res.payload as any;
       const totalPop = Number(p.totalPop) || (Number(p.currentPop) || 0) + (Number(p.soldierPop) || 0) + (Number(p.trainingPop) || 0);
       const ratio = p.hardCap > 0 ? Math.min(1, Math.max(0, totalPop / Math.max(1, p.hardCap))) : 0;
       const params = this.config.academy[this.ensureState(villageId).academy.highestLevel];
       const popFactor = params?.popFactor ?? 0;
-      return 1 + popFactor * ratio;
-    } catch { return 1; }
+      const result = 1 + popFactor * ratio;
+      this.popFactorCache.set(villageId, result);
+      return result;
+    } catch { return cached; }
   }
 
   private prereqsMet(villageId: string, requires: string[]): boolean {
@@ -562,8 +758,18 @@ export class ResearchModule {
     return out;
   }
 
-  private async pushRp(villageId: string, rp: number): Promise<void> {
-    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp } });
+  private doctrineFor(villageId: string, group: string): string | undefined {
+    return this.playerState(villageId)?.doctrines[group];
+  }
+
+  private doctrineBlocked(villageId: string, tech: ResearchDef): boolean {
+    if (!tech.doctrineGroup) return false;
+    const chosen = this.doctrineFor(villageId, tech.doctrineGroup);
+    return Boolean(chosen && chosen !== tech.code);
+  }
+
+  private async pushRp(villageId: string, rp: number, gained = 0): Promise<void> {
+    await this.bus.emit({ name: 'research.RpChanged', source: ResearchModule.NAME, ts: this.now(), payload: { villageId, rp, gained } });
   }
 
   /** 查询指定效果类型的已完成科技效果值总和（供 building/military 等模块计算时查询）。 */
@@ -575,5 +781,12 @@ export class ResearchModule {
       if (t) for (const e of t.effects) if (e.effectType === effectType) total = Math.min(e.cap, total + e.effectValue);
     }
     return { ok: true, payload: { mult: total } };
+  }
+
+  /** 机制开关只由 research 判断；调用方只得到最终布尔快照。 */
+  private hasMechanism(cmd: Command): CommandResult {
+    const { villageId, key } = cmd.payload as { villageId: string; key: string };
+    const active = [...this.effectiveCompleted(villageId)].some((code) => this.config.research[code]?.effects.some((e) => e.effectType === 'mechanism' && e.effectKey === key));
+    return { ok: true, payload: { active } };
   }
 }

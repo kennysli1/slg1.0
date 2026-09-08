@@ -267,6 +267,7 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
       'kingdom_fief_mercenary_min_ratio',
       'kingdom_fief_mercenary_max_ratio',
       'kingdom_city_state_reputation_penalty',
+      'caravan_raid_reputation_goods_per_point',
     ]) assert.match(reputationSection, new RegExp(key), `声望参数板块应包含 ${key}`);
     const cityStateFnStart = res.body.indexOf('function sectionCityState()');
     const cityStateFnEnd = res.body.indexOf('function sectionKingdom()', cityStateFnStart);

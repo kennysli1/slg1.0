@@ -34,11 +34,11 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
   const intervalSec: number = state?.intervalSec ?? 0;
   const lastCheck: number = academy.lastCheckTime ?? Date.now();
   const researching = state?.researching ?? null;
-
-  // 与服务端同公式：连续失败累积概率，学院等级抬高上下限
-  const baseProb = 0.10 + Math.max(0, highest - 1) * 0.01;
-  const maxProb = 0.30 + Math.max(0, highest - 1) * 0.02;
-  const curProb = count > 0 ? Math.min(maxProb, baseProb + failStreak * 0.02) : 0;
+  const formula = state?.rpFormula ?? {};
+  const baseProb = Number(formula.baseProbability ?? 0);
+  const maxProb = Number(formula.maxProbability ?? 0);
+  const curProb = Number(formula.currentProbability ?? 0);
+  const baseIntervalSec = Number(formula.baseIntervalSec ?? 0);
 
   function gotoTechTree() {
     closeModalByKey(KEY);
@@ -73,7 +73,8 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
 
       <StatGrid>
         <Stat label="当前成功率" value={`${(curProb * 100).toFixed(1)}%`} title="每次判定产出科研点的概率" />
-        <Stat label="概率上限" value={`${(maxProb * 100).toFixed(0)}%`} />
+        <Stat label="基础概率" value={`${(baseProb * 100).toFixed(1)}%`} />
+        <Stat label="概率上限" value={`${(maxProb * 100).toFixed(1)}%`} />
         <Stat label="连续失败" value={`${failStreak} 次`} title="失败会累积概率，属于保底机制" />
         <Stat label="学院数量" value={`${count} 座`} title="学院越多，判定间隔越短" />
       </StatGrid>
@@ -81,6 +82,8 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
       <div class="acad-prob-bar">
         <Bar pct={(curProb / Math.max(0.01, maxProb)) * 100} kind="steel" thin />
       </div>
+
+      {count > 0 && <ResearchFormula formula={formula} baseIntervalSec={baseIntervalSec} intervalSec={intervalSec} />}
 
       {count > 0 && intervalSec > 0 && (
         <>
@@ -101,5 +104,33 @@ function AcademyModal({ slotId, onClose }: { slotId: string; onClose: () => void
 
       <BuildingManagement slotId={slotId} name="学院" onClose={onClose} />
     </Modal>
+  );
+}
+
+function ResearchFormula({ formula, baseIntervalSec, intervalSec }: { formula: any; baseIntervalSec: number; intervalSec: number }) {
+  const intervalSources = Array.isArray(formula?.intervalSources) ? formula.intervalSources : [];
+  const probabilitySources = Array.isArray(formula?.probabilitySources) ? formula.probabilitySources : [];
+  if (!intervalSources.length && !probabilitySources.length) return null;
+  const sourceRows = (items: any[]) => items.map((item: any) => (
+    <div class="acad-source-row" key={`${item.source}-${item.label}`}>
+      <span>{item.label}</span><b>{item.displayValue}</b><small>{item.durationLabel ?? '持续生效'}</small>
+    </div>
+  ));
+  return (
+    <details class="acad-formula" open>
+      <summary>判定间隔、概率与来源</summary>
+      <div class="acad-formula-grid">
+        <div>
+          <h4>判定间隔</h4>
+          <p class="acad-formula-total">基础 {fmtDur(baseIntervalSec * 1000)} → 当前 {fmtDur(intervalSec * 1000)}</p>
+          {sourceRows(intervalSources)}
+        </div>
+        <div>
+          <h4>成功概率</h4>
+          <p class="acad-formula-total">当前 {((Number(formula.currentProbability) || 0) * 100).toFixed(1)}% · 上限 {((Number(formula.maxProbability) || 0) * 100).toFixed(1)}%</p>
+          {sourceRows(probabilitySources)}
+        </div>
+      </div>
+    </details>
   );
 }

@@ -439,6 +439,8 @@ export interface PveTemplate {
   cityState?: boolean;
   /** 王国 PvE 生成档位：普通城邦、统一标准封地或更高标准王都。 */
   kingdomProfile?: 'city_state' | 'fief' | 'capital';
+  /** 普通野外营地宝物掉落档位（1=低、2=中、3=高）；王国/任务目标不会走普通掉落。 */
+  treasureTier: 1 | 2 | 3;
   defender: Record<string, {
     count: number;
     form: UnitForm;
@@ -515,6 +517,8 @@ export interface GameConstants {
   marchSizePenalty: number;
   /** 军队规模减速：速度倍率下限。 */
   marchSizeMinMultiplier: number;
+  /** 野战/被伏击方达到该战损比例后返城的默认阈值（百分比）。 */
+  marchLossRateDefault: number;
   /** 骑兵兵种代码（由 cavalry_unit_codes 以 | 分隔配置），用于猎马人任务与绞马索效果。 */
   cavalryUnitCodes: string[];
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -662,6 +666,13 @@ export interface GameConstants {
   tradeOrderTtlSec: number;
   /** 宝物掉落：清理野外营地后掉落宝物的总体概率（0-1）。 */
   treasureCampDropChance: number;
+  /** 宝物掉落：普通/中等/高等野外营地总体掉落概率倍率。 */
+  treasureCampDropChanceTier1Multiplier: number;
+  treasureCampDropChanceTier2Multiplier: number;
+  treasureCampDropChanceTier3Multiplier: number;
+  /** 宝物掉落：中/高等营地按稀有度提高 dropRate 权重的倍率底数；稀有度每升一级再乘一次。 */
+  treasureCampRarityMultiplierTier2: number;
+  treasureCampRarityMultiplierTier3: number;
   /** 宝物：贸易中心 NPC 订单池中出现「宝物出售」订单的概率（0-1）。 */
   treasureNpcOfferChance: number;
   /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
@@ -704,6 +715,8 @@ export interface GameConstants {
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
+  /** 声望：商队劫掠每累计掠得多少单位物资扣 1 点声望；余数跨多次劫掠保留。 */
+  caravanRaidReputationGoodsPerPoint: number;
   /** PvP 掠夺/攻城：每拆除建筑一级所需的战力阈值。 */
   pvpRaidPowerPerBuildingLevel: number;
   pvpSiegePowerPerBuildingLevel: number;
@@ -769,7 +782,7 @@ export interface TradeCenterLevel {
   npcStoredRefreshes: number;
 }
 
-export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure';
+export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure' | 'escort';
 
 /** 议会厅可购买服务；所有价格、门槛、数量与延迟来自 kingdom_services.csv。 */
 export interface KingdomServiceDef {
@@ -799,6 +812,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** T2 战略纲领互斥组；同一玩家同组只能确立一项。 */
+  doctrineGroup?: string;
   /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
@@ -1316,7 +1331,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.pve_targets) {
     pveRows = mergeOverridesIntoRows(pveRows, {
       file: 'pve_targets.csv', key: 'id',
-      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop'],
+      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop','treasureTier'],
     }, overrides.pve_targets);
   }
   assertUniqueRows(pveRows, 'pve_targets.csv');
@@ -1329,6 +1344,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
       cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
       kingdomProfile: r.kingdomProfile === 'fief' || r.kingdomProfile === 'capital' ? r.kingdomProfile : (r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state' ? 'city_state' : undefined),
+      // 旧配置没有 treasureTier 时按现有普通营地难度顺序回退：1-2 低、3-5 中、6-8 高。
+      // 显式列值优先，便于配置中心按营地逐项调整。
+      treasureTier: (Math.max(1, Math.min(3, Math.floor(num(r.treasureTier, num(r.id) >= 6 && num(r.id) <= 8 ? 3 : num(r.id) >= 3 && num(r.id) <= 5 ? 2 : 1)))) as 1 | 2 | 3),
       respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
@@ -1428,6 +1446,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
     marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
     marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
+    marchLossRateDefault: Math.max(0, Math.min(100, cn('march_loss_rate_default', 40))),
     cavalryUnitCodes: parseConstantList(cs('cavalry_unit_codes', 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'), 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
@@ -1535,6 +1554,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
     tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
+    // 这些是直接乘在总体掉宝概率上的倍率。默认高档为 1，
+    // 这样即使现有 treasure_camp_drop_chance=1，也能通过低/中档的较低倍率
+    // 保证“难度越高，掉宝越容易”，同时不改写宝物目录 dropRate。
+    treasureCampDropChanceTier1Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier1_multiplier', 0.5)),
+    treasureCampDropChanceTier2Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier2_multiplier', 0.75)),
+    treasureCampDropChanceTier3Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier3_multiplier', 1)),
+    treasureCampRarityMultiplierTier2: Math.max(1, cn('treasure_camp_rarity_multiplier_tier2', 1.25)),
+    treasureCampRarityMultiplierTier3: Math.max(1, cn('treasure_camp_rarity_multiplier_tier3', 1.6)),
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
@@ -1560,6 +1587,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
+    caravanRaidReputationGoodsPerPoint: Math.max(1, Math.floor(cn('caravan_raid_reputation_goods_per_point', 2000))),
     pvpRaidPowerPerBuildingLevel: Math.max(1, cn('pvp_raid_power_per_building_level', 100)),
     pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
     pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
@@ -1658,6 +1686,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      doctrineGroup: r.doctrineGroup?.trim() || undefined,
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
@@ -2087,11 +2116,14 @@ export function validateGameConfig(config: GameConfig): void {
   const knownTribes = new Set(['romans', 'gauls', 'teutons']);
 
   for (const service of Object.values(config.kingdomServices)) {
-    if (!['reinforcement', 'attack', 'supplies', 'treasure'].includes(service.category)) {
+    if (!['reinforcement', 'attack', 'supplies', 'treasure', 'escort'].includes(service.category)) {
       errors.push(`kingdom_services.csv[${service.code}] category 非法：${service.category}`);
     }
-    if ((service.category === 'reinforcement' || service.category === 'attack') && (!service.unitCode || !config.units[service.unitCode])) {
+    if ((service.category === 'reinforcement' || service.category === 'attack' || service.category === 'escort') && (!service.unitCode || !config.units[service.unitCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 兵种 ${service.unitCode ?? '(空)'} 不在 units.csv`);
+    }
+    if (service.category === 'escort' && (!Number.isInteger(service.unitCount) || service.unitCount <= 0)) {
+      errors.push(`kingdom_services.csv[${service.code}] escort unitCount 必须为正整数`);
     }
     if (service.category === 'treasure' && (!service.treasureCode || !config.treasures[service.treasureCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 宝物 ${service.treasureCode ?? '(空)'} 不在 treasures.csv`);
@@ -2168,6 +2200,13 @@ export function validateGameConfig(config: GameConfig): void {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
+    const mainRequires = b.requires.filter((r) => r.kind === 'main');
+    const mainLevels = [...new Set(mainRequires.map((r) => r.level))];
+    if (mainLevels.length > 1) {
+      errors.push(`buildings.csv[${b.kind}] requires 不能包含多个不同的主基地等级`);
+    } else if (mainLevels.length === 1 && mainLevels[0] !== b.mainBaseLevel) {
+      errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 必须与 requires 主基地前置=${mainLevels[0]} 一致`);
+    }
     if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
     if (b.popGrowthPerLevel < 0) errors.push(`buildings.csv[${b.kind}] popGrowthPerLevel 必须≥0（当前${b.popGrowthPerLevel}）`);
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
@@ -2236,6 +2275,7 @@ export function validateGameConfig(config: GameConfig): void {
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
     if (p.faction !== 'neutral' && p.faction !== 'kingdom') errors.push(`pve_targets.csv[${p.type}] faction 必须是 neutral 或 kingdom`);
+    if (p.treasureTier !== 1 && p.treasureTier !== 2 && p.treasureTier !== 3) errors.push(`pve_targets.csv[${p.type}] treasureTier 必须为 1/2/3`);
     // happy_village（幸福村）和 kingdom_city_state（运行时随机生成）允许不在静态守军表中配置。
     if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
     for (const [unitCode, defender] of Object.entries(p.defender)) {
@@ -2319,6 +2359,8 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
+  if (c.treasureCampDropChanceTier1Multiplier < 0 || c.treasureCampDropChanceTier2Multiplier < 0 || c.treasureCampDropChanceTier3Multiplier < 0) errors.push(`game_constants.csv treasure_camp_drop_chance_tier*_multiplier 必须≥0`);
+  if (c.treasureCampRarityMultiplierTier2 < 1 || c.treasureCampRarityMultiplierTier3 < 1) errors.push(`game_constants.csv treasure_camp_rarity_multiplier_tier2/3 必须≥1`);
   if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
   if (c.treasureCarryTroopsPerSlot <= 0) errors.push(`game_constants.csv treasure_carry_troops_per_slot 必须>0（当前${c.treasureCarryTroopsPerSlot}）`);
   if (c.treasureCarryMaxSlots <= 0) errors.push(`game_constants.csv treasure_carry_max_slots 必须>0（当前${c.treasureCarryMaxSlots}）`);
@@ -2340,6 +2382,9 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
     errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
   }
+  if (c.marchLossRateDefault < 0 || c.marchLossRateDefault > 100) {
+    errors.push(`game_constants.csv march_loss_rate_default 必须在[0,100]`);
+  }
   if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
   if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);
   if (c.kingdomCityStateGoldMin < 0 || c.kingdomCityStateGoldMax < c.kingdomCityStateGoldMin) errors.push(`game_constants.csv kingdom_city_state_gold_min/max 范围非法`);
@@ -2354,6 +2399,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.kingdomFiefResourceMin < 0 || c.kingdomFiefResourceMax < c.kingdomFiefResourceMin || c.kingdomCapitalResourceMin < 0 || c.kingdomCapitalResourceMax < c.kingdomCapitalResourceMin) errors.push(`game_constants.csv 王国封地/王都资源范围非法`);
   if (c.kingdomFiefGoldMin < 0 || c.kingdomFiefGoldMax < c.kingdomFiefGoldMin || c.kingdomCapitalGoldMin < 0 || c.kingdomCapitalGoldMax < c.kingdomCapitalGoldMin) errors.push(`game_constants.csv 王国封地/王都金币范围非法`);
   if (c.kingdomPveKilledPopulationPerReputation <= 0 || c.kingdomPveRetaliationChunk <= 0) errors.push(`game_constants.csv 王国 PvE 声望累计参数必须>0`);
+  if (c.caravanRaidReputationGoodsPerPoint <= 0) errors.push(`game_constants.csv caravan_raid_reputation_goods_per_point 必须>0`);
   if (c.kingdomPveRetaliationSiegeThreshold > c.kingdomPveRetaliationRaidThreshold) errors.push(`game_constants.csv 王国 PvE 报复阈值顺序非法`);
   if (c.kingdomFiefMercenaryMinRatio < 0 || c.kingdomFiefMercenaryMaxRatio > 1 || c.kingdomFiefMercenaryMaxRatio < c.kingdomFiefMercenaryMinRatio) errors.push(`game_constants.csv 王国封地雇佣军比例范围非法`);
   if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
@@ -2441,6 +2487,12 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.checkIntervalSec < 1) errors.push(`academy.csv[Lv${a.level}] checkIntervalSec=${a.checkIntervalSec} 必须>0`);
     if (a.baseProbability < 0 || a.baseProbability > 1) errors.push(`academy.csv[Lv${a.level}] baseProbability 必须在[0,1]`);
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
+  }
+  const academyLevels = Object.values(config.academy).sort((a, b) => a.level - b.level);
+  for (let i = 1; i < academyLevels.length; i++) {
+    if (academyLevels[i].checkIntervalSec > academyLevels[i - 1].checkIntervalSec) {
+      errors.push(`academy.csv[Lv${academyLevels[i].level}] 判定间隔不得高于 Lv${academyLevels[i - 1].level}`);
+    }
   }
 
   // 科技效果类型白名单校验：新增 effectType 必须先在源码中接线，否则启动报错

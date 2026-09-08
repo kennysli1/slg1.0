@@ -11,6 +11,6 @@
  * 标记双向绑定——升了不写标记、写了标记不升，都会被拒绝提交。
  * 规矩全文见 docs/00_变更契约.md R6。
  */
-// v7：新战场冻结 role/traits 与阶段游标；旧 rulesetVersion=2 战场继续用 v2 结算。
-// v8：旧进行中战斗统一迁移到 v3 阶段结算；移除 simTraits 与 v2 战斗分支。
-export const SAVE_SCHEMA_VERSION = 8;
+// v8：科技树重构；research resume 审计式清空旧 RP/完成项/在途研发并记录 techTreeVersion。
+// v9：战斗统一迁移至阶段化总攻/总防/生命结算，移除 simTraits 与 v2 分支。
+export const SAVE_SCHEMA_VERSION = 9;

@@ -22,6 +22,7 @@ import './manifest.test.js';
 import './architecture.test.js';
 import './notifications.test.js';
 import './population.test.js';
+import './famine-recovery.test.js';
 // ---- 新增回归测试（阶段 1-3）----
 import './scheduler.test.js';
 import './lock-concurrency.test.js';
@@ -56,6 +57,9 @@ import './task.test.js';
 import './modifier-coverage.test.js';
 import './movement-foreign-visibility.test.js';
 import './caravan-return.test.js';
+import './caravan-support.test.js';
+import './caravan-movement.test.js';
+import './caravan-settlement-recovery.test.js';
 import './caravan-npc-faithful.test.js';
 import './task-flows.test.js';
 import './register-spot.test.js';
