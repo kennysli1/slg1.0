@@ -20,9 +20,19 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   config.units.legionnaire.carry = 10;
   const commands = new CommandBus(), bus = new EventBus(), scheduler = new Scheduler(() => now, true);
   const villages: Record<string, any> = { a: { q: 0, r: 0 }, b: { q: 8, r: 0 }, r: { q: 0, r: 0 } };
-  const grants: any[] = [], returns: any[] = [], reports: any[] = [], foreign: any[] = [], removed: any[] = [], warnings: any[] = [];
-  commands.register<any, any>('player.GetByVillage', ({ payload }: any) => villages[payload.villageId] ? { ok: true, payload: { player: { id: payload.villageId, name: payload.villageId, villages: [{ id: payload.villageId, name: `村${payload.villageId}` }] } } } : { ok: false, payload: {} });
-  commands.register('player.Get', ({ payload }: any) => ({ ok: true, payload: { player: { id: payload.playerId, villages: [{ id: payload.playerId }] } } }));
+  const villageOwners: Record<string, string> = { a: 'a', b: 'b', r: 'r' };
+  const playerVillages: Record<string, Array<{ id: string; name: string }>> = {
+    a: [{ id: 'a', name: '村a' }], b: [{ id: 'b', name: '村b' }], r: [{ id: 'r', name: '村r' }],
+  };
+  const grants: any[] = [], returns: any[] = [], reports: any[] = [], foreign: any[] = [], removed: any[] = [], warnings: any[] = [], reputationRaids: any[] = [];
+  commands.register<any, any>('player.GetByVillage', ({ payload }: any) => {
+    const villageId = String(payload.villageId);
+    const playerId = villageOwners[villageId] ?? villageId;
+    return villages[villageId]
+      ? { ok: true, payload: { player: { id: playerId, name: playerId, villages: playerVillages[playerId] ?? [{ id: villageId, name: `村${villageId}` }] } } }
+      : { ok: false, payload: {} };
+  });
+  commands.register('player.Get', ({ payload }: any) => ({ ok: true, payload: { player: { id: payload.playerId, villages: playerVillages[payload.playerId] ?? [{ id: payload.playerId }] } } }));
   commands.register('world.GetTileByRef', ({ payload }: any) => ({ ok: !!villages[payload.refId], payload: { tile: villages[payload.refId] ? { ...villages[payload.refId], kind: 'village', name: `村${payload.refId}`, refId: payload.refId } : undefined } }));
   commands.register('world.GetTile', () => ({ ok: true, payload: { tile: { terrain: 'plain', kind: 'empty' } } }));
   commands.register('vision.GetVisibility', () => ({ ok: true, payload: { visibility: visible ? 'visible' : 'explored' } }));
@@ -42,6 +52,7 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   commands.register('treasure.LoseCarried', () => ({ ok: true, payload: {} }));
   commands.register('treasure.RestoreCarried', () => ({ ok: true, payload: {} }));
   commands.register('economy.Grant', ({ payload }: any) => { grants.push(payload); return { ok: true, payload: {} }; });
+  commands.register('reputation.ProcessCaravanRaid', ({ payload }: any) => { reputationRaids.push(payload); return { ok: true, payload: {} }; });
   bus.on('movement.CaravanReturned', (e) => { returns.push(e.payload); });
   bus.on('movement.CaravanRaidReport', (e) => { reports.push(e.payload); });
   bus.on('movement.ForeignStepped', (e) => { foreign.push(e.payload); });
@@ -52,7 +63,11 @@ function fixture(store = new MemoryStore(), start = 1_000_000) {
   const combat = new CombatModule(store, bus, commands, scheduler, () => now, config); combat.init();
   new NotificationsModule(store, bus, commands, () => now, config).init();
   const send = (name: string, payload: any) => commands.send({ name, from: 'test', payload });
-  return { store, movement, config, grants, returns, reports, foreign, removed, warnings, commands, bus, send, villages,
+  return { store, movement, config, grants, returns, reports, foreign, removed, warnings, reputationRaids, commands, bus, send, villages,
+    addVillage: (id: string, ownerId: string, pos: { q: number; r: number }) => {
+      villages[id] = pos; villageOwners[id] = ownerId;
+      (playerVillages[ownerId] ??= []).push({ id, name: `村${id}` });
+    },
     clock: () => now,
     setVisible: (v: boolean) => { visible = v; }, setAllied: (v: boolean) => { allied = v; },
     advance: (ms: number) => scheduler.advanceTo(now + ms, (n) => { now = n; }),
@@ -68,6 +83,7 @@ test('商队追赶：段内追上，部分取货后分头原路返程/继续送�
   assert.equal(returned.type, 'return');
   assert.ok(returned.pos.q > 0 && returned.pos.q < 1, '必须在段内相遇原地掉头，不能跳到格心');
   assert.deepEqual(returned.loot, { wood: 30 });
+  assert.deepEqual(f.reputationRaids[0].loot, { wood: 30 });
   assert.deepEqual(f.store.get<any>('movement', car).cargo, { wood: 70 });
   assert.equal(f.reports[0].outcome, 'partial_delivery');
   assert.equal(f.reports[0].destinationVillageName, '村b');
@@ -75,6 +91,20 @@ test('商队追赶：段内追上，部分取货后分头原路返程/继续送�
   assert.equal(f.grants.find((x) => x.villageId === 'r')?.gain.wood, 30);
   assert.equal(f.grants.find((x) => x.villageId === 'b')?.gain.wood, 70);
   assert.equal(f.returns.length, 1);
+});
+
+test('商队追兵：只按当前商队位置计算最短追赶路径，不拼接商队送货路线', async () => {
+  const f = fixture();
+  // 让追兵与商队不在同一路线上；旧实现会把商队剩余路线拼到追兵路径末尾。
+  f.villages.r = { q: 0, r: 8 };
+  const car = await f.caravan();
+  await f.advance(1_200);
+  const caravan = f.store.get<any>('movement', car)!;
+  const chase = (f.movement as any).caravanChasePath({ q: 0, r: 8 }, caravan) as Array<{ q: number; r: number }>;
+  const current = (f.movement as any).caravanPosition(caravan) as { q: number; r: number };
+  assert.deepEqual(chase[chase.length - 1], current, '追兵路径终点应是商队当前连续位置');
+  assert.notDeepEqual(chase[chase.length - 1], caravan.path[caravan.path.length - 1], '追兵不应沿用商队目的地尾段');
+  assert.ok(chase.length <= 11, '追兵路径应是出发点到当前商队格的短路径');
 });
 
 test('抢空商队：立即原路回家，路线仅在返家释放，空返商队再被追上没有货物', async () => {
@@ -110,6 +140,25 @@ test('权限与隐藏：自己相关商队仅护送，盟友商队不能劫掠�
   assert.equal((await f.send('movement.ProtectCaravan', { villageId: 'a', targetMovementId: car, troops: { legionnaire: 2 } })).ok, false);
 });
 
+test('商队状态隐藏：第三方返程时仍只看到原送货目的地，所属玩家可看到返程', async () => {
+  const f = fixture(); const car = await f.caravan();
+  const delivery = await f.send('movement.ListForeign', { playerId: 'r' });
+  const publicCaravan = (delivery.payload as any).movements.find((m: any) => m.id === car);
+  assert.equal(publicCaravan.caravan.phase, 'delivery');
+  assert.equal(publicCaravan.caravan.destinationVillageId, 'b');
+
+  await (f.movement as any).startReturn(f.store.get('movement', car));
+  const returning = await f.send('movement.ListForeign', { playerId: 'r' });
+  const hiddenReturn = (returning.payload as any).movements.find((m: any) => m.id === car);
+  assert.equal(hiddenReturn.caravan.phase, 'delivery', '第三方不能判断商队已返程');
+  assert.equal(hiddenReturn.caravan.destinationVillageId, 'b', '第三方仍看到原送货目的地');
+
+  const ownerView = await f.send('movement.ListPlayer', { playerId: 'a' });
+  const ownerCaravan = (ownerView.payload as any).movements.find((m: any) => m.id === car);
+  assert.equal(ownerCaravan.caravan.phase, 'return');
+  assert.equal(ownerCaravan.caravan.destinationVillageId, 'a');
+});
+
 test('商队劫掠初始预警：派出瞬间向商队所属玩家的可见村庄推送', async () => {
   const f = fixture();
   const car = await f.caravan();
@@ -126,6 +175,18 @@ test('商队劫掠初始预警：派出瞬间向商队所属玩家的可见村�
     (playerView.payload as any).incomingWarnings.some((warning: any) => warning.id === raid.id),
     '受害玩家的玩家级行军列表必须包含商队劫掠预警',
   );
+});
+
+test('玩家级商队劫掠预警：同一商队不会因受害方有多个村庄而重复显示', async () => {
+  const f = fixture();
+  f.addVillage('a2', 'a', { q: 1, r: 0 });
+  const car = await f.caravan();
+  await f.advance(200);
+  await f.mission(car, 'Raid', 'r');
+  const raid = f.store.all<any>('movement').find((m) => m.type === 'caravan_raid');
+  const playerView = await f.send('movement.ListPlayer', { playerId: 'a' });
+  const warnings = (playerView.payload as any).incomingWarnings.filter((warning: any) => warning.id === raid.id);
+  assert.equal(warnings.length, 1);
 });
 
 test('驻扎军劫掠商队复用原 movement：不会从城镇重新派出一支军队', async () => {
@@ -148,8 +209,9 @@ test('驻扎军劫掠商队复用原 movement：不会从城镇重新派出一�
   assert.equal(f.store.get<any>('movement', (continued.payload as any).id)?.id, garrisonId);
 });
 
-test('护送：段内会合与商队同速，第三方不可见军队，抵达原派兵村直接收兵', async () => {
+test('护送：段内会合与商队同速，商队相关玩家可见，第三方不可见，抵达原派兵村直接收兵', async () => {
   const f = fixture(); const car = await f.caravan(); await f.advance(200);
+  const foreignBeforeAttach = f.foreign.length;
   const escort = await f.mission(car, 'Escort', 'b');
   await f.advance(3_000);
   assert.equal(f.store.get<any>('movement', escort).caravanMission.attached, true);
@@ -157,6 +219,18 @@ test('护送：段内会合与商队同速，第三方不可见军队，抵达�
   const army = (wire.payload as any).movements.find((m: any) => m.id === escort);
   const caravan = f.store.get<any>('movement', car);
   assert.deepEqual(army.pos, caravan.pos); assert.equal(army.nextStepAt, caravan.nextStepAt);
+  assert.equal(army.perStepMs, caravan.perStepMs, '护送军应与商队使用同一段计时');
+  assert.deepEqual(army.path, caravan.path, '护送军地图路径应跟随商队当前路径');
+  const originView = await f.send('movement.ListForeign', { playerId: 'a' });
+  const originEscort = (originView.payload as any).movements.find((m: any) => m.id === escort);
+  assert.ok(originEscort, '商队出发方应能看到他人护送军');
+  assert.equal(originEscort.escortAttached, true);
+  assert.equal(originEscort.escortCaravanId, car);
+  const escortPushes = f.foreign.slice(foreignBeforeAttach).filter((event: any) => event.army?.id === escort && event.army?.escortAttached);
+  assert.ok(escortPushes.some((event: any) => event.army?.id === escort && event.playerIds.includes('a')),
+    '商队步进应向出发方推送护送军图标');
+  assert.equal(escortPushes.some((event: any) => event.army?.id === escort && event.playerIds.includes('r')), false,
+    '护送军步进不得向第三方推送');
   const foreign = await f.send('movement.ListForeign', { playerId: 'r' });
   assert.equal((foreign.payload as any).movements.some((m: any) => m.id === escort), false);
   assert.ok(f.removed.some((e) => e.id === escort && e.playerIds.includes('r')), '合体时立即移除此前的外军图标');

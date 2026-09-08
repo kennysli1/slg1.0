@@ -52,7 +52,9 @@ if (hasShared) {
   run('typecheck');
   run('test:all');
 } else {
-  if (hasServer) {
+  // CSV 配置直接驱动服务端领域逻辑；配置校验只能保证表结构，不能发现
+  // Scheduler、状态机等运行时回归。因此配置改动与服务端改动同样跑回归。
+  if (hasServer || hasConfig) {
     run('build:shared');
     run('lint');
     run('test:server');

@@ -99,6 +99,7 @@ test('GM 面板：不存在的复合主键应是 no-op（不报错、不新增�
 test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 residence maxLevel=5）', () => {
   const table = BALANCE_TABLES['buildings'];
   assert.ok(table.key && !table.keyComposite, 'buildings 应为单主键');
+  assert.ok(table.text?.includes('requires'), '建筑表应开放 requires 前置字段编辑');
   withTmp((tmp) => {
     // residence 的 id=16（从配置读，避免硬编码）
     const resId = String(loadGameConfig(configDir).buildings['residence'].id);
@@ -107,6 +108,65 @@ test('GM 面板：单主键建筑表（buildings）编辑 round-trip（改 resid
     assert.equal(cfg.buildings['residence'].maxLevel, 5, 'residence maxLevel 应改为 5');
     assert.equal(cfg.buildings['main'].maxLevel, 4, 'main maxLevel 应保持新版四级主基地');
   });
+});
+
+test('GM 面板：建筑 requires 前置写回并进入运行时配置', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { requires: '1:2' } });
+    const cfg = loadGameConfig(tmp);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 2 }], '马厩前置应可由配置中心改为二级主基地');
+    const raw = readFileSync(join(tmp, 'buildings.csv'), 'utf8');
+    assert.match(raw, /^5,stable,[^\r\n]*,1:2,/m, 'buildings.csv 应写回 stable 的 1:2 前置');
+  });
+});
+
+test('GM 面板：建筑 mainBaseLevel 修改会同步 requires 中的主基地前置', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { mainBaseLevel: '4' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.stable.mainBaseLevel, 4);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 4 }]);
+  });
+});
+
+test('GM 面板：建筑 requires 中的主基地前置修改会同步 mainBaseLevel', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['5']: { requires: '1:3' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.stable.mainBaseLevel, 3);
+    assert.deepEqual(cfg.buildings.stable.requires, [{ kind: 'main', level: 3 }]);
+  });
+});
+
+test('GM 面板：建筑两个主基地字段同时修改但不一致时拒绝保存', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    assert.throws(
+      () => applyBalanceEdits(configDir, tmp, table, { ['5']: { mainBaseLevel: '4', requires: '1:3' } }),
+      /不一致/,
+    );
+  });
+});
+
+test('GM 面板：非主基地 requires 不被联动规则改写', () => {
+  const table = BALANCE_TABLES['buildings'];
+  withTmp((tmp) => {
+    applyBalanceEdits(configDir, tmp, table, { ['8']: { mainBaseLevel: '2' } });
+    const cfg = loadGameConfig(tmp);
+    assert.equal(cfg.buildings.smithy.mainBaseLevel, 2);
+    assert.deepEqual(cfg.buildings.smithy.requires, [{ kind: 'academy', level: 1 }]);
+  });
+});
+
+test('建筑配置：所有 requires=1:n 均与 mainBaseLevel 对齐', () => {
+  const cfg = loadGameConfig(configDir);
+  for (const [code, building] of Object.entries(cfg.buildings)) {
+    const mainReqs = building.requires.filter((req) => req.kind === 'main');
+    assert.ok(mainReqs.every((req) => req.level === building.mainBaseLevel), `${code} 的主基地前置应与 mainBaseLevel 一致`);
+  }
 });
 
 test('GM 面板：兵种视野可编辑并由配置加载为运行时权威值', () => {
@@ -124,14 +184,12 @@ test('GM 面板：兵种视野可编辑并由配置加载为运行时权威值',
 test('GM 面板：兵种线上/模拟器特性引用可随统一 CSV 一起保存', () => {
   const table = BALANCE_TABLES['units'];
   assert.ok(table.text?.includes('traits'), 'GM units 白名单必须包含线上特性列');
-  assert.ok(table.text?.includes('simTraits'), 'GM units 白名单必须包含模拟器特性列');
   withTmp((tmp) => {
     const phalanxId = String(loadGameConfig(configDir).units.phalanx.id);
     applyBalanceEdits(configDir, tmp, table, {
-      [phalanxId]: { traits: '6|18|23', simTraits: '13|18|23' },
+      [phalanxId]: { traits: 'gaul_phalanx_guard' },
     });
     const cfg = loadGameConfig(tmp);
-    assert.deepEqual(cfg.units.phalanx.traits, ['spear_wall', 'brace', 'gaul_origin_defense']);
-    assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
+    assert.deepEqual(cfg.units.phalanx.traits, ['gaul_phalanx_guard']);
   });
 });

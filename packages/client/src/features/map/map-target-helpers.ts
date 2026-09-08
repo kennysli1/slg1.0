@@ -57,6 +57,7 @@ export function displayGridForMovement(
 
 export function foreignArmyName(m: ForeignArmy): string {
   if (m.caravan) return `${m.ownerPlayerName ? `${m.ownerPlayerName} 的` : ''}商队 → ${m.caravan.destinationVillageName}`;
+  if (m.escortAttached) return `${m.ownerPlayerName ? `${m.ownerPlayerName} 的` : ''}护送军`;
   return m.ownerPlayerName ? `${m.ownerPlayerName} 的军队` : '敌方军队';
 }
 

@@ -638,6 +638,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
     numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    text: ['requires'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -649,10 +650,16 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   units: {
     file: 'units.csv', key: 'id',
     numeric: ['attack', 'defense', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
-    // 兵种的线上展示特性与模拟器特性同样属于配置中心可维护的文本字段。
-    // 这样在统一攻防/生命字段迁移后，保存兵种数值时不会把特性列留在旧共享表。
-    text: ['traits', 'simTraits'],
+     // 兵种的线上展示特性与模拟器特性同样属于配置中心可维护的文本字段。
+     // 这样在统一攻防/生命字段迁移后，保存兵种数值时不会把特性列留在旧共享表。
+     text: ['role', 'traits'],
     labels: ['id', 'code', 'name', 'tribe'],
+  },
+  unit_traits: {
+    file: 'unit_traits.csv', key: 'id',
+    numeric: ['value1', 'value2', 'value3'],
+    text: ['effect1', 'phase1', 'effect2', 'phase2', 'effect3', 'phase3'],
+    labels: ['id', 'code', 'name'],
   },
   // 雇佣兵（tribe=merc）：可编辑战斗属性 + 单价；upkeep/cost*/trainSec/popCost 由引擎强制为 0（不经训练队列），故不在此暴露
   mercenaries: {
@@ -680,7 +687,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   pve_targets: {
     file: 'pve_targets.csv', key: 'id',
-    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'],
+    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop', 'treasureTier'],
     labels: ['id', 'code', 'name'],
   },
   pve_defenders: {
@@ -763,6 +770,56 @@ function isBalanceKeyCol(col: string, table: BalanceTable): boolean {
   return table.keyComposite ? table.keyComposite.includes(col) : col === (table.key ?? '');
 }
 
+/**
+ * 建筑表的主基地门槛有两个历史字段：mainBaseLevel 与 requires 中的 1:n。
+ * 1:n 只是通用建筑前置语法中对主基地(id=1)的表达；两者同时存在时必须
+ * 指向同一个等级，否则运行时会出现“主基地栏写二级、前置又要求五级”的
+ * 隐藏额外门槛。配置中心修改任一字段时，将另一字段一并同步。
+ */
+function syncBuildingMainRequirement(orig: CsvRow, merged: CsvRow, inc: Record<string, string>): void {
+  const hasMainEdit = inc.mainBaseLevel !== undefined && inc.mainBaseLevel !== '';
+  const hasRequiresEdit = inc.requires !== undefined && inc.requires !== '';
+  if (!hasMainEdit && !hasRequiresEdit) return;
+
+  const parseMainLevel = (value: string): number | undefined => {
+    const levels = value.split('|')
+      .map((part) => part.trim())
+      .filter((part) => /^1:\d+$/.test(part))
+      .map((part) => Number(part.slice(2)));
+    const unique = [...new Set(levels)];
+    if (unique.length > 1) throw new Error(`buildings.csv 行 ${orig.id} 的 requires 含有多个不一致的主基地前置`);
+    return unique[0];
+  };
+
+  const requestedMain = hasMainEdit ? Number(inc.mainBaseLevel) : undefined;
+  if (requestedMain !== undefined && (!Number.isFinite(requestedMain) || requestedMain < 1)) {
+    throw new Error(`buildings.csv 行 ${orig.id} 字段 mainBaseLevel 必须是≥1的数字`);
+  }
+  const reqValue = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  // 只修改 mainBaseLevel 时，旧的 requires 值是待被同步的旧值，不能当作冲突；
+  // 只有玩家同时提交 requires 时，才用它参与一致性校验。
+  const requestedFromRequires = hasRequiresEdit ? parseMainLevel(reqValue) : undefined;
+  if (requestedMain !== undefined && requestedFromRequires !== undefined && requestedMain !== requestedFromRequires) {
+    throw new Error(`buildings.csv 行 ${orig.id} 的 mainBaseLevel=${requestedMain} 与 requires 主基地前置=${requestedFromRequires} 不一致；请只修改一个或填相同值`);
+  }
+
+  const level = requestedMain ?? requestedFromRequires;
+  if (level === undefined) return;
+
+  // 只替换已有的主基地前置；没有 1:n 的建筑（例如 smithy 的 7:1）
+  // 保持纯“其他建筑”依赖，不强行新增主基地 token。
+  const sourceRequires = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  const parts = sourceRequires.split('|').map((part) => part.trim()).filter(Boolean);
+  let replaced = false;
+  const next = parts.map((part) => {
+    if (!/^1:\d+$/.test(part)) return part;
+    replaced = true;
+    return `1:${level}`;
+  });
+  if (replaced) merged.requires = next.join('|');
+  if (requestedFromRequires !== undefined && !hasMainEdit) merged.mainBaseLevel = String(level);
+}
+
 export function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
   const doc = parseCsvStructured(readFileSync(join(srcDir, table.file), 'utf8'));
   const incByKey = new Map(Object.entries(changes));
@@ -796,6 +853,7 @@ export function applyBalanceEdits(srcDir: string, targetDir: string, table: Bala
       }
       // 非声明可编辑字段：忽略（不覆盖原值）
     }
+    if (table.file === 'buildings.csv') syncBuildingMainRequirement(orig, merged, inc);
     return merged;
   });
   writeFileSync(join(targetDir, table.file), serializeCsv(doc), 'utf8');
@@ -877,7 +935,8 @@ function sectionGeneric(table){
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
     var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
     var tradeKeys = {}; for (var tri=0;tri<TRADE_ROWS.length;tri++) tradeKeys[TRADE_ROWS[tri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeys = {}; for (var tci=0;tci<TREASURE_CAMP_ROWS.length;tci++) treasureCampKeys[TREASURE_CAMP_ROWS[tci][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && !treasureCampKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
@@ -885,7 +944,8 @@ function sectionGeneric(table){
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
     var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
     var tradeKeysOnly = {}; for (var atk=0;atk<TRADE_ROWS.length;atk++) tradeKeysOnly[TRADE_ROWS[atk][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeysOnly = {}; for (var tco=0;tco<TREASURE_CAMP_ROWS.length;tco++) treasureCampKeysOnly[TREASURE_CAMP_ROWS[tco][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && !treasureCampKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
   var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
@@ -985,6 +1045,7 @@ var REP_ROWS = [
   ['reputation_good_gold_tax_penalty_cap','正声望税收下降上限','正声望金币税收下降倍率上限'],
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
+  ['caravan_raid_reputation_goods_per_point','商队劫掠物资声望阈值','每累计掠得多少单位物资扣1点声望；跨多次劫掠累加'],
 ];
 
 var KINGDOM_ROWS = [
@@ -1046,6 +1107,7 @@ var MARCH_SIZE_ROWS = [
   ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
   ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
   ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+  ['march_loss_rate_default','默认战损返城阈值','野战/被伏击方达到该战损比例后返城；玩家可在派兵界面覆盖'],
 ];
 function sectionMarchSize(){
   var rows = DATA.constants || [], byKey = {};
@@ -1055,8 +1117,9 @@ function sectionMarchSize(){
   for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
     var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
     var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    var max = item[0] === 'march_loss_rate_default' ? '100' : '';
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
-    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td><input type="number" min="'+min+'"'+(max ? ' max="'+max+'"' : '')+' step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
@@ -1088,6 +1151,31 @@ function sectionTrade(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>贸易参数</h2>'+h+'</div>';
+}
+
+// ── 野外营地宝物掉落专用视图：总体命中倍率与稀有度权重写入 game_constants.csv。 ──
+var TREASURE_CAMP_ROWS = [
+  ['treasure_camp_drop_chance','基础掉宝概率','清理野外营地后先按此总体概率判定是否掉宝'],
+  ['treasure_camp_drop_chance_tier1_multiplier','低难度营地掉宝倍率','低难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier2_multiplier','中难度营地掉宝倍率','中难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier3_multiplier','高难度营地掉宝倍率','高难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_rarity_multiplier_tier2','中难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+  ['treasure_camp_rarity_multiplier_tier3','高难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+];
+function sectionTreasureCamp(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">宝物目录中的 dropRate 不会被改写。清营时先用基础掉宝概率 × 营地档位倍率做总体命中，再按 dropRate 轮盘抽取；中/高难度营地只临时提高稀有、史诗、传说宝物的权重。pve_targets.csv 的 treasureTier 可逐营地调整档位。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TREASURE_CAMP_ROWS.length;j++){
+    var item = TREASURE_CAMP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0].indexOf('rarity_multiplier') >= 0 ? '1' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>野外营地宝物掉落参数</h2>'+h+'</div>';
 }
 
 // ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
@@ -1365,9 +1453,9 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
+  var bFields = ['maxLevel','maxCount','mainBaseLevel','requires','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','建筑前置（数字ID:等级）','繁荣/级','人口增长/级·时'];
+  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。主基地等级与 requires 中的 1:n 前置会自动联动；requires 中其他建筑前置保持不变。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -1391,7 +1479,9 @@ function sectionBuildings(){
         var f0 = bFields[bf];
         var val0 = bld[f0]==null?'':bld[f0];
         h += '<label style="font-size:10px;color:#7a86a8;margin-left:4px;white-space:nowrap">'+bLabels[bf]+':</label> ';
-        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:62px;font-size:11px">';
+        var inputType = f0 === 'requires' ? 'text' : 'number';
+        var inputWidth = f0 === 'requires' ? '112px' : '62px';
+        h += '<input type="'+inputType+'" '+(inputType === 'number' ? 'step="any" ' : '')+'value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:'+inputWidth+';font-size:11px">';
       }
       h += '</div>';
     }
@@ -1505,6 +1595,7 @@ function render(){
   html += sectionTerrain();
   html += sectionMarchSize();
   html += sectionTrade();
+  html += sectionTreasureCamp();
   html += sectionCavalry();
   html += sectionHorseHunter();
   html += sectionCityState();
@@ -1518,11 +1609,43 @@ function render(){
   document.getElementById('tables').innerHTML = html;
 }
 
-function onEdit(el){
-  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+function recordEdit(t,k,f,v){
   if (!CHANGES[t][k]) CHANGES[t][k] = {};
   if (v==='') delete CHANGES[t][k][f];
   else CHANGES[t][k][f] = v;
+}
+
+function linkedBuildingInput(k,f){
+  var all = document.querySelectorAll('input[data-t="buildings"]');
+  for (var i=0;i<all.length;i++) if (all[i].dataset.k===k && all[i].dataset.f===f) return all[i];
+  return null;
+}
+
+function syncBuildingInputs(k,f,v){
+  if (v === '') return;
+  if (f === 'mainBaseLevel' && /^\d+$/.test(v)){
+    var req = linkedBuildingInput(k,'requires');
+    if (!req) return;
+    var parts = req.value.split('|').map(function(part){ return part.trim(); }).filter(Boolean);
+    var replaced = false;
+    parts = parts.map(function(part){
+      if (!/^1:\d+$/.test(part)) return part;
+      replaced = true;
+      return '1:'+v;
+    });
+    if (replaced){ req.value = parts.join('|'); recordEdit('buildings',k,'requires',req.value); }
+  } else if (f === 'requires'){
+    var match = v.match(/(?:^|\|)\s*1:(\d+)(?:\||$)/);
+    if (!match) return;
+    var main = linkedBuildingInput(k,'mainBaseLevel');
+    if (main){ main.value = match[1]; recordEdit('buildings',k,'mainBaseLevel',match[1]); }
+  }
+}
+
+function onEdit(el){
+  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+  recordEdit(t,k,f,v);
+  if (t === 'buildings' && (f === 'mainBaseLevel' || f === 'requires')) syncBuildingInputs(k,f,v);
   status('已修改「'+t+' / '+k+' / '+f+'」，记得点保存');
 }
 

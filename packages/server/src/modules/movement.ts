@@ -82,6 +82,8 @@ interface MovementRecord {
   caravanDestination?: string;
   /** 战斗类型：玩家村 raid=掠夺、siege=攻城；ambush=伏击；PvE/旧存档为空。 */
   battleType?: 'raid' | 'siege' | 'ambush';
+  /** 急行军在出征时冻结；返程、攻城、商队与拓荒均不会写入。 */
+  rapidRaidBonus?: number;
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -135,6 +137,14 @@ interface MovementRecord {
   reinforcementSnapshot?: Snapshot;
   /** 该支增援独立的掠夺防守配置；旧记录缺省为全军参与。 */
   reinforcementRaidDefense?: { enabled: boolean; troops: Record<string, number> };
+  /** 玩家派出时设置的野战/被伏击方战损返城阈值（百分比）。 */
+  lossRate?: number;
+  /** 首次离城时的实际兵力（按单位数量，不按 popCost）；用于多次遭遇累计战损。 */
+  initialTroopCount?: number;
+  /** 野战中该军是否是主动追击方；预留给追击行军，普通交叉相遇为 false。 */
+  fieldPursuer?: boolean;
+  /** 野战胜利缴获、尚未随军返城交付的敌方宝物。 */
+  capturedTreasures?: string[];
   /** 拓荒发起玩家（found 到达建村用） */
   founderPlayerId?: string;
   departAt: number;
@@ -435,6 +445,9 @@ export class MovementModule {
     return {
       id: mv.id,
       type: mv.type,
+      ...(mv.caravanMission?.attached && mv.targetMovementId
+        ? { escortCaravanId: mv.targetMovementId, escortAttached: true }
+        : {}),
       status: mv.status,
       ownerPlayerId: owner.playerId,
       ownerPlayerName: owner.name,
@@ -467,17 +480,20 @@ export class MovementModule {
     // 长时间空转占用 CPU，并让双方按当前位置正常返村。
     void this.cancelScoutEncounters({ name: 'movement.CancelScoutEncounters', from: MovementModule.NAME, payload: {} });
     // 先汇总各村的在途部队 popCost 总量 + 在途兵力，恢复 population.SetEnRoutePop 与 military 粮耗。
-    const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number> }>();
+    const enRouteByVillage = new Map<string, { popCostSum: number; marching: Record<string, number>; movements: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> }>();
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       const popSum = this.calcTroopsPopCost(mv.troops);
       if (mv.npcService) continue;
-      const cur = enRouteByVillage.get(mv.fromVillage) ?? { popCostSum: 0, marching: {} };
+      const cur = enRouteByVillage.get(mv.fromVillage) ?? { popCostSum: 0, marching: {}, movements: [] };
       cur.popCostSum += popSum;
       for (const [unit, n] of Object.entries(mv.troops)) {
         cur.marching[unit] = (cur.marching[unit] ?? 0) + n;
       }
+      cur.movements.push({ troops: mv.troops, upkeepMultiplier: this.marchingUpkeepMultiplier(mv) });
       enRouteByVillage.set(mv.fromVillage, cur);
     }
+    // 先由军事 owner 清零旧在途快照，避免崩溃后已到达/死亡的旧记录残留军粮。
+    void this.commands.send({ name: 'military.ClearMarchingTroops', from: MovementModule.NAME, payload: {} });
     for (const [villageId, data] of enRouteByVillage) {
       void this.commands.send({
         name: 'population.SetEnRoutePop',
@@ -487,7 +503,7 @@ export class MovementModule {
       void this.commands.send({
         name: 'military.SetMarchingTroops',
         from: MovementModule.NAME,
-        payload: { villageId, troops: data.marching },
+        payload: { villageId, troops: data.marching, movements: data.movements },
       });
     }
 
@@ -532,6 +548,28 @@ export class MovementModule {
     return Math.max(0, raw);
   }
 
+  private normalizeLossRate(raw: unknown): number {
+    const value = Number(raw);
+    const fallback = Number(this.config.constants.marchLossRateDefault ?? 40);
+    return Math.max(0, Math.min(100, Number.isFinite(value) ? value : (Number.isFinite(fallback) ? fallback : 40)));
+  }
+
+  private troopCount(troops: Record<string, number> | undefined): number {
+    return Object.values(troops ?? {}).reduce((sum, raw) => sum + Math.max(0, Math.floor(Number(raw) || 0)), 0);
+  }
+
+  private lossThresholdExceeded(mv: MovementRecord, survivors: Record<string, number>): boolean {
+    const initial = Math.max(1, Math.floor(Number(mv.initialTroopCount) || this.troopCount(mv.troops)));
+    const remaining = this.troopCount(survivors);
+    const rate = this.normalizeLossRate(mv.lossRate);
+    // 需求定义为严格小于出发兵力×(1-损失率)；恰好达到阈值仍继续原行动。
+    return remaining < initial * (1 - rate / 100);
+  }
+
+  private originIsVillage(mv: MovementRecord): boolean {
+    return !mv.fromVillage.startsWith('task:') && !mv.fromVillage.startsWith('npc:');
+  }
+
   /** 计算一支部队的有效人口（只计实际携带且数量大于0的兵）。 */
   private armyPopulation(troops: Record<string, number>): number {
     let sum = 0;
@@ -570,12 +608,14 @@ export class MovementModule {
     if (!villageId || villageId.startsWith('task:')) return;
     let total = 0;
     const marching: Record<string, number> = {};
+    const movements: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (mv.npcService || mv.fromVillage !== villageId) continue;
       total += this.calcTroopsPopCost(mv.troops);
       for (const [unit, n] of Object.entries(mv.troops)) {
         marching[unit] = (marching[unit] ?? 0) + n;
       }
+      movements.push({ troops: mv.troops, upkeepMultiplier: this.marchingUpkeepMultiplier(mv) });
     }
     void this.commands.send({
       name: 'population.SetEnRoutePop',
@@ -586,8 +626,13 @@ export class MovementModule {
     void this.commands.send({
       name: 'military.SetMarchingTroops',
       from: MovementModule.NAME,
-      payload: { villageId, troops: marching },
+      payload: { villageId, troops: marching, movements },
     });
+  }
+
+  /** 急行粮耗只在带有出征快照的 raid 去程生效；返程记录绝不继承该字段。 */
+  private marchingUpkeepMultiplier(mv: MovementRecord): number {
+    return mv.type === 'raid' && mv.status === 'marching' && (mv.rapidRaidBonus ?? 0) > 0 ? 1.5 : 1;
   }
 
   private load(id: string): MovementRecord | undefined {
@@ -903,7 +948,14 @@ export class MovementModule {
       .map((m) => this.wireWithCaravan(m, '', playerId)));
     const incomingWarnings = (await Promise.all(
       [...villageIds].map((villageId) => this.listIncomingWarnings(villageId)),
-    )).flat().sort((a, b) => a.arriveAt - b.arriveAt);
+    )).flat().reduce<IncomingWarning[]>((unique, warning) => {
+      // 商队劫掠预警会发给商队所属玩家的所有村庄；玩家级快照
+      // 汇总这些村庄时，同一支劫掠军只能显示一张预警卡。
+      // 普通 PvP 来袭以 targetVillage 区分，不能在这里合并。
+      if (warning.caravanRaid && unique.some((item) => item.id === warning.id)) return unique;
+      unique.push(warning);
+      return unique;
+    }, []).sort((a, b) => a.arriveAt - b.arriveAt);
     return { ok: true, payload: { movements, incomingWarnings } };
   }
 
@@ -980,7 +1032,11 @@ export class MovementModule {
         const sight = this.config.units[code]?.vision ?? 1;
         if (count > most || (count === most && sight > radius)) { most = count; radius = sight; }
       }
-      if (most > 0) sources.push({ ...this.caravanGrid(mv.pos), radius: mv.type === 'ambush' ? 1 : radius, terrainAware: true });
+      if (most > 0) {
+        const effects = await this.commands.send({ name: 'treasure.GetCarriedEffects', from: MovementModule.NAME, payload: { movementId: mv.id } });
+        const treasureBonus = effects.ok ? Math.max(0, Number((effects.payload as any)?.effects?.armyVisionBonus) || 0) : 0;
+        sources.push({ ...this.caravanGrid(mv.pos), radius: mv.type === 'ambush' ? 1 : radius + treasureBonus, terrainAware: true });
+      }
     }
     return { ok: true, payload: { sources } };
   }
@@ -1020,9 +1076,11 @@ export class MovementModule {
     const out: ForeignArmy[] = [];
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!mv.fromVillage || !mv.pos) continue;
+      const attachedCaravan = mv.caravanMission?.attached ? this.load(mv.targetMovementId ?? '') : undefined;
+      const escortForPlayer = !!attachedCaravan && await this.caravanRelatedToPlayer(attachedCaravan, playerId);
       // 侦察部队不产生地图外军标记；无论是主动侦察还是途中拦截侦察，
       // 都只对派出方可见，不能被目标或第三方通过地图轮询/推送发现。
-      if (this.isScoutMovement(mv) || mv.caravanMission?.attached) continue;
+      if (this.isScoutMovement(mv) || (mv.caravanMission?.attached && !escortForPlayer)) continue;
       const grid = this.caravanGrid(mv.pos);
       const key = `${grid.q},${grid.r}`;
       const incomingCaravan = mv.type === 'caravan' && !mv.returning && mv.targetVillage && await this.ownerOf(mv.targetVillage) === playerId;
@@ -1030,7 +1088,7 @@ export class MovementModule {
         // 伏击军的隐蔽性不受城池视野影响：只有查看方自己的地图单位在一格内时可见。
         const nearby = await this.hasNearbyArmySource(playerId, mv.pos);
         if (!nearby) continue;
-      } else if (!visible.has(key) && !incomingCaravan) continue;
+      } else if (!visible.has(key) && !incomingCaravan && !escortForPlayer) continue;
       // 王国 NPC 行军使用 `kingdom-fief:*` / `task:*` 等内部来源 ID，
       // 没有对应的玩家村庄，不能走 player.GetByVillage；否则移动中的
       // 王国军队（尤其是复仇军返程）会在地图外军列表里被静默丢弃。
@@ -1101,6 +1159,12 @@ export class MovementModule {
     return radius;
   }
 
+  private async visionRadiusForMovement(mv: MovementRecord): Promise<number> {
+    const base = this.visionRadius(mv.troops);
+    const effects = await this.commands.send({ name: 'treasure.GetCarriedEffects', from: MovementModule.NAME, payload: { movementId: mv.id } });
+    return base + (effects.ok ? Math.max(0, Number((effects.payload as any)?.effects?.armyVisionBonus) || 0) : 0);
+  }
+
   private async targetVisibility(villageId: string, target: Hex): Promise<{ visibility: string; unexploredDepth: number } | null> {
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
@@ -1138,7 +1202,7 @@ export class MovementModule {
 
   /** 行军起步与每一步都将当时视野写入探索历史；无需依赖客户端刷新地图。 */
   private async revealVision(mv: MovementRecord, revealId?: string): Promise<Array<{ q: number; r: number; kind: string; refId?: string; name?: string }>> {
-    const radius = mv.type === 'ambush' ? 1 : this.visionRadius(mv.troops);
+    const radius = mv.type === 'ambush' ? 1 : await this.visionRadiusForMovement(mv);
     const owner = await this.commands.send({ name: 'player.GetByVillage', from: MovementModule.NAME, payload: { villageId: mv.fromVillage } });
     const playerId = owner.ok ? (owner.payload as any)?.player?.id : undefined;
     if (!playerId) return [];
@@ -1283,8 +1347,8 @@ export class MovementModule {
 
   /** 派兵至已知空地，抵达时在野外驻扎。未探索格必须改用 SendExplore。 */
   private async sendGarrison(cmd: Command): Promise<CommandResult> {
-    const { villageId, q, r, troops, treasures } = cmd.payload as {
-      villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[];
+    const { villageId, q, r, troops, treasures, lossRate } = cmd.payload as {
+      villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[]; lossRate?: number;
     };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -1307,7 +1371,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = await this.launch({ id, type: 'garrison', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'garrison', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -1335,8 +1399,8 @@ export class MovementModule {
 
   /** 派兵调查任务营地：抵达后不战斗，直接驻扎并通知任务模块。 */
   private async sendInvestigate(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetId, troops, treasures } = cmd.payload as {
-      villageId: string; targetId: string; troops: Record<string, number>; treasures?: string[];
+    const { villageId, targetId, troops, treasures, lossRate } = cmd.payload as {
+      villageId: string; targetId: string; troops: Record<string, number>; treasures?: string[]; lossRate?: number;
     };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -1361,7 +1425,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = await this.launch({ id, type: 'investigate', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'investigate', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -1371,8 +1435,8 @@ export class MovementModule {
 
   /** 派兵至已知空地并进入隐蔽伏击状态；抵达前仍按普通军队参与野战。 */
   private async sendAmbush(cmd: Command): Promise<CommandResult> {
-    const { villageId, q, r, troops, treasures } = cmd.payload as {
-      villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[];
+    const { villageId, q, r, troops, treasures, lossRate } = cmd.payload as {
+      villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[]; lossRate?: number;
     };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -1396,7 +1460,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = await this.launch({ id, type: 'ambush', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'ambush', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -1406,7 +1470,7 @@ export class MovementModule {
 
   /** 未探索地块只能执行探索：抵达（或遇阻前一格）即返程，不会驻扎。 */
   private async sendExplore(cmd: Command): Promise<CommandResult> {
-    const { villageId, q, r, troops, treasures } = cmd.payload as { villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[] };
+    const { villageId, q, r, troops, treasures, lossRate } = cmd.payload as { villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[]; lossRate?: number };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
     const fromXY = await this.villageXY(villageId);
@@ -1426,7 +1490,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = await this.launch({ id, type: 'explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now() });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -1435,7 +1499,7 @@ export class MovementModule {
 
   /** 自动探索沿指定终点逐格推进，首次在新视野中发现公共营地、他人村庄或外军即返程。 */
   private async sendAutoExplore(cmd: Command): Promise<CommandResult> {
-    const { villageId, q, r, troops, treasures } = cmd.payload as { villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[] };
+    const { villageId, q, r, troops, treasures, lossRate } = cmd.payload as { villageId: string; q: number; r: number; troops: Record<string, number>; treasures?: string[]; lossRate?: number };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
     const fromXY = await this.villageXY(villageId);
@@ -1455,7 +1519,7 @@ export class MovementModule {
       await this.commands.send({ name: 'military.AdjustTroops', from: MovementModule.NAME, payload: { villageId, delta: valid.troops } });
       return { ok: false, payload: {}, reason: carry.reason };
     }
-    const mv = await this.launch({ id, type: 'auto_explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, departAt: this.now(), autoExplore: {} });
+    const mv = await this.launch({ id, type: 'auto_explore', fromVillage: villageId, fromXY, toXY, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now(), autoExplore: {} });
     mv.requestedXY = toXY;
     this.save(mv);
     await this.revealVision(mv);
@@ -1783,7 +1847,7 @@ export class MovementModule {
     villageId: string,
     path: Hex[],
     troops: Record<string, number>,
-    type: MovementRecord['type'],
+    type: MovementRecord['type'], rapidRaidBonus = 0,
   ): Promise<PathTiming> {
     const steps = Math.max(0, path.length - 1);
     if (steps === 0) {
@@ -1802,6 +1866,7 @@ export class MovementModule {
     let segmentMs = type === 'caravan'
       ? existingSegmentMs
       : existingSegmentMs.map((ms) => Math.max(1, Math.ceil(ms / sizeMultiplier)));
+    if (rapidRaidBonus > 0 && type === 'raid') segmentMs = segmentMs.map((ms) => Math.max(1, Math.ceil(ms / (1 + rapidRaidBonus))));
     const minimumMs = type === 'caravan' ? this.caravanMinDurationMs() : 3_000;
     const totalMs = Math.max(minimumMs, segmentMs.reduce((sum, ms) => sum + ms, 0));
     // 商队全程统一分摊，保持逐格调度与 arriveAt 一致；最低时长由配置中心控制。
@@ -1812,17 +1877,22 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId' | 'lossRate' | 'initialTroopCount' | 'fieldPursuer' | 'capturedTreasures' | 'rapidRaidBonus'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
       ? pathOverride.map((point) => wrapHex(point, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41))
       : linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type);
+    const rapidRaidBonus = base.type === 'raid' ? Math.max(0, Number(base.rapidRaidBonus) || 0) : 0;
+    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type, rapidRaidBonus);
     this.timingCache.set(base.id, timing);
     const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
     const full: MovementRecord = {
       ...base,
+      rapidRaidBonus: rapidRaidBonus || undefined,
+      lossRate: this.normalizeLossRate(base.lossRate),
+      initialTroopCount: Math.max(1, Math.floor(Number(base.initialTroopCount) || this.troopCount(base.troops))),
+      capturedTreasures: base.capturedTreasures ? [...base.capturedTreasures] : undefined,
       launchedAt: base.departAt,
       originalFromXY: base.originalFromXY ?? base.fromXY,
       path,
@@ -1850,11 +1920,11 @@ export class MovementModule {
    * 1. 校验兵力(从 Military 扣出) 2. 算路径 3. 逐格推进。
    */
   private async sendRaid(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetId, troops, treasures } = cmd.payload as {
+    const { villageId, targetId, troops, treasures, lossRate, rapidMarch } = cmd.payload as {
       villageId: string;
       targetId: string;
       troops: Record<string, number>;
-      treasures?: string[];
+      treasures?: string[]; lossRate?: number; rapidMarch?: boolean;
     };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -1872,6 +1942,10 @@ export class MovementModule {
       return { ok: false, payload: {}, reason: 'not_task_owner' };
     }
     const toXY: Hex = { q: tp.q, r: tp.r };
+    if (rapidMarch) {
+      const rapid = await this.commands.send({ name: 'research.HasMechanism', from: MovementModule.NAME, payload: { villageId, key: 'rapid_raid' } });
+      if (!rapid.ok || !(rapid.payload as any)?.active) return { ok: false, payload: {}, reason: 'rapid_march_not_unlocked' };
+    }
 
     // 从源村扣出兵力（负 delta）
     const adj = await this.deductDepartureTroops(cmd, villageId, valid.troops);
@@ -1887,12 +1961,12 @@ export class MovementModule {
 
     const mv = await this.launch({
       id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetId, troops: valid.troops,
-      treasures: carry.codes, departAt: this.now(),
+      treasures: carry.codes, lossRate, rapidRaidBonus: rapidMarch ? 0.25 : undefined, departAt: this.now(),
     });
 
     log('出征(raid)', { id: mv.id, from: villageId, targetId, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
-    return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
+    return { ok: true, payload: { id: mv.id, rapidMarch: !!mv.rapidRaidBonus, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
 
   /**
@@ -1900,11 +1974,11 @@ export class MovementModule {
    * 与 sendRaid 同结构，目标是玩家村（targetVillage）而非 PvE 目标。
    */
   private async sendAttack(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, targetId, troops, treasures, declareWar } = cmd.payload as {
+    const { villageId, targetVillage, targetId, troops, treasures, declareWar, lossRate } = cmd.payload as {
       villageId: string;
       targetVillage?: string; targetId?: string;
       troops: Record<string, number>;
-      treasures?: string[]; declareWar?: boolean;
+      treasures?: string[]; declareWar?: boolean; lossRate?: number;
     };
     if (!targetVillage && !targetId) return { ok: false, payload: {}, reason: 'target_not_found' };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
@@ -1945,7 +2019,7 @@ export class MovementModule {
 
     const mv = await this.launch({
       id, type: 'attack', battleType: 'siege', fromVillage: villageId, fromXY, toXY, ...(targetVillage ? { targetVillage } : { targetId }), troops: valid.troops,
-      treasures: carry.codes, departAt: this.now(),
+      treasures: carry.codes, lossRate, departAt: this.now(),
     });
 
     log('出征(attack)', { id: mv.id, from: villageId, targetVillage, targetId, troops: valid.troops, arriveAt: new Date(mv.arriveAt).toISOString() });
@@ -2131,7 +2205,7 @@ export class MovementModule {
 
   /** 向玩家村发起掠夺。与攻城共享战斗结算，但保留 raid 行军类型供地图/UI识别。 */
   private async sendVillageRaid(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, troops, treasures, declareWar } = cmd.payload as { villageId: string; targetVillage: string; troops: Record<string, number>; treasures?: string[]; declareWar?: boolean };
+    const { villageId, targetVillage, troops, treasures, declareWar, lossRate } = cmd.payload as { villageId: string; targetVillage: string; troops: Record<string, number>; treasures?: string[]; declareWar?: boolean; lossRate?: number };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'cannot_attack_self' };
     const valid = this.validateTroops(troops);
     if (!valid.ok) return { ok: false, payload: {}, reason: valid.reason };
@@ -2148,7 +2222,7 @@ export class MovementModule {
     const id = this.nextId();
     const carry = await this.assignCarry(villageId, treasures, id, valid.troops);
     if (!carry.ok) { await this.refundDepartureTroops(cmd, villageId, valid.troops); return { ok: false, payload: {}, reason: carry.reason }; }
-    const mv = await this.launch({ id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, departAt: this.now() });
+    const mv = await this.launch({ id, type: 'raid', battleType: 'raid', fromVillage: villageId, fromXY, toXY, targetVillage, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now() });
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'raid', villageId, targetVillage, arriveAt: mv.arriveAt } } as DomainEvent);
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
   }
@@ -2159,9 +2233,9 @@ export class MovementModule {
    * 侦察战斗与 PvP 采用同一套「守方侦察兵反侦察」规则。
    */
   private async sendScout(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, targetId, troops, treasures, scoutType } = cmd.payload as {
+    const { villageId, targetVillage, targetId, troops, treasures, scoutType, lossRate } = cmd.payload as {
       villageId: string; targetVillage?: string; targetId?: string; troops: Record<string, number>; treasures?: string[];
-      scoutType?: 'scout_resources' | 'scout_buildings';
+      scoutType?: 'scout_resources' | 'scout_buildings'; lossRate?: number;
     };
     const isPve = !!targetId;
     if ((!targetVillage && !targetId) || (targetVillage === villageId)) return { ok: false, payload: {}, reason: 'not_enemy_village' };
@@ -2210,7 +2284,7 @@ export class MovementModule {
       ...(isPve ? { targetId } : { targetVillage }),
       // 只有王国城邦允许侦察建筑；普通 PvE 仍只提供资源/守军报告。
       scoutType: (!isPve || pveCityState) && scoutType === 'scout_buildings' ? 'scout_buildings' : 'scout_resources',
-      troops: valid.troops, treasures: carry.codes, departAt: this.now(),
+      troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now(),
     });
     this.save(mv);
     void this.bus.emit({ name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(), payload: { id: mv.id, type: 'scout', villageId, targetVillage, targetId, arriveAt: mv.arriveAt } } as DomainEvent);
@@ -2222,8 +2296,8 @@ export class MovementModule {
    * 不会让仍有兵力的来袭军改道、暂停或重置到达时间。
    */
   private async sendIncomingScout(cmd: Command): Promise<CommandResult> {
-    const { villageId, movementId, troops, treasures } = cmd.payload as {
-      villageId: string; movementId: string; troops: Record<string, number>; treasures?: string[];
+    const { villageId, movementId, troops, treasures, lossRate } = cmd.payload as {
+      villageId: string; movementId: string; troops: Record<string, number>; treasures?: string[]; lossRate?: number;
     };
     const incoming = this.load(movementId);
     if (!incoming || !this.isIncomingHostile(incoming) || incoming.targetVillage !== villageId || incoming.status !== 'marching') {
@@ -2261,7 +2335,7 @@ export class MovementModule {
     const reverseEnemyPath = [...incoming.path].reverse();
     const mv = await this.launch({
       id, type: 'incoming_scout', fromVillage: villageId, fromXY, toXY: enemyOrigin,
-      targetMovementId: incoming.id, troops: valid.troops, treasures: carry.codes, departAt: this.now(),
+      targetMovementId: incoming.id, troops: valid.troops, treasures: carry.codes, lossRate, departAt: this.now(),
     }, reverseEnemyPath);
     void this.bus.emit({
       name: 'movement.Sent', source: MovementModule.NAME, ts: this.now(),
@@ -2311,13 +2385,13 @@ export class MovementModule {
    * 村间运输：仅己方村；运力=Σ(carry×数量)；可见可截；到达部队留守、货物全额入库。
    */
   private async sendTransport(cmd: Command): Promise<CommandResult> {
-    const { villageId, targetVillage, troops, cargo, treasures, mode } = cmd.payload as {
+    const { villageId, targetVillage, troops, cargo, treasures, mode, lossRate } = cmd.payload as {
       villageId: string;
       targetVillage: string;
       troops: Record<string, number>;
       cargo?: Record<string, number>;
       treasures?: string[];
-      mode?: 'transfer' | 'transport' | 'reinforce';
+      mode?: 'transfer' | 'transport' | 'reinforce'; lossRate?: number;
     };
     if (targetVillage === villageId) return { ok: false, payload: {}, reason: 'same_village' };
 
@@ -2392,7 +2466,7 @@ export class MovementModule {
 
     const mv = await this.launch({
       id, type: 'transport', fromVillage: villageId, fromXY, toXY,
-      targetVillage, troops: valid.troops, cargo: cleanedCargo, treasures: carry.codes, transportMode: mode ?? 'transport', departAt: this.now(),
+      targetVillage, troops: valid.troops, cargo: cleanedCargo, treasures: carry.codes, transportMode: mode ?? 'transport', lossRate, departAt: this.now(),
     });
     // 增援抵达后不写入目标村 military；保存出发时的最终战斗快照供目标村防守结算使用。
     if (isReinforce) {
@@ -2490,13 +2564,25 @@ export class MovementModule {
 
   private async caravanInfo(mv: MovementRecord, playerId: string): Promise<CaravanInfo> {
     const originVillageId = mv.caravanOrigin ?? mv.homeVillage ?? mv.fromVillage;
-    const destinationVillageId = mv.returning ? (mv.homeVillage ?? mv.fromVillage) : (mv.caravanDestination ?? mv.targetVillage ?? '');
+    // 送货目的地是商队对外公开的固定路线。只有出发村/收货村的玩家
+    // 才能知道商队已经掉头返程；第三方始终看到原送货目的地，不能据此
+    // 判断当前商队是否已经空返，从而保留劫掠跑空的风险。
+    const deliveryDestinationVillageId = mv.caravanDestination ?? mv.targetVillage ?? '';
+    const homeVillageId = mv.homeVillage ?? mv.fromVillage;
+    const [originOwner, destinationOwner] = await Promise.all([
+      this.ownerOf(originVillageId),
+      deliveryDestinationVillageId ? this.ownerOf(deliveryDestinationVillageId) : Promise.resolve(''),
+    ]);
+    const relatedPlayer = !!playerId && (playerId === originOwner || playerId === destinationOwner);
+    const showingReturn = !!mv.returning && relatedPlayer;
+    const destinationVillageId = showingReturn ? homeVillageId : deliveryDestinationVillageId;
     const origin = await this.villageTile(originVillageId);
     const target = await this.villageTile(destinationVillageId);
     return {
       originVillageId, originVillageName: origin?.name ?? originVillageId,
       destinationVillageId, destinationVillageName: target?.name ?? destinationVillageId,
-      destination: mv.toXY, phase: mv.returning ? 'return' : 'delivery',
+      destination: showingReturn ? mv.toXY : (target?.q !== undefined && target?.r !== undefined ? { q: target.q, r: target.r } : mv.toXY),
+      phase: showingReturn ? 'return' : 'delivery',
       ...await this.caravanPermissions(mv, playerId),
     };
   }
@@ -2587,7 +2673,7 @@ export class MovementModule {
   }
 
   private async sendCaravanMission(cmd: Command, type: 'caravan_raid' | 'caravan_escort'): Promise<CommandResult> {
-    const { villageId, targetMovementId, troops, treasures } = cmd.payload as { villageId: string; targetMovementId: string; troops: Record<string, number>; treasures?: string[] };
+    const { villageId, targetMovementId, troops, treasures, lossRate } = cmd.payload as { villageId: string; targetMovementId: string; troops: Record<string, number>; treasures?: string[]; lossRate?: number };
     const target = this.load(targetMovementId);
     if (!target || target.type !== 'caravan') return { ok: false, payload: {}, reason: 'caravan_unavailable' };
     const allowed = await this.caravanPermissions(target, await this.ownerOf(villageId));
@@ -2606,10 +2692,16 @@ export class MovementModule {
     const base = await this.baseStepMs(villageId, valid.troops, type);
     const size = this.marchSizeMultiplier(valid.troops, type);
     const mission = { flatMs: Math.max(1, Math.ceil(Math.round(base) / size)), hillsMs: Math.max(1, Math.ceil(Math.round(base / Math.max(0.0001, this.config.constants.hillsMarchSpeedMultiplier || 2 / 3)) / size)) };
-    const mv = await this.launch({ id, type, fromVillage: villageId, fromXY, toXY: target.toXY, targetMovementId, troops: valid.troops, treasures: carried.codes, departAt: this.now() }, path);
+    const mv = await this.launch({ id, type, fromVillage: villageId, fromXY, toXY: target.toXY, targetMovementId, troops: valid.troops, treasures: carried.codes, lossRate, departAt: this.now() }, path);
     mv.caravanMission = mission;
     mv.caravanTiming = [...(this.timingCache.get(id)?.segmentMs ?? [])];
     this.save(mv);
+    // launch() 的通用 pathTiming 以整格为单位，商队追兵首次目标可能是
+    // 当前格内的连续位置，必须立即按实际段长重算，避免把半格路程按整格
+    // 时长推进而错过相遇时刻。作废 launch 已登记的旧回调，再登记新段。
+    mv.stepToken += 1;
+    await this.replanCaravanChase(mv, target);
+    this.scheduler.schedule(mv.perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
     await this.checkCaravanMission(mv);
     // 商队劫掠从创建瞬间就可能进入受害方视野。此前只在追兵
     // 走完第一格后重算预警，导致受害玩家收不到初始来袭提示。
@@ -2623,28 +2715,40 @@ export class MovementModule {
 
   private caravanChasePath(from: Hex, caravan: MovementRecord): Hex[] {
     const paused = caravan.status === 'paused' || caravan.caravanSettlement || caravan.caravanBattleResult;
-    if (paused && hexDistanceWrapped(from, caravan.pos, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001) return [{ ...from }];
+    // 商队尚在格间移动时，把它此刻的连续位置作为直达追赶目标；
+    // 后续每次落格都会重排路线，因此不会沿着商队的送货尾路行进。
+    const current = paused ? caravan.pos : this.caravanPosition(caravan);
+    if (paused && hexDistanceWrapped(from, current, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001) return [{ ...from }];
     // 以商队当前已落地的离散格为锚点；商队每推进一格后，step() 会
     // 立即重排追兵的后续最短路线。段内连续位置只用于相遇时刻和战斗切点，
     // 避免把路线锚在尚未抵达的下一格。
-    const anchor = this.caravanGrid(caravan.pos);
+    const anchor = this.caravanGrid(current);
     const path = linePathWrapped(this.caravanGrid(from), anchor, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-    if (hexDistance(from, path[0]) > 0.000001) path.unshift({ ...from });
-    if (paused) {
-      const last = path[path.length - 1], previous = path[path.length - 2];
-      const distance = (a: Hex, b: Hex) => hexDistanceWrapped(a, b, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
-      if (distance(last, caravan.pos) > 0.000001) {
-        if (previous && Math.abs(distance(previous, caravan.pos) + distance(caravan.pos, last) - distance(previous, last)) < 0.000001) path[path.length - 1] = { ...caravan.pos };
-        else path.push({ ...caravan.pos });
-      }
-      return path;
+    if (hexDistance(from, path[0]) > 0.000001) {
+      // from 可能是当前格内的连续位置。若仍保留 linePath 的格心首点，
+      // 重新规划会先把追兵拉回格心，表现为地图上瞬移/倒退半格；直接
+      // 用连续起点替换同格格心，只有跨格时才插入连续起点。
+      if (this.caravanGrid(from).q === path[0].q && this.caravanGrid(from).r === path[0].r) path[0] = { ...from };
+      else path.unshift({ ...from });
     }
-    return [...path, ...caravan.path.slice(caravan.stepIndex + 1)];
+    // 追兵只负责追上商队，不沿用商队后续的送货路线。
+    const last = path[path.length - 1], previous = path[path.length - 2];
+    const distance = (a: Hex, b: Hex) => hexDistanceWrapped(a, b, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+    if (distance(last, current) > 0.000001) {
+      if (previous && Math.abs(distance(previous, current) + distance(current, last) - distance(previous, last)) < 0.000001) path[path.length - 1] = { ...current };
+      else path.push({ ...current });
+    }
+    return path;
   }
 
   /** 两条当前线性路段的真正相交时刻，包含同向追上、迎面相遇和环面接缝。 */
   private caravanMeetDelay(a: MovementRecord, b: MovementRecord): number | undefined {
     const ap = this.caravanPosition(a), bp = this.caravanPosition(b);
+    // 追兵已经完成至少一段且与商队在同一格内非常接近时会合；保留
+    // 连续距离阈值，避免仅因同格就把仍相距半格的两支队伍提前结算。
+    if (a.stepIndex > 0
+      && hexDistanceWrapped(this.caravanGrid(ap), this.caravanGrid(bp), this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41) < 0.000001
+      && hexDistance({ q: 0, r: 0 }, this.caravanDelta(ap, bp)) <= 0.05) return 0;
     // 追赶路线按离散格重排，但相遇仍按两条当前线性路段的连续位置
     // 计算，避免仅因同格就提前结算；目标跨入下一格后旧回调会由
     // 下方的 stepIndex/nextStepAt 校验作废。
@@ -2754,6 +2858,7 @@ export class MovementModule {
         this.splitCaravanSegment(mv);
         mv.caravanMission!.attached = true;
         mv.status = 'marching';
+        this.alignAttachedEscort(mv, caravan);
         this.save(mv);
         await this.removePreviousForeignAudience(mv, previousAudience);
         await this.publishCaravanMovement(mv);
@@ -2981,6 +3086,19 @@ export class MovementModule {
       if (raider?.type === 'caravan_raid') {
         const next = structuredClone(raider); next.loot = { ...plan.raidLootAfter }; this.save(next);
       }
+      if (plan.raiderVillage && plan.loot) {
+        const reputation = await this.commands.send({
+          name: 'reputation.ProcessCaravanRaid', from: MovementModule.NAME,
+          payload: {
+            villageId: plan.raiderVillage,
+            loot: plan.loot,
+            settlementId: `caravan-raid:${caravanId}:${journal.raiderId}:${journal.battleId ?? 'direct'}`,
+          },
+        });
+        if (!reputation.ok && !String(reputation.reason ?? '').startsWith('no_handler:')) {
+          log.warn('商队劫掠声望结算未完成', { caravanId, raiderId: journal.raiderId, reason: reputation.reason });
+        }
+      }
       for (let i = journal.reportIndex ?? 0; i < plan.reportVillages.length; i++) {
         const villageId = plan.reportVillages[i]!;
         await this.bus.emit({ name: 'movement.CaravanRaidReport', source: MovementModule.NAME, ts: this.now(), payload: {
@@ -3031,10 +3149,22 @@ export class MovementModule {
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
       if (!this.isCaravanMission(mv) || mv.targetMovementId !== caravan.id) continue;
       if (mv.caravanMission?.attached) {
-        this.appendEscortPoint(mv, caravan.pos);
+        this.alignAttachedEscort(mv, caravan);
         await this.publishCaravanMovement(mv);
       } else await this.checkCaravanMission(mv);
     }
+  }
+
+  /** 将附着护送军的显示路径/计时对齐到商队；附着军不再独立调度步进。 */
+  private alignAttachedEscort(escort: MovementRecord, caravan: MovementRecord): void {
+    escort.path = caravan.path.map((point) => ({ ...point }));
+    escort.stepIndex = caravan.stepIndex;
+    escort.pos = { ...caravan.pos };
+    escort.perStepMs = caravan.perStepMs;
+    escort.nextStepAt = caravan.nextStepAt;
+    escort.arriveAt = caravan.arriveAt;
+    escort.caravanTiming = caravan.caravanTiming ? [...caravan.caravanTiming] : undefined;
+    this.save(escort);
   }
 
   /**
@@ -3743,7 +3873,7 @@ export class MovementModule {
       mv.nextStepAt = this.now();
     }
     if (mv.type === 'auto_explore') {
-      const radius = this.visionRadius(mv.troops);
+      const radius = await this.visionRadiusForMovement(mv);
       mv.autoExplore = {
         ...mv.autoExplore,
         pendingReveal: { revealId: `${mv.id}:${mv.stepIndex}`, q: mv.pos.q, r: mv.pos.r, radius },
@@ -3822,13 +3952,32 @@ export class MovementModule {
     this.scheduler.schedule(mv.perStepMs, () => this.step(id, stepToken), `movement:${id}`, `movement:${id}`);
   }
 
-  /** 商队的视野外收货方也属于受众；隐藏护送队/侦察军不属于外军视图。 */
+  /** 商队的视野外收货方也属于受众；护送军仅向商队相关玩家公开，侦察军仍隐藏。 */
   private async foreignAudience(mv: MovementRecord): Promise<string[]> {
-    if (this.isScoutMovement(mv) || mv.caravanMission?.attached) return [];
+    if (this.isScoutMovement(mv)) return [];
+    if (mv.caravanMission?.attached) {
+      const caravan = this.load(mv.targetMovementId ?? '');
+      return caravan ? this.caravanRelatedPlayers(caravan) : [];
+    }
     const result = await this.commands.send({ name: 'vision.GetObservers', from: MovementModule.NAME, payload: this.caravanGrid(mv.pos) });
     const ids: string[] = [...((result.payload as any)?.playerIds ?? [])];
     if (mv.type === 'caravan' && !mv.returning && mv.targetVillage) ids.push(await this.ownerOf(mv.targetVillage));
     return [...new Set(ids.filter(Boolean))];
+  }
+
+  /** 商队出发方和收货方都能看到附着的他人护送军；第三方仍不可见。 */
+  private async caravanRelatedPlayers(caravan: MovementRecord): Promise<string[]> {
+    const origin = caravan.caravanOrigin ?? caravan.homeVillage ?? caravan.fromVillage;
+    const destination = caravan.caravanDestination ?? caravan.targetVillage;
+    const owners = await Promise.all(
+      [origin, destination].filter(Boolean).map((villageId) => this.ownerOf(villageId!)),
+    );
+    return [...new Set(owners.filter(Boolean))];
+  }
+
+  private async caravanRelatedToPlayer(caravan: MovementRecord, playerId: string): Promise<boolean> {
+    if (!playerId) return false;
+    return (await this.caravanRelatedPlayers(caravan)).includes(playerId);
   }
 
   private async removePreviousForeignAudience(mv: MovementRecord, previous: string[]): Promise<void> {
@@ -3844,7 +3993,7 @@ export class MovementModule {
   private async emitForeignStep(mv: MovementRecord): Promise<void> {
     // ListForeign 已过滤侦察，这里也必须在增量通道早退，避免地图轮询间隔内
     // 通过 ForeignStepped 短暂暴露侦察部队。
-    if (this.isScoutMovement(mv) || mv.caravanMission?.attached) return;
+    if (this.isScoutMovement(mv)) return;
     // NPC 行军使用内部来源 ID，不存在 player/village 记录；为其提供
     // 稳定的脱敏归属，避免 ForeignArmyStep 因查不到玩家而直接丢弃。
     const owner = mv.npcService
@@ -4234,10 +4383,10 @@ export class MovementModule {
   private async findEncounter(mv: MovementRecord): Promise<MovementRecord | undefined> {
     if (mv.npcService || mv.caravanMission?.attached || mv.type === 'scout' || mv.type === 'incoming_scout') return undefined;
     const myOwner = await this.ownerOf(mv.fromVillage);
-    const ids = this.posIndex.get(this.posKey(mv.pos.q, mv.pos.r));
-    if (!ids) return undefined;
-    for (const oid of ids) {
-      const other = this.load(oid);
+    // 位置索引只包含当前离散格，无法发现两军在同一段边上相向交换位置的情况。
+    // 统一扫描在途军并复用 movementPositionsMeet，同时检查当前格和 previousPos，
+    // 使“路径交叉”和“同格相碰”都进入同一个野战流程。
+    for (const other of this.store.all<MovementRecord>(COLLECTION)) {
       if (!other || other.id === mv.id) continue;
       // NPC 行军不是玩家军队，不能被普通野战遭遇卷入；双方都必须是
       // 玩家出征军，王国任务/复仇/增援等 NPC 行军一律跳过。
@@ -4249,6 +4398,7 @@ export class MovementModule {
       // 被普通野外遭遇战误判为敌军。这里按联盟模块的权威关系查询，
       // 不依赖 movement 记录是否带有旧版 allianceId 字段。
       if (await this.areAllied(myOwner, otherOwner)) continue;
+      if (!this.movementPositionsMeet(mv, other)) continue;
       return other;
     }
     return undefined;
@@ -4299,6 +4449,11 @@ export class MovementModule {
 
   /** 途中相遇：双方暂停 → combat.Engage(field) 逐 tick 结算 → BattleEnded 后 onBattleEnded 恢复行军。 */
   private async resolveFieldEncounter(a: MovementRecord, b: MovementRecord): Promise<void> {
+    // 具有明确 targetMovementId 的非商队军队属于主动追击；普通同格相碰
+    // 或路径交叉均视为野战遭遇，不臆测追击方。当前的直接追击命令会在
+    // 创建 movement 时写入 targetMovementId，旧档缺省则保持交叉相遇语义。
+    a.fieldPursuer = !a.caravanMission && (a.fieldPursuer === true || !!a.targetMovementId);
+    b.fieldPursuer = !b.caravanMission && (b.fieldPursuer === true || !!b.targetMovementId);
     // 双方就地暂停
     a.status = 'paused'; a.stepToken += 1;
     b.status = 'paused'; b.stepToken += 1;
@@ -4328,6 +4483,8 @@ export class MovementModule {
         troops: a.troops,
         attackerSnapshot: aSnap,
         treasures: aCarried,
+        capturedTreasures: a.capturedTreasures ?? [],
+        fieldPursuer: !!a.fieldPursuer,
         defenderField: {
           movementId: b.id,
           fromVillage: b.fromVillage,
@@ -4336,6 +4493,8 @@ export class MovementModule {
           troops: b.troops,
           attackerSnapshot: bSnap,
           treasures: bCarried,
+          capturedTreasures: b.capturedTreasures ?? [],
+          fieldPursuer: !!b.fieldPursuer,
         },
       },
     });
@@ -4360,11 +4519,11 @@ export class MovementModule {
         targetKind: 'field', battleType: 'ambush', targetId: `ambush:${ambush.id}:${target.id}`, targetXY: target.pos,
         movementId: ambush.id, fromVillage: ambush.fromVillage, fromXY: ambush.fromXY,
         originalFromXY: ambush.originalFromXY ?? ambush.fromXY, troops: ambush.troops,
-        attackerSnapshot: aSnap, treasures: ambush.treasures ?? [],
+        attackerSnapshot: aSnap, treasures: ambush.treasures ?? [], capturedTreasures: ambush.capturedTreasures ?? [], fieldPursuer: !!ambush.fieldPursuer,
         defenderField: {
           movementId: target.id, fromVillage: target.fromVillage, fromXY: target.fromXY,
           originalFromXY: target.originalFromXY ?? target.fromXY, troops: target.troops,
-          attackerSnapshot: bSnap, treasures: target.treasures ?? [],
+          attackerSnapshot: bSnap, treasures: target.treasures ?? [], capturedTreasures: target.capturedTreasures ?? [], fieldPursuer: !!target.fieldPursuer,
         },
       },
     });
@@ -4390,17 +4549,19 @@ export class MovementModule {
       survivors?: Record<string, number>; loot?: Record<string, number>;
       treasures?: string[]; targetKind?: string; targetId?: string; battleType?: string; movementId: string;
       originalFromXY?: Hex; npcService?: boolean; taskCode?: string; kingdomMercenary?: boolean; returnPveId?: string;
+      attackerWins?: boolean; fieldWinner?: boolean; capturedMovementIds?: string[]; capturedByMovementId?: string; capturedTreasureCodes?: string[];
     };
 
-    // 野战（field）分支：普通相遇战幸存者继续原路线；伏击战双方幸存者都原路返城。
+    // 野战（field）分支：胜负不再使用 attacker/defender 语义决定行军后续；
+    // 胜者按出发时兵力累计战损阈值决定继续或返城，败者始终返城。
     if (p.targetKind === 'field') {
       const mv = this.load(p.movementId);
       if (!mv) return;
       const survivors = p.survivors ?? {};
       if (Object.keys(survivors).length === 0) {
-        // 全灭：宝物回收到系统池（野战视为 pve 式灭失）
+        // 被胜方缴获的军队不再把宝物回收到系统池；胜方事件会原子转移携带记录。
         const treasures = p.treasures ?? [];
-        if (treasures.length > 0) {
+        if (treasures.length > 0 && !p.capturedByMovementId) {
           void this.commands.send({
             name: 'treasure.LoseCarried', from: MovementModule.NAME,
             payload: { movementId: p.movementId, mode: 'pve' },
@@ -4410,25 +4571,59 @@ export class MovementModule {
         this.updateEnRoutePop(p.fromVillage);
         return;
       }
-      if (p.battleType === 'ambush') {
-        mv.troops = survivors;
-        this.remove(mv.id);
-        this.updateEnRoutePop(mv.fromVillage);
-        await this.scheduleReturn(mv.fromVillage, p.toXY, p.originalFromXY ?? p.fromXY, survivors, {}, p.treasures, p.movementId, p.originalFromXY ?? p.fromXY);
+
+      // 先从败方的宝物模块记录中转移携带物；只在胜者事件上执行，
+      // TransferCarried 本身幂等，事件重放不会重复生成战利品。
+      if (p.fieldWinner && p.capturedMovementIds?.length) {
+        const captured: string[] = [];
+        for (const loserId of p.capturedMovementIds) {
+          const transferred = await this.commands.send({ name: 'treasure.TransferCarried', from: MovementModule.NAME, payload: { movementId: loserId } });
+          const codes = (transferred.ok ? (transferred.payload as any)?.codes : []) as string[];
+          captured.push(...(Array.isArray(codes) ? codes : []));
+        }
+        const priorCaptured = mv.capturedTreasures ?? [];
+        const eventCaptured = Array.isArray(p.capturedTreasureCodes) ? p.capturedTreasureCodes : [];
+        const allCaptured = [...captured, ...eventCaptured];
+        if (allCaptured.length) {
+          mv.capturedTreasures = [...priorCaptured, ...allCaptured];
+        }
+      } else if (p.capturedByMovementId) {
+        // 败方此前缴获但尚未入库的宝物也随本次野战转交给胜方，
+        // 不能继续留在败方行军记录中造成重复领取。
+        mv.capturedTreasures = [];
+      }
+
+      mv.troops = survivors;
+      const won = p.fieldWinner === true || (p.fieldWinner === undefined && ((p.side === 'attacker') === p.attackerWins));
+      const ambushAttacker = p.battleType === 'ambush' && p.side === 'attacker';
+      // 伏击方胜利始终返城；被伏击方胜利沿用损失阈值。
+      const mustReturn = !won || (p.battleType === 'ambush' && ambushAttacker) || (won && this.lossThresholdExceeded(mv, survivors));
+      if (mustReturn) {
+        await this.startReturn(mv);
         return;
       }
-      // 幸存者：更新兵力、解除暂停、恢复行军
-      mv.troops = survivors;
+      // 主动追击方在野外取胜且起点不是村庄时驻扎原地；从村庄出发则自动返城。
+      if (won && mv.fieldPursuer) {
+        if (this.originIsVillage(mv)) {
+          await this.startReturn(mv);
+        } else {
+          mv.status = 'stationed';
+          mv.toXY = mv.pos;
+          mv.nextStepAt = 0;
+          mv.stepToken += 1;
+          this.save(mv);
+          this.updateEnRoutePop(mv.fromVillage);
+        }
+        return;
+      }
+      // 胜方低于阈值：解除暂停，继续原来的行动；路径和 stepIndex 不变。
       mv.status = 'marching';
       mv.stepToken += 1;
       mv.nextStepAt = this.now() + mv.perStepMs;
       this.save(mv);
       this.updateEnRoutePop(mv.fromVillage);
       if (mv.stepIndex >= mv.path.length - 1) void this.arrive(mv);
-      else {
-        const token = mv.stepToken;
-        this.scheduler.schedule(mv.perStepMs, () => this.step(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
-      }
+      else this.scheduler.schedule(mv.perStepMs, () => this.step(mv.id, mv.stepToken), `movement:${mv.id}`, `movement:${mv.id}`);
       return;
     }
 
@@ -4869,6 +5064,12 @@ export class MovementModule {
       name: 'treasure.StoreCarried', from: MovementModule.NAME,
       payload: { movementId: outwardId, villageId: mv.fromVillage },
     });
+    if (mv.capturedTreasures && mv.capturedTreasures.length > 0) {
+      await this.commands.send({
+        name: 'treasure.StoreCaptured', from: MovementModule.NAME,
+        payload: { villageId: mv.fromVillage, codes: mv.capturedTreasures },
+      });
+    }
     // 标记本军队对应的 camp 掉落 pending 为已到达（无论是否有携带宝物都要发——清营掉落的 pending 单独存在）
     await this.commands.send({
       name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,
@@ -4894,6 +5095,8 @@ export class MovementModule {
         attack: def.attack, defense: def.defense,
         hp: def.hp,
         carry: def.carry,
+        form: def.form, role: def.role,
+        traits: def.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
       };
     }
     return snap;

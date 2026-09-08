@@ -72,6 +72,8 @@ interface PopulationState {
   storedOverflowRatio?: number;
   /** 动员加成（默认 0；全民皆兵 +0.15）。mobilizeCap = base + conscriptionBonus。旧存档无此字段默认 0。 */
   conscriptionBonus?: number;
+  /** 科技人口硬上限加成，基于建筑原始上限计算。 */
+  techHardCapBonus?: number;
   lastTick: number;
 }
 
@@ -135,6 +137,7 @@ export class PopulationModule {
     this.commands.register('population.SetReputationGrowthMult', (c) => this.setReputationGrowthMult(c));
     this.commands.register('population.SetReputationGoldTaxMult', (c) => this.setReputationGoldTaxMult(c));
     this.commands.register('population.SetConscriptionMult', (c) => this.setConscriptionMult(c));
+    this.commands.register('population.SetTechHardCapMult', (c) => this.setTechHardCapMult(c));
     this.commands.register('population.GrantPopulation', (c) => this.grantPopulation(c));
     this.commands.register('population.ApplyTaskGrowthBuff', (c) => this.applyTaskGrowthBuff(c));
 
@@ -678,7 +681,8 @@ export class PopulationModule {
       name: 'building.GetPopCap', from: PopulationModule.NAME,
       payload: { villageId },
     });
-    const hardCap: number = (capRes.payload as any)?.hardCap ?? s.hardCap;
+    const baseHardCap: number = (capRes.payload as any)?.hardCap ?? s.hardCap;
+    const hardCap = Math.floor(baseHardCap * (1 + Math.max(0, s.techHardCapBonus ?? 0)));
     const mainLevel: number = (capRes.payload as any)?.mainLevel ?? s.mainLevel;
     const capChanged = hardCap !== s.hardCap || mainLevel !== s.mainLevel;
     s.hardCap = hardCap;
@@ -981,6 +985,17 @@ export class PopulationModule {
     s.conscriptionBonus = Number.isFinite(bonus) ? bonus : 0;
     this.store.set(COLLECTION, villageId, s);
     return { ok: true, payload: {} };
+  }
+
+  /** 帝国权威提升建筑人口硬上限，不改变人口增长率。 */
+  private async setTechHardCapMult(cmd: Command): Promise<CommandResult> {
+    const { villageId, mult } = cmd.payload as { villageId: string; mult: number };
+    const s = this.load(villageId);
+    if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
+    s.techHardCapBonus = Math.max(0, Number(mult) || 0);
+    this.store.set(COLLECTION, villageId, s);
+    await this.refreshHardCap(villageId);
+    return { ok: true, payload: { bonus: s.techHardCapBonus } };
   }
 
   /** 任务奖励直接增加平民人口；人口仍受当前村可用人口上限约束。 */

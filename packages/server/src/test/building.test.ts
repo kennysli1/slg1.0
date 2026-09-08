@@ -37,16 +37,19 @@ test('三区布局：开局有城镇中心 + 城内/城外槽位 + 预置资源�
   assert.ok(l.queue.capacity >= 2, '开局队列容量≥2');
 });
 
-test('可建清单：城内/城外各只列本区建筑，前置未满足给灰显理由', async () => {
+test('可建清单：城内/城外各只列本区建筑，主基地前置状态来自统一配置', async () => {
   const app = freshApp();
   const inner = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'inner' })).payload as any;
   const outer = (await send(app, 'building.GetBuildOptions', { villageId: 'v1', zone: 'outer' })).payload as any;
   assert.ok(inner.options.some((o: any) => o.kind === 'warehouse'), '城内可建仓库');
   assert.ok(inner.options.some((o: any) => o.kind === 'barracks'), '城内可建兵营');
   assert.ok(!outer.options.some((o: any) => o.kind === 'barracks'), '城外不列兵营');
-  // 学院需城镇中心 3 级 → 开局锁定并给理由
+  // 学院的锁定状态必须由统一的 mainBaseLevel/requires 配置决定。
   const academy = inner.options.find((o: any) => o.kind === 'academy');
-  assert.ok(academy && !academy.unlocked && academy.lockReason, '学院应锁定且有理由');
+  const academyLevel = app.config.buildings.academy.mainBaseLevel;
+  assert.ok(academy, '配置中应列出学院');
+  assert.equal(academy.unlocked, academyLevel <= 1, '学院解锁状态应与主基地门槛一致');
+  if (!academy.unlocked) assert.ok(academy.lockReason, '未满足主基地前置时应给理由');
 });
 
 test('建筑门控：议会厅/联盟大厅需要二级主基地且每村限建一座', async () => {
@@ -134,12 +137,17 @@ test('槽位上限：城内槽满后拒绝继续建造', async () => {
   }
 });
 
-test('前置门控：学院开局锁定（需城镇中心3级），Build 应拒绝', async () => {
+test('前置门控：学院按配置的主基地门槛决定是否可建', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 9999, clay: 9999, iron: 9999, crop: 9999 } });
   const r = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'academy' });
-  assert.equal(r.ok, false, '前置未满足应拒绝');
-  assert.equal(r.reason, 'requires_not_met');
+  const required = app.config.buildings.academy.mainBaseLevel;
+  if (required <= 1) {
+    assert.equal(r.ok, true, '主基地门槛为一级时学院应可建');
+  } else {
+    assert.equal(r.ok, false, '前置未满足应拒绝');
+    assert.equal(r.reason, 'requires_not_met');
+  }
 });
 
 test('zone 校验：把城外建筑建到城内应拒绝', async () => {

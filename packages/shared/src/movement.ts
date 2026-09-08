@@ -15,6 +15,7 @@ export interface CaravanInfo {
   destinationVillageId: string;
   destinationVillageName: string;
   destination: Hex;
+  /** 非商队所属玩家始终收到 delivery，不能据此判断商队是否已返程。 */
   phase: 'delivery' | 'return';
   canRaid: boolean;
   canEscort: boolean;
@@ -87,10 +88,13 @@ export interface Movement {
   recallForfeits?: boolean;
 }
 
-/** 他国视图：不含路径、兵力或携带物；仅商队通过 caravan 公开目的地。 */
+/** 他国视图：不含路径、兵力或携带物；商队公开目的地，相关玩家可看到附着护送军。 */
 export interface ForeignArmy {
   id: string;
   caravan?: CaravanInfo;
+  /** 仅商队出发方/收货方可见的他人护送军标记。 */
+  escortCaravanId?: string;
+  escortAttached?: boolean;
   type: MovementType;
   status: MovementStatus;
   ownerPlayerId?: string;

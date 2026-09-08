@@ -19,6 +19,7 @@ import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
 import { DiceQuestModal } from './DiceQuestModal.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from './task-progress.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -70,7 +71,59 @@ function objText(task: any): string {
       ? `三局两胜骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`
       : `骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`;
   }
+  if (o.kind === 'rune_sequence') return '破解五枚符文的唯一排列顺序';
   return o.kind;
+}
+
+const ASHEN_RUNES = ['月影', '狼牙', '潮汐', '王冠', '天眼'];
+
+function RuneModal({ task, close }: { task: any; close: () => void }) {
+  const [sequence, setSequence] = useState<string[]>(() => [...ASHEN_RUNES]);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (new Set(sequence).size !== sequence.length) { showToast('每枚符文只能使用一次', 'bad'); return; }
+    if (!await ensureTaskExecution(task)) return;
+    setBusy(true);
+    await act(req('task.SolveRune', { code: task.code, sequence }), {
+      okToast: '符文排列正确',
+      onOk: () => close(),
+    });
+    setBusy(false);
+  };
+  return (
+    <Modal title="灰烬商路 · 符文解密" sub="根据线索排列五枚符文" onClose={busy ? () => {} : close}>
+      <p class="task-reward-hint">王冠不在首尾；月影紧挨狼牙且在其之前；潮汐在王冠之前；天眼在王冠之后且不紧挨狼牙；潮汐与月影之间隔一枚符文。</p>
+      <div class="task-submit-grid">
+        {sequence.map((value, index) => (
+          <label class="task-submit-row" key={index}>第 {index + 1} 位
+            <select value={value} disabled={busy} onChange={(event) => setSequence((prev) => prev.map((item, i) => i === index ? (event.currentTarget as HTMLSelectElement).value : item))}>
+              {ASHEN_RUNES.map((rune) => <option key={rune} value={rune}>{rune}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
+      <div class="modal-foot"><Btn variant="primary" disabled={busy} onClick={() => void submit()}>提交排列</Btn></div>
+    </Modal>
+  );
+}
+
+function BranchModal({ task, close }: { task: any; close: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const choose = async (branch: string) => {
+    if (!await ensureTaskExecution(task)) return;
+    setBusy(true);
+    await act(req('task.SelectBranch', { code: task.code, branch }), { okToast: '已选择后续路线', onOk: () => close() });
+    setBusy(false);
+  };
+  return (
+    <Modal title="选择灰烬商路的方向" sub="选择后将只开放对应支线" onClose={busy ? () => {} : close}>
+      <div class="dialogue-replies">
+        <Btn disabled={busy} onClick={() => void choose('trade')}>商路 · 经营与资源</Btn>
+        <Btn disabled={busy} onClick={() => void choose('military')}>烽火 · 兵锋与攻城</Btn>
+        <Btn disabled={busy} onClick={() => void choose('explore')}>遗迹 · 探索与知识</Btn>
+      </div>
+    </Modal>
+  );
 }
 
 /** 任务类型标签：主线=金、支线=橙、日常=绿。 */
@@ -430,6 +483,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const taskVillage = (o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.taskVillageXY
     ? { id: String(task.taskVillageId ?? `${task.taskVillageXY.q},${task.taskVillageXY.r}`), q: Number(task.taskVillageXY.q), r: Number(task.taskVillageXY.r) }
     : undefined;
+  const repairBuildingKinds = o.kind === 'repair_buildings' ? (o.buildingKinds ?? []) as string[] : [];
+  const hasRepairPending = hasRepairBuildingPending(task, repairBuildingKinds);
 
   const onAbandon = async () => {
     const isSide = task.type === 'side';
@@ -495,6 +550,12 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       openModal((close) => <DiceQuestModal task={task} close={close} />, `dice-task-${task.code}`);
     })();
   };
+  const onRuneSolve = () => {
+    void ensureTaskExecution(task).then((ok) => { if (ok) openModal((close) => <RuneModal task={task} close={close} />, `task-rune-${task.code}`); });
+  };
+  const onBranchSelect = () => {
+    void ensureTaskExecution(task).then((ok) => { if (ok) openModal((close) => <BranchModal task={task} close={close} />, `task-branch-${task.code}`); });
+  };
 
   return (
     <div class={`task-card task-card--${task.type}`}>
@@ -536,8 +597,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       {o.kind === 'repair_buildings' && (
         <div class="task-card-obj">
           <ol class="task-checklist" aria-label="资源田修复进度">
-            {((o.buildingKinds ?? []) as string[]).map((kind, index) => {
-              const done = (task.repairedBuildings ?? []).includes(kind);
+            {repairBuildingKinds.map((kind, index) => {
+              const done = isRepairBuildingDone(task, kind);
               const info = buildingInfo(kind);
               return (
                 <li key={kind} class={`task-checklist-item${done ? ' done' : ''}`}>
@@ -549,7 +610,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
               );
             })}
           </ol>
-          <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
+          {hasRepairPending && <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>}
         </div>
       )}
       {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units' || o.kind === 'clear_public_pve') && (
@@ -599,6 +660,14 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             </span>
             <span class="task-prog-hint">每局目标分数 {o.diceTargetScore ?? 2000}；可随时退出，退出本局计 NPC 胜一局</span>
             {task.diceLastOutcome === 'npc' && <span class="task-prog-hint task-prog-hint--warn">上一局未获胜，可重新尝试</span>}
+          </div>
+        </div>
+      )}
+      {o.kind === 'rune_sequence' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${task.runeSolved ? ' done' : ''}`}>{task.runeSolved ? '符文排列正确' : '尚未破解'}</span>
+            <span class="task-prog-hint">线索要求唯一解；错误提交不会消耗任务进度。</span>
           </div>
         </div>
       )}
@@ -660,6 +729,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       <div class="task-card-actions">
         {task.failureReady ? (
           <Btn size="sm" variant="danger" onClick={onFail}>任务失败</Btn>
+        ) : task.ready && task.code === 's13' ? (
+          <Btn size="sm" variant="primary" onClick={onBranchSelect}>选择后续路线</Btn>
         ) : task.ready ? (
           <Btn size="sm" variant="primary" onClick={onDeliver}>{task.natalieDecision === 'release' ? '领取奖励' : '完成任务'}</Btn>
         ) : (
@@ -680,6 +751,7 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
                   ? '继续对局'
                   : '开始对局'}
             </Btn>}
+            {o.kind === 'rune_sequence' && <Btn size="sm" variant="primary" onClick={onRuneSolve}>开始解密</Btn>}
           </>
         )}
         {!isMain && !task.failureReady && (

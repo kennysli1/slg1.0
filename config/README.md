@@ -37,7 +37,7 @@
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
-| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`simTraits` 为独立阶段化模拟器特性引用；冒险者为 `all` 通用侦察兵种 |
+| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`traits` 是线上战斗与模拟器共用的唯一特性入口；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维/模拟器生命值与特性 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
@@ -48,7 +48,7 @@
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率；`my_effort` 使用 `my_effort_use` 对话，`black_badge` 提供 PvE 掉率与军队加成 |
-| 表15 | `research.csv` | **科技树目录**（分支/层级/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
+| 表15 | `research.csv` | **科技树目录**（分支/层级/纲领互斥组/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
 | 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
 | 表17 | `quest_lines.csv` | **任务线目录**（入口与展示顺序） | 增加/调整独立任务线 |
@@ -65,7 +65,7 @@
 | 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
 | 表29 | `alliance_services.csv` | **联盟王国服务** | 调形象大使可购买的资源/增援服务、声望价格、数量与抵达时间 |
 
-`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
+`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），以及 `rune_sequence`（参数为逗号或竖线分隔的符文唯一序列，由服务端校验）。`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 attack / defense / hp。
@@ -155,7 +155,8 @@
 | code | 英文代码（程序/存档用，勿改） |
 | tribe | 所属部族（语义串 romans/gauls/teutons；`all` 表示所有部族可训练） |
 | name / icon | 显示名 / 图标基名 |
-| form | 仅用于目录展示，不参与战斗计算 |
+| form | 近战/远程形态：远程单位参加第二阶段；远程骑兵还会在第一阶段预射 |
+| role | 阶段角色：`cavalry` 参加第一阶段冲锋；其余角色不冲锋；第三阶段所有幸存单位（含攻城器）参战 |
 | attack | 攻击：每名存活兵贡献到己方总攻击 |
 | defense | 防御：每名存活兵贡献到己方总防御 |
 | hp | 生命：分摊到该兵种的伤害累计达到此值时阵亡一名 |
@@ -167,10 +168,10 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits / simTraits | 历史展示列，不参与现行战斗 |
+| traits | 唯一的阶段战斗特性 ID。新战斗创建时会把角色和 traits 冻结进快照 |
 | techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
-> 现行战斗只有总攻击、总防御、生命三项：`伤害=A²/(A+D)`，双方用回合开始快照同时结算；伤害按参战人数比例分摊，再按各兵种自身生命累计阵亡。条顿 `clubswinger` 仅原始进攻方攻击 +7.40%，高卢 `phalanx` 仅原始防守方防御 +22.06%。
+> 现行战斗只有攻击、防御、生命三项基础属性：每个步骤的伤害为 `A²/(A+D)`，双方使用步骤开始快照同时结算；伤害按当前人数比例分摊，并按各兵种自身生命累计阵亡。固定顺序为“弓骑预射 → 近战骑冲锋 → 远程 → 全员近战至一方归零”。`unit_traits.csv` 的效果只在标注阶段生效，绝不跨阶段；相同 unit code 的群体特性有幸存者时只生效一次，不按人数叠加。
 
 ## mercenaries.csv — 雇佣兵目录
 | 列 | 含义 |
@@ -199,16 +200,17 @@
 | maxStoredRefreshes | 最多可囤积的手动刷新次数 |
 | capacity | 该等级提供的佣兵统御容量 |
 
-## unit_traits.csv — 历史特性目录
+## unit_traits.csv — 阶段战斗特性目录
 | 列 | 含义 |
 |----|------|
 | id | 数字主键（units.csv 的 traits 列引用它） |
 | code | 英文代码（程序内部用，勿改） |
 | name | 显示名（如"持盾"） |
-| effect1..effect5 | 效果类型代码（枚举，见下；可填多组） |
-| value1..value5 | 数值（含义随 effect 而定，如 -0.30） |
+| effect1..effect3 | 效果类型代码（枚举，见下；可填多组） |
+| value1..value3 | 整数百分比数值（如 `-15` 表示 -15%） |
+| phase1..phase3 | 生效阶段：`charge`（冲锋）、`ranged`（远程）、`melee`（近战）或 `all`（全程） |
 
-> 此表不参与当前三属性战斗；当前仅 `clubswinger` 的进攻 +7.40% 和 `phalanx` 的防守 +22.06% 两项固定特性生效。
+> 此表由线上战斗与独立模拟器共同使用。特性在开战/模拟请求创建时冻结，配置热更不会改变已进行战斗；同 code 不叠层、不同 code 百分比相加。
 
 阶段化战斗模拟器页面为 `/battle-simulator`。它通过 `battleSimulator.GetCatalog` / `battleSimulator.Simulate` 读取这些 CSV 配置，不读写主游戏存档。
 > 加新特性：本表加一行；若新增 effect 类型，先在 `packages/server/src/infra/combat-types.ts` 扩展枚举，再在战斗计算里接入。
@@ -223,6 +225,8 @@
 | lootWood/Clay/Iron/Crop | 战利品总量 |
 | faction | 阵营（`neutral`/`kingdom`）；王国城邦填 `kingdom` |
 | cityState | 是否启用运行时随机城邦生成（`true`） |
+| kingdomProfile | 王国 PvE 档位（`city_state`/`fief`/`capital`，普通营地留空） |
+| treasureTier | 普通野外营地宝物掉落档位：1 低、2 中、3 高；高档提高总体掉宝概率并提高高稀有度权重 |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
@@ -235,10 +239,11 @@
 | unitCode | 守军单位代码（仅此目标内部标签，不跨表引用，保留英文串） |
 | name | 显示名 |
 | count | 数量 |
-| form | 仅用于目录展示 |
+| form | 近战/远程形态；远程守军参加第二阶段 |
+| role | 阶段角色；`cavalry` 参加冲锋，第三阶段所有幸存单位参战 |
 | attack / defense / hp | 唯一战斗属性：攻击 / 防御 / 生命 |
 | carry | 载货（守军一般0） |
-| traits | 历史展示标签，不参与现行战斗 |
+| traits | `unit_traits.csv` 的数字 ID；守军在开战时冻结对应特性 |
 
 > 一个目标可有多行守军（如强盗营地 `targetId=3` 有强盗+弓手两行）。
 
@@ -382,7 +387,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | id / code | 数字主键 / 稳定英文代码 |
 | name / icon | 显示名 / 图标基名 |
 | category / rarity | 宝物类别 / 稀有度 |
-| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写） |
+| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写；`vaultGoldLoot` 为攻城时可掠夺保险库金币比例，`armyVision` 为随军视野格数） |
 | reputationValue | 主宝物栏被动声望修正（可为负；备用栏和军队携带中不生效） |
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
@@ -392,6 +397,13 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | uniqueEffect | `1` 表示同名只允许一份生效 |
 | activeEffectType / activeEffectValue | 可选主动效果类型与数值；混合宝物可在保留被动效果的同时主动使用 |
 | activeDurationSec / activeConsume | 主动效果持续秒数（即时效果填0）/ 使用后是否消耗（1/0） |
+
+野外营地掉落仍以 `dropRate` 为宝物目录的基础权重，不会改写 `treasures.csv`。清营时先按
+`treasure_camp_drop_chance × treasure_camp_drop_chance_tier{1,2,3}_multiplier` 判定是否掉宝；
+默认低/中/高档倍率为 `0.5/0.75/1`，因此即使全局基础概率配置为 1，三档仍会保持明确的难度梯度；
+命中后，中/高档营地分别按 `treasure_camp_rarity_multiplier_tier2/3` 的稀有度底数提高
+rare/epic/legendary 权重（普通宝物倍率为1，稀有度每升一级再乘一次）。这些参数均可在配置中心
+“野外营地宝物掉落参数”板块修改。
 
 `enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
 `smartPerson`（聪明人）缩短科研点判定间隔，并可主动获得科研点；`warriorBanner`（勇士锦旗）被动提升全军攻防/人口增长，主动为本村（含本村在外活动的军队）提供限时攻防加成。
@@ -403,6 +415,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name / desc / icon | 显示名 / 说明 / 图标基名 |
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
 | tier | 层级，1 为顶层；界面按层从上到下分组显示 |
+| doctrineGroup | 仅 T2 战略纲领填写；同一玩家在同组完成一项后，本局不能完成另一项 |
 | mainBaseLevel | 研发所需主基地最低等级；默认 1，配置中心可调 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
@@ -489,7 +502,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
 | kind | 目标类型，如 `submit_resources`、`clear_camp`、`clear_public_pve`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
-| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，`rune_sequence` 用逗号或竖线分隔的符文顺序，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果

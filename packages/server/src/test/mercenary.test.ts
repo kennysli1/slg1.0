@@ -24,16 +24,25 @@ const send = (app: GameApp, name: string, payload: any) =>
 const reg = (app: GameApp, name: string, pwd = 'pass') =>
   send(app, 'player.Register', { name, password: pwd, tribe: 'romans' });
 
-async function drain(app: GameApp, step = 3_600_000, maxIters = 500): Promise<void> {
-  for (let i = 0; i < maxIters && app.scheduler.pending > 0; i++) {
-    await app.scheduler.advanceTo(clock + step, setClock);
+async function ensureMainBase(app: GameApp, villageId: string, level: number): Promise<void> {
+  await send(app, 'economy.Grant', { villageId, gain: { wood: 999999, clay: 999999, iron: 999999, crop: 999999, gold: 999999 } });
+  for (;;) {
+    const layout = (await send(app, 'building.GetLayout', { villageId })).payload as any;
+    if (layout.townCenter.level >= level) return;
+    const upgrade = await send(app, 'building.Upgrade', { villageId, slotId: 'center' });
+    if (!upgrade.ok) throw new Error(`主基地升级失败：${upgrade.reason}`);
+    await app.scheduler.advanceTo((upgrade.payload as any).finishAt, setClock);
   }
 }
 
 async function buildMercCamp(app: GameApp, villageId: string): Promise<boolean> {
+  const required = app.config.buildings.mercenarycamp.mainBaseLevel;
+  await ensureMainBase(app, villageId, required);
   const r = await send(app, 'building.Build', { villageId, zone: 'outer', kind: 'mercenarycamp' });
   if (!r.ok) return false;
-  await drain(app, 60_000);
+  // Scheduler 还持有营地自动刷新等永久周期任务；只能等待本次建造的 finishAt，
+  // 不能等待全局 pending 清空。
+  await app.scheduler.advanceTo((r.payload as any).finishAt, setClock);
   return true;
 }
 

@@ -10,6 +10,10 @@ export interface Contribution {
   npcService?: boolean;
   kingdomMercenary?: boolean;
   returnPveId?: string;
+  /** 野战主动追击标记；普通交叉相遇为 false。 */
+  fieldPursuer?: boolean;
+  /** 该军队在此前野战中缴获、尚未归城入库的宝物。 */
+  capturedTreasures?: string[];
 }
 
 /** 防守方兵力来源：驻军或临时增援。 */
@@ -23,6 +27,10 @@ export interface DefenderContribution {
 
 export interface BattleRound {
   round: number;
+  /** v3 阶段；旧 v2 回放缺失时按 total-ad 兼容展示。 */
+  phase?: 'charge' | 'ranged' | 'melee';
+  /** v3 的具体步骤：弓骑预射/骑兵冲锋/远程/近战。 */
+  step?: 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';
   attackerLosses: Record<string, number>;
   defenderLosses: Record<string, number>;
   attacker: Record<string, number>;
@@ -52,6 +60,8 @@ export interface BattleResolution {
   campCleared?: boolean;
   isTaskCamp?: boolean;
   isNoRespawn?: boolean;
+  /** 清营宝物掉落档位；仅普通 PvE 掉落使用。 */
+  treasureTier?: 1 | 2 | 3;
   attackerReportIndex?: number;
   /** 野战结算的来源游标，恢复后不重做已经完成的伤亡回收/战报步骤。 */
   fieldCasualtyIndex?: number;
@@ -81,6 +91,10 @@ export interface Battle {
   defenderDamageCarry?: Record<string, number>;
   /** 规则版本：缺省的旧战场会在下次 tick 惰性迁移到 v2。 */
   rulesetVersion?: number;
+  /** v3 当前待结算步骤；只对 rulesetVersion=3 有意义。 */
+  stagedStep?: 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';
+  /** 阶段三轮次，供“每回合”特性只在阶段三累积。 */
+  meleeRound?: number;
   initialAttacker: Record<string, number>;
   initialDefender: Record<string, number>;
   rounds: BattleRound[];

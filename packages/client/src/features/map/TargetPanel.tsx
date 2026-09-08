@@ -7,7 +7,7 @@ import { getCache, type SelectedTarget } from '../../app/state.js';
 import { dataVersion, selected, garrisonContinue, foreignMoves, tick, showToast, tab, type TaskCampInfo } from '../../app/store.js';
 import {
   worldW, worldH, treasureInfo, treasureRarityName, treasureCarryCap,
-  unitInfo,
+  unitInfo, gameConstants,
 } from '../../app/config.js';
 import { act, switchVillage } from '../../app/refresh.js';
 import { req, me, isOwnVillageId } from '../../api.js';
@@ -397,7 +397,7 @@ function TreasurePlanner({
 }
 
 function Preparation({
-  meta, troops, setTroops, treasures, setTreasures, scoutType, setScoutType, onBack, onNext,
+  meta, troops, setTroops, treasures, setTreasures, scoutType, setScoutType, lossRate, setLossRate, onBack, onNext,
 }: {
   meta: TargetMeta;
   troops: NumberMap;
@@ -406,6 +406,8 @@ function Preparation({
   setTreasures: (codes: string[]) => void;
   scoutType: 'scout_resources' | 'scout_buildings';
   setScoutType: (value: 'scout_resources' | 'scout_buildings') => void;
+  lossRate: number;
+  setLossRate: (value: number) => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -418,6 +420,15 @@ function Preparation({
       {meta.mode === 'scout' && (meta.targetKind !== 'pve' && meta.targetKind !== 'taskcamp' || meta.kingdomCityState) && <section class="expedition-assessment scout-type-picker"><div class="expedition-kicker">侦察报告</div><div class="target-actions target-actions--management"><Btn variant={scoutType === 'scout_resources' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_resources')}>资源与守军</Btn><Btn variant={scoutType === 'scout_buildings' ? 'primary' : 'ghost'} onClick={() => setScoutType('scout_buildings')}>城内外建筑</Btn></div></section>}
       {/* 转移行军不携带物资；资源转运统一走贸易中心的“转移资源”栏。 */}
       <TreasurePlanner selectedCodes={treasures} setSelectedCodes={setTreasures} troopCount={troopCount} />
+      <section class="target-section loss-rate-picker">
+        <div class="target-section-head"><span>野战战损返城阈值</span><strong>{lossRate}%</strong></div>
+        <p class="expedition-hint">野战或被伏击方获胜后，累计损失超过此比例会自动返城；默认 40%。伏击方获胜始终返城。</p>
+        <input class="loss-rate-slider" type="range" min={0} max={100} step={1} value={lossRate} aria-label="野战战损返城阈值百分比"
+          onInput={(event) => {
+            const raw = Number((event.currentTarget as HTMLInputElement).value);
+            setLossRate(Math.max(0, Math.min(100, Number.isFinite(raw) ? Math.floor(raw) : 40)));
+          }} />
+      </section>
       <div class="expedition-validation" aria-live="polite">
         {canDispatch ? `已选择 ${fmt(troopCount)} 名部队${isTransfer ? '，仅携带宝物' : ''}。` : '请选择至少一名部队。'}
       </div>
@@ -430,8 +441,8 @@ function Preparation({
 }
 
 function Confirmation({
-  meta, troops, treasures, onBack, onDispatch, busy,
-}: { meta: TargetMeta; troops: NumberMap; treasures: string[]; onBack: () => void; onDispatch: () => void; busy: boolean }) {
+  meta, troops, treasures, lossRate, rapidMarch, setRapidMarch, onBack, onDispatch, busy,
+}: { meta: TargetMeta; troops: NumberMap; treasures: string[]; lossRate: number; rapidMarch: boolean; setRapidMarch: (value: boolean) => void; onBack: () => void; onDispatch: () => void; busy: boolean }) {
   const [preview, setPreview] = useState<any>(null);
   const caravanTarget = meta.mode === 'caravan_raid' || meta.mode === 'caravan_escort';
   useEffect(() => {
@@ -452,10 +463,12 @@ function Confirmation({
           <div><dt>目标</dt><dd>({meta.q},{meta.r}) · {meta.dist} 格</dd></div>
           <div><dt>部队</dt><dd>{formatUnitSummary(troops)}</dd></div>
           <div><dt>宝物</dt><dd>{treasureNames.length ? treasureNames.join(' · ') : '不携带'}</dd></div>
+          <div><dt>战损返城阈值</dt><dd>{lossRate}%（野战/被伏击方适用）</dd></div>
           {preview && <><div><dt>{caravanTarget ? '到商队当前格耗时' : '预计时长'}</dt><dd>{fmt(preview.travelSec ?? 0)} 秒</dd></div><div><dt>行军点</dt><dd>{preview.marchPoints?.used ?? 0}/{preview.marchPoints?.cap ?? 0} · 集结点 {preview.rallyPointLevel ?? 0} 级</dd></div><div><dt>可派兵力</dt><dd>{formatUnitSummary(preview.availableTroops ?? {})}</dd></div></>}
         </dl>
       </section>
       {(meta.mode === 'attack' || meta.mode === 'raid') && <p class="expedition-warning">{meta.declareWar ? '该目标当前为中立玩家，确认后将同时宣战。' : '这是最终确认：部队抵达目标后将立即进入战斗。'}</p>}
+      {meta.mode === 'raid' && (meta.targetKind === 'pve' || meta.targetKind === 'taskcamp') && <label class="expedition-warning"><input type="checkbox" checked={rapidMarch} onChange={(event) => setRapidMarch(event.currentTarget.checked)} /> 急行军：去程速度 +25%，在外粮耗 +50%（需完成「急行军」科技）</label>}
       {caravanTarget && <p class="expedition-warning">商队持续移动，实际追赶时间会随商队位置变化。{meta.mode === 'caravan_raid' ? '如有护卫，将先交战；只有幸存部队可以搬运物资。' : '追上后以商队速度同行，送货结束后返回。'}</p>}
       <div class="target-foot expedition-foot expedition-foot--split">
         <Btn disabled={busy} onClick={onBack}>返回调整</Btn>
@@ -480,6 +493,8 @@ function ExpeditionWorkflow({
   const [troops, setTroops] = useState<NumberMap>({});
   const [treasures, setTreasures] = useState<string[]>([]);
   const [scoutType, setScoutType] = useState<'scout_resources' | 'scout_buildings'>('scout_resources');
+  const [lossRate, setLossRate] = useState(() => Math.max(0, Math.min(100, Math.floor(Number(gameConstants()?.marchLossRateDefault) || 40))));
+  const [rapidMarch, setRapidMarch] = useState(false);
   const [busy, setBusy] = useState(false);
   const dispatching = useRef(false);
 
@@ -491,36 +506,37 @@ function ExpeditionWorkflow({
     const selectedTroops = Object.fromEntries(Object.entries(troops).filter(([, amount]) => amount > 0));
     const cap = treasureCarryCap(total(selectedTroops));
     const selectedTreasures = treasures.slice(0, cap);
+    const lossOptions = { lossRate };
     let ok = false;
     if (meta.mode === 'caravan_raid' || meta.mode === 'caravan_escort') {
       ok = await act(req(meta.mode === 'caravan_raid' ? 'SendCaravanRaid' : 'SendCaravanEscort', {
-        targetMovementId: meta.refId, troops: selectedTroops, treasures: selectedTreasures,
+        targetMovementId: meta.refId, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions,
       }), { okToast: meta.mode === 'caravan_raid' ? '劫掠军开始追赶商队' : '护送军开始追赶商队' });
     } else if (meta.mode === 'scout') {
       const isPve = meta.targetKind === 'pve' || meta.targetKind === 'taskcamp';
-      ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve && !meta.kingdomCityState ? 'scout_resources' : scoutType }), { okToast: '侦察部队出发' });
+      ok = await act(req('SendScout', { ...(isPve ? { targetId: meta.refId } : { targetVillage: meta.refId }), troops: selectedTroops, treasures: selectedTreasures, scoutType: isPve && !meta.kingdomCityState ? 'scout_resources' : scoutType, ...lossOptions }), { okToast: '侦察部队出发' });
     } else if (meta.mode === 'transport' || meta.mode === 'transfer') {
       ok = await act(req('SendTransport', {
-        targetVillage: meta.refId, troops: selectedTroops, cargo: {}, treasures: selectedTreasures, mode: 'transfer',
+        targetVillage: meta.refId, troops: selectedTroops, cargo: {}, treasures: selectedTreasures, mode: 'transfer', ...lossOptions,
       }), { okToast: '转移部队出发' });
     } else if (meta.mode === 'reinforce') {
-      ok = await act(req('SendReinforce', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '增援部队出发' });
+      ok = await act(req('SendReinforce', { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '增援部队出发' });
     } else if (meta.mode === 'raid') {
       const isPve = meta.targetKind === 'pve' || meta.targetKind === 'taskcamp';
-      const p = isPve ? { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures } : { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar };
+      const p = isPve ? { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures, rapidMarch, ...lossOptions } : { targetVillage: meta.refId, troops: selectedTroops, treasures: selectedTreasures, declareWar: !!meta.declareWar, ...lossOptions };
       ok = await act(req(isPve ? 'SendRaid' : 'SendVillageRaid', p), { okToast: '掠夺部队出发' });
     } else if (meta.mode === 'garrison') {
-      ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '驻扎部队出发' });
+      ok = await act(req('SendGarrison', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '驻扎部队出发' });
     } else if (meta.mode === 'ambush') {
-      ok = await act(req('SendAmbush', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '伏击部队出发' });
+      ok = await act(req('SendAmbush', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '伏击部队出发' });
     } else if (meta.mode === 'investigate') {
-      ok = await act(req('SendInvestigate', { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '调查部队出发' });
+      ok = await act(req('SendInvestigate', { targetId: meta.refId, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '调查部队出发' });
     } else if (meta.mode === 'explore') {
-      ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '探索部队出发，抵达后将返城' });
+      ok = await act(req('SendExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '探索部队出发，抵达后将返城' });
     } else if (meta.mode === 'auto_explore') {
-      ok = await act(req('SendAutoExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures }), { okToast: '自动探索部队已出发' });
+      ok = await act(req('SendAutoExplore', { q: meta.q, r: meta.r, troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '自动探索部队已出发' });
     } else {
-      ok = await act(req('SendAttack', { ...(meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? { targetId: meta.refId } : { targetVillage: meta.refId, declareWar: !!meta.declareWar }), troops: selectedTroops, treasures: selectedTreasures }), { okToast: '攻城部队出发' });
+      ok = await act(req('SendAttack', { ...(meta.targetKind === 'pve' || meta.targetKind === 'taskcamp' ? { targetId: meta.refId } : { targetVillage: meta.refId, declareWar: !!meta.declareWar }), troops: selectedTroops, treasures: selectedTreasures, ...lossOptions }), { okToast: '攻城部队出发' });
     }
     if (ok) onClose();
     } finally { dispatching.current = false; setBusy(false); }
@@ -532,8 +548,8 @@ function ExpeditionWorkflow({
       {step === 1 && (modeOptions
         ? <TargetAssessment meta={meta} options={modeOptions} onChoose={(option) => onSelectMode?.(option)} />
         : <Assessment meta={meta} onNext={() => setStep(2)} />)}
-      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} onBack={() => { if (onModeBack) onModeBack(); else setStep(1); }} onNext={() => setStep(3)} />}
-      {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} busy={busy} onBack={() => setStep(2)} onDispatch={dispatch} />}
+      {step === 2 && <Preparation meta={meta} troops={troops} setTroops={setTroops} treasures={treasures} setTreasures={setTreasures} scoutType={scoutType} setScoutType={setScoutType} lossRate={lossRate} setLossRate={setLossRate} onBack={() => { if (onModeBack) onModeBack(); else setStep(1); }} onNext={() => setStep(3)} />}
+      {step === 3 && <Confirmation meta={meta} troops={troops} treasures={treasures} lossRate={lossRate} rapidMarch={rapidMarch} setRapidMarch={setRapidMarch} busy={busy} onBack={() => setStep(2)} onDispatch={dispatch} />}
     </Panel>
   );
 }
@@ -779,7 +795,7 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
       <div class="target-body expedition-body">
         <section class="expedition-assessment">
           <div class="expedition-kicker">驻扎中</div>
-          <p>该格有你的{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军。可召回返城，或选择下一处行军模式（编队与宝物保持原样）。</p>
+          <p>该格有你的{investigating ? '调查' : ambush ? '伏击' : '驻扎'}军。可召回返城，或继续行军（编队与宝物保持原样）。</p>
         </section>
         <div class="target-foot expedition-foot expedition-foot--split">
           <Btn onClick={async () => {
@@ -790,7 +806,7 @@ function OwnStationedPanel({ move, onClose }: { move: Movement; onClose: () => v
             selected.value = null;
             showToast(`请在地图上选择${investigating ? '调查军' : '驻扎军'}的下一处行军目标`);
             onClose();
-          }}>选择行军模式</Btn>}
+          }}>继续行军</Btn>}
         </div>
       </div>
     </Panel>

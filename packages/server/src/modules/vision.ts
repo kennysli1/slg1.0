@@ -57,7 +57,11 @@ export class VisionModule {
     if (!playerRes.ok) return null;
     const player = (playerRes.payload as any).player;
     const cityRadius = Math.max(0, Number(this.config.constants.raw.city_vision ?? 4));
-    const sources: Source[] = (player.villages ?? []).map((v: any) => ({ q: v.q, r: v.r, radius: cityRadius }));
+    const villageSources = await Promise.all((player.villages ?? []).map(async (v: any) => {
+      const bonus = await this.commands.send({ name: 'treasure.GetVillageVisionBonus', from: VisionModule.NAME, payload: { villageId: v.id } });
+      return { q: v.q, r: v.r, radius: cityRadius + (bonus.ok ? Math.max(0, Number((bonus.payload as any)?.bonus) || 0) : 0) };
+    }));
+    const sources: Source[] = villageSources;
     const marchRes = await this.commands.send({ name: 'movement.ListVisionSources', from: VisionModule.NAME, payload: { playerId } });
     if (marchRes.ok) sources.push(...((marchRes.payload as any).sources ?? []));
     await Promise.all(sources.filter((source) => source.terrainAware).map(async (source) => {

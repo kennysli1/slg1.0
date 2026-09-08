@@ -2,9 +2,10 @@ import type { Snapshot } from '../../infra/combat-types.js';
 import {
   aggregateSnapshotCounts,
   normalizeTotalAdSnapshot,
-  simulateTotalAdRound,
+  simulatePhaseStep,
   totalSnapshotCount,
   type DamageCarries,
+  type BattleStepKind,
 } from '../../infra/total-ad-combat.js';
 
 export const MAX_REPLAY_ROUNDS = 120;
@@ -16,26 +17,14 @@ export interface CombatTickInput {
   defenderDamageCarry?: DamageCarries;
 }
 
-export interface CombatTickResult {
-  attacker: Snapshot;
-  defender: Snapshot;
-  attackerDamageCarry: DamageCarries;
-  defenderDamageCarry: DamageCarries;
-  attackerBefore: Record<string, number>;
-  defenderBefore: Record<string, number>;
-  attackerAfter: Record<string, number>;
-  defenderAfter: Record<string, number>;
-  damageToAttacker: number;
-  damageToDefender: number;
-  attackerTotalAttack: number;
-  attackerTotalDefense: number;
-  defenderTotalAttack: number;
-  defenderTotalDefense: number;
+export interface StagedCombatTickInput extends CombatTickInput {
+  step: BattleStepKind;
+  meleeRound?: number;
 }
 
-/** Combat owner 对基础设施纯回合器的薄封装。 */
-export function simulateCombatTick(input: CombatTickInput): CombatTickResult {
-  return simulateTotalAdRound(input);
+/** v3 线上与独立模拟器共享的单阶段步骤封装。 */
+export function simulateStagedCombatTick(input: StagedCombatTickInput) {
+  return simulatePhaseStep(input);
 }
 
 export function cloneSnapshot(snapshot: Snapshot): Snapshot {

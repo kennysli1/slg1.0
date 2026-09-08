@@ -27,9 +27,28 @@ import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkben
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { caravanAction, collectMapTargetStack, displayGridForMovement, escortMarkerOffset, foreignArmyName, ownMovementsFromCache, selectedMapMovement } from '../features/map/map-target-helpers.js';
 import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
-import { toggleMultiSelection } from '../features/simulator/BattleSimulatorScreen.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
+import { unitTraitEffectText, unitTraitPhaseText } from '../app/config.js';
+
+describe('M1 资源田修复状态', () => {
+  it('任务已就绪时即使没有修复事件记录也把四块资源田显示为已修复', () => {
+    const task = { ready: true, repairedBuildings: [] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'claypit'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), true);
+    assert.equal(isRepairBuildingDone(task, 'cropland'), true);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), false);
+  });
+
+  it('只有仍有未完成修复项时才显示待修复提示', () => {
+    const task = { ready: false, repairedBuildings: ['woodcutter', 'claypit'] };
+    assert.equal(isRepairBuildingDone(task, 'woodcutter'), true);
+    assert.equal(isRepairBuildingDone(task, 'ironmine'), false);
+    assert.equal(hasRepairBuildingPending(task, ['woodcutter', 'claypit', 'ironmine', 'cropland']), true);
+  });
+});
 
 describe('军队面板折叠区顺序', () => {
   it('防御掠夺位于训练下方、解散上方，并使用与解散相同的折叠控件', () => {
@@ -142,14 +161,35 @@ describe('兵种训练卡基础属性', () => {
   });
 });
 
-describe('阶段化战斗模拟器的科技与宝物多选', () => {
-  it('可连续选择多个项目，并点击已选项目取消；重复勾选不会产生重复项', () => {
-    let selected = toggleMultiSelection([], 'tech-a', true);
-    selected = toggleMultiSelection(selected, 'tech-b', true);
-    assert.deepEqual(selected, ['tech-a', 'tech-b']);
-    selected = toggleMultiSelection(selected, 'tech-a', false);
-    assert.deepEqual(selected, ['tech-b']);
-    assert.deepEqual(toggleMultiSelection(selected, 'tech-b', true), ['tech-b']);
+describe('兵种战斗特性展示文案', () => {
+  it('保留服务端数值的正负号，并标注对应战斗阶段', () => {
+    assert.equal(unitTraitEffectText({ effect: 'self_attack', value: 0.18, phase: 'charge' }), '自身攻击 +18%');
+    assert.equal(unitTraitEffectText({ effect: 'enemy_cavalry_defense', value: -0.15, phase: 'ranged' }), '敌方骑兵防御 -15%');
+    assert.equal(unitTraitPhaseText('charge'), '冲锋阶段');
+    assert.equal(unitTraitPhaseText('all'), '全战斗阶段');
+  });
+
+  it('详情弹窗从配置快照渲染可点击特性标签和独立说明窗', () => {
+    const source = readFileSync(new URL('../features/army/UnitDetail.tsx', import.meta.url), 'utf8');
+    assert.match(source, /info\.traits\.map/);
+    assert.match(source, /class="unit-trait-btn"/);
+    assert.match(source, /openTraitDetail\(name, trait\)/);
+    assert.match(source, /unit-trait-detail/);
+  });
+});
+
+describe('阶段化战斗模拟器界面', () => {
+  it('只提交兵力，并将阶段步骤中的伤害、伤亡、特性与存活兵力展示为可读内容', () => {
+    const source = readFileSync(new URL('../features/simulator/BattleSimulatorScreen.tsx', import.meta.url), 'utf8');
+    assert.match(source, /attacker: \{ troops: sumTroops\(attacker\.rows\) \}/);
+    assert.match(source, /defender: \{ troops: sumTroops\(defender\.rows\) \}/);
+    assert.doesNotMatch(source, /attackPct|defensePct|hpPct/);
+    assert.match(source, /弓骑齐射/);
+    assert.match(source, /总攻击/);
+    assert.match(source, /承受伤害/);
+    assert.match(source, /阵亡/);
+    assert.match(source, /进攻方存活/);
+    assert.match(source, /展开近战回合/);
   });
 });
 
@@ -162,6 +202,17 @@ describe('科研点判定公式展示', () => {
     assert.match(tree, /state\?\.rpFormula/);
     assert.match(tree, /durationLabel/);
     assert.doesNotMatch(tree, /0\.10 \+ Math\.max\(0, highest - 1\)/);
+  });
+});
+
+describe('科技纲领树呈现', () => {
+  it('使用服务端纲领组与锁定状态呈现不可逆路线，不在客户端硬编码科技名称或效果', () => {
+    const tree = readFileSync(new URL('../features/research/TechTreeScreen.tsx', import.meta.url), 'utf8');
+    assert.match(tree, /doctrineGroup/);
+    assert.match(tree, /doctrine_locked/);
+    assert.match(tree, /战略纲领二选一/);
+    assert.match(tree, /完成后锁定本局路线；取消研发不会锁定/);
+    assert.doesNotMatch(tree, /rapid_march|全民皆兵|露天仓库/);
   });
 });
 
@@ -982,12 +1033,25 @@ describe('notificationKind', () => {
 });
 
 describe('商队地图交互', () => {
+  it('议会厅护卫服务在服务卡内提供商队选择，驻扎军按钮文案为继续行军', () => {
+    const council = readFileSync(new URL('../features/village/CouncilModal.tsx', import.meta.url), 'utf8');
+    const targetPanel = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(council, /council-caravan-pickers--card/);
+    assert.match(council, /选择护卫商队/);
+    assert.match(targetPanel, /继续行军<\/Btn>/);
+    assert.doesNotMatch(targetPanel, />选择行军模式<\/Btn>/);
+  });
   it('移动标记可直接按 ID 点击，商队不受旧外军 pointer-events:none 阻挡', () => {
     const source = readFileSync(new URL('../features/map/HexMap.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../styles/map.css', import.meta.url), 'utf8');
     assert.match(source, /closest\?\.\('\[data-move-id\]'\)/);
     assert.match(source, /class="march-marker-hit"/);
     assert.match(css, /\.enemy-march-mk\[data-move-id\]\s*\{\s*pointer-events:\s*all/);
+  });
+  it('野战战损返城阈值使用 0-100 滑条而不是数字输入', () => {
+    const source = readFileSync(new URL('../features/map/TargetPanel.tsx', import.meta.url), 'utf8');
+    assert.match(source, /class="loss-rate-slider"\s+type="range"\s+min=\{0\}\s+max=\{100\}/);
+    assert.match(source, /aria-label="野战战损返城阈值百分比"/);
   });
   it('按点击 ID 选择同格商队和护送军，不被占格顺序替换', () => {
     const escort = { id: 'escort', pos: { q: 5, r: 6 }, escortAttached: true } as any;

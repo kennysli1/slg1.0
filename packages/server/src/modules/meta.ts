@@ -67,6 +67,19 @@ export class MetaModule {
           popCost: u.popCost,
           upkeep: u.upkeep,
           isMercenary: !!u.isMercenary,
+          // 兵种详情只需要特性名称及其已配置效果；不下发战斗内部快照。
+          traits: u.traits
+            .map((code) => c.unitTraits[code])
+            .filter((trait): trait is NonNullable<typeof trait> => !!trait)
+            .map((trait) => ({
+              code: trait.code,
+              name: trait.name,
+              effects: trait.effects.map((effect) => ({
+                effect: effect.effect,
+                value: effect.value,
+                phase: effect.phase ?? 'all',
+              })),
+            })),
         })),
         // 雇佣兵单独下发（含完整战斗属性 + 金币单价），供招募店 UI 与军队详情展示
         mercenaries: Object.values(c.units).filter((u) => u.isMercenary).map((u) => ({
@@ -129,6 +142,7 @@ export class MetaModule {
           tradeNpcSellMargin: c.constants.tradeNpcSellMargin,
           tradeOrderMaxPerVillage: c.constants.tradeOrderMaxPerVillage,
           tradeOrderTtlSec: c.constants.tradeOrderTtlSec,
+          marchLossRateDefault: c.constants.marchLossRateDefault,
           treasureCampDropChance: c.constants.treasureCampDropChance,
           // 军队携带宝物：携带上限换算（每多少兵力+1格）与格数硬上限
           treasureCarryTroopsPerSlot: c.constants.treasureCarryTroopsPerSlot,

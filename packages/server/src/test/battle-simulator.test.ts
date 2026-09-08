@@ -22,6 +22,22 @@ test('模拟器使用攻击、防御、生命三属性配置，并同步同一�
   assert.ok(report.stages[0]!.steps.length > 0);
 });
 
+test('v3 整数基础步兵：六组 100 对 100 精确满足存活锚点', () => {
+  const cfg = loadGameConfig(configDir);
+  const cases: Array<[string, string, string, number]> = [
+    ['clubswinger', 'legionnaire', 'clubswinger', 30],
+    ['clubswinger', 'phalanx', 'clubswinger', 10],
+    ['legionnaire', 'clubswinger', 'legionnaire', 20],
+    ['legionnaire', 'phalanx', 'phalanx', 30],
+    ['phalanx', 'clubswinger', 'phalanx', 10],
+    ['phalanx', 'legionnaire', 'legionnaire', 20],
+  ];
+  for (const [attacker, defender, survivor, expected] of cases) {
+    const report = simulateBattle(cfg, { attacker: { troops: { [attacker]: 100 } }, defender: { troops: { [defender]: 100 } } });
+    assert.equal(report.final.attacker[survivor] ?? report.final.defender[survivor] ?? 0, expected, `${attacker} 攻 ${defender}`);
+  }
+});
+
 test('模拟器不再接受阶段、城墙或兵种形态作为伤害来源', () => {
   const cfg = loadGameConfig(configDir);
   const base = simulateBattle(cfg, { attacker: { troops: { clubswinger: 100 } }, defender: { troops: { legionnaire: 100 } } });

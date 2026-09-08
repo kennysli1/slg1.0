@@ -145,6 +145,15 @@
   line-height: 1;
   text-shadow: 0 0 var(--s-2) var(--tech-branch);
 }
+.tech-tree-stage--doctrine .tech-stage-head {
+  color: var(--c-gold-hi);
+}
+.tech-tree-stage--doctrine .tech-stage-nodes {
+  padding: var(--s-2);
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-md);
+  background: var(--c-panel-3);
+}
 .tech-node {
   position: relative;
   display: flex;
@@ -161,6 +170,9 @@
 .tech-node--doing { border-color: var(--c-ember); }
 .tech-node--locked { opacity: .7; }
 .tech-node--poor { border-color: var(--line-strong); }
+.tech-node--doctrine { border-width: 2px; }
+.tech-node--doctrine.tech-node--ready { box-shadow: var(--glow-gold); }
+.tech-node--abandoned { opacity: .62; }
 .tech-node-top { display: flex; align-items: center; gap: var(--s-2); }
 .tech-node-title { min-width: 0; flex: 1; }
 .tech-node-name { font-family: var(--ff-han); font-size: var(--f-md); font-weight: 700; color: var(--c-ink); }
@@ -182,6 +194,17 @@
   padding: var(--s-2); border-radius: var(--r-sm);
   background: var(--c-panel-3); color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.45;
 }
+.tech-doctrine-note {
+  padding: var(--s-2);
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-sm);
+  color: var(--c-ink-soft);
+  background: var(--c-panel-3);
+  font-size: var(--f-xs);
+  line-height: 1.45;
+}
+.tech-doctrine-note--chosen { border-color: var(--c-jade); color: var(--c-jade); }
+.tech-doctrine-note--abandoned { border-color: var(--c-crimson); color: var(--c-crimson-hi); }
 .tech-node-outcome .icon { margin-top: 1px; }
 .tech-node-meta { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); color: var(--c-ink-soft); font-size: var(--f-xs); }
 .tech-node-meta span { display: inline-flex; align-items: center; gap: var(--s-1); }

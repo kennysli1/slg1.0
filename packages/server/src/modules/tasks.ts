@@ -125,6 +125,8 @@ export class TasksModule {
     this.commands.register('task.SubmitResources', (c: Command) => this.submitResources(c));
     this.commands.register('task.StartDeliver', (c: Command) => this.startDeliver(c));
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
+    this.commands.register('task.SolveRune', (c: Command) => this.solveRune(c));
+    this.commands.register('task.SelectBranch', (c: Command) => this.selectBranch(c));
     this.commands.register('task.Fail', (c: Command) => this.fail(c));
     // 骰子王小游戏只通过任务模块读写任务进度；临时对局本身由 diceQuest owner 管理。
     this.commands.register('task.GetDiceMatch', (c: Command) => this.getDiceMatch(c));
@@ -818,6 +820,56 @@ export class TasksModule {
     } finally {
       this.deliveryInFlight.delete(lockKey);
     }
+  }
+
+  /** 灰烬商路的符文谜题：服务器按配置序列校验，客户端不能伪造进度。 */
+  private async solveRune(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, sequence } = cmd.payload as { villageId?: string; code?: string; sequence?: string[] };
+    if (!villageId || !code || !Array.isArray(sequence)) return { ok: false, payload: {}, reason: 'invalid_rune_submission' };
+    const quest = this.quest(code);
+    if (!quest || quest.objective.kind !== 'rune_sequence') return { ok: false, payload: {}, reason: 'not_rune_quest' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const instance = state.active[code];
+    if (!instance) return { ok: false, payload: {}, reason: 'not_active' };
+    if (instance.runeSolved || instance.readyToDeliver) return { ok: false, payload: {}, reason: 'rune_already_solved' };
+    const expected = quest.objective.runeSequence ?? [];
+    const submitted = sequence.map((v) => String(v).trim());
+    const correct = submitted.length === expected.length && submitted.every((v, i) => v === expected[i]);
+    if (!correct) return { ok: false, payload: { correct: false, progress: 0 }, reason: 'incorrect_rune_sequence' };
+    instance.runeSolved = true;
+    instance.progress = expected.length;
+    instance.readyToDeliver = true;
+    instance.executionVillageId = villageId;
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return { ok: true, payload: { code, correct: true, progress: expected.length, ready: true } };
+  }
+
+  /** s13 解密完成后选择唯一一条后续支线；选择写入 firedTriggers，避免新增存档字段。 */
+  private async selectBranch(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, branch } = cmd.payload as { villageId?: string; code?: string; branch?: string };
+    if (!villageId || code !== 's13' || !branch || !['trade', 'military', 'explore'].includes(branch)) {
+      return { ok: false, payload: {}, reason: 'invalid_branch' };
+    }
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const instance = state.active[code];
+    const quest = this.quest(code);
+    if (!instance || !quest || quest.objective.kind !== 'rune_sequence' || !instance.runeSolved || !instance.readyToDeliver) {
+      return { ok: false, payload: {}, reason: 'rune_not_solved' };
+    }
+    const trigger = `ashen_branch:${branch}`;
+    state.firedTriggers = state.firedTriggers.filter((value) => !value.startsWith('ashen_branch:'));
+    if (!state.firedTriggers.includes(trigger)) state.firedTriggers.push(trigger);
+    delete state.active[code];
+    if (!state.completedSide.includes(code)) state.completedSide.push(code);
+    this.store.set(COLLECTION, storageVillageId, state);
+    await this.unlockSideQuests(villageId);
+    await this.pushList(villageId);
+    await this.pushMap(villageId);
+    return { ok: true, payload: { code, branch } };
   }
 
   /** Deliver 的实际逻辑由上层互斥包裹，保证任务奖励（尤其 m8/m9 铁壁勋章）最多发放一次。 */
@@ -2064,6 +2116,7 @@ export class TasksModule {
       // tavern_refresh 表示“进入酒馆支线池”，本身不是 firedTriggers 事件；
       // refreshOffered 已在槽位刷新时选中该池，不能因没有同名事件而误删。
       if (row.kind === 'tavern_refresh') return true;
+      if (row.kind === 'branch_selected') return state.firedTriggers.includes(`ashen_branch:${value}`);
       const key = row.kind + (value ? `:${value}` : '');
       return state.firedTriggers.includes(row.kind) || state.firedTriggers.includes(key);
     };
@@ -3298,6 +3351,7 @@ export class TasksModule {
       diceDifficulty: q.objective.diceDifficulty ?? null,
       diceTargetScore: q.objective.diceTargetScore ?? null,
       diceWinsRequired: q.objective.diceWinsRequired ?? null,
+      runeSequence: q.objective.runeSequence ?? null,
     };
   }
 
@@ -3348,6 +3402,7 @@ export class TasksModule {
       dicePlayerWins: inst.dicePlayerWins ?? 0,
       diceNpcWins: inst.diceNpcWins ?? 0,
       diceLastOutcome: inst.diceLastOutcome ?? null,
+      runeSolved: inst.runeSolved === true,
       failureReady: inst.failureReady === true,
       canAbandon: inst.type !== 'main',
       ready: inst.readyToDeliver === true,

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { loadCsv, num } from './csv.js';
-import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
+import { TRAIT_EFFECTS, type CombatPhase, type CombatRole, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
 import {
   loadBalanceOverrides,
   mergeBalanceOverrides,
@@ -159,7 +159,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match' | 'rune_sequence';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -201,6 +201,8 @@ export interface QuestObjective {
   diceDifficulty?: 'easy' | 'normal' | 'hard';
   diceTargetScore?: number;
   diceWinsRequired?: number;
+  /** rune_sequence：以逗号分隔的唯一符文序列。 */
+  runeSequence?: string[];
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -387,6 +389,8 @@ export interface UnitDef {
   icon: string; // 基名
   /** 形态：melee(近战/前排) / ranged(远程/后排)。取代旧的 cat。 */
   form: UnitForm;
+  /** 阶段战斗角色；只决定阶段一出手资格，阶段三全员参战。 */
+  role: CombatRole;
   /** 战斗唯一攻击属性。 */
   attack: number;
   /** 战斗唯一防御属性。 */
@@ -411,8 +415,6 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
-  /** 历史展示标签；不参与战斗。 */
-  simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
   /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
@@ -439,9 +441,12 @@ export interface PveTemplate {
   cityState?: boolean;
   /** 王国 PvE 生成档位：普通城邦、统一标准封地或更高标准王都。 */
   kingdomProfile?: 'city_state' | 'fief' | 'capital';
+  /** 普通野外营地宝物掉落档位（1=低、2=中、3=高）；王国/任务目标不会走普通掉落。 */
+  treasureTier: 1 | 2 | 3;
   defender: Record<string, {
     count: number;
     form: UnitForm;
+    role: CombatRole;
     attack: number;
     defense: number;
     hp?: number;
@@ -514,6 +519,8 @@ export interface GameConstants {
   marchSizePenalty: number;
   /** 军队规模减速：速度倍率下限。 */
   marchSizeMinMultiplier: number;
+  /** 野战/被伏击方达到该战损比例后返城的默认阈值（百分比）。 */
+  marchLossRateDefault: number;
   /** 骑兵兵种代码（由 cavalry_unit_codes 以 | 分隔配置），用于猎马人任务与绞马索效果。 */
   cavalryUnitCodes: string[];
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -661,6 +668,13 @@ export interface GameConstants {
   tradeOrderTtlSec: number;
   /** 宝物掉落：清理野外营地后掉落宝物的总体概率（0-1）。 */
   treasureCampDropChance: number;
+  /** 宝物掉落：普通/中等/高等野外营地总体掉落概率倍率。 */
+  treasureCampDropChanceTier1Multiplier: number;
+  treasureCampDropChanceTier2Multiplier: number;
+  treasureCampDropChanceTier3Multiplier: number;
+  /** 宝物掉落：中/高等营地按稀有度提高 dropRate 权重的倍率底数；稀有度每升一级再乘一次。 */
+  treasureCampRarityMultiplierTier2: number;
+  treasureCampRarityMultiplierTier3: number;
   /** 宝物：贸易中心 NPC 订单池中出现「宝物出售」订单的概率（0-1）。 */
   treasureNpcOfferChance: number;
   /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
@@ -703,6 +717,8 @@ export interface GameConstants {
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
+  /** 声望：商队劫掠每累计掠得多少单位物资扣 1 点声望；余数跨多次劫掠保留。 */
+  caravanRaidReputationGoodsPerPoint: number;
   /** PvP 掠夺/攻城：每拆除建筑一级所需的战力阈值。 */
   pvpRaidPowerPerBuildingLevel: number;
   pvpSiegePowerPerBuildingLevel: number;
@@ -798,6 +814,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** T2 战略纲领互斥组；同一玩家同组只能确立一项。 */
+  doctrineGroup?: string;
   /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
@@ -1061,6 +1079,16 @@ function parseTraitRefs(s: string, traitIdToCode: Map<number, string>): string[]
   }).filter(Boolean);
 }
 
+/** CSV 老行没有 role 时按稳定 code/form 兼容推断；新配置必须显式填写。 */
+function parseCombatRole(raw: string | undefined, form: string | undefined, code: string | undefined): CombatRole {
+  if (raw === 'infantry' || raw === 'cavalry' || raw === 'siege' || raw === 'scout' || raw === 'special') return raw;
+  const key = code ?? '';
+  if (/ram|catapult|trebuchet/i.test(key)) return 'siege';
+  if (/scout|pathfinder|equlegati/i.test(key)) return 'scout';
+  if (/equi|theutates|druidrider|haeduan|paladin|knight|rider|cavalry/i.test(key)) return 'cavalry';
+  return form === 'ranged' ? 'infantry' : 'infantry';
+}
+
 function assertUniqueRows(rows: Record<string, string>[], table: string, idField = 'id', codeField = 'code'): void {
   const ids = new Set<string>();
   const codes = new Set<string>();
@@ -1180,10 +1208,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of traitRows) {
     if (!r.code) continue;
     traitIdToCode.set(num(r.id), r.code);
-    const effects: { effect: TraitEffect; value: number }[] = [];
+    const effects: { effect: TraitEffect; value: number; phase?: CombatPhase }[] = [];
     for (let i = 1; i <= 5; i++) {
       const ek = `effect${i}`, vk = `value${i}`;
-      if (r[ek]) effects.push({ effect: r[ek] as TraitEffect, value: num(r[vk]) });
+      if (r[ek]) {
+        const phaseRaw = r[`phase${i}`] as CombatPhase | undefined;
+        const phase: CombatPhase = phaseRaw === 'charge' || phaseRaw === 'ranged' || phaseRaw === 'melee' || phaseRaw === 'all'
+          ? phaseRaw : 'all';
+        // 配置中心直接填写整数百分比（例如 -18 = -18%），运行时才收敛为倍率。
+        effects.push({ effect: r[ek] as TraitEffect, value: num(r[vk]) / 100, phase });
+      }
     }
     unitTraits[r.code] = { id: num(r.id), code: r.code, name: r.name, effects };
   }
@@ -1203,6 +1237,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[r.code] = {
       id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.code),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: num(r.upkeep, 1),
@@ -1210,7 +1245,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
       techTier: Math.max(1, num(r.techTier, 1)),
@@ -1234,6 +1268,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[code] = {
       id: num(r.id), key: code, tribe: 'merc', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.code),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: 0,
@@ -1241,7 +1276,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: 0,
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: 0,
       popCostConfigured: true,
       isMercenary: true,
@@ -1299,7 +1333,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.pve_targets) {
     pveRows = mergeOverridesIntoRows(pveRows, {
       file: 'pve_targets.csv', key: 'id',
-      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop'],
+      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop','treasureTier'],
     }, overrides.pve_targets);
   }
   assertUniqueRows(pveRows, 'pve_targets.csv');
@@ -1312,6 +1346,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
       cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
       kingdomProfile: r.kingdomProfile === 'fief' || r.kingdomProfile === 'capital' ? r.kingdomProfile : (r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state' ? 'city_state' : undefined),
+      // 旧配置没有 treasureTier 时按现有普通营地难度顺序回退：1-2 低、3-5 中、6-8 高。
+      // 显式列值优先，便于配置中心按营地逐项调整。
+      treasureTier: (Math.max(1, Math.min(3, Math.floor(num(r.treasureTier, num(r.id) >= 6 && num(r.id) <= 8 ? 3 : num(r.id) >= 3 && num(r.id) <= 5 ? 2 : 1)))) as 1 | 2 | 3),
       respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
@@ -1331,6 +1368,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tpl.defender[r.unitCode] = {
       count: num(r.count),
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.unitCode),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       carry: num(r.carry), traitCodes: parseTraitRefs(r.traits, traitIdToCode),
     };
@@ -1410,6 +1448,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
     marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
     marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
+    marchLossRateDefault: Math.max(0, Math.min(100, cn('march_loss_rate_default', 40))),
     cavalryUnitCodes: parseConstantList(cs('cavalry_unit_codes', 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'), 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
@@ -1517,6 +1556,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
     tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
+    // 这些是直接乘在总体掉宝概率上的倍率。默认高档为 1，
+    // 这样即使现有 treasure_camp_drop_chance=1，也能通过低/中档的较低倍率
+    // 保证“难度越高，掉宝越容易”，同时不改写宝物目录 dropRate。
+    treasureCampDropChanceTier1Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier1_multiplier', 0.5)),
+    treasureCampDropChanceTier2Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier2_multiplier', 0.75)),
+    treasureCampDropChanceTier3Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier3_multiplier', 1)),
+    treasureCampRarityMultiplierTier2: Math.max(1, cn('treasure_camp_rarity_multiplier_tier2', 1.25)),
+    treasureCampRarityMultiplierTier3: Math.max(1, cn('treasure_camp_rarity_multiplier_tier3', 1.6)),
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
@@ -1542,6 +1589,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
+    caravanRaidReputationGoodsPerPoint: Math.max(1, Math.floor(cn('caravan_raid_reputation_goods_per_point', 2000))),
     pvpRaidPowerPerBuildingLevel: Math.max(1, cn('pvp_raid_power_per_building_level', 100)),
     pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
     pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
@@ -1640,6 +1688,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      doctrineGroup: r.doctrineGroup?.trim() || undefined,
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
@@ -1886,6 +1935,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         diceTargetScore: Math.max(1, num(targetScore, 2000)),
         diceWinsRequired: Math.max(1, num(winsRequired, 1)),
       };
+    }
+    if (row.kind === 'rune_sequence') {
+      return { kind: row.kind, runeSequence: row.params.split(/[|,]/).map((v) => v.trim()).filter(Boolean), count: 1 };
     }
     return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
   };
@@ -2153,6 +2205,13 @@ export function validateGameConfig(config: GameConfig): void {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
+    const mainRequires = b.requires.filter((r) => r.kind === 'main');
+    const mainLevels = [...new Set(mainRequires.map((r) => r.level))];
+    if (mainLevels.length > 1) {
+      errors.push(`buildings.csv[${b.kind}] requires 不能包含多个不同的主基地等级`);
+    } else if (mainLevels.length === 1 && mainLevels[0] !== b.mainBaseLevel) {
+      errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 必须与 requires 主基地前置=${mainLevels[0]} 一致`);
+    }
     if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
     if (b.popGrowthPerLevel < 0) errors.push(`buildings.csv[${b.kind}] popGrowthPerLevel 必须≥0（当前${b.popGrowthPerLevel}）`);
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
@@ -2204,11 +2263,11 @@ export function validateGameConfig(config: GameConfig): void {
     if (u.form !== 'melee' && u.form !== 'ranged') {
       errors.push(`units.csv[${u.key}] form=${u.form} 必须是 melee 或 ranged`);
     }
+    if (!['infantry', 'cavalry', 'siege', 'scout', 'special'].includes(u.role)) {
+      errors.push(`units.csv[${u.key}] role=${u.role} 必须是 infantry/cavalry/siege/scout/special`);
+    }
     for (const tc of u.traits) {
       if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
-    }
-    for (const tc of u.simTraits ?? []) {
-      if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] simTraits 引用了不存在的特性 ${tc}`);
     }
     // 雇佣兵不走 military.TrainTroops（trainSec=0 合法），普通兵种仍要求 trainSec>0 防零除
     if (!u.isMercenary && u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
@@ -2221,10 +2280,12 @@ export function validateGameConfig(config: GameConfig): void {
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
     if (p.faction !== 'neutral' && p.faction !== 'kingdom') errors.push(`pve_targets.csv[${p.type}] faction 必须是 neutral 或 kingdom`);
+    if (p.treasureTier !== 1 && p.treasureTier !== 2 && p.treasureTier !== 3) errors.push(`pve_targets.csv[${p.type}] treasureTier 必须为 1/2/3`);
     // happy_village（幸福村）和 kingdom_city_state（运行时随机生成）允许不在静态守军表中配置。
     if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
     for (const [unitCode, defender] of Object.entries(p.defender)) {
       if ((defender.hp ?? 1) <= 0) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] hp 必须>0（当前${defender.hp ?? 0}）`);
+      if (!['infantry', 'cavalry', 'siege', 'scout', 'special'].includes(defender.role)) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] role 无效`);
       for (const tc of defender.traitCodes ?? []) {
         if (!traitCodes.has(tc)) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] traits 引用了不存在的特性 ${tc}`);
       }
@@ -2241,7 +2302,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner', 'vaultGoldLoot', 'armyVision']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -2303,6 +2364,8 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
+  if (c.treasureCampDropChanceTier1Multiplier < 0 || c.treasureCampDropChanceTier2Multiplier < 0 || c.treasureCampDropChanceTier3Multiplier < 0) errors.push(`game_constants.csv treasure_camp_drop_chance_tier*_multiplier 必须≥0`);
+  if (c.treasureCampRarityMultiplierTier2 < 1 || c.treasureCampRarityMultiplierTier3 < 1) errors.push(`game_constants.csv treasure_camp_rarity_multiplier_tier2/3 必须≥1`);
   if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
   if (c.treasureCarryTroopsPerSlot <= 0) errors.push(`game_constants.csv treasure_carry_troops_per_slot 必须>0（当前${c.treasureCarryTroopsPerSlot}）`);
   if (c.treasureCarryMaxSlots <= 0) errors.push(`game_constants.csv treasure_carry_max_slots 必须>0（当前${c.treasureCarryMaxSlots}）`);
@@ -2324,6 +2387,9 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
     errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
   }
+  if (c.marchLossRateDefault < 0 || c.marchLossRateDefault > 100) {
+    errors.push(`game_constants.csv march_loss_rate_default 必须在[0,100]`);
+  }
   if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
   if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);
   if (c.kingdomCityStateGoldMin < 0 || c.kingdomCityStateGoldMax < c.kingdomCityStateGoldMin) errors.push(`game_constants.csv kingdom_city_state_gold_min/max 范围非法`);
@@ -2338,6 +2404,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.kingdomFiefResourceMin < 0 || c.kingdomFiefResourceMax < c.kingdomFiefResourceMin || c.kingdomCapitalResourceMin < 0 || c.kingdomCapitalResourceMax < c.kingdomCapitalResourceMin) errors.push(`game_constants.csv 王国封地/王都资源范围非法`);
   if (c.kingdomFiefGoldMin < 0 || c.kingdomFiefGoldMax < c.kingdomFiefGoldMin || c.kingdomCapitalGoldMin < 0 || c.kingdomCapitalGoldMax < c.kingdomCapitalGoldMin) errors.push(`game_constants.csv 王国封地/王都金币范围非法`);
   if (c.kingdomPveKilledPopulationPerReputation <= 0 || c.kingdomPveRetaliationChunk <= 0) errors.push(`game_constants.csv 王国 PvE 声望累计参数必须>0`);
+  if (c.caravanRaidReputationGoodsPerPoint <= 0) errors.push(`game_constants.csv caravan_raid_reputation_goods_per_point 必须>0`);
   if (c.kingdomPveRetaliationSiegeThreshold > c.kingdomPveRetaliationRaidThreshold) errors.push(`game_constants.csv 王国 PvE 报复阈值顺序非法`);
   if (c.kingdomFiefMercenaryMinRatio < 0 || c.kingdomFiefMercenaryMaxRatio > 1 || c.kingdomFiefMercenaryMaxRatio < c.kingdomFiefMercenaryMinRatio) errors.push(`game_constants.csv 王国封地雇佣军比例范围非法`);
   if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
@@ -2426,6 +2493,12 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.baseProbability < 0 || a.baseProbability > 1) errors.push(`academy.csv[Lv${a.level}] baseProbability 必须在[0,1]`);
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
   }
+  const academyLevels = Object.values(config.academy).sort((a, b) => a.level - b.level);
+  for (let i = 1; i < academyLevels.length; i++) {
+    if (academyLevels[i].checkIntervalSec > academyLevels[i - 1].checkIntervalSec) {
+      errors.push(`academy.csv[Lv${academyLevels[i].level}] 判定间隔不得高于 Lv${academyLevels[i - 1].level}`);
+    }
+  }
 
   // 科技效果类型白名单校验：新增 effectType 必须先在源码中接线，否则启动报错
   const KNOWN_TECH_EFFECT_TYPES = new Set([
@@ -2440,7 +2513,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match', 'rune_sequence']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2507,12 +2580,14 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
       if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
       if (!q.objective.diceDifficulty || !['easy', 'normal', 'hard'].includes(q.objective.diceDifficulty)) errors.push(`quests.csv[${q.code}] dice_match 难度无效`);
+    } else if (q.objective.kind === 'rune_sequence') {
+      if (!q.objective.runeSequence || q.objective.runeSequence.length < 2) errors.push(`quests.csv[${q.code}] rune_sequence 至少需要两个符文`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
       if (q.type !== 'side' && !(q.type === 'main' && (q.trigger.startsWith('main_base_level:') || q.trigger.startsWith('building_level:') || q.trigger.startsWith('treasure_used:')))) errors.push(`quests.csv[${q.code}] 仅支线或主基地/建筑/宝物使用门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used' && tk !== 'branch_selected') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

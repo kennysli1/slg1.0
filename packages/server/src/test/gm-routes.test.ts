@@ -267,6 +267,7 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
       'kingdom_fief_mercenary_min_ratio',
       'kingdom_fief_mercenary_max_ratio',
       'kingdom_city_state_reputation_penalty',
+      'caravan_raid_reputation_goods_per_point',
     ]) assert.match(reputationSection, new RegExp(key), `声望参数板块应包含 ${key}`);
     const cityStateFnStart = res.body.indexOf('function sectionCityState()');
     const cityStateFnEnd = res.body.indexOf('function sectionKingdom()', cityStateFnStart);
@@ -333,7 +334,7 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
     assert.equal(modulesRes.statusCode, 200);
     const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
     assert.equal(modules.ok, true);
-    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 9);
+    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 10);
     assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
     const graphRes = await fastify.inject({ method: 'GET', url: '/config/quest-graph/data' });
     assert.equal(graphRes.statusCode, 200);
