@@ -379,10 +379,10 @@ test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
 
  test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
   const cfg = loadGameConfig(configDir);
-  assert.deepEqual(cfg.units.clubswinger.simTraits, ['teuton_origin_attack']);
-  assert.deepEqual(cfg.units.phalanx.simTraits, ['gaul_origin_defense']);
+  assert.deepEqual(cfg.units.clubswinger.traits, ['teuton_origin_attack']);
+  assert.deepEqual(cfg.units.phalanx.traits, ['gaul_phalanx_guard']);
   assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.07);
-  assert.equal(cfg.unitTraits.gaul_origin_defense.effects[0]?.value, 0.21);
+  assert.equal(cfg.unitTraits.gaul_phalanx_guard.effects[0]?.value, 0.21);
   assert.equal(cfg.units.merc_slinger.attack, 35);
   assert.equal(cfg.units.merc_slinger.defense, 15);
   assert.equal(cfg.units.merc_slinger.hp, 80);

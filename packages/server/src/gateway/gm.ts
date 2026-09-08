@@ -651,7 +651,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['attack', 'defense', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
      // 兵种的线上展示特性与模拟器特性同样属于配置中心可维护的文本字段。
      // 这样在统一攻防/生命字段迁移后，保存兵种数值时不会把特性列留在旧共享表。
-     text: ['role', 'traits', 'simTraits'],
+     text: ['role', 'traits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
   unit_traits: {

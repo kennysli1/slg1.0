@@ -1,8 +1,7 @@
 import type { CombatPhase, CombatUnit, CombatRole, Snapshot, UnitTraitDef } from './combat-types.js';
 
-/** 新创建战斗使用 v3；已落盘 v2 必须继续走旧回合函数。 */
+/** 唯一战斗规则：阶段化总攻击/总防御/生命结算。 */
 export const TOTAL_AD_RULESET_VERSION = 3;
-export const TOTAL_AD_V2_RULESET_VERSION = 2;
 export interface DamageCarries { [snapshotKey: string]: number }
 
 export interface TotalAdRoundResult {
@@ -74,17 +73,6 @@ export function totalSnapshotCount(snapshot: Snapshot): number {
   return Object.values(snapshot).reduce((sum, unit) => sum + Math.max(0, unit.count), 0);
 }
 
-function totalStat(snapshot: Snapshot, side: 'attacker' | 'defender', stat: 'attack' | 'defense'): number {
-  return Object.entries(snapshot).reduce((sum, [key, unit]) => {
-    if (unit.count <= 0) return sum;
-    let value = nonNegative(unit[stat]);
-    // 仅这两个首个基础步兵在其“原始角色”触发种族特性。
-    if (stat === 'attack' && side === 'attacker' && unitCode(key) === 'clubswinger') value *= 1.074;
-    if (stat === 'defense' && side === 'defender' && unitCode(key) === 'phalanx') value *= 1.2206;
-    return sum + unit.count * value;
-  }, 0);
-}
-
 function damage(totalAttack: number, enemyTotalDefense: number): number {
   return totalAttack <= 0 ? 0 : totalAttack * totalAttack / Math.max(totalAttack + enemyTotalDefense, 0.000001);
 }
@@ -108,43 +96,6 @@ function applyIncomingDamage(snapshot: Snapshot, incoming: number, carries: Dama
     }
   }
   return { snapshot: next, carries: nextCarries };
-}
-
-/** 一个“总攻击 / 总防御”回合；双方始终基于同一轮开始快照同时结算。 */
-export function simulateTotalAdRound(input: {
-  attacker: Snapshot | Record<string, any>;
-  defender: Snapshot | Record<string, any>;
-  attackerDamageCarry?: DamageCarries;
-  defenderDamageCarry?: DamageCarries;
-}): TotalAdRoundResult {
-  const attacker = normalizeTotalAdSnapshot(input.attacker);
-  const defender = normalizeTotalAdSnapshot(input.defender);
-  const attackerBefore = aggregateSnapshotCounts(attacker);
-  const defenderBefore = aggregateSnapshotCounts(defender);
-  const attackA = totalStat(attacker, 'attacker', 'attack');
-  const defenseA = totalStat(attacker, 'attacker', 'defense');
-  const attackD = totalStat(defender, 'defender', 'attack');
-  const defenseD = totalStat(defender, 'defender', 'defense');
-  const damageToDefender = damage(attackA, defenseD);
-  const damageToAttacker = damage(attackD, defenseA);
-  const nextAttacker = applyIncomingDamage(attacker, damageToAttacker, input.attackerDamageCarry ?? {});
-  const nextDefender = applyIncomingDamage(defender, damageToDefender, input.defenderDamageCarry ?? {});
-  return {
-    attacker: nextAttacker.snapshot,
-    defender: nextDefender.snapshot,
-    attackerDamageCarry: nextAttacker.carries,
-    defenderDamageCarry: nextDefender.carries,
-    attackerBefore,
-    defenderBefore,
-    attackerAfter: aggregateSnapshotCounts(nextAttacker.snapshot),
-    defenderAfter: aggregateSnapshotCounts(nextDefender.snapshot),
-    damageToAttacker,
-    damageToDefender,
-    attackerTotalAttack: attackA,
-    attackerTotalDefense: defenseA,
-    defenderTotalAttack: attackD,
-    defenderTotalDefense: defenseD,
-  };
 }
 
 export type BattleStepKind = 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';

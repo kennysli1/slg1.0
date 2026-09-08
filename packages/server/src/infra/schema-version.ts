@@ -12,4 +12,5 @@
  * 规矩全文见 docs/00_变更契约.md R6。
  */
 // v7：新战场冻结 role/traits 与阶段游标；旧 rulesetVersion=2 战场继续用 v2 结算。
-export const SAVE_SCHEMA_VERSION = 7;
+// v8：旧进行中战斗统一迁移到 v3 阶段结算；移除 simTraits 与 v2 战斗分支。
+export const SAVE_SCHEMA_VERSION = 8;

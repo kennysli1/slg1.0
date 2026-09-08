@@ -413,8 +413,6 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
-  /** 历史展示标签；不参与战斗。 */
-  simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
   /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
@@ -1230,7 +1228,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
       techTier: Math.max(1, num(r.techTier, 1)),
@@ -1262,7 +1259,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: 0,
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: 0,
       popCostConfigured: true,
       isMercenary: true,
@@ -2228,9 +2224,6 @@ export function validateGameConfig(config: GameConfig): void {
     }
     for (const tc of u.traits) {
       if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
-    }
-    for (const tc of u.simTraits ?? []) {
-      if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] simTraits 引用了不存在的特性 ${tc}`);
     }
     // 雇佣兵不走 military.TrainTroops（trainSec=0 合法），普通兵种仍要求 trainSec>0 防零除
     if (!u.isMercenary && u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
