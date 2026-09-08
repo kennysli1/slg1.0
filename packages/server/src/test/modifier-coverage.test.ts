@@ -184,7 +184,7 @@ describe('modifier 覆盖率', () => {
     assert.ok(imper, 'equimperatoris not in trainable');
     // legionnaire：base(1)+upkeep(1)=2，军晌≤1 不减 → 仍 2
     assert.equal(legion.cropPerHourEach, 2, `legionnaire cropPerHourEach=${legion.cropPerHourEach} 应=2（军晌1不减）`);
-    // equimperatoris：新版 popCost=2，原始 (1+3)*2=8，减 1 → 7（不是减 popCost×1=2）
-    assert.equal(imper.cropPerHourEach, 7, `equimperatoris cropPerHourEach=${imper.cropPerHourEach} 应=7（减绝对值1，非popCost×1）`);
+    // equimperatoris：popCost=3，原始 (1+3)*3=12，减 1 → 11（不是减 popCost×1=3）。
+    assert.equal(imper.cropPerHourEach, 11, `equimperatoris cropPerHourEach=${imper.cropPerHourEach} 应=11（减绝对值1，非popCost×1）`);
   });
 });

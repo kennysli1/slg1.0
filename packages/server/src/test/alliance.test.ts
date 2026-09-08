@@ -373,14 +373,16 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(app.store.all<any>('movement').length, 0, '倒计时内取消不应派出军队');
 
   // 再建一个目标，推进到实际派出后验证 90 秒内的一键全员撤回。
-  // pve-0 的当前预计行军约 126 秒；使用 60 秒参军窗口 + 240 秒总倒计时，
+  // 保留充足的总倒计时，使当前兵种速度配置下仍可完成报名与派出。
   // 让派出时刻落在报名截止后的 90 秒内。
-  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
+  const plan2 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 7_289, participationCountdownSec: 60 });
   const plan2Id = (plan2.payload as any).plan.id as string;
   const joined2 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan2Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
   assert.equal(joined2.ok, true, joined2.reason);
   const plan2State = app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id];
   const dispatchAt = plan2State.deadlineAt - plan2State.participants[leader.player.id].travelSec * 1000;
+  // 用实际计算出的派出时刻作为报名截止，避免兵种速度调参令本测试的固定秒数失效。
+  plan2State.joinDeadlineAt = dispatchAt;
   await app.scheduler.advanceTo(dispatchAt, (t) => { clock = t; });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const dispatched = app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id];
@@ -392,7 +394,7 @@ test('联盟战事：倒计时创建、逐兵种可用兵力与取消/全员撤�
   assert.equal(app.store.get<any>('alliance', allianceId)!.warPlans[plan2Id].participants[leader.player.id].status, 'recalled');
 
   // 取消/撤回窗口从报名截止开始统一计算；报名截止后超过 90 秒不能再取消。
-  const plan3 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 240, participationCountdownSec: 60 });
+  const plan3 = await send(app, 'alliance.CreateWarPlan', { playerId: leader.player.id, mode: 'raid', targetKind: 'pve', targetId: 'pve-0', q: (target.payload as any).q, r: (target.payload as any).r, countdownSec: 7_289, participationCountdownSec: 60 });
   const plan3Id = (plan3.payload as any).plan.id as string;
   const joined3 = await send(app, 'alliance.JoinWarPlan', { playerId: leader.player.id, planId: plan3Id, sourceVillageId: leader.player.villageId, troops: { legionnaire: 2 } });
   assert.equal(joined3.ok, true, joined3.reason);

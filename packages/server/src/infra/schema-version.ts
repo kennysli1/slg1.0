@@ -12,4 +12,5 @@
  * 规矩全文见 docs/00_变更契约.md R6。
  */
 // v8：科技树重构；research resume 审计式清空旧 RP/完成项/在途研发并记录 techTreeVersion。
-export const SAVE_SCHEMA_VERSION = 8;
+// v9：战斗统一迁移至阶段化总攻/总防/生命结算，移除 simTraits 与 v2 分支。
+export const SAVE_SCHEMA_VERSION = 9;

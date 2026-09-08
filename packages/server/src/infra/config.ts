@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { loadCsv, num } from './csv.js';
-import { TRAIT_EFFECTS, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
+import { TRAIT_EFFECTS, type CombatPhase, type CombatRole, type TraitEffect, type UnitForm, type UnitTraitDef } from './combat-types.js';
 import {
   loadBalanceOverrides,
   mergeBalanceOverrides,
@@ -387,6 +387,8 @@ export interface UnitDef {
   icon: string; // 基名
   /** 形态：melee(近战/前排) / ranged(远程/后排)。取代旧的 cat。 */
   form: UnitForm;
+  /** 阶段战斗角色；只决定阶段一出手资格，阶段三全员参战。 */
+  role: CombatRole;
   /** 战斗唯一攻击属性。 */
   attack: number;
   /** 战斗唯一防御属性。 */
@@ -411,8 +413,6 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
-  /** 历史展示标签；不参与战斗。 */
-  simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
   /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
@@ -444,6 +444,7 @@ export interface PveTemplate {
   defender: Record<string, {
     count: number;
     form: UnitForm;
+    role: CombatRole;
     attack: number;
     defense: number;
     hp?: number;
@@ -1076,6 +1077,16 @@ function parseTraitRefs(s: string, traitIdToCode: Map<number, string>): string[]
   }).filter(Boolean);
 }
 
+/** CSV 老行没有 role 时按稳定 code/form 兼容推断；新配置必须显式填写。 */
+function parseCombatRole(raw: string | undefined, form: string | undefined, code: string | undefined): CombatRole {
+  if (raw === 'infantry' || raw === 'cavalry' || raw === 'siege' || raw === 'scout' || raw === 'special') return raw;
+  const key = code ?? '';
+  if (/ram|catapult|trebuchet/i.test(key)) return 'siege';
+  if (/scout|pathfinder|equlegati/i.test(key)) return 'scout';
+  if (/equi|theutates|druidrider|haeduan|paladin|knight|rider|cavalry/i.test(key)) return 'cavalry';
+  return form === 'ranged' ? 'infantry' : 'infantry';
+}
+
 function assertUniqueRows(rows: Record<string, string>[], table: string, idField = 'id', codeField = 'code'): void {
   const ids = new Set<string>();
   const codes = new Set<string>();
@@ -1195,10 +1206,16 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of traitRows) {
     if (!r.code) continue;
     traitIdToCode.set(num(r.id), r.code);
-    const effects: { effect: TraitEffect; value: number }[] = [];
+    const effects: { effect: TraitEffect; value: number; phase?: CombatPhase }[] = [];
     for (let i = 1; i <= 5; i++) {
       const ek = `effect${i}`, vk = `value${i}`;
-      if (r[ek]) effects.push({ effect: r[ek] as TraitEffect, value: num(r[vk]) });
+      if (r[ek]) {
+        const phaseRaw = r[`phase${i}`] as CombatPhase | undefined;
+        const phase: CombatPhase = phaseRaw === 'charge' || phaseRaw === 'ranged' || phaseRaw === 'melee' || phaseRaw === 'all'
+          ? phaseRaw : 'all';
+        // 配置中心直接填写整数百分比（例如 -18 = -18%），运行时才收敛为倍率。
+        effects.push({ effect: r[ek] as TraitEffect, value: num(r[vk]) / 100, phase });
+      }
     }
     unitTraits[r.code] = { id: num(r.id), code: r.code, name: r.name, effects };
   }
@@ -1218,6 +1235,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[r.code] = {
       id: num(r.id), key: r.code, tribe: r.tribe || 'romans', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.code),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: num(r.upkeep, 1),
@@ -1225,7 +1243,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
       techTier: Math.max(1, num(r.techTier, 1)),
@@ -1249,6 +1266,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     units[code] = {
       id: num(r.id), key: code, tribe: 'merc', name: r.name, icon: r.icon,
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.code),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       meleeAtk: num(r.attack), rangedAtk: num(r.attack), meleeDef: num(r.defense), rangedDef: num(r.defense),
       speed: num(r.speed, 6), vision: Math.max(0, num(r.vision, 1)), carry: num(r.carry), upkeep: 0,
@@ -1256,7 +1274,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: 0,
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: 0,
       popCostConfigured: true,
       isMercenary: true,
@@ -1349,6 +1366,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tpl.defender[r.unitCode] = {
       count: num(r.count),
       form: (r.form as UnitForm) || 'melee',
+      role: parseCombatRole(r.role, r.form, r.unitCode),
       attack: num(r.attack), defense: num(r.defense), hp: Math.max(1, num(r.hp, 100)),
       carry: num(r.carry), traitCodes: parseTraitRefs(r.traits, traitIdToCode),
     };
@@ -2240,11 +2258,11 @@ export function validateGameConfig(config: GameConfig): void {
     if (u.form !== 'melee' && u.form !== 'ranged') {
       errors.push(`units.csv[${u.key}] form=${u.form} 必须是 melee 或 ranged`);
     }
+    if (!['infantry', 'cavalry', 'siege', 'scout', 'special'].includes(u.role)) {
+      errors.push(`units.csv[${u.key}] role=${u.role} 必须是 infantry/cavalry/siege/scout/special`);
+    }
     for (const tc of u.traits) {
       if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
-    }
-    for (const tc of u.simTraits ?? []) {
-      if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] simTraits 引用了不存在的特性 ${tc}`);
     }
     // 雇佣兵不走 military.TrainTroops（trainSec=0 合法），普通兵种仍要求 trainSec>0 防零除
     if (!u.isMercenary && u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
@@ -2262,6 +2280,7 @@ export function validateGameConfig(config: GameConfig): void {
     if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
     for (const [unitCode, defender] of Object.entries(p.defender)) {
       if ((defender.hp ?? 1) <= 0) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] hp 必须>0（当前${defender.hp ?? 0}）`);
+      if (!['infantry', 'cavalry', 'siege', 'scout', 'special'].includes(defender.role)) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] role 无效`);
       for (const tc of defender.traitCodes ?? []) {
         if (!traitCodes.has(tc)) errors.push(`pve_defenders.csv[${p.type}/${unitCode}] traits 引用了不存在的特性 ${tc}`);
       }

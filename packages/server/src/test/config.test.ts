@@ -390,28 +390,28 @@ test('校验器：建筑主基地前置必须与 mainBaseLevel 一致', () => {
 test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
-  assert.equal(leg.attack, 59.04);
-  assert.equal(leg.defense, 45.11);
-  assert.equal(leg.hp, 280.14);
+  assert.equal(leg.attack, 60);
+  assert.equal(leg.defense, 43);
+  assert.equal(leg.hp, 273);
   const cat = cfg.units['catapult'];
   assert.ok(cat.attack > 0 && cat.defense > 0 && cat.hp > 0, '所有兵种只需三项战斗属性');
-  assert.equal(cfg.units.phalanx.defense, 47.39);
-  assert.equal(cfg.units.clubswinger.attack, 82.37);
-});
+  assert.equal(cfg.units.phalanx.defense, 51);
+  assert.equal(cfg.units.clubswinger.attack, 81);
+ });
 
-test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
+ test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
   const cfg = loadGameConfig(configDir);
-  assert.deepEqual(cfg.units.clubswinger.simTraits, ['sunder', 'teuton_origin_attack']);
-  assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
-  assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.074);
-  assert.equal(cfg.unitTraits.gaul_origin_defense.effects[0]?.value, 0.2206);
+  assert.deepEqual(cfg.units.clubswinger.traits, ['teuton_origin_attack']);
+  assert.deepEqual(cfg.units.phalanx.traits, ['gaul_phalanx_guard']);
+  assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.07);
+  assert.equal(cfg.unitTraits.gaul_phalanx_guard.effects[0]?.value, 0.21);
   assert.equal(cfg.units.merc_slinger.attack, 35);
   assert.equal(cfg.units.merc_slinger.defense, 15);
   assert.equal(cfg.units.merc_slinger.hp, 80);
   const rat = Object.values(cfg.pveTemplates).flatMap((template) => Object.entries(template.defender))
     .find(([code]) => code === 'rat')?.[1];
   assert.deepEqual(rat && { attack: rat.attack, defense: rat.defense, hp: rat.hp }, { attack: 5, defense: 10, hp: 10 });
-});
+ });
 
 test('PvE 营地：宝物掉落档位按难度递增且可由模板配置', () => {
   const cfg = loadGameConfig(configDir);

@@ -5,7 +5,7 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig } from '../infra/config.js';
 import type { Snapshot } from '../infra/combat-types.js';
-import { normalizeTotalAdSnapshot, TOTAL_AD_RULESET_VERSION } from '../infra/total-ad-combat.js';
+import { normalizeTotalAdSnapshot, TOTAL_AD_RULESET_VERSION, type BattleStepKind } from '../infra/total-ad-combat.js';
 import { makeLogger } from '../infra/logger.js';
 // eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的内部边界；架构测试按 owner 归并校验。
 import type { Battle, Contribution, DefenderContribution } from './combat/types.js';
@@ -16,7 +16,7 @@ import {
   filterNonSiegeWeapons,
   filterSiegeWeapons,
   sampleBattleRounds,
-  simulateCombatTick,
+  simulateStagedCombatTick,
   totalCount,
   totalPower,
 } from './combat/engine.js';
@@ -325,7 +325,7 @@ export class CombatModule {
         defenderFieldContributions: multiple ? fieldContributions : undefined,
         defenderContributions: multiple ? defenderContributions : undefined,
         caravanId: p.caravanId,
-        attackerDamageCarry: {}, defenderDamageCarry: {}, rulesetVersion: TOTAL_AD_RULESET_VERSION,
+        attackerDamageCarry: {}, defenderDamageCarry: {}, rulesetVersion: TOTAL_AD_RULESET_VERSION, stagedStep: 'bow_cavalry', meleeRound: 0,
         initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
         attackPower0: totalPower(attacker), defensePower0: totalPower(defender),
         startedAt: this.now(), ticks: 0, status: 'active',
@@ -393,6 +393,7 @@ export class CombatModule {
       attackerDamageCarry: {},
       defenderDamageCarry: {},
       rulesetVersion: TOTAL_AD_RULESET_VERSION,
+      stagedStep: 'bow_cavalry', meleeRound: 0,
       initialAttacker: aggregateCounts(attacker), initialDefender: aggregateCounts(defender), rounds: [],
       attackPower0: totalPower(attacker),
       defensePower0: totalPower(defender),
@@ -476,21 +477,23 @@ export class CombatModule {
   private async tick(id: string): Promise<void> {
     const b = this.load(id);
     if (!b || b.status !== 'active') return;
-    // 存量战场没有 rulesetVersion 或仍是旧四维快照时，在首个未结算回合安全迁移。
+    // 旧进行中战斗统一迁移到当前阶段规则；不再保留 v2 结算分支。
     if (b.rulesetVersion !== TOTAL_AD_RULESET_VERSION) {
       b.attacker = normalizeTotalAdSnapshot(b.attacker as any);
       b.defender = normalizeTotalAdSnapshot(b.defender as any);
       b.attackerDamageCarry = {};
       b.defenderDamageCarry = {};
       b.rulesetVersion = TOTAL_AD_RULESET_VERSION;
+      b.stagedStep = 'bow_cavalry';
+      b.meleeRound = 0;
     }
     b.ticks += 1;
-    const result = simulateCombatTick({
-      attacker: b.attacker,
-      defender: b.defender,
-      attackerDamageCarry: b.attackerDamageCarry,
-      defenderDamageCarry: b.defenderDamageCarry,
-    });
+    const step: BattleStepKind = b.stagedStep ?? 'bow_cavalry';
+    const result = simulateStagedCombatTick({
+        attacker: b.attacker, defender: b.defender,
+        attackerDamageCarry: b.attackerDamageCarry, defenderDamageCarry: b.defenderDamageCarry,
+        step, meleeRound: Math.max(1, b.meleeRound ?? 1),
+      });
     b.attacker = result.attacker;
     b.defender = result.defender;
     b.attackerDamageCarry = result.attackerDamageCarry;
@@ -503,6 +506,7 @@ export class CombatModule {
     const defenderAfter = result.defenderAfter;
     b.rounds.push({
       round: b.ticks,
+      phase: result.phase, step: result.step,
       attackerLosses: countDelta(result.attackerBefore, attackerAfter),
       defenderLosses: countDelta(result.defenderBefore, defenderAfter),
       attacker: attackerAfter,
@@ -514,6 +518,11 @@ export class CombatModule {
       damageToAttacker: result.damageToAttacker,
       damageToDefender: result.damageToDefender,
     });
+
+    if (step === 'bow_cavalry') b.stagedStep = 'cavalry_charge';
+    else if (step === 'cavalry_charge') b.stagedStep = 'ranged';
+    else if (step === 'ranged') { b.stagedStep = 'melee'; b.meleeRound = 1; }
+    else { b.stagedStep = 'melee'; b.meleeRound = Math.max(1, b.meleeRound ?? 1) + 1; }
 
     // 每10 tick 记录一次兵力变化（避免刷屏）
     if (b.ticks % 10 === 0) {
@@ -542,6 +551,7 @@ export class CombatModule {
         damageToAttacker: result.damageToAttacker,
         damageToDefender: result.damageToDefender,
         round: b.ticks,
+        phase: result.phase, step: result.step, meleeRound: b.meleeRound,
       }));
     }
 

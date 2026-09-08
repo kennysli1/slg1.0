@@ -184,14 +184,12 @@ test('GM 面板：兵种视野可编辑并由配置加载为运行时权威值',
 test('GM 面板：兵种线上/模拟器特性引用可随统一 CSV 一起保存', () => {
   const table = BALANCE_TABLES['units'];
   assert.ok(table.text?.includes('traits'), 'GM units 白名单必须包含线上特性列');
-  assert.ok(table.text?.includes('simTraits'), 'GM units 白名单必须包含模拟器特性列');
   withTmp((tmp) => {
     const phalanxId = String(loadGameConfig(configDir).units.phalanx.id);
     applyBalanceEdits(configDir, tmp, table, {
-      [phalanxId]: { traits: '6|18|23', simTraits: '13|18|23' },
+      [phalanxId]: { traits: 'gaul_phalanx_guard' },
     });
     const cfg = loadGameConfig(tmp);
-    assert.deepEqual(cfg.units.phalanx.traits, ['spear_wall', 'brace', 'gaul_origin_defense']);
-    assert.deepEqual(cfg.units.phalanx.simTraits, ['cavalry_hunter', 'brace', 'gaul_origin_defense']);
+    assert.deepEqual(cfg.units.phalanx.traits, ['gaul_phalanx_guard']);
   });
 });

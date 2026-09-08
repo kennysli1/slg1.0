@@ -449,9 +449,9 @@ export class MilitaryModule {
       carry: def.carry,
       upkeep: def.upkeep,
     };
-  }
+   }
 
-  /** 当前仍有效的主动宝物攻防倍率；同一村重复使用时按加成百分比相加。 */
+   /** 当前仍有效的主动宝物攻防倍率；同一村重复使用时按加成百分比相加。 */
   private timedCombatMult(s: MilitaryState): { atk: number; def: number } {
     const now = this.now();
     let atk = 1, def = 1;
@@ -460,8 +460,8 @@ export class MilitaryModule {
       atk = 1 + (atk - 1) + Math.max(0, Number(buff.atkMult) || 0);
       def = 1 + (def - 1) + Math.max(0, Number(buff.defMult) || 0);
     }
-    return { atk, def };
-  }
+     return { atk, def };
+   }
 
   private needsTechUnlock(unit: string): boolean {
     return Object.values(this.config.research).some((t) => t.effects.some((e) => e.effectType === 'unit_unlock' && e.effectKey === unit));
@@ -1151,6 +1151,9 @@ export class MilitaryModule {
         ...stats,
         attack: stats.attack * atkMult,
         defense: stats.defense * defMult,
+        form: this.config.units[unit]!.form,
+        role: this.config.units[unit]!.role,
+        traits: this.config.units[unit]!.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
       };
     }
     return { ok: true, payload: { snapshot } };
