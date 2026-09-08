@@ -188,11 +188,11 @@ export class TradeModule {
     // 中心建成/升级 → 确保中心状态存在并刷新参数。
     this.bus.on('building.Built', (evt: DomainEvent) => {
       const { villageId, kind } = evt.payload as { villageId: string; kind: string };
-      if (kind === 'tradecenter') void this.ensureCenter(villageId);
+      if (kind === 'tradecenter') return this.ensureCenter(villageId);
     });
     this.bus.on('building.Upgraded', (evt: DomainEvent) => {
       const { villageId, kind } = evt.payload as { villageId: string; kind: string };
-      if (kind === 'tradecenter') void this.ensureCenter(villageId);
+      if (kind === 'tradecenter') return this.ensureCenter(villageId);
     });
     // 商队返回家园 → 回收该村贸易路线。
     this.bus.on('movement.CaravanReturned', (evt: DomainEvent) => {
@@ -299,9 +299,21 @@ export class TradeModule {
     return out;
   }
 
-  /** 每条贸易路线的运力（单位）。 */
-  private routeCapacity(): number {
-    return Math.max(1, this.config.constants.tradeRouteCapacity ?? 500);
+  /**
+   * 每条贸易路线的实际运力（单位）。宝物仍由 Treasure owner 聚合；贸易只
+   * 消费已冻结的村庄效果。这样商路圣印只影响此后新建立的路线需求，不会
+   * 改写已经在途商队或已经预占的挂单路线数。
+   */
+  private async routeCapacity(villageId: string): Promise<number> {
+    const base = Math.max(1, this.config.constants.tradeRouteCapacity ?? 500);
+    const effects = await this.commands.send({
+      name: 'treasure.GetVillageEffects', from: TradeModule.NAME, payload: { villageId },
+    });
+    const raw = effects.ok
+      ? Number((effects.payload as { effects?: { caravanCapacityMult?: unknown } })?.effects?.caravanCapacityMult)
+      : 1;
+    const multiplier = Number.isFinite(raw) && raw >= 0 ? raw : 1;
+    return Math.max(1, Math.floor(base * multiplier));
   }
 
   /** 生成单条 NPC 资源订单：随机选资源，随机买卖双方，按金币基准价值计价。 */
@@ -356,11 +368,39 @@ export class TradeModule {
    * 再以 treasureNpcOfferChance 概率「覆盖其中一条」普通订单为宝物出售订单
    * （而非在普通订单之外额外多塞一条）。宝物出售订单在数量上始终占用一个普通订单名额。
    */
-  private buildPool(tc: { npcOrderCount: number; tradeViewRadius: number }, level: number, expiresAt: number): NpcOrder[] {
+  private async buildPool(villageId: string, tc: { npcOrderCount: number; tradeViewRadius: number }, level: number, expiresAt: number): Promise<NpcOrder[]> {
     const pool = Array.from({ length: tc.npcOrderCount }, () => this.rollNpcOrder(level, tc.tradeViewRadius, expiresAt));
     if (this.tradeableTreasures.length > 0 && Math.random() < this.config.constants.treasureNpcOfferChance) {
       const idx = Math.floor(Math.random() * pool.length);
       pool[idx] = this.rollTreasureOffer(expiresAt);
+    }
+    // 圣地残印不进入通常的 priceGold>0 宝物商单池。贸易中心刷新时向
+    // Sanctum owner 询问本轮是否仍能发现残印；命中后以一笔免费“特殊发现”
+    // 覆盖普通 NPC 订单。普通宝物商单仍可同时存在，确保新活动不会吃掉
+    // 既有的贸易中心宝物机制。
+    const issued = await this.commands.send({
+      name: 'sanctum.TryIssueSeal', from: TradeModule.NAME, payload: { villageId },
+    });
+    const issue = issued.payload as { allowed?: unknown; sealCode?: unknown } | undefined;
+    const sealCode = typeof issue?.sealCode === 'string' ? issue.sealCode : 'sanctum_fragment';
+    const def = this.config.treasures[sealCode];
+    if (issued.ok && issue?.allowed === true && def
+      && Math.random() < Math.max(0, Math.min(1, this.config.constants.sanctumFragmentTradeDropChance))
+      && pool.length > 0) {
+      // 尽可能不要覆盖刚刚选出的普通宝物商单；订单数只有 1 时则由残印优先。
+      const normalTreasureIndex = pool.findIndex((entry) => !!entry.treasure);
+      const candidates = pool.map((_, index) => index).filter((index) => index !== normalTreasureIndex);
+      const index = candidates.length > 0
+        ? candidates[Math.floor(Math.random() * candidates.length)]!
+        : Math.floor(Math.random() * pool.length);
+      pool[index] = {
+        id: this.nextId(), give: {}, want: {}, distance: 0, expiresAt,
+        treasure: {
+          code: def.code, name: def.name, icon: def.icon, category: def.category,
+          rarity: def.rarity, effectType: def.effectType, effectValue: def.effectValue,
+          applyType: def.applyType, buyPrice: 0, sellPrice: 0,
+        },
+      };
     }
     return pool;
   }
@@ -391,7 +431,7 @@ export class TradeModule {
     const existing = this.load(villageId);
     if (!existing) {
       const expiresAt = this.now() + tc.npcRefreshSec * 1000;
-      const pool = this.buildPool(tc, level, expiresAt);
+      const pool = await this.buildPool(villageId, tc, level, expiresAt);
       const nextRefreshAt = expiresAt;
       const s: TradeCenterState = {
         villageId, level, npcOrderPool: pool, storedRefreshes: 0,
@@ -417,7 +457,7 @@ export class TradeModule {
     if (!s) return;
     const tc = this.config.tradeCenter[s.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const expiresAt = this.now() + tc.npcRefreshSec * 1000;
-    s.npcOrderPool = this.buildPool(tc, s.level, expiresAt);
+    s.npcOrderPool = await this.buildPool(villageId, tc, s.level, expiresAt);
     s.storedRefreshes = Math.min(tc.npcStoredRefreshes, s.storedRefreshes + 1);
     s.nextRefreshAt = expiresAt;
     s.taskId = this.scheduleRefresh(villageId, expiresAt);
@@ -548,7 +588,7 @@ export class TradeModule {
     const target = targets.find((x) => x.villageId === targetVillage);
     if (!target) return { ok: false, payload: {}, reason: 'transfer_target_unavailable' };
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
-    const routesNeeded = Math.ceil(this.sumUnits(clean) / this.routeCapacity());
+    const routesNeeded = Math.ceil(this.sumUnits(clean) / await this.routeCapacity(villageId));
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
     if (routesNeeded > available) return { ok: false, payload: { routesNeeded, available }, reason: 'insufficient_routes' };
     const spend = await this.commands.send({ name: 'economy.TrySpend', from: TradeModule.NAME, payload: { villageId, cost: clean } });
@@ -590,7 +630,7 @@ export class TradeModule {
       return { ok: false, payload: {}, reason: 'invalid_transfer_resource' };
     }
     const tc = this.config.tradeCenter[level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
-    const routesNeeded = Math.ceil(this.sumUnits(clean) / this.routeCapacity());
+    const routesNeeded = Math.ceil(this.sumUnits(clean) / await this.routeCapacity(sourceVillageId));
     const available = Math.max(0, tc.tradeRoutes - s.tradeRoutesUsed);
     if (routesNeeded > available) return { ok: false, payload: { routesNeeded, available }, reason: 'insufficient_routes' };
     const spend = await this.commands.send({ name: 'economy.TrySpend', from: TradeModule.NAME, payload: { villageId: sourceVillageId, cost: clean } });
@@ -617,7 +657,7 @@ export class TradeModule {
     s.storedRefreshes -= 1;
     const tc = this.config.tradeCenter[s.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
     const expiresAt = s.nextRefreshAt;
-    s.npcOrderPool = this.buildPool(tc, s.level, expiresAt);
+    s.npcOrderPool = await this.buildPool(villageId, tc, s.level, expiresAt);
     this.store.set(COLLECTION, villageId, s);
     await this.emitUpdated(villageId);
     const base = await this.getCenter({ name: 'trade.GetCenter', from: 'trade', payload: { villageId } });
@@ -757,7 +797,7 @@ export class TradeModule {
 
     // 路线运力校验：己方提供的货物单位数须可由可用路线运完。
     const giveUnits = this.sumUnits(cleanGive);
-    const routesNeeded = Math.ceil(giveUnits / this.routeCapacity());
+    const routesNeeded = Math.ceil(giveUnits / await this.routeCapacity(villageId));
     if (routesNeeded > available) return { ok: false, payload: { routesNeeded, available }, reason: 'insufficient_routes' };
 
     // 挂单数量上限
@@ -811,7 +851,7 @@ export class TradeModule {
     let acceptor = this.load(villageId);
     if (!acceptor) { await this.ensureCenter(villageId); acceptor = this.load(villageId); }
     if (!acceptor) return { ok: false, payload: {}, reason: 'no_center' };
-    const acceptorRoutes = Math.ceil(this.sumUnits(order.want) / this.routeCapacity());
+    const acceptorRoutes = Math.ceil(this.sumUnits(order.want) / await this.routeCapacity(villageId));
     const acceptorAvailable = Math.max(0, aTc.tradeRoutes - acceptor.tradeRoutesUsed);
     if (acceptorRoutes > acceptorAvailable) return { ok: false, payload: { routesNeeded: acceptorRoutes, available: acceptorAvailable }, reason: 'insufficient_routes' };
 
@@ -897,11 +937,18 @@ export class TradeModule {
     const { villageId, npcId, npcXY, want, ownerName } = cmd.payload as {
       villageId: string; npcId: string; npcXY: Hex; want: Record<string, number>; ownerName?: string;
     };
-    const s = this.load(villageId);
+    let s = this.load(villageId);
+    // Tasks may retry immediately from the same building.Built event that
+    // creates the trade-center state. Initialize it here as well so the order
+    // cannot race the parallel EventBus subscribers.
+    if (!s) {
+      await this.ensureCenter(villageId);
+      s = this.load(villageId);
+    }
     if (!s) return { ok: false, payload: {}, reason: 'no_center' };
     const cleanWant = this.cleanRes(want ?? {});
     if (Object.keys(cleanWant).length === 0) return { ok: false, payload: {}, reason: 'empty_payload' };
-    const routesNeeded = Math.ceil(this.sumUnits(cleanWant) / this.routeCapacity());
+    const routesNeeded = Math.ceil(this.sumUnits(cleanWant) / await this.routeCapacity(villageId));
     const order: NpcDeliveryOrder = {
       id: this.nextId(), npcId, npcXY, want: cleanWant, routesNeeded,
       ownerName: ownerName ?? '幸福村', createdAt: this.now(), ttlAt: this.now() + 1e9,

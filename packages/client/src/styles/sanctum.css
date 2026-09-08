@@ -1,0 +1,126 @@
+/* ---------- 远弦圣地（任务页的全局事件面板） ---------- */
+.sanctum-event-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--s-3);
+  border-color: color-mix(in srgb, var(--c-gold) 58%, var(--c-border));
+  background:
+    radial-gradient(circle at 92% 0%, rgb(109 177 196 / 12%), transparent 32%),
+    linear-gradient(135deg, rgb(255 214 132 / 5%), transparent 42%),
+    var(--c-panel-2);
+}
+.sanctum-event-panel .section-head { margin-bottom: 0; }
+.sanctum-event-panel .head-actions { align-items: center; }
+.sanctum-event-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: rgb(0 0 0 / 12%);
+}
+.sanctum-event-summary > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-2) var(--s-3);
+  border-right: 1px solid var(--c-border);
+}
+.sanctum-event-summary > div:last-child { border-right: 0; }
+.sanctum-event-summary small,
+.sanctum-relic small { color: var(--c-ink-soft); font-size: var(--f-2xs); }
+.sanctum-event-summary strong,
+.sanctum-relic strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sanctum-event-notice,
+.sanctum-modal-hint {
+  margin: 0;
+  color: var(--c-ink-soft);
+  font-size: var(--f-sm);
+}
+.sanctum-section {
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
+  background: rgb(0 0 0 / 8%);
+}
+.sanctum-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 var(--s-3);
+  cursor: pointer;
+  color: var(--c-gold);
+  font-weight: 700;
+  list-style: none;
+}
+.sanctum-section > summary::-webkit-details-marker { display: none; }
+.sanctum-section > summary::before { content: '›'; margin-right: var(--s-1); transition: transform var(--t-fast); }
+.sanctum-section[open] > summary { border-bottom: 1px solid var(--c-border); }
+.sanctum-section[open] > summary::before { transform: rotate(90deg); }
+.sanctum-section > summary > span { margin-left: auto; color: var(--c-ink-soft); font-size: var(--f-2xs); font-weight: 500; }
+.sanctum-condition-list { display: grid; gap: var(--s-2); padding: var(--s-2); }
+.sanctum-condition {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--c-border) 84%, transparent);
+  border-radius: var(--r-sm);
+  background: rgb(255 255 255 / 2%);
+}
+.sanctum-condition.is-complete { border-color: color-mix(in srgb, var(--c-jade) 55%, var(--c-border)); }
+.sanctum-condition header { display: flex; align-items: start; justify-content: space-between; gap: var(--s-2); }
+.sanctum-condition header > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.sanctum-condition small { color: var(--c-ink-soft); font-size: var(--f-2xs); }
+.sanctum-condition p { margin: var(--s-1) 0 0; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.sanctum-condition .sanctum-reward { color: color-mix(in srgb, var(--c-gold) 85%, var(--c-ink)); }
+.sanctum-timer { display: block; margin-top: var(--s-1); }
+.sanctum-actions { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-2); }
+.sanctum-personal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); padding: var(--s-2) var(--s-3); }
+.sanctum-personal-grid > div { min-width: 0; }
+.sanctum-personal-grid h4 { margin: 0 0 var(--s-1); color: var(--c-ink); font-size: var(--f-sm); }
+.sanctum-personal-grid p { margin: var(--s-1) 0; font-size: var(--f-sm); }
+.sanctum-list { display: grid; gap: var(--s-1); margin: 0; padding-left: 18px; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.sanctum-list li { min-width: 0; }
+.sanctum-list li small { display: block; margin-top: 2px; color: var(--c-ink-soft); font-size: var(--f-2xs); }
+.sanctum-muted { margin: 0; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.sanctum-source-select,
+.sanctum-relic-action label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 var(--s-3) var(--s-2);
+  color: var(--c-ink-soft);
+  font-size: var(--f-sm);
+}
+.sanctum-source-select select,
+.sanctum-relic-action select,
+.sanctum-input,
+.sanctum-resource-inputs input {
+  min-width: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xs);
+  outline: none;
+  background: var(--c-panel-3);
+  color: var(--c-ink);
+}
+.sanctum-source-select select,
+.sanctum-relic-action select { min-height: 32px; padding: 0 var(--s-1); }
+.sanctum-input { width: 100%; min-height: 38px; padding: 0 var(--s-2); }
+.sanctum-relic { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; padding: var(--s-2); background: var(--c-border); }
+.sanctum-relic > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding: var(--s-2); background: var(--c-panel-2); }
+.sanctum-relic > .sanctum-relic-action { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.sanctum-relic-action .sanctum-muted { flex: 1 1 260px; }
+.sanctum-relic-action label { margin: 0; }
+.sanctum-history .sanctum-list { padding: var(--s-2) var(--s-3) var(--s-2) 30px; }
+.sanctum-resource-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); margin-top: var(--s-2); }
+.sanctum-resource-inputs label { display: grid; gap: 4px; color: var(--c-ink-soft); font-size: var(--f-sm); }
+.sanctum-resource-inputs input { min-height: 34px; padding: 0 var(--s-2); }
+
+@media (max-width: 760px) {
+  .sanctum-event-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sanctum-event-summary > div:nth-child(2) { border-right: 0; }
+  .sanctum-event-summary > div:nth-child(-n+2) { border-bottom: 1px solid var(--c-border); }
+  .sanctum-personal-grid { grid-template-columns: 1fr; }
+  .sanctum-relic { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

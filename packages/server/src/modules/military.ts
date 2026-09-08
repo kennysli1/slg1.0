@@ -58,6 +58,10 @@ interface MilitaryState {
   /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
   treasureAtkMult?: number;
   treasureDefMult?: number;
+  /** 远弦圣徽等仅作用于远程兵的宝物倍率；阶段二倍率在战斗快照中冻结。 */
+  treasureRangedAtkMult?: number;
+  treasureRangedDefMult?: number;
+  treasureRangedPhase2AtkMult?: number;
   /** 科研攻击倍率（由 research 模块推送，叠加在宝物之上）。 */
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
@@ -118,13 +122,26 @@ export class MilitaryModule {
 
   /** 宝物军事倍率（由 treasure 模块推送，无环）：攻/防分别作用。 */
   private setTreasureCombatMult(cmd: Command): CommandResult {
-    const { villageId, atkMult, defMult } = cmd.payload as { villageId: string; atkMult: number; defMult: number };
+    const { villageId, atkMult, defMult, rangedAtkMult, rangedDefMult, rangedPhase2AtkMult } = cmd.payload as {
+      villageId: string; atkMult: number; defMult: number;
+      rangedAtkMult?: number; rangedDefMult?: number; rangedPhase2AtkMult?: number;
+    };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.treasureAtkMult = atkMult > 0 ? atkMult : 1;
     s.treasureDefMult = defMult > 0 ? defMult : 1;
+    s.treasureRangedAtkMult = Number(rangedAtkMult) > 0 ? Number(rangedAtkMult) : 1;
+    s.treasureRangedDefMult = Number(rangedDefMult) > 0 ? Number(rangedDefMult) : 1;
+    s.treasureRangedPhase2AtkMult = Number(rangedPhase2AtkMult) > 0 ? Number(rangedPhase2AtkMult) : 1;
     this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { atkMult: s.treasureAtkMult, defMult: s.treasureDefMult } };
+    return {
+      ok: true,
+      payload: {
+        atkMult: s.treasureAtkMult, defMult: s.treasureDefMult,
+        rangedAtkMult: s.treasureRangedAtkMult, rangedDefMult: s.treasureRangedDefMult,
+        rangedPhase2AtkMult: s.treasureRangedPhase2AtkMult,
+      },
+    };
   }
 
   /** 科研攻击/防御倍率（research 模块推送，独立叠加在宝物倍率之上）。 */
@@ -241,6 +258,9 @@ export class MilitaryModule {
     // 宝物军事倍率迁移默认值（旧存档缺省置 1，无倍率）。
     if (s.treasureAtkMult === undefined) s.treasureAtkMult = 1;
     if (s.treasureDefMult === undefined) s.treasureDefMult = 1;
+    if (s.treasureRangedAtkMult === undefined) s.treasureRangedAtkMult = 1;
+    if (s.treasureRangedDefMult === undefined) s.treasureRangedDefMult = 1;
+    if (s.treasureRangedPhase2AtkMult === undefined) s.treasureRangedPhase2AtkMult = 1;
     if (s.techAtkMult === undefined) s.techAtkMult = 1;
     if (s.techDefMult === undefined) s.techDefMult = 1;
     if (s.treasureCavalryTrainMult === undefined) s.treasureCavalryTrainMult = 1;
@@ -1139,6 +1159,9 @@ export class MilitaryModule {
       * Math.max(0, Number(s.techDefMult ?? 1))
       * (1 + Math.max(0, Number(s.allianceDefMult ?? 0)))
       * timed.def;
+    const rangedAtkMult = Math.max(0, Number(s.treasureRangedAtkMult ?? 1));
+    const rangedDefMult = Math.max(0, Number(s.treasureRangedDefMult ?? 1));
+    const rangedPhase2AtkMult = Math.max(0, Number(s.treasureRangedPhase2AtkMult ?? 1));
     for (const [unit, n] of Object.entries(source)) {
       const requested = Math.max(0, Math.floor(Number(n) || 0));
       const available = units && purpose !== 'raid'
@@ -1146,14 +1169,16 @@ export class MilitaryModule {
         : Math.min(requested, Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (!this.config.units[unit] || available <= 0) continue;
       const stats = this.finalStats(unit);
+      const ranged = this.config.units[unit]!.form === 'ranged';
       snapshot[unit] = {
         count: available,
         ...stats,
-        attack: stats.attack * atkMult,
-        defense: stats.defense * defMult,
+        attack: stats.attack * atkMult * (ranged ? rangedAtkMult : 1),
+        defense: stats.defense * defMult * (ranged ? rangedDefMult : 1),
         form: this.config.units[unit]!.form,
         role: this.config.units[unit]!.role,
         traits: this.config.units[unit]!.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
+        ...(ranged && rangedPhase2AtkMult !== 1 ? { phaseAtkMult: { ranged: rangedPhase2AtkMult } } : {}),
       };
     }
     return { ok: true, payload: { snapshot } };

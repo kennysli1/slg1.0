@@ -18,3 +18,11 @@ id,code,name,icon,respawnSec,lootWood,lootClay,lootIron,lootCrop,faction,citySta
 106,tianwang_village,天王老子村,pve_bandits,999999,500,500,500,500,,,,1
 107,secret_camp,秘密营地,pve_bandits,999999,1000,1000,1000,1000,,,,1
 108,kingdom_city_state,王国城邦,pve_fortress,999999,0,0,0,0,kingdom,true,city_state,3
+109,sanctum_pursuers,失落信使的追兵,pve_bandits,999999,0,0,0,0,neutral,,,1
+110,sanctum_watchpost,远弦边境哨所,pve_fortress,999999,0,0,0,0,neutral,,,1
+111,sanctum_elite_camp,远弦精英营地,pve_fortress,999999,0,0,0,0,neutral,,,2
+112,sanctum_war_camp,远弦失序军营,pve_dark_legion,999999,0,0,0,0,neutral,,,3
+113,sanctum_coop_elite,远弦共战精英军,pve_dark_legion,999999,0,0,0,0,neutral,,,3
+114,sanctum_beast,天门巨兽,pve_bone_king,999999,0,0,0,0,neutral,,,3
+115,sanctum_banner_guard,逆势军旗守卫,pve_fortress,999999,0,0,0,0,neutral,,,3
+116,sanctum_sanctuary,远弦圣地,pve_fortress,999999,0,0,0,0,neutral,,,3

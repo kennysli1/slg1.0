@@ -119,6 +119,7 @@ export class TasksModule {
     this.commands.register('task.GetState', (c: Command) => this.getState(c));
     this.commands.register('task.GetPlayerState', (c: Command) => this.getPlayerState(c));
     this.commands.register('task.StartAccept', (c: Command) => this.startAccept(c));
+    this.commands.register('task.StartActiveDialogue', (c: Command) => this.startActiveDialogue(c));
     this.commands.register('task.ConsumeDialogue', (c: Command) => this.consumeDialogue(c));
     this.commands.register('task.Accept', (c: Command) => this.accept(c));
     this.commands.register('task.Abandon', (c: Command) => this.abandon(c));
@@ -127,6 +128,10 @@ export class TasksModule {
     this.commands.register('task.Deliver', (c: Command) => this.deliver(c));
     this.commands.register('task.SolveRune', (c: Command) => this.solveRune(c));
     this.commands.register('task.SelectBranch', (c: Command) => this.selectBranch(c));
+    // 公共事件 owner（远弦圣地等）通过这一条受控命令把已验证的外部进度
+    // 投影回任务卡。任务模块仍然独占 task 集合，外部模块绝不直写任务存档。
+    this.commands.register('task.AdvanceExternal', (c: Command) => this.advanceExternal(c));
+    this.commands.register('task.RefreshExternalOffers', (c: Command) => this.refreshExternalOffers(c));
     this.commands.register('task.Fail', (c: Command) => this.fail(c));
     // 骰子王小游戏只通过任务模块读写任务进度；临时对局本身由 diceQuest owner 管理。
     this.commands.register('task.GetDiceMatch', (c: Command) => this.getDiceMatch(c));
@@ -153,7 +158,7 @@ export class TasksModule {
     this.bus.on('building.Demolished', onTavern);
 
     // 建筑建成 → 触发带 building_built 触发条件的随机任务（如 宝库→祭祀筹备）
-    this.bus.on('building.Built', (evt: DomainEvent) => void this.onBuildingBuilt(evt));
+    this.bus.on('building.Built', (evt: DomainEvent) => this.onBuildingBuilt(evt));
     // 建筑完整拆除后释放槽位；build_buildings 任务把该槽位视为可重新建造的空地。
     this.bus.on('building.Demolished', (evt: DomainEvent) => void this.onBuildingDemolished(evt));
     // 建筑修复完成 → 推进 repair_buildings 类任务（如新村开局主线 m1）
@@ -532,6 +537,40 @@ export class TasksModule {
     return { ok: true, payload: { code, dialogue: (dialogue.payload as any).dialogue ?? null } };
   }
 
+  /**
+   * 已接取任务的受控 NPC 对话入口。
+   *
+   * 目前仅允许 s23 重开“唤醒残印”确认。这样玩家在接受调查后点击 X / Esc /
+   * 遮罩仍可稍后回到学者处继续，但客户端不能把任意内部对话 trigger 当成公开
+   * 动作，更不能借关闭对话自动唤醒公共事件。
+   */
+  private async startActiveDialogue(cmd: Command): Promise<CommandResult> {
+    const { villageId, code, trigger } = cmd.payload as { villageId?: string; code?: string; trigger?: string };
+    if (!villageId || !code || !trigger) return { ok: false, payload: {}, reason: 'villageId_code_and_trigger_required' };
+    if (code !== 's23' || trigger !== 'sanctum_awaken') return { ok: false, payload: {}, reason: 'active_dialogue_not_available' };
+    await this.playerDirectory.refreshVillage(villageId);
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    if (!this.ensureState(storageVillageId).active[code]) return { ok: false, payload: {}, reason: 'not_active' };
+    const context = await this.playerDirectory.dialogueContext(villageId);
+    const dialogue = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: { taskCode: code, trigger, ...context },
+    });
+    if (!dialogue.ok) return dialogue;
+    return { ok: true, payload: { code, trigger, dialogue: (dialogue.payload as any).dialogue ?? null } };
+  }
+
+  /** s23 接取成功后才显示的第二次确认；其它任务没有额外接取后 session。 */
+  private async postAcceptDialogue(villageId: string, code: string): Promise<SerializedDialogueSession | null> {
+    if (code !== 's23') return null;
+    const context = await this.playerDirectory.dialogueContext(villageId);
+    const dialogue = await this.commands.send({
+      name: 'dialogue.StartForTask', from: TasksModule.NAME,
+      payload: { taskCode: code, trigger: 'sanctum_awaken', ...context },
+    });
+    return dialogue.ok ? ((dialogue.payload as any).dialogue ?? null) : null;
+  }
+
   /** 客户端关闭自动对话后确认一次；只允许从该玩家名下的任务状态移除。 */
   private async consumeDialogue(cmd: Command): Promise<CommandResult> {
     const { playerId, dialogueId } = cmd.payload as { playerId?: string; dialogueId?: string };
@@ -584,7 +623,107 @@ export class TasksModule {
     this.store.set(COLLECTION, storageVillageId, s);
     await this.activateQuest(villageId, code);
     await this.syncThresholdObjectives(villageId);
-    return { ok: true, payload: { code } };
+    // 接取与公共事件唤醒必须是两个明确、顺序化的玩家动作。只在 s23 的
+    // task.Accept 已成功（费用也已完成结算）后，才下发第二段 `sanctum_awaken`
+    // 对话；关闭第一段绝不会走到这里，也不会请求 Sanctum owner。
+    const followupDialogue = await this.postAcceptDialogue(villageId, code);
+    return { ok: true, payload: { code, followupDialogue } };
+  }
+
+  /**
+   * 外部公共事件向既有任务链回写进度的唯一入口。
+   * 这不是网关公开 action；只接受已注册领域 owner 的内部 Command，避免客户端伪造
+   * s24 的公共条件、圣地占领或最终携物返乡。
+   */
+  private async advanceExternal(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'sanctum') return { ok: false, payload: {}, reason: 'external_owner_required' };
+    const { villageId, code, progress, ready } = cmd.payload as {
+      villageId?: string; code?: string; progress?: number; ready?: boolean;
+    };
+    if (!villageId || !code) return { ok: false, payload: {}, reason: 'villageId_and_code_required' };
+    const storageVillageId = this.storageVillageForQuest(villageId, code);
+    const state = this.ensureState(storageVillageId);
+    const inst = state.active[code];
+    if (!inst) return { ok: false, payload: {}, reason: 'not_active' };
+    if (Number.isFinite(Number(progress))) inst.progress = Math.max(inst.progress ?? 0, Math.max(0, Math.floor(Number(progress))));
+    inst.executionVillageId = villageId;
+    this.store.set(COLLECTION, storageVillageId, state);
+    if (ready) await this.markReady(villageId, code);
+    else {
+      await this.pushList(villageId);
+      await this.pushMap(villageId);
+    }
+    return { ok: true, payload: { code, progress: inst.progress ?? 0, ready: inst.readyToDeliver === true } };
+  }
+
+  /**
+   * 公共事件状态变化后重算事件型支线 offer（仍由 task owner 写入任务状态）。
+   *
+   * Sanctum 只能声明受影响玩家/村庄或 `allPlayers`；它不会、也不能直接扫描
+   * task 或 player 的持久化集合。任务 owner 先经 PlayerDirectory 刷新权威目录，
+   * 再走既有 unlockSideQuests，因而 s24–s29 仍与普通任务一样经历 offer →
+   * StartAccept → Accept → StartDeliver / Deliver 的完整流程。
+   */
+  private async refreshExternalOffers(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'sanctum') return { ok: false, payload: {}, reason: 'external_owner_required' };
+    const payload = cmd.payload as {
+      villageId?: string; villageIds?: string[]; playerId?: string; playerIds?: string[]; allPlayers?: boolean;
+    };
+    const villageIds = new Set<string>();
+    const addVillage = (value: unknown) => {
+      if (typeof value === 'string' && value) villageIds.add(value);
+    };
+    addVillage(payload.villageId);
+    for (const villageId of payload.villageIds ?? []) addVillage(villageId);
+
+    const playerIds = new Set<string>();
+    if (payload.playerId) playerIds.add(payload.playerId);
+    for (const playerId of payload.playerIds ?? []) if (playerId) playerIds.add(playerId);
+    for (const playerId of playerIds) {
+      await this.playerDirectory.refreshPlayer(playerId);
+      for (const villageId of this.playerDirectory.villages(playerId)) villageIds.add(villageId);
+    }
+    if (payload.allPlayers === true) {
+      await this.playerDirectory.refreshAll();
+      for (const villageId of this.playerDirectory.allVillageIds()) villageIds.add(villageId);
+    }
+    if (!villageIds.size) return { ok: false, payload: {}, reason: 'external_offer_recipients_required' };
+
+    for (const villageId of villageIds) {
+      await this.playerDirectory.refreshVillage(villageId);
+      // 外部活动也可能从 active 变为 ended。不能只补发新 offer，否则已经
+      // 不存在的圣地还会在玩家任务栏留下可接取的幽灵任务；重算仍只通过
+      // sanctum.CanOffer 命令，不窥探 Sanctum 的持久化状态。
+      await this.reconcileExternalOffers(villageId);
+      await this.unlockSideQuests(villageId);
+      await this.pushMap(villageId);
+    }
+    return { ok: true, payload: { villageIds: [...villageIds] } };
+  }
+
+  /**
+   * 清理本次外部事件已撤销资格的未接取 offer。
+   *
+   * 已接取、已完成或已放弃的任务是玩家历史，绝不能在这里改动；这里只移除
+   * 尚未接取且当前 `sanctum_offer` 已不成立的卡片。资格判断仍由 Sanctum
+   * owner 通过 CanOffer 返回，task 模块不读取它的 collection。
+   */
+  private async reconcileExternalOffers(villageId: string): Promise<void> {
+    for (const q of this.catalog.all()) {
+      if (q.type !== 'side') continue;
+      const hasExternalOffer = this.config.questGraph.conditions.some((row) => (
+        row.questCode === q.code && row.phase === 'offer' && row.kind === 'sanctum_offer'
+      ));
+      if (!hasExternalOffer) continue;
+      const storageVillageId = this.storageVillageForQuest(villageId, q.code);
+      const state = this.ensureState(storageVillageId);
+      if (state.active[q.code] || state.completedSide.includes(q.code) || state.abandonedSide.includes(q.code)) continue;
+      if (!state.offeredSide.includes(q.code) && !state.offered.includes(q.code)) continue;
+      if (await this.offerConditionsSatisfied(villageId, q)) continue;
+      state.offeredSide = state.offeredSide.filter((code) => code !== q.code);
+      state.offered = state.offered.filter((code) => code !== q.code);
+      this.store.set(COLLECTION, storageVillageId, state);
+    }
   }
 
   // ── 命令：Abandon（放弃日常/支线任务；主线不可放弃）──
@@ -680,7 +819,20 @@ export class TasksModule {
     const outcomeKey = (quest.code === 'm8' || quest.code === 'm9') && outcome
       ? (outcome === 'success' ? 'm8_success' : 'm8_failure')
       : undefined;
-    return (quest.code === 'm9' && outcomeKey ? quest.conditionalRewards?.[outcomeKey] : undefined) ?? quest.rewards;
+    const rewards = (quest.code === 'm9' && outcomeKey ? quest.conditionalRewards?.[outcomeKey] : undefined) ?? quest.rewards;
+    const externallySettledTreasure = this.externalSettlementTreasure(quest);
+    if (!externallySettledTreasure || !rewards.treasures?.includes(externallySettledTreasure)) return rewards;
+    // `sanctum_complete` 的宝物由 Sanctum owner 在军队真实返乡时原子发放。
+    // 即使未来兼容投影把它误编译进 QuestRewards，普通 task.Deliver 也绝不能
+    // 再次生成同一件唯一圣物。
+    return { ...rewards, treasures: rewards.treasures.filter((code) => code !== externallySettledTreasure) };
+  }
+
+  /** 返回由外部公共事件 owner 结算、不得走通用任务发奖路径的唯一宝物代码。 */
+  private externalSettlementTreasure(quest: QuestDef): string | undefined {
+    return this.catalog.get(quest.code)?.effects
+      .find((effect) => effect.phase === 'deliver' && effect.kind === 'sanctum_complete')
+      ?.params.trim() || undefined;
   }
 
   private resolveDeliveryContext(villageId: string, code: string): DeliveryContext | CommandResult {
@@ -1172,6 +1324,16 @@ export class TasksModule {
     // S3 的接取后追问是独立的 after_accept 对话，必须在任务真正接取成功后排入待弹队列。
     if (q.type === 'main' && code === 'm1') this.queueDialogue(storageVillageId, code, 'accept', villageId);
     else if (q.type === 'side' && code === 's3') this.queueDialogue(storageVillageId, code, 'after_accept', villageId);
+    // 任务接取是公共事件进入个人任务链的唯一事实事件。事件 owner 可订阅它，
+    // 但不得读取或修改 task 集合。
+    // 全局任务可能从任意分城接取；事件 owner 需要稳定的账号身份，而不是
+    // 猜测 storageVillageId。目录镜像未命中时先经 player owner 刷新一次。
+    await this.playerDirectory.refreshVillage(villageId);
+    const playerId = this.playerDirectory.villageOwner(villageId) ?? undefined;
+    await this.bus.emit({
+      name: 'task.Accepted', source: TasksModule.NAME, ts: this.now(),
+      payload: { villageId, storageVillageId, playerId, code, scope: q.scope, type: q.type },
+    } as DomainEvent);
     await this.pushList(villageId);
     await this.pushMap(villageId);
   }
@@ -1770,6 +1932,12 @@ export class TasksModule {
     // 主线完成 → 解锁下游主线；支线完成 → 解锁下游支线（任务线）
     if (q.type === 'main') await this.unlockMainQuests(villageId);
     else if (q.type === 'side') await this.unlockSideQuests(villageId);
+    // 交付而非“目标刚达成”才代表任务真正完成。远弦圣地据此解锁下一段，
+    // 从而保留既有的预览—确认奖励流程和关闭对话不完成任务的规则。
+    await this.bus.emit({
+      name: 'task.Delivered', source: TasksModule.NAME, ts: this.now(),
+      payload: { villageId, storageVillageId, rewardVillageId, code, scope: q.scope, type: q.type },
+    } as DomainEvent);
     return granted;
   }
 
@@ -2115,6 +2283,16 @@ export class TasksModule {
         const [kind, rawLevel] = value.split(':');
         const level = await this.commands.send({ name: 'building.GetBuildingLevel', from: TasksModule.NAME, payload: { villageId, kind } });
         return level.ok && Number((level.payload as any)?.level) >= Math.max(1, Number(rawLevel) || 1);
+      }
+      // 远弦圣地等公共事件的可接取资格由对应 owner 计算（残印持有、
+      // 先发者是否已唤醒、轮次是否结束等）。任务模块只消费一个布尔结果，
+      // 因而不会复制公共事件状态到 task 存档。
+      if (row.kind === 'sanctum_offer') {
+        const eligible = await this.commands.send({
+          name: 'sanctum.CanOffer', from: TasksModule.NAME,
+          payload: { villageId, code: q.code, mode: value || 'active' },
+        });
+        return eligible.ok && (eligible.payload as any)?.allowed === true;
       }
       // tavern_refresh 表示“进入酒馆支线池”，本身不是 firedTriggers 事件；
       // refreshOffered 已在槽位刷新时选中该池，不能因没有同名事件而误删。

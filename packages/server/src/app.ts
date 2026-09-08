@@ -32,6 +32,7 @@ import { DialoguesModule } from './modules/dialogues.js';
 import { DiceQuestModule } from './modules/dice-quest.js';
 import { BattleSimulatorModule } from './modules/battle-simulator.js';
 import { AllianceModule } from './modules/alliance.js';
+import { SanctumModule } from './modules/sanctum.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
 
@@ -73,6 +74,8 @@ const PROGRESS_COLLECTIONS = [
   'alliance',
   'alliance_by_player',
   'alliance_seq',
+  // 远弦圣地是本局公共进度（轮次、条件、占领和唯一圣物），不属于账号资料。
+  'sanctum',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -125,6 +128,7 @@ export interface GameApp {
   diceQuest: DiceQuestModule;
   battleSimulator: BattleSimulatorModule;
   alliance: AllianceModule;
+  sanctum: SanctumModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
@@ -263,16 +267,17 @@ export function createGameApp(opts?: {
   const diceQuest = new DiceQuestModule(commands, now, config, opts?.rng ?? Math.random);
   const battleSimulator = new BattleSimulatorModule(commands, config);
   const alliance = new AllianceModule(store, bus, commands, scheduler, now, config);
+  const sanctum = new SanctumModule(store, bus, commands, scheduler, now, config);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
-    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, alliance, battleSimulator,
+    player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, alliance, sanctum, battleSimulator,
     diceQuest,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
-    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom, alliance,
+    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom, alliance, sanctum,
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -373,7 +378,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, alliance, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, alliance, sanctum, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },

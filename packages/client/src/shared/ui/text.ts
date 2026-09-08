@@ -133,6 +133,7 @@ const ERR_MSG: Record<string, string> = {
   quest_cooldown: '该任务仍在冷却中',
   abandon_cooldown: '任务刚被放弃，请等待冷却结束',
   not_active: '该任务已不在进行中，请刷新任务列表',
+  active_dialogue_not_available: '当前任务没有可继续的对话',
   not_ready: '任务尚未达到领取条件',
   delivery_in_progress: '奖励正在领取，请勿重复操作',
   qualifying_flag_not_stored: '合格军旗尚未入库，暂时无法领取奖励',

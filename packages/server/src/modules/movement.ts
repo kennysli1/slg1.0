@@ -64,6 +64,17 @@ interface CaravanSettlement {
   reportIndex?: number;
 }
 
+/**
+ * 远弦圣地的唯一圣物并不属于普通随军宝物池。圣地 owner 保存圣物归属，
+ * Movement 只保存「这支驻军已接到返乡指令」这个恢复用标记，确保进程在
+ * `sanctum.RelicTaken` 事件之后崩溃时仍能继续原路返程。
+ */
+interface SanctumRelicTransit {
+  roundId?: string;
+  returnVillageId: string;
+  takenAt: number;
+}
+
 interface MovementRecord {
   id: string;
   type: 'raid' | 'attack' | 'scout' | 'incoming_scout' | 'return' | 'found' | 'transport' | 'caravan' | 'caravan_raid' | 'caravan_escort' | 'garrison' | 'explore' | 'auto_explore' | 'ambush' | 'investigate';
@@ -84,6 +95,11 @@ interface MovementRecord {
   battleType?: 'raid' | 'siege' | 'ambush';
   /** 急行军在出征时冻结；返程、攻城、商队与拓荒均不会写入。 */
   rapidRaidBonus?: number;
+  /**
+   * 宝物等外部速度倍率在出发时冻结。它不会在热更、宝物装卸或中途战损时
+   * 重新计算；返程若仍复用同一条行军记录，也沿用已冻结的逐段时间。
+   */
+  externalSpeedMult?: number;
   fromVillage: string;
   /** 起点/终点，六边形轴坐标。字段名沿用 XY 仅为 combat 透传兼容，值是 {q,r}。 */
   fromXY: Hex;
@@ -189,6 +205,14 @@ interface MovementRecord {
   /** 联盟王国服务行军；抵达后由 alliance owner 结算，不产生玩家来源村。 */
   allianceService?: boolean;
   serviceOrderId?: string;
+  /** 远弦圣地唯一圣物的返乡行军标记；圣物本身仍由 sanctum owner 持久化。 */
+  sanctumRelic?: SanctumRelicTransit;
+}
+
+interface SanctumGarrisonMatch {
+  movement: MovementRecord;
+  point: Hex;
+  troopCount: number;
 }
 
 const COLLECTION = 'movement';
@@ -276,6 +300,16 @@ export class MovementModule {
     this.commands.register('movement.ListEscortCaravans', (c) => this.listEscortCaravans(c));
     this.commands.register('movement.ValidateCaravanProtection', (c) => this.validateCaravanProtection(c));
     this.commands.register('movement.ProtectCaravan', (c) => this.protectCaravan(c));
+    // 圣地模块不能直接读取 movement 集合：驻军存在性、归属与返程均由本 owner 裁决。
+    this.commands.register('movement.ValidateSanctumPresence', (c) => this.validateSanctumPresence(c));
+    this.commands.register('movement.ValidateSanctumRelicCarrier', (c) => this.validateSanctumRelicCarrier(c));
+    this.commands.register('movement.BeginSanctumRelicReturn', (c) => this.beginSanctumRelicReturn(c));
+    this.commands.register('movement.GetSanctumDefenderSnapshot', (c) => this.getSanctumDefenderSnapshot(c));
+    this.commands.register('movement.GetSanctumDefenderStatus', (c) => this.getSanctumDefenderStatus(c));
+    this.commands.register('movement.ApplySanctumDefenderLosses', (c) => this.applySanctumDefenderLosses(c));
+    // Treasure 是宝物状态 owner；它清除全局活动凭证后，通过此受控命令
+    // 一并清掉 movement 的展示/返程副本，避免旧数组在归队时重新入库。
+    this.commands.register('movement.ConsumeCarriedTreasure', (c) => this.consumeCarriedTreasure(c));
     this.commands.register('movement.List', (c) => this.list(c));
     this.commands.register('movement.ListPlayer', (c) => this.listPlayer(c));
     this.commands.register('movement.GetMovement', (c) => this.getMovement(c));
@@ -289,6 +323,9 @@ export class MovementModule {
     // 目标消失（PvE 营地/幸福村被移除、玩家村庄被放弃）→ 在途的进攻/运输/商队立即原路返回
     this.bus.on('pve.TargetRemoved', (e: DomainEvent) => this.onTargetRemoved(e));
     this.bus.on('world.VillageRemoved', (e: DomainEvent) => this.onVillageRemoved(e));
+    // Sanctum 先持久化「圣物已取走」，随后本模块才把驻军改写为同 id 的返程军。
+    // EventBus 会等待此 handler，因此 TakeRelic 返回成功时客户端已能看到返乡路线。
+    this.bus.on('sanctum.RelicTaken', (e: DomainEvent) => this.onSanctumRelicTaken(e));
     this.rebuildIndexes();
   }
 
@@ -508,6 +545,13 @@ export class MovementModule {
     }
 
     for (const mv of this.store.all<MovementRecord>(COLLECTION)) {
+      // 取走圣物的事件已由 Sanctum 落盘、但进程可能在开始返程前中断。
+      // 标记仍在驻军记录上时，从恢复路径补发受控返程；已经返程的记录
+      // 则由下方正常逐格调度恢复，绝不重新计算或改写路线。
+      if (mv.sanctumRelic && mv.status === 'stationed') {
+        void this.resumeSanctumRelicReturn(mv);
+        continue;
+      }
       if (mv.caravanSettlement || mv.caravanBattleResult) {
         this.scheduleCaravanRecovery(mv.id, 0);
         continue;
@@ -532,6 +576,27 @@ export class MovementModule {
       }
       if (this.isCaravanMission(mv)) this.scheduler.schedule(0, () => this.checkCaravanMission(mv), `movement:${mv.id}`);
     }
+  }
+
+  /** 启动恢复时只从 movement 自己的持久化标记补发，不读取 Sanctum 的私有状态。 */
+  private async resumeSanctumRelicReturn(mv: MovementRecord): Promise<void> {
+    const marker = mv.sanctumRelic;
+    if (!marker || mv.status !== 'stationed') return;
+    const playerId = await this.ownerOf(mv.fromVillage);
+    const result = await this.commands.send({
+      name: 'movement.BeginSanctumRelicReturn', from: 'sanctum',
+      payload: {
+        playerId,
+        villageId: mv.fromVillage,
+        movementId: mv.id,
+        returnVillageId: marker.returnVillageId,
+        q: mv.pos.q,
+        r: mv.pos.r,
+        roundId: marker.roundId,
+        takenAt: marker.takenAt,
+      },
+    });
+    if (!result.ok) log.warn('恢复圣地圣物返乡行军失败', { movementId: mv.id, reason: result.reason });
   }
 
   /** 读取兵种的人口成本；旧/异常配置缺失时按1处理但不阻断行军。 */
@@ -1226,7 +1291,17 @@ export class MovementModule {
       name: 'world.GetTile', from: MovementModule.NAME, payload: { q: mv.toXY.q, r: mv.toXY.r },
     });
     const tile = (tileRes.payload as any)?.tile;
-    const terrainOccupied = !!(tile?.kind && tile.kind !== 'empty');
+    // 普通 PvE 格仍不可驻扎。只有 Sanctum owner 明确确认该格是本轮已清理、
+    // 可进入的活动圣地时，才放行驻扎；Movement 不读取 sanctum 私有状态，
+    // 且 command 缺失/失败一律按不可进入处理，避免意外放开所有营地。
+    const sanctumCheck = tile?.kind === 'pve'
+      ? await this.commands.send({
+        name: 'sanctum.CanGarrisonAt', from: MovementModule.NAME,
+        payload: { q: mv.toXY.q, r: mv.toXY.r },
+      })
+      : undefined;
+    const sanctumPassable = sanctumCheck?.ok && (sanctumCheck.payload as any)?.passable === true;
+    const terrainOccupied = !!(tile?.kind && tile.kind !== 'empty') && !sanctumPassable;
     const armyOccupied = this.store.all<MovementRecord>(COLLECTION).some((other) =>
       other.id !== mv.id
       && other.type !== 'caravan'
@@ -1809,6 +1884,71 @@ export class MovementModule {
     return Math.max(1, Math.round((this.config.constants.tradeCaravanMinDurationSec ?? 3) * 1000));
   }
 
+  private validExternalSpeedMultiplier(value: unknown): number {
+    const multiplier = Number(value);
+    return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  }
+
+  /**
+   * 共鸣徽章只在它确实随增援军携带时生效。事件目标的专用倍率由
+   * Sanctum owner 判定，所有数值由 Treasure owner 聚合；这里仅在出发
+   * 前冻结最终速度，避免中途宝物/配置变化让行军图标跳动。
+   */
+  private async reinforcementSpeedMultiplier(
+    treasures: readonly string[],
+    targetId: string | undefined,
+    targetXY: Hex,
+  ): Promise<number> {
+    if (treasures.length === 0) return 1;
+    const [effects, sanctum] = await Promise.all([
+      this.commands.send({
+        name: 'treasure.GetEffectsForCodes', from: MovementModule.NAME,
+        payload: { codes: [...treasures] },
+      }),
+      this.commands.send({
+        name: 'sanctum.GetMovementModifiers', from: MovementModule.NAME,
+        payload: { targetId, point: targetXY },
+      }),
+    ]);
+    const payload = effects.ok ? (effects.payload as {
+      effects?: { reinforcementMarchSpeedMult?: unknown; sanctumEventReinforcementMarchSpeedMult?: unknown };
+    }) : undefined;
+    const eventTarget = sanctum.ok && ((sanctum.payload as { eventTarget?: unknown; sanctuary?: unknown })?.eventTarget === true
+      || (sanctum.payload as { sanctuary?: unknown })?.sanctuary === true);
+    return this.validExternalSpeedMultiplier(eventTarget
+      ? payload?.effects?.sanctumEventReinforcementMarchSpeedMult
+      : payload?.effects?.reinforcementMarchSpeedMult);
+  }
+
+  /**
+   * 商路圣印是村庄栏位效果，而非随军宝物：只影响从该村新发出的商队。
+   * 事件目标同样由 Sanctum 受控查询识别，保证普通贸易不会误拿活动倍率。
+   */
+  private async caravanSpeedMultiplier(
+    villageId: string,
+    targetId: string | undefined,
+    targetXY: Hex,
+  ): Promise<number> {
+    const [effects, sanctum] = await Promise.all([
+      this.commands.send({
+        name: 'treasure.GetVillageEffects', from: MovementModule.NAME,
+        payload: { villageId },
+      }),
+      this.commands.send({
+        name: 'sanctum.GetMovementModifiers', from: MovementModule.NAME,
+        payload: { targetId, point: targetXY },
+      }),
+    ]);
+    const payload = effects.ok ? (effects.payload as {
+      effects?: { caravanSpeedMult?: unknown; sanctumEventCaravanSpeedMult?: unknown };
+    }) : undefined;
+    const eventTarget = sanctum.ok && ((sanctum.payload as { eventTarget?: unknown; sanctuary?: unknown })?.eventTarget === true
+      || (sanctum.payload as { sanctuary?: unknown })?.sanctuary === true);
+    return this.validExternalSpeedMultiplier(eventTarget
+      ? payload?.effects?.sanctumEventCaravanSpeedMult
+      : payload?.effects?.caravanSpeedMult);
+  }
+
   /** 计算行军的基础每格耗时。贸易商队不属于军队，不吃丘陵移速惩罚。 */
   private async baseStepMs(villageId: string, troops: Record<string, number>, type: MovementRecord['type']): Promise<number> {
     if (type === 'caravan') {
@@ -1831,9 +1971,11 @@ export class MovementModule {
     troops: Record<string, number>,
     type: MovementRecord['type'],
     from: Hex,
+    externalSpeedMult = 1,
   ): Promise<number> {
     const base = await this.baseStepMs(villageId, troops, type);
-    let existing = base;
+    const speedMultiplier = Number.isFinite(externalSpeedMult) && externalSpeedMult > 0 ? externalSpeedMult : 1;
+    let existing = base / speedMultiplier;
     if (type !== 'caravan' && (await this.terrainAt(from)) === 'hills') {
       const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
       existing = Math.max(1, Math.round(base / hillsMultiplier));
@@ -1847,7 +1989,7 @@ export class MovementModule {
     villageId: string,
     path: Hex[],
     troops: Record<string, number>,
-    type: MovementRecord['type'], rapidRaidBonus = 0,
+    type: MovementRecord['type'], rapidRaidBonus = 0, externalSpeedMult = 1,
   ): Promise<PathTiming> {
     const steps = Math.max(0, path.length - 1);
     if (steps === 0) {
@@ -1857,10 +1999,11 @@ export class MovementModule {
       };
     }
     const base = await this.baseStepMs(villageId, troops, type);
+    const speedMultiplier = Number.isFinite(externalSpeedMult) && externalSpeedMult > 0 ? externalSpeedMult : 1;
     const terrains = await Promise.all(path.slice(0, -1).map((point) => this.terrainAt(point)));
     const hillsMultiplier = Math.max(0.0001, Number(this.config.constants.hillsMarchSpeedMultiplier) || (2 / 3));
     const existingSegmentMs = terrains.map((terrain) => Math.max(1, Math.round(
-      type !== 'caravan' && terrain === 'hills' ? base / hillsMultiplier : base,
+      (type !== 'caravan' && terrain === 'hills' ? base / hillsMultiplier : base) / speedMultiplier,
     )));
     const sizeMultiplier = this.marchSizeMultiplier(troops, type);
     let segmentMs = type === 'caravan'
@@ -1877,19 +2020,23 @@ export class MovementModule {
   /** 组装一条行军记录（算路径 + 每格耗时），落库并登记首个推进任务。 */
   private async launch(
     base: Pick<MovementRecord, 'id' | 'type' | 'fromVillage' | 'fromXY' | 'toXY' | 'troops' | 'departAt'> &
-      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId' | 'lossRate' | 'initialTroopCount' | 'fieldPursuer' | 'capturedTreasures' | 'rapidRaidBonus'>>,
+      Partial<Pick<MovementRecord, 'targetId' | 'targetVillage' | 'targetMovementId' | 'battleType' | 'scoutType' | 'loot' | 'cargo' | 'transportMode' | 'founderPlayerId' | 'treasures' | 'outwardId' | 'originalFromXY' | 'autoExplore' | 'npcService' | 'taskCode' | 'taskVillageId' | 'kingdomMercenary' | 'returnPveId' | 'attackerSnapshotOverride' | 'reinforcementUntil' | 'reinforcementSnapshot' | 'scoutReturn' | 'allianceId' | 'allianceService' | 'serviceOrderId' | 'lossRate' | 'initialTroopCount' | 'fieldPursuer' | 'capturedTreasures' | 'rapidRaidBonus' | 'externalSpeedMult'>>,
     pathOverride?: Hex[],
   ): Promise<MovementRecord> {
     const path = pathOverride?.length
       ? pathOverride.map((point) => wrapHex(point, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41))
       : linePathWrapped(base.fromXY, base.toXY, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
     const rapidRaidBonus = base.type === 'raid' ? Math.max(0, Number(base.rapidRaidBonus) || 0) : 0;
-    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type, rapidRaidBonus);
+    const externalSpeedMult = Number.isFinite(Number(base.externalSpeedMult)) && Number(base.externalSpeedMult) > 0
+      ? Number(base.externalSpeedMult)
+      : 1;
+    const timing = await this.pathTiming(base.fromVillage, path, base.troops, base.type, rapidRaidBonus, externalSpeedMult);
     this.timingCache.set(base.id, timing);
     const perStepMs = timing.segmentMs[0] ?? timing.totalMs;
     const full: MovementRecord = {
       ...base,
       rapidRaidBonus: rapidRaidBonus || undefined,
+      externalSpeedMult: externalSpeedMult !== 1 ? externalSpeedMult : undefined,
       lossRate: this.normalizeLossRate(base.lossRate),
       initialTroopCount: Math.max(1, Math.floor(Number(base.initialTroopCount) || this.troopCount(base.troops))),
       capturedTreasures: base.capturedTreasures ? [...base.capturedTreasures] : undefined,
@@ -2660,6 +2807,345 @@ export class MovementModule {
     return { ok: true, payload: {} };
   }
 
+  /**
+   * Sanctum 的地图动作只可由 Sanctum owner 发起。客户端永远不直接调用
+   * movement.Validate*，否则可以把任意外军伪装成自己在圣地的驻军。
+   */
+  private isSanctumOwner(cmd: Command): boolean {
+    return cmd.from === 'sanctum';
+  }
+
+  private sanctumPoint(q: unknown, r: unknown): Hex | null {
+    const rawQ = Number(q), rawR = Number(r);
+    if (!Number.isInteger(rawQ) || !Number.isInteger(rawR)) return null;
+    return wrapHex({ q: rawQ, r: rawR }, this.config.constants.worldW ?? 41, this.config.constants.worldH ?? 41);
+  }
+
+  private sanctumGarrisonFailure(reason: string): CommandResult<SanctumGarrisonMatch> {
+    // CommandResult 的失败 payload 仍要求满足泛型；该值绝不会在 !ok 分支读取。
+    return { ok: false, payload: {} as SanctumGarrisonMatch, reason };
+  }
+
+  /** 仅以 Movement 的权威记录定位「确实抵达同一格的玩家驻军」。 */
+  private async findSanctumGarrison(payload: {
+    playerId?: string;
+    villageId?: string;
+    movementId?: string;
+    q?: unknown;
+    r?: unknown;
+  }): Promise<CommandResult<SanctumGarrisonMatch>> {
+    const { playerId, villageId, movementId } = payload;
+    const point = this.sanctumPoint(payload.q, payload.r);
+    if (!playerId || !villageId || !point) return this.sanctumGarrisonFailure('sanctum_player_village_coordinate_required');
+
+    // movementId 缺省时绝不取“第一支”驻军：若同一村同格有多支军队，
+    // 客户端必须明确选择，避免把错误的编队/宝物原路带走。
+    const candidates = movementId
+      ? [this.load(movementId)].filter((entry): entry is MovementRecord => Boolean(entry))
+      : this.store.all<MovementRecord>(COLLECTION).filter((entry) => entry.fromVillage === villageId && entry.status === 'stationed');
+    if (candidates.length === 0) return this.sanctumGarrisonFailure(movementId ? 'sanctum_movement_not_found' : 'sanctum_garrison_not_found');
+
+    const valid: Array<{ movement: MovementRecord; troopCount: number }> = [];
+    for (const movement of candidates) {
+      // 圣地的发现、占领与取宝都要求“真实驻军”。在途、战斗暂停、回程、
+      // 增援/NPC/商队均不能作为圣地控制权的载体。
+      if (movement.fromVillage !== villageId) continue;
+      if (movement.type !== 'garrison' || movement.status !== 'stationed' || movement.npcService) continue;
+      if (!movement.pos || movement.pos.q !== point.q || movement.pos.r !== point.r) continue;
+      if (await this.ownerOf(movement.fromVillage) !== playerId) continue;
+      const troopCount = this.troopCount(movement.troops);
+      if (troopCount <= 0) continue;
+      valid.push({ movement, troopCount });
+    }
+
+    if (valid.length === 0) {
+      // 显式 movementId 的失败原因尽量精确，方便 Sanctum/UI 给出可操作提示。
+      const specified = movementId ? candidates[0] : undefined;
+      if (specified && specified.fromVillage !== villageId) return this.sanctumGarrisonFailure('sanctum_source_village_mismatch');
+      if (specified && await this.ownerOf(specified.fromVillage) !== playerId) return this.sanctumGarrisonFailure('sanctum_movement_not_owned');
+      if (specified && (specified.type !== 'garrison' || specified.status !== 'stationed')) return this.sanctumGarrisonFailure('sanctum_garrison_required');
+      if (specified && (!specified.pos || specified.pos.q !== point.q || specified.pos.r !== point.r)) return this.sanctumGarrisonFailure('sanctum_coordinate_mismatch');
+      return this.sanctumGarrisonFailure('sanctum_garrison_not_found');
+    }
+    if (valid.length > 1) return this.sanctumGarrisonFailure('sanctum_garrison_ambiguous');
+    return { ok: true, payload: { movement: valid[0]!.movement, point, troopCount: valid[0]!.troopCount } };
+  }
+
+  /**
+   * 供 Sanctum 的 s25/s27 调用。允许省略 movementId，但只有唯一的同村、
+   * 同格、同玩家驻军才会被选中；避免多村玩家或重叠驻军被错误认领。
+   */
+  private async validateSanctumPresence(cmd: Command): Promise<CommandResult> {
+    if (!this.isSanctumOwner(cmd)) return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const found = await this.findSanctumGarrison(cmd.payload as {
+      playerId?: string; villageId?: string; movementId?: string; q?: unknown; r?: unknown;
+    });
+    if (!found.ok) return { ok: false, payload: {}, reason: found.reason };
+    const { movement, point, troopCount } = found.payload;
+    return {
+      ok: true,
+      payload: {
+        movementId: movement.id,
+        villageId: movement.fromVillage,
+        q: point.q,
+        r: point.r,
+        troopCount,
+        status: movement.status,
+      },
+    };
+  }
+
+  /**
+   * 取唯一圣物前的最后一道行军校验。返乡村必须等于这支驻军的真实来源村，
+   * 才能复用已经走过的路径反向返乡，不能借此把军队或圣物瞬移到另一个分城。
+   */
+  private async validateSanctumRelicCarrier(cmd: Command): Promise<CommandResult> {
+    if (!this.isSanctumOwner(cmd)) return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const payload = cmd.payload as {
+      playerId?: string; villageId?: string; movementId?: string; returnVillageId?: string; q?: unknown; r?: unknown;
+    };
+    const found = await this.findSanctumGarrison(payload);
+    if (!found.ok) return { ok: false, payload: {}, reason: found.reason };
+    const { movement, point, troopCount } = found.payload;
+    if (!payload.returnVillageId || payload.returnVillageId !== movement.fromVillage) {
+      return { ok: false, payload: {}, reason: 'sanctum_return_must_use_origin_village' };
+    }
+    if (movement.sanctumRelic) return { ok: false, payload: {}, reason: 'sanctum_relic_already_in_transit' };
+    return {
+      ok: true,
+      payload: {
+        movementId: movement.id,
+        villageId: movement.fromVillage,
+        returnVillageId: movement.fromVillage,
+        q: point.q,
+        r: point.r,
+        troopCount,
+      },
+    };
+  }
+
+  /**
+   * Sanctum 持久化取宝后调用的受控返乡入口。保留同一 movement id，
+   * 这样 Sanctum 不需要追踪一个新 return id，且 `startReturn` 能严格反走
+   * 已完成路径，不发生当前位置跳回前一格或向另一座村庄瞬移。
+   */
+  private async beginSanctumRelicReturn(cmd: Command): Promise<CommandResult> {
+    if (!this.isSanctumOwner(cmd)) return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const payload = cmd.payload as {
+      playerId?: string; villageId?: string; movementId?: string; returnVillageId?: string; q?: unknown; r?: unknown; roundId?: string; takenAt?: number;
+    };
+    if (!payload.movementId) return { ok: false, payload: {}, reason: 'sanctum_movement_required' };
+    const run = async (): Promise<CommandResult> => {
+      const existing = this.load(payload.movementId!);
+      // 重放/重复事件是正常情况：已经改写为返程的同一支军队保持幂等。
+      if (existing?.type === 'return' && existing.sanctumRelic
+        && existing.sanctumRelic.returnVillageId === payload.returnVillageId) {
+        return { ok: true, payload: { id: existing.id, arriveAt: existing.arriveAt, alreadyReturning: true } };
+      }
+      // sanctum.RelicTaken 是刻意脱敏的公共事件，不携带圣地精确坐标；
+      // 对已明确 movementId 的受控返程，直接取该驻军当前格再做完整校验。
+      const q = payload.q ?? existing?.pos?.q;
+      const r = payload.r ?? existing?.pos?.r;
+      const check = await this.validateSanctumRelicCarrier({
+        name: 'movement.ValidateSanctumRelicCarrier',
+        from: 'sanctum',
+        payload: { ...payload, q, r },
+      } as Command);
+      if (!check.ok) return check;
+      const movement = this.load(payload.movementId!);
+      if (!movement) return { ok: false, payload: {}, reason: 'sanctum_movement_not_found' };
+      movement.sanctumRelic = {
+        ...(payload.roundId ? { roundId: payload.roundId } : {}),
+        returnVillageId: movement.fromVillage,
+        takenAt: Number.isFinite(Number(payload.takenAt)) ? Number(payload.takenAt) : this.now(),
+      };
+      // 先把恢复标记落盘，再做路径/地形异步查询；崩溃恢复会自动补发返程。
+      this.save(movement);
+      await this.startReturn(movement);
+      const returning = this.load(movement.id);
+      if (!returning || returning.type !== 'return') return { ok: false, payload: {}, reason: 'sanctum_return_start_failed' };
+      await this.bus.emit({
+        name: 'movement.SanctumRelicReturning', source: MovementModule.NAME, ts: this.now(),
+        payload: {
+          movementId: returning.id,
+          villageId: returning.fromVillage,
+          playerId: payload.playerId,
+          returnVillageId: returning.sanctumRelic?.returnVillageId,
+          arriveAt: returning.arriveAt,
+          roundId: returning.sanctumRelic?.roundId,
+        },
+      } as DomainEvent);
+      return { ok: true, payload: { id: returning.id, arriveAt: returning.arriveAt, returnVillageId: returning.fromVillage } };
+    };
+    if (this.serialQueue) return this.serialQueue.run(`movement:${payload.movementId}`, run);
+    return run();
+  }
+
+  /** Sanctum 的取宝事件已经在其 owner 中落盘；这里把对应驻军切换到返乡路线。 */
+  private async onSanctumRelicTaken(event: DomainEvent): Promise<void> {
+    if (event.source !== 'sanctum') return;
+    const payload = event.payload as {
+      playerId?: string; villageId?: string; movementId?: string; returnVillageId?: string; q?: unknown; r?: unknown; roundId?: string; takenAt?: number;
+    };
+    if (!payload.playerId || !payload.villageId || !payload.movementId || !payload.returnVillageId) return;
+    const result = await this.commands.send({ name: 'movement.BeginSanctumRelicReturn', from: 'sanctum', payload });
+    if (!result.ok) log.warn('圣地圣物返乡行军未启动', {
+      movementId: payload.movementId,
+      villageId: payload.villageId,
+      reason: result.reason,
+    });
+  }
+
+  /**
+   * Combat 不能直接读取 movement collection。圣地守军快照只由 Sanctum
+   * 请求，再由 Sanctum 透传到 Combat；没有注册为 Gateway action，因此
+   * 不会泄露驻军兵力、来源村或玩家归属给客户端。
+   */
+  private async getSanctumDefenderSnapshot(cmd: Command): Promise<CommandResult> {
+    if (!this.isSanctumOwner(cmd)) return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const { movementId } = cmd.payload as { movementId?: string };
+    if (!movementId) return { ok: false, payload: {}, reason: 'sanctum_movement_required' };
+    const movement = this.load(movementId);
+    if (!movement || movement.type !== 'garrison' || movement.status !== 'stationed' || movement.npcService) {
+      return { ok: false, payload: {}, reason: 'sanctum_defender_not_stationed' };
+    }
+    const troopCount = this.troopCount(movement.troops);
+    if (troopCount <= 0) return { ok: false, payload: {}, reason: 'sanctum_defender_empty' };
+    const playerId = await this.ownerOf(movement.fromVillage);
+    const snapshot = await this.attackerSnapshot(movement);
+    if (Object.keys(snapshot).length === 0) return { ok: false, payload: {}, reason: 'sanctum_defender_snapshot_empty' };
+    return {
+      ok: true,
+      payload: {
+        movementId: movement.id,
+        villageId: movement.fromVillage,
+        playerId,
+        pos: { ...movement.pos },
+        troops: { ...movement.troops },
+        treasures: [...(movement.treasures ?? [])],
+        troopCount,
+        effectivePop: this.armyPopulation(movement.troops),
+        snapshot: structuredClone(snapshot),
+      },
+    };
+  }
+
+  /**
+   * Combat 结算后 Sanctum 可用该查询判断原驻军是否仍在圣地，不必读取
+   * movement 存档或凭“战报有无”猜测。真正的战损写入仍应由 Combat→
+   * Movement 的专用结算命令完成，避免查询命令修改兵力。
+   */
+  private async getSanctumDefenderStatus(cmd: Command): Promise<CommandResult> {
+    if (!this.isSanctumOwner(cmd)) return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const { movementId } = cmd.payload as { movementId?: string };
+    if (!movementId) return { ok: false, payload: {}, reason: 'sanctum_movement_required' };
+    const movement = this.load(movementId);
+    if (!movement) return { ok: true, payload: { movementId, exists: false, stillStationed: false } };
+    const troopCount = this.troopCount(movement.troops);
+    const stillStationed = movement.type === 'garrison' && movement.status === 'stationed' && !movement.npcService && troopCount > 0;
+    return {
+      ok: true,
+      payload: {
+        movementId,
+        exists: true,
+        stillStationed,
+        villageId: movement.fromVillage,
+        playerId: await this.ownerOf(movement.fromVillage),
+        pos: { ...movement.pos },
+        troopCount,
+        effectivePop: this.armyPopulation(movement.troops),
+      },
+    };
+  }
+
+  /**
+   * 圣地战斗的守军伤亡只能由 Combat 写入。它严格限定为目标格上的驻军，
+   * 不触碰来源村的常驻部队；该驻军本来就在「在途/驻扎兵力」池中，所以
+   * 每次结算后都重新推送人口与军粮快照。
+   */
+  private async applySanctumDefenderLosses(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'combat') return { ok: false, payload: {}, reason: 'combat_owner_required' };
+    const { movementId, losses } = cmd.payload as { movementId?: unknown; losses?: unknown };
+    if (typeof movementId !== 'string' || !movementId) {
+      return { ok: false, payload: {}, reason: 'sanctum_movement_required' };
+    }
+    if (!losses || typeof losses !== 'object' || Array.isArray(losses)) {
+      return { ok: false, payload: {}, reason: 'sanctum_losses_required' };
+    }
+    const run = async (): Promise<CommandResult> => {
+      const movement = this.load(movementId);
+      if (!movement || movement.type !== 'garrison' || movement.status !== 'stationed' || movement.npcService || this.troopCount(movement.troops) <= 0) {
+        return { ok: false, payload: {}, reason: 'sanctum_defender_not_stationed' };
+      }
+
+      for (const [code, rawLoss] of Object.entries(losses as Record<string, unknown>)) {
+        const requested = Math.max(0, Math.floor(Number(rawLoss) || 0));
+        if (requested <= 0) continue;
+        const available = Math.max(0, Math.floor(Number(movement.troops[code]) || 0));
+        const removed = Math.min(available, requested);
+        if (removed <= 0) continue;
+        const remaining = available - removed;
+        if (remaining <= 0) delete movement.troops[code];
+        else movement.troops[code] = remaining;
+        // 正常玩家驻军的战斗快照按当前 troops 即时重建；仅保留给
+        // 特殊记录的 override 需要同步缩减，避免下一次快照回到旧数量。
+        const overridden = movement.attackerSnapshotOverride?.[code];
+        if (overridden) {
+          overridden.count = Math.max(0, overridden.count - removed);
+          if (overridden.count <= 0) delete movement.attackerSnapshotOverride![code];
+        }
+      }
+
+      const villageId = movement.fromVillage;
+      const playerId = await this.ownerOf(villageId);
+      const survivors = { ...movement.troops };
+      const destroyed = this.troopCount(survivors) <= 0;
+      if (destroyed) this.remove(movement.id, 'destroyed');
+      else this.save(movement);
+      this.updateEnRoutePop(villageId);
+      return { ok: true, payload: { villageId, playerId, destroyed, survivors } };
+    };
+    if (this.serialQueue) return this.serialQueue.run(`movement:${movementId}`, run);
+    return run();
+  }
+
+  /**
+   * 清除 Movement 自己保有的随军宝物副本。Treasure 已先清空权威 carried
+   * 记录；这里不处理 capturedTreasures（它们是战利品而非随军栏），也不
+   * 改变兵力、路径、到达时刻或在途人口。
+   */
+  private async consumeCarriedTreasure(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'treasure') return { ok: false, payload: {}, reason: 'treasure_owner_required' };
+    const { code, playerId, villageId } = cmd.payload as { code?: unknown; playerId?: unknown; villageId?: unknown };
+    if (typeof code !== 'string' || !code) return { ok: false, payload: {}, reason: 'treasure_code_required' };
+    if (playerId !== undefined && (typeof playerId !== 'string' || !playerId)) return { ok: false, payload: {}, reason: 'treasure_player_required' };
+    if (villageId !== undefined && (typeof villageId !== 'string' || !villageId)) return { ok: false, payload: {}, reason: 'treasure_village_required' };
+    const movementIds: string[] = [];
+    let removed = 0;
+    const ownerByVillage = new Map<string, string>();
+    for (const movement of this.store.all<MovementRecord>(COLLECTION)) {
+      if (!Array.isArray(movement.treasures) || !movement.treasures.includes(code)) continue;
+      if (typeof villageId === 'string' && movement.fromVillage !== villageId) continue;
+      if (typeof playerId === 'string') {
+        let owner = ownerByVillage.get(movement.fromVillage);
+        if (!owner) {
+          owner = await this.ownerOf(movement.fromVillage);
+          ownerByVillage.set(movement.fromVillage, owner);
+        }
+        if (owner !== playerId) continue;
+      }
+      const before = movement.treasures.length;
+      movement.treasures = movement.treasures.filter((item) => item !== code);
+      const changed = before - movement.treasures.length;
+      if (changed <= 0) continue;
+      if (movement.treasures.length === 0) movement.treasures = undefined;
+      removed += changed;
+      movementIds.push(movement.id);
+      this.save(movement);
+    }
+    return { ok: true, payload: { code, removed, movementIds } };
+  }
+
   private protectCaravan(cmd: Command): CommandResult {
     const check = this.validateCaravanProtection(cmd);
     if (!check.ok) return check;
@@ -3173,15 +3659,17 @@ export class MovementModule {
    */
   private launchCaravan(opts: {
     id: string; fromVillage: string; fromXY: Hex; toXY: Hex; cargo: Record<string, number>;
-    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string; allianceId?: string; allianceService?: boolean; serviceOrderId?: string; caravanOrigin?: string;
+    homeVillage: string; routesFreed: number; returning?: boolean; targetVillage?: string; allianceId?: string; allianceService?: boolean; serviceOrderId?: string; caravanOrigin?: string; externalSpeedMult?: number;
   }): MovementRecord {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
     const path = linePathWrapped(opts.fromXY, opts.toXY, W, H);
     const steps = Math.max(1, path.length - 1);
     const mult = this.config.constants.tradeCaravanSpeed ?? 100;
+    const externalSpeedMult = this.validExternalSpeedMultiplier(opts.externalSpeedMult);
     const dist = hexDistanceWrapped(opts.fromXY, opts.toXY, W, H);
-    const totalMs = Math.max(this.caravanMinDurationMs(), Math.round((dist / mult) * 3600) * 1000);
+    const totalMs = Math.max(this.caravanMinDurationMs(), Math.round((dist / (mult * externalSpeedMult)) * 3600) * 1000);
     const perStepMs = Math.max(1, Math.round(totalMs / steps));
+    const caravanTiming = Array.from({ length: steps }, () => perStepMs);
     const full: MovementRecord = {
       id: opts.id, type: 'caravan', fromVillage: opts.fromVillage, fromXY: opts.fromXY, toXY: opts.toXY,
       originalFromXY: opts.fromXY,
@@ -3192,8 +3680,11 @@ export class MovementModule {
       allianceId: opts.allianceId, allianceService: opts.allianceService, serviceOrderId: opts.serviceOrderId,
       npcService: opts.allianceService || undefined,
       caravanOrigin: opts.caravanOrigin ?? opts.fromVillage, caravanDestination: opts.targetVillage,
+      externalSpeedMult: externalSpeedMult !== 1 ? externalSpeedMult : undefined,
+      caravanTiming,
     };
     this.save(full);
+    this.timingCache.set(full.id, { segmentMs: [...caravanTiming], totalMs: caravanTiming.reduce((sum, ms) => sum + ms, 0) });
     const token = full.stepToken;
     this.scheduler.schedule(perStepMs, () => this.step(full.id, token), `movement:${full.id}`, `movement:${full.id}`);
     return full;
@@ -3218,9 +3709,10 @@ export class MovementModule {
     if (!fromXY) return { ok: false, payload: {}, reason: 'origin_not_found' };
     const toXY = await this.tileXY(targetVillage);
     if (!toXY) return { ok: false, payload: {}, reason: 'target_not_found' };
+    const externalSpeedMult = await this.caravanSpeedMultiplier(fromVillage, targetVillage, toXY);
     const mv = this.launchCaravan({
       id: this.nextId(), fromVillage, fromXY, toXY, cargo: cleaned.clean,
-      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage, allianceId,
+      homeVillage: homeVillage ?? fromVillage, routesFreed: Number(routesFreed) || 0, returning: !!returning, targetVillage, allianceId, externalSpeedMult,
     });
     log('出征(caravan)', { id: mv.id, from: fromVillage, to: targetVillage, cargo: cleaned.clean, returning: !!returning });
     return { ok: true, payload: { id: mv.id, arriveAt: mv.arriveAt, travelSec: Math.round((mv.arriveAt - mv.departAt) / 1000) } };
@@ -5075,10 +5567,39 @@ export class MovementModule {
       name: 'treasure.MarkPendingArrived', from: MovementModule.NAME,
       payload: { movementId: outwardId },
     });
+    // 唯一圣物不进入 treasure.carried；它只由 Sanctum state 绑定到这个
+    // 同 id 返程军。先由 Sanctum 完成幂等结算，再移除 movement，避免
+    // 事件异步派发或重启窗口导致“军队到家但圣物没有结算”。
+    const sanctumRelic = mv.sanctumRelic;
+    const playerId = await this.ownerOf(mv.fromVillage);
+    if (sanctumRelic) {
+      const settled = await this.commands.send({
+        name: 'sanctum.OnMovementReturned', from: MovementModule.NAME,
+        payload: { movementId: mv.id, villageId: mv.fromVillage, playerId, sanctumRelic: true, roundId: sanctumRelic.roundId },
+      });
+      // 老版本/独立 Movement 测试还可能没有 Sanctum handler；普通返程不能
+      // 因此被卡住。真实 Sanctum 结算失败则留下明确日志，便于运维修复。
+      if (!settled.ok
+        && !String(settled.reason ?? '').startsWith('no_handler:')
+        // 圣地已结束/圣物已回归时可能留下过期 movement 标记；正常返乡仍应完成。
+        && settled.reason !== 'relic_movement_mismatch') {
+        log.warn('圣地圣物到家结算失败', { movementId: mv.id, villageId: mv.fromVillage, reason: settled.reason });
+      }
+    }
     this.remove(id, 'returned');
     // v2：通知 population 在途兵力减少（返程到家）
     this.updateEnRoutePop(mv.fromVillage);
-    void this.bus.emit({ name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(), payload: { villageId: mv.fromVillage, troops: mv.troops, loot: mv.loot } } as DomainEvent);
+    void this.bus.emit({
+      name: 'movement.Returned', source: MovementModule.NAME, ts: this.now(),
+      payload: {
+        movementId: mv.id,
+        villageId: mv.fromVillage,
+        playerId,
+        troops: mv.troops,
+        loot: mv.loot,
+        ...(sanctumRelic ? { sanctumRelic: true, roundId: sanctumRelic.roundId } : {}),
+      },
+    } as DomainEvent);
   }
 
   /**

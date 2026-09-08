@@ -25,6 +25,37 @@ export interface DefenderContribution {
   troops: Record<string, number>;
 }
 
+/**
+ * 远弦圣地战场的冻结上下文。
+ *
+ * Sanctum 仍是占领/旧占领者资格的唯一 owner；Combat 只保存已经通过 Command
+ * 查询到的参战人口和开战前守军基线。这样同一时刻多支部队并入时，能在首 tick
+ * 前用完整的主指挥人口占比重新判断是否取消圣地防御，而不用跨模块读取 Sanctum 状态。
+ */
+export interface SanctumAttackerContribution {
+  playerId?: string;
+  effectivePop: number;
+  isMainCommander: boolean;
+}
+
+export interface SanctumBattleContext {
+  eventTarget: boolean;
+  sanctuary: boolean;
+  /** 圣地第一次遭到进攻时的守军快照，首 tick 前可据此安全重算防守加成。 */
+  defenderBaseSnapshot?: Snapshot;
+  /** 驻守圣地的真实行军归属；仅由 Sanctum→Movement 受控快照提供。 */
+  defenderMovementId?: string;
+  defenderVillageId?: string;
+  defenderPlayerId?: string;
+  /** 守望棱镜等守军携物冻结出的第二阶段远程防御倍率。 */
+  defenderWatcherRangedDefMult?: number;
+  attackerContributions: Record<string, SanctumAttackerContribution>;
+  disableSanctuaryBonuses?: boolean;
+  defenderDefenseMult?: number;
+  defenderRangedAtkMult?: number;
+  defenderRangedDefMult?: number;
+}
+
 export interface BattleRound {
   round: number;
   /** v3 阶段；旧 v2 回放缺失时按 total-ad 兼容展示。 */
@@ -67,6 +98,9 @@ export interface BattleResolution {
   fieldCasualtyIndex?: number;
   defenderReportIndex?: number;
   caravanResultEmitted?: boolean;
+  /** 圣地驻军的损失已由 Movement owner 落盘，避免 resolving 恢复时重复扣兵。 */
+  sanctumDefenderApplied?: boolean;
+  sanctumDefenderDestroyed?: boolean;
 }
 
 export interface Battle {
@@ -81,6 +115,8 @@ export interface Battle {
   defender: Snapshot;
   defenderOriginal: Record<string, number>;
   defenderContributions?: Record<string, DefenderContribution>;
+  /** 可选以兼容旧战报/历史存档；仅远弦活动 PvE 战使用。 */
+  sanctum?: SanctumBattleContext;
   contributions: Record<string, Contribution>;
   defenderContribution?: Contribution;
   /** 商队护送战按行军隔离守方快照；缺省继续使用旧单行军野战。 */

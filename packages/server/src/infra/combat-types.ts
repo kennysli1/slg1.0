@@ -59,6 +59,12 @@ export interface CombatUnit {
   rangedDef?: number;
   isCavalry?: boolean;
   ambushPriority?: boolean;
+  /**
+   * 已在开战前冻结的阶段倍率。它们只影响指定阶段，避免把“第二阶段远程”
+   * 偷偷放大到冲锋或肉搏；键使用 CombatPhase 但不允许 all。
+   */
+  phaseAtkMult?: Partial<Record<'charge' | 'ranged' | 'melee', number>>;
+  phaseDefMult?: Partial<Record<'charge' | 'ranged' | 'melee', number>>;
 }
 
 /** 一方阵营的参战快照：兵种 code（或 contribution#code）→ 条目。 */

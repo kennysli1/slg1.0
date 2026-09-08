@@ -20,17 +20,38 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, sanctumMapMarkersFromState, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
 import { confirmOwnedVillage, inspectOwnedVillage } from '../features/map/owned-village-selection.js';
 import { caravanAction, collectMapTargetStack, displayGridForMovement, escortMarkerOffset, foreignArmyName, ownMovementsFromCache, selectedMapMovement } from '../features/map/map-target-helpers.js';
-import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
+import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, taskDialogueReplyIntent, visibleDialogueSegments } from '../features/village/task-dialogue-flow.js';
 import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
 import { unitTraitEffectText, unitTraitPhaseText } from '../app/config.js';
+
+describe('远弦圣地地图可见性', () => {
+  it('只绘制公开条件与服务端明确公开的 sanctum.point，不泄露线索或内部 site 坐标', () => {
+    const markers = sanctumMapMarkersFromState({
+      event: { roundId: 'r1', phase: 'active' },
+      publicTargets: [{ id: 'public-rune', name: '古老符文', q: 11, r: 22 }],
+      player: { clues: [{ text: '私有线索', q: 66, r: 77 }] },
+      site: { point: { q: 33, r: 44 } },
+    });
+    assert.deepEqual(markers, [{ id: 'public-rune', kind: 'condition', name: '古老符文', q: 11, r: 22 }]);
+  });
+
+  it('已返回 sanctum.point 时显示圣地，活动结束后清除所有事件标记', () => {
+    const visible = sanctumMapMarkersFromState({
+      event: { roundId: 'r1', phase: 'sanctum_active' },
+      sanctum: { name: '远弦圣地', point: { q: 15, r: 9 } },
+    });
+    assert.deepEqual(visible, [{ id: 'farstring-sanctum', kind: 'sanctum', name: '远弦圣地', q: 15, r: 9 }]);
+    assert.deepEqual(sanctumMapMarkersFromState({ event: { phase: 'ended' }, sanctum: { point: { q: 15, r: 9 } } }), []);
+  });
+});
 
 describe('M1 资源田修复状态', () => {
   it('任务已就绪时即使没有修复事件记录也把四块资源田显示为已修复', () => {
@@ -273,6 +294,13 @@ describe('任务接取与奖励领取对话状态机', () => {
     assert.equal(nextDialogueSegment(1, 2), null);
   });
 
+  it('s23 只在第二段显式 awaken 时请求 Sanctum，关闭或离开不改变活动状态', () => {
+    assert.equal(taskDialogueReplyIntent('s23', 'sanctum_awaken', 'awaken', true), 'sanctum_activate');
+    assert.equal(taskDialogueReplyIntent('s23', 'sanctum_awaken', 'leave', true), 'close');
+    assert.equal(taskDialogueReplyIntent('s23', 'sanctum_awaken', 'accept', true), 'advance');
+    assert.equal(taskDialogueReplyIntent('s24', 'accept', 'accept', false), 'accept');
+  });
+
   it('Deliver 首次收下才结算，后续收下只推进，领取前异常回复不能跳过确认', () => {
     assert.equal(deliverReplyIntent('take', false), 'claim');
     assert.equal(deliverReplyIntent('take', true), 'advance');
@@ -293,6 +321,9 @@ describe('任务接取与奖励领取对话状态机', () => {
     const autoHost = readFileSync(new URL('../features/village/TaskDialogueHost.tsx', import.meta.url), 'utf8');
     assert.match(taskBar, /function DialogueModal[\s\S]*onClose=\{closeSession\}/, 'Accept 的 X/Esc/遮罩只能关闭 session');
     assert.match(taskBar, /req\('task\.StartDeliver'/, '任务栏必须先请求奖励预览');
+    assert.match(taskBar, /req\('task\.StartActiveDialogue'/, '关闭 s23 确认后应能重新打开学者对话');
+    assert.match(taskBar, /intent === 'sanctum_activate'[\s\S]*?req\('sanctum\.Activate'/,
+      '只有 s23 的显式 awaken 回复才能调用 Sanctum owner');
     assert.match(taskBar, /deliveryInFlight\.current = true[\s\S]*req\('task\.Deliver'/,
       '只有首次收下进入互斥后才能正式 Deliver');
     assert.match(autoHost, /onClose=\{closeSession\}/, '自动对话关闭不能调用段落推进');
