@@ -356,3 +356,23 @@ test('task：Sanctum 状态收束时会撤掉未接取的过期事件 offer', as
   assert.equal(refreshed.ok, true, refreshed.reason);
   assert.equal((app.store.get<any>('task', villageId)!).offeredSide.includes('s24'), false);
 });
+
+test('task：读取任务栏时不会显示尚未触发的圣地任务', async () => {
+  const app = createGameApp({ now: () => 4_450_000, manualScheduler: true });
+  app.setupWorld();
+  const villageId = await village(app, 'sanctum-hidden');
+  const state = app.store.get<any>('task', villageId)!;
+  // 模拟旧存档/旧版本残留的事件型 offer；活动仍 dormant 且玩家没有残印。
+  state.offeredSide = ['s23', 's24', 's29'];
+  app.store.set('task', villageId, state);
+
+  const local = await send(app, 'task.GetState', { villageId });
+  assert.equal(local.ok, true, local.reason);
+  assert.deepEqual((local.payload as any).offeredSide.map((item: any) => item.code), [], '村庄任务栏不应显示未触发的圣地任务');
+
+  const player = (await send(app, 'player.GetByVillage', { villageId })).payload as any;
+  const aggregate = await send(app, 'task.GetPlayerState', { playerId: player.player.id });
+  assert.equal(aggregate.ok, true, aggregate.reason);
+  assert.equal((aggregate.payload as any).offeredSide.some((item: any) => /^s2[3-9]$/.test(item.code)), false, '玩家聚合任务栏也不应显示未触发的圣地任务');
+  assert.deepEqual((app.store.get<any>('task', villageId)!).offeredSide, [], '读取任务栏后应清理过期 offer');
+});

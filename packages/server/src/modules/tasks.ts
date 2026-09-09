@@ -417,6 +417,10 @@ export class TasksModule {
     await this.syncThresholdObjectives(villageId);
     await this.syncSuccessConditions(villageId);
     await this.syncTaskVillageCoordinates(villageId);
+    // 事件型圣地任务的 offer 资格由 Sanctum owner 决定。存档升级、旧版本
+    // 或服务重启可能留下过期的 s23–s29 offer；每次读取前先收束它们，避免
+    // dormant/ended 状态仍把圣地任务投影到任务栏。
+    await this.reconcileExternalOffers(villageId);
     return { ok: true, payload: await this.snapshotForVillage(villageId) };
   }
 
@@ -430,6 +434,7 @@ export class TasksModule {
       await this.syncThresholdObjectives(villageId);
       await this.syncSuccessConditions(villageId);
       await this.syncTaskVillageCoordinates(villageId);
+      await this.reconcileExternalOffers(villageId);
     }
     const anchor = villageIds[0];
     const global = anchor
