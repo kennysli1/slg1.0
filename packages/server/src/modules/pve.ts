@@ -206,21 +206,36 @@ export class PveModule {
   /** 归一 PvE 坐标进环面（幂等，兼容旧档）。 */
   private normalizeCoords(): void {
     const W = this.config.constants.worldW ?? 41, H = this.config.constants.worldH ?? 41;
-    for (const s of this.store.all<PveState>(COLLECTION)) {
+    // The collection key is the stable target identity.  Older migrations could
+    // leave an object under key `pve-44` whose embedded id was `pve-0`; using
+    // `s.id` here would preserve the collision and later make GetTarget resolve
+    // the wrong world tile.  Always repair the embedded id from the key before
+    // normalising coordinates.
+    for (const id of this.store.keys(COLLECTION)) {
+      const s = this.store.get<PveState>(COLLECTION, id);
+      if (!s) continue;
       const w = wrapHex({ q: s.q, r: s.r }, W, H);
-      if (w.q !== s.q || w.r !== s.r) {
-        this.store.set(COLLECTION, s.id, { ...s, q: w.q, r: w.r });
+      if (s.id !== id || w.q !== s.q || w.r !== s.r) {
+        this.store.set(COLLECTION, id, { ...s, id, q: w.q, r: w.r });
       }
     }
   }
 
   /** 重启恢复：被清空的目标直接重生（服务器停机期间视为已过重生冷却）。任务营地不在此重生。 */
   resume(): void {
-    for (const s of this.store.all<PveState>(COLLECTION)) {
+    // A test/imported store can be populated after init; run the identity
+    // migration here as well so recovery never follows a stale embedded id.
+    this.normalizeCoords();
+    // Iterate by collection key, not the embedded id.  This keeps recovery and
+    // migration on the same identity boundary as GetTarget after repairing old
+    // records with duplicate/stale embedded ids.
+    for (const id of this.store.keys(COLLECTION)) {
+      const s = this.load(id);
+      if (!s) continue;
       this.migrateTaskVillageDefender(s);
-      const current = this.load(s.id) ?? s;
+      const current = this.load(id) ?? s;
       this.migrateTaskVillageLoot(current);
-      const kingdomCurrent = this.migrateLegacyKingdomCityState(this.load(s.id) ?? current);
+      const kingdomCurrent = this.migrateLegacyKingdomCityState(this.load(id) ?? current);
       if (kingdomCurrent.cityState) {
         // 城邦规则升级时按新的等级/种族/兵种池重生成，避免旧存档继续保留旧版全罗马守军。
         if (kingdomCurrent.cityStateGenerationVersion !== this.config.constants.kingdomCityStateGenerationVersion || !kingdomCurrent.kingdomProfile || !kingdomCurrent.cityStateTribe) {
@@ -232,7 +247,7 @@ export class PveModule {
         continue;
       }
       // 任务营地清空后不自动重生（交由任务模块 resume 处理其生命周期）
-      if (s.cleared && !s.task && !s.noRespawn) this.respawn(s.id);
+      if (s.cleared && !s.task && !s.noRespawn) this.respawn(id);
     }
   }
 
@@ -378,7 +393,11 @@ export class PveModule {
   }
 
   private load(id: string): PveState | undefined {
-    return this.store.get<PveState>(COLLECTION, id);
+    const s = this.store.get<PveState>(COLLECTION, id);
+    // Treat the requested collection key as authoritative even before the
+    // startup migration has been persisted.  This prevents a stale embedded id
+    // from redirecting World.GetTileByRef to another PvE target.
+    return s ? (s.id === id ? s : { ...s, id }) : undefined;
   }
 
   /**
@@ -446,7 +465,8 @@ export class PveModule {
   }
 
   private async getTarget(cmd: Command): Promise<CommandResult> {
-    const s = this.load((cmd.payload as any).id);
+    const targetId = String((cmd.payload as any).id ?? '');
+    const s = this.load(targetId);
     if (!s) return { ok: false, payload: {}, reason: 'target_not_found' };
     // 读路径也执行一次惰性迁移，确保没有走完整 resume（例如 GM/API
     // 直接查看目标）时，旧 M8 库存仍会立即切到当前 CSV 默认值。
@@ -464,16 +484,24 @@ export class PveModule {
     // resolve the refId through World so scouting, raiding and map details agree.
     const tile = await this.commands.send({
       name: 'world.GetTileByRef', from: PveModule.NAME,
-      payload: { refId: current.id },
+      // Resolve by the collection key, never by a stale embedded id from an
+      // old/corrupted record.  Otherwise pve-44 could resolve to pve-0's tile.
+      payload: { refId: targetId },
     });
     const mapped = (tile.payload as any)?.tile;
     if (tile.ok && mapped && Number.isFinite(Number(mapped.q)) && Number.isFinite(Number(mapped.r))) {
       const q = Number(mapped.q), r = Number(mapped.r);
       if (q !== current.q || r !== current.r) {
-        const next = { ...current, q, r };
-        this.store.set(COLLECTION, current.id, next);
+        const next = { ...current, id: targetId, q, r };
+        this.store.set(COLLECTION, targetId, next);
         return { ok: true, payload: { ...next } };
       }
+    }
+    // Persist the repaired identity even when coordinates already match.
+    if (current.id !== targetId) {
+      const next = { ...current, id: targetId };
+      this.store.set(COLLECTION, targetId, next);
+      return { ok: true, payload: { ...next } };
     }
     return { ok: true, payload: { ...current } };
   }
@@ -483,12 +511,16 @@ export class PveModule {
     return {
       ok: true,
       payload: {
-        targets: this.store.all<PveState>(COLLECTION).map((s) => ({
-          id: s.id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
+        targets: this.store.keys(COLLECTION).flatMap((id) => {
+          const s = this.load(id);
+          if (!s) return [];
+          return [{
+          id, type: s.type, q: s.q, r: s.r, cleared: s.cleared,
           task: !!s.task, noRespawn: !!s.noRespawn,
           faction: s.faction, cityState: !!s.cityState, cityStateTier: s.cityStateTier, cityStateTribe: s.cityStateTribe, kingdomProfile: s.kingdomProfile,
           buildings: s.cityState ? structuredClone(s.buildings ?? []) : undefined,
-        })),
+          }];
+        }),
       },
     };
   }
