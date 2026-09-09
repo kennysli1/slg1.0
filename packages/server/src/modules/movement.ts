@@ -576,6 +576,58 @@ export class MovementModule {
       }
       if (this.isCaravanMission(mv)) this.scheduler.schedule(0, () => this.checkCaravanMission(mv), `movement:${mv.id}`);
     }
+    // Repair routes persisted by older PvE records whose embedded id pointed
+    // at a different world tile.  The correction starts at the army's current
+    // position, so it never teleports back to the old route's previous cell.
+    void this.reconcilePveTargetRoutes();
+  }
+
+  /**
+   * Re-resolve active PvE destinations after startup.  A historical identity
+   * collision could persist targetId=pve-44 together with toXY=(3,1), even
+   * though pve-44 is actually at (12,40).  New dispatches are protected by
+   * PveModule's key-authoritative lookup; this one-time reconciliation also
+   * repairs an already marching record without resetting its army or origin.
+   */
+  private async reconcilePveTargetRoutes(): Promise<void> {
+    const pveMovementTypes = new Set<MovementRecord['type']>(['raid', 'attack', 'scout', 'investigate']);
+    const W = this.config.constants.worldW ?? 41;
+    const H = this.config.constants.worldH ?? 41;
+    for (const snapshot of this.store.all<MovementRecord>(COLLECTION)) {
+      if (snapshot.status !== 'marching' || !snapshot.targetId || !pveMovementTypes.has(snapshot.type)) continue;
+      const target = await this.commands.send({
+        name: 'pve.GetTarget', from: MovementModule.NAME,
+        payload: { id: snapshot.targetId },
+      });
+      const resolved = target.ok ? (target.payload as any) : undefined;
+      const q = Number(resolved?.q), r = Number(resolved?.r);
+      if (!Number.isFinite(q) || !Number.isFinite(r)) continue;
+
+      // The movement may have advanced or been cancelled while the target
+      // lookup awaited World.  Always reload before changing the route.
+      const mv = this.load(snapshot.id);
+      if (!mv || mv.status !== 'marching' || !mv.targetId || !pveMovementTypes.has(mv.type)) continue;
+      if (mv.toXY.q === q && mv.toXY.r === r) continue;
+
+      const start = mv.pos ?? mv.fromXY;
+      const path = linePathWrapped(start, { q, r }, W, H);
+      const timing = await this.pathTiming(mv.fromVillage, path, mv.troops, mv.type, mv.rapidRaidBonus ?? 0, mv.externalSpeedMult ?? 1);
+      const nextStepMs = timing.segmentMs[0] ?? timing.totalMs;
+      mv.toXY = { q, r };
+      mv.requestedXY = { q, r };
+      mv.path = path;
+      mv.pos = path[0] ?? start;
+      mv.stepIndex = 0;
+      mv.previousPos = undefined;
+      mv.perStepMs = nextStepMs;
+      mv.nextStepAt = this.now() + nextStepMs;
+      mv.arriveAt = this.now() + timing.totalMs;
+      mv.stepToken += 1;
+      this.save(mv);
+      const token = mv.stepToken;
+      this.scheduler.schedule(nextStepMs, () => this.step(mv.id, token), `movement:${mv.id}`, `movement:${mv.id}`);
+      log('修复 PvE 行军目标路线', { movementId: mv.id, targetId: mv.targetId, from: start, to: { q, r } });
+    }
   }
 
   /** 启动恢复时只从 movement 自己的持久化标记补发，不读取 Sanctum 的私有状态。 */
