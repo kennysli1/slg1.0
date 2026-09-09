@@ -31,6 +31,16 @@ import { unitCardBaseStats } from '../features/army/unit-card-stats.js';
 import { isDiceMatchComplete, projectDiceQuestReplay, type DiceQuestReplayBase } from '../features/village/dice-quest-replay.js';
 import { hasRepairBuildingPending, isRepairBuildingDone } from '../features/village/task-progress.js';
 import { unitTraitEffectText, unitTraitPhaseText } from '../app/config.js';
+import { shouldShowSanctumEventPanel } from '../features/sanctum/SanctumEventPanel.js';
+
+describe('远弦圣地任务栏入口', () => {
+  it('活动未触发时隐藏面板，进入等待唤醒或活动阶段后显示', () => {
+    assert.equal(shouldShowSanctumEventPanel({ enabled: true, phase: 'dormant' }), false);
+    assert.equal(shouldShowSanctumEventPanel({ enabled: true, phase: 'awaiting_activation' }), true);
+    assert.equal(shouldShowSanctumEventPanel({ enabled: true, phase: 'active' }), true);
+    assert.equal(shouldShowSanctumEventPanel({ enabled: false, phase: 'active' }), false);
+  });
+});
 
 describe('远弦圣地地图可见性', () => {
   it('只绘制公开条件与服务端明确公开的 sanctum.point，不泄露线索或内部 site 坐标', () => {
