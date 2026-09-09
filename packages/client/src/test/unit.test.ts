@@ -14,7 +14,7 @@ import { errText } from '../shared/ui/text.js';
 import { isCompatibleVersion } from '../api.js';
 import { WIRE_VERSION, WIRE_MIN_VERSION } from '@slg/shared';
 import { setPopState, getPopState, interpolatePop, getCache, setCache, patchMovement, replaceMovementSnapshot, getReports, addReport, seedReports } from '../app/state.js';
-import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, setPlayerTaskState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
+import { beginVillageSwitch, endVillageSwitch, findTaskCampMarker, sanctumMapProjection, setPlayerTaskState, setSanctumState, setTaskMarkers, setTaskState, taskMarkers, villageSwitching } from '../app/store.js';
 import { breakdownTooltip, populationLedgerGrowth, populationTooltip, resourceLedgerRate } from '../features/village/VillageResourceLedger.js';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
 import { fmtDur, secLeft } from '../shared/utils/format.js';
@@ -60,6 +60,27 @@ describe('远弦圣地地图可见性', () => {
     });
     assert.deepEqual(visible, [{ id: 'farstring-sanctum', kind: 'sanctum', name: '远弦圣地', q: 15, r: 9 }]);
     assert.deepEqual(sanctumMapMarkersFromState({ event: { phase: 'ended' }, sanctum: { point: { q: 15, r: 9 } } }), []);
+  });
+
+  it('地图订阅只接收公开坐标投影，dormant 或私人线索变化不会触发地图快照', () => {
+    const active = {
+      event: { phase: 'active' },
+      publicTargets: [{ id: 'public-rune', name: '古老符文', q: 11, r: 22, description: '公开描述' }],
+      sanctum: { id: 'private-site', point: { q: 33, r: 44 }, pveId: 'private-pve' },
+      player: { clues: [{ text: '私有线索', q: 66, r: 77 }] },
+      site: { point: { q: 88, r: 99 } },
+    };
+    assert.deepEqual(sanctumMapProjection({ event: { phase: 'dormant' }, publicTargets: active.publicTargets }), null);
+    assert.deepEqual(sanctumMapProjection(active), {
+      publicTargets: [{ id: 'public-rune', name: '古老符文', q: 11, r: 22 }],
+      sanctum: { id: 'private-site', name: '远弦圣地', q: 33, r: 44 },
+    });
+    try {
+      assert.equal(setSanctumState({ ...active, player: { clues: [{ text: 'a' }] } }), true);
+      assert.equal(setSanctumState({ ...active, player: { clues: [{ text: 'b' }] } }), false);
+    } finally {
+      setSanctumState(null);
+    }
   });
 });
 

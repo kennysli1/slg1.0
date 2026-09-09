@@ -25,6 +25,54 @@ let mapBumpPending = false;
 let pendingSanctumMapState: { value: any | null } | undefined;
 let pendingMapTaskMarkers: Record<string, any[]> | undefined;
 
+/**
+ * 地图只消费圣地的公开投影。个人线索、条件完成记录和其它事件字段不能让
+ * 地图订阅整棵 Sanctum 快照，否则每次任务状态变化都会重新构造 SVG。
+ */
+function mapPoint(value: any): { q: number; r: number } | null {
+  const point = value?.point ?? value?.location ?? value;
+  const q = Number(point?.q), r = Number(point?.r);
+  return Number.isFinite(q) && Number.isFinite(r) ? { q, r } : null;
+}
+
+export function sanctumMapProjection(payload: any): any | null {
+  const state = payload?.event && typeof payload.event === 'object' ? { ...payload, ...payload.event } : payload;
+  const phase = String(state?.phase ?? '').trim().toLowerCase();
+  if (!['active', 'sanctum_hidden', 'sanctum_active', 'relic_in_transit'].includes(phase)) return null;
+
+  const publicTargets = (Array.isArray(state?.publicTargets) ? state.publicTargets : [])
+    .filter((target: any) => target && target.status !== 'removed' && mapPoint(target))
+    .map((target: any) => {
+      const point = mapPoint(target)!;
+      return {
+        id: String(target.id ?? target.conditionId ?? target.code ?? `${point.q},${point.r}`),
+        name: typeof target.name === 'string' && target.name ? target.name : '远弦条件',
+        q: point.q,
+        r: point.r,
+      };
+    });
+  const visibleSanctum = state?.sanctum;
+  const sanctumPosition = mapPoint(visibleSanctum);
+  const sanctum = visibleSanctum && sanctumPosition ? {
+    id: String(visibleSanctum.id ?? visibleSanctum.sanctumId ?? 'farstring-sanctum'),
+    name: typeof visibleSanctum.name === 'string' && visibleSanctum.name ? visibleSanctum.name : '远弦圣地',
+    q: sanctumPosition.q,
+    r: sanctumPosition.r,
+  } : undefined;
+  if (publicTargets.length === 0 && !sanctum) return null;
+  return { publicTargets, ...(sanctum ? { sanctum } : {}) };
+}
+
+function sanctumMapProjectionKey(value: any | null): string {
+  if (!value) return '';
+  const targets = Array.isArray(value.publicTargets)
+    ? [...value.publicTargets].sort((a, b) => String(a?.id ?? '').localeCompare(String(b?.id ?? '')))
+    : [];
+  return JSON.stringify({ publicTargets: targets, sanctum: value.sanctum ?? null });
+}
+
+let sanctumMapProjectionCurrentKey = '';
+
 /** 地图覆盖层快照：拖动期间延后提交，避免推送替换整棵 SVG。 */
 export const sanctumMapState = signal<any | null>(null);
 export const mapTaskMarkers = signal<Record<string, any[]>>({});
@@ -40,12 +88,16 @@ function flushDeferredMapSnapshots(): void {
   }
 }
 
-function setSanctumMapSnapshot(next: any | null): void {
+function setSanctumMapSnapshot(next: any | null): boolean {
+  const nextKey = sanctumMapProjectionKey(next);
+  if (nextKey === sanctumMapProjectionCurrentKey) return false;
+  sanctumMapProjectionCurrentKey = nextKey;
   if (mapInteractionDepth > 0) {
     pendingSanctumMapState = { value: next };
-    return;
+    return true;
   }
   sanctumMapState.value = next;
+  return true;
 }
 
 function setMapTaskMarkersSnapshot(next: Record<string, any[]>): void {
@@ -264,10 +316,10 @@ export const kingdomState = signal<any | null>(null);
  * 圣地争夺三个不同可见性层级，因此单独保留服务端已经脱敏后的玩家视图。
  */
 export const sanctumState = signal<any | null>(null);
-export function setSanctumState(payload: any): void {
+export function setSanctumState(payload: any): boolean {
   const next = payload ?? null;
   sanctumState.value = next;
-  setSanctumMapSnapshot(next);
+  return setSanctumMapSnapshot(sanctumMapProjection(next));
 }
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});

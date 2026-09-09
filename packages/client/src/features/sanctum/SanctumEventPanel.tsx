@@ -7,7 +7,7 @@
 import { useState } from 'preact/hooks';
 import { me, req } from '../../api.js';
 import { openModal, sanctumState, showToast, tab, tick } from '../../app/store.js';
-import { act, refreshMapArea, reloadSanctum, setMapCenter } from '../../app/refresh.js';
+import { act, reloadSanctum, setMapCenter } from '../../app/refresh.js';
 import { Btn, Panel, SectionHead, Tag } from '../../ui/index.js';
 import { Modal } from '../../ui/Modal.js';
 import { fmtDur } from '../../shared/utils/format.js';
@@ -319,8 +319,9 @@ function SanctumEventBody({ state }: { state: any }) {
       return await act(req(command, { ...spec.payload, roundId, ...payload }), {
         okToast: `${actionLabel(action, spec)}成功`,
         onOk: () => {
-          void reloadSanctum();
-          void refreshMapArea();
+          // act() 随动作已完成一次基础/地图刷新；这里仅更新圣地脱敏投影，
+          // 避免动作回调再把同一张地图标记为待刷新。
+          void reloadSanctum({ markMapStale: false });
         },
       });
     } finally {

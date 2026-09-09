@@ -31,6 +31,7 @@ let mapCenterLegacy: { q: number; r: number } | null = null;
 // 尤其不能把目标消失后的返程路径覆盖回出征路径。
 let refreshGeneration = 0;
 let movementRefreshGeneration = 0;
+let sanctumRefreshGeneration = 0;
 
 /**
  * GM 可直接调整村庄坐标/名称；玩家快照不会主动推送这些字段。
@@ -144,11 +145,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
 
     // 任务快照按玩家聚合；地图仍按 villageId 保留任务营地标记。
     const taskRefresh = reloadPlayerTasks();
-    // 圣地事件有独立的可见性和刷新节奏；请求失败（例如旧服务器尚未部署事件）
-    // 不应让基础村庄刷新报错或清空已有事件视图。
-    const sanctumRefresh = reloadSanctum();
     if (options.waitForTasks !== false) await taskRefresh;
-    void sanctumRefresh;
   } catch {
     pushReport('刷新失败：网络连接异常');
   }
@@ -198,12 +195,30 @@ export async function reloadPlayerTasks(): Promise<void> {
   if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
 }
 
-/** 轻量刷新远弦圣地事件；服务端仅返回当前玩家被允许看到的字段。 */
-export async function reloadSanctum(): Promise<void> {
+export interface SanctumReloadResult {
+  ok: boolean;
+  mapChanged: boolean;
+}
+
+/**
+ * 轻量刷新远弦圣地事件；服务端仅返回当前玩家被允许看到的字段。
+ * 它不是基础刷新的一部分，只由登录、圣地任务/事件推送和圣地动作触发。
+ */
+export async function reloadSanctum(options: { markMapStale?: boolean } = {}): Promise<SanctumReloadResult> {
+  const generation = ++sanctumRefreshGeneration;
   const result = await req('sanctum.GetState').catch(() => null);
-  if (!result?.ok) return;
-  setSanctumState(result.payload);
+  if (!result?.ok || generation !== sanctumRefreshGeneration) return { ok: false, mapChanged: false };
+  const mapChanged = setSanctumState(result.payload);
+  if (mapChanged && options.markMapStale !== false) mapAreaStale.value = true;
   bumpData();
+  return { ok: true, mapChanged };
+}
+
+async function refreshSanctumAfterPush(): Promise<void> {
+  const result = await reloadSanctum();
+  // MapScreen 会在当前页立即补拉，离开地图时则在进入地图页补拉；不在推送回调
+  // 中直接发起 GetArea，避免多个圣地事件把完整地图请求叠在一起。
+  if (result.ok && result.mapChanged) mapAreaStale.value = true;
 }
 
 export async function reloadKingdom(): Promise<void> {
@@ -447,11 +462,12 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
-  // 圣地状态会改变公开目标、个人线索和地图上的可见地物。不要把坐标直接塞进
-  // 普通任务标记；重新拉取服务端脱敏快照和地图区域，避免泄露私有线索。
+  // 圣地状态只接受定向推送。地图是否需要补拉由脱敏公开投影的坐标变化决定，
+  // 不再因为一个私人线索/倒计时变化就重建地图。
   if (event === 'SanctumUpdated') {
-    void reloadSanctum();
-    void refreshMapArea();
+    const playerIds = Array.isArray(payload?.playerIds) ? payload.playerIds.map((id: unknown) => String(id)) : [];
+    if (playerIds.length > 0 && (!me?.id || !playerIds.includes(String(me.id)))) return;
+    void refreshSanctumAfterPush();
     return;
   }
   if (event === 'KingdomUpdated') { void reloadKingdom(); return; }

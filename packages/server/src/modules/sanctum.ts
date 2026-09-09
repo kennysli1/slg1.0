@@ -281,12 +281,17 @@ export class SanctumModule {
   }
 
   private load(): SanctumState {
+    const stored = this.store.get<SanctumState>(SANCTUM_COLLECTION, SANCTUM_STATE_KEY);
     const state = normalizeSanctumState(
-      this.store.get<SanctumState>(SANCTUM_COLLECTION, SANCTUM_STATE_KEY),
+      stored,
       this.currentRoundId(),
       this.relicCode(),
     );
-    this.store.set(SANCTUM_COLLECTION, SANCTUM_STATE_KEY, state);
+    // 归一化只在旧档确实需要迁移时写回。GetState/CanOffer 等读路径不能每次
+    // 都生成 WAL；那会把一个本应休眠的事件变成高频持久化写入源。
+    if (JSON.stringify(stored) !== JSON.stringify(state)) {
+      this.store.set(SANCTUM_COLLECTION, SANCTUM_STATE_KEY, state);
+    }
     return state;
   }
 
@@ -472,9 +477,11 @@ export class SanctumModule {
     return stored || pending || carried;
   }
 
-  private projectedPhase(state: SanctumState, player: SanctumPlayerState | undefined, hasSeal: boolean): string {
+  private projectedPhase(state: SanctumState, player: SanctumPlayerState | undefined): string {
     if (state.phase === 'ended') return 'completed';
-    if (state.phase === 'dormant') return player?.joinedAt ? 'awaiting_activation' : (hasSeal ? 'seal_race' : 'dormant');
+    // dormant 不再根据宝物库存投影 seal_race。残印是否存在由任务 owner 在
+    // 残印真实入库/待领取时刷新 s23；GetState 只需知道玩家是否已进入手动唤醒阶段。
+    if (state.phase === 'dormant') return player?.joinedAt ? 'awaiting_activation' : 'dormant';
     if (state.relic.status === 'carried' || state.relic.status === 'settling') return 'relic_in_transit';
     if (state.site.occupantPlayerId) return 'sanctum_active';
     if (player?.qualifiedAt && !player.discoveredAt) return 'sanctum_hidden';
@@ -482,12 +489,33 @@ export class SanctumModule {
   }
 
   private async getState(cmd: Command): Promise<CommandResult> {
-    const { playerId, villageId } = cmd.payload as { playerId?: string; villageId?: string };
+    const { playerId } = cmd.payload as { playerId?: string };
     if (!playerId) return { ok: false, payload: {}, reason: 'player_id_required' };
     const state = this.load();
     const player = state.players[playerId];
-    const ownsSeal = await this.hasSeal(villageId);
     const joined = !!player?.joinedAt;
+
+    // 活动尚未被 s23 唤醒时，GetState 只返回阶段壳。这里不读取宝物、不计算
+    // 条件/资格、不下发目标和圣地坐标；真正的残印校验留在 Activate 的动作边界。
+    // 这样基础刷新即使被其它页面触发，也不会把未触发支线变成实时判定器。
+    if (state.phase === 'dormant') {
+      return {
+        ok: true,
+        payload: {
+          event: {
+            roundId: state.roundId,
+            id: text(this.eventRow(), 'code') || 'farstring_sanctum',
+            name: text(this.eventRow(), 'name') || '远弦圣地',
+            phase: joined ? 'awaiting_activation' : 'dormant',
+            revision: state.revision,
+            pioneerPlayerId: state.pioneerPlayerId,
+          },
+          ...(joined ? { player: { canActivate: true, activationPending: true } } : {}),
+          publicTargets: [],
+        },
+      };
+    }
+
     const qualified = !!player && this.isQualified(state, player);
     const revealSite = !!player?.discoveredAt || state.site.occupantPlayerId === playerId || state.relic.carrierPlayerId === playerId;
     const canTakeRelic = state.phase === 'active' && state.site.occupantPlayerId === playerId
@@ -499,15 +527,13 @@ export class SanctumModule {
           roundId: state.roundId,
           id: text(this.eventRow(), 'code') || 'farstring_sanctum',
           name: text(this.eventRow(), 'name') || '远弦圣地',
-          phase: this.projectedPhase(state, player, ownsSeal),
+          phase: this.projectedPhase(state, player),
           revision: state.revision,
           pioneerPlayerId: state.pioneerPlayerId,
           startedAt: state.rules?.activatedAt,
           endedAt: state.endedAt,
         },
         player: {
-          hasSeal: ownsSeal,
-          canActivate: state.phase === 'dormant' && joined && ownsSeal,
           isPioneer: state.pioneerPlayerId === playerId,
           conditionsCompleted: player?.conditionRecords.length ?? 0,
           conditionsRequired: this.playerRequiredConditions(state),
@@ -562,7 +588,9 @@ export class SanctumModule {
       payload: {
         roundId: state.roundId,
         phase: state.phase,
-        targets: Object.values(state.targets).filter((target) => target.status !== 'removed').map((target) => this.sanitizeTarget(state, target, player)),
+        targets: state.phase === 'active'
+          ? Object.values(state.targets).filter((target) => target.status !== 'removed').map((target) => this.sanitizeTarget(state, target, player))
+          : [],
       },
     };
   }
