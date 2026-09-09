@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 远端不可变发布执行器。由 tools/deploy.sh 通过 SSH stdin 调用，也可在临时目录中测试。
-set -euo pipefail
+# -E 让 ERR trap 进入函数与子 shell；否则配置迁移/校验函数失败时会直接
+# 退出而跳过 release、锁和 current 的清理。
+set -Eeuo pipefail
 
 ACTION="${1:-}"
 BASE_INPUT="${2:-}"
@@ -32,6 +34,25 @@ NPM_BIN="${KOW_DEPLOY_NPM_BIN:-npm}"
 NODE_BIN="${KOW_DEPLOY_NODE_BIN:-node}"
 PM2_BIN="${KOW_DEPLOY_PM2_BIN:-pm2}"
 CURL_BIN="${KOW_DEPLOY_CURL_BIN:-curl}"
+CONFIG_VALIDATOR="${KOW_DEPLOY_CONFIG_VALIDATOR:-}"
+
+check_build_memory() {
+  local meminfo="${KOW_DEPLOY_MEMINFO_PATH:-/proc/meminfo}"
+  local min_available_kb="${KOW_DEPLOY_MIN_AVAILABLE_KB:-786432}"
+  local min_swap_free_kb="${KOW_DEPLOY_MIN_SWAP_FREE_KB:-1048576}"
+  [[ -r "$meminfo" ]] || die "无法读取内存信息：$meminfo"
+  [[ "$min_available_kb" =~ ^[0-9]+$ && "$min_swap_free_kb" =~ ^[0-9]+$ ]] \
+    || die "非法的构建内存阈值"
+  local available_kb swap_free_kb
+  available_kb="$(awk '/^MemAvailable:/ { print $2; exit }' "$meminfo")"
+  swap_free_kb="$(awk '/^SwapFree:/ { print $2; exit }' "$meminfo")"
+  [[ "$available_kb" =~ ^[0-9]+$ && "$swap_free_kb" =~ ^[0-9]+$ ]] \
+    || die "无法解析内存信息：$meminfo"
+  if (( available_kb < min_available_kb && swap_free_kb < min_swap_free_kb )); then
+    die "可用内存不足，拒绝在生产机执行构建：MemAvailable=${available_kb}kB SwapFree=${swap_free_kb}kB"
+  fi
+  echo "    build memory: MemAvailable=${available_kb}kB SwapFree=${swap_free_kb}kB"
+}
 
 state_value() {
   local key="$1"
@@ -162,6 +183,7 @@ ARCHIVE="${4:-}"
 MAIN_SHA="${5:-}"
 [[ -f "$ARCHIVE" ]] || die "发布包不存在：$ARCHIVE"
 [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] || die "非法提交 SHA：$MAIN_SHA"
+check_build_memory
 
 if ! mkdir "$LOCK" 2>/dev/null; then
   die "已有生产发布正在进行；确认没有其他发布后再处理 $LOCK"
@@ -220,6 +242,20 @@ migrate_legacy_config() {
     "$NODE_BIN" "$target/packages/server/dist/infra/config-authority.js" --migrate
 }
 
+validate_release_config() {
+  local target="$1"
+  echo "==> 校验最终生产配置"
+  if [[ -n "$CONFIG_VALIDATOR" ]]; then
+    "$CONFIG_VALIDATOR" "$target/config"
+    return
+  fi
+  (
+    cd "$target"
+    KOW_CONFIG_DIR="$target/config" "$NODE_BIN" --input-type=module -e \
+      "const { loadGameConfig } = await import('./packages/server/dist/infra/config.js'); loadGameConfig(process.env.KOW_CONFIG_DIR);"
+  )
+}
+
 archive_legacy_source() {
   # 首次迁移前，旧生产目录 BASE/data 里可能还留有一份覆盖文件。若不把
   # 这份已复制并成功迁移的源文件移走，下一次发布会再次复制/迁移它，
@@ -248,16 +284,26 @@ fi
 printf 'PREVIOUS_MODE=%s\nPREVIOUS_PATH=%s\nTARGET_SHA=%s\n' \
   "$PREVIOUS_MODE" "$PREVIOUS_PATH" "$MAIN_SHA" > "$STATE"
 
-TARGET="$RELEASES/$MAIN_SHA"
-STAGING="$RELEASES/.staging-$MAIN_SHA-$$"
+# 首次发布使用提交 SHA 作为目录名；同一 SHA 重发时必须创建新的不可变
+# 候选目录，绝不能把共享配置原地写入当前正在运行的 release。
+RELEASE_ID="$MAIN_SHA"
+if [[ -e "$RELEASES/$RELEASE_ID" ]]; then
+  RELEASE_ID="$(printf '%s' "$MAIN_SHA:$(date -u +%s%N):$$" | sha1sum | awk '{ print $1 }')"
+fi
+TARGET="$RELEASES/$RELEASE_ID"
+STAGING="$RELEASES/.staging-$RELEASE_ID-$$"
 CREATED_TARGET=0
+ACTIVATION_STARTED=0
 
 rollback_on_error() {
   local code=$?
   trap - ERR
-  echo "远端发布失败，正在恢复上一个版本……" >&2
+  echo "远端发布失败，正在清理现场……" >&2
   rm -rf "$STAGING"
-  restore_previous || true
+  if [[ "$ACTIVATION_STARTED" == 1 ]]; then
+    echo "激活已开始，正在恢复上一个版本……" >&2
+    restore_previous || true
+  fi
   [[ "$CREATED_TARGET" == 1 ]] && rm -rf "$TARGET"
   rm -rf "$LOCK"
   exit "$code"
@@ -289,12 +335,14 @@ else
 fi
 
 # 构建完成后再套用最新 GM CSV；构建阶段使用 Git 默认配置，避免共享旧表
-# 把新增参数遮住。目标 release 已存在时也同样重新合并（例如同一 SHA 重试发布）。
+# 把新增参数遮住。同一 SHA 重试也使用新的候选目录，保持旧 release 不可变。
 apply_persisted_config "$TARGET"
 migrate_legacy_config "$TARGET"
 archive_legacy_source
 # 迁移可能刚把更多 CSV 写入 shared/config；再次覆盖确保当前 release 与共享配置一致。
 apply_persisted_config "$TARGET"
+validate_release_config "$TARGET"
 
+ACTIVATION_STARTED=1
 activate "$TARGET"
 trap - ERR

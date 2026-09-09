@@ -31,6 +31,7 @@ import './reset-concurrency.test.js';
 import './population-regression.test.js';
 import './population-v2.test.js';
 import './gateway-scheduler-serial.test.js';
+import './ws-backpressure.test.js';
 // ---- 网络安全阶段（wire-boundary / rate-limit / validate）----
 import './rate-limit.test.js';
 import './validate.test.js';

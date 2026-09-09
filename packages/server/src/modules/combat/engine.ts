@@ -10,6 +10,20 @@ import {
 
 export const MAX_REPLAY_ROUNDS = 120;
 
+/**
+ * 在线战斗只保留首轮与最近的回合，避免极长战斗让存档与内存无界增长。
+ * 真实总轮数由 Battle.ticks 单独记录。
+ */
+export function trimBattleRounds<T>(rounds: T[]): void {
+  if (rounds.length <= MAX_REPLAY_ROUNDS) return;
+  rounds.splice(1, rounds.length - MAX_REPLAY_ROUNDS);
+}
+
+export function appendBattleRound<T>(rounds: T[], round: T): void {
+  rounds.push(round);
+  trimBattleRounds(rounds);
+}
+
 export interface CombatTickInput {
   attacker: Snapshot;
   defender: Snapshot;

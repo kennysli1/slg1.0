@@ -6,7 +6,7 @@ module.exports = {
       name: 'kow',
       // 生产统一运行构建产物，与根 package.json 的 npm start 保持一致。
       script: 'packages/server/dist/main.js',
-      node_args: '--enable-source-maps',
+      node_args: '--enable-source-maps --max-old-space-size=512',
       cwd: __dirname,
       env: {
         NODE_ENV: 'production',
@@ -17,6 +17,7 @@ module.exports = {
       },
       autorestart: true,
       max_restarts: 10,
+      max_memory_restart: '650M',
       // 优雅停机：给进程时间 flush 存档
       kill_timeout: 5000,
       out_file: './logs/out.log',
@@ -26,7 +27,7 @@ module.exports = {
       // AI 测试服 01：与主服使用相同代码，但世界存档、日志和端口完全隔离。
       name: 'kow-test-01',
       script: 'packages/server/dist/main.js',
-      node_args: '--enable-source-maps',
+      node_args: '--enable-source-maps --max-old-space-size=256',
       cwd: __dirname,
       env: {
         NODE_ENV: 'production',
@@ -37,6 +38,7 @@ module.exports = {
       },
       autorestart: true,
       max_restarts: 10,
+      max_memory_restart: '350M',
       kill_timeout: 5000,
       out_file: './logs/test-01/out.log',
       error_file: './logs/test-01/err.log',
@@ -45,7 +47,7 @@ module.exports = {
       // 筛色子实验场：独立进程、端口和内存会话，不加载 KOW 存档。
       name: 'kow-dice-lab',
       script: 'packages/dice-lab/dist/server/main.js',
-      node_args: '--enable-source-maps',
+      node_args: '--enable-source-maps --max-old-space-size=128',
       cwd: __dirname,
       env: {
         NODE_ENV: 'production',
@@ -56,6 +58,7 @@ module.exports = {
       },
       autorestart: true,
       max_restarts: 10,
+      max_memory_restart: '200M',
       kill_timeout: 5000,
       out_file: './logs/dice-lab/out.log',
       error_file: './logs/dice-lab/err.log',
