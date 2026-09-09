@@ -367,7 +367,37 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   // ── 视口剔除触发器 ──
   const [_cullVer, setCullVer] = useState(0);
-  const scheduleCull = useCallback(() => setCullVer((v) => v + 1), []);
+  const cullRafRef = useRef<number | null>(null);
+  const lastCullCamera = useRef({ panX: Number.NaN, panY: Number.NaN, zoom: Number.NaN });
+  /**
+   * 拖动期间相机 transform 会连续变化，但可见格集合并不需要每个 pointermove
+   * 都重建。原实现每个事件都 setState，导致整张 SVG 在相机移动中反复提交，
+   * 与 marker 的独立 rAF 更新交错后会出现卡顿和短暂撕裂。
+   *
+   * 只有跨过约一格的屏幕距离（或发生强制导航/缩放）才重新剔除，并且同一帧
+   * 内最多提交一次。地图仍由 camEl 的 transform 连续移动，不会牺牲拖动流畅度。
+   */
+  const scheduleCull = useCallback((force = false) => {
+    const last = lastCullCamera.current;
+    const panDistance = Number.isFinite(last.panX)
+      ? Math.hypot(panX.current - last.panX, panY.current - last.panY)
+      : Infinity;
+    const zoomChanged = Number.isFinite(last.zoom) && Math.abs(zoom.current - last.zoom) > 0.015;
+    const threshold = Math.max(12, HEX_SIZE * Math.max(0.7, zoom.current * 0.7));
+    if (!force && panDistance < threshold && !zoomChanged) return;
+    last.panX = panX.current;
+    last.panY = panY.current;
+    last.zoom = zoom.current;
+    if (cullRafRef.current !== null) return;
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setCullVer((v) => v + 1);
+      return;
+    }
+    cullRafRef.current = window.requestAnimationFrame(() => {
+      cullRafRef.current = null;
+      setCullVer((v) => v + 1);
+    });
+  }, []);
 
   // ── 导航 UI 状态 ──
   const centeredKey  = useRef('');
@@ -412,6 +442,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   // ── rAF ──
   const rafRef = useRef<number | null>(null);
+  const lastTransform = useRef('');
 
   // ─── camera helpers ────────────────────────────────────────────────────────
   function clampZoom(z: number): number {
@@ -429,10 +460,10 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   }
 
   function applyTransform() {
-    camEl.current?.setAttribute(
-      'transform',
-      `translate(${panX.current.toFixed(2)},${panY.current.toFixed(2)}) scale(${zoom.current.toFixed(4)})`,
-    );
+    const transform = `translate(${panX.current.toFixed(2)},${panY.current.toFixed(2)}) scale(${zoom.current.toFixed(4)})`;
+    if (lastTransform.current === transform && camEl.current?.getAttribute('transform') === transform) return;
+    lastTransform.current = transform;
+    camEl.current?.setAttribute('transform', transform);
   }
 
   function syncZoomUi() {
@@ -453,7 +484,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     panY.current = sy - zoom.current * fh;
     reducePanToLattice();
     applyTransform();
-    scheduleCull();
+    scheduleCull(true);
     syncNavUI();
     syncZoomUi();
   }
@@ -488,7 +519,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     reducePanToLattice();
     applyTransform();
     centeredKey.current = `${q},${r}`;
-    scheduleCull();
+    scheduleCull(true);
   }, []); // intentional empty deps: uses only refs
 
   function viewCenter(): { q: number; r: number } {
@@ -1367,7 +1398,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     const moved = Math.hypot(e.clientX - dragSX.current, e.clientY - dragSY.current) > DRAG_THRESHOLD;
     if (moved) {
       suppress.current = true;
-      scheduleCull();
+      scheduleCull(true);
       syncNavUI();
     }
     dragMoved.current = false;
@@ -1526,7 +1557,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     } else {
       applyTransform();
     }
-    scheduleCull();
+    scheduleCull(true);
 
     // Resize observer
     const ro = new ResizeObserver((entries) => {
@@ -1536,7 +1567,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       svg.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`);
       reducePanToLattice();
       applyTransform();
-      scheduleCull();
+      scheduleCull(true);
     });
     ro.observe(svg);
 
@@ -1563,6 +1594,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       ro.disconnect();
       svg.removeEventListener('wheel', onWheel);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (cullRafRef.current !== null) cancelAnimationFrame(cullRafRef.current);
       window.clearInterval(fallbackTimer);
       unsubTab();
     };
