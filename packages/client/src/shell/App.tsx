@@ -3,7 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { connect, onPush, me, getProtocolError } from '../api.js';
 import { loadGameConfig } from '../app/config.js';
 import { tab, tick, sessionVersion, villageSwitching, allianceTargetPicker, allianceWarTarget, allianceWarFocus, selected, showToast } from '../app/store.js';
-import { refreshAll, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
+import { refreshAll, reloadSanctum, handlePush, hydrateReports, setSessionLostHandler } from '../app/refresh.js';
 import { ModalHost, ToastHost } from '../ui/index.js';
 import { TopBar } from './TopBar.js';
 import { TabBar } from './TabBar.js';
@@ -68,6 +68,9 @@ export function App() {
     sessionVersion.value++;
     void hydrateReports();
     void refreshAll();
+    // 登录/重连只建立一次圣地投影；之后由 SanctumUpdated 定向推送驱动。
+    // 基础刷新不再夹带 sanctum.GetState。
+    void reloadSanctum({ markMapStale: false });
   }
 
   if (phase === 'simulator') return <BattleSimulatorScreen />;

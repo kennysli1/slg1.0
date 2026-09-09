@@ -18,6 +18,7 @@ function fixture() {
   const scheduler = new Scheduler(() => now, true);
   const advances: Array<{ villageId: string; code: string; progress: number; ready: boolean }> = [];
   let relicGrants = 0;
+  let treasureListCalls = 0;
   const config = {
     constants: {
       raw: {
@@ -76,7 +77,7 @@ function fixture() {
     advances.push(payload);
     return ok();
   });
-  commands.register('treasure.List', () => ok({ codes: ['sanctum_fragment'] }));
+  commands.register('treasure.List', () => { treasureListCalls++; return ok({ codes: ['sanctum_fragment'] }); });
   commands.register('treasure.Grant', () => { relicGrants += 1; return ok({ pending: false }); });
   commands.register('economy.Grant', () => ok());
   commands.register('economy.TrySpend', () => ok());
@@ -90,9 +91,29 @@ function fixture() {
   const send = (name: string, payload: Record<string, unknown>, from = 'test') => commands.send({ name, from, payload });
   return {
     store, scheduler, advances, get relicGrants() { return relicGrants; },
+    get treasureListCalls() { return treasureListCalls; },
     now: () => now, setNow: (next: number) => { now = next; }, send,
   };
 }
+
+test('远弦圣地：未唤醒时只返回阶段壳，不查询宝物或计算公共条件', async () => {
+  const f = fixture();
+  const dormant = await f.send('sanctum.GetState', { playerId: 'p1', villageId: 'v1' });
+  assert.equal(dormant.ok, true, dormant.reason);
+  assert.equal((dormant.payload as any).event.phase, 'dormant');
+  assert.deepEqual((dormant.payload as any).publicTargets, []);
+  assert.equal((dormant.payload as any).sanctum, undefined);
+  assert.equal(f.treasureListCalls, 0, '未唤醒的 GetState 不得跨 owner 查询宝物');
+  const publicTargets = await f.send('sanctum.GetPublicTargets', { playerId: 'p1' });
+  assert.deepEqual((publicTargets.payload as any).targets, [], '未唤醒时不得暴露尚未生成的公共目标');
+
+  const joined = await f.send('sanctum.RegisterParticipant', { playerId: 'p1' }, 'task');
+  assert.equal(joined.ok, true, joined.reason);
+  const awaiting = await f.send('sanctum.GetState', { playerId: 'p1', villageId: 'v1' });
+  assert.equal((awaiting.payload as any).event.phase, 'awaiting_activation');
+  assert.equal((awaiting.payload as any).player.activationPending, true);
+  assert.equal(f.treasureListCalls, 0, '等待唤醒阶段也不得实时轮询宝物');
+});
 
 test('远弦圣地：并发唤醒只产生一名先发者，且不泄露未发现的圣地', async () => {
   const f = fixture();
