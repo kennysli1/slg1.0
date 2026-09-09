@@ -424,9 +424,14 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   function cameraToScreen(camX: number, camY: number): { x: number; y: number } {
     const rect = svgEl.current?.getBoundingClientRect();
     if (!rect) return { x: camX, y: camY };
+    // SVG 的 viewBox 使用 cw/ch 坐标，而 getBoundingClientRect 返回 CSS
+    // 像素。两者不一定是 1:1（缩放、侧栏、移动端 DPR 都可能改变它），
+    // 直接相加会让详情提示逐渐偏离实际格心。
+    const sx = rect.width / Math.max(1, cw.current);
+    const sy = rect.height / Math.max(1, ch.current);
     return {
-      x: rect.left + panX.current + zoom.current * camX,
-      y: rect.top + panY.current + zoom.current * camY,
+      x: rect.left + (panX.current + zoom.current * camX) * sx,
+      y: rect.top + (panY.current + zoom.current * camY) * sy,
     };
   }
 
@@ -684,7 +689,11 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     const Vy = hexToPixel({ q: 0, r: H });
     const Vsx = { x: zoom.current * Vx.x, y: 0 };
     const Vsy = { x: zoom.current * Vy.x, y: zoom.current * Vy.y };
-    const margin = HEX_SIZE * zoom.current * 0.8;
+    // 拖动期间只移动相机，不重建 SVG。旧实现只预留半格左右的缓冲，
+    // 用户拖过几十像素就会把可见集合拖出边界，出现残留、空白和错位。
+    // 这里预留至少 1.5 个视口，普通拖动全过程都由同一份 DOM 覆盖，
+    // 松手后再做一次精确剔除。
+    const margin = Math.max(cw.current, ch.current) * 1.5 + HEX_SIZE * zoom.current * 2;
     const x0 = -margin, x1 = cw.current + margin;
     const y0 = -margin, y1 = ch.current + margin;
     if (Vsy.y === 0 || Vsx.x === 0) return [];
@@ -1418,8 +1427,12 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   }
 
   // ─── event handlers ────────────────────────────────────────────────────────
-  function onMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
+  // 鼠标使用 Pointer Events 并捕获指针，拖到地图外层/战术栏上方后仍能
+  // 收到 move/up。旧的 mouseleave 会提前结束拖动，留下半帧的相机与标记错位。
+  function onPointerDown(e: PointerEvent) {
+    if (e.pointerType === 'touch' || (e.pointerType !== 'pen' && e.button !== 0)) return;
+    e.preventDefault();
+    svgEl.current?.setPointerCapture?.(e.pointerId);
     beginMapInteraction();
     dragging.current = true;
     dragMoved.current = false;
@@ -1430,7 +1443,8 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     if (hoveredLandmarkRef) setHoveredLandmarkRef('');
   }
 
-  function onMouseMove(e: MouseEvent) {
+  function onPointerMove(e: PointerEvent) {
+    if (e.pointerType === 'touch') return;
     if (dragging.current) {
       const dx = e.clientX - dragSX.current, dy = e.clientY - dragSY.current;
       if (!dragMoved.current && Math.hypot(dx, dy) <= DRAG_THRESHOLD) return;
@@ -1445,7 +1459,8 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     updateHoverTip(e.clientX, e.clientY);
   }
 
-  function onMouseUp(e: MouseEvent) {
+  function onPointerUp(e: PointerEvent) {
+    if (e.pointerType === 'touch') return;
     if (!dragging.current) return;
     dragging.current = false;
     svgEl.current?.classList.remove('grabbing');
@@ -1460,6 +1475,23 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     endMapInteraction();
     dragMoved.current = false;
     if (!moved) updateHoverTip(e.clientX, e.clientY);
+    if (svgEl.current?.hasPointerCapture?.(e.pointerId)) {
+      svgEl.current.releasePointerCapture?.(e.pointerId);
+    }
+  }
+
+  function onPointerCancel(e: PointerEvent) {
+    if (e.pointerType === 'touch' || !dragging.current) return;
+    dragging.current = false;
+    svgEl.current?.classList.remove('grabbing');
+    flushTransform();
+    cullDirtyRef.current = false;
+    scheduleCull(true);
+    endMapInteraction();
+    if (svgEl.current?.hasPointerCapture?.(e.pointerId)) {
+      svgEl.current.releasePointerCapture?.(e.pointerId);
+    }
+    dragMoved.current = false;
   }
 
   function onWheel(e: WheelEvent) {
@@ -1697,11 +1729,12 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         ref={svgEl}
         class="map-svg"
         viewBox={`0 0 ${cw.current} ${ch.current}`}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={(e) => {
-          if (dragging.current) onMouseUp(e);
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onMouseLeave={(_e) => {
+          if (dragging.current) return;
           setTooltip(null);
           hovKey.current = '';
           if (hoveredLandmarkRef) setHoveredLandmarkRef('');
@@ -1726,7 +1759,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
         <rect class="map-bg" x="0" y="0" width="100%" height="100%" />
 
-        <g ref={camEl} class="layer-camera">
+        <g ref={camEl} class="layer-camera" {...(lastTransform.current ? { transform: lastTransform.current } : {})}>
           {/* ── 连续地貌：同类地块聚合为 path，装饰由世界坐标稳定生成 ── */}
           <g class="layer-terrain" aria-hidden="true">
             {Array.from(terrainLayers.surfaces.entries()).map(([key, paths]) => {
