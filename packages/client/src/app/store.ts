@@ -18,6 +18,10 @@ export const tick = signal(0);
 export const dataVersion = signal(0);
 export function bumpData(): void { dataVersion.value++; }
 
+/** 地图专用版本号：只在地图区域/行军快照变化时递增，避免资源、人口等刷新重建整张地图。 */
+export const mapVersion = signal(0);
+export function bumpMap(): void { mapVersion.value++; }
+
 /** 联盟专用数据版本号；只在 AllianceUpdated 推送时递增，避免联盟页因地图/行军心跳重复请求。 */
 export const allianceVersion = signal(0);
 export function bumpAlliance(): void { allianceVersion.value++; }
@@ -144,21 +148,48 @@ export const battles = signal<Record<string, any>>({});
 /** 视野内的外国军队（脱敏）快照（ListForeign）。由 ForeignArmyStep/ForeignArmyRemoved 推送增量更新，供 HexMap 渲染与 TargetPanel 展示。 */
 export const foreignMoves = signal<ListForeignPayload | null>(null);
 
+// 地图动画每帧直接读这份快照；位置变化不触发地图组件重渲，只有队列结构/样式变化才需要。
+let foreignMovesSnapshot: ListForeignPayload | null = null;
+function foreignShape(payload: ListForeignPayload | null): string {
+  return (payload?.movements ?? [])
+    .map((m) => `${m.id}:${m.type ?? ''}:${m.status ?? ''}:${m.escortAttached ? 1 : 0}:${m.caravan?.phase ?? ''}`)
+    .sort()
+    .join('|');
+}
+export function setForeignMoves(payload: ListForeignPayload | null): void {
+  const next = payload ?? null;
+  const shapeChanged = foreignShape(foreignMovesSnapshot) !== foreignShape(next);
+  foreignMovesSnapshot = next;
+  foreignMoves.value = next;
+  if (shapeChanged) bumpMap();
+}
+export function getForeignMovesSnapshot(): ListForeignPayload | null {
+  return foreignMovesSnapshot ?? foreignMoves.value;
+}
+
 /** 增量更新：插入或替换一条外国军队记录。 */
 export function patchForeignArmy(army: ForeignArmy): void {
-  const prev = foreignMoves.value?.movements ?? [];
+  const prev = foreignMovesSnapshot?.movements ?? foreignMoves.value?.movements ?? [];
   const idx = prev.findIndex((m) => m.id === army.id);
   const next = idx >= 0
     ? [...prev.slice(0, idx), army, ...prev.slice(idx + 1)]
     : [...prev, army];
-  foreignMoves.value = { movements: next };
+  const previous = idx >= 0 ? prev[idx] : undefined;
+  foreignMovesSnapshot = { movements: next };
+  foreignMoves.value = foreignMovesSnapshot;
+  if (idx < 0 || `${previous?.type}:${previous?.status}:${previous?.escortAttached}:${previous?.caravan?.phase}`
+    !== `${army.type}:${army.status}:${army.escortAttached}:${army.caravan?.phase}`) bumpMap();
 }
 
 /** 增量更新：移除一条外国军队记录。 */
 export function dropForeignArmy(id: string): void {
-  const prev = foreignMoves.value?.movements ?? [];
+  const prev = foreignMovesSnapshot?.movements ?? foreignMoves.value?.movements ?? [];
   const next = prev.filter((m) => m.id !== id);
-  if (next.length !== prev.length) foreignMoves.value = { movements: next };
+  if (next.length !== prev.length) {
+    foreignMovesSnapshot = { movements: next };
+    foreignMoves.value = foreignMovesSnapshot;
+    bumpMap();
+  }
 }
 
 // ---------- 任务数据（服务端快照 + 推送，按 villageId 分桶） ----------

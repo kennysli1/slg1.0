@@ -17,9 +17,9 @@ import {
   addReport, seedReports, patchMovement, replaceMovementSnapshot, dropMovement, type ReportKind, type StoredReport,
 } from './state.js';
 import {
-  bumpData, bumpAlliance, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
+  bumpData, bumpMap, bumpAlliance, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, mapAreaStale,
+  setTaskState, setPlayerTaskState, setTaskMarkers, setForeignMoves, mapCenter, mapAreaStale,
   beginVillageSwitch, endVillageSwitch, patchForeignArmy, dropForeignArmy,
   kingdomState, setSanctumState,
 } from './store.js';
@@ -138,6 +138,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();
     if (pop.ok) applyPopPayload(pop.payload);
+    bumpMap();
     bumpData();
     void refreshForeignMoves();
 
@@ -163,6 +164,7 @@ export async function refreshMapArea(): Promise<boolean> {
     reconcileVillagesFromArea(area.payload);
     setCache({ ...getCache(), area: area.payload });
     mapAreaStale.value = false;
+    bumpMap();
     bumpData();
     return true;
   } catch {
@@ -337,7 +339,7 @@ export async function reloadResearch(): Promise<void> {
 export async function refreshForeignMoves(): Promise<void> {
   if (!me) return;
   const r = await req('ListForeign').catch(() => ({ ok: false } as any));
-  if (r.ok) foreignMoves.value = r.payload;
+  if (r.ok) setForeignMoves(r.payload);
 }
 
 /** 只刷新己方行军与实时来袭预警，不拉资源、建筑、任务或地图大包。 */
@@ -355,6 +357,7 @@ export async function refreshMovements(): Promise<void> {
     ...(moves.ok ? { moves: moves.payload } : {}),
     ...(playerMoves.ok ? { playerMoves: playerMoves.payload } : {}),
   });
+  bumpMap();
   bumpData();
 }
 
@@ -466,6 +469,7 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'MarchSent') {
     movementRefreshGeneration++;
     if (payload?.movement?.id) replaceMovementSnapshot(payload.movement);
+    bumpMap();
     bumpData();
     void refreshMovements();
     scheduleForeignRefresh(0);
@@ -485,6 +489,7 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'MarchRemoved') {
     movementRefreshGeneration++;
     dropMovement((payload as MarchRemovedPush).id);
+    bumpMap();
     bumpData();
     return;
   }

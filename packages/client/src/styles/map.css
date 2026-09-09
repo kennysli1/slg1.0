@@ -38,6 +38,24 @@
   min-height: 0;
 }
 .map-svg.grabbing { cursor: grabbing; }
+/* 拖动时相机只做合成层移动；暂停高成本投影/滤镜，避免 SVG 每帧重新栅格化。 */
+.map-svg.grabbing .hex-entity-img,
+.map-svg.grabbing .landmark-icon,
+.map-svg.grabbing .march-marker-art,
+.map-svg.grabbing .enemy-march-art,
+.map-svg.grabbing .hex-ring,
+.map-svg.grabbing .terrain-detail--explored {
+  filter: none;
+  transition: none;
+}
+.map-svg.grabbing .layer-paths .march-path,
+.map-svg.grabbing .hex-ring--self,
+.map-svg.grabbing .sanctum-map-marker {
+  animation-play-state: paused;
+}
+.layer-camera {
+  will-change: transform;
+}
 
 /* 地图底色 */
 .map-bg { fill: var(--map-canvas); }

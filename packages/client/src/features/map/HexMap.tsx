@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { dataVersion, selected, tick, taskMarkers, findTaskCampMarker, foreignMoves, sanctumState, tab } from '../../app/store.js';
+import { mapVersion, selected, taskMarkers, findTaskCampMarker, getForeignMovesSnapshot, sanctumState, tab } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
@@ -339,11 +339,9 @@ export interface MapCameraApi {
 }
 
 export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | null } }) {
-  // 订阅服务端数据（dataVersion 变化时整组件重渲，重算可见格）
-  const _dv = dataVersion.value;
-  const _tk = tick.value; // 订阅心跳：行军 ETA 文案每秒刷新
+  // 只订阅地图相关变更；资源/人口/科研刷新不应重建整张 SVG。
+  const _mv = mapVersion.value;
   void selected.value;
-  void foreignMoves.value;
   // Signal subscription: map markers update immediately after SanctumUpdated without
   // trying to infer any coordinate locally.
   const sanctumSnapshot = sanctumState.value;
@@ -369,6 +367,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   const [_cullVer, setCullVer] = useState(0);
   const cullRafRef = useRef<number | null>(null);
   const lastCullCamera = useRef({ panX: Number.NaN, panY: Number.NaN, zoom: Number.NaN });
+  const cullDirtyRef = useRef(false);
   /**
    * 拖动期间相机 transform 会连续变化，但可见格集合并不需要每个 pointermove
    * 都重建。原实现每个事件都 setState，导致整张 SVG 在相机移动中反复提交，
@@ -378,6 +377,12 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
    * 内最多提交一次。地图仍由 camEl 的 transform 连续移动，不会牺牲拖动流畅度。
    */
   const scheduleCull = useCallback((force = false) => {
+    // 拖动期间不要触发 Preact 重渲染。相机已经预留了屏幕外缓冲，
+    // 鼠标抬起时再一次性剔除，避免“拖一格就卡一下”的节奏性停顿。
+    if (dragging.current && !force) {
+      cullDirtyRef.current = true;
+      return;
+    }
     const last = lastCullCamera.current;
     const panDistance = Number.isFinite(last.panX)
       ? Math.hypot(panX.current - last.panX, panY.current - last.panY)
@@ -442,6 +447,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   // ── rAF ──
   const rafRef = useRef<number | null>(null);
+  const transformRafRef = useRef<number | null>(null);
   const lastTransform = useRef('');
 
   // ─── camera helpers ────────────────────────────────────────────────────────
@@ -464,6 +470,27 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     if (lastTransform.current === transform && camEl.current?.getAttribute('transform') === transform) return;
     lastTransform.current = transform;
     camEl.current?.setAttribute('transform', transform);
+  }
+
+  /** 合并同一帧内的多个 pointermove，避免每个事件都强制 SVG 重绘。 */
+  function scheduleTransform() {
+    if (transformRafRef.current !== null) return;
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      applyTransform();
+      return;
+    }
+    transformRafRef.current = window.requestAnimationFrame(() => {
+      transformRafRef.current = null;
+      applyTransform();
+    });
+  }
+
+  function flushTransform() {
+    if (transformRafRef.current !== null) {
+      cancelAnimationFrame(transformRafRef.current);
+      transformRafRef.current = null;
+    }
+    applyTransform();
   }
 
   function syncZoomUi() {
@@ -968,7 +995,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   // ─── foreign march markers（视野内其他玩家的脱敏军队，增量推送驱动）──────────
   function buildForeignMarkers() {
-    const armies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+    const armies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     armies.forEach((m) => {
@@ -1237,6 +1264,12 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         rafRef.current = requestAnimationFrame(frame);
         return;
       }
+      // 标记位于相机组内，拖动时会随相机一起移动；暂停逐军队插值，
+      // 避免与相机拖动争抢主线程。抬手后的下一帧会自动补齐位置。
+      if (dragging.current) {
+        rafRef.current = requestAnimationFrame(frame);
+        return;
+      }
       const ref = viewRef();
       const moves: any[] = ownMovementsFromCache();
       const now = Date.now();
@@ -1256,7 +1289,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
       });
       // 外国军队：pos+heading 单段插值（无 path），读数来自 foreignMoves 信号。
-      const foeArmies: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+      const foeArmies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
       foeArmies.forEach((m) => {
         if (!m.id) return;
         const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
@@ -1278,7 +1311,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       ?? incomingMarker?.getAttribute('data-move-id')
       ?? foreignMarker?.getAttribute('data-move-id');
     const ownMoves: any[] = ownMovementsFromCache();
-    const foreignList: ForeignArmy[] = foreignMoves.value?.movements ?? [];
+    const foreignList: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
     const incomingList: any[] = ownIncomingWarningsFromCache();
     const clickedOwn = clickedId ? ownMoves.find((m) => m.id === clickedId) : undefined;
     const clickedForeign = clickedId ? foreignList.find((m) => m.id === clickedId) : undefined;
@@ -1384,7 +1417,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       panX.current = dragPX.current + dx;
       panY.current = dragPY.current + dy;
       reducePanToLattice();
-      applyTransform();
+      scheduleTransform();
       scheduleCull();
       return;
     }
@@ -1395,9 +1428,11 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     if (!dragging.current) return;
     dragging.current = false;
     svgEl.current?.classList.remove('grabbing');
+    flushTransform();
     const moved = Math.hypot(e.clientX - dragSX.current, e.clientY - dragSY.current) > DRAG_THRESHOLD;
     if (moved) {
       suppress.current = true;
+      cullDirtyRef.current = false;
       scheduleCull(true);
       syncNavUI();
     }
@@ -1429,6 +1464,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     } else if (e.touches.length === 1) {
       dragging.current = true;
       dragMoved.current = false;
+      svgEl.current?.classList.add('grabbing');
       const t = e.touches[0];
       dragSX.current = t.clientX; dragSY.current = t.clientY;
       dragPX.current = panX.current; dragPY.current = panY.current;
@@ -1451,7 +1487,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       panX.current = sx - zoom.current * fw + (mx - pinchMidX.current);
       panY.current = sy - zoom.current * fh + (my - pinchMidY.current);
       reducePanToLattice();
-      applyTransform();
+      scheduleTransform();
       scheduleCull();
     } else if (e.touches.length === 1 && dragging.current) {
       const t = e.touches[0];
@@ -1461,7 +1497,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       panX.current = dragPX.current + dx;
       panY.current = dragPY.current + dy;
       reducePanToLattice();
-      applyTransform();
+      scheduleTransform();
       scheduleCull();
     }
   }
@@ -1470,12 +1506,15 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     if (e.touches.length < 2) {
       if (pinchDist.current > 0) syncZoomUi();
       pinchDist.current = 0;
+      flushTransform();
       syncNavUI();
     }
     if (e.touches.length === 0) {
       const wasDrag = dragMoved.current;
+      flushTransform();
       if (wasDrag) suppress.current = true;
       dragging.current = false;
+      svgEl.current?.classList.remove('grabbing');
       if (!wasDrag && e.changedTouches[0]) {
         suppress.current = true;
         const t = e.changedTouches[0];
@@ -1595,6 +1634,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       svg.removeEventListener('wheel', onWheel);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       if (cullRafRef.current !== null) cancelAnimationFrame(cullRafRef.current);
+      if (transformRafRef.current !== null) cancelAnimationFrame(transformRafRef.current);
       window.clearInterval(fallbackTimer);
       unsubTab();
     };
@@ -1606,7 +1646,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [_dv]); // intentional: _dv is the data dependency
+  }, [_mv]); // intentional: _mv is the map dependency
 
   useEffect(() => {
     if (jumpEditing.current) return;
