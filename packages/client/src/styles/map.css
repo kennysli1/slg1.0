@@ -50,6 +50,8 @@
 }
 .map-svg.grabbing .layer-paths .march-path,
 .map-svg.grabbing .hex-ring--self,
+.map-svg.grabbing .hex-ring--sanctum-condition,
+.map-svg.grabbing .hex-ring--sanctum-sanctum,
 .map-svg.grabbing .sanctum-map-marker {
   animation-play-state: paused;
 }

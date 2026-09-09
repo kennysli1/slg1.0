@@ -22,6 +22,39 @@ export function bumpData(): void { dataVersion.value++; }
 export const mapVersion = signal(0);
 let mapInteractionDepth = 0;
 let mapBumpPending = false;
+let pendingSanctumMapState: { value: any | null } | undefined;
+let pendingMapTaskMarkers: Record<string, any[]> | undefined;
+
+/** 地图覆盖层快照：拖动期间延后提交，避免推送替换整棵 SVG。 */
+export const sanctumMapState = signal<any | null>(null);
+export const mapTaskMarkers = signal<Record<string, any[]>>({});
+
+function flushDeferredMapSnapshots(): void {
+  if (pendingSanctumMapState !== undefined) {
+    sanctumMapState.value = pendingSanctumMapState.value;
+    pendingSanctumMapState = undefined;
+  }
+  if (pendingMapTaskMarkers !== undefined) {
+    mapTaskMarkers.value = pendingMapTaskMarkers;
+    pendingMapTaskMarkers = undefined;
+  }
+}
+
+function setSanctumMapSnapshot(next: any | null): void {
+  if (mapInteractionDepth > 0) {
+    pendingSanctumMapState = { value: next };
+    return;
+  }
+  sanctumMapState.value = next;
+}
+
+function setMapTaskMarkersSnapshot(next: Record<string, any[]>): void {
+  if (mapInteractionDepth > 0) {
+    pendingMapTaskMarkers = next;
+    return;
+  }
+  mapTaskMarkers.value = next;
+}
 
 /**
  * 拖动期间地图相机由 DOM transform 独立驱动。把行军推送触发的 mapVersion
@@ -32,9 +65,12 @@ export function beginMapInteraction(): void { mapInteractionDepth++; }
 export function endMapInteraction(): void {
   if (mapInteractionDepth <= 0) return;
   mapInteractionDepth--;
-  if (mapInteractionDepth === 0 && mapBumpPending) {
-    mapBumpPending = false;
-    mapVersion.value++;
+  if (mapInteractionDepth === 0) {
+    flushDeferredMapSnapshots();
+    if (mapBumpPending) {
+      mapBumpPending = false;
+      mapVersion.value++;
+    }
   }
 }
 export function bumpMap(): void {
@@ -229,7 +265,9 @@ export const kingdomState = signal<any | null>(null);
  */
 export const sanctumState = signal<any | null>(null);
 export function setSanctumState(payload: any): void {
-  sanctumState.value = payload ?? null;
+  const next = payload ?? null;
+  sanctumState.value = next;
+  setSanctumMapSnapshot(next);
 }
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
@@ -291,7 +329,9 @@ export function setTaskState(payload: any): void {
   // 已清理营地仍会留在任务快照里显示进度，但不能成为地图标记。
   // 同时过滤可抵御旧服务端推送、缓存快照或消息乱序造成的幽灵标记。
   const camps = decorateTaskCamps(payload.active ?? []);
-  taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
+  const next = { ...taskMarkers.value, [vid]: camps };
+  taskMarkers.value = next;
+  setMapTaskMarkersSnapshot(next);
 }
 
 export function setPlayerTaskState(payload: any): void {
@@ -310,7 +350,9 @@ export function setPlayerTaskState(payload: any): void {
     for (const camp of [...globalCamps, ...localCamps]) {
       if (camp?.id) byId.set(String(camp.id), camp);
     }
-    taskMarkers.value = { ...taskMarkers.value, [vid]: [...byId.values()] };
+    const next = { ...taskMarkers.value, [vid]: [...byId.values()] };
+    taskMarkers.value = next;
+    setMapTaskMarkersSnapshot(next);
   }
 }
 
@@ -324,7 +366,9 @@ export function setTaskMarkers(payload: any): void {
       .map((camp: any) => ({ ...(previousById.get(String(camp?.id)) ?? {}), ...camp }))
       .filter((camp: any) => !camp?.cleared)
     : [];
-  taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: camps };
+  const next = { ...taskMarkers.value, [payload.villageId as string]: camps };
+  taskMarkers.value = next;
+  setMapTaskMarkersSnapshot(next);
 }
 
 /** 按地图目标坐标/引用查找任务营地，供目标详情补全任务名称与说明。 */

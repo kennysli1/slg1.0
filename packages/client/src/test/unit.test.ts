@@ -20,7 +20,7 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, sanctumMapMarkersFromState, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapCullMargin, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, sanctumMapMarkersFromState, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
@@ -60,6 +60,15 @@ describe('远弦圣地地图可见性', () => {
     });
     assert.deepEqual(visible, [{ id: 'farstring-sanctum', kind: 'sanctum', name: '远弦圣地', q: 15, r: 9 }]);
     assert.deepEqual(sanctumMapMarkersFromState({ event: { phase: 'ended' }, sanctum: { point: { q: 15, r: 9 } } }), []);
+  });
+});
+
+describe('地图拖动渲染缓冲', () => {
+  it('缓冲随视口增长但有上限，不会按整张视口挂载海量 SVG 格子', () => {
+    const normal = mapCullMargin(1000, 700, 1);
+    const wide = mapCullMargin(3840, 2160, 1);
+    assert.ok(normal > 0);
+    assert.ok(wide < normal * 2);
   });
 });
 
