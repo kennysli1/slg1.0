@@ -4,7 +4,7 @@
  * 手机上目标工作流变为贴底抽屉，避免把表单和地图控件挤在同一视野内。
  */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { dataVersion, selected, garrisonContinue, mapAreaStale } from '../../app/store.js';
+import { mapVersion, selected, garrisonContinue, mapAreaStale } from '../../app/store.js';
 import { getCache, type SelectedTarget } from '../../app/state.js';
 import { HexMap, type MapCameraApi } from './HexMap.js';
 import { TargetPanel } from './TargetPanel.js';
@@ -30,15 +30,12 @@ export function MapScreen() {
   const [targetStage, setTargetStage] = useState<'preview' | 'actions'>('preview');
   const targetKey = target ? `${target.kind}:${target.refId}:${target.q}:${target.r}` : '';
   const areaStale = mapAreaStale.value;
-  dataVersion.value;
   useEffect(() => {
     if (areaStale) void refreshMapArea();
   }, [areaStale]);
   useEffect(() => { if (!mobile) { setMobileOverlay('none'); return; } if (continuing) { setTargetStage('actions'); setMobileOverlay('target'); } else if (target) { setTargetStage('preview'); setMobileOverlay('target'); } }, [mobile, targetKey, continuing]);
   useEffect(() => { const onEscape = (event: KeyboardEvent) => { if (event.key !== 'Escape' || !mobileOverlay) return; if (mobileOverlay === 'target' && targetStage === 'actions') setTargetStage('preview'); else { setMobileOverlay('none'); if (mobileOverlay === 'target') selected.value = null; } }; window.addEventListener('keydown', onEscape); return () => window.removeEventListener('keydown', onEscape); }, [mobileOverlay, targetStage]);
   const showPanel = !!target || !!continuing;
-  const warnings = getCache().playerMoves?.incomingWarnings?.length ?? getCache().moves?.incomingWarnings?.length ?? 0;
-  const marches = getCache().moves?.movements?.length ?? 0;
   const closeTarget = () => { selected.value = null; setMobileOverlay('none'); };
   return (
     <div class="map-screen">
@@ -51,13 +48,43 @@ export function MapScreen() {
         {showPanel && <TargetPanel />}
         <MarchList />
       </aside>}
-      {mobile && <div class="map-mobile-ui" aria-live="polite">
-        <MobileMapButtons active={mobileOverlay} warnings={warnings} marches={marches} camera={camera} onOpen={setMobileOverlay} />
-        {mobileOverlay === 'situation' && <MobileMapSheet kind="situation" camera={camera} onClose={() => setMobileOverlay('none')}><IncomingWarnings /><MarchList /></MobileMapSheet>}
-        {mobileOverlay === 'tools' && <MobileMapSheet kind="tools" camera={camera} onClose={() => setMobileOverlay('none')}><MapVillageIndex /></MobileMapSheet>}
-        {mobileOverlay === 'target' && targetStage === 'preview' && target && !continuing && <MobileTargetPreview target={target} onOpen={() => setTargetStage('actions')} onClose={closeTarget} onChoose={(next: SelectedTarget) => { selected.value = next; setTargetStage('preview'); }} />}
-        {mobileOverlay === 'target' && targetStage === 'actions' && showPanel && <div class="map-mobile-target-actions"><TargetPanel /></div>}
-      </div>}
+      {mobile && <MobileMapUi
+        active={mobileOverlay}
+        target={target}
+        continuing={continuing}
+        targetStage={targetStage}
+        camera={camera}
+        onOpen={setMobileOverlay}
+        onTargetStage={setTargetStage}
+        onCloseTarget={closeTarget}
+      />}
+    </div>
+  );
+}
+
+/** 移动端按钮单独订阅行军版本，桌面地图树不会被每次行军推送带着重渲染。 */
+function MobileMapUi({
+  active, target, continuing, targetStage, camera, onOpen, onTargetStage, onCloseTarget,
+}: {
+  active: MobileMapOverlayKind;
+  target: SelectedTarget | null;
+  continuing: { movementId: string; movementType?: 'garrison' | 'ambush' | 'investigate' } | null;
+  targetStage: 'preview' | 'actions';
+  camera: { current: MapCameraApi | null };
+  onOpen: (kind: MobileMapOverlayKind) => void;
+  onTargetStage: (stage: 'preview' | 'actions') => void;
+  onCloseTarget: () => void;
+}) {
+  mapVersion.value;
+  const warnings = getCache().playerMoves?.incomingWarnings?.length ?? getCache().moves?.incomingWarnings?.length ?? 0;
+  const marches = getCache().moves?.movements?.length ?? 0;
+  return (
+    <div class="map-mobile-ui" aria-live="polite">
+      <MobileMapButtons active={active} warnings={warnings} marches={marches} camera={camera} onOpen={onOpen} />
+      {active === 'situation' && <MobileMapSheet kind="situation" camera={camera} onClose={() => onOpen('none')}><IncomingWarnings /><MarchList /></MobileMapSheet>}
+      {active === 'tools' && <MobileMapSheet kind="tools" camera={camera} onClose={() => onOpen('none')}><MapVillageIndex /></MobileMapSheet>}
+      {active === 'target' && targetStage === 'preview' && target && !continuing && <MobileTargetPreview target={target} onOpen={() => onTargetStage('actions')} onClose={onCloseTarget} onChoose={(next: SelectedTarget) => { selected.value = next; onTargetStage('preview'); }} />}
+      {active === 'target' && targetStage === 'actions' && (target || continuing) && <div class="map-mobile-target-actions"><TargetPanel /></div>}
     </div>
   );
 }
