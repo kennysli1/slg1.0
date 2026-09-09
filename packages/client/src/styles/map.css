@@ -53,9 +53,10 @@
 .map-svg.grabbing .sanctum-map-marker {
   animation-play-state: paused;
 }
-.layer-camera {
-  will-change: transform;
-}
+/* 不给 SVG 的 <g> 强制创建合成层。这里使用的是 SVG presentation
+   transform；Chromium 在强制提升后会缓存旧的滤镜/瓦片，快速拖动时会
+   留下残影或与新位置错位。拖动期间只停用高成本装饰，由浏览器正常重绘
+   向量图层。 */
 
 /* 地图底色 */
 .map-bg { fill: var(--map-canvas); }
