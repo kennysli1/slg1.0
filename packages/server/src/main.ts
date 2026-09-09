@@ -10,6 +10,7 @@ import { WIRE_VERSION } from '@slg/shared';
 import { createGameApp } from './app.js';
 import { Gateway, type ClientConnection } from './gateway/gateway.js';
 import { registerGmRoutes } from './gateway/gm.js';
+import { BoundedSerialExecutor, sendWithBackpressure } from './gateway/ws-backpressure.js';
 import { initLogger } from './infra/logger.js';
 import { TokenBucket } from './infra/rate-limit.js';
 
@@ -27,6 +28,15 @@ const HTTP_BODY_LIMIT = 32 * 1024;
  * 建议根据服务器 CPU/内存调整；默认 500 适合轻量服务器。
  */
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS ?? 500);
+
+function positiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+/** 慢客户端发送缓冲上限，以及单连接待处理消息上限。 */
+const WS_MAX_BUFFERED_BYTES = positiveInteger(process.env.WS_MAX_BUFFERED_BYTES, 1024 * 1024);
+const WS_MAX_PENDING_MESSAGES = positiveInteger(process.env.WS_MAX_PENDING_MESSAGES, 16);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -144,12 +154,13 @@ async function main() {
 
       const conn: ClientConnection = {
         send: (msg) => {
-          try { socket.send(JSON.stringify(msg)); } catch { /* 连接可能已关闭 */ }
+          sendWithBackpressure(socket, JSON.stringify(msg), WS_MAX_BUFFERED_BYTES);
         },
       };
       const session = gateway.addClient(conn);
+      const messageQueue = new BoundedSerialExecutor(WS_MAX_PENDING_MESSAGES);
 
-      socket.on('message', async (raw: Buffer) => {
+      const handleMessage = async (raw: Buffer) => {
         lastActivity = Date.now();
         // ── 手动二次尺寸检查（ws maxPayload 按帧处理，这里按完整消息检查）──
         if (raw.length > WS_MAX_PAYLOAD) {
@@ -187,6 +198,12 @@ async function main() {
           res = rejectMsg('unknown', 'internal_error', '服务器内部错误');
         }
         conn.send(res);
+      };
+
+      socket.on('message', (raw: Buffer) => {
+        if (!messageQueue.enqueue(() => handleMessage(raw))) {
+          try { socket.close(1013, 'message backlog'); } catch { /* ignore */ }
+        }
       });
 
       socket.on('close', () => {
@@ -203,7 +220,20 @@ async function main() {
   });
 
   // 健康检查
-  fastify.get('/health', async () => ({ ok: true, ts: app.now() }));
+  fastify.get('/health', async () => {
+    const memory = process.memoryUsage();
+    return {
+      ok: true,
+      ts: app.now(),
+      uptimeSec: process.uptime(),
+      memory: {
+        rssBytes: memory.rss,
+        heapUsedBytes: memory.heapUsed,
+        heapTotalBytes: memory.heapTotal,
+        externalBytes: memory.external,
+      },
+    };
+  });
   fastify.get('/version', async (_req, reply) => {
     reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
     return { buildId, releaseCommit, releaseBranch };

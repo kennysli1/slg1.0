@@ -12,6 +12,7 @@ import type { Battle, Contribution, DefenderContribution, SanctumAttackerContrib
 // eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的纯计算层。
 import {
   aggregateCounts,
+  appendBattleRound,
   countDelta,
   filterNonSiegeWeapons,
   filterSiegeWeapons,
@@ -19,6 +20,7 @@ import {
   simulateStagedCombatTick,
   totalCount,
   totalPower,
+  trimBattleRounds,
 } from './combat/engine.js';
 // eslint-disable-next-line no-restricted-imports -- combat/** 是同一 combat owner 的结算辅助层。
 import { mergeResources, planPvpLoot, scaleResources, subtractProtected } from './combat/loot.js';
@@ -193,11 +195,20 @@ export class CombatModule {
     return `${targetKind}:${targetId}`;
   }
 
+  private releaseClaim(battleKey: string): void {
+    const resolve = this.claimingResolvers.get(battleKey);
+    this.claiming.delete(battleKey);
+    this.claimingResolvers.delete(battleKey);
+    this.claimingWaiters.delete(battleKey);
+    resolve?.();
+  }
+
   /** 兼容上线前已落盘的进行中战斗，首次访问时补齐战报回放字段。 */
   private ensureBattleLog(b: Battle): void {
     b.initialAttacker ??= aggregateCounts(b.attacker);
     b.initialDefender ??= aggregateCounts(b.defender);
     b.rounds ??= [];
+    trimBattleRounds(b.rounds);
     // 新增字段均为可选兼容字段，旧战斗在第一次访问时惰性初始化。
     if (b.status === 'ended') b.status = 'resolving';
   }
@@ -482,11 +493,14 @@ export class CombatModule {
     }
 
     // 同步预占：标记该 targetId 正在被新建流程占用
-    // 若已有其他并发 Engage 在预占中，直接返回等它完成后再并入
-    if (this.claiming.has(battleKey)) {
+    // 若已有其他并发 Engage 在预占中，等待后重新竞争；首建失败时只有
+    // 第一个恢复执行的请求能同步创建下一把 claim，其余请求继续等待。
+    while (this.claiming.has(battleKey)) {
       // 首个请求正在 await fetchDefender。必须等待它把 Battle 写入 store，
       // 仅做一次同步 findActive 会让第二个请求也进入新建分支，产生两场战斗。
-      await this.claimingWaiters.get(battleKey);
+      const waiter = this.claimingWaiters.get(battleKey);
+      if (!waiter) continue;
+      await waiter;
       const raceCheck = this.findActive(p.targetId, p.targetKind);
       if (raceCheck) {
         const prepared = await this.prepareAttacker(p, false);
@@ -561,25 +575,12 @@ export class CombatModule {
     }
 
     this.claiming.add(battleKey);
-    let resolveClaim: (() => void) | undefined;
     this.claimingWaiters.set(battleKey, new Promise<void>((resolve) => {
-      resolveClaim = resolve;
       this.claimingResolvers.set(battleKey, resolve);
     }));
 
-    let fetchedDefender: FetchedDefender | null = null;
     try {
-      fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId, p.targetXY, p.battleType);
-    } finally {
-      // Keep the waiter pending until the newly-created Battle is persisted
-      // below; on fetch failure resolve so the next caller can retry normally.
-      if (!fetchedDefender) {
-        this.claiming.delete(battleKey);
-        this.claimingResolvers.delete(battleKey);
-        this.claimingWaiters.delete(battleKey);
-        resolveClaim?.();
-      }
-    }
+      const fetchedDefender = await this.fetchDefender(p.targetKind, p.targetId, p.targetXY, p.battleType);
 
     // 二次安全检查：fetchDefender 是 async，并发 Engage 可能在此期间已创建战场
     const raceExisting = this.findActive(p.targetId, p.targetKind);
@@ -596,15 +597,11 @@ export class CombatModule {
       mergeCounts(raceExisting.initialAttacker, aggregateCounts(prepared.snapshot));
       await this.mergeSanctumContribution(raceExisting, contribId, prepared.contribution);
       this.store.set(COLLECTION, raceExisting.id, raceExisting);
-      this.claiming.delete(battleKey);
-      this.claimingResolvers.delete(battleKey);
-      this.claimingWaiters.delete(battleKey);
-      resolveClaim?.();
       log('二次检查并入', { battleId: raceExisting.id, from: p.fromVillage });
       return { ok: true, payload: { battleId: raceExisting.id, merged: true } };
     }
 
-    const { defender: fetchedDefenderSnapshot, wallLevel, defenderContributions, sanctumDefense } = fetchedDefender!;
+    const { defender: fetchedDefenderSnapshot, wallLevel, defenderContributions, sanctumDefense } = fetchedDefender;
     const prepared = await this.prepareAttacker(p, true);
     let defender = fetchedDefenderSnapshot;
     if (prepared.sanctum?.sanctuary) {
@@ -656,10 +653,6 @@ export class CombatModule {
       status: 'active',
     };
     this.store.set(COLLECTION, id, battle);
-    this.claiming.delete(battleKey);
-    this.claimingResolvers.delete(battleKey);
-    this.claimingWaiters.delete(battleKey);
-    resolveClaim?.();
 
     // 守卫倒计时只在真实驻军被攻击期间暂停。查询与状态写入都经 Sanctum
     // owner，Combat 不读取也不改写活动存档；异常时仍让战斗继续，避免一个
@@ -688,6 +681,9 @@ export class CombatModule {
 
     this.scheduler.schedule(this.tickMs(), () => this.tick(id), `combat:${id}`, `battle:${id}`);
     return { ok: true, payload: { battleId: id, merged: false } };
+    } finally {
+      this.releaseClaim(battleKey);
+    }
   }
 
   /**
@@ -890,7 +886,7 @@ export class CombatModule {
 
     const attackerAfter = result.attackerAfter;
     const defenderAfter = result.defenderAfter;
-    b.rounds.push({
+    appendBattleRound(b.rounds, {
       round: b.ticks,
       phase: result.phase, step: result.step,
       attackerLosses: countDelta(result.attackerBefore, attackerAfter),
@@ -915,7 +911,16 @@ export class CombatModule {
       log(`round#${b.ticks}`, { battleId: id, atkAlive, defAlive, damageToDef: Math.round(result.damageToDefender * 100) / 100, damageToAtk: Math.round(result.damageToAttacker * 100) / 100 });
     }
 
-    if (atkAlive <= 0 || defAlive <= 0) {
+    const meleeStalled = step === 'melee' && result.damageToAttacker <= 0 && result.damageToDefender <= 0;
+    if (atkAlive <= 0 || defAlive <= 0 || meleeStalled) {
+      if (meleeStalled) {
+        b.resolution = {
+          id: `${b.id}:${b.startedAt}`,
+          step: 'apply_domain',
+          startedAt: this.now(),
+          attackerWins: false,
+        };
+      }
       await this.beginResolution(b);
       return;
     }
@@ -1171,7 +1176,7 @@ export class CombatModule {
       battleLabel: b.battleType === 'raid' ? '掠夺' : b.battleType === 'siege' ? '攻城' : b.battleType === 'ambush' ? '伏击' : undefined,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
-      totalRounds: b.rounds.length,
+      totalRounds: b.ticks,
       rounds: sampleBattleRounds(b.rounds),
       buildingDamage,
       buildingLoot,
@@ -1374,7 +1379,7 @@ export class CombatModule {
       caravanId: b.caravanId,
       attackerLineup: b.initialAttacker,
       defenderLineup: b.initialDefender,
-      totalRounds: b.rounds.length,
+      totalRounds: b.ticks,
       rounds: sampleBattleRounds(b.rounds),
     };
 
