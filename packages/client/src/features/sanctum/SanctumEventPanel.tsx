@@ -273,6 +273,13 @@ function ContributeModal({ condition, sourceVillageId, disabled, onClose, onSubm
 }
 
 /** 远弦圣地事件入口，放在任务页且只在服务端返回事件视图时出现。 */
+export function shouldShowSanctumEventPanel(state: any): boolean {
+  if (!state || state.enabled === false) return false;
+  // dormant 表示残印尚未触发。本阶段玩家不应在任务栏看到整块圣地
+  // 事件入口；真正持有残印的玩家仍会通过 s23 任务卡进入唤醒流程。
+  return String(state.phase ?? '').trim().toLowerCase() !== 'dormant';
+}
+
 export function SanctumEventPanel() {
   // 倒计时仅使用本地心跳重绘，绝不为此轮询事件接口。
   tick.value;
@@ -280,7 +287,7 @@ export function SanctumEventPanel() {
   // GetState 的事件身份位于 event，而个人/公开/圣地视图位于顶层。
   // 合并而不是直接取 raw.event，才能兼容该契约以及旧的扁平快照。
   const state = raw?.event && typeof raw.event === 'object' ? { ...raw, ...raw.event } : raw;
-  if (!state || state.enabled === false) return null;
+  if (!shouldShowSanctumEventPanel(state)) return null;
   return <SanctumEventBody state={state} />;
 }
 
