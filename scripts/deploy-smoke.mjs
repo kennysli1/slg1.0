@@ -27,6 +27,15 @@ function assert(condition, message) {
   if (!condition) throw new Error(`[deploy-smoke] ${message}`);
 }
 
+function assertHealth(body) {
+  assert(body?.ok === true, '/health 未返回 ok=true');
+  assert(Number.isFinite(body?.uptimeSec) && body.uptimeSec >= 0, '/health uptimeSec 异常');
+  for (const key of ['rssBytes', 'heapUsedBytes', 'heapTotalBytes', 'externalBytes']) {
+    const value = body?.memory?.[key];
+    assert(Number.isFinite(value) && value >= 0, `/health memory.${key} 异常`);
+  }
+}
+
 async function freePort() {
   const server = createServer();
   await new Promise((resolveReady, reject) => {
@@ -74,7 +83,7 @@ async function waitForHealth(baseUrl, child) {
       const res = await fetch(`${baseUrl}/health`, { cache: 'no-store' });
       if (res.ok) {
         const body = await res.json();
-        assert(body?.ok === true, '/health 未返回 ok=true');
+        assertHealth(body);
         return;
       }
     } catch (error) { lastError = error; }
@@ -138,7 +147,7 @@ class WireClient {
 
 async function verifyFrontend(baseUrl) {
   const health = await fetchOk(`${baseUrl}/health`, 'application/json');
-  assert(JSON.parse(Buffer.from(health.bytes).toString('utf8')).ok === true, '健康检查内容异常');
+  assertHealth(JSON.parse(Buffer.from(health.bytes).toString('utf8')));
   const version = await fetchOk(`${baseUrl}/version`, 'application/json');
   const versionBody = JSON.parse(Buffer.from(version.bytes).toString('utf8'));
   assert(typeof versionBody?.buildId === 'string' && versionBody.buildId.length > 0, '版本探针缺少 buildId');
