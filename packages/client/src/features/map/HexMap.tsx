@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { mapVersion, selected, taskMarkers, findTaskCampMarker, getForeignMovesSnapshot, sanctumState, tab, beginMapInteraction, endMapInteraction } from '../../app/store.js';
+import { mapVersion, selected, findTaskCampMarker, getForeignMovesSnapshot, sanctumMapState, mapTaskMarkers, tab, beginMapInteraction, endMapInteraction } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
@@ -54,6 +54,12 @@ export function terrainDisplayName(terrain: Terrain | null): string {
   if (terrain === 'hills') return '丘陵';
   if (terrain === 'plain') return '平原';
   return '未探索区域';
+}
+
+/** 拖动缓冲只覆盖常见手势，避免按视口尺寸线性扩大 SVG DOM。 */
+export function mapCullMargin(viewportWidth: number, viewportHeight: number, zoom: number): number {
+  const viewportPadding = Math.min(Math.max(viewportWidth, viewportHeight) * 0.35, HEX_SIZE * 12);
+  return viewportPadding + HEX_SIZE * Math.max(2, zoom * 2);
 }
 
 /**
@@ -344,7 +350,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   void selected.value;
   // Signal subscription: map markers update immediately after SanctumUpdated without
   // trying to infer any coordinate locally.
-  const sanctumSnapshot = sanctumState.value;
+  const sanctumSnapshot = sanctumMapState.value;
 
   const W = worldW(), H = worldH();
 
@@ -691,9 +697,9 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     const Vsy = { x: zoom.current * Vy.x, y: zoom.current * Vy.y };
     // 拖动期间只移动相机，不重建 SVG。旧实现只预留半格左右的缓冲，
     // 用户拖过几十像素就会把可见集合拖出边界，出现残留、空白和错位。
-    // 这里预留至少 1.5 个视口，普通拖动全过程都由同一份 DOM 覆盖，
-    // 松手后再做一次精确剔除。
-    const margin = Math.max(cw.current, ch.current) * 1.5 + HEX_SIZE * zoom.current * 2;
+    // 缓冲只覆盖常见拖动距离；过大的整视口缓冲会让鼠标移动时同时栅格化
+    // 数千个 SVG 格子。松手后仍会按新相机位置精确剔除。
+    const margin = mapCullMargin(cw.current, ch.current, zoom.current);
     const x0 = -margin, x1 = cw.current + margin;
     const y0 = -margin, y1 = ch.current + margin;
     if (Vsy.y === 0 || Vsx.x === 0) return [];
@@ -737,7 +743,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
             // 任务营地（taskMarkers 提供，不在 area.tiles 里）：当作可掠夺的 pve 目标
             const taskCamp = visibility === 'unexplored'
               ? undefined
-              : (taskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
+              : (mapTaskMarkers.value[me?.villageId ?? ''] ?? []).find((c: any) => c.q === q && c.r === r && !c.cleared);
             let kind = 'empty', refId = `empty-${q},${r}`, name = '空地', icon: string | null = null;
             let relation: MapVillageRelation | null = null;
             const terrain = terrainFromTile(t, visibility);
@@ -1081,7 +1087,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   // ─── task camp markers（任务营地：真实 pve 地块 + 🎯 高亮）──────────────
   function buildTaskMarkers() {
-    const camps: any[] = (taskMarkers.value[me?.villageId ?? ''] ?? []).filter((camp: any) => !camp?.cleared);
+    const camps: any[] = (mapTaskMarkers.value[me?.villageId ?? ''] ?? []).filter((camp: any) => !camp?.cleared);
     const markers: preact.VNode[] = [];
     const ref = viewRef();
     camps.forEach((c) => {
@@ -1138,11 +1144,20 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     el.setAttribute('transform', `translate(${key})`);
   }
 
-  function updateHoverTip(clientX: number, clientY: number) {
-    const hit = document.elementFromPoint(clientX, clientY);
-    const cell = hit?.closest?.('.hex-cell') as Element | null;
+  function updateTooltipAnchor(anchorX: number, anchorY: number): void {
+    setTooltip((current) => {
+      if (!current) return current;
+      if (Math.abs(current.anchorX - anchorX) < 0.25 && Math.abs(current.anchorY - anchorY) < 0.25) return current;
+      return { ...current, anchorX, anchorY };
+    });
+  }
+
+  function updateHoverTip(clientX: number, clientY: number, eventTarget?: EventTarget | null) {
+    const target = eventTarget as Element | null;
+    const cell = (target?.closest?.('.hex-cell')
+      ?? document.elementFromPoint(clientX, clientY)?.closest?.('.hex-cell')) as Element | null;
     if (!cell) {
-      setTooltip(null);
+      if (hovKey.current) setTooltip(null);
       hovKey.current = '';
       if (hoveredLandmarkRef) setHoveredLandmarkRef('');
       return;
@@ -1167,7 +1182,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         hovKey.current = key;
         setTooltip({ q, r, kind: 'enemy_army', name, dist, anchorX: anchor.x, anchorY: anchor.y });
       } else {
-        setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
+        updateTooltipAnchor(anchor.x, anchor.y);
       }
       return;
     }
@@ -1180,7 +1195,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     const key = `${kind}:${relation ?? ''}:${q},${r}`;
     const dist = me ? hexDistanceWrapped({ q: me.q, r: me.r }, { q, r }, W, H) : 0;
     if (key === hovKey.current) {
-      setTooltip((t) => t ? { ...t, anchorX: anchor.x, anchorY: anchor.y } : t);
+      updateTooltipAnchor(anchor.x, anchor.y);
       return;
     }
     hovKey.current = key;
@@ -1281,21 +1296,25 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
 
   function startMarchAnimation() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    if (dragging.current) return;
     const frame = () => {
       // 首帧可能早于 SVG ref 挂载；不能直接 return，否则整个地图动画循环会永久停止。
       if (!markerEl.current) {
         rafRef.current = requestAnimationFrame(frame);
         return;
       }
-      // 标记位于相机组内，拖动时会随相机一起移动；暂停逐军队插值，
-      // 避免与相机拖动争抢主线程。抬手后的下一帧会自动补齐位置。
-      if (dragging.current) {
-        rafRef.current = requestAnimationFrame(frame);
-        return;
-      }
+      // 标记位于相机组内，拖动时会随相机一起移动；拖动期间不保留空转的 rAF。
+      if (dragging.current) { rafRef.current = null; return; }
       const ref = viewRef();
       const moves: any[] = ownMovementsFromCache();
       const now = Date.now();
+      const incoming: any[] = ownIncomingWarningsFromCache()
+        .map((warning: any) => normalizeIncomingWarningForRender(warning));
+      const foeArmies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
+      if (moves.length === 0 && incoming.length === 0 && foeArmies.length === 0) {
+        rafRef.current = null;
+        return;
+      }
       moves.forEach((m, i) => {
         const el = markerEl.current?.querySelector(
           `#march-mk-${movementDomSuffix(m.id, i)}`,
@@ -1304,8 +1323,6 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         if (!el || !px) return;
         setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
       });
-      const incoming: any[] = ownIncomingWarningsFromCache()
-        .map((warning: any) => normalizeIncomingWarningForRender(warning));
       incoming.forEach((m) => {
         if (!m.id) return;
         const el = markerEl.current?.querySelector(
@@ -1316,7 +1333,6 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
       });
       // 外国军队：pos+heading 单段插值（无 path），读数来自 foreignMoves 信号。
-      const foeArmies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
       foeArmies.forEach((m) => {
         if (!m.id) return;
         const el = foreignEl.current?.querySelector(
@@ -1434,6 +1450,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     e.preventDefault();
     svgEl.current?.setPointerCapture?.(e.pointerId);
     beginMapInteraction();
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     dragging.current = true;
     dragMoved.current = false;
     dragSX.current = e.clientX; dragSY.current = e.clientY;
@@ -1456,7 +1473,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       scheduleCull();
       return;
     }
-    updateHoverTip(e.clientX, e.clientY);
+    updateHoverTip(e.clientX, e.clientY, e.target);
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -1473,6 +1490,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       syncNavUI();
     }
     endMapInteraction();
+    startMarchAnimation();
     dragMoved.current = false;
     if (!moved) updateHoverTip(e.clientX, e.clientY);
     if (svgEl.current?.hasPointerCapture?.(e.pointerId)) {
@@ -1488,6 +1506,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     cullDirtyRef.current = false;
     scheduleCull(true);
     endMapInteraction();
+    startMarchAnimation();
     if (svgEl.current?.hasPointerCapture?.(e.pointerId)) {
       svgEl.current.releasePointerCapture?.(e.pointerId);
     }
@@ -1507,6 +1526,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   }
 
   function onTouchStart(e: TouchEvent) {
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     if (e.touches.length === 2) {
       const t = e.touches;
       pinchDist.current = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -1571,6 +1591,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       dragging.current = false;
       svgEl.current?.classList.remove('grabbing');
       endMapInteraction();
+      startMarchAnimation();
       if (!wasDrag && e.changedTouches[0]) {
         suppress.current = true;
         const t = e.changedTouches[0];
