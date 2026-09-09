@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { mapVersion, selected, taskMarkers, findTaskCampMarker, getForeignMovesSnapshot, sanctumState, tab } from '../../app/store.js';
+import { mapVersion, selected, taskMarkers, findTaskCampMarker, getForeignMovesSnapshot, sanctumState, tab, beginMapInteraction, endMapInteraction } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
@@ -866,6 +866,17 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   }
 
   // ─── march path + marker rendering ────────────────────────────────────────
+  /**
+   * Movement arrays are refreshed independently of the SVG animation loop.  An
+   * index is therefore not a stable identity: when a movement is inserted or
+   * removed, Preact may reuse the old DOM node for another army and the rAF
+   * updater then moves the wrong marker.  Keep the DOM identity tied to the
+   * server movement id (with an index fallback for legacy records).
+   */
+  function movementDomSuffix(id: unknown, fallback: number): string {
+    return String(id ?? fallback).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
   function buildMarchPaths() {
     const ownMoves: any[] = ownMovementsFromCache();
     const incoming = ownIncomingWarningsFromCache()
@@ -906,9 +917,10 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         : m.type === 'attack'    ? 'attack'
         : m.type === 'raid'      ? 'raid'
         : 'return';
+      const source = i < ownMoves.length ? 'own' : 'incoming';
       paths.push(
         <polyline
-          key={`path-${i}`}
+          key={`path-${source}-${movementDomSuffix(m.id, i)}`}
           class={`march-path march-path--${t}`}
           points={pts}
         />,
@@ -923,19 +935,22 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       .map((warning: any) => normalizeIncomingWarningForRender(warning));
     const markers: preact.VNode[] = [];
     const ref = viewRef();
+    // All markers in this render use one authoritative clock sample.  Reading
+    // Date.now() inside each loop can straddle a step boundary and leave a
+    // marker and its hit/display coordinates one grid apart.
+    const renderNow = Date.now();
     moves.forEach((m, i) => {
       if (!m.pos) return;
       // 像素位置和 data-display 坐标必须来自同一个时刻；若分别读取
       // Date.now()，恰好跨格时会出现“图标已经在下一格但命中仍在上一格”。
-      const now = Date.now();
-      const grid = displayGridForMovement(m, now);
-      const p = marchMarkerPixel(m, now, ref.x, ref.y)
+      const grid = displayGridForMovement(m, renderNow);
+      const p = marchMarkerPixel(m, renderNow, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       markers.push(
         <g
-          key={`mk-${i}`}
-          id={`march-mk-${i}`}
+          key={`mk-own-${movementDomSuffix(m.id, i)}`}
+          id={`march-mk-${movementDomSuffix(m.id, i)}`}
           data-own-move-id={m.id}
           {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="own-march-mk"
@@ -962,14 +977,13 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     // 只有红色路线而没有当前位置图标（尤其是任务村 NPC 攻城）。
     incoming.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const now = Date.now();
-      const grid = displayGridForMovement(m, now);
-      const p = marchMarkerPixel(m, now, ref.x, ref.y)
+      const grid = displayGridForMovement(m, renderNow);
+      const p = marchMarkerPixel(m, renderNow, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       markers.push(
         <g
-          key={`incoming-mk-${m.id}`}
-          id={`incoming-march-mk-${m.id}`}
+          key={`incoming-mk-${movementDomSuffix(m.id, 0)}`}
+          id={`incoming-march-mk-${movementDomSuffix(m.id, 0)}`}
           data-move-id={m.id}
           {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class="enemy-march-mk enemy-march-mk--attack incoming-march-mk"
@@ -998,11 +1012,11 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
     const armies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
     const markers: preact.VNode[] = [];
     const ref = viewRef();
+    const renderNow = Date.now();
     armies.forEach((m) => {
       if (!m.pos || !m.id) return;
-      const now = Date.now();
-      const grid = displayGridForMovement(m, now);
-      const p = foreignMarkerPixel(m, now, ref.x, ref.y)
+      const grid = displayGridForMovement(m, renderNow);
+      const p = foreignMarkerPixel(m, renderNow, ref.x, ref.y)
         ?? cameraPixelForHex(m.pos.q, m.pos.r, ox.current, oy.current, ref.x, ref.y, W, H);
       const t = m.type ?? 'return';
       const tone = foreignArmyMarkerTone(m.type, m.status);
@@ -1030,7 +1044,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       markers.push(
         <g
           key={`fmk-${m.id}`}
-          id={`foreign-mk-${m.id}`}
+          id={`foreign-mk-${movementDomSuffix(m.id, 0)}`}
           data-move-id={m.id}
           {...(grid ? { 'data-display-q': String(grid.q), 'data-display-r': String(grid.r) } : {})}
           class={`enemy-march-mk enemy-march-mk--${t} foreign-army-marker--${tone}`}
@@ -1274,7 +1288,9 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       const moves: any[] = ownMovementsFromCache();
       const now = Date.now();
       moves.forEach((m, i) => {
-        const el = markerEl.current?.querySelector(`#march-mk-${i}`) as SVGGElement | null;
+        const el = markerEl.current?.querySelector(
+          `#march-mk-${movementDomSuffix(m.id, i)}`,
+        ) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
         setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
@@ -1283,7 +1299,9 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
         .map((warning: any) => normalizeIncomingWarningForRender(warning));
       incoming.forEach((m) => {
         if (!m.id) return;
-        const el = markerEl.current?.querySelector(`#incoming-march-mk-${m.id}`) as SVGGElement | null;
+        const el = markerEl.current?.querySelector(
+          `#incoming-march-mk-${movementDomSuffix(m.id, 0)}`,
+        ) as SVGGElement | null;
         const px = marchMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
         setMarkerTransform(el, px.x, px.y, displayGridForMovement(m, now));
@@ -1292,7 +1310,9 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       const foeArmies: ForeignArmy[] = getForeignMovesSnapshot()?.movements ?? [];
       foeArmies.forEach((m) => {
         if (!m.id) return;
-        const el = foreignEl.current?.querySelector(`#foreign-mk-${m.id}`) as SVGGElement | null;
+        const el = foreignEl.current?.querySelector(
+          `#foreign-mk-${movementDomSuffix(m.id, 0)}`,
+        ) as SVGGElement | null;
         const px = foreignMarkerPixel(m, now, ref.x, ref.y);
         if (!el || !px) return;
         setMarkerTransform(el, px.x + escortMarkerOffset(m), px.y, displayGridForMovement(m, now));
@@ -1400,6 +1420,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   // ─── event handlers ────────────────────────────────────────────────────────
   function onMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
+    beginMapInteraction();
     dragging.current = true;
     dragMoved.current = false;
     dragSX.current = e.clientX; dragSY.current = e.clientY;
@@ -1436,6 +1457,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       scheduleCull(true);
       syncNavUI();
     }
+    endMapInteraction();
     dragMoved.current = false;
     if (!moved) updateHoverTip(e.clientX, e.clientY);
   }
@@ -1462,6 +1484,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       pinchMidX.current = mx; pinchMidY.current = my;
       pinchPX.current = panX.current; pinchPY.current = panY.current;
     } else if (e.touches.length === 1) {
+      beginMapInteraction();
       dragging.current = true;
       dragMoved.current = false;
       svgEl.current?.classList.add('grabbing');
@@ -1515,6 +1538,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       if (wasDrag) suppress.current = true;
       dragging.current = false;
       svgEl.current?.classList.remove('grabbing');
+      endMapInteraction();
       if (!wasDrag && e.changedTouches[0]) {
         suppress.current = true;
         const t = e.changedTouches[0];
@@ -1635,6 +1659,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       if (cullRafRef.current !== null) cancelAnimationFrame(cullRafRef.current);
       if (transformRafRef.current !== null) cancelAnimationFrame(transformRafRef.current);
+      if (dragging.current) endMapInteraction();
       window.clearInterval(fallbackTimer);
       unsubTab();
     };

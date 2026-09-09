@@ -20,7 +20,30 @@ export function bumpData(): void { dataVersion.value++; }
 
 /** 地图专用版本号：只在地图区域/行军快照变化时递增，避免资源、人口等刷新重建整张地图。 */
 export const mapVersion = signal(0);
-export function bumpMap(): void { mapVersion.value++; }
+let mapInteractionDepth = 0;
+let mapBumpPending = false;
+
+/**
+ * 拖动期间地图相机由 DOM transform 独立驱动。把行军推送触发的 mapVersion
+ * 延后到手势结束，避免 Preact 在同一时间重建地形/路径/标记，产生撕裂、
+ * 旧图层残留和相机坐标错位。
+ */
+export function beginMapInteraction(): void { mapInteractionDepth++; }
+export function endMapInteraction(): void {
+  if (mapInteractionDepth <= 0) return;
+  mapInteractionDepth--;
+  if (mapInteractionDepth === 0 && mapBumpPending) {
+    mapBumpPending = false;
+    mapVersion.value++;
+  }
+}
+export function bumpMap(): void {
+  if (mapInteractionDepth > 0) {
+    mapBumpPending = true;
+    return;
+  }
+  mapVersion.value++;
+}
 
 /** 联盟专用数据版本号；只在 AllianceUpdated 推送时递增，避免联盟页因地图/行军心跳重复请求。 */
 export const allianceVersion = signal(0);
