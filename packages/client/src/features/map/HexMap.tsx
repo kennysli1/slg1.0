@@ -64,6 +64,18 @@ export function mapCullMargin(viewportWidth: number, viewportHeight: number, zoo
 }
 
 /**
+ * 拖动期间提前重建剔除集合的距离。
+ *
+ * 可见格集合不是无限大的：相机只做 DOM transform 时，拖得太远会把旧集合
+ * 从视口的一侧拖走，露出 map-bg。阈值必须小于缓冲本身，并给六边形半径留
+ * 出余量；这样重建发生在出现硬切空白之前，而不是松手后才补救。
+ */
+export function mapCullRefreshDistance(viewportWidth: number, viewportHeight: number, zoom: number): number {
+  const margin = mapCullMargin(viewportWidth, viewportHeight, zoom);
+  return Math.max(HEX_SIZE, Math.min(margin * 0.55, Math.max(HEX_SIZE, margin - HEX_SIZE)));
+}
+
+/**
  * 路线只代表“正在行军”的计划；抵达后服务端会保留 path 供召回/续行，
  * 但地图上不应继续把它当成活动路线绘制。
  */
@@ -322,33 +334,39 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
    * 都重建。原实现每个事件都 setState，导致整张 SVG 在相机移动中反复提交，
    * 与 marker 的独立 rAF 更新交错后会出现卡顿和短暂撕裂。
    *
-   * 只有跨过约一格的屏幕距离（或发生强制导航/缩放）才重新剔除，并且同一帧
-   * 内最多提交一次。地图仍由 camEl 的 transform 连续移动，不会牺牲拖动流畅度。
+   * 普通拖动仍以 DOM transform 连续移动；但当相机接近旧集合的缓冲边缘时，
+   * 在拖动过程中提前排队一次剔除。只要阈值小于缓冲，任意长度的拖动都不会
+   * 把旧集合拖出视口。重建按 rAF 合帧，不会退回到每个 pointermove 都提交。
    */
   const scheduleCull = useCallback((force = false) => {
-    // 拖动期间不要触发 Preact 重渲染。相机已经预留了屏幕外缓冲，
-    // 鼠标抬起时再一次性剔除，避免“拖一格就卡一下”的节奏性停顿。
-    if (dragging.current && !force) {
-      cullDirtyRef.current = true;
-      return;
-    }
     const last = lastCullCamera.current;
     const panDistance = Number.isFinite(last.panX)
       ? Math.hypot(panX.current - last.panX, panY.current - last.panY)
       : Infinity;
     const zoomChanged = Number.isFinite(last.zoom) && Math.abs(zoom.current - last.zoom) > 0.015;
-    const threshold = Math.max(12, HEX_SIZE * Math.max(0.7, zoom.current * 0.7));
+    const threshold = dragging.current && !force
+      ? mapCullRefreshDistance(cw.current, ch.current, zoom.current)
+      : Math.max(12, HEX_SIZE * Math.max(0.7, zoom.current * 0.7));
     if (!force && panDistance < threshold && !zoomChanged) return;
-    last.panX = panX.current;
-    last.panY = panY.current;
-    last.zoom = zoom.current;
-    if (cullRafRef.current !== null) return;
+    // 只在实际 rAF 提交前记录相机。若这里提前记录，拖动期间的下一次
+    // scheduleCull 会把“已经排队但还没重建”的距离误认为已覆盖，导致
+    // 长拖动时错过补充剔除，最终出现左/右整片空白。
+    if (cullRafRef.current !== null) {
+      cullDirtyRef.current = true;
+      return;
+    }
     if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      last.panX = panX.current;
+      last.panY = panY.current;
+      last.zoom = zoom.current;
+      cullDirtyRef.current = false;
       setCullVer((v) => v + 1);
       return;
     }
     cullRafRef.current = window.requestAnimationFrame(() => {
       cullRafRef.current = null;
+      lastCullCamera.current = { panX: panX.current, panY: panY.current, zoom: zoom.current };
+      cullDirtyRef.current = false;
       setCullVer((v) => v + 1);
     });
   }, []);
@@ -1504,6 +1522,9 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
       if (pinchDist.current > 0) syncZoomUi();
       pinchDist.current = 0;
       flushTransform();
+      // 单指拖动和双指缩放都可能在最后一个 move 后留下新的相机位置；
+      // 不能只依赖拖动期间的阈值刷新，否则短手势/缩放结束会保留旧剔除集合。
+      scheduleCull(true);
       syncNavUI();
     }
     if (e.touches.length === 0) {

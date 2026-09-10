@@ -20,7 +20,7 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapCullMargin, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapCullMargin, mapCullRefreshDistance, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
 import { sanctumMapMarkersFromState } from '../features/map/sanctum-map.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
@@ -106,6 +106,13 @@ describe('地图拖动渲染缓冲', () => {
     const wide = mapCullMargin(3840, 2160, 1);
     assert.ok(normal > 0);
     assert.ok(wide < normal * 2);
+  });
+
+  it('拖动期间会在缓冲耗尽前触发补充剔除', () => {
+    const margin = mapCullMargin(2535, 1130, 1);
+    const refreshDistance = mapCullRefreshDistance(2535, 1130, 1);
+    assert.ok(refreshDistance < margin - 30);
+    assert.ok(refreshDistance >= 30);
   });
 });
 
