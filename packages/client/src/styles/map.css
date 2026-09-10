@@ -49,10 +49,7 @@
   transition: none;
 }
 .map-svg.grabbing .layer-paths .march-path,
-.map-svg.grabbing .hex-ring--self,
-.map-svg.grabbing .hex-ring--sanctum-condition,
-.map-svg.grabbing .hex-ring--sanctum-sanctum,
-.map-svg.grabbing .sanctum-map-marker {
+.map-svg.grabbing .hex-ring--self {
   animation-play-state: paused;
 }
 /* 不给 SVG 的 <g> 强制创建合成层。这里使用的是 SVG presentation
@@ -196,40 +193,6 @@
 }
 .task-camp-marker.cleared .task-camp-emoji {
   opacity: .55;
-}
-
-/* 远弦圣地：公共条件为青钢色，圣地本体为金色。该层只从 sanctum.GetState
-   已下发的 publicTargets[].point / sanctum.point 绘制，且不拦截底层地图点击。 */
-.sanctum-map-marker { pointer-events: none; }
-.hex-ring--sanctum-condition {
-  stroke: var(--c-steel);
-  stroke-width: 2.35;
-  stroke-dasharray: 4 2;
-  filter: drop-shadow(0 0 5px rgb(123 175 221 / 55%));
-  animation: sanctum-condition-pulse 2.5s ease-in-out infinite;
-}
-.hex-ring--sanctum-sanctum {
-  stroke: var(--c-gold-hi);
-  stroke-width: 3;
-  filter: drop-shadow(0 0 8px rgb(246 224 170 / 78%));
-  animation: sanctum-site-pulse 1.8s ease-in-out infinite;
-}
-.sanctum-map-marker-glyph {
-  fill: var(--c-ink-hi);
-  font-size: 16px;
-  font-weight: 800;
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
-}
-.sanctum-map-marker--sanctum .sanctum-map-marker-glyph { fill: var(--c-gold-hi); font-size: 20px; }
-@keyframes sanctum-condition-pulse {
-  0%, 100% { stroke-opacity: .85; }
-  50% { stroke-opacity: .45; }
-}
-@keyframes sanctum-site-pulse {
-  0%, 100% { stroke-opacity: 1; stroke-width: 3; }
-  50% { stroke-opacity: .6; stroke-width: 4; }
 }
 
 @keyframes ring-pulse-gold {
@@ -637,8 +600,6 @@
 .map-legend-line--raid     { background: var(--c-ember); }
 .map-legend-line--return   { background: var(--c-jade); }
 .map-legend-line--transport{ background: var(--c-steel); }
-.map-legend-sanctum { color: var(--c-gold-hi); font-size: 15px; font-weight: 800; line-height: 10px; }
-
 /* 选中其他玩家村庄时的公开资料卡。 */
 .player-village-info {
   margin: 0;

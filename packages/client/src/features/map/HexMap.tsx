@@ -8,13 +8,14 @@ import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { hexToPixel, hexCorners, HEX_SIZE, type Hex } from '../../shared/utils/hex.js';
 import { worldW, worldH, pveInfoByType } from '../../app/config.js';
 import { getCache } from '../../app/state.js';
-import { mapVersion, selected, findTaskCampMarker, getForeignMovesSnapshot, sanctumMapState, mapTaskMarkers, tab, beginMapInteraction, endMapInteraction } from '../../app/store.js';
+import { mapVersion, selected, findTaskCampMarker, getForeignMovesSnapshot, mapTaskMarkers, tab, beginMapInteraction, endMapInteraction } from '../../app/store.js';
 import { getMapCenter, setMapCenter, refreshForeignMoves } from '../../app/refresh.js';
 import type { ForeignArmy } from '@slg/shared';
 import { me, ownVillageAt } from '../../api.js';
 import { artPath, Btn } from '../../ui/index.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate } from './map-navigation.js';
 import { collectMapTargetStack, foreignArmyAt, foreignArmyName, escortMarkerOffset, displayGridForMovement, ownIncomingWarningsFromCache, ownMovementsFromCache } from './map-target-helpers.js';
+import { SanctumMapLayer, SanctumMapLegend } from './SanctumMapLayer.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 const DESKTOP_ZOOM_MIN = 0.8;
@@ -283,61 +284,6 @@ function pveIcon(name?: string): string {
 
 // ─── component ───────────────────────────────────────────────────────────────
 /** 供地图页外壳调用的最小相机接口；不暴露地图内部状态或 DOM。 */
-/**
- * Map markers are derived only from the current player's already-sanitized Sanctum
- * snapshot. In particular, this intentionally never reads `site` or `clues`:
- * those can carry hidden location data in internal state but must not render a map marker.
- */
-export interface SanctumMapMarker {
-  id: string;
-  kind: 'condition' | 'sanctum';
-  name: string;
-  q: number;
-  r: number;
-}
-
-function sanctumPoint(value: any): { q: number; r: number } | null {
-  const point = value?.point ?? value?.location ?? value;
-  const q = Number(point?.q);
-  const r = Number(point?.r);
-  return Number.isFinite(q) && Number.isFinite(r) ? { q, r } : null;
-}
-
-/** Public targets are always allowed; the sanctuary is allowed only when `sanctum.point` exists. */
-export function sanctumMapMarkersFromState(snapshot: any): SanctumMapMarker[] {
-  const state = snapshot?.event && typeof snapshot.event === 'object' ? { ...snapshot, ...snapshot.event } : snapshot;
-  if (!state || state.phase === 'ended' || state.phase === 'completed') return [];
-  const out: SanctumMapMarker[] = [];
-  const seen = new Set<string>();
-  for (const target of (Array.isArray(state.publicTargets) ? state.publicTargets : [])) {
-    if (!target || target.status === 'removed') continue;
-    const point = sanctumPoint(target);
-    if (!point) continue;
-    const id = String(target.id ?? target.conditionId ?? target.code ?? `${point.q},${point.r}`);
-    const key = `condition:${id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      id,
-      kind: 'condition',
-      name: typeof target.name === 'string' && target.name ? target.name : '远弦条件',
-      ...point,
-    });
-  }
-  // Never fall back to state.site; it is not public marker data.
-  const visibleSanctum = state.sanctum;
-  const point = sanctumPoint(visibleSanctum);
-  if (visibleSanctum && point) {
-    out.push({
-      id: String(visibleSanctum.id ?? visibleSanctum.sanctumId ?? 'farstring-sanctum'),
-      kind: 'sanctum',
-      name: typeof visibleSanctum.name === 'string' && visibleSanctum.name ? visibleSanctum.name : '远弦圣地',
-      ...point,
-    });
-  }
-  return out;
-}
-
 export interface MapCameraApi {
   focusCurrentVillage(): void;
   jumpTo(q: string, r: string): { ok: true } | { ok: false; error: string };
@@ -345,12 +291,9 @@ export interface MapCameraApi {
 }
 
 export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | null } }) {
-  // 只订阅地图相关变更；资源/人口/科研刷新不应重建整张 SVG。
+  // 只订阅地图相关变更；资源/人口/科研/圣地状态不应重建基础 SVG。
   const _mv = mapVersion.value;
   void selected.value;
-  // Signal subscription: map markers update immediately after SanctumUpdated without
-  // trying to infer any coordinate locally.
-  const sanctumSnapshot = sanctumMapState.value;
 
   const W = worldW(), H = worldH();
 
@@ -1110,27 +1053,6 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   }
 
   // ─── rAF march animation ───────────────────────────────────────────────────
-  /** Static event overlay: public conditions + only an explicitly disclosed sanctuary point. */
-  function buildSanctumMarkers() {
-    const markers: preact.VNode[] = [];
-    const ref = viewRef();
-    for (const marker of sanctumMapMarkersFromState(sanctumSnapshot)) {
-      const p = cameraPixelForHex(marker.q, marker.r, ox.current, oy.current, ref.x, ref.y, W, H);
-      markers.push(
-        <g
-          key={`sanctum-${marker.kind}-${marker.id}`}
-          class={`sanctum-map-marker sanctum-map-marker--${marker.kind}`}
-          transform={`translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}
-        >
-          <title>{marker.kind === 'sanctum' ? `已发现：${marker.name}` : `远弦公共条件：${marker.name}`}</title>
-          <polygon class={`hex-ring hex-ring--sanctum-${marker.kind}`} points={HEX_CORNER_STR} />
-          <text class="sanctum-map-marker-glyph" textAnchor="middle" dy={HEX_SIZE * 0.32}>{marker.kind === 'sanctum' ? '✧' : '✦'}</text>
-        </g>,
-      );
-    }
-    return markers;
-  }
-
   function setMarkerTransform(el: SVGGElement, x: number, y: number, grid?: { q: number; r: number } | null) {
     // 点击命中与图标渲染共用这一帧的离散格。这样图标跨过边界后，
     // 同格目标选择和底层地块定位会立即切换到新格，而不是继续锁在旧格。
@@ -1741,7 +1663,6 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
   const zoomRange = zoomBounds();
   const foreignMarkers = buildForeignMarkers();
   const taskMarkersEls = buildTaskMarkers();
-  const sanctumMarkersEls = buildSanctumMarkers();
 
   return (
     <>
@@ -1929,8 +1850,8 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
           {/* ── Task camp markers (static) ── */}
           <g class="layer-taskmarkers">{taskMarkersEls}</g>
 
-          {/* 远弦：公共条件与服务端已向当前玩家公开的圣地。 */}
-          <g class="layer-sanctum-markers">{sanctumMarkersEls}</g>
+          {/* 圣地覆盖层独立订阅状态；dormant 时返回 null，不参与基础地图渲染。 */}
+          <SanctumMapLayer markerPixel={(q, r) => cameraPixelForHex(q, r, ox.current, oy.current, viewRef().x, viewRef().y, W, H)} />
         </g>
       </svg>
 
@@ -2021,7 +1942,7 @@ export function HexMap({ cameraApi }: { cameraApi?: { current: MapCameraApi | nu
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--enemy" style="opacity:.7" />外军（非红色=非即时威胁）</div>
           <div class="map-legend-row"><span class="map-legend-dot map-legend-dot--threat" />动态威胁：进攻 / 掠夺 / 来袭</div>
           <div class="map-legend-row"><span>🎯</span>任务营地</div>
-          <div class="map-legend-row"><span class="map-legend-sanctum">✦</span>远弦条件 / 已发现圣地</div>
+          <SanctumMapLegend />
         </div>
       </div>
 
