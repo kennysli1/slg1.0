@@ -117,6 +117,43 @@
 .sanctum-resource-inputs label { display: grid; gap: 4px; color: var(--c-ink-soft); font-size: var(--f-sm); }
 .sanctum-resource-inputs input { min-height: 34px; padding: 0 var(--s-2); }
 
+/* ---------- 远弦圣地地图覆盖层（仅活动投影挂载时生效） ---------- */
+.sanctum-map-marker { pointer-events: none; }
+.hex-ring--sanctum-condition {
+  stroke: var(--c-steel);
+  stroke-width: 2.35;
+  stroke-dasharray: 4 2;
+  filter: drop-shadow(0 0 5px rgb(123 175 221 / 55%));
+  animation: sanctum-condition-pulse 2.5s ease-in-out infinite;
+}
+.hex-ring--sanctum-sanctum {
+  stroke: var(--c-gold-hi);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px rgb(246 224 170 / 78%));
+  animation: sanctum-site-pulse 1.8s ease-in-out infinite;
+}
+.sanctum-map-marker-glyph {
+  fill: var(--c-ink-hi);
+  font-size: 16px;
+  font-weight: 800;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.sanctum-map-marker--sanctum .sanctum-map-marker-glyph { fill: var(--c-gold-hi); font-size: 20px; }
+.map-svg.grabbing .hex-ring--sanctum-condition,
+.map-svg.grabbing .hex-ring--sanctum-sanctum,
+.map-svg.grabbing .sanctum-map-marker { animation-play-state: paused; }
+.map-legend-sanctum { color: var(--c-gold-hi); font-size: 15px; font-weight: 800; line-height: 10px; }
+@keyframes sanctum-condition-pulse {
+  0%, 100% { stroke-opacity: .85; }
+  50% { stroke-opacity: .45; }
+}
+@keyframes sanctum-site-pulse {
+  0%, 100% { stroke-opacity: 1; stroke-width: 3; }
+  50% { stroke-opacity: .6; stroke-width: 4; }
+}
+
 @media (max-width: 760px) {
   .sanctum-event-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sanctum-event-summary > div:nth-child(2) { border-right: 0; }

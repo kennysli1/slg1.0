@@ -20,7 +20,8 @@ import { notificationText, notificationKind, isReportEvent } from '../features/r
 import { fmtDur, secLeft } from '../shared/utils/format.js';
 import { modalLayerZ } from '../ui/modal-layer.js';
 import { capitalCoordinate, currentVillageCoordinate, currentVillageName, parseMapCoordinate, pendingTaskCamps } from '../features/map/map-navigation.js';
-import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapCullMargin, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, sanctumMapMarkersFromState, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { buildLandmarkTriangleOutline, foreignArmyMarkerTone, landmarkCenterFromTile, mapCullMargin, mapEntityRingKind, normalizeIncomingWarningForRender, normalizeMapVillageRelation, shouldRenderMarchPath, shouldRenderTerrainFog, terrainDisplayName, terrainFromTile } from '../features/map/HexMap.js';
+import { sanctumMapMarkersFromState } from '../features/map/sanctum-map.js';
 import { artPath } from '../ui/Icon.js';
 import { readTaskMenuOpenState, taskMenuStorageKey, writeTaskMenuOpenState } from '../features/village/task-menu-state.js';
 import { readVillageWorkbenchPreferences, toggleVillageWorkbench, villageWorkbenchLayoutClass, villageWorkbenchStorageKey, writeVillageWorkbenchPreferences } from '../features/village/workbench-preferences.js';
@@ -51,6 +52,21 @@ describe('远弦圣地地图可见性', () => {
       site: { point: { q: 33, r: 44 } },
     });
     assert.deepEqual(markers, [{ id: 'public-rune', kind: 'condition', name: '古老符文', q: 11, r: 22 }]);
+  });
+
+  it('未触发圣地支线时不产生任何地图标记，即使旧状态残留公开目标', () => {
+    assert.deepEqual(sanctumMapMarkersFromState({
+      event: { phase: 'dormant' },
+      publicTargets: [{ id: 'stale-target', q: 11, r: 22 }],
+      sanctum: { point: { q: 33, r: 44 } },
+    }), []);
+  });
+
+  it('基础地图不直接订阅圣地状态，避免 dormant 更新重建整张地图', () => {
+    const hexMapSource = readFileSync(new URL('../features/map/HexMap.tsx', import.meta.url), 'utf8');
+    assert.doesNotMatch(hexMapSource, /sanctumMapState\.value/);
+    assert.match(hexMapSource, /<SanctumMapLayer\b/);
+    assert.match(hexMapSource, /<SanctumMapLegend\s*\/>/);
   });
 
   it('已返回 sanctum.point 时显示圣地，活动结束后清除所有事件标记', () => {
