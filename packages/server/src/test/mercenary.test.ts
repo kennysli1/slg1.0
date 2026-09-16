@@ -216,3 +216,22 @@ test('Mercenary: 自动刷新后 storedRefreshes+1，可手动刷新', async () 
   const afterRefresh = r.payload as any;
   assert.ok(Array.isArray(afterRefresh.offers), '刷新后 offers 应为数组');
 });
+
+test('Mercenary: 过期刷新时间戳至少延后1秒重排，不能在同一假时刻自旋', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'merc8');
+  assert.equal(regRes.ok, true);
+  const villageId = (regRes.payload as any).player.villageId as string;
+  await buildMercCamp(app, villageId);
+  const state = app.store.get<any>('merc', villageId);
+  state.nextRefreshAt = clock - 1;
+  app.store.set('merc', villageId, state);
+
+  app.mercenary.resume();
+  await app.scheduler.advanceTo(clock, setClock);
+  assert.equal(((await send(app, 'mercenary.GetCamp', { villageId })).payload as any).storedRefreshes, 0);
+  await app.scheduler.advanceTo(clock + 999, setClock);
+  assert.equal(((await send(app, 'mercenary.GetCamp', { villageId })).payload as any).storedRefreshes, 0);
+  await app.scheduler.advanceTo(clock + 1, setClock);
+  assert.equal(((await send(app, 'mercenary.GetCamp', { villageId })).payload as any).storedRefreshes, 1);
+});

@@ -412,7 +412,10 @@ export class TradeModule {
   /** 取消并重新登记自动刷新定时。 */
   private scheduleRefresh(villageId: string, at: number): string {
     this.scheduler.cancelByOwner(`trade:${villageId}`);
-    const delay = Math.max(0, at - this.now());
+    // 配置热重载、旧存档或假时钟快进都可能留下 <= now 的时间戳。
+    // 周期任务绝不能在同一时刻重排，否则 Scheduler.advanceTo 会持续消费
+    // “已经到期”的新任务，形成零延迟死循环并淹没日志。
+    const delay = Math.max(1_000, at - this.now());
     return this.scheduler.schedule(
       delay,
       () => this.refreshTick(villageId),
@@ -442,6 +445,9 @@ export class TradeModule {
       await this.emitUpdated(villageId);
       return;
     }
+    // 只有等级变化才重排。GetCenter 会频繁调用 ensureCenter；每次读取都
+    // 推迟 nextRefreshAt 会导致活跃玩家永远等不到自动刷新。
+    if (existing.level === level && existing.taskId) return;
     // 升级：更新等级、按新间隔重排自动刷新；保留订单池与已存储次数。
     existing.level = level;
     existing.npcDeliveryOrders = existing.npcDeliveryOrders ?? [];

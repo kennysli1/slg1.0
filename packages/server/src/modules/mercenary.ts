@@ -89,13 +89,7 @@ export class MercenaryModule {
   resume(): void {
     for (const s of this.store.all<MercenaryCampState>(COLLECTION)) {
       s.contracts ??= [];
-      const delay = Math.max(0, s.nextRefreshAt - this.now());
-      s.taskId = this.scheduler.schedule(
-        delay,
-        () => this.refreshTick(s.villageId),
-        `mercenary:${s.villageId}`,
-        `village:${s.villageId}`,
-      );
+      s.taskId = this.scheduleRefresh(s.villageId, s.nextRefreshAt);
       this.store.set(COLLECTION, s.villageId, s);
       for (const contract of s.contracts) this.scheduleContract(s.villageId, contract);
     }
@@ -147,7 +141,9 @@ export class MercenaryModule {
   /** 取消并重新登记自动刷新定时（按 owner 去重，避免重复任务）。 */
   private scheduleRefresh(villageId: string, at: number): string {
     this.scheduler.cancelByOwner(`mercenary:${villageId}`);
-    const delay = Math.max(0, at - this.now());
+    // 旧存档或热调表可能留下已过期时间戳；至少延后 1 秒，避免手动调度器
+    // 与生产事件循环在同一时刻反复执行周期任务。
+    const delay = Math.max(1000, at - this.now());
     return this.scheduler.schedule(
       delay,
       () => this.refreshTick(villageId),

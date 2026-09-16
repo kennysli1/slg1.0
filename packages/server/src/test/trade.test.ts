@@ -221,3 +221,22 @@ test('Trade: 己方村资源转移在半径内可选并消耗路线，商队抵�
   const after = (await send(app, 'economy.GetResources', { villageId: target })).payload as any;
   assert.ok(after.resources.wood >= before.resources.wood + 100 - 0.01, '资源商队抵达后应进入目标村');
 });
+
+test('Trade: 过期刷新时间戳至少延后1秒重排，不能在同一假时刻自旋', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, 'refresh_guard');
+  const villageId = (regRes.payload as any).player.villageId as string;
+  assert.equal(await buildInZone(app, villageId, 'outer', 'tradecenter'), true);
+  const state = app.store.get<any>('trade', villageId);
+  state.storedRefreshes = 0;
+  state.nextRefreshAt = clock;
+  app.store.set('trade', villageId, state);
+  (app.trade as any).scheduleRefresh(villageId, clock);
+
+  await app.scheduler.advanceTo(clock, setClock);
+  assert.equal(app.store.get<any>('trade', villageId).storedRefreshes, 0, '同一时刻不应执行新排刷新');
+  await app.scheduler.advanceTo(clock + 999, setClock);
+  assert.equal(app.store.get<any>('trade', villageId).storedRefreshes, 0, '最小保护间隔内不应刷新');
+  await app.scheduler.advanceTo(clock + 1, setClock);
+  assert.equal(app.store.get<any>('trade', villageId).storedRefreshes, 1, '保护间隔到达后只刷新一次');
+});

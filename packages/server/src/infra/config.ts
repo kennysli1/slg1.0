@@ -755,6 +755,9 @@ export interface GameConstants {
   allianceAmbassadorRoleLevel: number;
   /** 联盟建筑建造与联盟科技研发的默认耗时（秒）。 */
   allianceProjectDurationSec: number;
+  /** 正式服赛季结算窗口（天）；仅供玩法与运营读取，不自动触发破坏性重置。 */
+  seasonSettlementMinDays: number;
+  seasonSettlementMaxDays: number;
   /** 远弦圣地：取得占领资格所需的已完成公共条件次数。 */
   sanctumConditionsRequired: number;
   /** 远弦圣地：首次占领需连续守卫的秒数。 */
@@ -1746,6 +1749,8 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     allianceTechRoleLevel: Math.max(1, Math.floor(cn('alliance_tech_role_level', 3))),
     allianceAmbassadorRoleLevel: Math.max(1, Math.floor(cn('alliance_ambassador_role_level', 4))),
     allianceProjectDurationSec: Math.max(1, Math.floor(cn('alliance_project_duration_sec', 10))),
+    seasonSettlementMinDays: Math.max(1, Math.floor(cn('season_settlement_min_days', 7))),
+    seasonSettlementMaxDays: Math.max(1, Math.floor(cn('season_settlement_max_days', 10))),
     sanctumConditionsRequired: Math.max(1, Math.floor(cn('sanctum_conditions_required', 6))),
     sanctumFirstHoldSec: Math.max(1, Math.floor(cn('sanctum_first_hold_sec', 1800))),
     sanctumDefenseMult: Math.max(0, cn('sanctum_defense_mult', 0.5)),
@@ -2506,8 +2511,19 @@ export function validateGameConfig(config: GameConfig): void {
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
+  if (centerMaxLevel > 0 && config.constants.foundMinMainLevel > centerMaxLevel) {
+    errors.push(`game_constants.csv found_min_main_level=${config.constants.foundMinMainLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
+  if (config.constants.seasonSettlementMinDays > config.constants.seasonSettlementMaxDays) {
+    errors.push('game_constants.csv season_settlement_min_days 不能大于 season_settlement_max_days');
+  }
   for (const b of Object.values(config.buildings)) {
     if (centerMaxLevel > 0 && b.mainBaseLevel > centerMaxLevel) errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
+  for (const [level, tier] of Object.entries(config.tradeCenter)) {
+    if (!Number.isFinite(tier.npcRefreshSec) || tier.npcRefreshSec <= 0) {
+      errors.push(`trade_center.csv level=${level} npcRefreshSec 必须>0`);
+    }
   }
 
   // town_center_slots：覆盖 1..城镇中心maxLevel；槽位单调不减；queue≥1

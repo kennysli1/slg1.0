@@ -14,6 +14,7 @@ module.exports = {
         HOST: '0.0.0.0',
         // 数据落盘路径（相对 cwd）
         DATA_PATH: './data/game.json',
+        GM_TOKEN: process.env.GM_TOKEN ?? '',
       },
       autorestart: true,
       max_restarts: 10,
@@ -35,6 +36,7 @@ module.exports = {
         HOST: '0.0.0.0',
         DATA_PATH: './data/test-01/game.json',
         LOG_DIR: './logs/test-01',
+        GM_TOKEN: process.env.GM_TOKEN ?? '',
       },
       autorestart: true,
       max_restarts: 10,

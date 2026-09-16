@@ -223,7 +223,7 @@ try {
       cwd: ROOT,
       env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port),
         DATA_PATH: join(tempDir, 'game.json'), LOG_DIR: join(tempDir, 'logs'),
-        GM_ENABLED: 'off', GAME_LOG: 'off' },
+        GM_ENABLED: 'off', GM_TOKEN: 'deploy-smoke-only', GAME_LOG: 'off' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.on('data', (chunk) => { logs += chunk.toString(); });
