@@ -1711,6 +1711,9 @@ load();
 
 export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp: GameApp): void {
   const token = process.env.GM_TOKEN?.trim() || null;
+  if (process.env.NODE_ENV === 'production' && !token) {
+    throw new Error('生产环境启用 GM API 时必须配置 GM_TOKEN；如需完全关闭请设置 GM_ENABLED=off');
+  }
 
   const auth = (req: FastifyRequest, reply: FastifyReply): boolean => {
     if (!token) return true;

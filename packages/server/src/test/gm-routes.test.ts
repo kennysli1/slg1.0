@@ -1,6 +1,6 @@
 /**
  * GM HTTP 路由测试（Fastify inject）：
- *  1. 未设 GM_TOKEN 时所有路由开放（保持现有默认行为不变）
+ *  1. 开发环境未设 GM_TOKEN 时路由开放；生产环境启用 GM 时必须配置 token
  *  2. 设置 GM_TOKEN 时，缺少 X-GM-Token header → 401
  *  3. 设置 GM_TOKEN 时，携带正确 X-GM-Token header → 200
  *  4. 危险路由（DELETE /gm/:collection）不带 ?confirm=yes → 400
@@ -18,6 +18,21 @@ import { createGameApp } from '../app.js';
 import { parseCsvStructured } from '../infra/csv.js';
 
 const SECRET = 'test-gm-token-xyz';
+
+test('生产环境启用 GM API 但未配置 GM_TOKEN 时拒绝启动', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousToken = process.env.GM_TOKEN;
+  process.env.NODE_ENV = 'production';
+  delete process.env.GM_TOKEN;
+  try {
+    assert.throws(() => buildFastify(), /必须配置 GM_TOKEN/);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousToken === undefined) delete process.env.GM_TOKEN;
+    else process.env.GM_TOKEN = previousToken;
+  }
+});
 
 function buildFastify(storePath?: string, configDir?: string) {
   const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath, configDir });
@@ -611,7 +626,7 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     // 模拟历史 shared/config：新增的酒馆支线概率列存在但整列是空值。
     // 配置中心应显示运行时默认 0.5，而不是让管理员看到空白。
     const staleLevelsPath = join(tempConfig, 'building_levels.csv');
-    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.5,', ',,'));
+    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.2,', ',,'));
     writeFileSync(staleLevelsPath, staleLevels, 'utf8');
     const { fastify, app } = buildFastify(storePath, tempConfig);
     await fastify.ready();

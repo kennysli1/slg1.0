@@ -15,8 +15,8 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   const c = loadGameConfig(configDir).constants;
   assert.equal(c.wallBonusPerLevel, 0.03, '城墙加成');
   assert.equal(c.mainBuildSpeedupCap, 0.6, '主基地提速上限');
-  assert.equal(c.startResourceAmount, 750, '初始资源');
-  assert.equal(c.storageBase, 800, '基础容量');
+  assert.equal(c.startResourceAmount, 1500, '正式服初始资源');
+  assert.equal(c.storageBase, 5000, '正式服基础容量');
   assert.equal(c.mapSize, 20, '地图尺寸');
   assert.equal(c.mapViewRadius, 6, '视野半径');
   assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
@@ -35,7 +35,8 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
     [1.25, 1.6],
     '中高档营地应有独立稀有度权重底数',
   );
-  assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
+  assert.equal(c.allianceProjectDurationSec, 21600, '联盟建筑/科技默认耗时为6小时');
+  assert.deepEqual([c.seasonSettlementMinDays, c.seasonSettlementMaxDays], [7, 10], '赛季结算窗口为7–10天');
   assert.deepEqual(
     [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
     [1, 2, 3, 4],
@@ -61,7 +62,7 @@ test('远弦圣地：活动内容、任务图与可编辑常量均从 CSV 编译
   assert.equal(cfg.sanctumClues.c22[0]?.precision, 'direction');
   assert.ok(cfg.sanctumConditionRewards.c18.some((reward) => reward.params === 'breach_horn'));
   assert.equal(cfg.constants.sanctumConditionsRequired, 6);
-  assert.equal(cfg.constants.sanctumFirstHoldSec, 1800);
+  assert.equal(cfg.constants.sanctumFirstHoldSec, 21600);
   assert.equal(cfg.constants.sanctumFormerHolderMinCommanderPopShare, 0.5);
   assert.equal(cfg.treasures.sanctum_fragment.effectType, 'sanctum_fragment');
   assert.equal(cfg.treasures.farstring_crest.effectType, 'sanctum_farstring_crest');
@@ -129,6 +130,36 @@ test('校验器：合法配置不抛错', () => {
   assert.deepEqual(Object.keys(cfg.allianceServices), ['alliance_supplies_small', 'alliance_reinforcement_guard']);
   assert.equal(cfg.allianceServices.alliance_supplies_small.category, 'supplies');
   assert.equal(cfg.allianceServices.alliance_reinforcement_guard.unitCode, 'legionnaire');
+});
+
+test('正式服数值基线：建筑5天、科技5天、结算7至10天且拓荒可达', () => {
+  const cfg = loadGameConfig(configDir);
+  const rawBuildSeconds = Object.values(cfg.buildings).reduce((total, building) => (
+    total + Object.values(building.levels).reduce((sum, level) => sum + level.timeSec, 0)
+  ), 0);
+  assert.equal(rawBuildSeconds, 10 * 86400, '完整建筑目录原始工期应为10天，两条队列折合5天');
+
+  const graduationPath = [
+    'military_drill', 'standing_army', 'formation_doctrine', 'advanced_arms',
+    'agronomy', 'standard_methods', 'architecture', 'workshop_organization',
+    'civic_order', 'frontier_charter', 'exploration_charter', 'colonial_administration',
+  ];
+  const researchSeconds = graduationPath.reduce((sum, code) => sum + cfg.research[code].durationSec, 0);
+  assert.equal(researchSeconds, 5 * 86400, '三分支各选一条纲领后的科技毕业工期应为5天');
+  assert.deepEqual([cfg.constants.seasonSettlementMinDays, cfg.constants.seasonSettlementMaxDays], [7, 10]);
+  assert.equal(cfg.constants.foundMinMainLevel, cfg.buildings.main.maxLevel, '第二村门槛必须在主基地等级上限内可达');
+  assert.equal(cfg.units.teusettler.popCost, 5, '条顿拓荒者人口成本必须与其他部族一致');
+  assert.ok(Object.values(cfg.tradeCenter).every((tier) => tier.npcRefreshSec === 1800), 'NPC订单统一30分钟刷新');
+
+  const totalCosts = Object.values(cfg.buildings).reduce((totals, building) => {
+    for (const level of Object.values(building.levels)) {
+      for (const key of ['wood', 'clay', 'iron', 'crop']) totals[key] += level.cost[key] ?? 0;
+    }
+    return totals;
+  }, { wood: 0, clay: 0, iron: 0, crop: 0 } as Record<string, number>);
+  for (const [resource, value] of Object.entries(totalCosts)) {
+    assert.ok(value >= 300_000 && value <= 800_000, `${resource} 全建筑毕业成本应落在正式服预算区间`);
+  }
 });
 
 test('任务图：六表编译后保留任务线、目标、效果与关系', () => {
@@ -337,11 +368,8 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
-  assert.deepEqual(
-    Object.values(cfg.buildings.alliance_hall.levels ?? {}).map((level) => level.timeSec),
-    Array.from({ length: 10 }, () => 10),
-    '联盟大厅 1-10 级默认建造时间应与配置中心全十秒版本一致',
-  );
+  const allianceHallTimes = Object.values(cfg.buildings.alliance_hall.levels ?? {}).map((level) => level.timeSec);
+  assert.ok(allianceHallTimes.every((time, index) => index === 0 || time > allianceHallTimes[index - 1]), '联盟大厅逐级耗时应递增');
   // 主基地固定四级；逐级人口上限增量由配置中心决定，不在测试中硬编码。
   const main = cfg.buildings['main'];
   assert.equal(main.name, '主基地', '主基地显示名应统一');
@@ -352,7 +380,7 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
   assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
-  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.5, '酒馆支线刷新概率默认应为 0.5');
+  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.2, '正式服酒馆支线刷新概率应为 0.2');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {

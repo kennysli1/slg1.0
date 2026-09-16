@@ -98,9 +98,9 @@ test('academy 参数表解析正确', () => {
   const a = app.config.academy;
   assert.ok(a[1], 'Lv1 应存在');
   assert.ok(a[1].checkIntervalSec > 0, 'Lv1 判定间隔应为正数');
-  assert.equal(a[1].baseProbability, 0.10);
+  assert.equal(a[1].baseProbability, 0.25);
   assert.ok(a[10], 'Lv10 应存在');
-  assert.ok(a[10].maxProbability >= 0.7, 'Lv10 保底概率应≥0.7');
+  assert.ok(a[10].maxProbability >= 0.95, 'Lv10 正式服保底概率应≥0.95');
 });
 
 test('正直的心：科研状态下发实际缩短后的判定间隔', async () => {

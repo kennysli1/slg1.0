@@ -164,6 +164,51 @@ function defaultConfigDir(): string {
   return join(here, '../../../config');
 }
 
+/**
+ * 手动 Scheduler 用于验证状态机而不是等待正式服墙钟时间。历史测试普遍以
+ * 2–10 秒推进建造/训练；正式平衡改为分钟/小时后，统一在测试入口压缩耗时，
+ * 避免每次平衡调整都把数百个业务断言改成配置特例。生产路径不会调用此函数。
+ */
+function withManualSchedulerTimings(source: GameConfig): GameConfig {
+  const buildings = Object.fromEntries(Object.entries(source.buildings).map(([code, building]) => {
+    const levels = Object.fromEntries(Object.entries(building.levels).map(([level, values]) => [
+      Number(level), { ...values, timeSec: Math.min(values.timeSec, 10) },
+    ]));
+    return [code, { ...building, levels, timeSec: (level: number) => levels[level]?.timeSec ?? 10 }];
+  }));
+  const units = Object.fromEntries(Object.entries(source.units).map(([code, unit]) => [
+    code, { ...unit, trainSec: Math.max(1, Math.round(unit.trainSec / 30)) },
+  ]));
+  const research = Object.fromEntries(Object.entries(source.research).map(([code, tech]) => [
+    code, { ...tech, durationSec: Math.min(tech.durationSec, 7200) },
+  ]));
+  const mercCamp = Object.fromEntries(Object.entries(source.mercCamp).map(([level, camp]) => [
+    Number(level), { ...camp, refreshSec: Math.min(camp.refreshSec, 3600) },
+  ]));
+  return {
+    ...source,
+    buildings,
+    units,
+    research,
+    mercCamp,
+    constants: {
+      ...source.constants,
+      raw: {
+        ...source.constants.raw,
+        kingdom_task_initial_min_sec: 1,
+        kingdom_task_initial_max_sec: 2,
+        kingdom_task_interval_min_sec: 1,
+        kingdom_task_interval_max_sec: 2,
+        kingdom_task_duration_sec: 10,
+        alliance_project_duration_sec: 10,
+        m8_attack_delay_sec: Math.min(source.constants.m8AttackDelaySec, 180),
+      },
+      allianceProjectDurationSec: Math.min(source.constants.allianceProjectDurationSec, 10),
+      m8AttackDelaySec: Math.min(source.constants.m8AttackDelaySec, 180),
+    },
+  };
+}
+
 export function createGameApp(opts?: {
   now?: () => number;
   manualScheduler?: boolean;
@@ -183,6 +228,7 @@ export function createGameApp(opts?: {
   // CSV 是唯一运行时配置事实源。旧版 balance_overrides.json 由部署阶段一次性迁移，
   // 这里刻意不再读取，避免删档/重启时被隐藏的 JSON 覆盖配置中心的 CSV。
   let config = loadGameConfig(configDir);
+  if (opts?.manualScheduler) config = withManualSchedulerTimings(config);
   let configuredWorldW = config.constants.worldW;
   let configuredWorldH = config.constants.worldH;
 
