@@ -14,6 +14,8 @@ type TileSnapshot = {
   name?: string;
   icon?: string;
   terrain?: Terrain;
+  /** 仅实时可见村庄携带的公开发展人口；探索快照不保存也不回放该值。 */
+  population?: number;
 };
 interface VisionState { playerId: string; explored: Record<string, TileSnapshot>; }
 interface RevealReceipt { playerId: string; revealId: string; newlyRevealed: TileSnapshot[]; }
@@ -41,6 +43,24 @@ export class VisionModule {
     this.commands.register('vision.GetVisibleTiles', (c) => this.getVisibleTiles(c));
     this.commands.register('vision.GetExploredCount', (c) => this.getExploredCount(c));
     this.commands.register('vision.GetObservers', (c) => this.getObservers(c));
+    this.commands.register('vision.GetPlayerMapSnapshot', (c) => this.getPlayerMapSnapshot(c));
+  }
+
+  /**
+   * 服务器侧合法感知边界。调用方只能得到与普通地图请求相同的战争迷雾投影，
+   * 从而不需要先取得 world 全量目录再自行过滤。
+   */
+  private async getPlayerMapSnapshot(cmd: Command): Promise<CommandResult> {
+    const { playerId } = cmd.payload as { playerId: string };
+    const raw = await this.commands.send({
+      name: 'world.GetArea', from: VisionModule.NAME,
+      payload: { cq: 0, cr: 0, full: true, includeEmpty: true },
+    });
+    if (!raw.ok) return raw;
+    return this.filterArea({
+      name: 'vision.FilterArea', from: VisionModule.NAME,
+      payload: { playerId, tiles: (raw.payload as any).tiles ?? [] },
+    });
   }
 
   private async worldDimensions(): Promise<{ W: number; H: number }> {
@@ -263,10 +283,26 @@ export class VisionModule {
       );
     }));
 
+    const populationByVillage = new Map<string, number>();
+    const visibleVillages = [...new Set(tiles
+      .filter((tile: any) => tile.kind === 'village' && tile.refId && tile.visibility === 'visible')
+      .map((tile) => tile.refId!))];
+    await Promise.all(visibleVillages.map(async (villageId) => {
+      const snapshot = await this.commands.send({
+        name: 'population.GetSnapshot', from: VisionModule.NAME, payload: { villageId },
+      });
+      if (snapshot.ok) populationByVillage.set(villageId, Number((snapshot.payload as any).currentPop ?? 0));
+    }));
+
     return tiles.map((tile) => {
       if (tile.kind !== 'village' || !tile.refId) return tile;
       const owner = ownerByVillage.get(tile.refId);
-      return { ...tile, relation: owner ? (relationByOwner.get(owner) ?? 'neutral') : 'neutral' };
+      const population = populationByVillage.get(tile.refId);
+      return {
+        ...tile,
+        relation: owner ? (relationByOwner.get(owner) ?? 'neutral') : 'neutral',
+        ...(population === undefined ? {} : { population }),
+      };
     });
   }
 

@@ -1,0 +1,6 @@
+code,economyWeight,militaryWeight,tradeWeight,socialWeight,aggression,reserveRatio,sleepHours,dailyActionBudget
+#人格代码,经济权重,军事权重,贸易权重,社交权重,侵略性,安全库存比例,每日睡眠小时,每日主要动作预算
+pioneer,0.55,0.25,0.30,0.25,0.15,0.20,8,14
+merchant,0.40,0.25,0.85,0.45,0.10,0.35,7,16
+raider,0.30,0.50,0.20,0.20,0.65,0.20,6,12
+cooperator,0.40,0.30,0.45,0.85,0.20,0.30,9,14

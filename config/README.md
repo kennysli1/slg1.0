@@ -78,6 +78,10 @@
 | 表33 | `sanctum_puzzles.csv` | **远弦圣地谜题目录** | 调谜题可用单位、符号集合、答错冷却与说明 |
 | 表34 | `sanctum_puzzle_steps.csv` | **远弦圣地谜题步骤** | 调服务端答案顺序和下发给玩家的逐步线索 |
 | 表35 | `sanctum_clues.csv` | **远弦圣地私有线索** | 调条件完成后给参与者的圣地方向/区域/距离提示 |
+| 表36 | `ai_personas.csv` | **AI 四类人格权重与作息预算** | 调经济/军事/贸易/社交倾向、安全库存、睡眠和每日行动预算 |
+| 表37 | `ai_roster.csv` | **固定16名托管玩家 roster** | 调名字、部族、人格、固定随机种子和48–72小时预热期；首版不得增删行 |
+
+`ai_personas.csv` 的 `reserveRatio` 必须在 0–1，`sleepHours` 必须在 6–9；`ai_roster.csv` 必须恰好 16 行，名字唯一且不超过 16 字，`warmupHours` 必须在 48–72。AI 配置只影响服务器控制器，普通客户端协议不下发人格、种子或行为树状态。
 
 `quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），以及 `rune_sequence`（参数为逗号或竖线分隔的符文唯一序列，由服务端校验）。`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 

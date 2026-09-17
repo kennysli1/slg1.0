@@ -1031,6 +1031,29 @@ export interface SanctumClueDef {
   weight: number;
 }
 
+export type AiPersonaCode = 'pioneer' | 'merchant' | 'raider' | 'cooperator';
+
+export interface AiPersonaDef {
+  code: AiPersonaCode;
+  economyWeight: number;
+  militaryWeight: number;
+  tradeWeight: number;
+  socialWeight: number;
+  aggression: number;
+  reserveRatio: number;
+  sleepHours: number;
+  dailyActionBudget: number;
+}
+
+export interface AiRosterDef {
+  rosterId: string;
+  name: string;
+  tribe: string;
+  persona: AiPersonaCode;
+  seed: number;
+  warmupHours: number;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -1074,6 +1097,9 @@ export interface GameConfig {
   /** 对话目录（dialogues.csv）：按任务 code + trigger 查找有序对话段落组。 */
   dialogues: Record<string, DialogueDef>;
   pvpPowerCurve: { maxRatio: number; lootMult: number }[];
+  /** AI 玩家静态人格与固定 roster；运行时黑板由 ai-player owner 独占。 */
+  aiPersonas: Record<AiPersonaCode, AiPersonaDef>;
+  aiRoster: AiRosterDef[];
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -1243,6 +1269,19 @@ function assertUniqueRows(rows: Record<string, string>[], table: string, idField
 /** 从指定目录加载所有 CSV。configDir 默认指向仓库根的 config/。 */
 export function loadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   const p = (f: string) => join(configDir, f);
+
+  const aiPersonas = Object.fromEntries(loadCsv(p('ai_personas.csv')).map((r) => [r.code, {
+    code: r.code as AiPersonaCode,
+    economyWeight: num(r.economyWeight), militaryWeight: num(r.militaryWeight),
+    tradeWeight: num(r.tradeWeight), socialWeight: num(r.socialWeight),
+    aggression: num(r.aggression), reserveRatio: num(r.reserveRatio),
+    sleepHours: num(r.sleepHours), dailyActionBudget: Math.floor(num(r.dailyActionBudget)),
+  }])) as Record<AiPersonaCode, AiPersonaDef>;
+  const aiRoster = loadCsv(p('ai_roster.csv')).map((r) => ({
+    rosterId: r.rosterId, name: r.name, tribe: r.tribe,
+    persona: r.persona as AiPersonaCode, seed: Math.floor(num(r.seed)),
+    warmupHours: num(r.warmupHours),
+  }));
 
   const resourceRows = loadCsv(p('resources.csv'));
   assertUniqueRows(resourceRows, 'resources.csv', 'id', 'id');
@@ -2387,7 +2426,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   const config: GameConfig = {
     resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, allianceServices,
     sanctumEvents, sanctumConditions, sanctumConditionRewards, sanctumPuzzles, sanctumPuzzleSteps, sanctumClues,
-    quests, questGraph, dialogues, pvpPowerCurve,
+    quests, questGraph, dialogues, pvpPowerCurve, aiPersonas, aiRoster,
   };
   validateGameConfig(config);
   return config;
@@ -2413,6 +2452,29 @@ export function validateGameConfig(config: GameConfig): void {
   const errors: string[] = [];
   const resourceKeys = new Set(config.resources.map((r) => r.key));
   const knownTribes = new Set(['romans', 'gauls', 'teutons']);
+
+  const personaCodes = new Set(Object.keys(config.aiPersonas));
+  for (const persona of Object.values(config.aiPersonas)) {
+    if (!['pioneer', 'merchant', 'raider', 'cooperator'].includes(persona.code)) errors.push(`ai_personas.csv[${persona.code}] code 非法`);
+    for (const [key, value] of Object.entries(persona)) {
+      if (key === 'code') continue;
+      if (!Number.isFinite(value)) errors.push(`ai_personas.csv[${persona.code}] ${key} 必须是数字`);
+    }
+    if (persona.reserveRatio < 0 || persona.reserveRatio > 1) errors.push(`ai_personas.csv[${persona.code}] reserveRatio 必须在 0..1`);
+    if (persona.sleepHours < 6 || persona.sleepHours > 9) errors.push(`ai_personas.csv[${persona.code}] sleepHours 必须在 6..9`);
+    if (persona.dailyActionBudget < 1) errors.push(`ai_personas.csv[${persona.code}] dailyActionBudget 必须为正整数`);
+  }
+  if (config.aiRoster.length !== 16) errors.push(`ai_roster.csv 必须固定 16 行，实际 ${config.aiRoster.length}`);
+  const rosterIds = new Set<string>(), rosterNames = new Set<string>();
+  for (const row of config.aiRoster) {
+    if (!row.rosterId || rosterIds.has(row.rosterId)) errors.push(`ai_roster.csv rosterId 重复或为空：${row.rosterId}`);
+    if (!row.name || row.name.length > 16 || rosterNames.has(row.name.toLowerCase())) errors.push(`ai_roster.csv name 非法或重复：${row.name}`);
+    if (!knownTribes.has(row.tribe)) errors.push(`ai_roster.csv[${row.rosterId}] tribe 非法：${row.tribe}`);
+    if (!personaCodes.has(row.persona)) errors.push(`ai_roster.csv[${row.rosterId}] persona 不存在：${row.persona}`);
+    if (!Number.isSafeInteger(row.seed) || row.seed <= 0) errors.push(`ai_roster.csv[${row.rosterId}] seed 必须为正整数`);
+    if (row.warmupHours < 48 || row.warmupHours > 72) errors.push(`ai_roster.csv[${row.rosterId}] warmupHours 必须在 48..72`);
+    rosterIds.add(row.rosterId); rosterNames.add(row.name.toLowerCase());
+  }
 
   for (const service of Object.values(config.kingdomServices)) {
     if (!['reinforcement', 'attack', 'supplies', 'treasure', 'escort'].includes(service.category)) {

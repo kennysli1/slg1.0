@@ -697,6 +697,15 @@ export class AllianceModule {
     if (!a || a.leaderId !== playerId) return { ok: false, payload: {}, reason: 'leader_required' };
     if (!this.isMember(a, targetPlayerId)) return { ok: false, payload: {}, reason: 'member_not_found' };
     if (role !== null && !Object.prototype.hasOwnProperty.call(ROLE_LEVEL_FALLBACK, role)) return { ok: false, payload: {}, reason: 'invalid_role' };
+    if (role) {
+      const control = await this.commands.send({
+        name: 'player.GetControlContext', from: AllianceModule.NAME,
+        payload: { playerId: targetPlayerId },
+      });
+      if (control.ok && (control.payload as any).controller === 'ai') {
+        return { ok: false, payload: {}, reason: 'managed_player_cannot_hold_role' };
+      }
+    }
     if (role && !this.roleUnlocked(a, role)) return { ok: false, payload: {}, reason: 'role_locked' };
     if (role) for (const memberId of a.memberIds) a.roles[memberId] = (a.roles[memberId] ?? []).filter((x) => x !== role);
     a.roles[targetPlayerId] = role ? [...new Set([...(a.roles[targetPlayerId] ?? []), role])] : [];

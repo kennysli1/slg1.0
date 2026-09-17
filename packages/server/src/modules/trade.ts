@@ -850,8 +850,12 @@ export class TradeModule {
     const creator = this.load(order.villageId);
     if (!creator) return { ok: false, payload: {}, reason: 'creator_gone' };
     const cTc = this.config.tradeCenter[creator.level] ?? { tradeRoutes: 2, tradeViewRadius: 5, npcOrderCount: 3, npcRefreshSec: 3600, npcStoredRefreshes: 1 };
-    const creatorAvailable = Math.max(0, cTc.tradeRoutes - creator.tradeRoutesUsed);
-    if (order.routesNeeded > creatorAvailable) return { ok: false, payload: {}, reason: 'creator_insufficient_routes' };
+    // 创建订单时已经把 order.routesNeeded 计入 tradeRoutesUsed；这里若再拿“剩余路线”
+    // 与订单需求比较，会让恰好占满路线的合法订单永远无法成交。只校验该预留仍在且
+    // 总占用未超出中心上限，成交后由商队返程释放这份预留。
+    if (creator.tradeRoutesUsed < order.routesNeeded || creator.tradeRoutesUsed > cTc.tradeRoutes) {
+      return { ok: false, payload: {}, reason: 'creator_route_reservation_invalid' };
+    }
 
     // 接受方路线校验：接受方需运出 order.want
     let acceptor = this.load(villageId);

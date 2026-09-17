@@ -86,3 +86,4 @@ import './sanctum-offers.test.js';
 import './sanctum-movement.test.js';
 import './sanctum-integration.test.js';
 import './pve-target-identity.test.js';
+import './ai-player.test.js';
