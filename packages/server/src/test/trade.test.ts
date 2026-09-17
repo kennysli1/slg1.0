@@ -149,6 +149,29 @@ test('Trade: 不存在的 orderId → order_not_found', async () => {
   assert.equal(r.reason, 'order_not_found');
 });
 
+test('Trade: 创建方订单恰好占满全部路线时仍可被接受', async () => {
+  const app = freshApp();
+  const creator = (await reg(app, '满路线卖家')).payload as any;
+  const acceptor = (await reg(app, '满路线买家')).payload as any;
+  const cv = creator.player.villageId as string;
+  const av = acceptor.player.villageId as string;
+  assert.ok(await buildInZone(app, cv, 'outer', 'tradecenter'));
+  assert.ok(await buildInZone(app, av, 'outer', 'tradecenter'));
+  await send(app, 'economy.Grant', { villageId: cv, gain: { wood: 5000 } });
+  await send(app, 'economy.Grant', { villageId: av, gain: { clay: 5000 } });
+  const capacity = app.config.constants.tradeRouteCapacity;
+  const routes = app.config.tradeCenter[1].tradeRoutes;
+  const create = await send(app, 'trade.CreateOrder', {
+    villageId: cv, give: { wood: capacity * routes }, want: { clay: 100 },
+  });
+  assert.equal(create.ok, true, create.reason);
+  const center = create.payload as any;
+  assert.equal(center.tradeRoutesUsed, routes, '挂单应恰好预占全部路线');
+  const order = center.myOrders[0];
+  const accept = await send(app, 'trade.AcceptPlayer', { villageId: av, orderId: order.id });
+  assert.equal(accept.ok, true, accept.reason);
+});
+
 // ─── 5. 路线生命周期：CreateOrder 占用 → CancelOrder 回收 ────────────
 test('Trade: CreateTradeOrder 占用路线 CancelTradeOrder 回收路线', async () => {
   const app = freshApp();

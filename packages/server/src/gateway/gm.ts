@@ -1826,6 +1826,35 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   });
   fastify.all('/config/*', configProxy);
 
+  // AI 玩家专用调试入口：读黑板、强制单次思考、启停调度；普通 Wire 无对应 action。
+  fastify.get('/gm/ops/ai', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const res = await gameApp.commands.send({ name: 'aiPlayer.ListDebug', from: 'gm', payload: {} });
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
+  fastify.get('/gm/ops/ai/:playerId', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const res = await gameApp.commands.send({ name: 'aiPlayer.GetDebug', from: 'gm', payload: { playerId } });
+    void reply.code(res.ok ? 200 : 404).send(res);
+  });
+  fastify.post('/gm/ops/ai/:playerId/think', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const res = await gameApp.commands.send({ name: 'aiPlayer.Think', from: 'gm', payload: { playerId } });
+    store.flush();
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
+  fastify.post('/gm/ops/ai/:playerId/enabled', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== 'boolean') return void reply.code(400).send({ ok: false, reason: 'enabled 必须为 boolean' });
+    const res = await gameApp.commands.send({ name: 'aiPlayer.SetEnabled', from: 'gm', payload: { playerId, enabled } });
+    store.flush();
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
+
   // GET /gm/collections
   fastify.get('/gm/collections', (req, reply) => {
     if (!auth(req, reply)) return;

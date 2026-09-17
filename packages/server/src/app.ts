@@ -33,6 +33,7 @@ import { DiceQuestModule } from './modules/dice-quest.js';
 import { BattleSimulatorModule } from './modules/battle-simulator.js';
 import { AllianceModule } from './modules/alliance.js';
 import { SanctumModule } from './modules/sanctum.js';
+import { AiPlayerModule } from './modules/ai-player.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
 
@@ -76,6 +77,8 @@ const PROGRESS_COLLECTIONS = [
   'alliance_seq',
   // 远弦圣地是本局公共进度（轮次、条件、占领和唯一圣物），不属于账号资料。
   'sanctum',
+  'ai_player',
+  'ai_global',
 ] as const;
 
 /** 账号类集合：wipe:all 时才清空。 */
@@ -129,6 +132,7 @@ export interface GameApp {
   battleSimulator: BattleSimulatorModule;
   alliance: AllianceModule;
   sanctum: SanctumModule;
+  aiPlayer: AiPlayerModule;
   now: () => number;
   createVillage(villageId: string, q?: number, r?: number, name?: string, initialPop?: number): void | Promise<void>;
   setupWorld(): void;
@@ -314,16 +318,17 @@ export function createGameApp(opts?: {
   const battleSimulator = new BattleSimulatorModule(commands, config);
   const alliance = new AllianceModule(store, bus, commands, scheduler, now, config);
   const sanctum = new SanctumModule(store, bus, commands, scheduler, now, config);
+  const aiPlayer = new AiPlayerModule(store, bus, commands, scheduler, now, config, !opts?.manualScheduler);
 
   /** 单一生命周期清单：新增 owner 后只在此登记一次 init/config；恢复能力按需提供。 */
   const modules = [
     economy, building, military, population, world, pve, diplomacy, movement, combat,
     player, meta, notifications, mercenary, trade, treasure, research, dialogue, task, vision, reputation, alchemy, kingdom, alliance, sanctum, battleSimulator,
-    diceQuest,
+    diceQuest, aiPlayer,
   ] as const;
   const resumableModules = [
     building, military, population, movement, combat, pve,
-    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom, alliance, sanctum,
+    mercenary, trade, treasure, research, task, reputation, alchemy, kingdom, alliance, sanctum, aiPlayer,
   ] as const;
 
   /** 清理单村进度/行军/战斗/地图（放弃分城与删号共用）。 */
@@ -424,7 +429,7 @@ export function createGameApp(opts?: {
 
   return {
     config, configDir, balanceOverridePath, configAuthority, store, bus, commands, scheduler, serialQueue,
-    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, alliance, sanctum, now,
+    economy, building, military, population, world, pve, diplomacy, movement, combat, player, meta, notifications, mercenary, trade, treasure, dialogue, task, vision, reputation, alchemy, kingdom, diceQuest, battleSimulator, alliance, sanctum, aiPlayer, now,
     createVillage(villageId, q = 0, r = 0, name = '我的村庄', initialPop?: number) {
       return doCreateVillage(villageId, q, r, name, 'romans', initialPop);
     },
@@ -497,6 +502,7 @@ export function createGameApp(opts?: {
       // 0. 先清空调度器：取消所有待处理定时任务，避免刷档后遗留任务触发旧逻辑。
       scheduler.reset();
       serialQueue.reset();
+      const hadManagedAccounts = store.all<{ controller?: string }>('player').some((entry) => entry.controller === 'ai');
 
       // 1. 清空所有游戏进度集合。
       for (const c of PROGRESS_COLLECTIONS) store.clear(c);
@@ -523,6 +529,9 @@ export function createGameApp(opts?: {
       const plan = setupWorldPlan(reassignSpots);
       if (reassignSpots) ensurePve(plan);
       await player.rebuildVillages(reassignSpots);
+      // season/respawn 保留托管账号，AI owner 状态在重建后按 roster 惰性补齐并恢复调度。
+      if (hadManagedAccounts) await commands.send({ name: 'aiPlayer.Bootstrap', from: 'app', payload: {} });
+      await aiPlayer.resume();
       if (!reassignSpots) ensurePve(plan);
       return { accounts: store.all('player').length };
     },
@@ -578,6 +587,8 @@ export function createGameApp(opts?: {
         for (const c of progressByVillage) store.delete(c, villageId);
       }
       store.delete('reputation', playerId);
+      store.delete('ai_player', playerId);
+      scheduler.cancelByOwner(`ai-player:${playerId}`);
       kingdom.deletePlayer(playerId);
       alliance.deletePlayer(playerId);
       for (const m of store.all<{ id?: string; fromVillage?: string; targetId?: string; targetVillage?: string }>('movement')) {
