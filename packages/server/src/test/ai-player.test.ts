@@ -238,6 +238,25 @@ test('E2E raid 三道门槛：账号年龄、公开规模与12小时合法情报
   assert.ok(app.store.all<any>('movement').some((movement) => movement.fromVillage === state.villageId && movement.targetVillage === human.villageId), '通过准入后应由真实 Movement owner 创建 raid 行军');
 });
 
+test('E2E raid 活跃时段按游戏运营时区 UTC+8 判定，不受宿主机 TZ 影响', async () => {
+  assert.equal(new Date(clock).getUTCHours(), 4, '测试基准应处于 UTC 凌晨');
+  const app = await boot();
+  const { state, human } = await activateNearHuman(app, 'raider');
+  state.cooldowns.pve = clock + 24 * 3_600_000;
+  app.store.set('ai_player', state.playerId, state);
+  await send(app, 'military.AdjustTroops', { villageId: state.villageId, delta: { legionnaire: 12 } });
+  const rawHuman = app.store.get<any>('player', human.id)!;
+  rawHuman.createdAt = clock - 73 * 3_600_000;
+  app.store.set('player', human.id, rawHuman);
+  await app.bus.emit({ name: 'movement.ScoutReport', source: 'movement', ts: clock, payload: {
+    villageId: state.villageId, side: 'attacker', context: 'village_scout', targetKind: 'village',
+    targetVillage: human.villageId, outcome: 'attacker_survived',
+  } });
+
+  await thinkCandidates(app, state.playerId);
+  assert.ok(app.store.all<any>('movement').some((movement) => movement.fromVillage === state.villageId && movement.targetVillage === human.villageId), 'UTC 04:00 对应运营时区白天，应允许真实 raid 行军');
+});
+
 test('E2E raid：过期情报与公开人口规模比越界均不得进入候选', async () => {
   const app = await boot();
   const { state, human } = await activateNearHuman(app, 'raider');

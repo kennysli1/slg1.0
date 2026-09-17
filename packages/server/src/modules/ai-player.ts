@@ -510,8 +510,8 @@ export class AiPlayerModule {
       if (candidate.kind === 'raid') {
         arrivalAt = this.now() + Number((preview.payload as any).travelMs ?? 0);
         if (!victimId || !this.reserveVictim(state, victimId, arrivalAt)) return { ok: false, payload: {}, reason: 'victim_reserved_or_rate_limited' };
-        const arrival = new Date(arrivalAt);
-        const hour = arrival.getHours();
+        // 游戏运营时区固定为中国标准时间；不得依赖宿主机 TZ，否则 CI/生产会产生不同决策。
+        const hour = new Date(arrivalAt + 8 * 3_600_000).getUTCHours();
         if (hour < 9 || hour >= 23) {
           if (victimId) this.finishVictimReservation(state, victimId, false, arrivalAt);
           return { ok: false, payload: {}, reason: 'raid_arrival_outside_active_hours' };
