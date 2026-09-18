@@ -304,7 +304,18 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     assert.equal(gm.statusCode, 200);
     assert.match(gm.body, /配置中心（CSV）/);
     assert.match(gm.body, /任务状态管理/);
+    assert.match(gm.body, /AI 玩家控制台/);
     assert.doesNotMatch(gm.body, /任务模块编辑/);
+    const aiPage = await fastify.inject({ method: 'GET', url: '/gm/ai' });
+    assert.equal(aiPage.statusCode, 200);
+    assert.match(aiPage.body, /全部启动/);
+    assert.match(aiPage.body, /全部暂停/);
+    assert.match(aiPage.body, /立即思考一次/);
+    assert.match(aiPage.body, /近期行为结果/);
+    assert.match(aiPage.body, /\/ops\/ai\/.*\/enabled/);
+    const aiScript = aiPage.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(aiScript, 'AI 控制台应包含初始化脚本');
+    assert.doesNotThrow(() => new Function(aiScript), 'AI 控制台脚本必须是合法 JavaScript');
     const center = await fastify.inject({ method: 'GET', url: '/config' });
     assert.equal(center.statusCode, 200);
     assert.match(center.body, /配置中心（CSV）/);

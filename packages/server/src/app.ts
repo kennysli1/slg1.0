@@ -34,7 +34,6 @@ import { BattleSimulatorModule } from './modules/battle-simulator.js';
 import { AllianceModule } from './modules/alliance.js';
 import { SanctumModule } from './modules/sanctum.js';
 import { AiPlayerModule } from './modules/ai-player.js';
-import { AiActivityJournal } from './infra/ai-activity-journal.js';
 import { kingdomLandmarkFootprint } from './infra/world-generation.js';
 import { wrapHex } from './infra/hex.js';
 
@@ -224,8 +223,6 @@ export function createGameApp(opts?: {
   balanceOverridePath?: string;
   /** 随机数生成器（默认 Math.random）。测试可注入确定性 RNG 以复现掉落/加权结果。 */
   rng?: () => number;
-  /** AI 的人类可读行为纪要目录；未提供时不写文件。 */
-  aiActivityLogDir?: string;
 }): GameApp {
   const now = opts?.now ?? (() => Date.now());
   const configDir = opts?.configDir ?? defaultConfigDir();
@@ -323,7 +320,6 @@ export function createGameApp(opts?: {
   const sanctum = new SanctumModule(store, bus, commands, scheduler, now, config);
   const aiPlayer = new AiPlayerModule(
     store, bus, commands, scheduler, now, config,
-    new AiActivityJournal(opts?.aiActivityLogDir ?? null),
     !opts?.manualScheduler,
   );
 

@@ -4,7 +4,6 @@ import type { CommandBus } from '../infra/command-bus.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
 import type { GameConfig, AiPersonaCode, AiPersonaDef, AiRosterDef } from '../infra/config.js';
-import type { AiActivityJournal } from '../infra/ai-activity-journal.js';
 
 type LifeCycle = 'warming' | 'active' | 'recovering' | 'disabled';
 type ActionKind = 'build' | 'upgrade' | 'train' | 'research' | 'pve' | 'scout' | 'trade_create' | 'trade_accept' | 'trade_cancel' | 'alliance_apply' | 'raid' | 'idle';
@@ -87,7 +86,6 @@ export class AiPlayerModule {
     private scheduler: Scheduler,
     private now: () => number,
     private config: GameConfig,
-    private journal: AiActivityJournal,
     private schedulingEnabled = true,
   ) {}
 
@@ -107,7 +105,6 @@ export class AiPlayerModule {
     const state = this.store.all<AiPlayerState>(PLAYER_COLLECTION)
       .find((entry) => entry.villageId === String(payload.villageId ?? ''));
     if (!state) return;
-    this.journalBattle(state, payload);
     if (payload.side !== 'attacker') return;
     if (payload.targetKind === 'village' && typeof payload.targetId === 'string') {
       state.intelByVillage ??= {};
@@ -135,7 +132,6 @@ export class AiPlayerModule {
     const state = this.store.all<AiPlayerState>(PLAYER_COLLECTION)
       .find((entry) => entry.villageId === String(payload.villageId ?? ''));
     if (!state) return;
-    this.journalScout(state, payload);
     if (payload.targetKind !== 'village'
       || payload.outcome !== 'attacker_survived' || typeof payload.targetVillage !== 'string') return;
     state.intelByVillage ??= {};
@@ -194,11 +190,6 @@ export class AiPlayerModule {
       const state = this.newState(row, player);
       this.save(state);
       this.schedule(state);
-      this.journal.append({
-        at: this.now(), actor: row.name, persona: row.persona,
-        event: '托管账号创建', target: state.villageId, outcome: '成功',
-        details: { 玩家ID: state.playerId, 预热小时: row.warmupHours },
-      });
       created++;
     }
     return { ok: true, payload: { created, total: this.store.all(PLAYER_COLLECTION).length } };
@@ -264,11 +255,6 @@ export class AiPlayerModule {
 
     // prepared 意图可能处于“Command 已成功但进程未回写结果”的崩溃窗口；绝不重放。
     if (state.pendingIntent) {
-      this.journal.append({
-        at: now, actor: this.actorName(state), persona: state.persona,
-        event: '崩溃恢复检查', outcome: '未重放不确定动作',
-        details: { 动作: this.actionLabel(state.pendingIntent.kind), 原因: '避免重复写入' },
-      });
       this.record(state, state.pendingIntent.kind, false, 'uncertain_intent_not_retried');
       state.pendingIntent = undefined;
       state.cooldowns.uncertain = now + 30 * 60_000;
@@ -303,7 +289,6 @@ export class AiPlayerModule {
     state.pendingIntent = intent;
     this.save(state); // 写前意图必须先落盘
     const result = await this.execute(state, selected);
-    this.journalAction(state, selected, result);
     state.pendingIntent = undefined;
     state.actionsToday += result.ok ? 1 : 0;
     state.cooldowns[selected.kind] = now + (result.ok ? this.cooldownMs(selected.kind) : 30 * 60_000);
@@ -559,111 +544,20 @@ export class AiPlayerModule {
     return this.config.aiRoster.find((row) => row.rosterId === state.rosterId)?.name ?? state.rosterId;
   }
 
-  private actionLabel(kind: ActionKind): string {
-    const labels: Record<ActionKind, string> = {
-      build: '建造建筑', upgrade: '升级建筑', train: '训练军队', research: '研究科技',
-      pve: '进攻 PvE 营地', scout: '侦察玩家', trade_create: '发布贸易订单',
-      trade_accept: '接受玩家贸易', trade_cancel: '取消贸易订单', alliance_apply: '申请加入联盟',
-      raid: '掠夺玩家', idle: '休息',
-    };
-    return labels[kind];
-  }
-
-  private journalAction(state: AiPlayerState, candidate: Candidate, result: CommandResult): void {
-    const payload = candidate.payload as Record<string, any>;
-    const target = payload.targetVillage ?? payload.targetId ?? payload.orderId ?? payload.allianceId
-      ?? payload.kind ?? payload.slotId ?? payload.techCode ?? payload.unit;
-    this.journal.append({
-      at: this.now(), actor: this.actorName(state), persona: state.persona,
-      event: this.actionLabel(candidate.kind), target: target ? String(target) : undefined,
-      outcome: result.ok ? '成功提交' : `失败：${result.reason ?? '未知原因'}`,
-      details: {
-        兵力: this.formatMap(payload.troops),
-        数量: payload.count,
-        提供: this.formatMap(payload.give),
-        索取: this.formatMap(payload.want),
-        行军ID: (result.payload as any)?.movementId ?? (result.payload as any)?.id,
-        完成时间: this.formatTime((result.payload as any)?.finishAt),
-      },
-    });
-  }
-
-  private journalBattle(state: AiPlayerState, payload: Record<string, unknown>): void {
-    const side = String(payload.side ?? '');
-    const attackerWins = Boolean(payload.attackerWins);
-    const won = typeof payload.fieldWinner === 'boolean'
-      ? payload.fieldWinner
-      : side === 'attacker' ? attackerWins : !attackerWins;
-    const deployed = payload.deployedTroops as Record<string, number> | undefined;
-    const survivors = payload.survivors as Record<string, number> | undefined;
-    const losses = (payload.ownLosses as Record<string, number> | undefined)
-      ?? this.lossesFrom(deployed, survivors);
-    const deployedCount = this.mapTotal(deployed);
-    const lossCount = this.mapTotal(losses);
-    const heavyLoss = deployedCount > 0 && lossCount / deployedCount >= 0.3;
-    this.journal.append({
-      at: this.now(), actor: this.actorName(state), persona: state.persona,
-      event: `战斗结算（${String(payload.battleLabel ?? payload.battleType ?? '战斗')}）`,
-      target: `${String(payload.targetKind ?? '目标')}:${String(payload.targetId ?? '未知')}`,
-      outcome: won ? '胜利' : '失败',
-      details: {
-        身份: side === 'defender' ? '防守方' : '进攻方',
-        参战: this.formatMap(deployed), 损失: this.formatMap(losses), 幸存: this.formatMap(survivors),
-        战利品: this.formatMap((payload.loot ?? payload.looted) as Record<string, number> | undefined),
-        回合数: Number(payload.totalRounds) || undefined,
-        恢复状态: heavyLoss && side === 'attacker' ? '进入至少 72 小时恢复期' : undefined,
-      },
-    });
-  }
-
-  private journalScout(state: AiPlayerState, payload: Record<string, unknown>): void {
-    const outcome = String(payload.outcome ?? '已收到报告');
-    this.journal.append({
-      at: this.now(), actor: this.actorName(state), persona: state.persona,
-      event: '侦察回报',
-      target: String(payload.targetVillage ?? payload.targetId ?? payload.targetMovementId ?? '未知目标'),
-      outcome: outcome === 'attacker_survived' ? '侦察兵生还并带回情报' : outcome,
-      details: {
-        损失: this.formatMap(payload.attackerLosses as Record<string, number> | undefined),
-        发现资源: payload.resources ? '是' : '否',
-        发现守军: payload.defenderTroops ? '是' : '否',
-        发现建筑: payload.buildings ? '是' : '否',
-      },
-    });
-  }
-
-  private lossesFrom(deployed?: Record<string, number>, survivors?: Record<string, number>): Record<string, number> | undefined {
-    if (!deployed) return undefined;
-    return Object.fromEntries(Object.entries(deployed)
-      .map(([code, count]) => [code, Math.max(0, Number(count) - Number(survivors?.[code] ?? 0))])
-      .filter(([, count]) => Number(count) > 0));
-  }
-
-  private mapTotal(values?: Record<string, number>): number {
-    return Object.values(values ?? {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
-  }
-
-  private formatMap(values?: Record<string, number>): string | undefined {
-    if (!values) return undefined;
-    const entries = Object.entries(values).filter(([, value]) => Number(value) !== 0);
-    return entries.length ? entries.map(([key, value]) => `${key}×${Number(value)}`).join('、') : undefined;
-  }
-
-  private formatTime(value: unknown): string | undefined {
-    const timestamp = Number(value);
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
-    return new Date(timestamp + 8 * 3_600_000).toISOString().replace('T', ' ').slice(0, 19);
-  }
-
   private getDebug(cmd: Command): CommandResult {
     if (!['gm', 'test', 'app'].includes(cmd.from)) return { ok: false, payload: {}, reason: 'internal_only' };
     const state = this.load(String((cmd.payload as any).playerId ?? ''));
-    return state ? { ok: true, payload: { state: structuredClone(state), global: structuredClone(this.global()) } } : { ok: false, payload: {}, reason: 'ai_not_found' };
+    return state ? {
+      ok: true,
+      payload: { state: { ...structuredClone(state), displayName: this.actorName(state) }, global: structuredClone(this.global()) },
+    } : { ok: false, payload: {}, reason: 'ai_not_found' };
   }
 
   private listDebug(cmd: Command): CommandResult {
     if (!['gm', 'test', 'app'].includes(cmd.from)) return { ok: false, payload: {}, reason: 'internal_only' };
-    return { ok: true, payload: { players: structuredClone(this.store.all<AiPlayerState>(PLAYER_COLLECTION)) } };
+    const players = this.store.all<AiPlayerState>(PLAYER_COLLECTION)
+      .map((state) => ({ ...structuredClone(state), displayName: this.actorName(state) }));
+    return { ok: true, payload: { players } };
   }
 
   private setEnabled(cmd: Command): CommandResult {
@@ -673,10 +567,6 @@ export class AiPlayerModule {
     state.enabled = Boolean((cmd.payload as any).enabled);
     state.lifecycle = state.enabled ? (this.now() < state.warmupUntil ? 'warming' : 'active') : 'disabled';
     state.nextThinkAt = this.now(); this.save(state); this.schedule(state);
-    this.journal.append({
-      at: this.now(), actor: this.actorName(state), persona: state.persona,
-      event: 'AI 管理状态变更', outcome: state.enabled ? '已启用' : '已停用',
-    });
     return { ok: true, payload: { enabled: state.enabled } };
   }
 }
