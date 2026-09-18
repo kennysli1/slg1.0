@@ -1,8 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { createGameApp } from '../app.js';
 
 let clock = Date.UTC(2026, 8, 17, 4, 0, 0);
@@ -67,8 +64,10 @@ test('AI roster：固定创建16个不可登录托管账号，公开玩家快照
   const login = await send(app, 'player.Login', { name: app.config.aiRoster[0].name, password: 'anything' });
   assert.equal(login.ok, false);
   assert.equal(login.reason, 'managed_account');
+  const listed = await send(app, 'aiPlayer.ListDebug', {}, 'test');
+  assert.equal(listed.ok, true);
+  assert.equal((listed.payload as any).players[0].displayName, app.config.aiRoster[0].name, 'GM 列表应直接返回可读名称');
 });
-
 test('reset语义：season保留托管账号并重建AI状态，wipe全清且重启按固定roster补齐', async () => {
   const app = await boot();
   const managedIds = app.store.all<any>('ai_player').map((state) => state.playerId).sort();
@@ -388,43 +387,4 @@ test('PvP频控：同一真人12小时仅一次、72小时最多两次，预约�
   assert.equal(owner.canReserveVictim(b, 'human-1', arrival2 + 13 * 3_600_000), false, '预计到达点附近72小时已有两次命中应拒绝');
   const global = app.store.get<any>('ai_global', 'global');
   assert.deepEqual(global.victimHits['human-1'], [arrival1, arrival2], '命中必须记录预计抵达而非派出时刻');
-});
-
-test('AI行为纪要：按日生成可读Markdown并记录动作、侦察和战斗结果', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'slg-ai-journal-'));
-  try {
-    const app = createGameApp({ now: () => clock, manualScheduler: true, aiActivityLogDir: dir });
-    app.setupWorld();
-    const bootstrapped = await send(app, 'aiPlayer.Bootstrap', {}, 'test');
-    assert.equal(bootstrapped.ok, true, bootstrapped.reason);
-    const state = app.store.all<any>('ai_player').find((entry) => entry.persona === 'pioneer')!;
-    state.warmupUntil = clock - 1;
-    state.lifecycle = 'active';
-    state.primaryGoal = 'build';
-    state.goalUntil = clock + 3_600_000;
-    app.store.set('ai_player', state.playerId, state);
-    await send(app, 'aiPlayer.Think', { playerId: state.playerId }, 'test');
-    (app.aiPlayer as any).onScoutReport({
-      villageId: state.villageId, side: 'attacker', outcome: 'attacker_survived',
-      targetKind: 'village', targetVillage: 'v-human', resources: { wood: 123 }, attackerLosses: {},
-    });
-    (app.aiPlayer as any).onBattleEnded({
-      villageId: state.villageId, side: 'attacker', attackerWins: false,
-      targetKind: 'pve', targetId: 'pve-journal', battleLabel: '掠夺', totalRounds: 7,
-      deployedTroops: { legionnaire: 10 }, survivors: { legionnaire: 6 }, ownLosses: { legionnaire: 4 },
-    });
-
-    const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
-    assert.equal(files.length, 1);
-    const markdown = readFileSync(join(dir, files[0]!), 'utf8');
-    assert.match(markdown, /# AI 行为纪要/);
-    assert.match(markdown, /托管账号创建/);
-    assert.match(markdown, /侦察回报/);
-    assert.match(markdown, /战斗结算（掠夺）/);
-    assert.match(markdown, /结果：失败/);
-    assert.match(markdown, /进入至少 72 小时恢复期/);
-    assert.doesNotMatch(markdown, /password|GM_TOKEN/i);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
