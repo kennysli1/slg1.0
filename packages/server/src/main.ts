@@ -50,7 +50,7 @@ async function main() {
   const dataPath = process.env.DATA_PATH ?? join(__dirname, '../../../data/game.json');
   const logDir = process.env.LOG_DIR ?? join(__dirname, '../../../data/logs');
   initLogger(logDir);
-  const app = createGameApp({ storePath: dataPath });
+  const app = createGameApp({ storePath: dataPath, aiActivityLogDir: join(logDir, 'ai-activity') });
   const gateway = new Gateway(app);
 
   // 进程退出前把数据刷盘，避免丢最后几秒的变更
