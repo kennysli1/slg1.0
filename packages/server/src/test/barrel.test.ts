@@ -4,17 +4,21 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// 测试既可由 tsx 直接执行 src，也可由 Node 执行编译后的 dist；清单约束始终
+// 检查源目录，避免 dist 中本就不存在 .ts 文件时产生伪失败。
+const sourceTestDir = existsSync(join(__dirname, 'all.test.ts'))
+  ? __dirname
+  : resolve(__dirname, '../../src/test');
 
 test('所有 *.test.ts 都已在 all.test.ts 中 import', () => {
-  const testDir = __dirname;
-  const allBarrel = readFileSync(join(testDir, 'all.test.ts'), 'utf-8');
+  const allBarrel = readFileSync(join(sourceTestDir, 'all.test.ts'), 'utf-8');
 
-  const allFiles = readdirSync(testDir).filter(
+  const allFiles = readdirSync(sourceTestDir).filter(
     (f) =>
       f.endsWith('.test.ts') &&
       f !== 'all.test.ts' &&
