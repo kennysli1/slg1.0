@@ -69,6 +69,21 @@ has_dice_lab() {
   grep -Fq "name: 'kow-dice-lab'" "$config"
 }
 
+wait_for_health() {
+  local endpoint="$1"
+  local attempts="${KOW_DEPLOY_HEALTH_ATTEMPTS:-30}"
+  local attempt
+  [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || die "非法的健康检查重试次数：$attempts"
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if "$CURL_BIN" --fail --silent "$endpoint" >/dev/null 2>&1; then
+      echo "    service ready: $endpoint（第 $attempt/$attempts 次检查）"
+      return 0
+    fi
+    sleep 1
+  done
+  "$CURL_BIN" --fail --silent --show-error "$endpoint" >/dev/null
+}
+
 start_servers() {
   local config="$1"
   # PM2 的 startOrReload 不会可靠更新既有进程的 script/cwd（历史进程曾仍指向 src/main.ts）。
@@ -83,13 +98,14 @@ start_servers() {
   if has_dice_lab "$config"; then
     "$PM2_BIN" start "$config" --only kow-dice-lab --update-env
   fi
-  sleep "${KOW_DEPLOY_HEALTH_DELAY:-2}"
-  "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8080/health >/dev/null
+  # Node 进程显示 online 到 HTTP 端口真正监听之间可能超过两秒；轮询有界等待，
+  # 避免健康检查过早把可正常启动的新 release 误判为失败并触发回滚。
+  wait_for_health http://127.0.0.1:8080/health
   if has_test_server "$config"; then
-    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8081/health >/dev/null
+    wait_for_health http://127.0.0.1:8081/health
   fi
   if has_dice_lab "$config"; then
-    "$CURL_BIN" --fail --silent --show-error http://127.0.0.1:8091/health >/dev/null
+    wait_for_health http://127.0.0.1:8091/health
   fi
 }
 

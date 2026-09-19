@@ -24,6 +24,8 @@ STATE5="$TEST_ROOT/state5"
 STATE6="$TEST_ROOT/state6"
 PM2_LOG="$TEST_ROOT/pm2.log"
 FAKE_PM2="$TEST_ROOT/fake-pm2"
+HEALTH_COUNTER="$TEST_ROOT/health-counter"
+FAKE_CURL="$TEST_ROOT/fake-curl"
 VALIDATOR_LOG="$TEST_ROOT/validator.log"
 FAKE_VALIDATOR="$TEST_ROOT/fake-validator"
 MEMINFO="$TEST_ROOT/meminfo"
@@ -56,6 +58,10 @@ COPYFILE_DISABLE=1 tar czf "$ARCHIVE" -C "$FIXTURE" ecosystem.config.cjs config 
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$KOW_TEST_PM2_LOG"\n' > "$FAKE_PM2"
 chmod +x "$FAKE_PM2"
 export KOW_TEST_PM2_LOG="$PM2_LOG"
+# 模拟新进程首轮健康检查尚未监听：发布器必须重试，而非立刻回滚。
+printf '#!/bin/sh\ncount=0\n[ -f "$KOW_TEST_HEALTH_COUNTER" ] && count="$(cat "$KOW_TEST_HEALTH_COUNTER")"\ncount=$((count + 1))\nprintf "%%s" "$count" > "$KOW_TEST_HEALTH_COUNTER"\n[ "$count" -gt 1 ]\n' > "$FAKE_CURL"
+chmod +x "$FAKE_CURL"
+export KOW_TEST_HEALTH_COUNTER="$HEALTH_COUNTER"
 printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "$KOW_TEST_VALIDATOR_LOG"\ngrep -Fq "1,invalid-final" "$1/buildings.csv" && exit 1\ngrep -Fq "1,gm-main" "$1/buildings.csv"\n' > "$FAKE_VALIDATOR"
 chmod +x "$FAKE_VALIDATOR"
 export KOW_TEST_VALIDATOR_LOG="$VALIDATOR_LOG"
@@ -65,10 +71,10 @@ printf 'MemAvailable:       1024 kB\nSwapFree:               0 kB\n' > "$LOW_MEM
 run_helper() {
   KOW_DEPLOY_NPM_BIN=true \
   KOW_DEPLOY_PM2_BIN="$FAKE_PM2" \
-  KOW_DEPLOY_CURL_BIN=true \
+  KOW_DEPLOY_CURL_BIN="$FAKE_CURL" \
   KOW_DEPLOY_CONFIG_VALIDATOR="$FAKE_VALIDATOR" \
   KOW_DEPLOY_MEMINFO_PATH="${KOW_DEPLOY_MEMINFO_PATH:-$MEMINFO}" \
-  KOW_DEPLOY_HEALTH_DELAY=0 \
+  KOW_DEPLOY_HEALTH_ATTEMPTS=2 \
     bash "$ROOT/tools/remote-release.sh" "$@"
 }
 
