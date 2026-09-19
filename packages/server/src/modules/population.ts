@@ -236,7 +236,17 @@ export class PopulationModule {
     const INTERVAL_MS = 30_000;
     const tick = () => {
       for (const s of this.store.all<PopulationState>(COLLECTION)) {
-        void this.settleAndPersist(s);
+        // 周期结算也必须进入与 Gateway 同一条村庄车道。否则 settle() 在
+        // await economy.GetCropContext 前取到的 popCeiling，可能在训练/行军
+        // 改写士兵足迹后继续使用，进而把人口增长到已过期的上限。
+        // 逐村排队既保持不同村可并行，也让本村结算与写请求严格 FIFO。
+        const villageId = s.villageId;
+        this.scheduler.schedule(
+          0,
+          () => this.settleAndPersist(villageId),
+          `population:settle:${villageId}`,
+          `village:${villageId}`,
+        );
       }
       this.scheduler.schedule(INTERVAL_MS, tick, 'population:settleAll');
     };
@@ -244,7 +254,10 @@ export class PopulationModule {
   }
 
   /** 结算并持久化单个村庄状态（供周期 tick 复用；命令路径各自在结算后自行 store.set）。 */
-  private async settleAndPersist(s: PopulationState): Promise<void> {
+  private async settleAndPersist(villageId: string): Promise<void> {
+    // 状态须在取得村庄车道后再读取；tick 取到的旧对象不能跨越等待队列使用。
+    const s = this.load(villageId);
+    if (!s) return;
     await this.settle(s);
     // 恢复不依赖减员任务是否仍存在（例如零人口、旧任务编号或减员后刚好收支平衡）。
     // GetSnapshot/settle 仍不发事件；恢复事件只由 Scheduler 周期路径发出。
