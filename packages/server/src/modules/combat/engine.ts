@@ -2,7 +2,6 @@ import type { Snapshot } from '../../infra/combat-types.js';
 import {
   aggregateSnapshotCounts,
   normalizeTotalAdSnapshot,
-  simulateTotalAdRound,
   simulatePhaseStep,
   totalSnapshotCount,
   type DamageCarries,
@@ -11,6 +10,20 @@ import {
 
 export const MAX_REPLAY_ROUNDS = 120;
 
+/**
+ * 在线战斗只保留首轮与最近的回合，避免极长战斗让存档与内存无界增长。
+ * 真实总轮数由 Battle.ticks 单独记录。
+ */
+export function trimBattleRounds<T>(rounds: T[]): void {
+  if (rounds.length <= MAX_REPLAY_ROUNDS) return;
+  rounds.splice(1, rounds.length - MAX_REPLAY_ROUNDS);
+}
+
+export function appendBattleRound<T>(rounds: T[], round: T): void {
+  rounds.push(round);
+  trimBattleRounds(rounds);
+}
+
 export interface CombatTickInput {
   attacker: Snapshot;
   defender: Snapshot;
@@ -18,33 +31,9 @@ export interface CombatTickInput {
   defenderDamageCarry?: DamageCarries;
 }
 
-export interface CombatTickResult {
-  attacker: Snapshot;
-  defender: Snapshot;
-  attackerDamageCarry: DamageCarries;
-  defenderDamageCarry: DamageCarries;
-  attackerBefore: Record<string, number>;
-  defenderBefore: Record<string, number>;
-  attackerAfter: Record<string, number>;
-  defenderAfter: Record<string, number>;
-  damageToAttacker: number;
-  damageToDefender: number;
-  attackerTotalAttack: number;
-  attackerTotalDefense: number;
-  defenderTotalAttack: number;
-  defenderTotalDefense: number;
-  phase?: 'charge' | 'ranged' | 'melee';
-  step?: BattleStepKind;
-}
-
 export interface StagedCombatTickInput extends CombatTickInput {
   step: BattleStepKind;
   meleeRound?: number;
-}
-
-/** Combat owner 对基础设施纯回合器的薄封装。 */
-export function simulateCombatTick(input: CombatTickInput): CombatTickResult {
-  return simulateTotalAdRound(input);
 }
 
 /** v3 线上与独立模拟器共享的单阶段步骤封装。 */

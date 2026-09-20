@@ -91,15 +91,15 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
 
   const academy = state?.academy ?? {};
   const count: number = academy.academyCount ?? 0;
-  const highest: number = academy.highestLevel ?? 0;
   const failStreak: number = academy.failStreak ?? 0;
   const intervalSec: number = state?.intervalSec ?? 0;
   const lastCheck: number = academy.lastCheckTime ?? Date.now();
-
-  // 概率随连续失败递增（保底机制），公式与服务端一致
-  const baseProb = 0.10 + Math.max(0, highest - 1) * 0.01;
-  const maxProb = 0.30 + Math.max(0, highest - 1) * 0.02;
-  const curProb = count > 0 ? Math.min(maxProb, baseProb + failStreak * 0.02) : 0;
+  const formula = state?.rpFormula ?? {};
+  // 判定公式由服务端下发，页面不再按学院等级硬编码概率，避免配置中心改值后显示错误。
+  const baseProb = Number(formula.baseProbability ?? 0);
+  const maxProb = Number(formula.maxProbability ?? 0);
+  const curProb = Number(formula.currentProbability ?? 0);
+  const baseIntervalSec = Number(formula.baseIntervalSec ?? 0);
 
   async function cancel() {
     await act(req('CancelResearch', {}), { okToast: '已取消研发，按剩余进度的 90% 返还科研点' });
@@ -120,10 +120,12 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
               <span class="num">{(curProb * 100).toFixed(1)}%</span>
             </div>
             <Bar pct={(curProb / Math.max(0.01, maxProb)) * 100} kind="steel" thin />
-            <div class="rp-prob-foot">连续失败 {failStreak} 次 · 上限 {(maxProb * 100).toFixed(0)}%</div>
+            <div class="rp-prob-foot">基础 {(baseProb * 100).toFixed(1)}% · 连续失败 {failStreak} 次 · 上限 {(maxProb * 100).toFixed(1)}%</div>
           </div>
         )}
       </div>
+
+      {count > 0 && <ResearchFormula formula={formula} baseIntervalSec={baseIntervalSec} intervalSec={intervalSec} />}
 
       {researching && (
         <div class="rp-researching">
@@ -148,6 +150,34 @@ function RpPanel({ rp, state, researching }: { rp: number; state: any; researchi
         </div>
       )}
     </Panel>
+  );
+}
+
+function ResearchFormula({ formula, baseIntervalSec, intervalSec }: { formula: any; baseIntervalSec: number; intervalSec: number }) {
+  const intervalSources = Array.isArray(formula?.intervalSources) ? formula.intervalSources : [];
+  const probabilitySources = Array.isArray(formula?.probabilitySources) ? formula.probabilitySources : [];
+  if (!intervalSources.length && !probabilitySources.length) return null;
+  const sourceRows = (items: any[]) => items.map((item: any) => (
+    <div class="rp-source-row" key={`${item.source}-${item.label}`}>
+      <span>{item.label}</span><b>{item.displayValue}</b><small>{item.durationLabel ?? '持续生效'}</small>
+    </div>
+  ));
+  return (
+    <details class="rp-formula" open>
+      <summary>判定公式与加成明细</summary>
+      <div class="rp-formula-grid">
+        <div>
+          <h4>判定间隔</h4>
+          <p class="rp-formula-total">基础 {fmtDur(baseIntervalSec * 1000)} → 当前 {fmtDur(intervalSec * 1000)}</p>
+          {sourceRows(intervalSources)}
+        </div>
+        <div>
+          <h4>成功概率</h4>
+          <p class="rp-formula-total">当前 {((Number(formula.currentProbability) || 0) * 100).toFixed(1)}% · 上限 {((Number(formula.maxProbability) || 0) * 100).toFixed(1)}%</p>
+          {sourceRows(probabilitySources)}
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -187,6 +217,11 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
 
   const tiers = [...new Set(list.map((t) => t.tier))].sort((a, b) => Number(a) - Number(b));
   const names = new Map(techs.map((t) => [t.code, t.name]));
+  const catalog = new Map(techs.map((t) => [t.code, t]));
+  const doctrines = new Map<string, any>();
+  for (const tech of techs) {
+    if (tech.doctrineGroup && tech.status === 'completed') doctrines.set(tech.doctrineGroup, tech);
+  }
 
   return (
     <div class={`tech-tree-board tech-tree-board--${branch}`}>
@@ -197,10 +232,10 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
       </div>
       <div class="tech-tree-stages">
         {tiers.map((tier, index) => (
-          <section key={tier} class="tech-tree-stage">
+          <section key={tier} class={`tech-tree-stage${Number(tier) === 2 ? ' tech-tree-stage--doctrine' : ''}`}>
             <div class="tech-stage-head">
               <span class="tech-stage-index">{toRoman(Number(tier))}</span>
-              <span>阶段 {tier}</span>
+              <span>{Number(tier) === 2 ? '战略纲领 · 二选一' : `阶段 ${tier}`}</span>
               <small>{list.filter((t) => t.tier === tier).length} 项</small>
             </div>
             <div class="tech-stage-nodes">
@@ -211,6 +246,8 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
                   rp={rp}
                   researchingCode={researchingCode}
                   names={names}
+                  catalog={catalog}
+                  doctrines={doctrines}
                   academyAvailable={academyAvailable}
                 />
               ))}
@@ -223,16 +260,19 @@ function TechBranch({ branch, techs, rp, researchingCode, academyAvailable }: {
   );
 }
 
-function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
+function TechNode({ t, rp, researchingCode, names, catalog, doctrines, academyAvailable }: {
   t: any;
   rp: number;
   researchingCode: string | null;
   names: Map<string, string>;
+  catalog: Map<string, any>;
+  doctrines: Map<string, any>;
   academyAvailable: boolean;
 }) {
   const completed = t.status === 'completed';
   const researching = t.status === 'researching' || researchingCode === t.code;
-  const locked = t.status === 'locked';
+  const doctrineLocked = t.status === 'doctrine_locked';
+  const locked = t.status === 'locked' || doctrineLocked;
   const poor = t.status === 'available' && rp < t.rpCost;
   const canStart = academyAvailable && t.status === 'available' && rp >= t.rpCost && !researchingCode;
 
@@ -242,6 +282,10 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
         : canStart ? 'ready' : 'poor';
   const requires: string[] = t.requires ?? [];
   const focus = techFocus(t);
+  const chosenDoctrine = t.doctrineGroup ? doctrines.get(t.doctrineGroup) : null;
+  const abandonedPrereq = requires.map((code) => catalog.get(code)).find((tech) => tech?.doctrineGroup && doctrines.has(tech.doctrineGroup) && doctrines.get(tech.doctrineGroup)?.code !== tech.code);
+  const abandonedBy = doctrineLocked ? chosenDoctrine : abandonedPrereq ? doctrines.get(abandonedPrereq.doctrineGroup) : null;
+  const isDoctrineChoice = Boolean(t.doctrineGroup);
 
   async function start() {
     await act(req('StartResearch', { techCode: t.code }), { okToast: `开始研发「${t.name}」` });
@@ -249,7 +293,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
   }
 
   return (
-    <Panel variant="flat" class={`tech-node tech-node--${state}`}>
+    <Panel variant="flat" class={`tech-node tech-node--${state}${isDoctrineChoice ? ' tech-node--doctrine' : ''}${doctrineLocked ? ' tech-node--abandoned' : ''}`}>
       <div class="tech-node-top">
         <IconPlate
           icon={t.icon}
@@ -262,7 +306,7 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
           <div class="tech-node-name">{t.name}</div>
           <div class="tech-node-state">
             <span class={`tech-state-orb tech-state-orb--${state}`} aria-hidden="true" />
-            {completed ? '已掌握' : researching ? '正在推演' : !academyAvailable ? '需要学院' : locked ? '等待前置' : poor ? '科研点不足' : '可投入研发'}
+            {completed ? (isDoctrineChoice ? '已确立，本局不可逆' : '已掌握') : researching ? (isDoctrineChoice ? '正在确立，完成后不可逆' : '正在推演') : !academyAvailable ? '需要学院' : doctrineLocked ? '该纲领路线已放弃' : abandonedBy ? '前置路线已放弃' : locked ? '等待前置' : poor ? '科研点不足' : isDoctrineChoice ? '选择后本局不可逆' : '可投入研发'}
           </div>
         </div>
         {t.scope === 'player' && <Tag kind="gold" title="对全部村庄生效">全局</Tag>}
@@ -270,6 +314,17 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
 
       {focus && <div class="tech-node-focus">{focus}</div>}
       <div class="tech-node-effect">{t.desc}</div>
+
+      {isDoctrineChoice && (
+        <div class={`tech-doctrine-note${completed ? ' tech-doctrine-note--chosen' : doctrineLocked ? ' tech-doctrine-note--abandoned' : ''}`}>
+          {completed ? '已选纲领：本局后续发展将沿此路线推进。'
+            : doctrineLocked ? `已选择「${chosenDoctrine?.name ?? '另一纲领'}」，此路线不可再选。`
+              : '战略纲领二选一：完成后锁定本局路线；取消研发不会锁定。'}
+        </div>
+      )}
+      {!isDoctrineChoice && abandonedBy && (
+        <div class="tech-doctrine-note tech-doctrine-note--abandoned">前置纲领已选择「{abandonedBy.name}」，此后续节点本局不可再研发。</div>
+      )}
 
       <div class="tech-node-meta">
         <span><Icon icon="bld_academy" label="科研点" size="2xs" /> <b>{fmt(t.rpCost)}</b> RP</span>
@@ -287,6 +342,8 @@ function TechNode({ t, rp, researchingCode, names, academyAvailable }: {
         {completed ? <Tag kind="jade">已完成</Tag>
           : researching ? <Tag kind="ember">研发中…</Tag>
             : !academyAvailable ? <Tag>需要学院</Tag>
+              : doctrineLocked ? <Tag kind="crimson">路线已放弃</Tag>
+              : abandonedBy ? <Tag kind="crimson">前置路线已放弃</Tag>
               : locked ? <Tag>前置未满足</Tag>
               : poor ? <Tag kind="crimson">科研点不足</Tag>
                 : (

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameApp, type GameApp } from '../app.js';
+import { treasureCampDropChance, treasureCampDropWeight } from '../modules/treasures.js';
 
 /**
  * 宝物系统集成测试：验证「宝物栏存储 + 效果应用（铁律#4 推送）」端到端生效。
@@ -34,6 +35,20 @@ async function freshApp(rng?: () => number): Promise<GameApp> {
 async function send(app: GameApp, action: string, payload: any) {
   return app.commands.send({ name: action, from: 'test', payload });
 }
+
+test('野外营地宝物掉落：高难度提高总体命中与高稀有度权重，目录 dropRate 保持不变', () => {
+  const app = createGameApp();
+  const cfg = app.config;
+  const common = { dropRate: 0.08, rarity: 'common' as const };
+  const legendary = { dropRate: 0.005, rarity: 'legendary' as const };
+  assert.ok(Math.abs(treasureCampDropChance(0.2, 1, 0, 1, cfg.constants) - 0.1) < 1e-12);
+  assert.ok(Math.abs(treasureCampDropChance(0.2, 1, 0, 2, cfg.constants) - 0.15) < 1e-12);
+  assert.ok(Math.abs(treasureCampDropChance(0.2, 1, 0, 3, cfg.constants) - 0.2) < 1e-12);
+  assert.equal(treasureCampDropWeight(common, 1, cfg.constants), 0.08);
+  assert.equal(treasureCampDropWeight(legendary, 1, cfg.constants), 0.005);
+  assert.equal(treasureCampDropWeight(legendary, 3, cfg.constants), 0.005 * 1.6 ** 3);
+  assert.equal(cfg.treasures.chainsaw.dropRate, 0.08, '基础宝物 dropRate 仍来自目录原值');
+});
 
 test('宝物：woodRate 被动提升木产率 (+5%)', async () => {
   const app = await freshApp();
@@ -242,14 +257,14 @@ test('宝物掉落：栏满时确认 → 拒绝领取(no_room)，需显式出售
 });
 
 test('宝物掉落：门控未命中(高 RNG) → 无掉落', async () => {
-  // rng 恒返回 0.99；当配置中心把总体掉落率调到 1 时，0.99 仍应命中，
-  // 测试只在门控确实低于该值时断言“不掉落”。
+  // rng 恒返回 0.99；按低档营地的实际总体命中概率断言“不掉落”。
   const app = await freshApp(() => 0.99);
   const drop = await send(app, 'treasure.RollDrop', { villageId: 'v1', source: 'camp', movementId: 'mv-3' });
   assert.equal(drop.ok, true);
-  if (app.config.constants.treasureCampDropChance < 0.99) assert.equal(drop.payload.dropped, null, '应无掉落');
+  const lowTierChance = treasureCampDropChance(app.config.constants.treasureCampDropChance, 1, 0, 1, app.config.constants);
+  if (lowTierChance < 0.99) assert.equal(drop.payload.dropped, null, '应无掉落');
   const list = (await send(app, 'treasure.List', { villageId: 'v1' })).payload as any;
-  if (app.config.constants.treasureCampDropChance < 0.99) {
+  if (lowTierChance < 0.99) {
     assert.deepEqual(list.codes, [], '不应有宝物');
     assert.equal(list.pending.length, 0, '不应有待领取');
   } else {

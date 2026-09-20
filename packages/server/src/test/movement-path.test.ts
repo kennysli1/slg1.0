@@ -28,6 +28,23 @@ async function giveTroops(app: GameApp, villageId: string, troops: Record<string
   await send(app, 'military.AdjustTroops', { villageId, delta: troops });
 }
 
+test('急行军：去程冻结 1.5 倍在途粮耗，Military 统一汇总', async () => {
+  const app = freshApp();
+  const reg = await send(app, 'player.Register', { name: '急行', password: 'pass123', tribe: 'romans' });
+  const villageId = (reg.payload as any).player.villageId;
+  app.store.set('research', villageId, { villageId, rp: 0, completed: ['rapid_march'], academy: { failStreak: 0, lastCheckTime: clock, highestLevel: 1, academyCount: 1 } });
+  await giveTroops(app, villageId, { legionnaire: 10 });
+  const raid = await send(app, 'movement.SendRaid', { villageId, targetId: 'pve-0', troops: { legionnaire: 10 }, rapidMarch: true });
+  assert.equal(raid.ok, true);
+  const mv = movements(app).find((m) => m.type === 'raid');
+  assert.equal(mv.rapidRaidBonus, 0.25, '急行倍率应写入去程记录而非动态读取');
+  const military = app.store.get<any>('military', villageId);
+  assert.deepEqual(military.marchingUpkeep, [{ troops: { legionnaire: 10 }, upkeepMultiplier: 1.5 }]);
+  const eco = app.store.get<any>('economy', villageId);
+  // legionnaire：基础粮 1 + upkeep 1，10 人急行 = 30/h；居民粮另由 population 上报。
+  assert.ok(eco.cropUpkeep.troops >= 30, '急行军应计入 1.5 倍军队口粮');
+});
+
 test('逐格推进：raid 部队 pos 随时间沿路径前移，到达前不结算', async () => {
   const app = freshApp();
   const reg = await send(app, 'player.Register', { name: '甲', password: 'pass123', tribe: 'romans' });

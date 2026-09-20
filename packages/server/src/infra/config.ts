@@ -159,7 +159,7 @@ export interface TreasureDef {
 }
 
 /** 任务目标种类。 */
-export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match';
+export type QuestObjectiveKind = 'submit_resources' | 'repair_buildings' | 'build_buildings' | 'population_reached' | 'resource_owned' | 'explore_tiles' | 'main_base_level' | 'clear_camp' | 'clear_public_pve' | 'sell_discard_treasure' | 'carry_flag' | 'deliver_to_npc' | 'research_completed' | 'raid_task_village' | 'defend_task_village' | 'investigate_task_village' | 'reputation_at_most' | 'reputation_at_least' | 'kill_units' | 'dice_match' | 'rune_sequence' | 'sanctum_activate' | 'sanctum_condition_count' | 'sanctum_discover' | 'sanctum_briefing' | 'sanctum_occupy' | 'sanctum_hold' | 'sanctum_return_artifact';
 
 /** 单个任务目标。每任务恰好一个目标。 */
 export interface QuestObjective {
@@ -201,6 +201,8 @@ export interface QuestObjective {
   diceDifficulty?: 'easy' | 'normal' | 'hard';
   diceTargetScore?: number;
   diceWinsRequired?: number;
+  /** rune_sequence：以逗号分隔的唯一符文序列。 */
+  runeSequence?: string[];
 }
 
 /** 任务一个结局可获得的物品、资源和声望。 */
@@ -413,8 +415,6 @@ export interface UnitDef {
   building: string; // 所需建筑 code（由数字ID解析而来）
   /** 特性 code 列表（由 units.csv 的数字 traits 引用解析而来；可空）。 */
   traits: string[];
-  /** 历史展示标签；不参与战斗。 */
-  simTraits?: string[];
   /** 训练时扣除的人口数量（消耗玩家的 currentPop）。 */
   popCost: number;
   /** 科技档位标签；只用于目录、平衡验收和解锁分层，不直接乘战斗力。 */
@@ -441,6 +441,8 @@ export interface PveTemplate {
   cityState?: boolean;
   /** 王国 PvE 生成档位：普通城邦、统一标准封地或更高标准王都。 */
   kingdomProfile?: 'city_state' | 'fief' | 'capital';
+  /** 普通野外营地宝物掉落档位（1=低、2=中、3=高）；王国/任务目标不会走普通掉落。 */
+  treasureTier: 1 | 2 | 3;
   defender: Record<string, {
     count: number;
     form: UnitForm;
@@ -517,6 +519,8 @@ export interface GameConstants {
   marchSizePenalty: number;
   /** 军队规模减速：速度倍率下限。 */
   marchSizeMinMultiplier: number;
+  /** 野战/被伏击方达到该战损比例后返城的默认阈值（百分比）。 */
+  marchLossRateDefault: number;
   /** 骑兵兵种代码（由 cavalry_unit_codes 以 | 分隔配置），用于猎马人任务与绞马索效果。 */
   cavalryUnitCodes: string[];
   /** 行军点：基础值 + 集结点等级 × 每级增量，限制同时离城的军队数。 */
@@ -664,6 +668,13 @@ export interface GameConstants {
   tradeOrderTtlSec: number;
   /** 宝物掉落：清理野外营地后掉落宝物的总体概率（0-1）。 */
   treasureCampDropChance: number;
+  /** 宝物掉落：普通/中等/高等野外营地总体掉落概率倍率。 */
+  treasureCampDropChanceTier1Multiplier: number;
+  treasureCampDropChanceTier2Multiplier: number;
+  treasureCampDropChanceTier3Multiplier: number;
+  /** 宝物掉落：中/高等营地按稀有度提高 dropRate 权重的倍率底数；稀有度每升一级再乘一次。 */
+  treasureCampRarityMultiplierTier2: number;
+  treasureCampRarityMultiplierTier3: number;
   /** 宝物：贸易中心 NPC 订单池中出现「宝物出售」订单的概率（0-1）。 */
   treasureNpcOfferChance: number;
   /** 宝物：NPC 出售宝物的加价倍率（买价 = 目录价 priceGold × 此值，向上取整；卖出回收价 = priceGold）。 */
@@ -706,6 +717,8 @@ export interface GameConstants {
   reputationGoodGoldTaxPenaltyCap: number;
   reputationEvilPveDropRatePerPoint: number;
   reputationEvilPveDropRateCap: number;
+  /** 声望：商队劫掠每累计掠得多少单位物资扣 1 点声望；余数跨多次劫掠保留。 */
+  caravanRaidReputationGoodsPerPoint: number;
   /** PvP 掠夺/攻城：每拆除建筑一级所需的战力阈值。 */
   pvpRaidPowerPerBuildingLevel: number;
   pvpSiegePowerPerBuildingLevel: number;
@@ -742,6 +755,52 @@ export interface GameConstants {
   allianceAmbassadorRoleLevel: number;
   /** 联盟建筑建造与联盟科技研发的默认耗时（秒）。 */
   allianceProjectDurationSec: number;
+  /** 正式服赛季结算窗口（天）；仅供玩法与运营读取，不自动触发破坏性重置。 */
+  seasonSettlementMinDays: number;
+  seasonSettlementMaxDays: number;
+  /** 远弦圣地：取得占领资格所需的已完成公共条件次数。 */
+  sanctumConditionsRequired: number;
+  /** 远弦圣地：首次占领需连续守卫的秒数。 */
+  sanctumFirstHoldSec: number;
+  /** 远弦圣地：守方全军防御倍率增量（0.5 = +50%）。 */
+  sanctumDefenseMult: number;
+  /** 远弦圣地：守方第二阶段远程攻击倍率增量（0.4 = +40%）。 */
+  sanctumPhase2RangedAtkMult: number;
+  /** 旧占领者关闭守方圣地加成时，其军队人口占进攻联军人口的最低比例。 */
+  sanctumFormerHolderMinCommanderPopShare: number;
+  sanctumSimpleRuneWrongCooldownSec: number;
+  sanctumFinalRuneWrongCooldownSec: number;
+  sanctumRepeatPersonalCooldownSec: number;
+  sanctumRepeatPvpPairCooldownSec: number;
+  /** 圣地尚未被唤醒时，公共 PvE / 贸易中心分别掉落圣地残印的概率。 */
+  sanctumFragmentCampDropChance: number;
+  sanctumFragmentTradeDropChance: number;
+  /** 本轮结束后是否允许 Sanctum owner 新开一轮（默认关闭）。 */
+  sanctumNextRoundEnabled: boolean;
+  /** 活动结束公告是否公开获胜者。 */
+  sanctumRevealWinner: boolean;
+  /** 远弦圣地辅助宝物：破阵号角对普通/事件 PvE 的攻击增量。 */
+  sanctumBreachHornPveAtkBonus: number;
+  sanctumBreachHornEventAtkBonus: number;
+  /** 守望棱镜：普通/圣地内军队视野，以及圣地守方第二阶段远程防御增量。 */
+  sanctumWatcherPrismArmyVisionBonus: number;
+  sanctumWatcherPrismEventVisionBonus: number;
+  sanctumWatcherPrismEventRangedDefBonus: number;
+  /** 商路圣印：普通/圣地事件商队的速度、单线运力增量。 */
+  sanctumTradeSealCaravanSpeedBonus: number;
+  sanctumTradeSealCaravanCapacityBonus: number;
+  sanctumTradeSealEventCaravanSpeedBonus: number;
+  sanctumTradeSealEventCaravanCapacityBonus: number;
+  /** 共鸣徽章：普通/圣地事件增援行军速度增量。 */
+  sanctumResonanceMedallionReinforceSpeedBonus: number;
+  sanctumResonanceMedallionEventReinforceSpeedBonus: number;
+  /** 猎王印：普通/圣地事件 PvE 的攻击增量。 */
+  sanctumHunterKingSealPveAtkBonus: number;
+  sanctumHunterKingSealEventAtkBonus: number;
+  /** 远弦圣徽：远程兵攻击、防御及第二阶段远程攻击增量。 */
+  sanctumFarstringCrestRangedAtkBonus: number;
+  sanctumFarstringCrestRangedDefBonus: number;
+  sanctumFarstringCrestPhase2RangedAtkBonus: number;
   /** 原始 key->value（含未被强类型收录的扩展项） */
   raw: Record<string, number | boolean | string>;
 }
@@ -771,7 +830,7 @@ export interface TradeCenterLevel {
   npcStoredRefreshes: number;
 }
 
-export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure';
+export type KingdomServiceCategory = 'reinforcement' | 'attack' | 'supplies' | 'treasure' | 'escort';
 
 /** 议会厅可购买服务；所有价格、门槛、数量与延迟来自 kingdom_services.csv。 */
 export interface KingdomServiceDef {
@@ -801,6 +860,8 @@ export interface ResearchDef {
   name: string;
   branch: TechBranch;
   tier: number;
+  /** T2 战略纲领互斥组；同一玩家同组只能确立一项。 */
+  doctrineGroup?: string;
   /** 研发该科技所需的主基地最低等级；默认 1，配置中心可调。 */
   mainBaseLevel: number;
   /** 前置科技 code 列表。支持 AND（| 分隔）和 OR（OR 分隔）。 */
@@ -889,6 +950,110 @@ export interface AllianceServiceDef {
   desc: string;
 }
 
+/** 远弦圣地活动目录（sanctum_event.csv）。运行中的轮次、玩家进度与坐标不属于 CSV。 */
+export interface SanctumEventDef {
+  code: string;
+  name: string;
+  enabled: boolean;
+  /** 在活动尚未被唤醒时可由公共掉落获得的事件令牌。 */
+  fragmentTreasureCode: string;
+  /** 圣地在世界出现时使用的动态 PvE 模板。 */
+  sanctuaryTemplateCode: string;
+  description: string;
+}
+
+export type SanctumConditionCategory = 'low' | 'repeatable' | 'unique';
+export type SanctumConditionCompletionMode = 'global_once' | 'personal_repeat' | 'team_once';
+export type SanctumConditionKind = 'investigate' | 'puzzle' | 'escort' | 'resource_delivery' | 'pve_clear' | 'pvp_control' | 'caravan_escort' | 'caravan_raid' | 'cooperative_pve' | 'synchronous_ritual' | 'hold_point';
+
+/** C01–C22 的声明式目录。params 由 Sanctum owner 按 kind 解释，避免把活动流程塞进通用任务 CSV。 */
+export interface SanctumConditionDef {
+  id: number;
+  code: string;
+  name: string;
+  category: SanctumConditionCategory;
+  completionMode: SanctumConditionCompletionMode;
+  /** 同时存在的实例数量；global_once/unique 通常为 1。 */
+  instances: number;
+  /** 可重复条件实例刷新秒数；0 表示不由定时刷新。 */
+  refreshSec: number;
+  kind: SanctumConditionKind;
+  params: string;
+  pveTemplateCode?: string;
+  puzzleCode?: string;
+  minPlayers: number;
+  minPlayerPop: number;
+  minContributionShare: number;
+  personalCooldownSec: number;
+  pairCooldownSec: number;
+  rewardGroup: string;
+  clueGroup: string;
+  description: string;
+}
+
+/** 单个圣地条件的局部奖励。recipient 由 Sanctum owner 解释（participant/designated_recipient 等）。 */
+export interface SanctumConditionRewardDef {
+  id: string;
+  conditionCode: string;
+  kind: string;
+  params: string;
+  recipient: string;
+  order: number;
+}
+
+/** 符文题目录；答案步骤只留在服务端配置，不能作为公开游戏目录下发。 */
+export interface SanctumPuzzleDef {
+  code: string;
+  name: string;
+  conditionCode: string;
+  unitRequirement: string;
+  minUnits: number;
+  allowedSymbols: string[];
+  wrongCooldownSec: number;
+  description: string;
+}
+
+export interface SanctumPuzzleStepDef {
+  id: string;
+  puzzleCode: string;
+  step: number;
+  answer: string;
+  clueText: string;
+}
+
+/** 完成一个公共条件后只给参与者的私有圣地线索。 */
+export interface SanctumClueDef {
+  id: string;
+  conditionCode: string;
+  order: number;
+  template: string;
+  precision: string;
+  weight: number;
+}
+
+export type AiPersonaCode = 'pioneer' | 'merchant' | 'raider' | 'cooperator';
+
+export interface AiPersonaDef {
+  code: AiPersonaCode;
+  economyWeight: number;
+  militaryWeight: number;
+  tradeWeight: number;
+  socialWeight: number;
+  aggression: number;
+  reserveRatio: number;
+  sleepHours: number;
+  dailyActionBudget: number;
+}
+
+export interface AiRosterDef {
+  rosterId: string;
+  name: string;
+  tribe: string;
+  persona: AiPersonaCode;
+  seed: number;
+  warmupHours: number;
+}
+
 export interface GameConfig {
   resources: { key: string; name: string; icon: string }[];
   buildings: Record<string, BuildingDef>;
@@ -918,6 +1083,13 @@ export interface GameConfig {
   allianceBuildings: Record<string, AllianceBuildingDef>;
   allianceTech: Record<string, AllianceTechDef>;
   allianceServices: Record<string, AllianceServiceDef>;
+  /** 远弦圣地的静态配置；运行时状态由 Sanctum owner 独立持久化。 */
+  sanctumEvents: Record<string, SanctumEventDef>;
+  sanctumConditions: Record<string, SanctumConditionDef>;
+  sanctumConditionRewards: Record<string, SanctumConditionRewardDef[]>;
+  sanctumPuzzles: Record<string, SanctumPuzzleDef>;
+  sanctumPuzzleSteps: Record<string, SanctumPuzzleStepDef[]>;
+  sanctumClues: Record<string, SanctumClueDef[]>;
   /** 任务目录（quests.csv）：code → QuestDef。 */
   quests: Record<string, QuestDef>;
   /** 任务线/条件/目标/效果/关系边：GM 审查与后续声明式引擎的唯一设计事实源。 */
@@ -925,6 +1097,9 @@ export interface GameConfig {
   /** 对话目录（dialogues.csv）：按任务 code + trigger 查找有序对话段落组。 */
   dialogues: Record<string, DialogueDef>;
   pvpPowerCurve: { maxRatio: number; lootMult: number }[];
+  /** AI 玩家静态人格与固定 roster；运行时黑板由 ai-player owner 独占。 */
+  aiPersonas: Record<AiPersonaCode, AiPersonaDef>;
+  aiRoster: AiRosterDef[];
 }
 
 /** 解析 game_constants.csv 的一行值（按 type 列转型）。 */
@@ -1095,6 +1270,19 @@ function assertUniqueRows(rows: Record<string, string>[], table: string, idField
 export function loadGameConfig(configDir: string, overrides?: BalanceOverrides): GameConfig {
   const p = (f: string) => join(configDir, f);
 
+  const aiPersonas = Object.fromEntries(loadCsv(p('ai_personas.csv')).map((r) => [r.code, {
+    code: r.code as AiPersonaCode,
+    economyWeight: num(r.economyWeight), militaryWeight: num(r.militaryWeight),
+    tradeWeight: num(r.tradeWeight), socialWeight: num(r.socialWeight),
+    aggression: num(r.aggression), reserveRatio: num(r.reserveRatio),
+    sleepHours: num(r.sleepHours), dailyActionBudget: Math.floor(num(r.dailyActionBudget)),
+  }])) as Record<AiPersonaCode, AiPersonaDef>;
+  const aiRoster = loadCsv(p('ai_roster.csv')).map((r) => ({
+    rosterId: r.rosterId, name: r.name, tribe: r.tribe,
+    persona: r.persona as AiPersonaCode, seed: Math.floor(num(r.seed)),
+    warmupHours: num(r.warmupHours),
+  }));
+
   const resourceRows = loadCsv(p('resources.csv'));
   assertUniqueRows(resourceRows, 'resources.csv', 'id', 'id');
   const resources = resourceRows.map((r) => ({ key: r.id, name: r.name, icon: r.icon }));
@@ -1230,7 +1418,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: num(r.trainSec, 30),
       building: buildingIdToCode.get(num(r.building)) ?? r.building, // 数字建筑ID → code
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: num(r.popCost, 1),
       popCostConfigured: r.popCost !== undefined && r.popCost.trim() !== '',
       techTier: Math.max(1, num(r.techTier, 1)),
@@ -1262,7 +1449,6 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       trainSec: 0,
       building: '', // 雇佣兵不经训练建筑
       traits: parseTraitRefs(r.traits, traitIdToCode),
-      simTraits: parseTraitRefs(r.simTraits, traitIdToCode),
       popCost: 0,
       popCostConfigured: true,
       isMercenary: true,
@@ -1320,7 +1506,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   if (overrides?.pve_targets) {
     pveRows = mergeOverridesIntoRows(pveRows, {
       file: 'pve_targets.csv', key: 'id',
-      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop'],
+      numeric: ['respawnSec','lootWood','lootClay','lootIron','lootCrop','treasureTier'],
     }, overrides.pve_targets);
   }
   assertUniqueRows(pveRows, 'pve_targets.csv');
@@ -1333,6 +1519,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       faction: r.faction === 'kingdom' || r.code === 'kingdom_city_state' ? 'kingdom' : 'neutral',
       cityState: r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state',
       kingdomProfile: r.kingdomProfile === 'fief' || r.kingdomProfile === 'capital' ? r.kingdomProfile : (r.cityState === 'true' || r.cityState === '1' || r.code === 'kingdom_city_state' ? 'city_state' : undefined),
+      // 旧配置没有 treasureTier 时按现有普通营地难度顺序回退：1-2 低、3-5 中、6-8 高。
+      // 显式列值优先，便于配置中心按营地逐项调整。
+      treasureTier: (Math.max(1, Math.min(3, Math.floor(num(r.treasureTier, num(r.id) >= 6 && num(r.id) <= 8 ? 3 : num(r.id) >= 3 && num(r.id) <= 5 ? 2 : 1)))) as 1 | 2 | 3),
       respawnSec: num(r.respawnSec, 120),
       defender: {},
       loot: { wood: num(r.lootWood), clay: num(r.lootClay), iron: num(r.lootIron), crop: num(r.lootCrop) },
@@ -1432,6 +1621,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     marchSizeReferencePop: Math.max(0, cn('march_size_reference_pop', 20)),
     marchSizePenalty: Math.max(0, cn('march_size_penalty', 0.0015)),
     marchSizeMinMultiplier: Math.max(0, Math.min(1, cn('march_size_min_multiplier', 0.45))),
+    marchLossRateDefault: Math.max(0, Math.min(100, cn('march_loss_rate_default', 40))),
     cavalryUnitCodes: parseConstantList(cs('cavalry_unit_codes', 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'), 'equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|paladin|teutonknight|merc_cavalry|merc_knight'),
     marchPointBase: cn('march_point_base', 0),
     marchPointPerRallypointLevel: cn('march_point_per_rallypoint_level', 1),
@@ -1539,6 +1729,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     tradeOrderMaxPerVillage: cn('trade_order_max_per_village', 5),
     tradeOrderTtlSec: cn('trade_order_ttl_sec', 86400),
     treasureCampDropChance: cn('treasure_camp_drop_chance', 0.15),
+    // 这些是直接乘在总体掉宝概率上的倍率。默认高档为 1，
+    // 这样即使现有 treasure_camp_drop_chance=1，也能通过低/中档的较低倍率
+    // 保证“难度越高，掉宝越容易”，同时不改写宝物目录 dropRate。
+    treasureCampDropChanceTier1Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier1_multiplier', 0.5)),
+    treasureCampDropChanceTier2Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier2_multiplier', 0.75)),
+    treasureCampDropChanceTier3Multiplier: Math.max(0, cn('treasure_camp_drop_chance_tier3_multiplier', 1)),
+    treasureCampRarityMultiplierTier2: Math.max(1, cn('treasure_camp_rarity_multiplier_tier2', 1.25)),
+    treasureCampRarityMultiplierTier3: Math.max(1, cn('treasure_camp_rarity_multiplier_tier3', 1.6)),
     treasureNpcOfferChance: cn('treasure_npc_offer_chance', 0.18),
     treasureNpcBuyMarkup: cn('treasure_npc_buy_markup', 1.6),
     treasureClaimTimeoutSec: cn('treasure_claim_timeout_sec', 3600),
@@ -1564,6 +1762,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     reputationGoodGoldTaxPenaltyCap: cn('reputation_good_gold_tax_penalty_cap', 0.5),
     reputationEvilPveDropRatePerPoint: cn('reputation_evil_pve_drop_rate_per_point', 0.01),
     reputationEvilPveDropRateCap: cn('reputation_evil_pve_drop_rate_cap', 0.5),
+    caravanRaidReputationGoodsPerPoint: Math.max(1, Math.floor(cn('caravan_raid_reputation_goods_per_point', 2000))),
     pvpRaidPowerPerBuildingLevel: Math.max(1, cn('pvp_raid_power_per_building_level', 100)),
     pvpSiegePowerPerBuildingLevel: Math.max(1, cn('pvp_siege_power_per_building_level', 100)),
     pvpSiegeWeaponPowerPerBuildingLevel: Math.max(1, cn('pvp_siege_weapon_power_per_building_level', 100)),
@@ -1589,6 +1788,37 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     allianceTechRoleLevel: Math.max(1, Math.floor(cn('alliance_tech_role_level', 3))),
     allianceAmbassadorRoleLevel: Math.max(1, Math.floor(cn('alliance_ambassador_role_level', 4))),
     allianceProjectDurationSec: Math.max(1, Math.floor(cn('alliance_project_duration_sec', 10))),
+    seasonSettlementMinDays: Math.max(1, Math.floor(cn('season_settlement_min_days', 7))),
+    seasonSettlementMaxDays: Math.max(1, Math.floor(cn('season_settlement_max_days', 10))),
+    sanctumConditionsRequired: Math.max(1, Math.floor(cn('sanctum_conditions_required', 6))),
+    sanctumFirstHoldSec: Math.max(1, Math.floor(cn('sanctum_first_hold_sec', 1800))),
+    sanctumDefenseMult: Math.max(0, cn('sanctum_defense_mult', 0.5)),
+    sanctumPhase2RangedAtkMult: Math.max(0, cn('sanctum_phase2_ranged_atk_mult', 0.4)),
+    sanctumFormerHolderMinCommanderPopShare: Math.max(0, Math.min(1, cn('sanctum_former_holder_min_commander_pop_share', 0.5))),
+    sanctumSimpleRuneWrongCooldownSec: Math.max(0, Math.floor(cn('sanctum_simple_rune_wrong_cooldown_sec', 120))),
+    sanctumFinalRuneWrongCooldownSec: Math.max(0, Math.floor(cn('sanctum_final_rune_wrong_cooldown_sec', 600))),
+    sanctumRepeatPersonalCooldownSec: Math.max(0, Math.floor(cn('sanctum_repeat_personal_cooldown_sec', 1800))),
+    sanctumRepeatPvpPairCooldownSec: Math.max(0, Math.floor(cn('sanctum_repeat_pvp_pair_cooldown_sec', 21600))),
+    sanctumFragmentCampDropChance: Math.max(0, Math.min(1, cn('sanctum_fragment_camp_drop_chance', 0.03))),
+    sanctumFragmentTradeDropChance: Math.max(0, Math.min(1, cn('sanctum_fragment_trade_drop_chance', 0.02))),
+    sanctumNextRoundEnabled: raw.sanctum_next_round_enabled === true,
+    sanctumRevealWinner: raw.sanctum_reveal_winner === true,
+    sanctumBreachHornPveAtkBonus: Math.max(0, cn('sanctum_breach_horn_pve_atk_bonus', 0.05)),
+    sanctumBreachHornEventAtkBonus: Math.max(0, cn('sanctum_breach_horn_event_atk_bonus', 0.15)),
+    sanctumWatcherPrismArmyVisionBonus: Math.max(0, cn('sanctum_watcher_prism_army_vision_bonus', 1)),
+    sanctumWatcherPrismEventVisionBonus: Math.max(0, cn('sanctum_watcher_prism_event_vision_bonus', 1)),
+    sanctumWatcherPrismEventRangedDefBonus: Math.max(0, cn('sanctum_watcher_prism_event_ranged_def_bonus', 0.15)),
+    sanctumTradeSealCaravanSpeedBonus: Math.max(0, cn('sanctum_trade_seal_caravan_speed_bonus', 0.08)),
+    sanctumTradeSealCaravanCapacityBonus: Math.max(0, cn('sanctum_trade_seal_caravan_capacity_bonus', 0.05)),
+    sanctumTradeSealEventCaravanSpeedBonus: Math.max(0, cn('sanctum_trade_seal_event_caravan_speed_bonus', 0.2)),
+    sanctumTradeSealEventCaravanCapacityBonus: Math.max(0, cn('sanctum_trade_seal_event_caravan_capacity_bonus', 0.15)),
+    sanctumResonanceMedallionReinforceSpeedBonus: Math.max(0, cn('sanctum_resonance_medallion_reinforce_speed_bonus', 0.08)),
+    sanctumResonanceMedallionEventReinforceSpeedBonus: Math.max(0, cn('sanctum_resonance_medallion_event_reinforce_speed_bonus', 0.15)),
+    sanctumHunterKingSealPveAtkBonus: Math.max(0, cn('sanctum_hunter_king_seal_pve_atk_bonus', 0.05)),
+    sanctumHunterKingSealEventAtkBonus: Math.max(0, cn('sanctum_hunter_king_seal_event_atk_bonus', 0.12)),
+    sanctumFarstringCrestRangedAtkBonus: Math.max(0, cn('sanctum_farstring_crest_ranged_atk_bonus', 0.3)),
+    sanctumFarstringCrestRangedDefBonus: Math.max(0, cn('sanctum_farstring_crest_ranged_def_bonus', 0.25)),
+    sanctumFarstringCrestPhase2RangedAtkBonus: Math.max(0, cn('sanctum_farstring_crest_phase2_ranged_atk_bonus', 0.45)),
     raw,
   };
 
@@ -1662,6 +1892,7 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
       name: r.name ?? code,
       branch: (r.branch as TechBranch) || 'production',
       tier: num(r.tier, 1),
+      doctrineGroup: r.doctrineGroup?.trim() || undefined,
       mainBaseLevel: Math.max(1, num(r.mainBaseLevel, 1)),
       requires: r.requires ? r.requires.split('|').map((s: string) => s.trim()).filter(Boolean) : [],
       desc: r.desc ?? '',
@@ -1807,6 +2038,126 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     };
   }
 
+  // 远弦圣地：六张表只描述活动规则、条件、题目、奖励与线索。
+  // 当前轮次、公共目标坐标、玩家完成记录与携物状态一律由 Sanctum owner 落盘，
+  // 不允许把可变状态写回 CSV。
+  const sanctumEventRows = existsSync(p('sanctum_event.csv')) ? loadCsv(p('sanctum_event.csv')) : [];
+  const sanctumConditionRows = existsSync(p('sanctum_conditions.csv')) ? loadCsv(p('sanctum_conditions.csv')) : [];
+  const sanctumRewardRows = existsSync(p('sanctum_condition_rewards.csv')) ? loadCsv(p('sanctum_condition_rewards.csv')) : [];
+  const sanctumPuzzleRows = existsSync(p('sanctum_puzzles.csv')) ? loadCsv(p('sanctum_puzzles.csv')) : [];
+  const sanctumPuzzleStepRows = existsSync(p('sanctum_puzzle_steps.csv')) ? loadCsv(p('sanctum_puzzle_steps.csv')) : [];
+  const sanctumClueRows = existsSync(p('sanctum_clues.csv')) ? loadCsv(p('sanctum_clues.csv')) : [];
+  assertUniqueRows(sanctumEventRows, 'sanctum_event.csv', 'code', 'code');
+  assertUniqueRows(sanctumConditionRows, 'sanctum_conditions.csv');
+  assertUniqueRows(sanctumRewardRows, 'sanctum_condition_rewards.csv', 'id', 'id');
+  assertUniqueRows(sanctumPuzzleRows, 'sanctum_puzzles.csv', 'code', 'code');
+  assertUniqueRows(sanctumPuzzleStepRows, 'sanctum_puzzle_steps.csv', 'id', 'id');
+  assertUniqueRows(sanctumClueRows, 'sanctum_clues.csv', 'id', 'id');
+
+  const sanctumEvents: Record<string, SanctumEventDef> = {};
+  for (const r of sanctumEventRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    sanctumEvents[code] = {
+      code,
+      name: r.name?.trim() || code,
+      enabled: r.enabled === '1' || r.enabled === 'true',
+      fragmentTreasureCode: r.fragmentTreasureCode?.trim() || '',
+      sanctuaryTemplateCode: r.sanctuaryTemplateCode?.trim() || '',
+      description: r.description?.trim() || '',
+    };
+  }
+
+  const sanctumConditions: Record<string, SanctumConditionDef> = {};
+  for (const r of sanctumConditionRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    sanctumConditions[code] = {
+      id: num(r.id),
+      code,
+      name: r.name?.trim() || code,
+      category: r.category as SanctumConditionCategory,
+      completionMode: r.completionMode as SanctumConditionCompletionMode,
+      instances: Math.floor(num(r.instances, 1)),
+      refreshSec: Math.floor(num(r.refreshSec, 0)),
+      kind: r.kind as SanctumConditionKind,
+      params: r.params?.trim() || '',
+      pveTemplateCode: r.pveTemplateCode?.trim() || undefined,
+      puzzleCode: r.puzzleCode?.trim() || undefined,
+      minPlayers: Math.floor(num(r.minPlayers, 1)),
+      minPlayerPop: Math.floor(num(r.minPlayerPop, 0)),
+      minContributionShare: num(r.minContributionShare, 0),
+      personalCooldownSec: Math.floor(num(r.personalCooldownSec, constants.sanctumRepeatPersonalCooldownSec)),
+      pairCooldownSec: Math.floor(num(r.pairCooldownSec, constants.sanctumRepeatPvpPairCooldownSec)),
+      rewardGroup: r.rewardGroup?.trim() || code,
+      clueGroup: r.clueGroup?.trim() || code,
+      description: r.description?.trim() || '',
+    };
+  }
+
+  const sanctumConditionRewards: Record<string, SanctumConditionRewardDef[]> = {};
+  for (const r of sanctumRewardRows) {
+    const conditionCode = r.conditionCode?.trim();
+    const id = r.id?.trim();
+    if (!conditionCode || !id) continue;
+    (sanctumConditionRewards[conditionCode] ??= []).push({
+      id,
+      conditionCode,
+      kind: r.kind?.trim() || '',
+      params: r.params?.trim() || '',
+      recipient: r.recipient?.trim() || 'participant',
+      order: num(r.order),
+    });
+  }
+  for (const rewards of Object.values(sanctumConditionRewards)) rewards.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
+  const sanctumPuzzles: Record<string, SanctumPuzzleDef> = {};
+  for (const r of sanctumPuzzleRows) {
+    const code = r.code?.trim();
+    if (!code) continue;
+    sanctumPuzzles[code] = {
+      code,
+      name: r.name?.trim() || code,
+      conditionCode: r.conditionCode?.trim() || '',
+      unitRequirement: r.unitRequirement?.trim() || '',
+      minUnits: Math.floor(num(r.minUnits, 1)),
+      allowedSymbols: (r.allowedSymbols ?? '').split('|').map((symbol) => symbol.trim()).filter(Boolean),
+      wrongCooldownSec: Math.floor(num(r.wrongCooldownSec, 0)),
+      description: r.description?.trim() || '',
+    };
+  }
+
+  const sanctumPuzzleSteps: Record<string, SanctumPuzzleStepDef[]> = {};
+  for (const r of sanctumPuzzleStepRows) {
+    const puzzleCode = r.puzzleCode?.trim();
+    const id = r.id?.trim();
+    if (!puzzleCode || !id) continue;
+    (sanctumPuzzleSteps[puzzleCode] ??= []).push({
+      id,
+      puzzleCode,
+      step: Math.floor(num(r.step)),
+      answer: r.answer?.trim() || '',
+      clueText: r.clueText?.trim() || '',
+    });
+  }
+  for (const steps of Object.values(sanctumPuzzleSteps)) steps.sort((a, b) => a.step - b.step || a.id.localeCompare(b.id));
+
+  const sanctumClues: Record<string, SanctumClueDef[]> = {};
+  for (const r of sanctumClueRows) {
+    const conditionCode = r.conditionCode?.trim();
+    const id = r.id?.trim();
+    if (!conditionCode || !id) continue;
+    (sanctumClues[conditionCode] ??= []).push({
+      id,
+      conditionCode,
+      order: num(r.order),
+      template: r.template?.trim() || '',
+      precision: r.precision?.trim() || 'coarse',
+      weight: Math.max(0, num(r.weight, 1)),
+    });
+  }
+  for (const clues of Object.values(sanctumClues)) clues.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
   // tradeCenter 缺级回退：从已解析的最高有效级向下复制，保证任意贸易中心等级都能取到参数。
   const maxTcLv = Object.keys(tradeCenter).map(Number).sort((a, b) => a - b);
   if (maxTcLv.length) {
@@ -1864,6 +2215,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
   for (const r of edgeRows) questGraph.edges.push({ id: r.id.trim(), fromQuest: r.fromQuest?.trim() || '', toQuest: r.toQuest?.trim() || '', relation: (r.relation as QuestEdgeDef['relation']) || 'requires', order: num(r.order) });
 
   const objectiveOf = (row: QuestObjectiveDef): QuestObjective => {
+    if (row.kind === 'submit_resources') {
+      return { kind: row.kind, resources: parseResourceList(row.params) ?? {} };
+    }
     if (row.kind === 'repair_buildings') {
       return {
         kind: row.kind,
@@ -1909,7 +2263,14 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
         diceWinsRequired: Math.max(1, num(winsRequired, 1)),
       };
     }
-    return { kind: 'submit_resources', resources: parseResourceList(row.params) ?? {} };
+    if (row.kind === 'rune_sequence') {
+      return { kind: row.kind, runeSequence: row.params.split(/[|,]/).map((v) => v.trim()).filter(Boolean), count: 1 };
+    }
+    if (row.kind === 'sanctum_activate' || row.kind === 'sanctum_condition_count' || row.kind === 'sanctum_discover' || row.kind === 'sanctum_briefing' || row.kind === 'sanctum_occupy' || row.kind === 'sanctum_hold' || row.kind === 'sanctum_return_artifact') {
+      // 圣地 owner 维护真实进度；兼容任务卡只读取声明的数值目标。
+      return { kind: row.kind, count: Math.max(1, Math.floor(num(row.params, 1))) };
+    }
+    throw new Error(`quest_objectives.csv[${row.id}] 未知目标类型：${row.kind}`);
   };
   const parseReputationMercenaryExchange = (s: string): { unitCode: string; perPoint: number } | null => {
     const [unitCode, rawPerPoint] = (s ?? '').split(':').map((value) => value.trim());
@@ -2063,7 +2424,9 @@ export function loadGameConfig(configDir: string, overrides?: BalanceOverrides):
     .sort((a, b) => a.maxRatio - b.maxRatio);
 
   const config: GameConfig = {
-    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, allianceServices, quests, questGraph, dialogues, pvpPowerCurve,
+    resources, buildings, townCenterSlots, units, unitTraits, pveTemplates, pveSpawns, constants, villageTemplates, mercCamp, tradeCenter, kingdomServices, treasures, research, academy, allianceLevels, allianceBuildings, allianceTech, allianceServices,
+    sanctumEvents, sanctumConditions, sanctumConditionRewards, sanctumPuzzles, sanctumPuzzleSteps, sanctumClues,
+    quests, questGraph, dialogues, pvpPowerCurve, aiPersonas, aiRoster,
   };
   validateGameConfig(config);
   return config;
@@ -2090,12 +2453,38 @@ export function validateGameConfig(config: GameConfig): void {
   const resourceKeys = new Set(config.resources.map((r) => r.key));
   const knownTribes = new Set(['romans', 'gauls', 'teutons']);
 
+  const personaCodes = new Set(Object.keys(config.aiPersonas));
+  for (const persona of Object.values(config.aiPersonas)) {
+    if (!['pioneer', 'merchant', 'raider', 'cooperator'].includes(persona.code)) errors.push(`ai_personas.csv[${persona.code}] code 非法`);
+    for (const [key, value] of Object.entries(persona)) {
+      if (key === 'code') continue;
+      if (!Number.isFinite(value)) errors.push(`ai_personas.csv[${persona.code}] ${key} 必须是数字`);
+    }
+    if (persona.reserveRatio < 0 || persona.reserveRatio > 1) errors.push(`ai_personas.csv[${persona.code}] reserveRatio 必须在 0..1`);
+    if (persona.sleepHours < 6 || persona.sleepHours > 9) errors.push(`ai_personas.csv[${persona.code}] sleepHours 必须在 6..9`);
+    if (persona.dailyActionBudget < 1) errors.push(`ai_personas.csv[${persona.code}] dailyActionBudget 必须为正整数`);
+  }
+  if (config.aiRoster.length !== 16) errors.push(`ai_roster.csv 必须固定 16 行，实际 ${config.aiRoster.length}`);
+  const rosterIds = new Set<string>(), rosterNames = new Set<string>();
+  for (const row of config.aiRoster) {
+    if (!row.rosterId || rosterIds.has(row.rosterId)) errors.push(`ai_roster.csv rosterId 重复或为空：${row.rosterId}`);
+    if (!row.name || row.name.length > 16 || rosterNames.has(row.name.toLowerCase())) errors.push(`ai_roster.csv name 非法或重复：${row.name}`);
+    if (!knownTribes.has(row.tribe)) errors.push(`ai_roster.csv[${row.rosterId}] tribe 非法：${row.tribe}`);
+    if (!personaCodes.has(row.persona)) errors.push(`ai_roster.csv[${row.rosterId}] persona 不存在：${row.persona}`);
+    if (!Number.isSafeInteger(row.seed) || row.seed <= 0) errors.push(`ai_roster.csv[${row.rosterId}] seed 必须为正整数`);
+    if (row.warmupHours < 48 || row.warmupHours > 72) errors.push(`ai_roster.csv[${row.rosterId}] warmupHours 必须在 48..72`);
+    rosterIds.add(row.rosterId); rosterNames.add(row.name.toLowerCase());
+  }
+
   for (const service of Object.values(config.kingdomServices)) {
-    if (!['reinforcement', 'attack', 'supplies', 'treasure'].includes(service.category)) {
+    if (!['reinforcement', 'attack', 'supplies', 'treasure', 'escort'].includes(service.category)) {
       errors.push(`kingdom_services.csv[${service.code}] category 非法：${service.category}`);
     }
-    if ((service.category === 'reinforcement' || service.category === 'attack') && (!service.unitCode || !config.units[service.unitCode])) {
+    if ((service.category === 'reinforcement' || service.category === 'attack' || service.category === 'escort') && (!service.unitCode || !config.units[service.unitCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 兵种 ${service.unitCode ?? '(空)'} 不在 units.csv`);
+    }
+    if (service.category === 'escort' && (!Number.isInteger(service.unitCount) || service.unitCount <= 0)) {
+      errors.push(`kingdom_services.csv[${service.code}] escort unitCount 必须为正整数`);
     }
     if (service.category === 'treasure' && (!service.treasureCode || !config.treasures[service.treasureCode])) {
       errors.push(`kingdom_services.csv[${service.code}] 宝物 ${service.treasureCode ?? '(空)'} 不在 treasures.csv`);
@@ -2172,13 +2561,31 @@ export function validateGameConfig(config: GameConfig): void {
       if (!buildingCodes.has(r.kind)) errors.push(`buildings.csv[${b.kind}] requires 引用了不存在的建筑 ${r.kind}`);
       if (r.level <= 0) errors.push(`buildings.csv[${b.kind}] requires 等级必须>0`);
     }
+    const mainRequires = b.requires.filter((r) => r.kind === 'main');
+    const mainLevels = [...new Set(mainRequires.map((r) => r.level))];
+    if (mainLevels.length > 1) {
+      errors.push(`buildings.csv[${b.kind}] requires 不能包含多个不同的主基地等级`);
+    } else if (mainLevels.length === 1 && mainLevels[0] !== b.mainBaseLevel) {
+      errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 必须与 requires 主基地前置=${mainLevels[0]} 一致`);
+    }
     if (b.prosperityPerLevel < 0) errors.push(`buildings.csv[${b.kind}] prosperityPerLevel 必须≥0（当前${b.prosperityPerLevel}）`);
     if (b.popGrowthPerLevel < 0) errors.push(`buildings.csv[${b.kind}] popGrowthPerLevel 必须≥0（当前${b.popGrowthPerLevel}）`);
     if (b.kind === 'main' && b.popGrowthPerLevel <= 0) errors.push(`buildings.csv[main] popGrowthPerLevel 必须>0（人口增长绑在城镇中心上；当前${b.popGrowthPerLevel}）`);
   }
   if (centerCount !== 1) errors.push(`buildings.csv 必须恰好有一个 zone=center 的建筑（城镇中心），当前 ${centerCount} 个`);
+  if (centerMaxLevel > 0 && config.constants.foundMinMainLevel > centerMaxLevel) {
+    errors.push(`game_constants.csv found_min_main_level=${config.constants.foundMinMainLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
+  if (config.constants.seasonSettlementMinDays > config.constants.seasonSettlementMaxDays) {
+    errors.push('game_constants.csv season_settlement_min_days 不能大于 season_settlement_max_days');
+  }
   for (const b of Object.values(config.buildings)) {
     if (centerMaxLevel > 0 && b.mainBaseLevel > centerMaxLevel) errors.push(`buildings.csv[${b.kind}] mainBaseLevel=${b.mainBaseLevel} 超过主基地最高等级 ${centerMaxLevel}`);
+  }
+  for (const [level, tier] of Object.entries(config.tradeCenter)) {
+    if (!Number.isFinite(tier.npcRefreshSec) || tier.npcRefreshSec <= 0) {
+      errors.push(`trade_center.csv level=${level} npcRefreshSec 必须>0`);
+    }
   }
 
   // town_center_slots：覆盖 1..城镇中心maxLevel；槽位单调不减；queue≥1
@@ -2229,9 +2636,6 @@ export function validateGameConfig(config: GameConfig): void {
     for (const tc of u.traits) {
       if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] traits 引用了不存在的特性 ${tc}`);
     }
-    for (const tc of u.simTraits ?? []) {
-      if (!traitCodes.has(tc)) errors.push(`units.csv[${u.key}] simTraits 引用了不存在的特性 ${tc}`);
-    }
     // 雇佣兵不走 military.TrainTroops（trainSec=0 合法），普通兵种仍要求 trainSec>0 防零除
     if (!u.isMercenary && u.trainSec <= 0) errors.push(`units.csv[${u.key}] trainSec 必须>0（防零除，当前${u.trainSec}）`);
     if (u.speed <= 0) errors.push(`units.csv[${u.key}] speed 必须>0（防零除，当前${u.speed}）`);
@@ -2243,6 +2647,7 @@ export function validateGameConfig(config: GameConfig): void {
   const pveCodes = new Set(Object.keys(config.pveTemplates));
   for (const p of Object.values(config.pveTemplates)) {
     if (p.faction !== 'neutral' && p.faction !== 'kingdom') errors.push(`pve_targets.csv[${p.type}] faction 必须是 neutral 或 kingdom`);
+    if (p.treasureTier !== 1 && p.treasureTier !== 2 && p.treasureTier !== 3) errors.push(`pve_targets.csv[${p.type}] treasureTier 必须为 1/2/3`);
     // happy_village（幸福村）和 kingdom_city_state（运行时随机生成）允许不在静态守军表中配置。
     if (Object.keys(p.defender).length === 0 && p.type !== 'happy_village' && !p.cityState) errors.push(`pve_targets.csv[${p.type}] 没有任何守军（pve_defenders.csv 至少应有一行）`);
     for (const [unitCode, defender] of Object.entries(p.defender)) {
@@ -2264,7 +2669,7 @@ export function validateGameConfig(config: GameConfig): void {
   // 宝物目录：类别/稀有度/效果类型/应用方式必须在已知枚举内；数值范围合理
   const TREASURE_CATEGORIES = new Set(['economic', 'military', 'social', 'special']);
   const TREASURE_RARITIES = new Set(['common', 'rare', 'epic', 'legendary']);
-  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner']);
+  const TREASURE_EFFECTS = new Set(['woodRate', 'clayRate', 'ironRate', 'cropRate', 'goldRate', 'allResRate', 'atkMult', 'defMult', 'popGrowth', 'reputation', 'instantGold', 'ritualBuff', 'cavalryTrainSpeed', 'soldierFoodReduce', 'victoryFlag', 'reportCoords', 'honestHeart', 'dialogue', 'blackBadge', 'enemyCavalryDef', 'smartPerson', 'warriorBanner', 'vaultGoldLoot', 'armyVision', 'sanctum_fragment', 'sanctum_breach_horn', 'sanctum_watcher_prism', 'sanctum_trade_seal', 'sanctum_resonance_medallion', 'sanctum_hunter_king_seal', 'sanctum_farstring_crest']);
   const TREASURE_APPLY = new Set(['passive', 'instant']);
   for (const t of Object.values(config.treasures)) {
     if (!t.code) errors.push(`treasures.csv 存在空 code 的行`);
@@ -2280,6 +2685,97 @@ export function validateGameConfig(config: GameConfig): void {
     if (t.activeEffectValue !== undefined && t.activeEffectValue < 0) errors.push(`treasures.csv[${t.code}] activeEffectValue 必须≥0（当前${t.activeEffectValue}）`);
     if (t.activeDurationSec !== undefined && t.activeDurationSec < 0) errors.push(`treasures.csv[${t.code}] activeDurationSec 必须≥0（当前${t.activeDurationSec}）`);
     if (t.activeEffectType && !['instantResearchPoints', 'temporaryCombatBuff'].includes(t.activeEffectType)) errors.push(`treasures.csv[${t.code}] activeEffectType=${t.activeEffectType} 不是已知主动效果`);
+  }
+
+  // 远弦圣地：配置只定义规则和内容，所有可变进度必须由 Sanctum owner 保存。
+  // 保留“没有 sanctum_event.csv”的兼容入口，便于旧共享配置先升级代码再同步新增文件。
+  const sanctumEventCodes = new Set(Object.keys(config.sanctumEvents));
+  const sanctumConditionCodes = new Set(Object.keys(config.sanctumConditions));
+  const sanctumPuzzleCodes = new Set(Object.keys(config.sanctumPuzzles));
+  const SANCTUM_CATEGORIES = new Set<SanctumConditionCategory>(['low', 'repeatable', 'unique']);
+  const SANCTUM_COMPLETION_MODES = new Set<SanctumConditionCompletionMode>(['global_once', 'personal_repeat', 'team_once']);
+  const SANCTUM_CONDITION_KINDS = new Set<SanctumConditionKind>(['investigate', 'puzzle', 'escort', 'resource_delivery', 'pve_clear', 'pvp_control', 'caravan_escort', 'caravan_raid', 'cooperative_pve', 'synchronous_ritual', 'hold_point']);
+  const SANCTUM_REWARD_KINDS = new Set(['grant_resources', 'grant_random_resource', 'grant_research_points', 'adjust_reputation', 'grant_treasure', 'grant_temporary_army_vision']);
+  for (const event of Object.values(config.sanctumEvents)) {
+    if (!event.name) errors.push(`sanctum_event.csv[${event.code}] name 不能为空`);
+    const fragment = config.treasures[event.fragmentTreasureCode];
+    if (!fragment) errors.push(`sanctum_event.csv[${event.code}] fragmentTreasureCode=${event.fragmentTreasureCode} 不在 treasures.csv`);
+    else {
+      if (fragment.effectType !== 'sanctum_fragment') errors.push(`treasures.csv[${fragment.code}] 圣地残印必须使用 effectType=sanctum_fragment`);
+      if (fragment.dropRate !== 0 || fragment.priceGold !== 0) errors.push(`treasures.csv[${fragment.code}] 圣地残印必须由 Sanctum owner 发放，dropRate 与 priceGold 必须为 0`);
+    }
+    if (!config.pveTemplates[event.sanctuaryTemplateCode]) errors.push(`sanctum_event.csv[${event.code}] sanctuaryTemplateCode=${event.sanctuaryTemplateCode} 不在 pve_targets.csv`);
+    if (config.pveSpawns.some((spawn) => spawn.type === event.sanctuaryTemplateCode)) errors.push(`sanctum_event.csv[${event.code}] 圣地模板不得写入 pve_spawns.csv（它必须由活动生命周期动态生成）`);
+  }
+  for (const condition of Object.values(config.sanctumConditions)) {
+    if (!Number.isInteger(condition.id) || condition.id < 1) errors.push(`sanctum_conditions.csv[${condition.code}] id 必须为正整数`);
+    if (!condition.name) errors.push(`sanctum_conditions.csv[${condition.code}] name 不能为空`);
+    if (!SANCTUM_CATEGORIES.has(condition.category)) errors.push(`sanctum_conditions.csv[${condition.code}] category 必须是 low/repeatable/unique`);
+    if (!SANCTUM_COMPLETION_MODES.has(condition.completionMode)) errors.push(`sanctum_conditions.csv[${condition.code}] completionMode 非法`);
+    if (!SANCTUM_CONDITION_KINDS.has(condition.kind)) errors.push(`sanctum_conditions.csv[${condition.code}] kind=${condition.kind} 未接线`);
+    if (!Number.isInteger(condition.instances) || condition.instances < 1) errors.push(`sanctum_conditions.csv[${condition.code}] instances 必须为正整数`);
+    if (!Number.isInteger(condition.refreshSec) || condition.refreshSec < 0) errors.push(`sanctum_conditions.csv[${condition.code}] refreshSec 必须为非负整数`);
+    if (!Number.isInteger(condition.minPlayers) || condition.minPlayers < 1) errors.push(`sanctum_conditions.csv[${condition.code}] minPlayers 必须为正整数`);
+    if (!Number.isInteger(condition.minPlayerPop) || condition.minPlayerPop < 0) errors.push(`sanctum_conditions.csv[${condition.code}] minPlayerPop 必须为非负整数`);
+    if (!Number.isFinite(condition.minContributionShare) || condition.minContributionShare < 0 || condition.minContributionShare > 1) errors.push(`sanctum_conditions.csv[${condition.code}] minContributionShare 必须在[0,1]`);
+    if (!Number.isInteger(condition.personalCooldownSec) || condition.personalCooldownSec < 0 || !Number.isInteger(condition.pairCooldownSec) || condition.pairCooldownSec < 0) errors.push(`sanctum_conditions.csv[${condition.code}] 冷却时间必须为非负整数`);
+    if (!condition.params) errors.push(`sanctum_conditions.csv[${condition.code}] params 不能为空`);
+    if (condition.pveTemplateCode) {
+      if (!config.pveTemplates[condition.pveTemplateCode]) errors.push(`sanctum_conditions.csv[${condition.code}] pveTemplateCode=${condition.pveTemplateCode} 不在 pve_targets.csv`);
+      if (config.pveSpawns.some((spawn) => spawn.type === condition.pveTemplateCode)) errors.push(`sanctum_conditions.csv[${condition.code}] 动态条件模板不得写入 pve_spawns.csv`);
+    }
+    if ((condition.kind === 'pve_clear' || condition.kind === 'cooperative_pve') && !condition.pveTemplateCode) errors.push(`sanctum_conditions.csv[${condition.code}] ${condition.kind} 必须指定 pveTemplateCode`);
+    if (condition.puzzleCode && !sanctumPuzzleCodes.has(condition.puzzleCode)) errors.push(`sanctum_conditions.csv[${condition.code}] puzzleCode=${condition.puzzleCode} 不在 sanctum_puzzles.csv`);
+    if (condition.kind === 'puzzle' && !condition.puzzleCode) errors.push(`sanctum_conditions.csv[${condition.code}] puzzle 必须指定 puzzleCode`);
+    if (!config.sanctumConditionRewards[condition.code]?.length) errors.push(`sanctum_conditions.csv[${condition.code}] 缺少 sanctum_condition_rewards.csv 奖励`);
+    if (!config.sanctumClues[condition.code]?.length) errors.push(`sanctum_conditions.csv[${condition.code}] 缺少 sanctum_clues.csv 私有线索`);
+  }
+  for (const [conditionCode, rewards] of Object.entries(config.sanctumConditionRewards)) {
+    if (!sanctumConditionCodes.has(conditionCode)) errors.push(`sanctum_condition_rewards.csv 条件不存在：${conditionCode}`);
+    for (const reward of rewards) {
+      if (!SANCTUM_REWARD_KINDS.has(reward.kind)) errors.push(`sanctum_condition_rewards.csv[${reward.id}] kind=${reward.kind} 未接线`);
+      if (!reward.params) errors.push(`sanctum_condition_rewards.csv[${reward.id}] params 不能为空`);
+      if (!reward.recipient) errors.push(`sanctum_condition_rewards.csv[${reward.id}] recipient 不能为空`);
+      if (reward.kind === 'grant_resources') {
+        const resources = parseResourceList(reward.params);
+        if (!resources || Object.keys(resources).length === 0) errors.push(`sanctum_condition_rewards.csv[${reward.id}] grant_resources 参数无效`);
+        for (const resource of Object.keys(resources ?? {})) if (!resourceKeys.has(resource)) errors.push(`sanctum_condition_rewards.csv[${reward.id}] 资源 ${resource} 不在 resources.csv`);
+      }
+      if (reward.kind === 'grant_treasure' && !config.treasures[reward.params]) errors.push(`sanctum_condition_rewards.csv[${reward.id}] 宝物 ${reward.params} 不在 treasures.csv`);
+    }
+  }
+  for (const puzzle of Object.values(config.sanctumPuzzles)) {
+    if (!puzzle.name || !puzzle.conditionCode) errors.push(`sanctum_puzzles.csv[${puzzle.code}] name/conditionCode 不能为空`);
+    if (!sanctumConditionCodes.has(puzzle.conditionCode)) errors.push(`sanctum_puzzles.csv[${puzzle.code}] conditionCode=${puzzle.conditionCode} 不在 sanctum_conditions.csv`);
+    if (!Number.isInteger(puzzle.minUnits) || puzzle.minUnits < 1) errors.push(`sanctum_puzzles.csv[${puzzle.code}] minUnits 必须为正整数`);
+    if (puzzle.allowedSymbols.length < 2) errors.push(`sanctum_puzzles.csv[${puzzle.code}] allowedSymbols 至少需要两个符号`);
+    if (!Number.isInteger(puzzle.wrongCooldownSec) || puzzle.wrongCooldownSec < 0) errors.push(`sanctum_puzzles.csv[${puzzle.code}] wrongCooldownSec 必须为非负整数`);
+    const steps = config.sanctumPuzzleSteps[puzzle.code] ?? [];
+    if (!steps.length) errors.push(`sanctum_puzzles.csv[${puzzle.code}] 缺少 sanctum_puzzle_steps.csv 步骤`);
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.step !== i + 1) errors.push(`sanctum_puzzle_steps.csv[${step.id}] ${puzzle.code} 的 step 必须从1连续编号`);
+      if (!puzzle.allowedSymbols.includes(step.answer)) errors.push(`sanctum_puzzle_steps.csv[${step.id}] answer=${step.answer} 不在 allowedSymbols`);
+    }
+  }
+  for (const [puzzleCode, steps] of Object.entries(config.sanctumPuzzleSteps)) {
+    if (!sanctumPuzzleCodes.has(puzzleCode)) errors.push(`sanctum_puzzle_steps.csv 引用了不存在的 puzzleCode=${puzzleCode}`);
+    for (const step of steps) if (!step.clueText) errors.push(`sanctum_puzzle_steps.csv[${step.id}] clueText 不能为空`);
+  }
+  for (const [conditionCode, clues] of Object.entries(config.sanctumClues)) {
+    if (!sanctumConditionCodes.has(conditionCode)) errors.push(`sanctum_clues.csv 条件不存在：${conditionCode}`);
+    for (const clue of clues) {
+      if (!clue.template) errors.push(`sanctum_clues.csv[${clue.id}] template 不能为空`);
+      if (!Number.isFinite(clue.weight) || clue.weight < 0) errors.push(`sanctum_clues.csv[${clue.id}] weight 必须≥0`);
+    }
+  }
+  if (sanctumEventCodes.size > 0 && Object.keys(config.sanctumConditions).length < config.constants.sanctumConditionsRequired) {
+    errors.push(`sanctum_conditions.csv 条件数量少于 sanctum_conditions_required=${config.constants.sanctumConditionsRequired}`);
+  }
+  const farstringCrest = config.treasures.farstring_crest;
+  if (sanctumEventCodes.has('farstring_sanctum')) {
+    if (!farstringCrest || farstringCrest.effectType !== 'sanctum_farstring_crest') errors.push('treasures.csv 缺少远弦圣徽 farstring_crest（effectType=sanctum_farstring_crest）');
+    else if (farstringCrest.dropRate !== 0 || farstringCrest.priceGold !== 0) errors.push('treasures.csv[farstring_crest] 必须只由携物返乡结算，dropRate 与 priceGold 必须为 0');
   }
 
   // village_templates：预置建筑 code 必须存在；资源覆盖 key 必须存在；开局预置不超 tcLevel=1 槽位
@@ -2326,10 +2822,29 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.mainBuildSpeedupCap < 0 || c.mainBuildSpeedupCap >= 1) errors.push(`game_constants.csv main_build_speedup_cap 必须在[0,1)`);
   // 宝物掉落总体概率：必须在 [0,1]
   if (c.treasureCampDropChance < 0 || c.treasureCampDropChance > 1) errors.push(`game_constants.csv treasure_camp_drop_chance 必须在[0,1]（当前${c.treasureCampDropChance}）`);
+  if (c.treasureCampDropChanceTier1Multiplier < 0 || c.treasureCampDropChanceTier2Multiplier < 0 || c.treasureCampDropChanceTier3Multiplier < 0) errors.push(`game_constants.csv treasure_camp_drop_chance_tier*_multiplier 必须≥0`);
+  if (c.treasureCampRarityMultiplierTier2 < 1 || c.treasureCampRarityMultiplierTier3 < 1) errors.push(`game_constants.csv treasure_camp_rarity_multiplier_tier2/3 必须≥1`);
   if (c.treasureClaimTimeoutSec <= 0) errors.push(`game_constants.csv treasure_claim_timeout_sec 必须>0（当前${c.treasureClaimTimeoutSec}）`);
   if (c.treasureCarryTroopsPerSlot <= 0) errors.push(`game_constants.csv treasure_carry_troops_per_slot 必须>0（当前${c.treasureCarryTroopsPerSlot}）`);
   if (c.treasureCarryMaxSlots <= 0) errors.push(`game_constants.csv treasure_carry_max_slots 必须>0（当前${c.treasureCarryMaxSlots}）`);
   if (c.alchemyRefineSec <= 0) errors.push(`game_constants.csv alchemy_refine_sec 必须>0（当前${c.alchemyRefineSec}）`);
+  if (c.sanctumConditionsRequired < 1) errors.push('game_constants.csv sanctum_conditions_required 必须≥1');
+  if (c.sanctumFirstHoldSec < 1) errors.push('game_constants.csv sanctum_first_hold_sec 必须≥1');
+  if (c.sanctumDefenseMult < 0) errors.push('game_constants.csv sanctum_defense_mult 必须≥0');
+  if (c.sanctumPhase2RangedAtkMult < 0) errors.push('game_constants.csv sanctum_phase2_ranged_atk_mult 必须≥0');
+  if (c.sanctumFormerHolderMinCommanderPopShare < 0 || c.sanctumFormerHolderMinCommanderPopShare > 1) errors.push('game_constants.csv sanctum_former_holder_min_commander_pop_share 必须在[0,1]');
+  if (c.sanctumSimpleRuneWrongCooldownSec < 0 || c.sanctumFinalRuneWrongCooldownSec < 0 || c.sanctumRepeatPersonalCooldownSec < 0 || c.sanctumRepeatPvpPairCooldownSec < 0) errors.push('game_constants.csv 圣地冷却参数必须为非负整数');
+  if (c.sanctumFragmentCampDropChance < 0 || c.sanctumFragmentCampDropChance > 1 || c.sanctumFragmentTradeDropChance < 0 || c.sanctumFragmentTradeDropChance > 1) errors.push('game_constants.csv 圣地残印掉率必须在[0,1]');
+  const sanctumTreasureBonuses = [
+    c.sanctumBreachHornPveAtkBonus, c.sanctumBreachHornEventAtkBonus,
+    c.sanctumWatcherPrismArmyVisionBonus, c.sanctumWatcherPrismEventVisionBonus, c.sanctumWatcherPrismEventRangedDefBonus,
+    c.sanctumTradeSealCaravanSpeedBonus, c.sanctumTradeSealCaravanCapacityBonus,
+    c.sanctumTradeSealEventCaravanSpeedBonus, c.sanctumTradeSealEventCaravanCapacityBonus,
+    c.sanctumResonanceMedallionReinforceSpeedBonus, c.sanctumResonanceMedallionEventReinforceSpeedBonus,
+    c.sanctumHunterKingSealPveAtkBonus, c.sanctumHunterKingSealEventAtkBonus,
+    c.sanctumFarstringCrestRangedAtkBonus, c.sanctumFarstringCrestRangedDefBonus, c.sanctumFarstringCrestPhase2RangedAtkBonus,
+  ];
+  if (sanctumTreasureBonuses.some((value) => !Number.isFinite(value) || value < 0)) errors.push('game_constants.csv 圣地宝物加成参数必须为非负数');
   if (c.trainTimeReduceCap < 0 || c.trainTimeReduceCap >= 1) errors.push(`game_constants.csv train_time_reduce_cap 必须在[0,1)`);
   if (c.trainCostReduceCap < 0 || c.trainCostReduceCap >= 1) errors.push(`game_constants.csv train_cost_reduce_cap 必须在[0,1)`);
   if (c.storageBase <= 0) errors.push(`game_constants.csv storage_base 必须>0`);
@@ -2347,6 +2862,9 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.marchSizeMinMultiplier <= 0 || c.marchSizeMinMultiplier > 1) {
     errors.push(`game_constants.csv march_size_min_multiplier 必须在(0,1]`);
   }
+  if (c.marchLossRateDefault < 0 || c.marchLossRateDefault > 100) {
+    errors.push(`game_constants.csv march_loss_rate_default 必须在[0,100]`);
+  }
   if (c.kingdomCityStateResourceMin < 0 || c.kingdomCityStateResourceMax < c.kingdomCityStateResourceMin) errors.push(`game_constants.csv kingdom_city_state_resource_min/max 范围非法`);
   if (c.kingdomCityStateCount < 0 || !Number.isInteger(c.kingdomCityStateCount)) errors.push(`game_constants.csv kingdom_city_state_count 必须为非负整数`);
   if (c.kingdomCityStateGoldMin < 0 || c.kingdomCityStateGoldMax < c.kingdomCityStateGoldMin) errors.push(`game_constants.csv kingdom_city_state_gold_min/max 范围非法`);
@@ -2361,6 +2879,7 @@ export function validateGameConfig(config: GameConfig): void {
   if (c.kingdomFiefResourceMin < 0 || c.kingdomFiefResourceMax < c.kingdomFiefResourceMin || c.kingdomCapitalResourceMin < 0 || c.kingdomCapitalResourceMax < c.kingdomCapitalResourceMin) errors.push(`game_constants.csv 王国封地/王都资源范围非法`);
   if (c.kingdomFiefGoldMin < 0 || c.kingdomFiefGoldMax < c.kingdomFiefGoldMin || c.kingdomCapitalGoldMin < 0 || c.kingdomCapitalGoldMax < c.kingdomCapitalGoldMin) errors.push(`game_constants.csv 王国封地/王都金币范围非法`);
   if (c.kingdomPveKilledPopulationPerReputation <= 0 || c.kingdomPveRetaliationChunk <= 0) errors.push(`game_constants.csv 王国 PvE 声望累计参数必须>0`);
+  if (c.caravanRaidReputationGoodsPerPoint <= 0) errors.push(`game_constants.csv caravan_raid_reputation_goods_per_point 必须>0`);
   if (c.kingdomPveRetaliationSiegeThreshold > c.kingdomPveRetaliationRaidThreshold) errors.push(`game_constants.csv 王国 PvE 报复阈值顺序非法`);
   if (c.kingdomFiefMercenaryMinRatio < 0 || c.kingdomFiefMercenaryMaxRatio > 1 || c.kingdomFiefMercenaryMaxRatio < c.kingdomFiefMercenaryMinRatio) errors.push(`game_constants.csv 王国封地雇佣军比例范围非法`);
   if (c.kingdomCityStateOuterBuildingCountMin < 4 || c.kingdomCityStateOuterBuildingCountMax < c.kingdomCityStateOuterBuildingCountMin) errors.push(`game_constants.csv kingdom_city_state_outer_building_count_min/max 范围非法`);
@@ -2449,6 +2968,12 @@ export function validateGameConfig(config: GameConfig): void {
     if (a.baseProbability < 0 || a.baseProbability > 1) errors.push(`academy.csv[Lv${a.level}] baseProbability 必须在[0,1]`);
     if (a.maxProbability < a.baseProbability) errors.push(`academy.csv[Lv${a.level}] maxProbability 必须≥baseProbability`);
   }
+  const academyLevels = Object.values(config.academy).sort((a, b) => a.level - b.level);
+  for (let i = 1; i < academyLevels.length; i++) {
+    if (academyLevels[i].checkIntervalSec > academyLevels[i - 1].checkIntervalSec) {
+      errors.push(`academy.csv[Lv${academyLevels[i].level}] 判定间隔不得高于 Lv${academyLevels[i - 1].level}`);
+    }
+  }
 
   // 科技效果类型白名单校验：新增 effectType 必须先在源码中接线，否则启动报错
   const KNOWN_TECH_EFFECT_TYPES = new Set([
@@ -2463,7 +2988,7 @@ export function validateGameConfig(config: GameConfig): void {
   }
 
   // 任务系统校验
-  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match']);
+  const QUEST_OBJECTIVE_KINDS = new Set(['submit_resources', 'repair_buildings', 'build_buildings', 'population_reached', 'resource_owned', 'explore_tiles', 'main_base_level', 'clear_camp', 'clear_public_pve', 'sell_discard_treasure', 'carry_flag', 'deliver_to_npc', 'research_completed', 'raid_task_village', 'defend_task_village', 'investigate_task_village', 'reputation_at_most', 'reputation_at_least', 'kill_units', 'dice_match', 'rune_sequence', 'sanctum_activate', 'sanctum_condition_count', 'sanctum_discover', 'sanctum_briefing', 'sanctum_occupy', 'sanctum_hold', 'sanctum_return_artifact']);
   const TREASURE_RARITY_ORDER = ['common', 'rare', 'epic', 'legendary'];
   const questCodes = new Set(Object.keys(config.quests));
   for (const q of Object.values(config.quests)) {
@@ -2530,12 +3055,16 @@ export function validateGameConfig(config: GameConfig): void {
       if (!q.objective.diceTargetScore || q.objective.diceTargetScore < 1) errors.push(`quests.csv[${q.code}] dice_match 目标分数必须≥1`);
       if (!q.objective.diceWinsRequired || q.objective.diceWinsRequired < 1) errors.push(`quests.csv[${q.code}] dice_match 胜场数必须≥1`);
       if (!q.objective.diceDifficulty || !['easy', 'normal', 'hard'].includes(q.objective.diceDifficulty)) errors.push(`quests.csv[${q.code}] dice_match 难度无效`);
+    } else if (q.objective.kind === 'rune_sequence') {
+      if (!q.objective.runeSequence || q.objective.runeSequence.length < 2) errors.push(`quests.csv[${q.code}] rune_sequence 至少需要两个符文`);
+    } else if (q.objective.kind === 'sanctum_activate' || q.objective.kind === 'sanctum_condition_count' || q.objective.kind === 'sanctum_discover' || q.objective.kind === 'sanctum_briefing' || q.objective.kind === 'sanctum_occupy' || q.objective.kind === 'sanctum_hold' || q.objective.kind === 'sanctum_return_artifact') {
+      if (!q.objective.count || q.objective.count < 1) errors.push(`quests.csv[${q.code}] ${q.objective.kind} 数量必须≥1`);
     }
     // 触发条件校验：随机支线和主线门槛可带 trigger；格式 = kind:arg
     if (q.trigger) {
       if (q.type !== 'side' && !(q.type === 'main' && (q.trigger.startsWith('main_base_level:') || q.trigger.startsWith('building_level:') || q.trigger.startsWith('treasure_used:')))) errors.push(`quests.csv[${q.code}] 仅支线或主基地/建筑/宝物使用门槛主线可设触发条件 trigger`);
       const [tk] = q.trigger.split(':');
-      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
+      if (tk !== 'building_built' && tk !== 'troops_reached' && tk !== 'pve_camp_cleared' && tk !== 'secret_note_used' && tk !== 'tavern_refresh' && tk !== 'main_base_level' && tk !== 'building_level' && tk !== 'treasure_used' && tk !== 'branch_selected' && tk !== 'sanctum_offer') errors.push(`quests.csv[${q.code}] 未知触发条件 ${q.trigger}`);
     }
     if (q.rewards.treasures) {
       for (const t of q.rewards.treasures) if (!config.treasures[t]) errors.push(`quests.csv[${q.code}] 奖励宝物 ${t} 不在 treasures.csv`);

@@ -28,6 +28,22 @@
 }
 .rp-researching > .progress { flex: 1; }
 .rp-next { margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.rp-formula, .acad-formula {
+  margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line);
+  color: var(--c-ink-soft); font-size: var(--f-xs);
+}
+.rp-formula summary, .acad-formula summary { cursor: pointer; color: var(--c-gold); font-weight: 700; }
+.rp-formula-grid, .acad-formula-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--s-4); margin-top: var(--s-3);
+}
+.rp-formula h4, .acad-formula h4 { margin: 0 0 var(--s-1); color: var(--c-ink); font-size: var(--f-sm); }
+.rp-formula-total, .acad-formula-total { margin: 0 0 var(--s-2); color: var(--c-ink); }
+.rp-source-row, .acad-source-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s-2);
+  padding: 4px 0; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+.rp-source-row b, .acad-source-row b { color: var(--c-steel); font-family: var(--ff-num); font-weight: 600; }
+.rp-source-row small, .acad-source-row small { grid-column: 1 / -1; color: var(--c-ink-dim); font-size: var(--f-2xs); }
 
 /* ---------- 分支切换 ---------- */
 .tech-branch-tabs {
@@ -129,6 +145,15 @@
   line-height: 1;
   text-shadow: 0 0 var(--s-2) var(--tech-branch);
 }
+.tech-tree-stage--doctrine .tech-stage-head {
+  color: var(--c-gold-hi);
+}
+.tech-tree-stage--doctrine .tech-stage-nodes {
+  padding: var(--s-2);
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-md);
+  background: var(--c-panel-3);
+}
 .tech-node {
   position: relative;
   display: flex;
@@ -145,6 +170,9 @@
 .tech-node--doing { border-color: var(--c-ember); }
 .tech-node--locked { opacity: .7; }
 .tech-node--poor { border-color: var(--line-strong); }
+.tech-node--doctrine { border-width: 2px; }
+.tech-node--doctrine.tech-node--ready { box-shadow: var(--glow-gold); }
+.tech-node--abandoned { opacity: .62; }
 .tech-node-top { display: flex; align-items: center; gap: var(--s-2); }
 .tech-node-title { min-width: 0; flex: 1; }
 .tech-node-name { font-family: var(--ff-han); font-size: var(--f-md); font-weight: 700; color: var(--c-ink); }
@@ -166,6 +194,17 @@
   padding: var(--s-2); border-radius: var(--r-sm);
   background: var(--c-panel-3); color: var(--c-ink-soft); font-size: var(--f-xs); line-height: 1.45;
 }
+.tech-doctrine-note {
+  padding: var(--s-2);
+  border: 1px solid var(--c-gold-dim);
+  border-radius: var(--r-sm);
+  color: var(--c-ink-soft);
+  background: var(--c-panel-3);
+  font-size: var(--f-xs);
+  line-height: 1.45;
+}
+.tech-doctrine-note--chosen { border-color: var(--c-jade); color: var(--c-jade); }
+.tech-doctrine-note--abandoned { border-color: var(--c-crimson); color: var(--c-crimson-hi); }
 .tech-node-outcome .icon { margin-top: 1px; }
 .tech-node-meta { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); color: var(--c-ink-soft); font-size: var(--f-xs); }
 .tech-node-meta span { display: inline-flex; align-items: center; gap: var(--s-1); }

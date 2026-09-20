@@ -7,9 +7,9 @@ train_time_reduce_per_level,0.05,number,军事建筑每级训练提速(0.05=每�
 train_time_reduce_cap,0.6,number,军事建筑训练提速上限(0.6=最多-60%训练耗时)
 train_cost_reduce_per_level,0.03,number,军事建筑每级训练降费(0.03=每级-3%资源消耗)
 train_cost_reduce_cap,0.5,number,军事建筑训练降费上限(0.5=最多-50%资源消耗)
-storage_base,800,number,仓库/粮仓基础容量
+storage_base,5000,number,仓库/粮仓基础容量
 storage_growth_per_level,0.5,number,容量每级增长系数(0.5=每级+50%基数)
-start_resource_amount,750,number,新村各资源初始存量
+start_resource_amount,1500,number,新村各资源初始存量
 base_production_per_hour,1000,number,资源田0级基础每小时产量
 map_size,20,number,地图半径(六边形网格
 map_view_radius,6,number,前端地图视野半径(六边形环数
@@ -25,6 +25,7 @@ hills_march_speed_multiplier,0.6666666667,number,军队位于丘陵时行军速�
 march_size_reference_pop,20,number,军队规模减速的免惩罚人口基准
 march_size_penalty,0.0015,number,军队规模减速系数
 march_size_min_multiplier,0.45,number,军队规模减速后的最低速度比例
+march_loss_rate_default,40,number,玩家派军默认战损返城阈值（百分比；野战/被伏击方适用）
 cavalry_unit_codes,equlegati|equimperatoris|equcaesaris|theutates|druidrider|haeduan|gaul_warboar_rider|paladin|teutonknight|merc_cavalry|merc_knight,string,骑兵兵种代码（以|分隔；用于猎马人任务和绞马索效果）
 march_point_base,0,number,每座城镇基础行军点数（同时在地图上的军队上限基础值）
 march_point_per_rallypoint_level,1,number,集结点每级提供的行军点数（开局集结点1级即为1点）
@@ -41,27 +42,32 @@ pop_famine_tick_sec,300,number,饥荒减员定时任务间隔(秒;5分钟=300)
 pop_hospital_recovery_base,0.20,number,医院1级即时回收战死士兵人口的比例(其余永久扣除;无伤兵池)
 pop_hospital_recovery_per_level,0.10,number,医院每级额外回收比例
 pop_hospital_recovery_max,0.80,number,医院回收比例上限
-found_min_main_level,10,number,拓荒建村：出发村主基地最低等级
+found_min_main_level,4,number,拓荒建村：出发村主基地最低等级
 found_settler_count,1,number,拓荒建村：所需拓荒者数量（每名拓荒者占用5人口）
-found_resource_cost_base,100,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
+found_resource_cost_base,3000,number,第2村开城包（单资源）；第N村=base×growth^(N-2)
 found_resource_cost_growth,2,number,开城包递增底数
 found_min_tile_distance,3,number,新村与任意已有村庄的最小六边形距离
 found_max_inflight,1,number,每玩家同时在途的拓荒行军上限
 found_abandon_lock_sec,86400,number,新建分城后禁止放弃的秒数
-gold_tax_per_civilian_per_hour,100,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
-start_gold_amount,100,number,新村初始金币存量（让首座建筑可立即开建）
+gold_tax_per_civilian_per_hour,1,number,每个劳动人口每小时交税金币数（绑定城镇中心 与人口增速同节奏 不受繁荣度影响）
+start_gold_amount,500,number,新村初始金币存量（让首座建筑可立即开建）
 trade_route_capacity,500,number,每条贸易路线可运送的货物单位数（wood/clay/iron/crop/gold 各算 1 单位 多条路线叠加）
 trade_caravan_speed,100,number,商人车队行进速度（格/小时 >0；独立于行军倍率）
 trade_caravan_min_duration_sec,3,number,商队单程最低行进时长（秒；仅防止零距离或极高速商队瞬间抵达）
 trade_npc_gold_per_resource,0.5,number,NPC 订单中每个资源单位的金币基准价值（买/卖统一计价）
 trade_npc_sell_margin,0.8,number,玩家向 NPC 出售资源换取金币时的折价（NPC 赚差价 0.8=玩家拿到 80% 基准价值）
 trade_order_max_per_village,5,number,每个村庄同时可挂出的玩家贸易订单上限
-trade_order_ttl_sec,86400,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
-treasure_camp_drop_chance,1,number,清理野外营地后掉落宝物的总体概率(0-1
-treasure_npc_offer_chance,1,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1
+trade_order_ttl_sec,43200,number,玩家贸易订单未被人接受时的存活时长（秒）超时自动下架
+treasure_camp_drop_chance,0.12,number,清理野外营地后掉落宝物的总体概率(0-1
+treasure_camp_drop_chance_tier1_multiplier,0.5,number,低难度野外营地宝物总体掉落概率倍率（默认基础概率的50%）
+treasure_camp_drop_chance_tier2_multiplier,0.75,number,中难度野外营地宝物总体掉落概率倍率（默认基础概率的75%）
+treasure_camp_drop_chance_tier3_multiplier,1,number,高难度野外营地宝物总体掉落概率倍率（默认基础概率的100%）
+treasure_camp_rarity_multiplier_tier2,1.25,number,中难度营地按稀有度提高宝物dropRate权重的倍率底数（每提升一级稀有度再乘一次）
+treasure_camp_rarity_multiplier_tier3,1.6,number,高难度营地按稀有度提高宝物dropRate权重的倍率底数（每提升一级稀有度再乘一次）
+treasure_npc_offer_chance,0.15,number,贸易中心NPC订单池出现「宝物出售」订单的概率(0-1
 treasure_npc_buy_markup,1.6,number,NPC出售宝物的加价倍率(买价=目录价priceGold×此值
 treasure_claim_timeout_sec,3600,number,军队带回的待领取宝物确认超时(秒);超时未确认由服务端自动遗弃
-treasure_carry_troops_per_slot,40,number,军队携带宝物容量换算:每多少兵力+1携带格
+treasure_carry_troops_per_slot,30,number,军队携带宝物容量换算:每多少兵力+1携带格
 treasure_carry_max_slots,10,number,军队携带宝物格数硬上限(实际携带上限=min(此值
 ritual_buff_duration_sec,7200,number,祭祀台(ritualBuff)buff持续时长(秒;7200=2小时)
 ritual_buff_pop_cost,20,number,祭祀台(ritualBuff)使用时扣除的劳动人口数(不足则扣除士兵人口)
@@ -79,7 +85,7 @@ pvp_raid_power_per_building_level,100,number,玩家掠夺战每消耗多少进�
 pvp_siege_power_per_building_level,100,number,玩家攻城战每消耗多少总进攻战力拆除外围建筑一级
 pvp_siege_weapon_power_per_building_level,100,number,玩家攻城战每消耗多少攻城武器战力拆除城内建筑一级
 pvp_siege_storage_loot_ratio,1,number,玩家攻城战可掠夺仓库与粮仓资源的比例
-villager_request_trigger_chance,1,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
+villager_request_trigger_chance,0.2,number,村民的请求触发概率（成功掠夺PvE营地后按此概率触发）
 villager_request_order_resource,crop,string,幸福村贸易订单所需资源种类（key∈resources.csv）
 villager_request_order_amount,500,number,幸福村贸易订单所需资源数量
 villager_request_spawn_radius,3,number,幸福村生成于玩家村庄周围的六边形环数（仅邻近 3 格内）
@@ -106,12 +112,13 @@ reputation_good_gold_tax_penalty_per_point,0.005,number,每点正声望带来的
 reputation_good_gold_tax_penalty_cap,0.5,number,正声望金币税收下降倍率上限（0.5=−50%）
 reputation_evil_pve_drop_rate_per_point,0.01,number,每点负声望带来的PvE宝物掉落概率倍率
 reputation_evil_pve_drop_rate_cap,0.5,number,负声望PvE宝物掉落倍率上限（0.5=+50%）
+caravan_raid_reputation_goods_per_point,2000,number,商队劫掠每累计掠得多少单位物资扣1点声望（跨多次劫掠累计）
 kingdom_fief_offset_ratio,0.25,number,四封地中心相对世界宽高的偏移比例
-kingdom_task_initial_min_sec,1,number,注册或首次进入王国系统后首次任务最短等待秒数
-kingdom_task_initial_max_sec,2,number,注册或首次进入王国系统后首次任务最长等待秒数
-kingdom_task_interval_min_sec,1,number,王国任务循环发放最短间隔秒数
-kingdom_task_interval_max_sec,2,number,王国任务循环发放最长间隔秒数
-kingdom_task_duration_sec,10,number,每个王国任务的有效期秒数
+kingdom_task_initial_min_sec,1800,number,注册或首次进入王国系统后首次任务最短等待秒数
+kingdom_task_initial_max_sec,3600,number,注册或首次进入王国系统后首次任务最长等待秒数
+kingdom_task_interval_min_sec,21600,number,王国任务循环发放最短间隔秒数
+kingdom_task_interval_max_sec,43200,number,王国任务循环发放最长间隔秒数
+kingdom_task_duration_sec,43200,number,每个王国任务的有效期秒数
 kingdom_task_tribute_weight,35,number,上贡资源任务抽取权重
 kingdom_task_clear_pve_weight,35,number,清理象限现有PvE营地任务抽取权重
 kingdom_task_attack_evil_weight,15,number,攻打负声望玩家任务抽取权重
@@ -125,8 +132,8 @@ kingdom_task_tribute_reward_reputation,2,number,完成上贡任务获得的声�
 kingdom_task_clear_pve_reward_reputation,3,number,完成清理PvE任务获得的声望
 kingdom_task_attack_evil_reward_reputation,4,number,完成攻打负声望玩家任务获得的声望
 kingdom_task_eliminate_troops_reward_reputation,5,number,完成消灭负声望玩家兵力任务获得的声望
-kingdom_reinforcement_duration_sec,3600,number,议会厅购买的王国增援抵达后临时驻防时长秒数
-m8_attack_delay_sec,180,number,m8接受任务后天王老子村发动攻城的延迟秒数
+kingdom_reinforcement_duration_sec,21600,number,议会厅购买的王国增援抵达后临时驻防时长秒数
+m8_attack_delay_sec,3600,number,m8接受任务后天王老子村发动攻城的延迟秒数
 m8_task_village_spawn_radius,8,number,m8任务村相对主城的随机生成半径
 m8_task_village_resource_amount,500,number,m8任务村每种资源初始库存
 m8_task_village_gold,500,number,m8任务村初始金币
@@ -218,4 +225,36 @@ alliance_logistics_role_level,1,number,后勤主管解锁所需联盟等级
 alliance_war_role_level,2,number,战争专家解锁所需联盟等级
 alliance_tech_role_level,3,number,首席科技官解锁所需联盟等级
 alliance_ambassador_role_level,4,number,形象大使解锁所需联盟等级
-alliance_project_duration_sec,10,number,联盟建筑建造与联盟科技研发耗时（秒）
+alliance_project_duration_sec,21600,number,联盟建筑建造与联盟科技研发耗时（秒）
+sanctum_conditions_required,6,number,远弦圣地取得占领资格所需的已完成公共条件次数
+sanctum_first_hold_sec,21600,number,远弦圣地首次占领需连续守卫的秒数
+sanctum_defense_mult,0.5,number,远弦圣地守方全军防御加成（0.5=+50%）
+sanctum_phase2_ranged_atk_mult,0.4,number,远弦圣地守方第二阶段远程攻击加成（0.4=+40%）
+sanctum_former_holder_min_commander_pop_share,0.5,number,旧占领者作为主指挥者关闭守方圣地加成所需自身人口占进攻联军比例
+sanctum_simple_rune_wrong_cooldown_sec,120,number,远弦圣地普通符文答错后的冷却秒数
+sanctum_final_rune_wrong_cooldown_sec,600,number,远弦圣地终解符文答错后的冷却秒数
+sanctum_repeat_personal_cooldown_sec,21600,number,远弦圣地可重复条件同一玩家默认冷却秒数
+sanctum_repeat_pvp_pair_cooldown_sec,43200,number,远弦圣地可重复PvP条件同一对手默认奖励冷却秒数
+sanctum_fragment_camp_drop_chance,0.03,number,活动尚未被唤醒时公共PvE掉落圣地残印的概率
+sanctum_fragment_trade_drop_chance,0.02,number,活动尚未被唤醒时贸易中心特殊发现圣地残印的概率
+sanctum_next_round_enabled,false,bool,本轮远弦圣地结束后是否允许自动开启下一轮
+sanctum_reveal_winner,false,bool,远弦圣地结束公告是否公开最终获得圣徽的玩家
+sanctum_breach_horn_pve_atk_bonus,0.05,number,破阵号角对普通公共PvE的攻击加成（0.05=+5%）
+sanctum_breach_horn_event_atk_bonus,0.15,number,破阵号角对远弦事件防守方的攻击加成（0.15=+15%）
+sanctum_watcher_prism_army_vision_bonus,1,number,守望棱镜携带军队的常规额外视野格数
+sanctum_watcher_prism_event_vision_bonus,1,number,守望棱镜在远弦事件中的额外视野格数（与常规视野叠加）
+sanctum_watcher_prism_event_ranged_def_bonus,0.15,number,守望棱镜守卫远弦圣地时第二阶段远程防御加成
+sanctum_trade_seal_caravan_speed_bonus,0.08,number,商路圣印对本村普通商队的速度加成
+sanctum_trade_seal_caravan_capacity_bonus,0.05,number,商路圣印对本村普通商队单路线运力加成
+sanctum_trade_seal_event_caravan_speed_bonus,0.2,number,商路圣印对远弦事件商队的速度加成
+sanctum_trade_seal_event_caravan_capacity_bonus,0.15,number,商路圣印对远弦事件商队单路线运力加成
+sanctum_resonance_medallion_reinforce_speed_bonus,0.08,number,共鸣徽章携带增援的常规行军速度加成
+sanctum_resonance_medallion_event_reinforce_speed_bonus,0.15,number,共鸣徽章携带远弦事件增援的行军速度加成
+sanctum_hunter_king_seal_pve_atk_bonus,0.05,number,猎王印对普通公共PvE的攻击加成
+sanctum_hunter_king_seal_event_atk_bonus,0.12,number,猎王印对远弦事件防守方的攻击加成
+sanctum_farstring_crest_ranged_atk_bonus,0.3,number,远弦圣徽对远程兵攻击加成
+sanctum_farstring_crest_ranged_def_bonus,0.25,number,远弦圣徽对远程兵防御加成
+sanctum_farstring_crest_phase2_ranged_atk_bonus,0.45,number,远弦圣徽在第二阶段对远程兵攻击的额外加成
+season_settlement_min_days,7,number,
+season_settlement_max_days,10,number,
+release_balance_version,1,number,

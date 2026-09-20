@@ -60,6 +60,8 @@ export interface TaskInstance {
   dicePlayerWins?: number;
   diceNpcWins?: number;
   diceLastOutcome?: 'player' | 'npc';
+  /** 灰烬商路符文解密：正确序列完成后才可选择分支。 */
+  runeSolved?: boolean;
 }
 
 export interface PendingTaskDialogue {

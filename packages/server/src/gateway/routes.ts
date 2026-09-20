@@ -172,6 +172,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetId: { type: 'string', minLen: 1, maxLen: 64 },
           troops:   { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
+          rapidMarch: { type: 'boolean', optional: true },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -181,6 +183,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           declareWar: { type: 'boolean', optional: true },
         },
@@ -191,6 +194,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           scoutType: { type: 'enum', optional: true, values: ['scout_resources', 'scout_buildings'] },
         },
@@ -200,6 +204,25 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           movementId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
+      SendCaravanRaid: {
+        command: 'movement.SendCaravanRaid', ownVillage: true, needAuth: true,
+        schema: {
+          targetMovementId: { type: 'string', minLen: 1, maxLen: 64 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
+          treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
+        },
+      },
+      SendCaravanEscort: {
+        command: 'movement.SendCaravanEscort', ownVillage: true, needAuth: true,
+        schema: {
+          targetMovementId: { type: 'string', minLen: 1, maxLen: 64 },
+          troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -208,6 +231,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           declareWar: { type: 'boolean', optional: true },
         },
@@ -217,6 +241,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -234,7 +259,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       PreviewMarch: {
         command: 'movement.PreviewMarch', ownVillage: true, needAuth: true,
-        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout', 'ambush', 'investigate'] }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
+        schema: { q: { type: 'integer', min: -100, max: 100 }, r: { type: 'integer', min: -100, max: 100 }, mode: { type: 'enum', values: ['garrison', 'explore', 'transfer', 'reinforce', 'raid', 'attack', 'scout', 'ambush', 'investigate', 'caravan_raid', 'caravan_escort'] }, targetMovementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 } },
       },
       FoundVillage: {
         command: 'movement.FoundVillage', ownVillage: true, needAuth: true,
@@ -248,6 +273,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetVillage: { type: 'string', minLen: 1, maxLen: 64 },
           troops:        { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           cargo: { type: 'record_int', maxKeys: 4, minVal: 0, maxVal: 10_000_000 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
           mode: { type: 'enum', optional: true, values: ['transfer', 'transport', 'reinforce'] },
@@ -259,6 +285,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -268,6 +295,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -276,6 +304,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         schema: {
           targetId: { type: 'string', minLen: 1, maxLen: 64 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -285,6 +314,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -294,6 +324,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
           troops: { type: 'record_int', maxKeys: 20, minVal: 1, maxVal: 100000 },
+          lossRate: { type: 'number', optional: true, min: 0, max: 100 },
           treasures: { type: 'string_array', optional: true, maxItems: 10, minLen: 1, maxLen: 64 },
         },
       },
@@ -319,9 +350,10 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
           movementId: { type: 'string', minLen: 1, maxLen: 64 },
           q: { type: 'integer', min: -100, max: 100 },
           r: { type: 'integer', min: -100, max: 100 },
-          mode: { type: 'enum', values: ['garrison', 'explore', 'raid', 'attack', 'scout', 'reinforce', 'transfer', 'ambush', 'investigate'] },
+          mode: { type: 'enum', values: ['garrison', 'explore', 'raid', 'attack', 'scout', 'reinforce', 'transfer', 'ambush', 'investigate', 'caravan_raid', 'caravan_escort'] },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetVillage: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
+          targetMovementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
         },
       },
       ListMovements: { command: 'movement.List', ownVillage: true, needAuth: true, schema: {} },
@@ -340,6 +372,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'movement.Investigated': 'Investigated',
       'movement.AutoExploreStopped': 'AutoExploreStopped',
       'movement.ScoutReport': 'ScoutReport',
+      'movement.CaravanRaidReport': 'CaravanRaidReport',
       'movement.VisionUpdated': 'VisionUpdated',
       'movement.Recalled': 'MarchRecalled',
       'movement.Stopped': 'MarchStopped',
@@ -429,6 +462,7 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
         command: 'kingdom.BuyService', ownVillage: true, needAuth: true, injectPlayerId: true,
         schema: {
           serviceCode: { type: 'string', minLen: 1, maxLen: 64 },
+          targetMovementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
           targetKind: { type: 'enum', optional: true, values: ['village', 'pve'] },
           targetId: { type: 'string', optional: true, minLen: 1, maxLen: 64 },
         },
@@ -468,6 +502,9 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'task.GetPlayerState': { command: 'task.GetPlayerState', needAuth: true, injectPlayerId: true, schema: {} },
       'task.ConsumeDialogue': { command: 'task.ConsumeDialogue', needAuth: true, injectPlayerId: true, schema: { dialogueId: { type: 'string', minLen: 1, maxLen: 160 } } },
       'task.StartAccept': { command: 'task.StartAccept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
+      // 已接取任务的明确 NPC 行动确认（当前仅 s23 的 sanctum_awaken）。这只是
+      // 读取配置对话；实际公共事件状态仍须由随后的 sanctum.Activate 处理。
+      'task.StartActiveDialogue': { command: 'task.StartActiveDialogue', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, trigger: { type: 'string', minLen: 1, maxLen: 48 } } },
       'task.Accept': { command: 'task.Accept', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Abandon': { command: 'task.Abandon', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.SubmitResources': {
@@ -479,6 +516,8 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       },
       'task.StartDeliver': { command: 'task.StartDeliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
       'task.Deliver': { command: 'task.Deliver', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
+      'task.SolveRune': { command: 'task.SolveRune', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, sequence: { type: 'string_array', minItems: 2, maxItems: 8, minLen: 1, maxLen: 32 } } },
+      'task.SelectBranch': { command: 'task.SelectBranch', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 }, branch: { type: 'string', minLen: 1, maxLen: 16 } } },
       'task.Fail': { command: 'task.Fail', ownVillage: true, needAuth: true, schema: { code: { type: 'string', minLen: 1, maxLen: 32 } } },
     },
     // 左=内部事件名，右=推给客户端的裸名（与 research/tech 等保持一致）
@@ -487,6 +526,41 @@ export const MODULE_MANIFESTS: ModuleManifest[] = [
       'task.MapUpdated': 'TaskMapUpdated',
     },
     },
+  {
+    moduleName: 'sanctum',
+    publicActions: {
+      'sanctum.GetState': { command: 'sanctum.GetState', needAuth: true, injectPlayerId: true, schema: {} },
+      'sanctum.Activate': {
+        command: 'sanctum.Activate', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', optional: true, minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.BeginCondition': {
+        command: 'sanctum.BeginCondition', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.SubmitRune': {
+        command: 'sanctum.SubmitRune', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 }, answer: { type: 'string_array', minItems: 1, maxItems: 12, minLen: 1, maxLen: 32 } },
+      },
+      'sanctum.Contribute': {
+        command: 'sanctum.Contribute', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, conditionId: { type: 'string', minLen: 1, maxLen: 64 }, sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 }, resources: { type: 'record_int', maxKeys: 5, minVal: 0, maxVal: 10_000_000 } },
+      },
+      'sanctum.Discover': {
+        command: 'sanctum.Discover', ownVillage: true, needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.Claim': {
+        command: 'sanctum.Claim', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 }, sourceVillageId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+      'sanctum.TakeRelic': {
+        command: 'sanctum.TakeRelic', needAuth: true, injectPlayerId: true,
+        schema: { roundId: { type: 'string', minLen: 1, maxLen: 64 }, sanctumId: { type: 'string', minLen: 1, maxLen: 64 }, movementId: { type: 'string', optional: true, minLen: 1, maxLen: 64 }, returnVillageId: { type: 'string', minLen: 1, maxLen: 64 } },
+      },
+    },
+    eventPushMap: { 'sanctum.Updated': 'SanctumUpdated' },
+  },
   {
     moduleName: 'dialogue',
     publicActions: {

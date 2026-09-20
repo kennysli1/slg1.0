@@ -132,7 +132,7 @@ test('Population resume: 旧存档缺新字段自动补全，无 wounded', async
 
 // ── 金币：历史 null/NaN 自愈 + 周期结算累加 ────────────────────────────────
 
-test('Economy: 历史残留 null 金币经 settle 自愈为 startGoldAmount(=100)', async () => {
+test('Economy: 历史残留 null 金币经 settle 自愈为配置的 startGoldAmount', async () => {
   const app = makeApp();
   app.setupWorld();
   const reg = await app.commands.send({
@@ -155,10 +155,10 @@ test('Economy: 历史残留 null 金币经 settle 自愈为 startGoldAmount(=100
   const after = app.store.get<any>('economy', vid);
   assert.equal(typeof after.resources.gold, 'number', '金币应从 null 自愈为数字');
   assert.ok(Number.isFinite(after.resources.gold), '金币应为有限数字（非 NaN）');
-  assert.equal(after.resources.gold, 100, '金币自愈应回退到 startGoldAmount(=100)');
+  assert.equal(after.resources.gold, app.config.constants.startGoldAmount, '金币自愈应回退到配置的 startGoldAmount');
 });
 
-test('Economy: 旧村庄 baseRate 缺 gold 键时金币自愈为 100（而非 NaN→0）', async () => {
+test('Economy: 旧村庄 baseRate 缺 gold 键时金币自愈为配置初始值（而非 NaN→0）', async () => {
   const app = makeApp();
   app.setupWorld();
   const reg = await app.commands.send({
@@ -179,7 +179,7 @@ test('Economy: 旧村庄 baseRate 缺 gold 键时金币自愈为 100（而非 Na
   assert.ok(r.ok);
   const after = app.store.get<any>('economy', vid);
   assert.equal(typeof after.resources.gold, 'number', '金币应为数字');
-  assert.equal(after.resources.gold, 100, '旧村庄金币应自愈为 startGoldAmount(=100)，而非被 NaN 清成 0');
+  assert.equal(after.resources.gold, app.config.constants.startGoldAmount, '旧村庄金币应自愈为配置初始值，而非被 NaN 清成 0');
   assert.equal(typeof after.baseRate.gold, 'number', 'baseRate.gold 应被补齐为数字（0）');
 });
 

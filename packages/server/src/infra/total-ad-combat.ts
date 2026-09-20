@@ -1,8 +1,7 @@
 import type { CombatPhase, CombatUnit, CombatRole, Snapshot, UnitTraitDef } from './combat-types.js';
 
-/** 新创建战斗使用 v3；已落盘 v2 必须继续走旧回合函数。 */
+/** 唯一战斗规则：阶段化总攻击/总防御/生命结算。 */
 export const TOTAL_AD_RULESET_VERSION = 3;
-export const TOTAL_AD_V2_RULESET_VERSION = 2;
 export interface DamageCarries { [snapshotKey: string]: number }
 
 export interface TotalAdRoundResult {
@@ -49,10 +48,23 @@ export function normalizeTotalAdSnapshot(snapshot: Snapshot | Record<string, any
       form: legacy.form === 'ranged' ? 'ranged' : 'melee',
       role: normalizeRole(legacy.role, legacy.isCavalry),
       traits: Array.isArray(legacy.traits) ? structuredClone(legacy.traits) as UnitTraitDef[] : [],
+      ...(normalizePhaseMultipliers(legacy.phaseAtkMult) ? { phaseAtkMult: normalizePhaseMultipliers(legacy.phaseAtkMult) } : {}),
+      ...(normalizePhaseMultipliers(legacy.phaseDefMult) ? { phaseDefMult: normalizePhaseMultipliers(legacy.phaseDefMult) } : {}),
       ...(legacy.popCost === undefined ? {} : { popCost: Math.max(0, Number(legacy.popCost) || 0) }),
     };
   }
   return out;
+}
+
+/** 只接收三个实战阶段的正有限倍率，避免热更/旧档把无效值带进战斗快照。 */
+function normalizePhaseMultipliers(raw: unknown): Partial<Record<'charge' | 'ranged' | 'melee', number>> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const result: Partial<Record<'charge' | 'ranged' | 'melee', number>> = {};
+  for (const phase of ['charge', 'ranged', 'melee'] as const) {
+    const value = Number((raw as Record<string, unknown>)[phase]);
+    if (Number.isFinite(value) && value > 0 && value !== 1) result[phase] = value;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function normalizeRole(raw: unknown, isCavalry: unknown): CombatRole {
@@ -72,17 +84,6 @@ export function aggregateSnapshotCounts(snapshot: Snapshot): Record<string, numb
 
 export function totalSnapshotCount(snapshot: Snapshot): number {
   return Object.values(snapshot).reduce((sum, unit) => sum + Math.max(0, unit.count), 0);
-}
-
-function totalStat(snapshot: Snapshot, side: 'attacker' | 'defender', stat: 'attack' | 'defense'): number {
-  return Object.entries(snapshot).reduce((sum, [key, unit]) => {
-    if (unit.count <= 0) return sum;
-    let value = nonNegative(unit[stat]);
-    // 仅这两个首个基础步兵在其“原始角色”触发种族特性。
-    if (stat === 'attack' && side === 'attacker' && unitCode(key) === 'clubswinger') value *= 1.074;
-    if (stat === 'defense' && side === 'defender' && unitCode(key) === 'phalanx') value *= 1.2206;
-    return sum + unit.count * value;
-  }, 0);
 }
 
 function damage(totalAttack: number, enemyTotalDefense: number): number {
@@ -108,43 +109,6 @@ function applyIncomingDamage(snapshot: Snapshot, incoming: number, carries: Dama
     }
   }
   return { snapshot: next, carries: nextCarries };
-}
-
-/** 一个“总攻击 / 总防御”回合；双方始终基于同一轮开始快照同时结算。 */
-export function simulateTotalAdRound(input: {
-  attacker: Snapshot | Record<string, any>;
-  defender: Snapshot | Record<string, any>;
-  attackerDamageCarry?: DamageCarries;
-  defenderDamageCarry?: DamageCarries;
-}): TotalAdRoundResult {
-  const attacker = normalizeTotalAdSnapshot(input.attacker);
-  const defender = normalizeTotalAdSnapshot(input.defender);
-  const attackerBefore = aggregateSnapshotCounts(attacker);
-  const defenderBefore = aggregateSnapshotCounts(defender);
-  const attackA = totalStat(attacker, 'attacker', 'attack');
-  const defenseA = totalStat(attacker, 'attacker', 'defense');
-  const attackD = totalStat(defender, 'defender', 'attack');
-  const defenseD = totalStat(defender, 'defender', 'defense');
-  const damageToDefender = damage(attackA, defenseD);
-  const damageToAttacker = damage(attackD, defenseA);
-  const nextAttacker = applyIncomingDamage(attacker, damageToAttacker, input.attackerDamageCarry ?? {});
-  const nextDefender = applyIncomingDamage(defender, damageToDefender, input.defenderDamageCarry ?? {});
-  return {
-    attacker: nextAttacker.snapshot,
-    defender: nextDefender.snapshot,
-    attackerDamageCarry: nextAttacker.carries,
-    defenderDamageCarry: nextDefender.carries,
-    attackerBefore,
-    defenderBefore,
-    attackerAfter: aggregateSnapshotCounts(nextAttacker.snapshot),
-    defenderAfter: aggregateSnapshotCounts(nextDefender.snapshot),
-    damageToAttacker,
-    damageToDefender,
-    attackerTotalAttack: attackA,
-    attackerTotalDefense: defenseA,
-    defenderTotalAttack: attackD,
-    defenderTotalDefense: defenseD,
-  };
 }
 
 export type BattleStepKind = 'bow_cavalry' | 'cavalry_charge' | 'ranged' | 'melee';
@@ -241,14 +205,17 @@ function effectiveStats(
   let attack = 0;
   let defense = 0;
   const participants: Record<string, number> = {};
+  const phase = phaseForStep(step);
   for (const [key, unit] of Object.entries(snapshot)) {
     if (unit.count <= 0) continue;
     const mod = ownModifiers[key] ?? { attack: 0, defense: 0 };
     // 防御是被攻击方所有幸存单位的总防御；攻击仅计算本步骤可出手的单位。
-    defense += unit.count * Math.max(0, nonNegative(unit.defense) * (1 + mod.defense));
+    const phaseAtkMult = Math.max(0, Number(unit.phaseAtkMult?.[phase] ?? 1));
+    const phaseDefMult = Math.max(0, Number(unit.phaseDefMult?.[phase] ?? 1));
+    defense += unit.count * Math.max(0, nonNegative(unit.defense) * (1 + mod.defense) * phaseDefMult);
     if (!participates(unit, step)) continue;
     participants[keyCode(key)] = (participants[keyCode(key)] ?? 0) + unit.count;
-    attack += unit.count * Math.max(0, nonNegative(unit.attack) * (1 + mod.attack));
+    attack += unit.count * Math.max(0, nonNegative(unit.attack) * (1 + mod.attack) * phaseAtkMult);
   }
   return { attack, defense, participants };
 }

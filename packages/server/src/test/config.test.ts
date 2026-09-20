@@ -15,16 +15,28 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   const c = loadGameConfig(configDir).constants;
   assert.equal(c.wallBonusPerLevel, 0.03, '城墙加成');
   assert.equal(c.mainBuildSpeedupCap, 0.6, '主基地提速上限');
-  assert.equal(c.startResourceAmount, 750, '初始资源');
-  assert.equal(c.storageBase, 800, '基础容量');
+  assert.equal(c.startResourceAmount, 1500, '正式服初始资源');
+  assert.equal(c.storageBase, 5000, '正式服基础容量');
   assert.equal(c.mapSize, 20, '地图尺寸');
   assert.equal(c.mapViewRadius, 6, '视野半径');
   assert.equal(c.marchSizeReferencePop, 20, '军队规模减速基准人口');
   assert.equal(c.marchSizePenalty, 0.0015, '军队规模减速系数');
   assert.equal(c.marchSizeMinMultiplier, 0.45, '军队规模减速下限');
+  assert.equal(c.marchLossRateDefault, 40, '默认战损返城阈值');
   assert.equal(c.tradeCaravanSpeed, 100, '商队速度默认值');
   assert.equal(c.tradeCaravanMinDurationSec, 3, '商队最低时长默认值');
-  assert.equal(c.allianceProjectDurationSec, 10, '联盟建筑/科技默认耗时');
+  assert.deepEqual(
+    [c.treasureCampDropChanceTier1Multiplier, c.treasureCampDropChanceTier2Multiplier, c.treasureCampDropChanceTier3Multiplier],
+    [0.5, 0.75, 1],
+    '野外营地掉宝总体倍率应按低/中/高档递增',
+  );
+  assert.deepEqual(
+    [c.treasureCampRarityMultiplierTier2, c.treasureCampRarityMultiplierTier3],
+    [1.25, 1.6],
+    '中高档营地应有独立稀有度权重底数',
+  );
+  assert.equal(c.allianceProjectDurationSec, 21600, '联盟建筑/科技默认耗时为6小时');
+  assert.deepEqual([c.seasonSettlementMinDays, c.seasonSettlementMaxDays], [7, 10], '赛季结算窗口为7–10天');
   assert.deepEqual(
     [c.allianceLogisticsRoleLevel, c.allianceWarRoleLevel, c.allianceTechRoleLevel, c.allianceAmbassadorRoleLevel],
     [1, 2, 3, 4],
@@ -33,6 +45,32 @@ test('常量表：game_constants.csv 被解析为强类型', () => {
   assert.equal(c.allianceReputationBonusMaxMultiplier, 2, '联盟声望加成倍率上限');
   assert.ok(c.cavalryUnitCodes.includes('equlegati'), '骑兵代码配置应包含罗马骑兵');
   assert.ok(c.cavalryUnitCodes.includes('teutonknight'), '骑兵代码配置应包含条顿骑士');
+});
+
+test('远弦圣地：活动内容、任务图与可编辑常量均从 CSV 编译', () => {
+  const cfg = loadGameConfig(configDir);
+  const event = cfg.sanctumEvents.farstring_sanctum;
+  assert.ok(event, '应存在远弦圣地活动定义');
+  assert.equal(event.fragmentTreasureCode, 'sanctum_fragment');
+  assert.equal(event.sanctuaryTemplateCode, 'sanctum_sanctuary');
+  assert.equal(Object.keys(cfg.sanctumConditions).length, 22, '应加载 C01-C22 共二十二个条件');
+  assert.equal(cfg.sanctumConditions.c16.minPlayers, 2, '共战条件应要求两名玩家');
+  assert.equal(cfg.sanctumConditions.c21.minPlayers, 3, '三方共鸣应要求三名玩家');
+  assert.equal(cfg.sanctumConditions.c19.puzzleCode, 'sanctum_final_rune');
+  assert.equal(cfg.sanctumPuzzles.sanctum_final_rune.wrongCooldownSec, 600);
+  assert.equal(cfg.sanctumPuzzleSteps.sanctum_final_rune.length, 5, '终解应有五步答案');
+  assert.equal(cfg.sanctumClues.c22[0]?.precision, 'direction');
+  assert.ok(cfg.sanctumConditionRewards.c18.some((reward) => reward.params === 'breach_horn'));
+  assert.equal(cfg.constants.sanctumConditionsRequired, 6);
+  assert.equal(cfg.constants.sanctumFirstHoldSec, 21600);
+  assert.equal(cfg.constants.sanctumFormerHolderMinCommanderPopShare, 0.5);
+  assert.equal(cfg.treasures.sanctum_fragment.effectType, 'sanctum_fragment');
+  assert.equal(cfg.treasures.farstring_crest.effectType, 'sanctum_farstring_crest');
+  assert.equal(cfg.questGraph.lines.farstring_sanctum.entryQuest, 's23');
+  assert.deepEqual(
+    ['s23', 's24', 's25', 's26', 's27', 's28', 's29'].map((code) => cfg.quests[code]?.objective.kind),
+    ['sanctum_activate', 'sanctum_condition_count', 'sanctum_discover', 'sanctum_briefing', 'sanctum_occupy', 'sanctum_hold', 'sanctum_return_artifact'],
+  );
 });
 
 test('猎马人支线与绞马索宝物配置已接入任务图', () => {
@@ -72,6 +110,7 @@ test('三区/槽位配置：buildings.zone 解析 + town_center_slots 曲线', (
   assert.equal(cfg.buildings['council'].mainBaseLevel, 2, '议会厅需要二级主基地');
   assert.equal(cfg.buildings['alliance_hall'].maxCount, 1, '联盟大厅每村最多 1 座');
   assert.equal(cfg.buildings['alliance_hall'].mainBaseLevel, 2, '联盟大厅需要二级主基地');
+  assert.deepEqual(cfg.buildings['stable'].requires, [{ kind: 'main', level: 2 }], '马厩前置应为二级主基地');
   assert.equal(cfg.buildings['woodcutter'].zone, 'outer', '资源田归 outer');
   assert.equal(cfg.buildings['woodcutter'].resource, 'wood', '伐木场产木');
   assert.ok((cfg.buildings['woodcutter'].levels?.[1]?.prod ?? 0) > 0, '资源田第1级应有产量');
@@ -91,6 +130,36 @@ test('校验器：合法配置不抛错', () => {
   assert.deepEqual(Object.keys(cfg.allianceServices), ['alliance_supplies_small', 'alliance_reinforcement_guard']);
   assert.equal(cfg.allianceServices.alliance_supplies_small.category, 'supplies');
   assert.equal(cfg.allianceServices.alliance_reinforcement_guard.unitCode, 'legionnaire');
+});
+
+test('正式服数值基线：建筑5天、科技5天、结算7至10天且拓荒可达', () => {
+  const cfg = loadGameConfig(configDir);
+  const rawBuildSeconds = Object.values(cfg.buildings).reduce((total, building) => (
+    total + Object.values(building.levels).reduce((sum, level) => sum + level.timeSec, 0)
+  ), 0);
+  assert.equal(rawBuildSeconds, 10 * 86400, '完整建筑目录原始工期应为10天，两条队列折合5天');
+
+  const graduationPath = [
+    'military_drill', 'standing_army', 'formation_doctrine', 'advanced_arms',
+    'agronomy', 'standard_methods', 'architecture', 'workshop_organization',
+    'civic_order', 'frontier_charter', 'exploration_charter', 'colonial_administration',
+  ];
+  const researchSeconds = graduationPath.reduce((sum, code) => sum + cfg.research[code].durationSec, 0);
+  assert.equal(researchSeconds, 5 * 86400, '三分支各选一条纲领后的科技毕业工期应为5天');
+  assert.deepEqual([cfg.constants.seasonSettlementMinDays, cfg.constants.seasonSettlementMaxDays], [7, 10]);
+  assert.equal(cfg.constants.foundMinMainLevel, cfg.buildings.main.maxLevel, '第二村门槛必须在主基地等级上限内可达');
+  assert.equal(cfg.units.teusettler.popCost, 5, '条顿拓荒者人口成本必须与其他部族一致');
+  assert.ok(Object.values(cfg.tradeCenter).every((tier) => tier.npcRefreshSec === 1800), 'NPC订单统一30分钟刷新');
+
+  const totalCosts = Object.values(cfg.buildings).reduce((totals, building) => {
+    for (const level of Object.values(building.levels)) {
+      for (const key of ['wood', 'clay', 'iron', 'crop']) totals[key] += level.cost[key] ?? 0;
+    }
+    return totals;
+  }, { wood: 0, clay: 0, iron: 0, crop: 0 } as Record<string, number>);
+  for (const [resource, value] of Object.entries(totalCosts)) {
+    assert.ok(value >= 300_000 && value <= 800_000, `${resource} 全建筑毕业成本应落在正式服预算区间`);
+  }
 });
 
 test('任务图：六表编译后保留任务线、目标、效果与关系', () => {
@@ -299,11 +368,8 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
       else assert.equal(ld.prod, undefined, `非资源田 ${b.kind} level=${lv} 不应有 prod`);
     }
   }
-  assert.deepEqual(
-    Object.values(cfg.buildings.alliance_hall.levels ?? {}).map((level) => level.timeSec),
-    Array.from({ length: 10 }, () => 10),
-    '联盟大厅 1-10 级默认建造时间应与配置中心全十秒版本一致',
-  );
+  const allianceHallTimes = Object.values(cfg.buildings.alliance_hall.levels ?? {}).map((level) => level.timeSec);
+  assert.ok(allianceHallTimes.every((time, index) => index === 0 || time > allianceHallTimes[index - 1]), '联盟大厅逐级耗时应递增');
   // 主基地固定四级；逐级人口上限增量由配置中心决定，不在测试中硬编码。
   const main = cfg.buildings['main'];
   assert.equal(main.name, '主基地', '主基地显示名应统一');
@@ -314,7 +380,7 @@ test('建筑逐级参数：building_levels.csv 被载入并覆盖 1..maxLevel', 
   assert.equal(Object.keys(res.levels).length, 10, '居民楼应有 10 级');
   assert.equal(cfg.buildings['alchemy'].maxLevel, 1, '炼金炉最高等级应固定为 1');
   assert.deepEqual(Object.keys(cfg.buildings['alchemy'].levels), ['1'], '炼金炉只应有 1 级升级参数');
-  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.5, '酒馆支线刷新概率默认应为 0.5');
+  assert.equal(cfg.buildings.tavern.levels[1].taskSideQuestChance, 0.2, '正式服酒馆支线刷新概率应为 0.2');
 });
 
 test('超上限惩罚常量：pop_overcap_penalty_full_ratio 载入=2.0', () => {
@@ -365,6 +431,16 @@ test('校验器：建筑 requires 循环依赖应抛错', () => {
   assert.throws(() => validateGameConfig(bad), /循环依赖/);
 });
 
+test('校验器：建筑主基地前置必须与 mainBaseLevel 一致', () => {
+  const cfg = loadGameConfig(configDir);
+  const bad: GameConfig = { ...cfg, buildings: { ...cfg.buildings } };
+  bad.buildings.stable = {
+    ...bad.buildings.stable,
+    mainBaseLevel: bad.buildings.stable.mainBaseLevel + 1,
+  };
+  assert.throws(() => validateGameConfig(bad), /mainBaseLevel=.*requires 主基地前置/);
+});
+
 test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
   const cfg = loadGameConfig(configDir);
   const leg = cfg.units['legionnaire'];
@@ -379,10 +455,10 @@ test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
 
  test('兵种配置：佣兵与 PvE 守军也使用统一三属性，基础兵特性引用完整', () => {
   const cfg = loadGameConfig(configDir);
-  assert.deepEqual(cfg.units.clubswinger.simTraits, ['teuton_origin_attack']);
-  assert.deepEqual(cfg.units.phalanx.simTraits, ['gaul_origin_defense']);
+  assert.deepEqual(cfg.units.clubswinger.traits, ['teuton_origin_attack']);
+  assert.deepEqual(cfg.units.phalanx.traits, ['gaul_phalanx_guard']);
   assert.equal(cfg.unitTraits.teuton_origin_attack.effects[0]?.value, 0.07);
-  assert.equal(cfg.unitTraits.gaul_origin_defense.effects[0]?.value, 0.21);
+  assert.equal(cfg.unitTraits.gaul_phalanx_guard.effects[0]?.value, 0.21);
   assert.equal(cfg.units.merc_slinger.attack, 35);
   assert.equal(cfg.units.merc_slinger.defense, 15);
   assert.equal(cfg.units.merc_slinger.hp, 80);
@@ -390,6 +466,14 @@ test('兵种：新战斗模型列被解析（攻击/防御/生命）', () => {
     .find(([code]) => code === 'rat')?.[1];
   assert.deepEqual(rat && { attack: rat.attack, defense: rat.defense, hp: rat.hp }, { attack: 5, defense: 10, hp: 10 });
  });
+
+test('PvE 营地：宝物掉落档位按难度递增且可由模板配置', () => {
+  const cfg = loadGameConfig(configDir);
+  assert.equal(cfg.pveTemplates.rats.treasureTier, 1);
+  assert.equal(cfg.pveTemplates.bandits.treasureTier, 2);
+  assert.equal(cfg.pveTemplates.fortress.treasureTier, 3);
+  assert.equal(cfg.treasures.chainsaw.dropRate, 0.08, '宝物目录原始 dropRate 不应被营地规则改写');
+});
 
 test('校验器：兵种 form 非法应抛错', () => {
   const cfg = loadGameConfig(configDir);
@@ -499,8 +583,8 @@ test('特性：多效果特性正确展开', () => {
 
 test('游戏设计约束表：军事科技、PvP曲线、佣兵合同与随机任务冷却均从 CSV 载入', () => {
   const cfg = loadGameConfig(configDir);
-  const formation = cfg.research.melee_attack_iii;
-  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk']);
+  const formation = cfg.research.formation_doctrine;
+  assert.deepEqual(formation.effects.map((e) => e.effectType), ['combat_atk', 'combat_def']);
   assert.equal(cfg.mercCamp[1].capacity, 10);
   assert.equal(cfg.units.merc_champion.commandCost, 5);
   assert.equal(cfg.units.merc_champion.contractSec, 259200);

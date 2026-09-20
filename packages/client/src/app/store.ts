@@ -18,6 +18,121 @@ export const tick = signal(0);
 export const dataVersion = signal(0);
 export function bumpData(): void { dataVersion.value++; }
 
+/** 地图专用版本号：只在地图区域/行军快照变化时递增，避免资源、人口等刷新重建整张地图。 */
+export const mapVersion = signal(0);
+let mapInteractionDepth = 0;
+let mapBumpPending = false;
+let pendingSanctumMapState: { value: any | null } | undefined;
+let pendingMapTaskMarkers: Record<string, any[]> | undefined;
+
+/**
+ * 地图只消费圣地的公开投影。个人线索、条件完成记录和其它事件字段不能让
+ * 地图订阅整棵 Sanctum 快照，否则每次任务状态变化都会重新构造 SVG。
+ */
+function mapPoint(value: any): { q: number; r: number } | null {
+  const point = value?.point ?? value?.location ?? value;
+  const q = Number(point?.q), r = Number(point?.r);
+  return Number.isFinite(q) && Number.isFinite(r) ? { q, r } : null;
+}
+
+export function sanctumMapProjection(payload: any): any | null {
+  const state = payload?.event && typeof payload.event === 'object' ? { ...payload, ...payload.event } : payload;
+  const phase = String(state?.phase ?? '').trim().toLowerCase();
+  if (!['active', 'sanctum_hidden', 'sanctum_active', 'relic_in_transit'].includes(phase)) return null;
+
+  const publicTargets = (Array.isArray(state?.publicTargets) ? state.publicTargets : [])
+    .filter((target: any) => target && target.status !== 'removed' && mapPoint(target))
+    .map((target: any) => {
+      const point = mapPoint(target)!;
+      return {
+        id: String(target.id ?? target.conditionId ?? target.code ?? `${point.q},${point.r}`),
+        name: typeof target.name === 'string' && target.name ? target.name : '远弦条件',
+        q: point.q,
+        r: point.r,
+      };
+    });
+  const visibleSanctum = state?.sanctum;
+  const sanctumPosition = mapPoint(visibleSanctum);
+  const sanctum = visibleSanctum && sanctumPosition ? {
+    id: String(visibleSanctum.id ?? visibleSanctum.sanctumId ?? 'farstring-sanctum'),
+    name: typeof visibleSanctum.name === 'string' && visibleSanctum.name ? visibleSanctum.name : '远弦圣地',
+    q: sanctumPosition.q,
+    r: sanctumPosition.r,
+  } : undefined;
+  if (publicTargets.length === 0 && !sanctum) return null;
+  return { publicTargets, ...(sanctum ? { sanctum } : {}) };
+}
+
+function sanctumMapProjectionKey(value: any | null): string {
+  if (!value) return '';
+  const targets = Array.isArray(value.publicTargets)
+    ? [...value.publicTargets].sort((a, b) => String(a?.id ?? '').localeCompare(String(b?.id ?? '')))
+    : [];
+  return JSON.stringify({ publicTargets: targets, sanctum: value.sanctum ?? null });
+}
+
+let sanctumMapProjectionCurrentKey = '';
+
+/** 地图覆盖层快照：拖动期间延后提交，避免推送替换整棵 SVG。 */
+export const sanctumMapState = signal<any | null>(null);
+export const mapTaskMarkers = signal<Record<string, any[]>>({});
+
+function flushDeferredMapSnapshots(): void {
+  if (pendingSanctumMapState !== undefined) {
+    sanctumMapState.value = pendingSanctumMapState.value;
+    pendingSanctumMapState = undefined;
+  }
+  if (pendingMapTaskMarkers !== undefined) {
+    mapTaskMarkers.value = pendingMapTaskMarkers;
+    pendingMapTaskMarkers = undefined;
+  }
+}
+
+function setSanctumMapSnapshot(next: any | null): boolean {
+  const nextKey = sanctumMapProjectionKey(next);
+  if (nextKey === sanctumMapProjectionCurrentKey) return false;
+  sanctumMapProjectionCurrentKey = nextKey;
+  if (mapInteractionDepth > 0) {
+    pendingSanctumMapState = { value: next };
+    return true;
+  }
+  sanctumMapState.value = next;
+  return true;
+}
+
+function setMapTaskMarkersSnapshot(next: Record<string, any[]>): void {
+  if (mapInteractionDepth > 0) {
+    pendingMapTaskMarkers = next;
+    return;
+  }
+  mapTaskMarkers.value = next;
+}
+
+/**
+ * 拖动期间地图相机由 DOM transform 独立驱动。把行军推送触发的 mapVersion
+ * 延后到手势结束，避免 Preact 在同一时间重建地形/路径/标记，产生撕裂、
+ * 旧图层残留和相机坐标错位。
+ */
+export function beginMapInteraction(): void { mapInteractionDepth++; }
+export function endMapInteraction(): void {
+  if (mapInteractionDepth <= 0) return;
+  mapInteractionDepth--;
+  if (mapInteractionDepth === 0) {
+    flushDeferredMapSnapshots();
+    if (mapBumpPending) {
+      mapBumpPending = false;
+      mapVersion.value++;
+    }
+  }
+}
+export function bumpMap(): void {
+  if (mapInteractionDepth > 0) {
+    mapBumpPending = true;
+    return;
+  }
+  mapVersion.value++;
+}
+
 /** 联盟专用数据版本号；只在 AllianceUpdated 推送时递增，避免联盟页因地图/行军心跳重复请求。 */
 export const allianceVersion = signal(0);
 export function bumpAlliance(): void { allianceVersion.value++; }
@@ -111,6 +226,8 @@ export interface SelectedTarget {
   population?: number;
   mainBaseLevel?: number;
   mainBaseName?: string;
+  /** 同一格叠放的可交互目标；地图点击后保留整组，供目标切换栏选择。 */
+  stackedTargets?: SelectedTarget[];
 }
 export const selected = signal<SelectedTarget | null>(null);
 
@@ -142,21 +259,48 @@ export const battles = signal<Record<string, any>>({});
 /** 视野内的外国军队（脱敏）快照（ListForeign）。由 ForeignArmyStep/ForeignArmyRemoved 推送增量更新，供 HexMap 渲染与 TargetPanel 展示。 */
 export const foreignMoves = signal<ListForeignPayload | null>(null);
 
+// 地图动画每帧直接读这份快照；位置变化不触发地图组件重渲，只有队列结构/样式变化才需要。
+let foreignMovesSnapshot: ListForeignPayload | null = null;
+function foreignShape(payload: ListForeignPayload | null): string {
+  return (payload?.movements ?? [])
+    .map((m) => `${m.id}:${m.type ?? ''}:${m.status ?? ''}:${m.escortAttached ? 1 : 0}:${m.caravan?.phase ?? ''}`)
+    .sort()
+    .join('|');
+}
+export function setForeignMoves(payload: ListForeignPayload | null): void {
+  const next = payload ?? null;
+  const shapeChanged = foreignShape(foreignMovesSnapshot) !== foreignShape(next);
+  foreignMovesSnapshot = next;
+  foreignMoves.value = next;
+  if (shapeChanged) bumpMap();
+}
+export function getForeignMovesSnapshot(): ListForeignPayload | null {
+  return foreignMovesSnapshot ?? foreignMoves.value;
+}
+
 /** 增量更新：插入或替换一条外国军队记录。 */
 export function patchForeignArmy(army: ForeignArmy): void {
-  const prev = foreignMoves.value?.movements ?? [];
+  const prev = foreignMovesSnapshot?.movements ?? foreignMoves.value?.movements ?? [];
   const idx = prev.findIndex((m) => m.id === army.id);
   const next = idx >= 0
     ? [...prev.slice(0, idx), army, ...prev.slice(idx + 1)]
     : [...prev, army];
-  foreignMoves.value = { movements: next };
+  const previous = idx >= 0 ? prev[idx] : undefined;
+  foreignMovesSnapshot = { movements: next };
+  foreignMoves.value = foreignMovesSnapshot;
+  if (idx < 0 || `${previous?.type}:${previous?.status}:${previous?.escortAttached}:${previous?.caravan?.phase}`
+    !== `${army.type}:${army.status}:${army.escortAttached}:${army.caravan?.phase}`) bumpMap();
 }
 
 /** 增量更新：移除一条外国军队记录。 */
 export function dropForeignArmy(id: string): void {
-  const prev = foreignMoves.value?.movements ?? [];
+  const prev = foreignMovesSnapshot?.movements ?? foreignMoves.value?.movements ?? [];
   const next = prev.filter((m) => m.id !== id);
-  if (next.length !== prev.length) foreignMoves.value = { movements: next };
+  if (next.length !== prev.length) {
+    foreignMovesSnapshot = { movements: next };
+    foreignMoves.value = foreignMovesSnapshot;
+    bumpMap();
+  }
 }
 
 // ---------- 任务数据（服务端快照 + 推送，按 villageId 分桶） ----------
@@ -167,6 +311,16 @@ export const taskStates = signal<Record<string, any>>({});
 export const playerTaskState = signal<any | null>(null);
 /** 玩家级王国任务与当前村议会厅服务快照。 */
 export const kingdomState = signal<any | null>(null);
+/**
+ * 远弦圣地全局事件快照。事件本身不是普通村庄任务：它有公开目标、私有线索和
+ * 圣地争夺三个不同可见性层级，因此单独保留服务端已经脱敏后的玩家视图。
+ */
+export const sanctumState = signal<any | null>(null);
+export function setSanctumState(payload: any): boolean {
+  const next = payload ?? null;
+  sanctumState.value = next;
+  return setSanctumMapSnapshot(sanctumMapProjection(next));
+}
 /** 任务营地地图标记：villageId → [{id,q,r,cleared}]。 */
 export const taskMarkers = signal<Record<string, any[]>>({});
 
@@ -227,7 +381,9 @@ export function setTaskState(payload: any): void {
   // 已清理营地仍会留在任务快照里显示进度，但不能成为地图标记。
   // 同时过滤可抵御旧服务端推送、缓存快照或消息乱序造成的幽灵标记。
   const camps = decorateTaskCamps(payload.active ?? []);
-  taskMarkers.value = { ...taskMarkers.value, [vid]: camps };
+  const next = { ...taskMarkers.value, [vid]: camps };
+  taskMarkers.value = next;
+  setMapTaskMarkersSnapshot(next);
 }
 
 export function setPlayerTaskState(payload: any): void {
@@ -246,7 +402,9 @@ export function setPlayerTaskState(payload: any): void {
     for (const camp of [...globalCamps, ...localCamps]) {
       if (camp?.id) byId.set(String(camp.id), camp);
     }
-    taskMarkers.value = { ...taskMarkers.value, [vid]: [...byId.values()] };
+    const next = { ...taskMarkers.value, [vid]: [...byId.values()] };
+    taskMarkers.value = next;
+    setMapTaskMarkersSnapshot(next);
   }
 }
 
@@ -260,7 +418,9 @@ export function setTaskMarkers(payload: any): void {
       .map((camp: any) => ({ ...(previousById.get(String(camp?.id)) ?? {}), ...camp }))
       .filter((camp: any) => !camp?.cleared)
     : [];
-  taskMarkers.value = { ...taskMarkers.value, [payload.villageId as string]: camps };
+  const next = { ...taskMarkers.value, [payload.villageId as string]: camps };
+  taskMarkers.value = next;
+  setMapTaskMarkersSnapshot(next);
 }
 
 /** 按地图目标坐标/引用查找任务营地，供目标详情补全任务名称与说明。 */

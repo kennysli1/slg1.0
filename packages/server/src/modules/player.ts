@@ -49,6 +49,10 @@ interface PlayerState {
   q: number;
   r: number;
   createdAt: number;
+  /** 服务器控制类型。旧档缺失时一律按真人处理；该字段不进入 publicPlayer/Wire。 */
+  controller?: 'human' | 'ai';
+  /** 托管 owner，仅 controller=ai 时存在；普通客户端永不下发。 */
+  managedBy?: 'ai-player';
   pvpHits?: number[];
   lastRecoveryAt?: number;
   pvpHitsByVillage?: Record<string, number[]>;
@@ -172,6 +176,8 @@ export class PlayerModule {
     this.commands.register('player.GetPvpContext', (c) => this.getPvpContext(c));
     this.commands.register('player.RecordPvpHit', (c) => this.recordPvpHit(c));
     this.commands.register('player.ListAll', (c) => this.listAll(c));
+    this.commands.register('player.CreateManaged', (c) => this.createManaged(c));
+    this.commands.register('player.GetControlContext', (c) => this.getControlContext(c));
   }
 
   /** 规范化旧档 → 完整 PlayerState；若发生迁移则写回。 */
@@ -219,6 +225,8 @@ export class PlayerModule {
       q,
       r,
       createdAt: raw.createdAt,
+      controller: raw.controller ?? 'human',
+      managedBy: raw.managedBy,
       pvpHits: raw.pvpHits,
       lastRecoveryAt: raw.lastRecoveryAt,
       pvpHitsByVillage: raw.pvpHitsByVillage,
@@ -302,6 +310,7 @@ export class PlayerModule {
     if (!id) return { ok: false, payload: {}, reason: 'no_such_user' };
     const p = this.load(id);
     if (!p) return { ok: false, payload: {}, reason: 'no_such_user' };
+    if (p.controller === 'ai') return { ok: false, payload: {}, reason: 'managed_account' };
     if (!await verifyPassword(password ?? '', p.pwd)) return { ok: false, payload: {}, reason: 'wrong_password' };
     return { ok: true, payload: this.authPayload(p) };
   }
@@ -313,6 +322,7 @@ export class PlayerModule {
     if (!p || !validSessionToken(token, p, this.now())) {
       return { ok: false, payload: {}, reason: 'invalid_session' };
     }
+    if (p.controller === 'ai') return { ok: false, payload: {}, reason: 'managed_account' };
     const current = currentVillageId && p.ownedVillages.some((v) => v.id === currentVillageId)
       ? currentVillageId
       : p.capitalVillageId;
@@ -331,6 +341,44 @@ export class PlayerModule {
     const p = this.load(pid);
     if (!p) return { ok: false, payload: {}, reason: 'owner_not_found' };
     return { ok: true, payload: { player: this.publicPlayer(p) } };
+  }
+
+  /** 仅供服务器 owner 查询账号控制类型，避免把 AI 标记带进公开玩家快照。 */
+  private getControlContext(cmd: Command): CommandResult {
+    if (!['ai-player', 'alliance', 'app'].includes(cmd.from)) {
+      return { ok: false, payload: {}, reason: 'internal_only' };
+    }
+    const input = cmd.payload as { playerId?: string; villageId?: string };
+    const playerId = input.playerId ?? (input.villageId ? this.store.get<string>(COLLECTION_BYVILLAGE, input.villageId) : undefined);
+    const p = playerId ? this.load(playerId) : undefined;
+    if (!p) return { ok: false, payload: {}, reason: 'player_not_found' };
+    return { ok: true, payload: { playerId: p.id, controller: p.controller ?? 'human', createdAt: p.createdAt } };
+  }
+
+  /**
+   * AI owner 创建不可登录托管账号。复用完整注册/建村链路，再由 Player owner
+   * 原子标记控制类型；调用方只能获得内部身份与主村引用，不获得 session token。
+   */
+  private async createManaged(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'ai-player') return { ok: false, payload: {}, reason: 'internal_only' };
+    const { name, tribe } = cmd.payload as { name: string; tribe?: string };
+    const existingId = this.store.get<string>(COLLECTION_BYNAME, String(name ?? '').trim());
+    if (existingId) {
+      const existing = this.load(existingId);
+      if (existing?.controller !== 'ai') return { ok: false, payload: {}, reason: 'name_taken' };
+      return { ok: true, payload: { playerId: existing.id, villageId: existing.capitalVillageId, createdAt: existing.createdAt, existing: true } };
+    }
+    const created = await this.register({
+      name: 'player.Register', from: PlayerModule.NAME,
+      payload: { name, tribe: tribe ?? 'romans', password: randomBytes(32).toString('hex') },
+    });
+    if (!created.ok) return created;
+    const publicCreated = (created.payload as any).player as { id: string; villageId: string };
+    const p = this.load(publicCreated.id)!;
+    p.controller = 'ai';
+    p.managedBy = 'ai-player';
+    this.store.set(COLLECTION, p.id, p);
+    return { ok: true, payload: { playerId: p.id, villageId: p.capitalVillageId, createdAt: p.createdAt, existing: false } };
   }
 
   /** 校验村属于该玩家；Gateway 据此切换 session.villageId。 */

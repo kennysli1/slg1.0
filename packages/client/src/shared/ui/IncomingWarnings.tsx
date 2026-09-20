@@ -135,7 +135,7 @@ export function IncomingWarnings() {
         return (
           <article key={warning.id} class="incoming-warning-card">
             <div class="incoming-warning-top">
-              <strong>{warning.battleType === 'siege' ? '攻城来袭' : '掠夺来袭'}</strong>
+              <strong>{(warning as any).caravanRaid ? '商队遭到劫掠' : warning.battleType === 'siege' ? '攻城来袭' : '掠夺来袭'}</strong>
               <span>{etaText(warning.arriveAt)}</span>
             </div>
             <div>出发村庄：{warning.fromVillageName} ({warning.from.q},{warning.from.r})</div>
@@ -145,9 +145,11 @@ export function IncomingWarnings() {
             </div>
             <div class={intelligence ? 'incoming-intel incoming-intel--known' : 'incoming-intel'}>{intelligence ? '最近侦察兵力' : '兵力'}：{troopText}</div>
             {treasureText && <div class="incoming-intel incoming-intel--known">宝物：{treasureText}</div>}
-            <Btn size="sm" variant="primary" onClick={() => void scout(warning)}>
-              {warning.targetVillage === me?.villageId ? '侦察来袭部队' : '切换到受袭村庄并侦察'}
-            </Btn>
+            {(warning as any).caravanRaid ? <div class="incoming-rule-note">该预警针对你的商队，商队战斗将在相遇时结算。</div> : (
+              <Btn size="sm" variant="primary" onClick={() => void scout(warning)}>
+                {warning.targetVillage === me?.villageId ? '侦察来袭部队' : '切换到受袭村庄并侦察'}
+              </Btn>
+            )}
           </article>
         );
       })}

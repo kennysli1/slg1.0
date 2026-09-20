@@ -17,8 +17,10 @@ import { pendingTaskCamps, type TaskCampCoordinate } from '../map/map-navigation
 import { openTradeCenter } from '../trade/TradeModal.js';
 import { VillageList } from '../../shared/ui/VillageList.js';
 import { readTaskMenuOpenState, writeTaskMenuOpenState, type TaskMenuOpenState } from './task-menu-state.js';
-import { acceptReplyIntent, deliverReplyIntent, nextDialogueSegment, visibleDialogueSegments } from './task-dialogue-flow.js';
+import { deliverReplyIntent, nextDialogueSegment, taskDialogueReplyIntent, visibleDialogueSegments } from './task-dialogue-flow.js';
 import { DiceQuestModal } from './DiceQuestModal.js';
+import { hasRepairBuildingPending, isRepairBuildingDone } from './task-progress.js';
+import { SanctumEventPanel } from '../sanctum/SanctumEventPanel.js';
 
 function vid(): string {
   return me?.villageId ?? '';
@@ -70,7 +72,66 @@ function objText(task: any): string {
       ? `三局两胜骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`
       : `骰子游戏战胜${difficulty}（目标 ${o.diceTargetScore} 分）`;
   }
+  if (o.kind === 'rune_sequence') return '破解五枚符文的唯一排列顺序';
+  if (o.kind === 'sanctum_activate') return '在学者对话中明确唤醒或加入远弦圣地';
+  if (o.kind === 'sanctum_condition_count') return `完成远弦公共条件 ×${o.count}`;
+  if (o.kind === 'sanctum_discover') return '依据私有线索找到远弦圣地';
+  if (o.kind === 'sanctum_briefing') return '抵达圣地并聆听门后的回响';
+  if (o.kind === 'sanctum_occupy') return '率军占领远弦圣地';
+  if (o.kind === 'sanctum_hold') return `连续守卫圣地 ${fmt(o.count)} 秒`;
+  if (o.kind === 'sanctum_return_artifact') return '让携带远弦圣徽的军队安全返乡';
   return o.kind;
+}
+
+const ASHEN_RUNES = ['月影', '狼牙', '潮汐', '王冠', '天眼'];
+
+function RuneModal({ task, close }: { task: any; close: () => void }) {
+  const [sequence, setSequence] = useState<string[]>(() => [...ASHEN_RUNES]);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (new Set(sequence).size !== sequence.length) { showToast('每枚符文只能使用一次', 'bad'); return; }
+    if (!await ensureTaskExecution(task)) return;
+    setBusy(true);
+    await act(req('task.SolveRune', { code: task.code, sequence }), {
+      okToast: '符文排列正确',
+      onOk: () => close(),
+    });
+    setBusy(false);
+  };
+  return (
+    <Modal title="灰烬商路 · 符文解密" sub="根据线索排列五枚符文" onClose={busy ? () => {} : close}>
+      <p class="task-reward-hint">王冠不在首尾；月影紧挨狼牙且在其之前；潮汐在王冠之前；天眼在王冠之后且不紧挨狼牙；潮汐与月影之间隔一枚符文。</p>
+      <div class="task-submit-grid">
+        {sequence.map((value, index) => (
+          <label class="task-submit-row" key={index}>第 {index + 1} 位
+            <select value={value} disabled={busy} onChange={(event) => setSequence((prev) => prev.map((item, i) => i === index ? (event.currentTarget as HTMLSelectElement).value : item))}>
+              {ASHEN_RUNES.map((rune) => <option key={rune} value={rune}>{rune}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
+      <div class="modal-foot"><Btn variant="primary" disabled={busy} onClick={() => void submit()}>提交排列</Btn></div>
+    </Modal>
+  );
+}
+
+function BranchModal({ task, close }: { task: any; close: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const choose = async (branch: string) => {
+    if (!await ensureTaskExecution(task)) return;
+    setBusy(true);
+    await act(req('task.SelectBranch', { code: task.code, branch }), { okToast: '已选择后续路线', onOk: () => close() });
+    setBusy(false);
+  };
+  return (
+    <Modal title="选择灰烬商路的方向" sub="选择后将只开放对应支线" onClose={busy ? () => {} : close}>
+      <div class="dialogue-replies">
+        <Btn disabled={busy} onClick={() => void choose('trade')}>商路 · 经营与资源</Btn>
+        <Btn disabled={busy} onClick={() => void choose('military')}>烽火 · 兵锋与攻城</Btn>
+        <Btn disabled={busy} onClick={() => void choose('explore')}>遗迹 · 探索与知识</Btn>
+      </div>
+    </Modal>
+  );
 }
 
 /** 任务类型标签：主线=金、支线=橙、日常=绿。 */
@@ -360,9 +421,12 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [segmentIndex, setSegmentIndex] = useState(0);
+  // s23 的“接受调查”与“唤醒残印”是两个独立的服务器确认点。接取成功后
+  // 由 task.Accept 返回下一段 session，而不是把唤醒按钮预先塞进 accept 对话。
+  const [sessionDialogue, setSessionDialogue] = useState(dialogue);
   const accepting = useRef(false);
-  const segments = visibleDialogueSegments(dialogue);
-  const current = segments[segmentIndex] ?? dialogue;
+  const segments = visibleDialogueSegments(sessionDialogue);
+  const current = segments[segmentIndex] ?? sessionDialogue;
   const closeSession = useCallback(() => close(), [close]);
   const advanceSegment = useCallback(() => {
     const next = nextDialogueSegment(segmentIndex, segments.length);
@@ -371,13 +435,31 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
   }, [close, segmentIndex, segments.length]);
   const onReply = async (key: string) => {
     if (accepting.current) return;
-    const intent = acceptReplyIntent(key, accepted);
+    const intent = taskDialogueReplyIntent(task.code, String(sessionDialogue?.trigger ?? ''), key, accepted);
     if (intent === 'close') {
       closeSession();
       return;
     }
     if (intent === 'advance') {
       advanceSegment();
+      return;
+    }
+    if (intent === 'sanctum_activate') {
+      accepting.current = true;
+      setBusy(true);
+      if (!await ensureTaskExecution(task)) {
+        accepting.current = false;
+        setBusy(false);
+        return;
+      }
+      // Sanctum owner 会原子判断“首发者唤醒”还是“活动已开后的加入”；前端
+      // 只把配置中心定义的 awaken 回复转成这一次明确请求，关闭/离开绝不调用它。
+      await act(req('sanctum.Activate'), {
+        okToast: '远弦回响已确认',
+        onOk: () => closeSession(),
+      });
+      accepting.current = false;
+      setBusy(false);
       return;
     }
     accepting.current = true;
@@ -387,13 +469,25 @@ function DialogueModal({ dialogue, task, close }: { dialogue: any; task: any; cl
       setBusy(false);
       return;
     }
-    await act(req('task.Accept', { code: task.code }), {
+    let followupDialogue: any = null;
+    const acceptedOk = await act(req('task.Accept', { code: task.code }), {
       okToast: '已接取任务',
-      onOk: () => {
-        setAccepted(true);
-        advanceSegment();
+      onOk: (payload) => {
+        followupDialogue = payload?.followupDialogue ?? null;
       },
     });
+    if (acceptedOk) {
+      // s23 成功接取后进入服务端生成的“唤醒残印”session；其它任务保持
+      // 原先的接取成功后普通推进语义。
+      if (followupDialogue) {
+        setSessionDialogue(followupDialogue);
+        setSegmentIndex(0);
+        setAccepted(true);
+      } else {
+        setAccepted(true);
+        advanceSegment();
+      }
+    }
     accepting.current = false;
     setBusy(false);
   };
@@ -430,6 +524,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
   const taskVillage = (o.kind === 'defend_task_village' || o.kind === 'raid_task_village') && task.taskVillageXY
     ? { id: String(task.taskVillageId ?? `${task.taskVillageXY.q},${task.taskVillageXY.r}`), q: Number(task.taskVillageXY.q), r: Number(task.taskVillageXY.r) }
     : undefined;
+  const repairBuildingKinds = o.kind === 'repair_buildings' ? (o.buildingKinds ?? []) as string[] : [];
+  const hasRepairPending = hasRepairBuildingPending(task, repairBuildingKinds);
 
   const onAbandon = async () => {
     const isSide = task.type === 'side';
@@ -495,6 +591,28 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       openModal((close) => <DiceQuestModal task={task} close={close} />, `dice-task-${task.code}`);
     })();
   };
+  const onRuneSolve = () => {
+    void ensureTaskExecution(task).then((ok) => { if (ok) openModal((close) => <RuneModal task={task} close={close} />, `task-rune-${task.code}`); });
+  };
+  const onBranchSelect = () => {
+    void ensureTaskExecution(task).then((ok) => { if (ok) openModal((close) => <BranchModal task={task} close={close} />, `task-branch-${task.code}`); });
+  };
+  const onOpenSanctumAwakenDialogue = () => {
+    void (async () => {
+      if (!await ensureTaskExecution(task)) return;
+      const started = await req('task.StartActiveDialogue', { code: task.code, trigger: 'sanctum_awaken' });
+      if (!started.ok) {
+        await act(Promise.resolve(started), { silent: true });
+        return;
+      }
+      const dialogue = (started.payload as any)?.dialogue;
+      if (!dialogue) {
+        showToast('学者暂时没有新的话要说', 'bad');
+        return;
+      }
+      openModal((close) => <DialogueModal dialogue={dialogue} task={task} close={close} />, `dialogue-${dialogue.id}`);
+    })();
+  };
 
   return (
     <div class={`task-card task-card--${task.type}`}>
@@ -536,8 +654,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       {o.kind === 'repair_buildings' && (
         <div class="task-card-obj">
           <ol class="task-checklist" aria-label="资源田修复进度">
-            {((o.buildingKinds ?? []) as string[]).map((kind, index) => {
-              const done = (task.repairedBuildings ?? []).includes(kind);
+            {repairBuildingKinds.map((kind, index) => {
+              const done = isRepairBuildingDone(task, kind);
               const info = buildingInfo(kind);
               return (
                 <li key={kind} class={`task-checklist-item${done ? ' done' : ''}`}>
@@ -549,10 +667,10 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
               );
             })}
           </ol>
-          <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>
+          {hasRepairPending && <span class="task-prog-hint">请在村庄页面修复被破坏的资源田</span>}
         </div>
       )}
-      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units') && (
+      {(o.kind === 'build_buildings' || o.kind === 'population_reached' || o.kind === 'resource_owned' || o.kind === 'explore_tiles' || o.kind === 'main_base_level' || o.kind === 'kill_units' || o.kind === 'clear_public_pve' || o.kind.startsWith('sanctum_')) && (
         <div class="task-card-obj">
           <div class="task-card-prog">
             <span class={`task-prog-chip${(task.progress ?? 0) >= (o.count ?? 1) ? ' done' : ''}`}>
@@ -564,6 +682,14 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             {o.kind === 'explore_tiles' && <span class="task-prog-hint">城镇初始视野与之后探索的格子都会计入</span>}
             {o.kind === 'main_base_level' && <span class="task-prog-hint">主基地等级达到目标后即可领取</span>}
             {o.kind === 'kill_units' && <span class="task-prog-hint">累计消灭敌方{ o.unitCategory === 'cavalry' ? '骑兵' : (o.unitCategory ?? '指定兵种') }人口</span>}
+            {o.kind === 'clear_public_pve' && <span class="task-prog-hint">已清除雇佣兵营及更强的常驻公开 PvE 营地</span>}
+            {o.kind === 'sanctum_activate' && <span class="task-prog-hint">必须在学者对话中明确确认；关闭、Esc 和离开不会唤醒活动</span>}
+            {o.kind === 'sanctum_condition_count' && <span class="task-prog-hint">任意完成六项公共条件即可取得寻找资格；私有线索不会公开</span>}
+            {o.kind === 'sanctum_discover' && <span class="task-prog-hint">根据自己获得的方向、区域和距离线索在地图上寻找</span>}
+            {o.kind === 'sanctum_briefing' && <span class="task-prog-hint">抵达已发现的圣地后由服务器确认资格</span>}
+            {o.kind === 'sanctum_occupy' && <span class="task-prog-hint">只有合格玩家可占领；其他玩家可协助或争夺</span>}
+            {o.kind === 'sanctum_hold' && <span class="task-prog-hint">战斗暂停计时，失守或撤离会重置首次守卫</span>}
+            {o.kind === 'sanctum_return_artifact' && <span class="task-prog-hint">圣徽在军队返乡时由服务器结算，不通过任务奖励重复发放</span>}
           </div>
         </div>
       )}
@@ -598,6 +724,14 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
             </span>
             <span class="task-prog-hint">每局目标分数 {o.diceTargetScore ?? 2000}；可随时退出，退出本局计 NPC 胜一局</span>
             {task.diceLastOutcome === 'npc' && <span class="task-prog-hint task-prog-hint--warn">上一局未获胜，可重新尝试</span>}
+          </div>
+        </div>
+      )}
+      {o.kind === 'rune_sequence' && (
+        <div class="task-card-obj">
+          <div class="task-card-prog">
+            <span class={`task-prog-chip${task.runeSolved ? ' done' : ''}`}>{task.runeSolved ? '符文排列正确' : '尚未破解'}</span>
+            <span class="task-prog-hint">线索要求唯一解；错误提交不会消耗任务进度。</span>
           </div>
         </div>
       )}
@@ -659,6 +793,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
       <div class="task-card-actions">
         {task.failureReady ? (
           <Btn size="sm" variant="danger" onClick={onFail}>任务失败</Btn>
+        ) : task.ready && task.code === 's13' ? (
+          <Btn size="sm" variant="primary" onClick={onBranchSelect}>选择后续路线</Btn>
         ) : task.ready ? (
           <Btn size="sm" variant="primary" onClick={onDeliver}>{task.natalieDecision === 'release' ? '领取奖励' : '完成任务'}</Btn>
         ) : (
@@ -679,6 +815,8 @@ export function TaskCard({ task, hideHeader = false }: { task: any; hideHeader?:
                   ? '继续对局'
                   : '开始对局'}
             </Btn>}
+            {o.kind === 'rune_sequence' && <Btn size="sm" variant="primary" onClick={onRuneSolve}>开始解密</Btn>}
+            {o.kind === 'sanctum_activate' && <Btn size="sm" variant="primary" onClick={onOpenSanctumAwakenDialogue}>与学者交谈</Btn>}
           </>
         )}
         {!isMain && !task.failureReady && (
@@ -979,6 +1117,7 @@ function TaskBoard({ state }: { state: any }) {
   };
   return (
     <section class="task-bar">
+      <SanctumEventPanel />
       <TaskScopeMenu
         scope="global"
         state={globalState}

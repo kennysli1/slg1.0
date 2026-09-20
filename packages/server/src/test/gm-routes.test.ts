@@ -1,6 +1,6 @@
 /**
  * GM HTTP 路由测试（Fastify inject）：
- *  1. 未设 GM_TOKEN 时所有路由开放（保持现有默认行为不变）
+ *  1. 开发环境未设 GM_TOKEN 时路由开放；生产环境启用 GM 时必须配置 token
  *  2. 设置 GM_TOKEN 时，缺少 X-GM-Token header → 401
  *  3. 设置 GM_TOKEN 时，携带正确 X-GM-Token header → 200
  *  4. 危险路由（DELETE /gm/:collection）不带 ?confirm=yes → 400
@@ -18,6 +18,21 @@ import { createGameApp } from '../app.js';
 import { parseCsvStructured } from '../infra/csv.js';
 
 const SECRET = 'test-gm-token-xyz';
+
+test('生产环境启用 GM API 但未配置 GM_TOKEN 时拒绝启动', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousToken = process.env.GM_TOKEN;
+  process.env.NODE_ENV = 'production';
+  delete process.env.GM_TOKEN;
+  try {
+    assert.throws(() => buildFastify(), /必须配置 GM_TOKEN/);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousToken === undefined) delete process.env.GM_TOKEN;
+    else process.env.GM_TOKEN = previousToken;
+  }
+});
 
 function buildFastify(storePath?: string, configDir?: string) {
   const app = createGameApp({ now: () => 1_000_000, manualScheduler: true, storePath, configDir });
@@ -267,6 +282,7 @@ test('/config/balance 暴露宝库逐级主/备用槽编辑说明', async () => 
       'kingdom_fief_mercenary_min_ratio',
       'kingdom_fief_mercenary_max_ratio',
       'kingdom_city_state_reputation_penalty',
+      'caravan_raid_reputation_goods_per_point',
     ]) assert.match(reputationSection, new RegExp(key), `声望参数板块应包含 ${key}`);
     const cityStateFnStart = res.body.indexOf('function sectionCityState()');
     const cityStateFnEnd = res.body.indexOf('function sectionKingdom()', cityStateFnStart);
@@ -288,7 +304,18 @@ test('GM 与配置中心入口分离：GM 首页不再暴露 CSV 编辑器', asy
     assert.equal(gm.statusCode, 200);
     assert.match(gm.body, /配置中心（CSV）/);
     assert.match(gm.body, /任务状态管理/);
+    assert.match(gm.body, /AI 玩家控制台/);
     assert.doesNotMatch(gm.body, /任务模块编辑/);
+    const aiPage = await fastify.inject({ method: 'GET', url: '/gm/ai' });
+    assert.equal(aiPage.statusCode, 200);
+    assert.match(aiPage.body, /全部启动/);
+    assert.match(aiPage.body, /全部暂停/);
+    assert.match(aiPage.body, /立即思考一次/);
+    assert.match(aiPage.body, /近期行为结果/);
+    assert.match(aiPage.body, /\/ops\/ai\/.*\/enabled/);
+    const aiScript = aiPage.body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(aiScript, 'AI 控制台应包含初始化脚本');
+    assert.doesNotThrow(() => new Function(aiScript), 'AI 控制台脚本必须是合法 JavaScript');
     const center = await fastify.inject({ method: 'GET', url: '/config' });
     assert.equal(center.statusCode, 200);
     assert.match(center.body, /配置中心（CSV）/);
@@ -333,7 +360,7 @@ test('/config/quest-modules/data 与 /config/quest-graph/data 返回完整声明
     assert.equal(modulesRes.statusCode, 200);
     const modules = JSON.parse(modulesRes.body) as { ok: boolean; tables?: Record<string, { rows: unknown[] }> };
     assert.equal(modules.ok, true);
-    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 9);
+    assert.equal(modules.tables?.['quest_lines.csv'].rows.length, 11);
     assert.ok((modules.tables?.['quest_effects.csv'].rows.length ?? 0) >= 12);
     const graphRes = await fastify.inject({ method: 'GET', url: '/config/quest-graph/data' });
     assert.equal(graphRes.statusCode, 200);
@@ -610,7 +637,7 @@ test('/config/balance/save → 写回 CSV → balance/data 反映修改', async 
     // 模拟历史 shared/config：新增的酒馆支线概率列存在但整列是空值。
     // 配置中心应显示运行时默认 0.5，而不是让管理员看到空白。
     const staleLevelsPath = join(tempConfig, 'building_levels.csv');
-    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.5,', ',,'));
+    const staleLevels = readFileSync(staleLevelsPath, 'utf8').replace(/^tavern,.*$/gm, (line) => line.replace(',0.2,', ',,'));
     writeFileSync(staleLevelsPath, staleLevels, 'utf8');
     const { fastify, app } = buildFastify(storePath, tempConfig);
     await fastify.ready();

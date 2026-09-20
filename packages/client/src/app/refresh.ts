@@ -17,11 +17,11 @@ import {
   addReport, seedReports, patchMovement, replaceMovementSnapshot, dropMovement, type ReportKind, type StoredReport,
 } from './state.js';
 import {
-  bumpData, bumpAlliance, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
+  bumpData, bumpMap, bumpAlliance, bumpReports, bumpSession, showToast, mercCamp, tradeCenter,
   techTree, researchState, putBattle, dropBattle, modals, tab,
-  setTaskState, setPlayerTaskState, setTaskMarkers, foreignMoves, mapCenter, mapAreaStale,
+  setTaskState, setPlayerTaskState, setTaskMarkers, setForeignMoves, mapCenter, mapAreaStale,
   beginVillageSwitch, endVillageSwitch, patchForeignArmy, dropForeignArmy,
-  kingdomState,
+  kingdomState, setSanctumState,
 } from './store.js';
 import type { MarchStepPush, MarchRemovedPush, ForeignArmyStepPush, ForeignArmyRemovedPush } from '@slg/shared';
 import { notificationText, notificationKind, isReportEvent } from '../features/reports/notification-text.js';
@@ -31,6 +31,7 @@ let mapCenterLegacy: { q: number; r: number } | null = null;
 // 尤其不能把目标消失后的返程路径覆盖回出征路径。
 let refreshGeneration = 0;
 let movementRefreshGeneration = 0;
+let sanctumRefreshGeneration = 0;
 
 /**
  * GM 可直接调整村庄坐标/名称；玩家快照不会主动推送这些字段。
@@ -138,6 +139,7 @@ export async function refreshAll(options: { includeArea?: boolean; waitForTasks?
     setPendingTreasures(treasures.ok && (treasures.payload as any)?.pending ? (treasures.payload as any).pending : []);
     markResFetched();
     if (pop.ok) applyPopPayload(pop.payload);
+    bumpMap();
     bumpData();
     void refreshForeignMoves();
 
@@ -159,6 +161,7 @@ export async function refreshMapArea(): Promise<boolean> {
     reconcileVillagesFromArea(area.payload);
     setCache({ ...getCache(), area: area.payload });
     mapAreaStale.value = false;
+    bumpMap();
     bumpData();
     return true;
   } catch {
@@ -190,6 +193,32 @@ export async function switchVillage(villageId: string): Promise<{ ok: boolean; e
 export async function reloadPlayerTasks(): Promise<void> {
   const taskRes = await req('task.GetPlayerState').catch(() => null);
   if (taskRes?.ok) setPlayerTaskState(taskRes.payload);
+}
+
+export interface SanctumReloadResult {
+  ok: boolean;
+  mapChanged: boolean;
+}
+
+/**
+ * 轻量刷新远弦圣地事件；服务端仅返回当前玩家被允许看到的字段。
+ * 它不是基础刷新的一部分，只由登录、圣地任务/事件推送和圣地动作触发。
+ */
+export async function reloadSanctum(options: { markMapStale?: boolean } = {}): Promise<SanctumReloadResult> {
+  const generation = ++sanctumRefreshGeneration;
+  const result = await req('sanctum.GetState').catch(() => null);
+  if (!result?.ok || generation !== sanctumRefreshGeneration) return { ok: false, mapChanged: false };
+  const mapChanged = setSanctumState(result.payload);
+  if (mapChanged && options.markMapStale !== false) mapAreaStale.value = true;
+  bumpData();
+  return { ok: true, mapChanged };
+}
+
+async function refreshSanctumAfterPush(): Promise<void> {
+  const result = await reloadSanctum();
+  // MapScreen 会在当前页立即补拉，离开地图时则在进入地图页补拉；不在推送回调
+  // 中直接发起 GetArea，避免多个圣地事件把完整地图请求叠在一起。
+  if (result.ok && result.mapChanged) mapAreaStale.value = true;
 }
 
 export async function reloadKingdom(): Promise<void> {
@@ -325,7 +354,7 @@ export async function reloadResearch(): Promise<void> {
 export async function refreshForeignMoves(): Promise<void> {
   if (!me) return;
   const r = await req('ListForeign').catch(() => ({ ok: false } as any));
-  if (r.ok) foreignMoves.value = r.payload;
+  if (r.ok) setForeignMoves(r.payload);
 }
 
 /** 只刷新己方行军与实时来袭预警，不拉资源、建筑、任务或地图大包。 */
@@ -343,6 +372,7 @@ export async function refreshMovements(): Promise<void> {
     ...(moves.ok ? { moves: moves.payload } : {}),
     ...(playerMoves.ok ? { playerMoves: playerMoves.payload } : {}),
   });
+  bumpMap();
   bumpData();
 }
 
@@ -396,6 +426,13 @@ export function handlePush(event: string, payload: any, ts?: number): void {
     void refreshMovements();
     return;
   }
+  if (event === 'CaravanRaidReport') {
+    void refreshMovements();
+    scheduleForeignRefresh(0);
+    void reloadTrade();
+    void reloadKingdom();
+    return;
+  }
 
   // 人口变化很频繁：只校正快照，绝不触发 refreshAll，
   // 否则会形成 push → refresh → settle → emit 的正反馈死循环。
@@ -425,6 +462,14 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   // 任务推送：直接写信号，不触发整页刷新（任务更新频繁且与其它数据解耦）
   if (event === 'TaskListChanged') { setTaskState(payload); void reloadPlayerTasks(); return; }
   if (event === 'TaskMapUpdated') { setTaskMarkers(payload); return; }
+  // 圣地状态只接受定向推送。地图是否需要补拉由脱敏公开投影的坐标变化决定，
+  // 不再因为一个私人线索/倒计时变化就重建地图。
+  if (event === 'SanctumUpdated') {
+    const playerIds = Array.isArray(payload?.playerIds) ? payload.playerIds.map((id: unknown) => String(id)) : [];
+    if (playerIds.length > 0 && (!me?.id || !playerIds.includes(String(me.id)))) return;
+    void refreshSanctumAfterPush();
+    return;
+  }
   if (event === 'KingdomUpdated') { void reloadKingdom(); return; }
   if (event === 'AllianceUpdated') { bumpAlliance(); void refreshAll({ includeArea: false, waitForTasks: false }); return; }
 
@@ -440,6 +485,7 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'MarchSent') {
     movementRefreshGeneration++;
     if (payload?.movement?.id) replaceMovementSnapshot(payload.movement);
+    bumpMap();
     bumpData();
     void refreshMovements();
     scheduleForeignRefresh(0);
@@ -459,6 +505,7 @@ export function handlePush(event: string, payload: any, ts?: number): void {
   if (event === 'MarchRemoved') {
     movementRefreshGeneration++;
     dropMovement((payload as MarchRemovedPush).id);
+    bumpMap();
     bumpData();
     return;
   }

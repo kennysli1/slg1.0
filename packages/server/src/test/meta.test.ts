@@ -25,6 +25,16 @@ test('GetGameConfig：返回 resources/buildings/units/pve/常量最小集', asy
   // 兵种：下发数量 = config 兵种数量（新增 CSV 行会自动出现）
   assert.equal(p.units.length, Object.keys(app.config.units).length);
   assert.ok(p.units.every((u: any) => u.key && u.tribe && u.name && u.icon && Number.isFinite(u.attack) && Number.isFinite(u.defense) && Number.isFinite(u.hp)));
+  // 特性是配置的只读展示投影：保留兵种引用顺序，并完整下发名称与效果。
+  const traitUnit = Object.values(app.config.units).find((u) => u.traits.length > 0)!;
+  const traitMeta = p.units.find((u: any) => u.key === traitUnit.key);
+  assert.deepEqual(traitMeta.traits.map((t: any) => t.code), traitUnit.traits);
+  assert.deepEqual(traitMeta.traits[0], {
+    code: app.config.unitTraits[traitUnit.traits[0]].code,
+    name: app.config.unitTraits[traitUnit.traits[0]].name,
+    effects: app.config.unitTraits[traitUnit.traits[0]].effects,
+  });
+  assert.ok(p.units.filter((u: any) => !app.config.units[u.key].traits.length).every((u: any) => Array.isArray(u.traits) && u.traits.length === 0));
   // 建筑：下发数量 = config 建筑数量（含资源田，均带 zone）
   assert.equal(p.buildings.length, Object.keys(app.config.buildings).length);
   assert.ok(p.buildings.every((b: any) => b.kind && b.name && b.icon && b.zone));

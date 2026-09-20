@@ -49,6 +49,8 @@ interface MilitaryState {
   raidDefense?: { enabled: boolean; troops: Record<string, number> };
   /** 在途（行军/出征中）兵力：兵种 -> 数量，由 movement 模块推送；仍计入口粮消耗。 */
   marching?: Record<string, number>;
+  /** 在途口粮快照；Movement 仅提供部队与倍率，单位口粮公式仍由本模块唯一计算。 */
+  marchingUpkeep?: Array<{ troops: Record<string, number>; upkeepMultiplier: number }>;
   /** 旧版单条训练队列（仅用于兼容旧存档；新训练一律走 trainingBySlot）。 */
   training: TrainOrder | null;
   /** 逐建筑实例训练队列：slotId -> 该建筑的独立训练队列（多实例并行训练）。 */
@@ -56,6 +58,10 @@ interface MilitaryState {
   /** 宝物军事倍率（乘数，默认 1；由 treasure 模块推送，无环）：攻/防分别作用。 */
   treasureAtkMult?: number;
   treasureDefMult?: number;
+  /** 远弦圣徽等仅作用于远程兵的宝物倍率；阶段二倍率在战斗快照中冻结。 */
+  treasureRangedAtkMult?: number;
+  treasureRangedDefMult?: number;
+  treasureRangedPhase2AtkMult?: number;
   /** 科研攻击倍率（由 research 模块推送，叠加在宝物之上）。 */
   techAtkMult?: number;
   /** 科研防御倍率（由 research 模块推送，叠加在宝物之上）。 */
@@ -116,13 +122,26 @@ export class MilitaryModule {
 
   /** 宝物军事倍率（由 treasure 模块推送，无环）：攻/防分别作用。 */
   private setTreasureCombatMult(cmd: Command): CommandResult {
-    const { villageId, atkMult, defMult } = cmd.payload as { villageId: string; atkMult: number; defMult: number };
+    const { villageId, atkMult, defMult, rangedAtkMult, rangedDefMult, rangedPhase2AtkMult } = cmd.payload as {
+      villageId: string; atkMult: number; defMult: number;
+      rangedAtkMult?: number; rangedDefMult?: number; rangedPhase2AtkMult?: number;
+    };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
     s.treasureAtkMult = atkMult > 0 ? atkMult : 1;
     s.treasureDefMult = defMult > 0 ? defMult : 1;
+    s.treasureRangedAtkMult = Number(rangedAtkMult) > 0 ? Number(rangedAtkMult) : 1;
+    s.treasureRangedDefMult = Number(rangedDefMult) > 0 ? Number(rangedDefMult) : 1;
+    s.treasureRangedPhase2AtkMult = Number(rangedPhase2AtkMult) > 0 ? Number(rangedPhase2AtkMult) : 1;
     this.store.set(COLLECTION, villageId, s);
-    return { ok: true, payload: { atkMult: s.treasureAtkMult, defMult: s.treasureDefMult } };
+    return {
+      ok: true,
+      payload: {
+        atkMult: s.treasureAtkMult, defMult: s.treasureDefMult,
+        rangedAtkMult: s.treasureRangedAtkMult, rangedDefMult: s.treasureRangedDefMult,
+        rangedPhase2AtkMult: s.treasureRangedPhase2AtkMult,
+      },
+    };
   }
 
   /** 科研攻击/防御倍率（research 模块推送，独立叠加在宝物倍率之上）。 */
@@ -197,6 +216,7 @@ export class MilitaryModule {
     this.commands.register('military.RestoreConsumedTroops', (c) => this.restoreConsumedTroops(c));
     // 在途（行军）兵力快照：由 Movement 汇总推送，仅用于计入粮耗（不影响驻村兵力/动员）。
     this.commands.register('military.SetMarchingTroops', (c) => this.setMarchingTroops(c));
+    this.commands.register('military.ClearMarchingTroops', () => this.clearMarchingTroops());
     // 祭祀台等消耗型效果：按 popCost 升序移除驻村士兵直到满足人口缺口（允许超扣）。
     this.commands.register('military.SacrificeTroops', (c) => this.sacrificeTroops(c));
     // 雇佣兵：把雇佣兵永久写入 troops（popCost=0/upkeep=0 → 自动零副作用、自动参战）。
@@ -238,6 +258,9 @@ export class MilitaryModule {
     // 宝物军事倍率迁移默认值（旧存档缺省置 1，无倍率）。
     if (s.treasureAtkMult === undefined) s.treasureAtkMult = 1;
     if (s.treasureDefMult === undefined) s.treasureDefMult = 1;
+    if (s.treasureRangedAtkMult === undefined) s.treasureRangedAtkMult = 1;
+    if (s.treasureRangedDefMult === undefined) s.treasureRangedDefMult = 1;
+    if (s.treasureRangedPhase2AtkMult === undefined) s.treasureRangedPhase2AtkMult = 1;
     if (s.techAtkMult === undefined) s.techAtkMult = 1;
     if (s.techDefMult === undefined) s.techDefMult = 1;
     if (s.treasureCavalryTrainMult === undefined) s.treasureCavalryTrainMult = 1;
@@ -364,8 +387,12 @@ export class MilitaryModule {
       ration += this.foodPerSoldier(unit, s, base) * n;
     }
     // 在途（行军）部队同样耗粮（出征不减免口粮）。
-    for (const [unit, n] of Object.entries(s.marching ?? {})) {
-      ration += this.foodPerSoldier(unit, s, base) * n;
+    const marchingGroups = s.marchingUpkeep ?? [{ troops: s.marching ?? {}, upkeepMultiplier: 1 }];
+    for (const group of marchingGroups) {
+      const multiplier = Math.max(0, Number(group.upkeepMultiplier) || 1);
+      for (const [unit, n] of Object.entries(group.troops ?? {})) {
+        ration += this.foodPerSoldier(unit, s, base) * n * multiplier;
+      }
     }
     // 训练队列：每个未产出的兵也按 foodPerSoldier 计入（即便尚未入 troops）。
     if (s.training) {
@@ -1132,6 +1159,9 @@ export class MilitaryModule {
       * Math.max(0, Number(s.techDefMult ?? 1))
       * (1 + Math.max(0, Number(s.allianceDefMult ?? 0)))
       * timed.def;
+    const rangedAtkMult = Math.max(0, Number(s.treasureRangedAtkMult ?? 1));
+    const rangedDefMult = Math.max(0, Number(s.treasureRangedDefMult ?? 1));
+    const rangedPhase2AtkMult = Math.max(0, Number(s.treasureRangedPhase2AtkMult ?? 1));
     for (const [unit, n] of Object.entries(source)) {
       const requested = Math.max(0, Math.floor(Number(n) || 0));
       const available = units && purpose !== 'raid'
@@ -1139,14 +1169,16 @@ export class MilitaryModule {
         : Math.min(requested, Math.max(0, (s.troops[unit] ?? 0) - this.reservedCount(s, unit)));
       if (!this.config.units[unit] || available <= 0) continue;
       const stats = this.finalStats(unit);
+      const ranged = this.config.units[unit]!.form === 'ranged';
       snapshot[unit] = {
         count: available,
         ...stats,
-        attack: stats.attack * atkMult,
-        defense: stats.defense * defMult,
+        attack: stats.attack * atkMult * (ranged ? rangedAtkMult : 1),
+        defense: stats.defense * defMult * (ranged ? rangedDefMult : 1),
         form: this.config.units[unit]!.form,
         role: this.config.units[unit]!.role,
         traits: this.config.units[unit]!.traits.map((code) => this.config.unitTraits[code]).filter(Boolean),
+        ...(ranged && rangedPhase2AtkMult !== 1 ? { phaseAtkMult: { ranged: rangedPhase2AtkMult } } : {}),
       };
     }
     return { ok: true, payload: { snapshot } };
@@ -1229,13 +1261,32 @@ export class MilitaryModule {
 
   /** 记录在途（行军）兵力快照：仅计粮耗，不改驻村兵力/动员上限（动员由 population.SetEnRoutePop 单独算）。 */
   private setMarchingTroops(cmd: Command): CommandResult {
-    const { villageId, troops } = cmd.payload as { villageId: string; troops: Record<string, number> };
+    const { villageId, troops, movements } = cmd.payload as { villageId: string; troops?: Record<string, number>; movements?: Array<{ troops: Record<string, number>; upkeepMultiplier: number }> };
     const s = this.load(villageId);
     if (!s) return { ok: false, payload: {}, reason: 'village_not_found' };
-    s.marching = troops;
+    const groups = Array.isArray(movements) ? movements.map((entry) => ({
+      troops: entry?.troops ?? {}, upkeepMultiplier: Math.max(0, Number(entry?.upkeepMultiplier) || 1),
+    })) : [{ troops: troops ?? {}, upkeepMultiplier: 1 }];
+    s.marchingUpkeep = groups;
+    s.marching = {};
+    for (const group of groups) for (const [unit, raw] of Object.entries(group.troops)) {
+      const count = Math.max(0, Math.floor(Number(raw) || 0));
+      if (count) s.marching[unit] = (s.marching[unit] ?? 0) + count;
+    }
     this.store.set(COLLECTION, villageId, s);
     this.reportUpkeep(s);
-    return { ok: true, payload: { marching: { ...troops } } };
+    return { ok: true, payload: { marching: { ...s.marching } } };
+  }
+
+  /** 重启前由 Movement 先清理旧快照，再按仍在途的行军逐村回填。 */
+  private clearMarchingTroops(): CommandResult {
+    for (const state of this.store.all<MilitaryState>(COLLECTION)) {
+      state.marching = {};
+      state.marchingUpkeep = [];
+      this.store.set(COLLECTION, state.villageId, state);
+      this.reportUpkeep(state);
+    }
+    return { ok: true, payload: {} };
   }
 
   /**

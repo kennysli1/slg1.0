@@ -1057,6 +1057,34 @@ test('秘密字条：使用后生成战报并解锁「调查坐标」', async ()
   assert.ok(!codes.includes('secret_note'), '秘密字条使用后应被消耗');
 });
 
+test('灰烬商路：s13 选择贸易分支后应解锁 s14，而不是等待错误的旧 trigger', async () => {
+  const app = freshApp();
+  const regRes = await reg(app, '灰烬商路分支触发');
+  const va = (regRes.payload as any).player.villageId;
+  app.store.set('task', va, {
+    villageId: va,
+    completedMain: [], completedSide: [], abandonedSide: [],
+    active: {
+      s13: {
+        code: 's13', type: 'side', acceptedAt: clock,
+        submitted: {}, camps: [], campCleared: 0, progress: 5,
+        runeSolved: true, readyToDeliver: true,
+      },
+    },
+    offered: [], offeredMain: [], offeredSide: [], firedTriggers: [],
+    cooldownUntil: {}, pendingDialogues: [], outcomes: {}, taskVillages: {},
+  });
+
+  const selected = await send(app, 'task.SelectBranch', { villageId: va, code: 's13', branch: 'trade' });
+  assert.equal(selected.ok, true, `选择贸易分支应成功: ${selected.reason ?? ''}`);
+  const state = app.store.get<any>('task', va);
+  assert.ok(state?.completedSide.includes('s13'), '选择分支后 s13 应标记完成');
+  assert.ok(state?.firedTriggers.includes('ashen_branch:trade'), '应保存运行时分支触发令牌');
+  assert.ok(state?.offeredSide.includes('s14'), '贸易分支应解锁 s14「账本与车辙」');
+  assert.ok(!state?.offeredSide.includes('s17'), '贸易分支不应解锁军事分支');
+  assert.ok(!state?.offeredSide.includes('s20'), '贸易分支不应解锁探索分支');
+});
+
 test('调查坐标：接取 → 清剿3个rats营地 → 第3处掉落被囚禁的娜塔莉们 → 放入宝库后失败', async () => {
   const app = freshApp();
   const regRes = await reg(app, '调查坐标完整流程');

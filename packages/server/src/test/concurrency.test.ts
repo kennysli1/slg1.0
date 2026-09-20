@@ -65,6 +65,38 @@ test('Combat: 同目标并发 Engage 只创建一场战斗', async () => {
   assert.equal(id1, id2, '两次 Engage 应对应同一个 battleId');
 });
 
+test('Combat: 首建异常会释放 claiming，等待者可重新竞争且不会永久挂起', async () => {
+  const app = makeApp();
+  app.setupWorld();
+  const combat = app.combat as any;
+  const originalFetch = combat.fetchDefender.bind(combat);
+  let fetches = 0;
+  combat.fetchDefender = async (...args: any[]) => {
+    fetches += 1;
+    if (fetches === 1) throw new Error('injected fetch failure');
+    return originalFetch(...args);
+  };
+  const engage = (movementId: string) => app.commands.send({
+    name: 'combat.Engage', from: 'test',
+    payload: {
+      targetKind: 'pve', targetId: 'pve-4', targetXY: { q: 0, r: 0 },
+      movementId, fromVillage: `v-${movementId}`, fromXY: { q: 1, r: 0 },
+      troops: { legionnaire: 20 },
+      attackerSnapshot: { legionnaire: { count: 20, attack: 40, defense: 35, hp: 100, carry: 10 } },
+    },
+  });
+  const settled = await Promise.race([
+    Promise.allSettled([engage('claim-a'), engage('claim-b')]),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('claim waiter timeout')), 1_000)),
+  ]);
+  assert.equal(settled.filter((entry) => entry.status === 'rejected').length, 1);
+  const successful = settled.find((entry): entry is PromiseFulfilledResult<any> => entry.status === 'fulfilled');
+  assert.equal(successful?.value.ok, true, '等待者应在首建失败后重新竞争并成功创建战场');
+  const retry = await engage('claim-c');
+  assert.equal(retry.ok, true, '后续请求不应被遗留 claim 阻塞');
+  assert.equal((retry.payload as any).battleId, (successful?.value.payload as any).battleId);
+});
+
 // ── G) CropDeficit 边沿触发：只发一次 ────────────────────────────────────
 
 test('Economy: CropDeficit 边沿触发，多次 settle 只 emit 一次', async () => {

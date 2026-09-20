@@ -15,10 +15,25 @@ async function send(app: GameApp, name: string, payload: any = {}) {
   return app.commands.send({ name, from: 'test', payload });
 }
 
+async function ensureMainBase(app: GameApp, level: number): Promise<void> {
+  for (;;) {
+    const layout = (await send(app, 'building.GetLayout', { villageId: 'v1' })).payload as any;
+    if (layout.townCenter.level >= level) return;
+    const upgrade = await send(app, 'building.Upgrade', { villageId: 'v1', slotId: 'center' });
+    assert.equal(upgrade.ok, true, `主基地升级应成功：${upgrade.reason ?? ''}`);
+    await app.scheduler.advanceTo((upgrade.payload as any).finishAt, setClock);
+  }
+}
+
+async function buildAlchemy(app: GameApp): Promise<any> {
+  await ensureMainBase(app, app.config.buildings.alchemy.mainBaseLevel);
+  return send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'alchemy' });
+}
+
 test('炼金炉：三个同品质宝物炼化为更高品质并按掉率产出', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 } });
-  const build = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'alchemy' });
+  const build = await buildAlchemy(app);
   assert.equal(build.ok, true, `炼金炉建造应成功: ${build.reason ?? ''}`);
   await app.scheduler.advanceTo((build.payload as any).finishAt + 1, setClock);
   assert.equal((await send(app, 'building.GetBuildingLevel', { villageId: 'v1', kind: 'alchemy' })).payload.level, 1);
@@ -45,7 +60,7 @@ test('炼金炉：三个同品质宝物炼化为更高品质并按掉率产出',
 test('炼金炉：第二、第三槽拒绝不同品质，最高品质没有可炼化目标', async () => {
   const app = freshApp();
   await send(app, 'economy.Grant', { villageId: 'v1', gain: { wood: 99999, clay: 99999, iron: 99999, crop: 99999, gold: 99999 } });
-  const build = await send(app, 'building.Build', { villageId: 'v1', zone: 'inner', kind: 'alchemy' });
+  const build = await buildAlchemy(app);
   await app.scheduler.advanceTo((build.payload as any).finishAt + 1, setClock);
   await send(app, 'treasure.SetSlots', { villageId: 'v1', extra: 2 });
   await send(app, 'treasure.Grant', { villageId: 'v1', code: 'war_flag' });

@@ -10,6 +10,10 @@ export interface Contribution {
   npcService?: boolean;
   kingdomMercenary?: boolean;
   returnPveId?: string;
+  /** 野战主动追击标记；普通交叉相遇为 false。 */
+  fieldPursuer?: boolean;
+  /** 该军队在此前野战中缴获、尚未归城入库的宝物。 */
+  capturedTreasures?: string[];
 }
 
 /** 防守方兵力来源：驻军或临时增援。 */
@@ -19,6 +23,37 @@ export interface DefenderContribution {
   fromVillage?: string;
   npcService?: boolean;
   troops: Record<string, number>;
+}
+
+/**
+ * 远弦圣地战场的冻结上下文。
+ *
+ * Sanctum 仍是占领/旧占领者资格的唯一 owner；Combat 只保存已经通过 Command
+ * 查询到的参战人口和开战前守军基线。这样同一时刻多支部队并入时，能在首 tick
+ * 前用完整的主指挥人口占比重新判断是否取消圣地防御，而不用跨模块读取 Sanctum 状态。
+ */
+export interface SanctumAttackerContribution {
+  playerId?: string;
+  effectivePop: number;
+  isMainCommander: boolean;
+}
+
+export interface SanctumBattleContext {
+  eventTarget: boolean;
+  sanctuary: boolean;
+  /** 圣地第一次遭到进攻时的守军快照，首 tick 前可据此安全重算防守加成。 */
+  defenderBaseSnapshot?: Snapshot;
+  /** 驻守圣地的真实行军归属；仅由 Sanctum→Movement 受控快照提供。 */
+  defenderMovementId?: string;
+  defenderVillageId?: string;
+  defenderPlayerId?: string;
+  /** 守望棱镜等守军携物冻结出的第二阶段远程防御倍率。 */
+  defenderWatcherRangedDefMult?: number;
+  attackerContributions: Record<string, SanctumAttackerContribution>;
+  disableSanctuaryBonuses?: boolean;
+  defenderDefenseMult?: number;
+  defenderRangedAtkMult?: number;
+  defenderRangedDefMult?: number;
 }
 
 export interface BattleRound {
@@ -56,7 +91,16 @@ export interface BattleResolution {
   campCleared?: boolean;
   isTaskCamp?: boolean;
   isNoRespawn?: boolean;
+  /** 清营宝物掉落档位；仅普通 PvE 掉落使用。 */
+  treasureTier?: 1 | 2 | 3;
   attackerReportIndex?: number;
+  /** 野战结算的来源游标，恢复后不重做已经完成的伤亡回收/战报步骤。 */
+  fieldCasualtyIndex?: number;
+  defenderReportIndex?: number;
+  caravanResultEmitted?: boolean;
+  /** 圣地驻军的损失已由 Movement owner 落盘，避免 resolving 恢复时重复扣兵。 */
+  sanctumDefenderApplied?: boolean;
+  sanctumDefenderDestroyed?: boolean;
 }
 
 export interface Battle {
@@ -71,8 +115,13 @@ export interface Battle {
   defender: Snapshot;
   defenderOriginal: Record<string, number>;
   defenderContributions?: Record<string, DefenderContribution>;
+  /** 可选以兼容旧战报/历史存档；仅远弦活动 PvE 战使用。 */
+  sanctum?: SanctumBattleContext;
   contributions: Record<string, Contribution>;
   defenderContribution?: Contribution;
+  /** 商队护送战按行军隔离守方快照；缺省继续使用旧单行军野战。 */
+  defenderFieldContributions?: Record<string, Contribution>;
+  caravanId?: string;
   /** Total-AD v2 每个快照条目的生命值余伤；旧字段保留只为平滑读旧档。 */
   attackerDamageCarry?: Record<string, number>;
   defenderDamageCarry?: Record<string, number>;

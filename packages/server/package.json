@@ -7,7 +7,7 @@
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
-    "test": "tsx --test --test-force-exit src/test/all.test.ts"
+    "test": "npm run build && node --test --test-force-exit dist/test/all.test.js"
   },
   "dependencies": {
     "@fastify/ajv-compiler": "^4.0.6",

@@ -3,8 +3,17 @@
 # 远端使用 releases/<sha> + current 原子切换；生产目录不是 Git 工作树。
 set -euo pipefail
 
-# 发布发起机专用的回连 key；可用 DEPLOY_KEY 覆盖，避免依赖已弃用的个人 PEM 文件。
-DEPLOY_KEY="${DEPLOY_KEY:-$HOME/.ssh/kow_release_ed25519}"
+# 发布发起机专用的回连 key；显式 DEPLOY_KEY 优先，其次使用项目专用 key，
+# 最后兼容旧机器上仍在使用的 kennysgame.pem。
+if [[ -n "${DEPLOY_KEY:-}" ]]; then
+  DEPLOY_KEY="$DEPLOY_KEY"
+elif [[ -f "$HOME/.ssh/kow_release_ed25519" ]]; then
+  DEPLOY_KEY="$HOME/.ssh/kow_release_ed25519"
+elif [[ -f "$HOME/.ssh/kennysgame.pem" ]]; then
+  DEPLOY_KEY="$HOME/.ssh/kennysgame.pem"
+else
+  DEPLOY_KEY="$HOME/.ssh/kow_release_ed25519"
+fi
 DEPLOY_HOST="${DEPLOY_HOST:-ubuntu@101.43.64.22}"
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-~/kow}"
 DEPLOY_URL="${DEPLOY_URL:-http://101.43.64.22:8080}"
@@ -19,6 +28,7 @@ for cmd in git ssh scp npm tar; do
   command -v "$cmd" >/dev/null || { echo "缺少命令：$cmd" >&2; exit 1; }
 done
 [[ -f "$DEPLOY_KEY" ]] || { echo "部署密钥不存在：$DEPLOY_KEY" >&2; exit 1; }
+echo "    deploy key: $DEPLOY_KEY"
 
 echo "==> 获取远程生产分支 origin/main"
 REMOTE_LINE="$(git -C "$ROOT" ls-remote origin refs/heads/main)"

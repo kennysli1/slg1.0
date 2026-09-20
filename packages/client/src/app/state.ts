@@ -25,6 +25,8 @@ export interface SelectedTarget {
   population?: number;
   mainBaseLevel?: number;
   mainBaseName?: string;
+  /** 同一格叠放的可交互目标；由地图点击层填充。 */
+  stackedTargets?: SelectedTarget[];
 }
 
 /** 待领取宝物视图（只有普通 PvE 随机掉落含确认倒计时，任务/送达宝物无期限）。 */

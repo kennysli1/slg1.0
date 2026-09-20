@@ -1,8 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { simulatePhaseStep, totalSnapshotCount } from '../infra/total-ad-combat.js';
+import { appendBattleRound, MAX_REPLAY_ROUNDS } from '../modules/combat/engine.js';
 
 const unit = (count: number, attack: number, defense: number, hp: number, role: 'infantry' | 'cavalry' = 'infantry', form: 'melee' | 'ranged' = 'melee', traits: any[] = []) => ({ count, attack, defense, hp, role, form, traits, carry: 0 });
+
+test('v3：在线回放固定保留首轮与最近回合', () => {
+  const rounds: Array<{ round: number }> = [];
+  for (let round = 1; round <= 1_000; round += 1) appendBattleRound(rounds, { round });
+  assert.equal(rounds.length, MAX_REPLAY_ROUNDS);
+  assert.equal(rounds[0]?.round, 1, '首轮应保留');
+  assert.equal(rounds.at(-1)?.round, 1_000, '最新轮应保留');
+  assert.equal(rounds[1]?.round, 882, '中间只保留最近的固定窗口');
+});
 
 test('v3：弓骑预射、近战骑冲锋、远程、近战严格按阶段出手', () => {
   const attacker = {

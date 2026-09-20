@@ -3,7 +3,7 @@ import type { Store } from '../infra/store.js';
 import type { EventBus } from '../infra/event-bus.js';
 import type { CommandBus } from '../infra/command-bus.js';
 import type { Scheduler } from '../infra/scheduler.js';
-import type { GameConfig, TreasureDef } from '../infra/config.js';
+import type { GameConfig, GameConstants, TreasureDef } from '../infra/config.js';
 
 /**
  * 领域模块 · Treasures（宝物）
@@ -31,6 +31,27 @@ import type { GameConfig, TreasureDef } from '../infra/config.js';
 type ResKey = 'wood' | 'clay' | 'iron' | 'crop' | 'gold';
 type ResMult = Partial<Record<ResKey, number>>;
 
+export type TreasureDropTier = 1 | 2 | 3;
+
+const TREASURE_RARITY_RANK: Record<string, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
+
+/** 清营总体掉宝概率：保留原基础概率，并按营地档位套用配置倍率。 */
+export function treasureCampDropChance(baseChance: number, reputationMultiplier: number, pveBonus: number, tier: TreasureDropTier, constants: Pick<GameConstants, 'treasureCampDropChanceTier1Multiplier' | 'treasureCampDropChanceTier2Multiplier' | 'treasureCampDropChanceTier3Multiplier'>): number {
+  const tierMultiplier = tier === 3
+    ? constants.treasureCampDropChanceTier3Multiplier
+    : tier === 2
+      ? constants.treasureCampDropChanceTier2Multiplier
+      : constants.treasureCampDropChanceTier1Multiplier;
+  return Math.min(1, Math.max(0, baseChance) * Math.max(0, reputationMultiplier) * Math.max(0, tierMultiplier) + Math.max(0, pveBonus));
+}
+
+/** 按原始 dropRate 计算单个宝物在该营地档位的临时权重；目录值本身不变。 */
+export function treasureCampDropWeight(treasure: Pick<TreasureDef, 'dropRate' | 'rarity'>, tier: TreasureDropTier, constants: Pick<GameConstants, 'treasureCampRarityMultiplierTier2' | 'treasureCampRarityMultiplierTier3'>): number {
+  const rarityBase = tier === 3 ? constants.treasureCampRarityMultiplierTier3 : tier === 2 ? constants.treasureCampRarityMultiplierTier2 : 1;
+  const rarityRank = TREASURE_RARITY_RANK[treasure.rarity] ?? 0;
+  return Math.max(0, Number(treasure.dropRate) || 0) * Math.pow(Math.max(1, rarityBase), rarityRank);
+}
+
 /** 聚合后的宝物效果（倍率以「乘数」表示，如 1.05 = +5%）。 */
 export interface TreasureEffects {
   /** 各资源产出加成（加性分数，直接喂 economy.SetRateModifier 的 mult）。 */
@@ -55,6 +76,27 @@ export interface TreasureEffects {
   pveDropRateBonus: number;
   /** 绞马索：攻击方对敌方骑兵防御的倍率（默认 1，30% 削弱为 0.7）。 */
   enemyCavalryDefMult: number;
+  /** 解密棱镜：随军视野 +2；放入村庄时由 vision owner 折算为村庄视野 +1。 */
+  armyVisionBonus: number;
+  /** 破阵号角：对普通公共 PvE 的攻击倍率；圣地战另由 sanctum 上下文取 event 版。 */
+  pveAttackMult: number;
+  /** 商路圣印：本村商队速度与单线路运力倍率。 */
+  caravanSpeedMult: number;
+  caravanCapacityMult: number;
+  /** 商路圣印：远弦事件目标的专用商队速度/单线路运力倍率。 */
+  sanctumEventCaravanSpeedMult: number;
+  sanctumEventCaravanCapacityMult: number;
+  /** 共鸣徽章：携带增援的普通行军速度倍率。 */
+  reinforcementMarchSpeedMult: number;
+  /** 共鸣徽章：远弦事件目标的专用增援行军速度倍率。 */
+  sanctumEventReinforcementMarchSpeedMult: number;
+  /** 守望棱镜：活动内额外视野与第二阶段远程防御倍率。 */
+  sanctumEventVisionBonus: number;
+  sanctumEventRangedDefMult: number;
+  /** 远弦圣徽：远程兵攻击、防御与阶段二额外攻击倍率。 */
+  rangedAtkMult: number;
+  rangedDefMult: number;
+  rangedPhase2AtkMult: number;
 }
 
 /** 资源/人口/金币明细使用的宝物来源；数值为加性倍率（0.05 = +5%）。 */
@@ -206,6 +248,9 @@ export class TreasureModule {
     this.commands.register('treasure.StoreCarried', (c) => this.storeCarried(c));
     // 抵达另一个村庄时把携带宝物转为该村庄的待处理报告
     this.commands.register('treasure.OffloadForeign', (c) => this.offloadForeign(c));
+    // 野战胜方缴获的宝物：战斗中先从败方军队携带记录转移，胜方归城后生成待处理报告。
+    this.commands.register('treasure.TransferCarried', (c) => this.transferCarried(c));
+    this.commands.register('treasure.StoreCaptured', (c) => this.storeCaptured(c));
     // 携带宝物的军队被全歼：pve 回收系统池 / pvp 转交防守方
     this.commands.register('treasure.LoseCarried', (c) => this.loseCarried(c));
     // 军队到家：标记本军队对应的 camp 掉落 pending 为已到达（仅标记，不删记录；claimPending 据此放行）
@@ -214,6 +259,13 @@ export class TreasureModule {
     this.commands.register('treasure.SetExpectedArrival', (c) => this.setExpectedArrival(c));
     // 查询某支军队携带宝物的聚合效果
     this.commands.register('treasure.GetCarriedEffects', (c) => this.getCarriedEffects(c));
+    // 供行军/贸易/战斗读取已经聚合的宝物快照；调用者永远不读取宝物存档。
+    this.commands.register('treasure.GetVillageEffects', (c) => this.getVillageEffects(c));
+    this.commands.register('treasure.GetEffectsForCodes', (c) => this.getEffectsForCodes(c));
+    // 远弦圣地开启后，所有未使用的圣地残印必须从全部位置一次性消失。
+    // 仅 Sanctum owner 可以调用，避免被客户端伪造为“消耗他人宝物”。
+    this.commands.register('treasure.ConsumeEventToken', (c) => this.consumeEventToken(c));
+    this.commands.register('treasure.GetVillageVisionBonus', (c) => this.getVillageVisionBonus(c));
     this.commands.register('treasure.GetPveDropRateBonus', (c) => this.getPveDropRateBonus(c));
     this.commands.register('treasure.ExchangeQuestFlag', (c) => this.exchangeQuestFlag(c));
     // 炼金炉消耗宝物：由 alchemy owner 通过命令请求，避免跨模块直读 treasure 存档。
@@ -523,6 +575,19 @@ export class TreasureModule {
     let techIntervalMult = 1;
     let pveDropRateBonus = 0;
     let enemyCavalryDefMult = 1;
+    let armyVisionBonus = 0;
+    let pveAttackMult = 1;
+    let caravanSpeedMult = 1;
+    let caravanCapacityMult = 1;
+    let sanctumEventCaravanSpeedMult = 1;
+    let sanctumEventCaravanCapacityMult = 1;
+    let reinforcementMarchSpeedMult = 1;
+    let sanctumEventReinforcementMarchSpeedMult = 1;
+    let sanctumEventVisionBonus = 0;
+    let sanctumEventRangedDefMult = 1;
+    let rangedAtkMult = 1;
+    let rangedDefMult = 1;
+    let rangedPhase2AtkMult = 1;
     for (const code of codes) {
       const t: TreasureDef | undefined = this.config.treasures[code];
       if (!t) continue;
@@ -584,6 +649,33 @@ export class TreasureModule {
           // Combat 取最强单项，避免跨军队重复乘算造成非预期指数削弱。
           enemyCavalryDefMult = Math.min(enemyCavalryDefMult, Math.max(0, 1 - frac));
           break;
+        case 'armyVision': armyVisionBonus += Math.max(0, Math.floor(Number(t.effectValue) || 0)); break;
+        case 'sanctum_breach_horn':
+          pveAttackMult *= 1 + Math.max(0, this.config.constants.sanctumBreachHornPveAtkBonus);
+          break;
+        case 'sanctum_watcher_prism':
+          armyVisionBonus += Math.max(0, this.config.constants.sanctumWatcherPrismArmyVisionBonus);
+          sanctumEventVisionBonus += Math.max(0, this.config.constants.sanctumWatcherPrismEventVisionBonus);
+          sanctumEventRangedDefMult *= 1 + Math.max(0, this.config.constants.sanctumWatcherPrismEventRangedDefBonus);
+          break;
+        case 'sanctum_trade_seal':
+          caravanSpeedMult *= 1 + Math.max(0, this.config.constants.sanctumTradeSealCaravanSpeedBonus);
+          caravanCapacityMult *= 1 + Math.max(0, this.config.constants.sanctumTradeSealCaravanCapacityBonus);
+          sanctumEventCaravanSpeedMult *= 1 + Math.max(0, this.config.constants.sanctumTradeSealEventCaravanSpeedBonus);
+          sanctumEventCaravanCapacityMult *= 1 + Math.max(0, this.config.constants.sanctumTradeSealEventCaravanCapacityBonus);
+          break;
+        case 'sanctum_resonance_medallion':
+          reinforcementMarchSpeedMult *= 1 + Math.max(0, this.config.constants.sanctumResonanceMedallionReinforceSpeedBonus);
+          sanctumEventReinforcementMarchSpeedMult *= 1 + Math.max(0, this.config.constants.sanctumResonanceMedallionEventReinforceSpeedBonus);
+          break;
+        case 'sanctum_hunter_king_seal':
+          pveAttackMult *= 1 + Math.max(0, this.config.constants.sanctumHunterKingSealPveAtkBonus);
+          break;
+        case 'sanctum_farstring_crest':
+          rangedAtkMult *= 1 + Math.max(0, this.config.constants.sanctumFarstringCrestRangedAtkBonus);
+          rangedDefMult *= 1 + Math.max(0, this.config.constants.sanctumFarstringCrestRangedDefBonus);
+          rangedPhase2AtkMult *= 1 + Math.max(0, this.config.constants.sanctumFarstringCrestPhase2RangedAtkBonus);
+          break;
         case 'instantGold':
           // 即时宝物：储存时不产生被动效果，use 时一次性发放金币。
           break;
@@ -591,7 +683,14 @@ export class TreasureModule {
           break;
       }
     }
-    return { resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta, cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus, enemyCavalryDefMult };
+    return {
+      resMult, goldMult, atkMult, defMult, popGrowthMult, reputationDelta,
+      cavalryTrainMult, soldierFoodReduce, techIntervalMult, pveDropRateBonus,
+      enemyCavalryDefMult, armyVisionBonus, pveAttackMult, caravanSpeedMult,
+      caravanCapacityMult, sanctumEventCaravanSpeedMult, sanctumEventCaravanCapacityMult,
+      reinforcementMarchSpeedMult, sanctumEventReinforcementMarchSpeedMult, sanctumEventVisionBonus,
+      sanctumEventRangedDefMult, rangedAtkMult, rangedDefMult, rangedPhase2AtkMult,
+    };
   }
 
   /** 重算并推送效果到 economy / population / military（铁律#4：只发命令，不回查）。携带中的宝物不计入。
@@ -639,7 +738,12 @@ export class TreasureModule {
     // 军事攻防倍率（作用于防守快照）
     await this.commands.send({
       name: 'military.SetTreasureCombatMult', from: TreasureModule.NAME,
-      payload: { villageId, atkMult: eff.atkMult, defMult: eff.defMult },
+      payload: {
+        villageId, atkMult: eff.atkMult, defMult: eff.defMult,
+        rangedAtkMult: eff.rangedAtkMult,
+        rangedDefMult: eff.rangedDefMult,
+        rangedPhase2AtkMult: eff.rangedPhase2AtkMult,
+      },
     });
     // 骑兵训练加速（伯乐）：总是下发（mult=1 即归零），避免移除宝物后加速永久残留
     await this.commands.send({
@@ -789,12 +893,14 @@ export class TreasureModule {
     if (alwaysPending) {
       this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
       await this.emitChanged(villageId);
+      await this.emitGranted(villageId, code, true);
       return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
     }
     if (!this.storeIfRoom(s, code)) {
       if (pendingIfFull) {
         this.createDeliverPending(villageId, code, undefined, false, false, undefined, undefined, rewardVillageId);
         await this.emitChanged(villageId);
+        await this.emitGranted(villageId, code, true);
         return { ok: true, payload: { codes: this.storedCodes(s), treasure: t, pending: true } };
       }
       return { ok: false, payload: { slots: this.getTreasureSlots(villageId), have: this.storedCodes(s).length }, reason: 'treasure_slots_full' };
@@ -802,7 +908,16 @@ export class TreasureModule {
     this.store.set(COLLECTION, villageId, s);
     await this.recomputeAndPush(villageId);
     await this.emitChanged(villageId);
+    await this.emitGranted(villageId, code, false);
     return { ok: true, payload: { codes: this.storedCodes(s), treasure: t } };
+  }
+
+  /** 宝物已真正生成（已入库或已形成待领取记录）的精确事件，供活动 owner 过滤自己的 token。 */
+  private async emitGranted(villageId: string, code: string, pending: boolean): Promise<void> {
+    await this.bus.emit({
+      name: 'treasure.Granted', source: TreasureModule.NAME, ts: this.now(),
+      payload: { villageId, code, pending },
+    } as DomainEvent);
   }
 
   /**
@@ -953,6 +1068,28 @@ export class TreasureModule {
     return { ok: true, payload: { villageId, codes: got, stored, pending } };
   }
 
+  /** 原子转移一支被击败军队的携带宝物；重复调用安全，已转移时返回空数组。 */
+  private transferCarried(cmd: Command): CommandResult {
+    const { movementId } = cmd.payload as { movementId: string };
+    const codes = this.removeCarried(movementId) ?? [];
+    return { ok: true, payload: { movementId, codes } };
+  }
+
+  /** 胜方返城后把野战缴获物作为永久 deliver 报告交给玩家处理。 */
+  private async storeCaptured(cmd: Command): Promise<CommandResult> {
+    const { villageId, codes } = cmd.payload as { villageId: string; codes?: string[] };
+    if (!villageId || !Array.isArray(codes) || codes.length === 0) return { ok: true, payload: { villageId, pending: [] } };
+    const pending: string[] = [];
+    for (const code of codes.filter(Boolean)) {
+      if (!this.config.treasures[code]) continue;
+      const id = `captured-${villageId}-${this.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      this.createDeliverPending(villageId, code, id, false);
+      pending.push(id);
+    }
+    if (pending.length > 0) await this.emitChanged(villageId);
+    return { ok: true, payload: { villageId, pending } };
+  }
+
   /**
    * 携带宝物的军队被全歼：pve=回收到系统宝物池（直接丢弃，可再掉落）；pvp=转交防守方村庄作为 deliver 报告。
    * 不论哪种，携带记录都从本模块清除（军队已不存在）。
@@ -1028,6 +1165,131 @@ export class TreasureModule {
       if (entry) return { ok: true, payload: { effects: this.aggregate(entry.codes, s.victoryFlagBonus ?? 0) } };
     }
     return { ok: true, payload: { effects: this.aggregate([]) } };
+  }
+
+  /**
+   * 返回本村当前生效栏位的汇总快照。贸易和行军只拿结果，不得访问宝物集合，
+   * 因而宝物移入/移出栏位后的效果会自然在下一次新派遣时生效。
+   */
+  private getVillageEffects(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId?: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const state = this.ensureState(villageId);
+    return { ok: true, payload: { effects: this.aggregate(this.activeCodes(state), state.victoryFlagBonus ?? 0) } };
+  }
+
+  /**
+   * 为已由 Movement/Treasure owner 校验过的携带代码计算快照。该命令不写状态，
+   * 用于返程新 movementId 仍需沿用原军携带宝物的冻结效果。
+   */
+  private getEffectsForCodes(cmd: Command): CommandResult {
+    const { codes } = cmd.payload as { codes?: unknown };
+    const safeCodes = Array.isArray(codes)
+      ? codes.filter((code): code is string => typeof code === 'string' && !!this.config.treasures[code])
+      : [];
+    return { ok: true, payload: { effects: this.aggregate(safeCodes) } };
+  }
+
+  /**
+   * 消耗全服活动凭证。
+   *
+   * 圣地残印在第一位开启者确认开启后不应继续留在其他玩家的城镇、宝库、
+   * 随军栏或待领取报告中。Treasure 是前三类和 pending 的唯一 owner；
+   * movement 自己拥有行军记录，所以额外发受控 Command 清除其展示/返程副本，
+   * 而不是在这里跨模块改 movement collection。
+   */
+  private async consumeEventToken(cmd: Command): Promise<CommandResult> {
+    if (cmd.from !== 'sanctum') return { ok: false, payload: {}, reason: 'sanctum_owner_required' };
+    const { code } = cmd.payload as { code?: unknown };
+    if (typeof code !== 'string' || !code || !this.config.treasures[code]) {
+      return { ok: false, payload: {}, reason: 'unknown_event_token' };
+    }
+
+    let storedRemoved = 0;
+    let carriedRemoved = 0;
+    let pendingRemoved = 0;
+    const changedVillages = new Set<string>();
+    const removeAll = (items: string[]): string[] => {
+      const kept = items.filter((item) => {
+        if (item !== code) return true;
+        storedRemoved += 1;
+        return false;
+      });
+      return kept;
+    };
+
+    // 先同步落盘所有属主状态；之后任何 await 即使失败/重入，也不会再让残印
+    // 被重复用于 Activate。legacy document 通过 ensureState 正规化后再处理。
+    for (const raw of this.store.all<TreasureState>(COLLECTION)) {
+      if (!raw?.villageId) continue;
+      const state = this.ensureState(raw.villageId);
+      const beforeStored = storedRemoved;
+      state.town = removeAll(state.town);
+      state.treasury = removeAll(state.treasury);
+      state.treasuryReserve = removeAll(state.treasuryReserve);
+      let carriedChanged = false;
+      for (const [movementId, entry] of Object.entries(state.carried)) {
+        const before = entry.codes.length;
+        entry.codes = entry.codes.filter((item) => item !== code);
+        const removed = before - entry.codes.length;
+        if (removed > 0) {
+          carriedRemoved += removed;
+          carriedChanged = true;
+        }
+        if (entry.codes.length === 0) delete state.carried[movementId];
+      }
+      if (storedRemoved !== beforeStored || carriedChanged) {
+        this.store.set(COLLECTION, state.villageId, state);
+        changedVillages.add(state.villageId);
+      }
+    }
+
+    // pending 的 key 并不总是 villageId（通常为 movementId），因此逐条删除并
+    // 取消其到期调度；否则过期回调会在凭证已删除后再次刷新旧报告。
+    for (const pending of this.store.all<PendingTreasure>(COLLECTION_PENDING)) {
+      if (pending.code !== code) continue;
+      this.store.delete(COLLECTION_PENDING, pending.movementId);
+      this.scheduler.cancelByOwner(`treasure-pending:${pending.movementId}`);
+      pendingRemoved += 1;
+      changedVillages.add(pending.villageId);
+    }
+
+    // Movement 保存其 own 的展示/返程宝物数组；命令不存在时保守继续，因为
+    // Treasure 的权威携带记录已经清空。完整 app 中该命令由 Movement owner 提供。
+    const movement = await this.commands.send({
+      name: 'movement.ConsumeCarriedTreasure', from: TreasureModule.NAME, payload: { code },
+    });
+    const movementRemoved = movement.ok
+      ? Math.max(0, Math.floor(Number((movement.payload as { removed?: unknown })?.removed) || 0))
+      : 0;
+
+    for (const villageId of changedVillages) {
+      await this.recomputeAndPush(villageId);
+      await this.emitChanged(villageId);
+    }
+    await this.bus.emit({
+      name: 'treasure.EventTokenConsumed', source: TreasureModule.NAME, ts: this.now(),
+      payload: { code, storedRemoved, carriedRemoved, pendingRemoved, movementRemoved, villageIds: [...changedVillages] },
+    } as DomainEvent);
+    return {
+      ok: true,
+      payload: {
+        code,
+        storedRemoved,
+        carriedRemoved,
+        pendingRemoved,
+        movementRemoved,
+        villageIds: [...changedVillages],
+      },
+    };
+  }
+
+  private getVillageVisionBonus(cmd: Command): CommandResult {
+    const { villageId } = cmd.payload as { villageId?: string };
+    if (!villageId) return { ok: false, payload: {}, reason: 'villageId_required' };
+    const s = this.ensureState(villageId);
+    const bonus = Math.floor(this.aggregate(this.activeCodes(s), s.victoryFlagBonus ?? 0).armyVisionBonus / 2);
+    return { ok: true, payload: { bonus } };
   }
 
   private getPveDropRateBonus(cmd: Command): CommandResult {
@@ -1330,7 +1592,7 @@ export class TreasureModule {
    * 这是「军队带回宝物 → 战报确认 + 超时自动遗弃」机制的服务端实现。
    */
   private async rollDrop(cmd: Command): Promise<CommandResult> {
-    const { villageId, source, movementId, forceCode, taskRelated } = cmd.payload as {
+    const { villageId, source, movementId, forceCode, taskRelated, treasureTier: requestedTier } = cmd.payload as {
       villageId: string;
       source: 'camp';
       /** 关联的行军 id（attack movement），用作待领取记录主键；缺省时自动生成。 */
@@ -1339,8 +1601,23 @@ export class TreasureModule {
       forceCode?: string;
       /** 任务专属掉落不设置报告处理期限。captured_natalies 也按旧调用自动识别。 */
       taskRelated?: boolean;
+      /** 清营营地的宝物档位；由 PvE 模板传入，旧调用回退低档。 */
+      treasureTier?: 1 | 2 | 3;
     };
     const c = this.config.constants;
+
+    // 圣地残印不是普通宝物权重池的一员（dropRate=0），但在远弦圣地尚未
+    // 被唤醒时，清空公共 PvE 仍有独立机会发现一枚。这里先向 Sanctum
+    // owner 询问本轮是否还允许发放，再由 Treasure 作为宝物 owner 真正入库；
+    // 两条路径彼此独立，不能为了残印而吞掉既有的普通营地掉宝。
+    //
+    // 任务强制掉落、任务营地奖励和测试 forceCode 不参与，以免任务文本意外
+    // 触发全局活动。满栏时转为永久待处理记录，残印仍视为真实拥有，s23 可以
+    // 立即出现，玩家不必先腾出宝物格。
+    const fragment = !forceCode && !taskRelated && source === 'camp'
+      ? await this.tryGrantSanctumFragmentFromCamp(villageId)
+      : undefined;
+    const treasureTier: 1 | 2 | 3 = requestedTier === 3 ? 3 : requestedTier === 2 ? 2 : 1;
     const baseChance = c.treasureCampDropChance;
     let chanceMult = 1;
     try {
@@ -1354,14 +1631,14 @@ export class TreasureModule {
       const bonusRes = await this.commands.send({ name: 'treasure.GetPveDropRateBonus', from: TreasureModule.NAME, payload: { villageId } });
       pveBonus = bonusRes.ok ? Math.max(0, Number((bonusRes.payload as any)?.bonus) || 0) : 0;
     }
-    const hit = forceCode ? true : this.rng() < Math.min(1, baseChance * chanceMult + pveBonus);
-    if (!hit) return { ok: true, payload: { dropped: null } };
+    const hit = forceCode ? true : this.rng() < treasureCampDropChance(baseChance, chanceMult, pveBonus, treasureTier, c);
+    if (!hit) return { ok: true, payload: { dropped: null, ...(fragment ? { fragment } : {}) } };
 
     // 加权抽选宝物（按 dropRate 轮盘赌）
-    const code = forceCode ?? this.weightedPick();
-    if (!code) return { ok: true, payload: { dropped: null } };
+    const code = forceCode ?? this.weightedPick(treasureTier);
+    if (!code) return { ok: true, payload: { dropped: null, ...(fragment ? { fragment } : {}) } };
     const t = this.config.treasures[code];
-    if (!t) return { ok: true, payload: { dropped: null } };
+    if (!t) return { ok: true, payload: { dropped: null, ...(fragment ? { fragment } : {}) } };
 
     // 生成待领取记录（不直接入栏）
     const now = this.now();
@@ -1397,7 +1674,29 @@ export class TreasureModule {
     } as DomainEvent);
 
     const dropped = { code, name: t.name, rarity: t.rarity, category: t.category, pending: true, movementId: pid };
-    return { ok: true, payload: { dropped } };
+    return { ok: true, payload: { dropped, ...(fragment ? { fragment } : {}) } };
+  }
+
+  /**
+   * 清营发现残印。活动是否仍处于 dormant 只能由 Sanctum 判断；本模块绝不
+   * 读取 sanctum 持久化集合。成功走普通 Grant，因而会发出 treasure.Granted，
+   * Sanctum 据此刷新真实持有者的 s23 外部任务 offer。
+   */
+  private async tryGrantSanctumFragmentFromCamp(villageId: string): Promise<{ code: string; pending: boolean } | undefined> {
+    const issued = await this.commands.send({
+      name: 'sanctum.TryIssueSeal', from: TreasureModule.NAME, payload: { villageId },
+    });
+    if (!issued.ok) return undefined;
+    const payload = issued.payload as { allowed?: unknown; sealCode?: unknown };
+    const code = typeof payload.sealCode === 'string' ? payload.sealCode : 'sanctum_fragment';
+    if (payload.allowed !== true || !this.config.treasures[code]) return undefined;
+    if (this.rng() >= Math.max(0, Math.min(1, this.config.constants.sanctumFragmentCampDropChance))) return undefined;
+    const granted = await this.grant({
+      name: 'treasure.Grant', from: TreasureModule.NAME,
+      payload: { villageId, code, pendingIfFull: true, rewardVillageId: villageId },
+    });
+    if (!granted.ok) return undefined;
+    return { code, pending: (granted.payload as { pending?: unknown }).pending === true };
   }
 
   /**
@@ -1522,14 +1821,19 @@ export class TreasureModule {
       }));
   }
 
-  /** 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。 */
-  private weightedPick(): string | undefined {
+  /**
+   * 按各宝物 dropRate 归一化做轮盘赌，返回抽中的 code（无 dropRate>0 的宝物时返回 undefined）。
+   * dropRate 本身保持目录原值；中/高难度营地只在本次抽取时按稀有度提高权重，
+   * 稀有度等级 common=0、rare=1、epic=2、legendary=3。
+   */
+  private weightedPick(treasureTier: 1 | 2 | 3 = 1): string | undefined {
     const entries = Object.values(this.config.treasures).filter((t) => (t.dropRate ?? 0) > 0);
     if (entries.length === 0) return undefined;
-    const total = entries.reduce((a, t) => a + t.dropRate, 0);
+    const weightOf = (t: TreasureDef): number => treasureCampDropWeight(t, treasureTier, this.config.constants);
+    const total = entries.reduce((a, t) => a + weightOf(t), 0);
     let r = this.rng() * total;
     for (const t of entries) {
-      r -= t.dropRate;
+      r -= weightOf(t);
       if (r <= 0) return t.code;
     }
     return entries[entries.length - 1].code;

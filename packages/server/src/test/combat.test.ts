@@ -228,6 +228,33 @@ test('战斗：防守方全胜时进攻方全灭、无返程', async () => {
   assert.equal(Object.keys(ended.survivors).length, 0, '败方应全灭无幸存');
 });
 
+test('战斗：近战双方零伤害时按攻击方未胜结束，不再无限积累回合', async () => {
+  const app = freshApp();
+  let ended: any = null;
+  app.bus.on('combat.BattleEnded', (event) => {
+    if ((event.payload as any).side === 'attacker') ended = event.payload;
+  });
+  const result = await send(app, 'combat.Engage', {
+    targetKind: 'field', targetId: 'field-zero-damage', targetXY: { q: 0, r: 0 },
+    movementId: 'zero-a', fromVillage: 'v-a', fromXY: { q: -1, r: 0 },
+    troops: { inert: 1 }, attackerSnapshot: {
+      inert: { ...melee(1, 10, 1e308), phaseDefMult: { melee: 1e308 } },
+    },
+    defenderField: {
+      movementId: 'zero-b', fromVillage: 'v-b', fromXY: { q: 1, r: 0 },
+      troops: { inert: 1 }, attackerSnapshot: {
+        inert: { ...melee(1, 10, 1e308), phaseDefMult: { melee: 1e308 } },
+      },
+    },
+  });
+  assert.equal(result.ok, true);
+  await drain(app);
+  assert.ok(ended, '零伤害战斗应完成结算');
+  assert.equal(ended.attackerWins, false, '停滞沿用攻击方未胜语义');
+  assert.equal(ended.totalRounds, 4, '应完成三个开场阶段并在首个近战回合停止');
+  assert.equal(ended.rounds.length, 4);
+});
+
 test('M8/M9 天王老子村即使缺少旧 task 标记也不直接掉落宝物', async () => {
   // 旧存档可能只有 tianwang_village 类型，没有 task=true。即使强制让普通
   // 掉落概率命中，也不能把铁壁勋章（或其它宝物）作为清营战利品直接发放；

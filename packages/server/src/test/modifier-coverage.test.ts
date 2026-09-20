@@ -72,13 +72,18 @@ describe('modifier 覆盖率', () => {
   });
 
   it('military.GetArmy: 骑兵 trainSec 含宝物加速', async () => {
+    await commands.send({ name: 'military.SetTreasureCavalryTrainMult', from: 'test', payload: { villageId: vid, mult: 1 } });
+    const baselineRes = await commands.send({ name: 'military.GetArmy', from: 'test', payload: { villageId: vid } });
+    const baseline = (baselineRes.payload as any).trainable?.find((t: any) => t.key === 'equlegati');
+    await commands.send({ name: 'military.SetTreasureCavalryTrainMult', from: 'test', payload: { villageId: vid, mult: 0.5 } });
     const res = await commands.send({ name: 'military.GetArmy', from: 'test', payload: { villageId: vid } });
     assert.ok(res.ok, 'GetArmy failed');
     const p = res.payload as any;
     const trainable = p.trainable ?? [];
     const equ = trainable.find((t: any) => t.key === 'equlegati');
     assert.ok(equ, 'equlegati not in trainable');
-    assert.ok(equ.trainSec < 14, `trainSec=${equ.trainSec} should < 14`);
+    assert.ok(baseline, 'baseline equlegati not in trainable');
+    assert.equal(equ.trainSec, Math.max(1, Math.round(baseline.trainSec * 0.5)));
   });
 
   it('economy.GetResources: SetRateModifier 改变 netRate.crop 且字段真实', async () => {

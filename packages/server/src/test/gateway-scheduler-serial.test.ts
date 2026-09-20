@@ -170,6 +170,44 @@ test('Gateway-Scheduler serial: 建造计时器与同村请求不交错破坏状
   assert.equal(schedulerRanWhileGatewayRunning, false, 'Scheduler 村级任务不应在 Gateway 请求执行期间运行（同 key 串行）');
 });
 
+test('Gateway-Scheduler serial: 人口周期结算等待同村请求，不能带着旧人口上限续算', async () => {
+  let clock = 1_000_000;
+  const app = createGameApp({ now: () => clock, manualScheduler: true });
+  app.setupWorld();
+  const reg = await app.commands.send({
+    name: 'player.Register', from: 'test',
+    payload: { name: '人口结算串行', password: 'pass123', tribe: 'romans' },
+  });
+  assert.ok(reg.ok);
+  const villageId = (reg.payload as any).player.villageId as string;
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  app.resume();
+
+  const beforeTick = (app.store.get<any>('population', villageId)).lastTick;
+  let releaseGateway!: () => void;
+  const gatewayBlocker = new Promise<void>((resolve) => { releaseGateway = resolve; });
+  const gateway = app.serialQueue.run(`village:${villageId}`, async () => {
+    await gatewayBlocker;
+  });
+  // 先确保占住同村车道，再触发 30 秒周期结算。
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const advance = app.scheduler.advanceTo(clock + 30_000, (value) => { clock = value; });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+
+  assert.equal(
+    (app.store.get<any>('population', villageId)).lastTick,
+    beforeTick,
+    '周期结算必须在同村请求完成后才开始，不能先缓存训练前的 popCeiling',
+  );
+
+  releaseGateway();
+  await gateway;
+  await advance;
+  assert.equal((app.store.get<any>('population', villageId)).lastTick, clock, '解除车道后应正常完成结算');
+});
+
 // ── 5. serialQueue 在 resetWorld 后被重置 ────────────────────────────────
 
 test('Gateway-Scheduler serial: resetWorld 后 serialQueue 被重置', async () => {

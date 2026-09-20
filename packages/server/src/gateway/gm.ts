@@ -207,6 +207,7 @@ button.sm{padding:3px 7px;font-size:11px}
     <div class="ops-row">
       <button class="warn sm" onclick="window.open('/config','_blank')">配置中心（CSV）</button>
       <button class="warn sm" onclick="window.open('/gm/tasks','_blank')">任务状态管理</button>
+      <button class="warn sm" onclick="window.open('/gm/ai','_blank')">AI 玩家控制台</button>
       <button class="warn sm" onclick="showPlayers()">管理玩家</button>
       <button class="warn sm" onclick="resetOp('season')">新赛季（留进度位置）</button>
       <button class="warn sm" onclick="resetOp('respawn')">重排位置（留账号）</button>
@@ -434,6 +435,44 @@ refreshAll();
 </body>
 </html>`;
 
+const GM_AI_PANEL_HTML = `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 玩家控制台</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0d1117;color:#d7e0ea;font:14px ui-monospace,monospace;min-height:100vh}button{border:1px solid #4cc9f0;border-radius:4px;background:#12273a;color:#8edcff;padding:8px 12px;cursor:pointer;font:inherit}button:hover{background:#20445f}button:disabled{cursor:not-allowed;opacity:.45}.danger{border-color:#ef7b7b;color:#ffaaaa;background:#321b23}.success{border-color:#73d99a;color:#9ff0bb;background:#153122}.ghost{border-color:#52677b;color:#b8c7d6;background:#151d26}.shell{max-width:1280px;margin:0 auto;padding:18px}.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}.top h1{font-size:22px;margin:0;color:#a8e5ff}.actions{display:flex;gap:7px;flex-wrap:wrap}.summary{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;margin-bottom:12px}.metric,.panel{border:1px solid #263c50;background:#111b25;border-radius:7px}.metric{padding:12px}.metric b{display:block;font-size:22px;color:#eef8ff;margin-top:4px}.layout{display:grid;grid-template-columns:320px 1fr;gap:12px;min-height:620px}.panel{overflow:hidden}.panel-head{padding:11px 13px;border-bottom:1px solid #263c50;color:#8edcff;font-weight:700}.ai-list{max-height:720px;overflow:auto}.ai-row{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #263c50;border-radius:0;background:transparent;padding:12px;color:inherit}.ai-row:hover,.ai-row.active{background:#173047}.ai-name{display:flex;justify-content:space-between;gap:8px;font-weight:700}.meta{color:#8da2b5;font-size:12px;line-height:1.6}.tag{display:inline-block;border-radius:12px;padding:2px 7px;font-size:11px;background:#2b3a48;color:#cad7e3}.tag.on{background:#174a31;color:#aaf0c4}.tag.off{background:#54252a;color:#ffb7bd}.detail{padding:14px}.detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px}.field{background:#0d151e;border:1px solid #263c50;border-radius:5px;padding:9px}.field label{display:block;color:#7f96aa;font-size:11px;margin-bottom:5px}.section{margin-top:16px}.section h2{font-size:14px;color:#8edcff;margin:0 0 8px}.activity{display:flex;flex-direction:column;gap:6px}.event{display:grid;grid-template-columns:150px 130px 80px 1fr;gap:8px;border-left:3px solid #4b6174;background:#0d151e;padding:8px 10px}.event.ok{border-color:#58b881}.event.fail{border-color:#d46872}.empty{color:#6f8294;text-align:center;padding:42px 16px}.candidate{display:flex;gap:8px;align-items:center;margin:5px 0}.score{height:6px;background:#263c50;border-radius:4px;overflow:hidden;flex:1}.score i{display:block;height:100%;background:#4cc9f0}.status{min-height:20px;color:#8da2b5;margin-top:10px}@media(max-width:800px){.shell{padding:10px}.summary{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}.ai-list{max-height:300px}.grid{grid-template-columns:repeat(2,1fr)}.event{grid-template-columns:1fr 1fr}.event span:last-child{grid-column:1/-1}}
+</style></head><body><main class="shell">
+<div class="top"><div><h1>AI 玩家控制台</h1><div class="meta">点击 AI 查看近期行为、决策和运行状态；所有控制只作用于当前服务器。</div></div><div class="actions"><button class="ghost" onclick="location.href='/gm'">返回 GM</button><button onclick="refresh()">刷新</button><button class="success" onclick="setAll(true)">全部启动</button><button class="danger" onclick="setAll(false)">全部暂停</button></div></div>
+<div class="summary"><div class="metric">AI 总数<b id="total">-</b></div><div class="metric">运行中<b id="enabled">-</b></div><div class="metric">暂停<b id="disabled">-</b></div><div class="metric">今日动作<b id="actions">-</b></div></div>
+<div class="layout"><section class="panel"><div class="panel-head">AI 列表</div><div id="list" class="ai-list"><div class="empty">加载中…</div></div></section><section class="panel"><div class="panel-head">AI 详情</div><div id="detail" class="detail"><div class="empty">从左侧选择一个 AI</div></div></section></div><div id="status" class="status"></div>
+</main><script>
+let token=sessionStorage.getItem('gmToken')||'';let players=[];let selectedId='';
+const actionLabels={build:'建造建筑',upgrade:'升级建筑',train:'训练军队',research:'研究科技',pve:'进攻 PvE',scout:'侦察玩家',trade_create:'发布贸易',trade_accept:'接受贸易',trade_cancel:'取消贸易',alliance_apply:'申请联盟',raid:'掠夺玩家',idle:'休息'};
+const lifecycleLabels={warming:'预热中',active:'活跃',recovering:'恢复中',disabled:'已暂停'};
+const personaLabels={pioneer:'开拓者',raider:'掠夺者',merchant:'商人',cooperator:'协作者'};
+const reasonLabels={sleeping:'作息休眠',budget_exhausted:'今日预算用完',no_candidate_over_threshold:'没有足够优先级的行为',perception_failed:'感知失败',uncertain_intent_not_retried:'崩溃恢复：未重试不确定动作',already_thinking:'正在思考',ai_not_found_or_disabled:'AI 已暂停'};
+async function api(method,path,body,retry){if(retry===undefined)retry=true;const headers={'Content-Type':'application/json'};if(token)headers['X-GM-Token']=token;const response=await fetch('/gm'+path,{method:method,headers:headers,body:body===undefined?undefined:JSON.stringify(body)});let data={};try{data=await response.json()}catch{data={ok:false,reason:'HTTP '+response.status}}if(response.status===401&&retry){const next=prompt('请输入 GM Token：',token);if(next!==null){token=next.trim();if(token)sessionStorage.setItem('gmToken',token);else sessionStorage.removeItem('gmToken');return api(method,path,body,false)}}if(!response.ok)throw new Error(data.reason||('HTTP '+response.status));return data}
+function text(tag,value,className){const el=document.createElement(tag);el.textContent=String(value===undefined||value===null?'—':value);if(className)el.className=className;return el}
+function time(value){const n=Number(value);return Number.isFinite(n)&&n>0?new Date(n).toLocaleString('zh-CN',{hour12:false}):'—'}
+function status(message,ok){const el=document.getElementById('status');el.textContent=message||'';el.style.color=ok===false?'#ff9ca5':'#8da2b5'}
+function rowField(label,value){const wrap=text('div','', 'field');wrap.appendChild(text('label',label));wrap.appendChild(text('div',value));return wrap}
+function playerName(player){return player.displayName||player.rosterId||player.playerId}
+function renderList(){const list=document.getElementById('list');list.textContent='';players.sort(function(a,b){return playerName(a).localeCompare(playerName(b),'zh-CN')});players.forEach(function(player){const row=document.createElement('button');row.className='ai-row'+(player.playerId===selectedId?' active':'');const head=text('div','', 'ai-name');head.appendChild(text('span',playerName(player)));head.appendChild(text('span',player.enabled?'运行中':'已暂停','tag '+(player.enabled?'on':'off')));row.appendChild(head);row.appendChild(text('div',(personaLabels[player.persona]||player.persona)+' · '+(lifecycleLabels[player.lifecycle]||player.lifecycle)+' · 今日 '+(player.actionsToday||0)+' 次','meta'));row.onclick=function(){selectPlayer(player.playerId)};list.appendChild(row)});if(!players.length)list.appendChild(text('div','暂无 AI 玩家','empty'))}
+function renderSummary(){document.getElementById('total').textContent=players.length;document.getElementById('enabled').textContent=players.filter(function(p){return p.enabled}).length;document.getElementById('disabled').textContent=players.filter(function(p){return !p.enabled}).length;document.getElementById('actions').textContent=players.reduce(function(sum,p){return sum+Number(p.actionsToday||0)},0)}
+function section(title){const wrap=text('section','', 'section');wrap.appendChild(text('h2',title));return wrap}
+function renderDetail(state,global){const root=document.getElementById('detail');root.textContent='';const controls=text('div','', 'detail-actions');const toggle=text('button',state.enabled?'暂停这个 AI':'启动这个 AI',state.enabled?'danger':'success');toggle.onclick=function(){setEnabled(state.playerId,!state.enabled)};controls.appendChild(toggle);const think=text('button','立即思考一次');think.disabled=!state.enabled;think.onclick=function(){thinkNow(state.playerId)};controls.appendChild(think);root.appendChild(controls);const grid=text('div','', 'grid');grid.appendChild(rowField('名称',playerName(state)));grid.appendChild(rowField('人格',personaLabels[state.persona]||state.persona));grid.appendChild(rowField('状态',lifecycleLabels[state.lifecycle]||state.lifecycle));grid.appendChild(rowField('今日动作',state.actionsToday||0));grid.appendChild(rowField('主要目标',actionLabels[state.primaryGoal]||state.primaryGoal));grid.appendChild(rowField('下次思考',time(state.nextThinkAt)));grid.appendChild(rowField('预热结束',time(state.warmupUntil)));grid.appendChild(rowField('恢复结束',time(state.recoveryUntil)));grid.appendChild(rowField('村庄 ID',state.villageId));root.appendChild(grid);
+const decision=section('最近一次决策');if(state.lastDecision){decision.appendChild(text('div',time(state.lastDecision.at)+' · 选择：'+(actionLabels[state.lastDecision.selected]||state.lastDecision.selected),'meta'));(state.lastDecision.candidates||[]).slice().sort(function(a,b){return b.score-a.score}).forEach(function(item){const line=text('div','', 'candidate');line.appendChild(text('span',actionLabels[item.kind]||item.kind));const bar=text('span','', 'score');const fill=document.createElement('i');fill.style.width=Math.max(0,Math.min(100,Number(item.score)||0))+'%';bar.appendChild(fill);line.appendChild(bar);line.appendChild(text('span',Math.round(Number(item.score)||0)));decision.appendChild(line)})}else decision.appendChild(text('div','尚无决策记录','meta'));root.appendChild(decision);
+const activity=section('近期行为结果');const events=text('div','', 'activity');const recent=(state.recentActions||[]).slice().reverse();recent.forEach(function(item){const event=text('div','', 'event '+(item.ok?'ok':'fail'));event.appendChild(text('span',time(item.at)));event.appendChild(text('span',actionLabels[item.kind]||item.kind));event.appendChild(text('span',item.ok?'成功':'失败'));event.appendChild(text('span',reasonLabels[item.reason]||item.reason||'已提交'));events.appendChild(event)});if(!recent.length)events.appendChild(text('div','暂无行为记录','empty'));activity.appendChild(events);root.appendChild(activity);
+const shared=section('全局交互约束');const reservations=Object.keys((global&&global.reservations)||{}).length;const victims=Object.keys((global&&global.victimHits)||{}).length;shared.appendChild(text('div','当前目标预约 '+reservations+' 个；近期受害者频控 '+victims+' 个。','meta'));root.appendChild(shared)}
+async function loadPlayers(keepSelection){try{const data=await api('GET','/ops/ai');players=(data.payload&&data.payload.players)||[];renderSummary();if(!keepSelection||!players.some(function(p){return p.playerId===selectedId}))selectedId=players[0]&&players[0].playerId||'';renderList();if(selectedId)await loadDetail(selectedId);else document.getElementById('detail').innerHTML='<div class="empty">暂无 AI 玩家</div>';status('已刷新 '+players.length+' 个 AI')}catch(error){status('加载失败：'+error.message,false)}}
+async function loadDetail(playerId){try{const data=await api('GET','/ops/ai/'+encodeURIComponent(playerId));renderDetail(data.payload.state,data.payload.global)}catch(error){status('详情加载失败：'+error.message,false)}}
+async function selectPlayer(playerId){selectedId=playerId;renderList();await loadDetail(playerId)}
+async function setEnabled(playerId,enabled){try{await api('POST','/ops/ai/'+encodeURIComponent(playerId)+'/enabled',{enabled:enabled});status(enabled?'AI 已启动':'AI 已暂停');await loadPlayers(true)}catch(error){status('操作失败：'+error.message,false)}}
+async function thinkNow(playerId){try{const data=await api('POST','/ops/ai/'+encodeURIComponent(playerId)+'/think');const result=data.payload||{};status('思考完成：'+(actionLabels[result.action]||result.action||'无动作')+(result.reason?'（'+(reasonLabels[result.reason]||result.reason)+'）':''));await loadPlayers(true)}catch(error){status('思考失败：'+error.message,false)}}
+async function setAll(enabled){if(!confirm(enabled?'确定启动全部 AI？':'确定暂停全部 AI？已提交的建筑、训练和行军不会撤销。'))return;try{for(const player of players)await api('POST','/ops/ai/'+encodeURIComponent(player.playerId)+'/enabled',{enabled:enabled});status(enabled?'全部 AI 已启动':'全部 AI 已暂停');await loadPlayers(true)}catch(error){status('批量操作中断：'+error.message,false)}}
+async function refresh(){await loadPlayers(true)}
+loadPlayers(false);
+</script></body></html>`;
+
 /** 独立配置中心入口：只编辑版本化 CSV，保存后由配置同步队列创建 GitHub PR。 */
 const CONFIG_CENTER_HTML = `<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8"><title>配置中心</title>
@@ -514,6 +553,12 @@ const WHOLE_TABLE_KEY_COLUMNS: Record<string, string[]> = {
   'quest_objectives.csv': ['id'],
   'quest_effects.csv': ['id'],
   'quest_edges.csv': ['id'],
+  'sanctum_event.csv': ['code'],
+  'sanctum_conditions.csv': ['id'],
+  'sanctum_condition_rewards.csv': ['id'],
+  'sanctum_puzzles.csv': ['code'],
+  'sanctum_puzzle_steps.csv': ['id'],
+  'sanctum_clues.csv': ['id'],
 };
 
 function persistentConfigDir(gameApp: GameApp): string | null {
@@ -638,6 +683,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   buildings: {
     file: 'buildings.csv', key: 'id',
     numeric: ['maxLevel', 'maxCount', 'mainBaseLevel', 'prosperityPerLevel', 'popGrowthPerLevel'],
+    text: ['requires'],
     labels: ['id', 'code', 'name'],
   },
   building_levels: {
@@ -651,7 +697,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     numeric: ['attack', 'defense', 'hp', 'speed', 'vision', 'carry', 'upkeep', 'costWood', 'costClay', 'costIron', 'costCrop', 'trainSec', 'popCost', 'techTier'],
      // 兵种的线上展示特性与模拟器特性同样属于配置中心可维护的文本字段。
      // 这样在统一攻防/生命字段迁移后，保存兵种数值时不会把特性列留在旧共享表。
-     text: ['role', 'traits', 'simTraits'],
+     text: ['role', 'traits'],
     labels: ['id', 'code', 'name', 'tribe'],
   },
   unit_traits: {
@@ -686,7 +732,7 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
   },
   pve_targets: {
     file: 'pve_targets.csv', key: 'id',
-    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop'],
+    numeric: ['respawnSec', 'lootWood', 'lootClay', 'lootIron', 'lootCrop', 'treasureTier'],
     labels: ['id', 'code', 'name'],
   },
   pve_defenders: {
@@ -753,6 +799,44 @@ export const BALANCE_TABLES: Record<string, BalanceTable> = {
     text: ['name', 'category', 'unitCode', 'desc'],
     labels: ['code', 'name', 'category'],
   },
+  // 远弦圣地：独立 CSV 仍由同一配置中心的校验、持久化与同步路径处理。
+  // 不放进 QUEST_MODULE_TABLES，避免保存任务图时意外重写活动条件与谜题。
+  sanctum_event: {
+    file: 'sanctum_event.csv', key: 'code',
+    numeric: ['enabled'],
+    text: ['name', 'fragmentTreasureCode', 'sanctuaryTemplateCode', 'description'],
+    labels: ['code', 'name'],
+  },
+  sanctum_conditions: {
+    file: 'sanctum_conditions.csv', key: 'id',
+    numeric: ['instances', 'refreshSec', 'minPlayers', 'minPlayerPop', 'minContributionShare', 'personalCooldownSec', 'pairCooldownSec'],
+    text: ['code', 'name', 'category', 'completionMode', 'kind', 'params', 'pveTemplateCode', 'puzzleCode', 'rewardGroup', 'clueGroup', 'description'],
+    labels: ['id', 'code', 'name', 'category', 'completionMode', 'kind'],
+  },
+  sanctum_condition_rewards: {
+    file: 'sanctum_condition_rewards.csv', key: 'id',
+    numeric: ['order'],
+    text: ['conditionCode', 'kind', 'params', 'recipient'],
+    labels: ['id', 'conditionCode', 'kind', 'recipient'],
+  },
+  sanctum_puzzles: {
+    file: 'sanctum_puzzles.csv', key: 'code',
+    numeric: ['minUnits', 'wrongCooldownSec'],
+    text: ['name', 'conditionCode', 'unitRequirement', 'allowedSymbols', 'description'],
+    labels: ['code', 'name', 'conditionCode'],
+  },
+  sanctum_puzzle_steps: {
+    file: 'sanctum_puzzle_steps.csv', key: 'id',
+    numeric: ['step'],
+    text: ['puzzleCode', 'answer', 'clueText'],
+    labels: ['id', 'puzzleCode', 'step'],
+  },
+  sanctum_clues: {
+    file: 'sanctum_clues.csv', key: 'id',
+    numeric: ['order', 'weight'],
+    text: ['conditionCode', 'template', 'precision'],
+    labels: ['id', 'conditionCode', 'precision'],
+  },
 };
 
 /**
@@ -767,6 +851,56 @@ function balanceRowKey(row: CsvRow, table: BalanceTable): string {
 /** 该列是否为主键列（写回时跳过）。 */
 function isBalanceKeyCol(col: string, table: BalanceTable): boolean {
   return table.keyComposite ? table.keyComposite.includes(col) : col === (table.key ?? '');
+}
+
+/**
+ * 建筑表的主基地门槛有两个历史字段：mainBaseLevel 与 requires 中的 1:n。
+ * 1:n 只是通用建筑前置语法中对主基地(id=1)的表达；两者同时存在时必须
+ * 指向同一个等级，否则运行时会出现“主基地栏写二级、前置又要求五级”的
+ * 隐藏额外门槛。配置中心修改任一字段时，将另一字段一并同步。
+ */
+function syncBuildingMainRequirement(orig: CsvRow, merged: CsvRow, inc: Record<string, string>): void {
+  const hasMainEdit = inc.mainBaseLevel !== undefined && inc.mainBaseLevel !== '';
+  const hasRequiresEdit = inc.requires !== undefined && inc.requires !== '';
+  if (!hasMainEdit && !hasRequiresEdit) return;
+
+  const parseMainLevel = (value: string): number | undefined => {
+    const levels = value.split('|')
+      .map((part) => part.trim())
+      .filter((part) => /^1:\d+$/.test(part))
+      .map((part) => Number(part.slice(2)));
+    const unique = [...new Set(levels)];
+    if (unique.length > 1) throw new Error(`buildings.csv 行 ${orig.id} 的 requires 含有多个不一致的主基地前置`);
+    return unique[0];
+  };
+
+  const requestedMain = hasMainEdit ? Number(inc.mainBaseLevel) : undefined;
+  if (requestedMain !== undefined && (!Number.isFinite(requestedMain) || requestedMain < 1)) {
+    throw new Error(`buildings.csv 行 ${orig.id} 字段 mainBaseLevel 必须是≥1的数字`);
+  }
+  const reqValue = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  // 只修改 mainBaseLevel 时，旧的 requires 值是待被同步的旧值，不能当作冲突；
+  // 只有玩家同时提交 requires 时，才用它参与一致性校验。
+  const requestedFromRequires = hasRequiresEdit ? parseMainLevel(reqValue) : undefined;
+  if (requestedMain !== undefined && requestedFromRequires !== undefined && requestedMain !== requestedFromRequires) {
+    throw new Error(`buildings.csv 行 ${orig.id} 的 mainBaseLevel=${requestedMain} 与 requires 主基地前置=${requestedFromRequires} 不一致；请只修改一个或填相同值`);
+  }
+
+  const level = requestedMain ?? requestedFromRequires;
+  if (level === undefined) return;
+
+  // 只替换已有的主基地前置；没有 1:n 的建筑（例如 smithy 的 7:1）
+  // 保持纯“其他建筑”依赖，不强行新增主基地 token。
+  const sourceRequires = hasRequiresEdit ? inc.requires : String(orig.requires ?? '');
+  const parts = sourceRequires.split('|').map((part) => part.trim()).filter(Boolean);
+  let replaced = false;
+  const next = parts.map((part) => {
+    if (!/^1:\d+$/.test(part)) return part;
+    replaced = true;
+    return `1:${level}`;
+  });
+  if (replaced) merged.requires = next.join('|');
+  if (requestedFromRequires !== undefined && !hasMainEdit) merged.mainBaseLevel = String(level);
 }
 
 export function applyBalanceEdits(srcDir: string, targetDir: string, table: BalanceTable, changes: Record<string, Record<string, string>>): void {
@@ -802,6 +936,7 @@ export function applyBalanceEdits(srcDir: string, targetDir: string, table: Bala
       }
       // 非声明可编辑字段：忽略（不覆盖原值）
     }
+    if (table.file === 'buildings.csv') syncBuildingMainRequirement(orig, merged, inc);
     return merged;
   });
   writeFileSync(join(targetDir, table.file), serializeCsv(doc), 'utf8');
@@ -854,8 +989,8 @@ table.bt input:focus{outline:1px solid #4cc9f0}
 <script>
 const TOKEN = sessionStorage.getItem('gmToken') ?? '';
 const H = TOKEN ? {'X-GM-Token': TOKEN, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
-const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services'];
-const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}};
+const TABLES = ['buildings','building_levels','units','mercenaries','merc_camp','trade_center','kingdom_services','pve_targets','pve_defenders','treasures','quest_objectives','quest_effects','constants','research','academy','alliance_levels','alliance_buildings','alliance_tech','alliance_services','sanctum_event','sanctum_conditions','sanctum_condition_rewards','sanctum_puzzles','sanctum_puzzle_steps','sanctum_clues'];
+const CHANGES = {buildings:{}, building_levels:{}, units:{}, mercenaries:{}, merc_camp:{}, trade_center:{}, kingdom_services:{}, pve_targets:{}, pve_defenders:{}, treasures:{}, quest_objectives:{}, quest_effects:{}, constants:{}, research:{}, academy:{}, alliance_levels:{}, alliance_buildings:{}, alliance_tech:{}, alliance_services:{}, sanctum_event:{}, sanctum_conditions:{}, sanctum_condition_rewards:{}, sanctum_puzzles:{}, sanctum_puzzle_steps:{}, sanctum_clues:{}};
 let DATA = null;
 
 function esc(s){ s = String(s==null?'':s); return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -883,7 +1018,8 @@ function sectionGeneric(table){
     var cityStateKeys = {}; for (var ci=0;ci<CITY_STATE_ROWS.length;ci++) cityStateKeys[CITY_STATE_ROWS[ci][0]] = true;
     var allianceKeys = {}; for (var ai=0;ai<ALLIANCE_ROWS.length;ai++) allianceKeys[ALLIANCE_ROWS[ai][0]] = true;
     var tradeKeys = {}; for (var tri=0;tri<TRADE_ROWS.length;tri++) tradeKeys[TRADE_ROWS[tri][0]] = true;
-    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeys = {}; for (var tci=0;tci<TREASURE_CAMP_ROWS.length;tci++) treasureCampKeys[TREASURE_CAMP_ROWS[tci][0]] = true;
+    rows = rows.filter(function(r){ return !repKeys[r.key] && !foundingKeys[r.key] && !kingdomKeys[r.key] && !m8Keys[r.key] && !terrainKeys[r.key] && !cityStateKeys[r.key] && !allianceKeys[r.key] && !tradeKeys[r.key] && !treasureCampKeys[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   } else if (table === 'constants') {
     var foundingKeysOnly = {}; for (var fj=0;fj<FOUND_ROWS.length;fj++) foundingKeysOnly[FOUND_ROWS[fj][0]] = true;
     var m8KeysOnly = {}; for (var mj=0;mj<M8_ROWS.length;mj++) m8KeysOnly[M8_ROWS[mj][0]] = true;
@@ -891,10 +1027,11 @@ function sectionGeneric(table){
     var cityStateKeysOnly = {}; for (var cj=0;cj<CITY_STATE_ROWS.length;cj++) cityStateKeysOnly[CITY_STATE_ROWS[cj][0]] = true;
     var allianceKeysOnly = {}; for (var ak=0;ak<ALLIANCE_ROWS.length;ak++) allianceKeysOnly[ALLIANCE_ROWS[ak][0]] = true;
     var tradeKeysOnly = {}; for (var atk=0;atk<TRADE_ROWS.length;atk++) tradeKeysOnly[TRADE_ROWS[atk][0]] = true;
-    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
+    var treasureCampKeysOnly = {}; for (var tco=0;tco<TREASURE_CAMP_ROWS.length;tco++) treasureCampKeysOnly[TREASURE_CAMP_ROWS[tco][0]] = true;
+    rows = rows.filter(function(r){ return !foundingKeysOnly[r.key] && !m8KeysOnly[r.key] && !terrainKeysOnly[r.key] && !cityStateKeysOnly[r.key] && !allianceKeysOnly[r.key] && !tradeKeysOnly[r.key] && !treasureCampKeysOnly[r.key] && r.key !== 'cavalry_unit_codes' && r.key !== 'alchemy_refine_sec'; });
   }
   var fields = meta.numericByType ? ['value'] : (meta.numeric || []).concat(meta.text || []);
-  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务' };
+  var TITLES = { buildings:'建筑 / 资源田', units:'兵种', mercenaries:'雇佣兵', merc_camp:'雇佣兵营地刷新', trade_center:'贸易中心逐级参数', kingdom_services:'议会厅王国服务', pve_targets:'PvE目标与王国地标', pve_defenders:'PvE与王国地标守军', treasures:'宝物目录', quest_objectives:'任务目标', quest_effects:'任务效果', constants:'全局常量', research:'科技目录', academy:'学院RP参数', alliance_levels:'联盟等级与成员上限', alliance_buildings:'联盟建筑目录', alliance_tech:'联盟科技目录', alliance_services:'联盟王国服务', sanctum_event:'远弦圣地活动', sanctum_conditions:'远弦圣地公共条件', sanctum_condition_rewards:'远弦圣地条件奖励', sanctum_puzzles:'远弦圣地谜题', sanctum_puzzle_steps:'远弦圣地谜题步骤', sanctum_clues:'远弦圣地私有线索' };
   var title = TITLES[table] || table;
   var keyLabel = meta.key || (meta.keyComposite || []).join('|');
   var h = '<div class="hint">主键 ' + esc(keyLabel) + ' · 可编辑字段: ' + esc(fields.join(', ')) + '</div>';
@@ -991,6 +1128,7 @@ var REP_ROWS = [
   ['reputation_good_gold_tax_penalty_cap','正声望税收下降上限','正声望金币税收下降倍率上限'],
   ['reputation_evil_pve_drop_rate_per_point','负声望PvE掉宝/点','每点负声望带来的PvE宝物掉落概率倍率'],
   ['reputation_evil_pve_drop_rate_cap','负声望PvE掉宝上限','负声望PvE宝物掉落概率倍率上限'],
+  ['caravan_raid_reputation_goods_per_point','商队劫掠物资声望阈值','每累计掠得多少单位物资扣1点声望；跨多次劫掠累加'],
 ];
 
 var KINGDOM_ROWS = [
@@ -1052,6 +1190,7 @@ var MARCH_SIZE_ROWS = [
   ['march_size_reference_pop','规模免惩罚人口基准','有效军队人口不超过此值时不降低行军速度'],
   ['march_size_penalty','规模减速系数','超出基准人口后按 1/(1+系数×超出人口) 计算速度倍率'],
   ['march_size_min_multiplier','规模减速最低速度比例','规模减速倍率的下限，避免大军完全失去机动能力'],
+  ['march_loss_rate_default','默认战损返城阈值','野战/被伏击方达到该战损比例后返城；玩家可在派兵界面覆盖'],
 ];
 function sectionMarchSize(){
   var rows = DATA.constants || [], byKey = {};
@@ -1061,8 +1200,9 @@ function sectionMarchSize(){
   for (var j=0;j<MARCH_SIZE_ROWS.length;j++){
     var item = MARCH_SIZE_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
     var min = item[0] === 'march_size_min_multiplier' ? '0.0001' : '0';
+    var max = item[0] === 'march_loss_rate_default' ? '100' : '';
     h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
-    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td><input type="number" min="'+min+'"'+(max ? ' max="'+max+'"' : '')+' step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
     h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
   }
   h += '</tbody></table>';
@@ -1094,6 +1234,31 @@ function sectionTrade(){
   }
   h += '</tbody></table>';
   return '<div class="sec"><h2>贸易参数</h2>'+h+'</div>';
+}
+
+// ── 野外营地宝物掉落专用视图：总体命中倍率与稀有度权重写入 game_constants.csv。 ──
+var TREASURE_CAMP_ROWS = [
+  ['treasure_camp_drop_chance','基础掉宝概率','清理野外营地后先按此总体概率判定是否掉宝'],
+  ['treasure_camp_drop_chance_tier1_multiplier','低难度营地掉宝倍率','低难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier2_multiplier','中难度营地掉宝倍率','中难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_drop_chance_tier3_multiplier','高难度营地掉宝倍率','高难度营地对基础掉宝概率的倍率'],
+  ['treasure_camp_rarity_multiplier_tier2','中难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+  ['treasure_camp_rarity_multiplier_tier3','高难度稀有度倍率底数','按宝物稀有度等级（普通0、稀有1、史诗2、传说3）逐级乘此倍率'],
+];
+function sectionTreasureCamp(){
+  var rows = DATA.constants || [], byKey = {};
+  for (var i=0;i<rows.length;i++) byKey[rows[i].key] = rows[i];
+  var h = '<div class="hint">宝物目录中的 dropRate 不会被改写。清营时先用基础掉宝概率 × 营地档位倍率做总体命中，再按 dropRate 轮盘抽取；中/高难度营地只临时提高稀有、史诗、传说宝物的权重。pve_targets.csv 的 treasureTier 可逐营地调整档位。</div>';
+  h += '<table class="bt"><thead><tr><th>参数</th><th>当前值</th><th>说明</th></tr></thead><tbody>';
+  for (var j=0;j<TREASURE_CAMP_ROWS.length;j++){
+    var item = TREASURE_CAMP_ROWS[j], row = byKey[item[0]] || {}, value = row.value == null ? '' : row.value;
+    var min = item[0].indexOf('rarity_multiplier') >= 0 ? '1' : '0';
+    h += '<tr><td class="lbl">'+esc(item[1])+' <small style="color:#7a86a8">('+esc(item[0])+')</small></td>';
+    h += '<td><input type="number" min="'+min+'" step="any" value="'+esc(value)+'" data-t="constants" data-k="'+esc(item[0])+'" data-f="value" oninput="onEdit(this)"></td>';
+    h += '<td class="lbl">'+esc(item[2])+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  return '<div class="sec"><h2>野外营地宝物掉落参数</h2>'+h+'</div>';
 }
 
 // ── 骑兵分类专用视图：猎马人任务与绞马索效果共用该配置。 ──
@@ -1371,9 +1536,9 @@ function sectionBuildings(){
     }
     return c;
   }
-  var bFields = ['maxLevel','maxCount','mainBaseLevel','prosperityPerLevel','popGrowthPerLevel'];
-  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','繁荣/级','人口增长/级·时'];
-  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
+  var bFields = ['maxLevel','maxCount','mainBaseLevel','requires','prosperityPerLevel','popGrowthPerLevel'];
+  var bLabels = ['最高等级','每村最多建造(-1不限)','所需主基地级','建筑前置（数字ID:等级）','繁荣/级','人口增长/级·时'];
+  var h = '<div class="hint">配置中心的每栋建筑独立卡片——建筑属性(顶部) + 通用逐级参数 + 建筑专属奖励列 + 贸易中心/雇佣兵营地/炼金炉功能参数(如有)。主基地等级与 requires 中的 1:n 前置会自动联动；requires 中其他建筑前置保持不变。宝库的「每级主/备用槽」可直接修改；保险库的五种「每级保护量」会逐级累加并在攻城拆建筑后重新计算。保存会校验并写回 CSV、镜像到共享配置并排队创建配置 PR；GM 实时状态和删档不会改变这些默认值。</div>';
   h += '<div class="bl-list">';
   var codes = Object.keys(byCode).sort();
   for (var c=0;c<codes.length;c++){
@@ -1397,7 +1562,9 @@ function sectionBuildings(){
         var f0 = bFields[bf];
         var val0 = bld[f0]==null?'':bld[f0];
         h += '<label style="font-size:10px;color:#7a86a8;margin-left:4px;white-space:nowrap">'+bLabels[bf]+':</label> ';
-        h += '<input type="number" step="any" value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:62px;font-size:11px">';
+        var inputType = f0 === 'requires' ? 'text' : 'number';
+        var inputWidth = f0 === 'requires' ? '112px' : '62px';
+        h += '<input type="'+inputType+'" '+(inputType === 'number' ? 'step="any" ' : '')+'value="'+esc(val0)+'" data-t="buildings" data-k="'+esc(bKey)+'" data-f="'+esc(f0)+'" oninput="onEdit(this)" style="width:'+inputWidth+';font-size:11px">';
       }
       h += '</div>';
     }
@@ -1511,6 +1678,7 @@ function render(){
   html += sectionTerrain();
   html += sectionMarchSize();
   html += sectionTrade();
+  html += sectionTreasureCamp();
   html += sectionCavalry();
   html += sectionHorseHunter();
   html += sectionCityState();
@@ -1524,11 +1692,43 @@ function render(){
   document.getElementById('tables').innerHTML = html;
 }
 
-function onEdit(el){
-  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+function recordEdit(t,k,f,v){
   if (!CHANGES[t][k]) CHANGES[t][k] = {};
   if (v==='') delete CHANGES[t][k][f];
   else CHANGES[t][k][f] = v;
+}
+
+function linkedBuildingInput(k,f){
+  var all = document.querySelectorAll('input[data-t="buildings"]');
+  for (var i=0;i<all.length;i++) if (all[i].dataset.k===k && all[i].dataset.f===f) return all[i];
+  return null;
+}
+
+function syncBuildingInputs(k,f,v){
+  if (v === '') return;
+  if (f === 'mainBaseLevel' && /^\d+$/.test(v)){
+    var req = linkedBuildingInput(k,'requires');
+    if (!req) return;
+    var parts = req.value.split('|').map(function(part){ return part.trim(); }).filter(Boolean);
+    var replaced = false;
+    parts = parts.map(function(part){
+      if (!/^1:\d+$/.test(part)) return part;
+      replaced = true;
+      return '1:'+v;
+    });
+    if (replaced){ req.value = parts.join('|'); recordEdit('buildings',k,'requires',req.value); }
+  } else if (f === 'requires'){
+    var match = v.match(/(?:^|\|)\s*1:(\d+)(?:\||$)/);
+    if (!match) return;
+    var main = linkedBuildingInput(k,'mainBaseLevel');
+    if (main){ main.value = match[1]; recordEdit('buildings',k,'mainBaseLevel',match[1]); }
+  }
+}
+
+function onEdit(el){
+  var t = el.dataset.t, k = el.dataset.k, f = el.dataset.f, v = el.value;
+  recordEdit(t,k,f,v);
+  if (t === 'buildings' && (f === 'mainBaseLevel' || f === 'requires')) syncBuildingInputs(k,f,v);
   status('已修改「'+t+' / '+k+' / '+f+'」，记得点保存');
 }
 
@@ -1550,6 +1750,9 @@ load();
 
 export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp: GameApp): void {
   const token = process.env.GM_TOKEN?.trim() || null;
+  if (process.env.NODE_ENV === 'production' && !token) {
+    throw new Error('生产环境启用 GM API 时必须配置 GM_TOKEN；如需完全关闭请设置 GM_ENABLED=off');
+  }
 
   const auth = (req: FastifyRequest, reply: FastifyReply): boolean => {
     if (!token) return true;
@@ -1615,6 +1818,9 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
   fastify.get('/gm', (_req, reply) => {
     void reply.type('text/html; charset=utf-8').send(GM_PANEL_HTML);
   });
+  fastify.get('/gm/ai', (_req, reply) => {
+    void reply.type('text/html; charset=utf-8').send(GM_AI_PANEL_HTML);
+  });
 
   // 独立配置中心入口与页面。旧编辑器通过 configPage 重写为 /config API。
   fastify.get('/config', (_req, reply) => {
@@ -1661,6 +1867,35 @@ export function registerGmRoutes(fastify: FastifyInstance, store: Store, gameApp
     }
   });
   fastify.all('/config/*', configProxy);
+
+  // AI 玩家专用调试入口：读黑板、强制单次思考、启停调度；普通 Wire 无对应 action。
+  fastify.get('/gm/ops/ai', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const res = await gameApp.commands.send({ name: 'aiPlayer.ListDebug', from: 'gm', payload: {} });
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
+  fastify.get('/gm/ops/ai/:playerId', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const res = await gameApp.commands.send({ name: 'aiPlayer.GetDebug', from: 'gm', payload: { playerId } });
+    void reply.code(res.ok ? 200 : 404).send(res);
+  });
+  fastify.post('/gm/ops/ai/:playerId/think', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const res = await gameApp.commands.send({ name: 'aiPlayer.Think', from: 'gm', payload: { playerId } });
+    store.flush();
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
+  fastify.post('/gm/ops/ai/:playerId/enabled', async (req, reply) => {
+    if (!auth(req, reply)) return;
+    const { playerId } = req.params as { playerId: string };
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== 'boolean') return void reply.code(400).send({ ok: false, reason: 'enabled 必须为 boolean' });
+    const res = await gameApp.commands.send({ name: 'aiPlayer.SetEnabled', from: 'gm', payload: { playerId, enabled } });
+    store.flush();
+    void reply.code(res.ok ? 200 : 400).send(res);
+  });
 
   // GET /gm/collections
   fastify.get('/gm/collections', (req, reply) => {

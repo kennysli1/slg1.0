@@ -7,6 +7,14 @@
 >
 > **字段注释行**：每张表表头下方有一行以 `#` 开头的中文字段说明（如 `#数字ID,代码标识,...`），配置时可直接对照，**后端解析时会自动跳过这一行，不影响游戏**。编辑数据时不要动这行；若想重建注释或改了表头，运行 `python tools/annotate_csv.py` 重新生成。
 
+### 正式服 1.0 节奏基线
+
+- 建筑：完整目录原始工期固定为 10 天；主基地满级开放 2 条队列，理想并行墙钟约 5 天。主基地、人口与科技加速会让活跃玩家略早毕业。
+- 科技：三个分支各选择一条互斥纲领后，完整毕业路径固定为 5 天；RP 产出曲线按该目标同步调整。
+- 赛季：第 7 天起可结算，最晚第 10 天结算。CSV 只定义窗口，不会自动执行 `season`/`respawn`/`wipe`。
+- 经济：全建筑毕业所需木/泥/铁/粮分别约 69.7万/61.6万/52.4万/35.5万；仓储、初始资源、训练成本与刷新周期已同步放大。
+- 复现：执行 `npm run balance:release` 会按上述预算重新生成正式服 CSV；提交前由配置测试锁定总工期、成本区间、拓荒门槛和周期窗口。
+
 ---
 
 ## ⭐ 两个全局约定（2.0 起，务必先读）
@@ -37,7 +45,7 @@
 | 表1 | `resources.csv` | **资源种类**（木/泥/铁/粮） | 加一种新资源、改资源显示名/图标 |
 | 表2 | `buildings.csv` | **全部建筑**（含资源田；`zone` 分主基地/城内/城外） | 改建筑或资源田的成本/耗时/产量/最高等级、每村最多建造数、主基地最低等级、改科技树前置、改归属区；探险家协会、联盟大厅在此配置 |
 | 表3 | `town_center_slots.csv` | **主基地 1–4 阶段开放的槽位**（城内/城外槽位数 + 建造队列条数） | 调发育节奏、调城内外取舍强度、调队列条数 |
-| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`simTraits` 为独立阶段化模拟器特性引用；冒险者为 `all` 通用侦察兵种 |
+| 表4 | `units.csv` | **兵种**（罗马/高卢/条顿；`all` 为通用兵种） | 改兵种攻防/生命值伤亡池/速度/视野/载货/耗粮/造价、加新兵种、加新部族；`traits` 是线上战斗与模拟器共用的唯一特性入口；冒险者为 `all` 通用侦察兵种 |
 | 表5 | `pve_targets.csv` | **野怪/PvE目标模板**（老鼠窝/野狼群/强盗营地/王国城邦） | 改目标战利品、重生时间、显示名/图标、加新目标类型；`kingdom_city_state` 的内容由运行时配置随机生成 |
 | 表6 | `pve_defenders.csv` | **野怪的守军**（每个PvE目标里有哪些怪、几只、多强） | 改某目标守军的种类/数量/三维/模拟器生命值与特性 |
 | 表7 | `pve_spawns.csv` | **野怪在地图上的位置**（哪个坐标放哪种目标） | 增删地图上的PvE点、改其坐标 |
@@ -48,7 +56,7 @@
 | 表12 | `merc_camp.csv` | **雇佣兵营地逐级刷新参数** | 调候选数量、刷新间隔和可囤刷新次数 |
 | 表13 | `trade_center.csv` | **贸易中心逐级能力** | 调路线数、交易视野、NPC订单和刷新节奏 |
 | 表14 | `treasures.csv` | **宝物目录、效果、价格与掉率** | 调宝物效果、稀有度、NPC价格和出现概率；`my_effort` 使用 `my_effort_use` 对话，`black_badge` 提供 PvE 掉率与军队加成 |
-| 表15 | `research.csv` | **科技树目录**（分支/层级/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
+| 表15 | `research.csv` | **科技树目录**（分支/层级/纲领互斥组/主基地最低等级/前置/RP 造价） | 加科技、调研发耗时与作用域 |
 | 表15a | `research_effects.csv` | **科技效果明细**（一个科技可配多条） | 调科技真实效果、目标、叠加上限 |
 | 表16 | `academy.csv` | **学院逐级出点参数**（判定间隔与概率曲线） | 调科研点产出速度与保底强度 |
 | 表17 | `quest_lines.csv` | **任务线目录**（入口与展示顺序） | 增加/调整独立任务线 |
@@ -64,8 +72,18 @@
 | 表27 | `alliance_buildings.csv` | **联盟建筑目录** | 调联盟建筑最高等级、解锁等级、资源成本与成员加成 |
 | 表28 | `alliance_tech.csv` | **联盟科技目录** | 调联盟科技最高等级、解锁等级、科技点成本与成员加成 |
 | 表29 | `alliance_services.csv` | **联盟王国服务** | 调形象大使可购买的资源/增援服务、声望价格、数量与抵达时间 |
+| 表30 | `sanctum_event.csv` | **远弦圣地活动目录** | 调活动开关、残印与圣地模板引用 |
+| 表31 | `sanctum_conditions.csv` | **远弦圣地公共条件** | 调条件类型、数量、刷新、协作门槛、奖励/线索组与说明 |
+| 表32 | `sanctum_condition_rewards.csv` | **远弦圣地条件奖励** | 调每个公共条件的资源、声望、科技点或宝物奖励 |
+| 表33 | `sanctum_puzzles.csv` | **远弦圣地谜题目录** | 调谜题可用单位、符号集合、答错冷却与说明 |
+| 表34 | `sanctum_puzzle_steps.csv` | **远弦圣地谜题步骤** | 调服务端答案顺序和下发给玩家的逐步线索 |
+| 表35 | `sanctum_clues.csv` | **远弦圣地私有线索** | 调条件完成后给参与者的圣地方向/区域/距离提示 |
+| 表36 | `ai_personas.csv` | **AI 四类人格权重与作息预算** | 调经济/军事/贸易/社交倾向、安全库存、睡眠和每日行动预算 |
+| 表37 | `ai_roster.csv` | **固定16名托管玩家 roster** | 调名字、部族、人格、固定随机种子和48–72小时预热期；首版不得增删行 |
 
-`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），用于骰子任务的独立对局目标；`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
+`ai_personas.csv` 的 `reserveRatio` 必须在 0–1，`sleepHours` 必须在 6–9；`ai_roster.csv` 必须恰好 16 行，名字唯一且不超过 16 字，`warmupHours` 必须在 48–72。AI 配置只影响服务器控制器，普通客户端协议不下发人格、种子或行为树状态。
+
+`quest_objectives.csv` 的 `kind` 还支持 `dice_match`，参数格式为 `difficulty:targetScore:winsRequired`（例如 `easy:2000:1`、`normal:4000:2`、`hard:6000:2`），以及 `rune_sequence`（参数为逗号或竖线分隔的符文唯一序列，由服务端校验）。`reputation_at_least`/`reputation_at_most` 分别表示声望达到阈值或更高/更低。`easy`、`normal`、`hard` 分别对应简单、普通、困难 NPC。
 
 > **常见操作举例**
 > - 想让军团兵更强 → 表4 `units.csv`，改 legionnaire 行的 attack / defense / hp。
@@ -168,7 +186,7 @@
 | costWood/Clay/Iron/Crop | 训练一个的成本 |
 | trainSec | 训练一个耗时（秒） |
 | building | 训练所需建筑（填**建筑数字ID**，如 4=兵营、5=马厩） |
-| traits / simTraits | `traits` 为线上战斗特性 ID；`simTraits` 保留给目录兼容。新战斗创建时会把角色和 traits 冻结进快照 |
+| traits | 唯一的阶段战斗特性 ID。新战斗创建时会把角色和 traits 冻结进快照 |
 | techTier | 战斗科技档位标签（1/2/3）；用于解锁、目录和数值验收，不直接乘战斗力 |
 
 > 现行战斗只有攻击、防御、生命三项基础属性：每个步骤的伤害为 `A²/(A+D)`，双方使用步骤开始快照同时结算；伤害按当前人数比例分摊，并按各兵种自身生命累计阵亡。固定顺序为“弓骑预射 → 近战骑冲锋 → 远程 → 全员近战至一方归零”。`unit_traits.csv` 的效果只在标注阶段生效，绝不跨阶段；相同 unit code 的群体特性有幸存者时只生效一次，不按人数叠加。
@@ -225,6 +243,8 @@
 | lootWood/Clay/Iron/Crop | 战利品总量 |
 | faction | 阵营（`neutral`/`kingdom`）；王国城邦填 `kingdom` |
 | cityState | 是否启用运行时随机城邦生成（`true`） |
+| kingdomProfile | 王国 PvE 档位（`city_state`/`fief`/`capital`，普通营地留空） |
+| treasureTier | 普通野外营地宝物掉落档位：1 低、2 中、3 高；高档提高总体掉宝概率并提高高稀有度权重 |
 
 配置中的 `tianwang_village` 是 M8 任务村模板；其地图实体由任务模块按接取村庄动态生成，不应手动添加到 `pve_spawns.csv`。模板标注四种资源各 500，实际初始资源和金币由 `m8_task_village_resource_amount` / `m8_task_village_gold` 控制，守军由 `pve_defenders.csv` 的 `targetId=106` 控制。
 
@@ -385,7 +405,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | id / code | 数字主键 / 稳定英文代码 |
 | name / icon | 显示名 / 图标基名 |
 | category / rarity | 宝物类别 / 稀有度 |
-| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写） |
+| effectType / effectValue | 效果类型 / 效果数值（倍率类按百分比值填写；`vaultGoldLoot` 为攻城时可掠夺保险库金币比例，`armyVision` 为随军视野格数） |
 | reputationValue | 主宝物栏被动声望修正（可为负；备用栏和军队携带中不生效） |
 | priceGold | NPC出售或回收时使用的金币基准价 |
 | dropRate | 掉落或进入NPC订单池的概率（0–1） |
@@ -395,6 +415,13 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | uniqueEffect | `1` 表示同名只允许一份生效 |
 | activeEffectType / activeEffectValue | 可选主动效果类型与数值；混合宝物可在保留被动效果的同时主动使用 |
 | activeDurationSec / activeConsume | 主动效果持续秒数（即时效果填0）/ 使用后是否消耗（1/0） |
+
+野外营地掉落仍以 `dropRate` 为宝物目录的基础权重，不会改写 `treasures.csv`。清营时先按
+`treasure_camp_drop_chance × treasure_camp_drop_chance_tier{1,2,3}_multiplier` 判定是否掉宝；
+默认低/中/高档倍率为 `0.5/0.75/1`，因此即使全局基础概率配置为 1，三档仍会保持明确的难度梯度；
+命中后，中/高档营地分别按 `treasure_camp_rarity_multiplier_tier2/3` 的稀有度底数提高
+rare/epic/legendary 权重（普通宝物倍率为1，稀有度每升一级再乘一次）。这些参数均可在配置中心
+“野外营地宝物掉落参数”板块修改。
 
 `enemyCavalryDef` 为绞马索专用效果类型，`effectValue=30` 表示攻击时将敌方骑兵的近战/远程防御都乘以 `0.70`；只作用于携带该宝物的进攻军队，不会改变持有者自身防御。
 `smartPerson`（聪明人）缩短科研点判定间隔，并可主动获得科研点；`warriorBanner`（勇士锦旗）被动提升全军攻防/人口增长，主动为本村（含本村在外活动的军队）提供限时攻防加成。
@@ -406,6 +433,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | name / desc / icon | 显示名 / 说明 / 图标基名 |
 | branch | 分支：`military` 军事 / `production` 生产 / `social` 社会 |
 | tier | 层级，1 为顶层；界面按层从上到下分组显示 |
+| doctrineGroup | 仅 T2 战略纲领填写；同一玩家在同组完成一项后，本局不能完成另一项 |
 | mainBaseLevel | 研发所需主基地最低等级；默认 1，配置中心可调 |
 | requires | 前置科技 code；`\|` 分隔=全都要，`OR` 分隔=任满其一，留空=无前置 |
 | scope | `village` 仅本村生效 / `player` 全部村庄生效 |
@@ -492,7 +520,7 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 |----|------|
 | id / questCode | 稳定目标 ID / 所属任务 |
 | kind | 目标类型，如 `submit_resources`、`clear_camp`、`clear_public_pve`、`research_completed`、`reputation_at_least`/`reputation_at_most`（声望达到阈值或更高/更低）、`defend_task_village`、`raid_task_village`、`investigate_task_village`（到达指定任务营地并调查，不战斗）、`kill_units`（累计击杀指定兵种类别） |
-| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，其他格式按 `任务模块.md` 说明 |
+| params | 目标参数；资源用 `wood:200|clay:200`，`kill_units` 用 `cavalry:50`，`clear_public_pve` 用 `最低模板id:数量`（例如 `4:3`，从雇佣兵营起计常驻公开营地），`dice_match` 用 `difficulty:targetScore:winsRequired`，`rune_sequence` 用逗号或竖线分隔的符文顺序，其他格式按 `任务模块.md` 说明 |
 | order | 同任务多目标时的顺序 |
 
 ### quest_effects.csv — 效果
@@ -512,6 +540,72 @@ M8 任务村参数：`m8_attack_delay_sec`（接取后攻城等待，默认 2880
 | fromQuest / toQuest | 起点与终点任务代码 |
 | relation | `requires`（前置完成）/ `success_unlock` / `failure_unlock` |
 | order | 多条入边的稳定顺序 |
+
+## 远弦圣地公共事件（`sanctum_*.csv`）
+
+这六张表共同定义一轮全服可争夺的“远弦圣地”。它们只描述活动、条件、奖励、谜题与私人线索；玩家完成情况、公共目标坐标、占领者、守卫倒计时和圣物位置属于运行时 `sanctum` 状态，不能写回 CSV。详细生命周期见 `docs/远弦圣地模块.md`。
+
+### sanctum_event.csv — 活动目录
+
+| 列 | 含义 |
+|---|---|
+| code / name | 稳定活动代码 / 显示名称；`code` 是运行时和存档引用，勿改名 |
+| enabled | 是否允许残印触发该活动，填 `1` 或 `0` |
+| fragmentTreasureCode | 开启活动所需的 `treasures.csv` 宝物代码 |
+| sanctuaryTemplateCode | 圣地守卫使用的 `pve_targets.csv` 动态 PvE 模板代码 |
+| description | 玩家可见说明 |
+
+### sanctum_conditions.csv — 公共条件目录
+
+| 列 | 含义 |
+|---|---|
+| id / code / name | 稳定数字 ID、条件代码、显示名称；跨表使用 `code` |
+| category | 难度与供给组：`low`（一次性稀少）、`repeatable`（可重复）或 `unique`（高难一次性） |
+| completionMode | `global_once`（首位完成后消失）、`personal_repeat`（玩家按冷却重复）或 `team_once`（一次协作完成） |
+| instances / refreshSec | 同时存在的目标实例数 / 重新生成的秒数；一次性条件填 `0` 刷新 |
+| kind / params | 服务器已支持的条件类型和参数；参数用 `key:value`，多项用 `\|` 分隔 |
+| pveTemplateCode / puzzleCode | 需要战斗或解谜时对应的 PvE 模板 / `sanctum_puzzles.csv` 谜题代码；不用则留空 |
+| minPlayers / minPlayerPop / minContributionShare | 协作条件最低参与者、每人最低有效人口、单人最低贡献占比；非协作条件填 `1/0/0` |
+| personalCooldownSec / pairCooldownSec | 个人重复完成冷却 / 与同一 PvP 对手再次计数的冷却；无此限制填 `0` |
+| rewardGroup / clueGroup | 对应奖励与私有线索的分组代码，通常与条件 `code` 相同 |
+| description | 玩家可见的条件说明 |
+
+### sanctum_condition_rewards.csv — 条件奖励
+
+| 列 | 含义 |
+|---|---|
+| id | 稳定奖励行 ID |
+| conditionCode | 所属 `sanctum_conditions.csv` 条件代码 |
+| kind / params | 奖励类型与参数；资源使用 `wood:数量\|...`，其他格式由服务端校验 |
+| recipient | `participant` 发给完成者；`designated_recipient` 发给协作条件指定领取者 |
+| order | 同一条件内的稳定结算顺序 |
+
+### sanctum_puzzles.csv — 谜题目录
+
+| 列 | 含义 |
+|---|---|
+| code / name / conditionCode | 稳定谜题代码、显示名、所属条件代码 |
+| unitRequirement / minUnits | 可提交谜题的兵种要求与最低数量；当前 `scout_or_adventurer` 表示侦察兵或冒险者 |
+| allowedSymbols | 可选符号，使用 `\|` 分隔；不在集合内的提交会被拒绝 |
+| wrongCooldownSec | 答错后同一玩家再次尝试的冷却秒数 |
+| description | 玩家可见的解谜说明 |
+
+### sanctum_puzzle_steps.csv — 谜题步骤
+
+| 列 | 含义 |
+|---|---|
+| id / puzzleCode / step | 稳定步骤 ID、所属谜题、从 1 连续递增的答案步骤 |
+| answer | 服务端校验用的正确符号；不得向客户端完整下发 |
+| clueText | 对应步骤可显示给玩家的解谜线索 |
+
+### sanctum_clues.csv — 私有线索
+
+| 列 | 含义 |
+|---|---|
+| id / conditionCode / order | 稳定线索 ID、所属条件、同条件内稳定顺序 |
+| template | 仅完成该条件的玩家可见的文本模板；可使用 `{direction}`、`{region}`、`{distance}` |
+| precision | 服务端替换模板变量的提示维度：`direction`、`region` 或 `distance` |
+| weight | 同条件有多条候选线索时的抽取权重，须为正数 |
 
 ## pvp_power_curve.csv — PvP 强弱差掠夺衰减
 | 列 | 含义 |
@@ -539,13 +633,15 @@ S3 的接取后追问单独维护为 `s3_after_accept` entry，并在任务真�
 | 列 | 含义 |
 |----|------|
 | id / code / name | 数字主键、稳定代码与显示名 |
-| category | `reinforcement` 增援 / `attack` 代打 / `supplies` 物资 / `treasure` 宝物 |
+| category | `reinforcement` 增援 / `attack` 代打 / `supplies` 物资 / `treasure` 宝物 / `escort` 商队护卫 |
 | minCouncilLevel / reputationCost | 最低议会厅等级 / 声望价格 |
-| unitCode / unitCount | 增援或代打使用的 `units.csv` 兵种代码与数量 |
+| unitCode / unitCount | 增援、代打或商队护卫使用的 `units.csv` 兵种代码与数量；护卫数量必须为正整数 |
 | wood/clay/iron/crop/gold | 物资服务发放量 |
 | treasureCode | 宝物服务发放的 `treasures.csv` 代码 |
 | delaySec | 代打服务购买后出发延迟；即时服务填 0 |
 | desc | 玩家可见说明 |
+
+商队护卫默认条目为 `caravan_guard`（1 级议会厅、3 声望、100 军团兵）。配置中心“平衡参数与常量 → 议会厅王国服务”可编辑等级、声望成本与兵力数量。护卫购买后立即保护所选当前村庄相关的送货商队，送达或提前返程后解除；不保护返程，不重复购买，不占玩家驻军人口。价格也出现在“声望参数”中。部署只补充缺失条目，不覆盖配置中心现有单元格。
 
 ## alliance_levels.csv — 联盟等级与成员容量
 
